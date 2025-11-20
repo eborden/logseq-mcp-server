@@ -15,7 +15,7 @@ describe('LogseqClient', () => {
 
   describe('callAPI', () => {
     it('should call LogSeq API with correct headers', async () => {
-      const mockResponse = { data: { result: 'success' } };
+      const mockResponse = { result: 'success' };
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => mockResponse
@@ -42,10 +42,9 @@ describe('LogseqClient', () => {
 
     it('should return response data on success', async () => {
       const mockData = { id: 1, content: 'test block' };
-      const mockResponse = { data: mockData };
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse
+        json: async () => mockData
       }) as any;
 
       const result = await client.callAPI('logseq.Editor.getBlock', ['block-uuid']);
@@ -99,10 +98,7 @@ describe('LogseqClient', () => {
 
     it('should handle API error response', async () => {
       const mockResponse = {
-        error: {
-          message: 'Invalid method',
-          code: 'INVALID_METHOD'
-        }
+        error: 'Invalid method'
       };
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -116,10 +112,9 @@ describe('LogseqClient', () => {
 
     it('should work with method calls that have no arguments', async () => {
       const mockData = { version: '1.0.0' };
-      const mockResponse = { data: mockData };
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockResponse
+        json: async () => mockData
       }) as any;
 
       const result = await client.callAPI('logseq.App.getVersion');
