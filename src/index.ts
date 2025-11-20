@@ -7,6 +7,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { resolve } from 'path';
 import { homedir } from 'os';
+import { realpathSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { loadConfig } from './config.js';
 import { LogseqClient } from './client.js';
 import { getPage } from './tools/get-page.js';
@@ -366,7 +368,9 @@ async function main() {
 }
 
 // Run main if this is the entry point
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Resolve symlinks to support npm link
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+if (isMainModule) {
   main().catch((error) => {
     console.error('Fatal error:', error);
     process.exit(1);

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "SlashCommand(/superpowers:brainstorm)",
+      "Bash(node:*)",
+      "Bash(logseq-mcp)",
+      "Bash(npm run build)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
