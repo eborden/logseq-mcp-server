@@ -41,16 +41,16 @@ export class LogseqClient {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      // Parse response
-      const responseData: LogseqAPIResponse<T> = await response.json();
+      // Parse response - LogSeq returns data directly, not wrapped
+      const responseData = await response.json();
 
-      // Handle API errors
-      if (responseData.error) {
-        throw new Error(`LogSeq API error: ${responseData.error.message}`);
+      // Check if this is an error response (has error property)
+      if (responseData && typeof responseData === 'object' && 'error' in responseData) {
+        throw new Error(`LogSeq API error: ${responseData.error}`);
       }
 
-      // Return successful data
-      return responseData.data as T;
+      // Return the data directly (LogSeq doesn't wrap in {data: ...})
+      return responseData as T;
     } catch (error) {
       // Handle connection errors (ECONNREFUSED, ETIMEDOUT, etc.)
       if (error instanceof Error && 'code' in error) {
