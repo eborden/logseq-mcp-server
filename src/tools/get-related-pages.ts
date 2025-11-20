@@ -43,6 +43,55 @@ export async function getRelatedPages(
   const relatedPages: RelatedPagesResult['relatedPages'] = [];
   const visited = new Set<number>([sourcePage.id]);
 
+  // Get outbound references (pages that this page links to)
+  const blocks = await client.callAPI<BlockEntity[] | null>(
+    'logseq.Editor.getPageBlocksTree',
+    [pageName]
+  );
+
+  if (blocks) {
+    // Extract page references from blocks recursively
+    const extractPageReferences = (blocks: BlockEntity[]): string[] => {
+      const references: string[] = [];
+      const pageRefRegex = /\[\[([^\]]+)\]\]/g;
+
+      for (const block of blocks) {
+        if (block.content) {
+          let match;
+          while ((match = pageRefRegex.exec(block.content)) !== null) {
+            references.push(match[1]);
+          }
+        }
+
+        if (block.children && block.children.length > 0) {
+          references.push(...extractPageReferences(block.children));
+        }
+      }
+
+      return references;
+    };
+
+    const pageRefs = extractPageReferences(blocks);
+    const uniquePageRefs = [...new Set(pageRefs)];
+
+    // Get page entities for each reference
+    for (const pageRef of uniquePageRefs) {
+      const page = await client.callAPI<PageEntity | null>(
+        'logseq.Editor.getPage',
+        [pageRef]
+      );
+
+      if (page && !visited.has(page.id)) {
+        visited.add(page.id);
+        relatedPages.push({
+          page: page,
+          relationshipType: 'outbound-reference',
+          distance: 1
+        });
+      }
+    }
+  }
+
   // Get inbound references (pages that link to this page)
   // getPageLinkedReferences returns tuples of [BlockEntity, PageEntity]
   const backlinks = await client.callAPI<[BlockEntity, PageEntity][] | null>(
