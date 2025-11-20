@@ -74,13 +74,15 @@ export async function getRelatedPages(
     const pageRefs = extractPageReferences(blocks);
     const uniquePageRefs = [...new Set(pageRefs)];
 
-    // Get page entities for each reference
-    for (const pageRef of uniquePageRefs) {
-      const page = await client.callAPI<PageEntity | null>(
-        'logseq.Editor.getPage',
-        [pageRef]
-      );
+    // Get page entities for each reference in parallel
+    const pagePromises = uniquePageRefs.map(pageRef =>
+      client.callAPI<PageEntity | null>('logseq.Editor.getPage', [pageRef])
+    );
+    const pages = await Promise.all(pagePromises);
 
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      const pageRef = uniquePageRefs[i];
       if (page && !visited.has(page.id)) {
         visited.add(page.id);
         relatedPages.push({
