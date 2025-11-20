@@ -21,16 +21,15 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
     }
 
     // Validate required fields
-    if (!config.apiUrl) {
-      throw new Error('Configuration validation failed: apiUrl is required');
-    }
-
     if (!config.authToken) {
       throw new Error('Configuration validation failed: authToken is required');
     }
 
+    // Apply default for apiUrl if not provided
+    const apiUrl = config.apiUrl || 'http://127.0.0.1:12315';
+
     // Validate types
-    if (typeof config.apiUrl !== 'string') {
+    if (typeof apiUrl !== 'string') {
       throw new Error('Configuration validation failed: apiUrl must be a string');
     }
 
@@ -39,7 +38,7 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
     }
 
     return {
-      apiUrl: config.apiUrl,
+      apiUrl,
       authToken: config.authToken
     };
   } catch (error) {
