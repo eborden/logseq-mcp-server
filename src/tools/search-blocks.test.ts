@@ -320,4 +320,115 @@ describe('searchBlocks', () => {
     expect(result).toHaveLength(1);
     expect(result![0].content).toBe('Block with UPPERCASE keyword');
   });
+
+  it('should include semantic context when requested', async () => {
+    const mockPages: PageEntity[] = [
+      { id: 100, uuid: 'page-uuid-1', name: 'Container Page', originalName: 'Container Page' }
+    ];
+
+    const mockBlocks: BlockEntity[] = [
+      {
+        id: 1,
+        uuid: 'block-uuid-1',
+        content: 'Test block with [[PageA]] and #tag1',
+        page: {
+          id: 100,
+          uuid: 'page-uuid-1',
+          name: 'Container Page',
+          originalName: 'Container Page'
+        },
+        parent: { id: 100 },
+        left: { id: 100 }
+      }
+    ];
+
+    const mockPageDetails: PageEntity = {
+      id: 100,
+      uuid: 'page-uuid-1',
+      name: 'Container Page',
+      originalName: 'Container Page',
+      properties: { tags: 'important' }
+    };
+
+    (mockClient.callAPI as any)
+      .mockResolvedValueOnce(mockPages)      // getAllPages
+      .mockResolvedValueOnce(mockBlocks)     // getPageBlocksTree
+      .mockResolvedValueOnce(mockPageDetails); // getPage for context
+
+    const result = await searchBlocks(mockClient, 'Test', undefined, true);
+
+    expect(result).toHaveLength(1);
+    expect(result![0]).toHaveProperty('context');
+    expect(result![0].context).toHaveProperty('page');
+    expect(result![0].context!.page).toEqual(mockPageDetails);
+    expect(result![0].context).toHaveProperty('references');
+    expect(result![0].context!.references).toEqual(['PageA']);
+    expect(result![0].context).toHaveProperty('tags');
+    expect(result![0].context!.tags).toEqual(['tag1']);
+  });
+
+  it('should extract multiple references and tags from block content', async () => {
+    const mockPages: PageEntity[] = [
+      { id: 100, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+    ];
+
+    const mockBlocks: BlockEntity[] = [
+      {
+        id: 1,
+        uuid: 'block-uuid-1',
+        content: 'Complex block [[PageA]] [[PageB]] #tag1 #tag2 #tag-with-dash',
+        page: {
+          id: 100,
+          uuid: 'page-uuid-1',
+          name: 'test-page',
+          originalName: 'Test Page'
+        },
+        parent: { id: 100 },
+        left: { id: 100 }
+      }
+    ];
+
+    const mockPageDetails: PageEntity = {
+      id: 100,
+      uuid: 'page-uuid-1',
+      name: 'test-page',
+      originalName: 'Test Page'
+    };
+
+    (mockClient.callAPI as any)
+      .mockResolvedValueOnce(mockPages)      // getAllPages
+      .mockResolvedValueOnce(mockBlocks)     // getPageBlocksTree
+      .mockResolvedValueOnce(mockPageDetails); // getPage for context
+
+    const result = await searchBlocks(mockClient, 'Complex', undefined, true);
+
+    expect(result![0].context!.references).toEqual(['PageA', 'PageB']);
+    expect(result![0].context!.tags).toEqual(['tag1', 'tag2', 'tag-with-dash']);
+  });
+
+  it('should not include context when includeContext is false', async () => {
+    const mockPages: PageEntity[] = [
+      { id: 1, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+    ];
+
+    const mockBlocks: BlockEntity[] = [
+      {
+        id: 1,
+        uuid: 'block-uuid-1',
+        content: 'Test block',
+        page: { id: 1 },
+        parent: { id: 1 },
+        left: { id: 1 }
+      }
+    ];
+
+    (mockClient.callAPI as any)
+      .mockResolvedValueOnce(mockPages)  // getAllPages
+      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
+
+    const result = await searchBlocks(mockClient, 'Test', undefined, false);
+
+    expect(result).toHaveLength(1);
+    expect(result![0]).not.toHaveProperty('context');
+  });
 });

@@ -77,7 +77,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_search_blocks',
-    description: 'Search for blocks containing specific text',
+    description: 'Search for blocks containing specific text with optional semantic context',
     inputSchema: {
       type: 'object',
       properties: {
@@ -88,6 +88,11 @@ const TOOLS = [
         limit: {
           type: 'number',
           description: 'Maximum number of results to return (optional)',
+        },
+        include_context: {
+          type: 'boolean',
+          description: 'Include semantic context (page, references, tags)',
+          default: false,
         },
       },
       required: ['query'],
@@ -281,12 +286,8 @@ export function createServer(): Server {
         case 'logseq_search_blocks': {
           const query = args?.query as string;
           const limit = args?.limit as number | undefined;
-          let result = await searchBlocks(client, query);
-
-          // Apply limit if specified
-          if (limit && result && Array.isArray(result)) {
-            result = result.slice(0, limit);
-          }
+          const includeContext = (args?.include_context as boolean) ?? false;
+          let result = await searchBlocks(client, query, limit, includeContext);
 
           return {
             content: [
@@ -470,12 +471,8 @@ async function main() {
           case 'logseq_search_blocks': {
             const query = args?.query as string;
             const limit = args?.limit as number | undefined;
-            let result = await searchBlocks(client, query);
-
-            // Apply limit if specified
-            if (limit && result && Array.isArray(result)) {
-              result = result.slice(0, limit);
-            }
+            const includeContext = (args?.include_context as boolean) ?? false;
+            let result = await searchBlocks(client, query, limit, includeContext);
 
             return {
               content: [
