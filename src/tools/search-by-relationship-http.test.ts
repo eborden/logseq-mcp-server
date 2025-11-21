@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { searchByRelationship } from './search-by-relationship.js';
+import { searchByRelationshipHTTP } from './search-by-relationship-http.js';
 import { LogseqClient } from '../client.js';
 
-describe('searchByRelationship', () => {
+describe('searchByRelationshipHTTP', () => {
   it('should find blocks about topic that reference another page', async () => {
     const mockClient = {
       callAPI: vi.fn()
@@ -22,7 +22,7 @@ describe('searchByRelationship', () => {
       }
     ]);
 
-    const result = await searchByRelationship(
+    const result = await searchByRelationshipHTTP(
       mockClient,
       'Topic',
       'RelatedPage',
@@ -67,7 +67,7 @@ describe('searchByRelationship', () => {
     // Mock getting blocks from second page (no matches)
     (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
-    const result = await searchByRelationship(
+    const result = await searchByRelationshipHTTP(
       mockClient,
       'Topic',
       'TargetPage',
@@ -85,7 +85,7 @@ describe('searchByRelationship', () => {
 
     (mockClient.callAPI as any).mockResolvedValue([]);
 
-    const result = await searchByRelationship(
+    const result = await searchByRelationshipHTTP(
       mockClient,
       'NonExistent',
       'AlsoNonExistent',
@@ -144,7 +144,7 @@ describe('searchByRelationship', () => {
       }
     ]);
 
-    const result = await searchByRelationship(
+    const result = await searchByRelationshipHTTP(
       mockClient,
       'TopicA',
       'TopicB',

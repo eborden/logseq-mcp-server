@@ -49,11 +49,40 @@ export async function buildContextForTopicDatalog(
 
   const directBlocks = Array.from(blockMap.values()).slice(0, maxBlocks);
 
-  // Related pages would require a separate query or be extracted from block references
+  // Query 2: Get related pages and backlinks using same pattern as get-concept-network
   const relatedPages: TopicContext['relatedPages'] = [];
-
-  // Build references (simplified - blocks that mention this topic from other pages)
   const references: TopicContext['references'] = [];
+
+  // Get pages connected to main page (similar to concept network depth=1)
+  if (mainPage.id) {
+    try {
+      const connectionsQuery = DatalogQueryBuilder.getConnectedPages([mainPage.id]);
+      const connections = await client.executeDatalogQuery<Array<[number, any, string]>>(connectionsQuery);
+
+      const seenPageIds = new Set<number>([mainPage.id]);
+
+      if (connections && connections.length > 0) {
+        for (const [sourceId, connectedPage, relType] of connections) {
+          if (!connectedPage) continue;
+
+          const connectedId = connectedPage.id || connectedPage['db/id'];
+          if (!connectedId || seenPageIds.has(connectedId)) continue;
+
+          seenPageIds.add(connectedId);
+
+          // Add to related pages
+          if (relatedPages.length < maxRelatedPages) {
+            relatedPages.push({
+              page: connectedPage,
+              relationshipType: relType === 'outbound' ? 'outbound' : 'inbound'
+            });
+          }
+        }
+      }
+    } catch (error) {
+      // No connections found, continue with empty related pages
+    }
+  }
 
   // Build temporal context if requested
   let temporalContext: TopicContext['temporalContext'] | undefined;

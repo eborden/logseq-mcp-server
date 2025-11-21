@@ -9,19 +9,25 @@ describe('buildContextForTopicDatalog', () => {
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock Datalog query results: [[page, block]]
-    (mockClient.executeDatalogQuery as any).mockResolvedValue([
+    // Mock Query 1: Get page and blocks
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
       [{ id: 1, name: 'Topic', properties: {} }, { id: 10, content: 'Block 1' }],
-      [{ id: 1, name: 'Topic', properties: {} }, { id: 11, content: 'Block 2' }],
-      [{ id: 1, name: 'Topic', properties: {} }, null] // Page with no block
+      [{ id: 1, name: 'Topic', properties: {} }, { id: 11, content: 'Block 2' }]
+    ]);
+
+    // Mock Query 2: Get connected pages
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [1, { id: 2, name: 'Related Page' }, 'outbound']
     ]);
 
     const result = await buildContextForTopicDatalog(mockClient, 'Topic', {});
 
-    expect(mockClient.executeDatalogQuery).toHaveBeenCalledOnce();
+    // Should make 2 queries (page+blocks, then connections)
+    expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(2);
     expect(result.topic).toBe('Topic');
     expect(result.mainPage.id).toBe(1);
     expect(result.directBlocks.length).toBe(2); // Two blocks found
+    expect(result.relatedPages.length).toBe(1); // One related page found
   });
 
   it('should throw error when page not found', async () => {
