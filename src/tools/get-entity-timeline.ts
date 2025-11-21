@@ -24,7 +24,6 @@ export async function getEntityTimeline(
   endDate?: number
 ): Promise<EntityTimelineResult> {
   // Search for blocks containing the entity reference
-  const searchQuery = `[[${entityName}]]`;
   const blocks = await client.callAPI<BlockEntity[]>(
     'logseq.DB.q',
     [`(page-property :title "${entityName}")`]

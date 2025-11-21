@@ -4,7 +4,15 @@
       "SlashCommand(/superpowers:brainstorm)",
       "Bash(node:*)",
       "Bash(logseq-mcp)",
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "mcp__logseq__logseq_search_blocks",
+      "mcp__logseq__logseq_get_block",
+      "Skill(superpowers:writing-plans)",
+      "Bash(mkdir:*)",
+      "Skill(superpowers:subagent-driven-development)",
+      "Bash(npm test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
