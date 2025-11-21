@@ -20,6 +20,7 @@ import { getRelatedPages } from './tools/get-related-pages.js';
 import { getEntityTimeline } from './tools/get-entity-timeline.js';
 import { getConceptNetwork } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
+import { buildContextForTopic } from './tools/build-context.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -204,6 +205,40 @@ const TOOLS = [
       required: ['topic_a', 'topic_b', 'relationship_type'],
     },
   },
+  {
+    name: 'logseq_build_context',
+    description: 'Build comprehensive context for a topic including related pages, blocks, and references',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic_name: {
+          type: 'string',
+          description: 'Name of the topic to build context for',
+        },
+        max_blocks: {
+          type: 'number',
+          description: 'Maximum number of blocks to include (default: 50)',
+          default: 50,
+        },
+        max_related_pages: {
+          type: 'number',
+          description: 'Maximum number of related pages to include (default: 10)',
+          default: 10,
+        },
+        max_references: {
+          type: 'number',
+          description: 'Maximum number of reference blocks to include (default: 20)',
+          default: 20,
+        },
+        include_temporal_context: {
+          type: 'boolean',
+          description: 'Include temporal context for journal pages (default: true)',
+          default: true,
+        },
+      },
+      required: ['topic_name'],
+    },
+  },
 ];
 
 /**
@@ -373,6 +408,25 @@ export function createServer(): Server {
             relationshipType,
             maxDistance
           );
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_build_context': {
+          const topicName = args?.topic_name as string;
+          const options = {
+            maxBlocks: args?.max_blocks as number | undefined,
+            maxRelatedPages: args?.max_related_pages as number | undefined,
+            maxReferences: args?.max_references as number | undefined,
+            includeTemporalContext: args?.include_temporal_context as boolean | undefined
+          };
+          const result = await buildContextForTopic(client, topicName, options);
           return {
             content: [
               {
@@ -558,6 +612,25 @@ async function main() {
               relationshipType,
               maxDistance
             );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_build_context': {
+            const topicName = args?.topic_name as string;
+            const options = {
+              maxBlocks: args?.max_blocks as number | undefined,
+              maxRelatedPages: args?.max_related_pages as number | undefined,
+              maxReferences: args?.max_references as number | undefined,
+              includeTemporalContext: args?.include_temporal_context as boolean | undefined
+            };
+            const result = await buildContextForTopic(client, topicName, options);
             return {
               content: [
                 {
