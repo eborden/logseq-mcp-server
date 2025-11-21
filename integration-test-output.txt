@@ -1,0 +1,924 @@
+
+> logseq-mcp-server@1.0.0 test:integration
+> vitest run --config vitest.integration.config.ts
+
+
+ RUN  v3.2.4 /Users/evanborden/Code/logseq-llm/logseq-mcp-server
+
+ ❯ tests/integration/temporal-queries.test.ts (16 tests | 14 failed) 62ms
+   × Temporal Queries Integration Tests > logseq_query_by_date_range > should return date range structure with entries 12ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_query_by_date_range > should filter entries by date range 3ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_query_by_date_range > should filter blocks by search term 2ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_query_by_date_range > should return entries sorted by date 2ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_query_by_date_range > should handle empty date range 2ms
+     → fetch failed
+   ✓ Temporal Queries Integration Tests > logseq_query_by_date_range > should throw error for invalid date format 2ms
+   ✓ Temporal Queries Integration Tests > logseq_query_by_date_range > should throw error when start date is after end date 0ms
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should return concept evolution structure 2ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should track timeline chronologically 2ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should filter by date range 5ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should group mentions by day 3ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should group mentions by week 2ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should group mentions by month 1ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should handle concepts with no mentions 2ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should distinguish journal from non-journal mentions 1ms
+     → fetch failed
+   × Temporal Queries Integration Tests > logseq_get_concept_evolution > should track earliest and latest mentions 1ms
+     → fetch failed
+ ❯ tests/integration/context-building.test.ts (10 tests | 9 failed) 111ms
+   × Context Building Tools Integration Tests > logseq_build_context > should return comprehensive context structure 13ms
+     → fetch failed
+   × Context Building Tools Integration Tests > logseq_build_context > should respect maxBlocks limit 2ms
+     → fetch failed
+   × Context Building Tools Integration Tests > logseq_build_context > should handle journal pages with temporal context 2ms
+     → fetch failed
+   × Context Building Tools Integration Tests > logseq_build_context > should throw error for non-existent page 14ms
+     → expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+   × Context Building Tools Integration Tests > logseq_build_context > should aggregate related pages correctly 2ms
+     → fetch failed
+   × Context Building Tools Integration Tests > logseq_get_context_for_query > should extract topics and build context 2ms
+     → fetch failed
+   × Context Building Tools Integration Tests > logseq_get_context_for_query > should handle multiple topics in query 2ms
+     → fetch failed
+   ✓ Context Building Tools Integration Tests > logseq_get_context_for_query > should handle queries without explicit topics 48ms
+   × Context Building Tools Integration Tests > logseq_get_context_for_query > should respect maxTopics limit 3ms
+     → fetch failed
+   × Context Building Tools Integration Tests > logseq_get_context_for_query > should validate context aggregation 2ms
+     → fetch failed
+ ❯ tests/integration/graph-tools.test.ts (10 tests | 10 failed) 85ms
+   × Graph Traversal Tools Integration Tests > logseq_get_related_pages > should return structure with sourcePage and relatedPages 9ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_related_pages > should respect depth parameter 2ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_related_pages > should throw error for non-existent page 23ms
+     → expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+   × Graph Traversal Tools Integration Tests > logseq_get_entity_timeline > should return timeline structure 7ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_entity_timeline > should filter by date range 2ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_entity_timeline > should sort timeline chronologically 3ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_concept_network > should return network structure with nodes and edges 3ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_concept_network > should respect maxDepth parameter 4ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_concept_network > should not have duplicate nodes 5ms
+     → fetch failed
+   × Graph Traversal Tools Integration Tests > logseq_get_concept_network > should throw error for non-existent page 7ms
+     → expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+ ❯ tests/integration/server.test.ts (10 tests | 9 failed) 56ms
+   × LogSeq MCP Server Integration Tests > Connection Tests > should connect to LogSeq HTTP API 8ms
+     → fetch failed
+   ✓ LogSeq MCP Server Integration Tests > Connection Tests > should have valid auth token 1ms
+   × LogSeq MCP Server Integration Tests > logseq_get_page > should retrieve a page by name 3ms
+     → fetch failed
+   × LogSeq MCP Server Integration Tests > logseq_get_page > should include children when requested 2ms
+     → fetch failed
+   × LogSeq MCP Server Integration Tests > logseq_get_page > should throw error for non-existent page 11ms
+     → expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+   × LogSeq MCP Server Integration Tests > logseq_get_backlinks > should get backlinks for a page 2ms
+     → fetch failed
+   × LogSeq MCP Server Integration Tests > logseq_search_blocks > should search for blocks by content 2ms
+     → fetch failed
+   × LogSeq MCP Server Integration Tests > logseq_search_blocks > should return empty array for non-matching search 2ms
+     → fetch failed
+   × LogSeq MCP Server Integration Tests > logseq_query_by_property > should query blocks by property 4ms
+     → fetch failed
+   × LogSeq MCP Server Integration Tests > logseq_query_by_property > should return empty array for non-existent property 2ms
+     → fetch failed
+ ❯ tests/integration/semantic-search.test.ts (7 tests | 7 failed) 80ms
+   × Semantic Search Integration Tests > logseq_search_by_relationship > should return structure with query and results 12ms
+     → fetch failed
+   × Semantic Search Integration Tests > logseq_search_by_relationship > should support in-pages-linking-to relationship 2ms
+     → fetch failed
+   × Semantic Search Integration Tests > logseq_search_by_relationship > should support connected-within relationship with maxDistance 2ms
+     → fetch failed
+   × Semantic Search Integration Tests > enhanced search_blocks with includeContext > should return blocks without context when includeContext is false 3ms
+     → fetch failed
+   × Semantic Search Integration Tests > enhanced search_blocks with includeContext > should include context when includeContext is true 2ms
+     → fetch failed
+   × Semantic Search Integration Tests > enhanced search_blocks with includeContext > should extract references from block content 2ms
+     → fetch failed
+   × Semantic Search Integration Tests > enhanced search_blocks with includeContext > should extract tags from block content 2ms
+     → fetch failed
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 49 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_build_context > should return comprehensive context structure
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:59:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_build_context > should respect maxBlocks limit
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:110:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_build_context > should handle journal pages with temporal context
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:135:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_build_context > should throw error for non-existent page
+AssertionError: expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+
+Expected: [32m"[7mPage not foun[27md"[39m
+Received: [31m"[7mfetch faile[27md"[39m
+
+ ❯ tests/integration/context-building.test.ts:164:7
+    162| 
+    163|     it.skipIf(skipTests)('should throw error for non-existent page', a…
+    164|       await expect(
+       |       ^
+    165|         buildContextForTopic(client, 'NonExistentPageForContextBuildin…
+    166|       ).rejects.toThrow('Page not found');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_build_context > should aggregate related pages correctly
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:171:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_get_context_for_query > should extract topics and build context
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:206:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_get_context_for_query > should handle multiple topics in query
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:247:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_get_context_for_query > should respect maxTopics limit
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:298:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/49]⎯
+
+ FAIL  tests/integration/context-building.test.ts > Context Building Tools Integration Tests > logseq_get_context_for_query > should validate context aggregation
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/context-building.test.ts:331:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_related_pages > should return structure with sourcePage and relatedPages
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:60:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_related_pages > should respect depth parameter
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:100:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_related_pages > should throw error for non-existent page
+AssertionError: expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+
+Expected: [32m"[7mPage not foun[27md"[39m
+Received: [31m"[7mfetch faile[27md"[39m
+
+ ❯ tests/integration/graph-tools.test.ts:125:7
+    123| 
+    124|     it.skipIf(skipTests)('should throw error for non-existent page', a…
+    125|       await expect(
+       |       ^
+    126|         getRelatedPages(client, 'NonExistentPageForGraphTools12345', 1)
+    127|       ).rejects.toThrow('Page not found');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_entity_timeline > should return timeline structure
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:134:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_entity_timeline > should filter by date range
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:175:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_entity_timeline > should sort timeline chronologically
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:213:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_concept_network > should return network structure with nodes and edges
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:254:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_concept_network > should respect maxDepth parameter
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:304:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_concept_network > should not have duplicate nodes
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/graph-tools.test.ts:340:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/49]⎯
+
+ FAIL  tests/integration/graph-tools.test.ts > Graph Traversal Tools Integration Tests > logseq_get_concept_network > should throw error for non-existent page
+AssertionError: expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+
+Expected: [32m"[7mPage not foun[27md"[39m
+Received: [31m"[7mfetch faile[27md"[39m
+
+ ❯ tests/integration/graph-tools.test.ts:364:7
+    362| 
+    363|     it.skipIf(skipTests)('should throw error for non-existent page', a…
+    364|       await expect(
+       |       ^
+    365|         getConceptNetwork(client, 'NonExistentConceptForGraphTools1234…
+    366|       ).rejects.toThrow('Page not found');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/49]⎯
+
+ FAIL  tests/integration/semantic-search.test.ts > Semantic Search Integration Tests > logseq_search_by_relationship > should return structure with query and results
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/semantic-search.test.ts:59:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/49]⎯
+
+ FAIL  tests/integration/semantic-search.test.ts > Semantic Search Integration Tests > logseq_search_by_relationship > should support in-pages-linking-to relationship
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/semantic-search.test.ts:111:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/49]⎯
+
+ FAIL  tests/integration/semantic-search.test.ts > Semantic Search Integration Tests > logseq_search_by_relationship > should support connected-within relationship with maxDistance
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/semantic-search.test.ts:145:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/49]⎯
+
+ FAIL  tests/integration/semantic-search.test.ts > Semantic Search Integration Tests > enhanced search_blocks with includeContext > should return blocks without context when includeContext is false
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/semantic-search.test.ts:182:23
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/49]⎯
+
+ FAIL  tests/integration/semantic-search.test.ts > Semantic Search Integration Tests > enhanced search_blocks with includeContext > should include context when includeContext is true
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/semantic-search.test.ts:199:23
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/49]⎯
+
+ FAIL  tests/integration/semantic-search.test.ts > Semantic Search Integration Tests > enhanced search_blocks with includeContext > should extract references from block content
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/semantic-search.test.ts:234:23
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/49]⎯
+
+ FAIL  tests/integration/semantic-search.test.ts > Semantic Search Integration Tests > enhanced search_blocks with includeContext > should extract tags from block content
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/semantic-search.test.ts:264:23
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > Connection Tests > should connect to LogSeq HTTP API
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/server.test.ts:60:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_get_page > should retrieve a page by name
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/server.test.ts:73:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_get_page > should include children when requested
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/server.test.ts:103:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_get_page > should throw error for non-existent page
+AssertionError: expected [Function] to throw error including 'Page not found' but got 'fetch failed'
+
+Expected: [32m"[7mPage not foun[27md"[39m
+Received: [31m"[7mfetch faile[27md"[39m
+
+ ❯ tests/integration/server.test.ts:128:7
+    126| 
+    127|     it.skipIf(skipTests)('should throw error for non-existent page', a…
+    128|       await expect(
+       |       ^
+    129|         getPage(client, 'NonExistentPageThatShouldNeverExist12345', fa…
+    130|       ).rejects.toThrow('Page not found');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_get_backlinks > should get backlinks for a page
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/server.test.ts:137:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_search_blocks > should search for blocks by content
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/server.test.ts:163:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_search_blocks > should return empty array for non-matching search
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ searchBlocks src/tools/search-blocks.ts:28:19
+ ❯ tests/integration/server.test.ts:176:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_query_by_property > should query blocks by property
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ queryByProperty src/tools/query-by-property.ts:18:19
+ ❯ tests/integration/server.test.ts:185:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/49]⎯
+
+ FAIL  tests/integration/server.test.ts > LogSeq MCP Server Integration Tests > logseq_query_by_property > should return empty array for non-existent property
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ queryByProperty src/tools/query-by-property.ts:18:19
+ ❯ tests/integration/server.test.ts:198:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_query_by_date_range > should return date range structure with entries
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ queryByDateRange src/tools/query-by-date-range.ts:67:20
+ ❯ tests/integration/temporal-queries.test.ts:69:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_query_by_date_range > should filter entries by date range
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ queryByDateRange src/tools/query-by-date-range.ts:67:20
+ ❯ tests/integration/temporal-queries.test.ts:109:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_query_by_date_range > should filter blocks by search term
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ queryByDateRange src/tools/query-by-date-range.ts:67:20
+ ❯ tests/integration/temporal-queries.test.ts:134:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_query_by_date_range > should return entries sorted by date
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ queryByDateRange src/tools/query-by-date-range.ts:67:20
+ ❯ tests/integration/temporal-queries.test.ts:166:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_query_by_date_range > should handle empty date range
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ queryByDateRange src/tools/query-by-date-range.ts:67:20
+ ❯ tests/integration/temporal-queries.test.ts:181:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should return concept evolution structure
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:211:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should track timeline chronologically
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:261:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should filter by date range
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:300:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should group mentions by day
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:335:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should group mentions by week
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:375:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should group mentions by month
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:408:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should handle concepts with no mentions
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ getConceptEvolution src/tools/get-concept-evolution.ts:77:18
+ ❯ tests/integration/temporal-queries.test.ts:440:22
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[47/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should distinguish journal from non-journal mentions
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:456:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[48/49]⎯
+
+ FAIL  tests/integration/temporal-queries.test.ts > Temporal Queries Integration Tests > logseq_get_concept_evolution > should track earliest and latest mentions
+TypeError: fetch failed
+ ❯ LogseqClient.callAPI src/client.ts:30:24
+     28| 
+     29|     try {
+     30|       const response = await fetch(url, {
+       |                        ^
+     31|         method: 'POST',
+     32|         headers: {
+ ❯ tests/integration/temporal-queries.test.ts:481:28
+
+Caused by: Error: connect ECONNREFUSED 127.0.0.1:12315
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { errno: -61, code: 'ECONNREFUSED', syscall: 'connect', address: '127.0.0.1', port: 12315 }
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[49/49]⎯
+
+
+ Test Files  5 failed (5)
+      Tests  49 failed | 4 passed (53)
+   Start at  09:20:52
+   Duration  1.70s (transform 490ms, setup 0ms, collect 1.83s, tests 394ms, environment 2ms, prepare 2.43s)
+

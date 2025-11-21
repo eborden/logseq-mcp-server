@@ -57,4 +57,11 @@ export interface LogseqAPIResponse<T = any> {
 export interface LogseqMCPConfig {
   apiUrl: string;
   authToken: string;
+  features?: {
+    useDatalog?: boolean | {
+      conceptNetwork?: boolean;
+      buildContext?: boolean;
+      searchByRelationship?: boolean;
+    };
+  };
 }

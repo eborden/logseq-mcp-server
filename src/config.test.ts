@@ -85,4 +85,57 @@ describe('loadConfig', () => {
 
     await expect(loadConfig(configPath)).rejects.toThrow();
   });
+
+  it('should load config with global Datalog feature flag enabled', async () => {
+    const config = {
+      apiUrl: 'http://localhost:12315',
+      authToken: 'test-token-123',
+      features: {
+        useDatalog: true
+      }
+    };
+
+    await writeFile(configPath, JSON.stringify(config));
+
+    const result = await loadConfig(configPath);
+
+    expect(result.features?.useDatalog).toBe(true);
+  });
+
+  it('should load config with per-tool Datalog feature flags', async () => {
+    const config = {
+      apiUrl: 'http://localhost:12315',
+      authToken: 'test-token-123',
+      features: {
+        useDatalog: {
+          conceptNetwork: true,
+          buildContext: false,
+          searchByRelationship: true
+        }
+      }
+    };
+
+    await writeFile(configPath, JSON.stringify(config));
+
+    const result = await loadConfig(configPath);
+
+    expect(result.features?.useDatalog).toEqual({
+      conceptNetwork: true,
+      buildContext: false,
+      searchByRelationship: true
+    });
+  });
+
+  it('should load config without feature flags (backwards compatible)', async () => {
+    const config = {
+      apiUrl: 'http://localhost:12315',
+      authToken: 'test-token-123'
+    };
+
+    await writeFile(configPath, JSON.stringify(config));
+
+    const result = await loadConfig(configPath);
+
+    expect(result.features).toBeUndefined();
+  });
 });

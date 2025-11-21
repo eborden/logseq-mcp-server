@@ -5,6 +5,7 @@ import { LogseqClient } from '../client.js';
 describe('getContextForQuery', () => {
   it('should extract topics from query and build context', async () => {
     const mockClient = {
+      config: { apiUrl: 'http://test', authToken: 'test' },
       callAPI: vi.fn()
     } as unknown as LogseqClient;
 
@@ -50,6 +51,7 @@ describe('getContextForQuery', () => {
 
   it('should handle queries with no explicit topics', async () => {
     const mockClient = {
+      config: { apiUrl: 'http://test', authToken: 'test' },
       callAPI: vi.fn()
     } as unknown as LogseqClient;
 
@@ -69,6 +71,7 @@ describe('getContextForQuery', () => {
 
   it('should combine multiple topic contexts efficiently', async () => {
     const mockClient = {
+      config: { apiUrl: 'http://test', authToken: 'test' },
       callAPI: vi.fn()
     } as unknown as LogseqClient;
 
@@ -103,6 +106,7 @@ describe('getContextForQuery', () => {
 
   it('should extract hashtags from query', async () => {
     const mockClient = {
+      config: { apiUrl: 'http://test', authToken: 'test' },
       callAPI: vi.fn()
     } as unknown as LogseqClient;
 
@@ -130,6 +134,7 @@ describe('getContextForQuery', () => {
 
   it('should deduplicate extracted topics', async () => {
     const mockClient = {
+      config: { apiUrl: 'http://test', authToken: 'test' },
       callAPI: vi.fn()
     } as unknown as LogseqClient;
 
@@ -153,6 +158,7 @@ describe('getContextForQuery', () => {
 
   it('should skip topics that do not exist', async () => {
     const mockClient = {
+      config: { apiUrl: 'http://test', authToken: 'test' },
       callAPI: vi.fn()
     } as unknown as LogseqClient;
 

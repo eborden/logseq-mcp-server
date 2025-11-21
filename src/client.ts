@@ -5,7 +5,7 @@ import { LogseqMCPConfig, LogseqAPIRequest, LogseqAPIResponse } from './types.js
  * Handles authentication, error handling, and API communication
  */
 export class LogseqClient {
-  private config: LogseqMCPConfig;
+  public config: LogseqMCPConfig;
 
   constructor(config: LogseqMCPConfig) {
     this.config = config;
@@ -63,5 +63,15 @@ export class LogseqClient {
       // Re-throw other errors
       throw error;
     }
+  }
+
+  /**
+   * Execute a Datalog query via logseq.DB.datascriptQuery
+   * @param query - The Datalog query string
+   * @returns The query results
+   * @throws Error if the query fails
+   */
+  async executeDatalogQuery<T = any>(query: string): Promise<T> {
+    return this.callAPI<T>('logseq.DB.datascriptQuery', [query]);
   }
 }

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildContextForTopic } from './build-context.js';
+import { buildContextForTopicHTTP } from './build-context-http.js';
 import { LogseqClient } from '../client.js';
 
-describe('buildContextForTopic', () => {
+describe('buildContextForTopicHTTP', () => {
   it('should gather comprehensive context for a topic', async () => {
     const mockClient = {
       callAPI: vi.fn()
@@ -62,7 +62,7 @@ describe('buildContextForTopic', () => {
       ]
     ]);
 
-    const result = await buildContextForTopic(mockClient, 'Test Topic');
+    const result = await buildContextForTopicHTTP(mockClient, 'Test Topic');
 
     expect(result).toHaveProperty('topic', 'Test Topic');
     expect(result).toHaveProperty('mainPage');
@@ -97,7 +97,7 @@ describe('buildContextForTopic', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce(manyBlocks);
     (mockClient.callAPI as any).mockResolvedValue([]);
 
-    const result = await buildContextForTopic(
+    const result = await buildContextForTopicHTTP(
       mockClient,
       'Topic',
       { maxBlocks: 10 }
@@ -122,7 +122,7 @@ describe('buildContextForTopic', () => {
 
     (mockClient.callAPI as any).mockResolvedValue([]);
 
-    const result = await buildContextForTopic(mockClient, 'nov 20th, 2025');
+    const result = await buildContextForTopicHTTP(mockClient, 'nov 20th, 2025');
 
     expect(result).toHaveProperty('temporalContext');
     expect(result.temporalContext).toHaveProperty('isJournal', true);
@@ -134,7 +134,7 @@ describe('buildContextForTopic', () => {
       callAPI: vi.fn().mockResolvedValue(null)
     } as unknown as LogseqClient;
 
-    await expect(buildContextForTopic(mockClient, 'NonExistent'))
+    await expect(buildContextForTopicHTTP(mockClient, 'NonExistent'))
       .rejects.toThrow('Page not found: NonExistent');
   });
 });

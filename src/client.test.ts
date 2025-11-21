@@ -131,4 +131,34 @@ describe('LogseqClient', () => {
       );
     });
   });
+
+  describe('executeDatalogQuery', () => {
+    it('should execute Datalog query via logseq.DB.datascriptQuery', async () => {
+      const mockResponse = [
+        [{ id: 1, name: 'Page A' }],
+        [{ id: 2, name: 'Page B' }]
+      ];
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockResponse
+      }) as any;
+
+      const query = '[:find (pull ?p [*]) :where [?p :block/name]]';
+      const result = await client.executeDatalogQuery(query);
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://localhost:12315/api',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            method: 'logseq.DB.datascriptQuery',
+            args: [query]
+          })
+        })
+      );
+
+      expect(result).toEqual(mockResponse);
+    });
+  });
 });
