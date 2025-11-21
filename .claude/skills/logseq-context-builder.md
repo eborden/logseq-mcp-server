@@ -23,15 +23,51 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 
 ## Available MCP Tools
 
-Quick reference for the 5 LogSeq tools:
+Quick reference for all 18 LogSeq MCP tools organized by category:
+
+### Basic Tools (5 tools)
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `logseq_search_blocks` | Full-text search across graph | query, limit (default: 10) |
+| `logseq_search_blocks` | Full-text search with optional semantic context | query, limit, include_context |
 | `logseq_get_page` | Get complete page content | page_name, include_children |
 | `logseq_get_backlinks` | Find all references to a page | page_name |
 | `logseq_get_block` | Get specific block by UUID | block_uuid, include_children |
 | `logseq_query_by_property` | Find blocks by property value | property_key, property_value |
+
+### Graph Traversal Tools (3 tools)
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `logseq_get_related_pages` | Find pages connected through references/backlinks | page_name, depth (max: 3) |
+| `logseq_get_entity_timeline` | Track when/where entity is mentioned over time | entity_name, start_date, end_date |
+| `logseq_get_concept_network` | Build graph network with nodes and edges | concept_name, max_depth (max: 3) |
+
+### Semantic Search Tools (1 tool)
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `logseq_search_by_relationship` | Find blocks based on topic relationships | topic_a, topic_b, relationship_type, max_distance |
+
+**Relationship types:**
+- `references`: Blocks about A that reference B
+- `referenced-by`: Blocks about A in pages referenced by B
+- `in-pages-linking-to`: Blocks about A in pages linking to B
+- `connected-within`: A and B connected within N hops
+
+### Context Building Tools (2 tools)
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `logseq_build_context` | Gather comprehensive context for a topic | topic_name, max_blocks, max_related_pages, max_references |
+| `logseq_get_context_for_query` | Parse natural language query and build context | query, max_topics, max_search_results |
+
+### Temporal Query Tools (2 tools)
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `logseq_query_by_date_range` | Query journal entries in date range | start_date, end_date, search_term |
+| `logseq_get_concept_evolution` | Track concept evolution over time | concept_name, start_date, end_date, group_by |
 
 ## Workflow 1: Research Assistant
 
@@ -143,10 +179,187 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
 
 **When:** User mentions specific page and needs full context.
 
-1. Get full page: `logseq_get_page(name, includeChildren=true)`
-2. Get connections: `logseq_get_backlinks(name)`
-3. Extract linked pages from content
-4. Synthesize: content summary + connections + usage patterns
+**Enhanced with build_context:**
+
+1. **Quick Context**: `logseq_build_context(page_name)`
+   - Gets page + blocks + related pages + references + temporal info
+   - Single call replaces multiple queries
+
+2. **Manual Context** (if build_context not available):
+   - Get full page: `logseq_get_page(name, includeChildren=true)`
+   - Get connections: `logseq_get_backlinks(name)`
+   - Extract linked pages from content
+
+3. Synthesize: content summary + connections + usage patterns
+
+## Workflow 5: Graph Exploration
+
+**When:** User wants to explore knowledge network, find related concepts, or understand relationships.
+
+**3-Phase Approach:**
+
+### Phase 1: Discover Connections
+```
+logseq_get_related_pages(topic, depth=2)
+```
+- Returns both inbound (backlinks) and outbound (references)
+- Shows relationship type and distance
+- Use depth=1 for immediate connections, depth=2-3 for broader network
+
+### Phase 2: Visualize Network
+```
+logseq_get_concept_network(topic, max_depth=2)
+```
+- Returns nodes (pages) and edges (connections)
+- Good for understanding topic centrality
+- Identifies hub pages vs. leaf pages
+
+### Phase 3: Present Insights
+- **Core connections**: Pages at distance 1
+- **Clusters**: Groups of highly connected pages
+- **Bridges**: Pages connecting different clusters
+- **Orphans**: Related pages with few connections
+
+**Example:**
+```
+User: "Show me everything connected to [[Machine Learning]]"
+
+1. logseq_get_related_pages("Machine Learning", depth=2)
+   → 23 related pages found
+
+2. logseq_get_concept_network("Machine Learning", max_depth=2)
+   → 23 nodes, 47 edges
+
+3. Present:
+   "CORE CONNECTIONS (depth 1):
+    - [[Neural Networks]] (referenced in 8 places)
+    - [[Python]] (used in all ML projects)
+    - [[Transformers]] (recent deep dive)
+
+    CONNECTED TOPICS (depth 2):
+    - [[NLP]] → via [[Transformers]]
+    - [[Computer Vision]] → via [[Neural Networks]]
+    - [[Data Science]] → via [[Python]]
+
+    NETWORK INSIGHTS:
+    - [[Machine Learning]] is a hub (23 connections)
+    - Most activity in [[Neural Networks]] cluster
+    - [[Transformers]] is bridge to [[NLP]]"
+```
+
+## Workflow 6: Temporal Analysis
+
+**When:** User asks about time-based patterns, concept evolution, or "what was I thinking about X?"
+
+**For Journal Queries:**
+```
+logseq_query_by_date_range(start_date, end_date, search_term?)
+```
+- Use YYYYMMDD format (20251101 = Nov 1, 2025)
+- Optional search term filters blocks
+- Returns entries sorted chronologically
+
+**For Concept Evolution:**
+```
+logseq_get_concept_evolution(concept, start_date?, end_date?, group_by?)
+```
+- Tracks how concept appears over time
+- Supports grouping: 'day', 'week', 'month'
+- Shows temporal patterns and gaps
+
+**For Entity Timeline:**
+```
+logseq_get_entity_timeline(entity, start_date?, end_date?)
+```
+- Shows when entity is mentioned
+- Sorted chronologically
+- Distinguishes journal vs. non-journal pages
+
+**Example:**
+```
+User: "How has my thinking on [[Rust]] evolved this year?"
+
+1. logseq_get_concept_evolution("Rust", 20250101, 20251231, group_by='month')
+   → Timeline with monthly grouping
+
+2. Present:
+   "RUST EVOLUTION (2025):
+
+    Jan-Feb: Initial learning phase
+    - 12 mentions (basics, ownership, borrowing)
+
+    Mar-May: Active project work
+    - 34 mentions (async, tokio, production issues)
+
+    Jun-Aug: Deep dive period
+    - 28 mentions (unsafe, FFI, optimization)
+
+    Sep-Nov: Maintenance
+    - 8 mentions (updates, refactoring)
+
+    PATTERN: Intense learning → Active development → Maintenance
+    GAP: No mentions in September (vacation?)"
+```
+
+## Workflow 7: Smart Context Building
+
+**When:** User asks complex questions requiring comprehensive context from multiple sources.
+
+**Simple Queries:**
+```
+logseq_get_context_for_query("What did I write about [[Project X]] in [[Team Meeting]]?")
+```
+- Automatically extracts topics from [[references]] and #tags
+- Builds context for each topic
+- Returns aggregated results
+
+**Deep Dives:**
+```
+logseq_build_context(topic, max_blocks=50, max_related_pages=10)
+```
+- Main page with properties
+- Direct blocks from page
+- Related pages (inbound + outbound)
+- Reference blocks mentioning the topic
+- Temporal context (for journal pages)
+- Summary statistics
+
+**Example:**
+```
+User: "Give me full context on [[Q4 Planning]]"
+
+1. logseq_build_context("Q4 Planning", max_blocks=50, max_related_pages=15)
+   → Comprehensive aggregation
+
+2. Present:
+   "Q4 PLANNING CONTEXT:
+
+    MAIN PAGE:
+    - 23 blocks (goals, milestones, retrospective)
+    - Properties: quarter::4, year::2025, status::active
+
+    RELATED PAGES (15):
+    Outbound references:
+    - [[Product Roadmap]] (planning source)
+    - [[Team Capacity]] (resource planning)
+    - [[Budget 2025]] (financial planning)
+
+    Inbound references:
+    - [[Weekly Standup]] (7 mentions)
+    - [[Engineering Notes]] (4 mentions)
+    - [[Leadership Meeting]] (3 mentions)
+
+    TEMPORAL CONTEXT:
+    - Created: Oct 15, 2025
+    - Most recent: Nov 20, 2025
+    - Nearby dates: Oct 14-15, Oct 16-17 (planning session)
+
+    SUMMARY:
+    - 23 direct blocks
+    - 15 related pages
+    - 14 reference blocks
+    - Active planning document"
+```
 
 ## Core Guidelines
 
@@ -171,39 +384,89 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
 
 ## Tool Selection Guide
 
-**For initial exploration:**
-- Start with `logseq_search_blocks` (broad coverage)
+### By Use Case:
 
-**For structured queries:**
-- Use `logseq_query_by_property` (tasks, status, priorities)
+**Initial exploration:**
+- `logseq_search_blocks` (broad text search)
+- `logseq_get_context_for_query` (natural language queries)
 
-**For deep dives:**
-- Use `logseq_get_page` with `includeChildren=true` (full content)
+**Structured queries:**
+- `logseq_query_by_property` (tasks, status, priorities)
+- `logseq_query_by_date_range` (journal entries by date)
 
-**For discovering connections:**
-- Use `logseq_get_backlinks` (see how concepts are used)
+**Deep dives:**
+- `logseq_get_page` with `includeChildren=true` (full page content)
+- `logseq_build_context` (comprehensive topic context)
 
-**For specific blocks:**
-- Use `logseq_get_block` when you have a UUID
+**Discovering connections:**
+- `logseq_get_backlinks` (pages linking to this one)
+- `logseq_get_related_pages` (bidirectional connections)
+- `logseq_get_concept_network` (full network visualization)
+
+**Relationship-based search:**
+- `logseq_search_by_relationship` (find blocks based on topic relationships)
+
+**Time-based analysis:**
+- `logseq_get_entity_timeline` (when entity is mentioned)
+- `logseq_get_concept_evolution` (track concept over time)
+- `logseq_query_by_date_range` (journal queries)
+
+**Specific blocks:**
+- `logseq_get_block` (when you have a UUID)
+
+### By Question Type:
+
+| Question | Best Tool(s) |
+|----------|-------------|
+| "What do I know about X?" | `get_context_for_query` or `build_context` |
+| "Show me everything connected to X" | `get_related_pages` + `get_concept_network` |
+| "How did X evolve over time?" | `get_concept_evolution` |
+| "What was I doing last week?" | `query_by_date_range` |
+| "Find blocks about A that mention B" | `search_by_relationship` |
+| "What are my TODOs?" | `search_blocks` + `query_by_property` |
+| "When did I mention X?" | `get_entity_timeline` |
+| "Get full details on page X" | `build_context` or `get_page` |
 
 ## Common Pitfalls
 
 | Pitfall | Solution |
 |---------|----------|
 | Missing tasks | Check BOTH markers and properties |
-| Incomplete context | Always get backlinks for key pages |
-| Poor search results | Try broader terms, iterate |
-| Date queries unclear | Query all, filter in analysis |
-| Lost connections | Follow backlinks 1-2 hops deep |
+| Incomplete context | Use `build_context` or get backlinks |
+| Poor search results | Use `get_context_for_query` for natural language |
+| Date queries unclear | Use `query_by_date_range` with YYYYMMDD format |
+| Lost connections | Use `get_related_pages` with depth=2 |
+| Manual aggregation | Use `build_context` instead of multiple queries |
+| Shallow exploration | Use `get_concept_network` to see full graph |
+| Time patterns unclear | Use `get_concept_evolution` with grouping |
 
 ## Performance Tips
 
-- **Broad exploration**: Search → Get specific pages
-- **Specific deep-dive**: Get page first → Backlinks
-- **Structured data**: Property queries
-- **Limit recursion**: Don't follow every link (ask user first)
+### Smart Tool Selection:
 
-## Example Complete Session
+**Single-call solutions (fastest):**
+- `build_context` - Replaces 5+ separate queries
+- `get_context_for_query` - Handles natural language automatically
+- `get_concept_network` - Full graph in one call
+
+**Multi-call workflows (when needed):**
+- Broad exploration: `search_blocks` → `get_page` → `get_backlinks`
+- Specific deep-dive: `get_page` → `get_related_pages`
+- Structured data: `query_by_property` for precise matches
+
+**Limit parameters:**
+- Use `max_blocks`, `max_related_pages` to control response size
+- Use `depth` and `max_depth` carefully (depth=1 usually sufficient)
+- Use `limit` on search_blocks to avoid overwhelming results
+
+**Best practices:**
+- Prefer `build_context` over manual aggregation
+- Prefer `get_context_for_query` over multiple searches
+- Use relationship search instead of filtering results manually
+
+## Example Complete Sessions
+
+### Session 1: Weekly Planning (Enhanced)
 
 ```
 User: "Help me plan my week"
@@ -234,14 +497,109 @@ User: "Help me plan my week"
 4. Ask: "Want to dive deeper into any project?"
 ```
 
+### Session 2: Knowledge Graph Exploration (NEW)
+
+```
+User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]]?"
+
+1. logseq_search_by_relationship("TypeScript", "GraphQL", "connected-within", max_distance=3)
+   → Found connection at distance 2
+
+2. logseq_get_related_pages("TypeScript", depth=2)
+   → 15 related pages including [[GraphQL]]
+
+3. logseq_get_concept_network("TypeScript", max_depth=2)
+   → Network analysis
+
+4. Present:
+   "CONNECTION FOUND (Distance 2):
+    [[TypeScript]] → [[API Development]] → [[GraphQL]]
+
+    SHARED CONTEXT:
+    - Both referenced in [[API Development]] (8 mentions)
+    - Both tagged in [[Backend Architecture]]
+    - Co-occur in 3 project pages
+
+    RELATIONSHIP INSIGHTS:
+    - GraphQL types written in TypeScript
+    - Type safety mentioned in both contexts
+    - [[API Development]] is the bridge concept
+
+    RECOMMENDATION: Review [[API Development]] to see how you use them together."
+```
+
+### Session 3: Temporal Analysis (NEW)
+
+```
+User: "How has my approach to testing changed this year?"
+
+1. logseq_get_concept_evolution("Testing", 20250101, 20251231, group_by='month')
+   → 67 mentions across 11 months
+
+2. logseq_query_by_date_range(20250101, 20250331, "testing")
+   → Q1 entries
+
+3. logseq_query_by_date_range(20251001, 20251231, "testing")
+   → Q4 entries (current)
+
+4. Present:
+   "TESTING EVOLUTION (2025):
+
+    Q1 (Jan-Mar): Learning phase
+    - 18 mentions: Unit testing basics, TDD introduction
+    - Focus: Jest, Vitest setup
+
+    Q2 (Apr-Jun): Adoption
+    - 24 mentions: Integration tests, test architecture
+    - Focus: Testing strategies, mocking
+
+    Q3 (Jul-Sep): Mastery
+    - 15 mentions: Advanced patterns, performance testing
+    - Focus: Property-based testing, benchmarks
+
+    Q4 (Oct-Nov): Teaching
+    - 10 mentions: Testing guides, team workshops
+    - Focus: Documentation, mentoring
+
+    KEY SHIFTS:
+    - From learning → practicing → teaching
+    - From unit focus → integration + E2E
+    - Added property-based testing in Q3
+
+    CURRENT STATE: You're now teaching testing patterns to others."
+```
+
 ## Summary
 
 This skill teaches effective LogSeq knowledge graph queries through:
 
-1. **Search-first strategy** for broad understanding
-2. **Backlink discovery** for hidden connections
-3. **Multi-indicator task queries** (markers + properties)
-4. **Synthesis over raw data** (context + recommendations)
-5. **User system respect** (read-only, no structural changes)
+1. **Smart tool selection** - Use single-call solutions when available (build_context, get_context_for_query)
+2. **Graph traversal** - Leverage bidirectional links (get_related_pages, get_concept_network)
+3. **Temporal analysis** - Track concept evolution and patterns over time
+4. **Relationship search** - Find connections between topics semantically
+5. **Multi-indicator task queries** (markers + properties)
+6. **Synthesis over raw data** (context + recommendations)
+7. **User system respect** (read-only, no structural changes)
 
 Remember: You're helping the user leverage their own knowledge, not imposing structure.
+
+## New Capabilities Summary
+
+The enhanced MCP server now supports MegaMem-inspired features:
+
+**Graph Intelligence:**
+- Discover bidirectional page relationships
+- Build visual network graphs
+- Track entity mentions across the graph
+
+**Temporal Intelligence:**
+- Query journal entries by date range
+- Track how concepts evolve over time
+- Analyze writing patterns and gaps
+
+**Context Intelligence:**
+- Single-call comprehensive context gathering
+- Natural language query parsing
+- Relationship-aware semantic search
+
+**Best Practice:** Start with high-level tools (build_context, get_context_for_query) and drill down with specific tools (get_page, search_blocks) only when needed.
