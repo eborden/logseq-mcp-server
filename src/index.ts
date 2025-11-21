@@ -18,6 +18,7 @@ import { searchBlocks } from './tools/search-blocks.js';
 import { queryByProperty } from './tools/query-by-property.js';
 import { getRelatedPages } from './tools/get-related-pages.js';
 import { getEntityTimeline } from './tools/get-entity-timeline.js';
+import { getConceptNetwork } from './tools/get-concept-network.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -148,6 +149,25 @@ const TOOLS = [
         },
       },
       required: ['entity_name'],
+    },
+  },
+  {
+    name: 'logseq_get_concept_network',
+    description: 'Get network of pages related to a concept with nodes and edges',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        concept_name: {
+          type: 'string',
+          description: 'Name of the root concept',
+        },
+        max_depth: {
+          type: 'number',
+          description: 'Maximum depth to traverse (default: 2, max: 3)',
+          default: 2,
+        },
+      },
+      required: ['concept_name'],
     },
   },
 ];
@@ -287,6 +307,20 @@ export function createServer(): Server {
             startDate,
             endDate
           );
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_get_concept_network': {
+          const conceptName = args?.concept_name as string;
+          const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
+          const result = await getConceptNetwork(client, conceptName, maxDepth);
           return {
             content: [
               {
@@ -440,6 +474,20 @@ async function main() {
               startDate,
               endDate
             );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_get_concept_network': {
+            const conceptName = args?.concept_name as string;
+            const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
+            const result = await getConceptNetwork(client, conceptName, maxDepth);
             return {
               content: [
                 {
