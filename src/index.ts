@@ -19,6 +19,7 @@ import { queryByProperty } from './tools/query-by-property.js';
 import { getRelatedPages } from './tools/get-related-pages.js';
 import { getEntityTimeline } from './tools/get-entity-timeline.js';
 import { getConceptNetwork } from './tools/get-concept-network.js';
+import { searchByRelationship } from './tools/search-by-relationship.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -168,6 +169,34 @@ const TOOLS = [
         },
       },
       required: ['concept_name'],
+    },
+  },
+  {
+    name: 'logseq_search_by_relationship',
+    description: 'Search for blocks based on relationship between topics (e.g., blocks about X that reference Y)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        topic_a: {
+          type: 'string',
+          description: 'Primary topic to search for',
+        },
+        topic_b: {
+          type: 'string',
+          description: 'Related topic that defines the relationship',
+        },
+        relationship_type: {
+          type: 'string',
+          enum: ['references', 'referenced-by', 'in-pages-linking-to', 'connected-within'],
+          description: 'Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)',
+        },
+        max_distance: {
+          type: 'number',
+          description: 'Maximum graph distance for connected-within (default: 2)',
+          default: 2,
+        },
+      },
+      required: ['topic_a', 'topic_b', 'relationship_type'],
     },
   },
 ];
@@ -321,6 +350,28 @@ export function createServer(): Server {
           const conceptName = args?.concept_name as string;
           const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
           const result = await getConceptNetwork(client, conceptName, maxDepth);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_search_by_relationship': {
+          const topicA = args?.topic_a as string;
+          const topicB = args?.topic_b as string;
+          const relationshipType = args?.relationship_type as any;
+          const maxDistance = (args?.max_distance as number) ?? 2;
+          const result = await searchByRelationship(
+            client,
+            topicA,
+            topicB,
+            relationshipType,
+            maxDistance
+          );
           return {
             content: [
               {
@@ -488,6 +539,28 @@ async function main() {
             const conceptName = args?.concept_name as string;
             const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
             const result = await getConceptNetwork(client, conceptName, maxDepth);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_search_by_relationship': {
+            const topicA = args?.topic_a as string;
+            const topicB = args?.topic_b as string;
+            const relationshipType = args?.relationship_type as any;
+            const maxDistance = (args?.max_distance as number) ?? 2;
+            const result = await searchByRelationship(
+              client,
+              topicA,
+              topicB,
+              relationshipType,
+              maxDistance
+            );
             return {
               content: [
                 {
