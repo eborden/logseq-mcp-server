@@ -23,6 +23,7 @@ import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
 import { getContextForQuery } from './tools/get-context-for-query.js';
 import { queryByDateRange } from './tools/query-by-date-range.js';
+import { getConceptEvolution } from './tools/get-concept-evolution.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -287,6 +288,33 @@ const TOOLS = [
       required: ['start_date', 'end_date'],
     },
   },
+  {
+    name: 'logseq_get_concept_evolution',
+    description: 'Track how a concept evolves over time through journal entries',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        concept_name: {
+          type: 'string',
+          description: 'Name of the concept to track',
+        },
+        start_date: {
+          type: 'number',
+          description: 'Optional start date in YYYYMMDD format',
+        },
+        end_date: {
+          type: 'number',
+          description: 'Optional end date in YYYYMMDD format',
+        },
+        group_by: {
+          type: 'string',
+          enum: ['day', 'week', 'month'],
+          description: 'Optional grouping period',
+        },
+      },
+      required: ['concept_name'],
+    },
+  },
 ];
 
 /**
@@ -512,6 +540,24 @@ export function createServer(): Server {
             endDate,
             searchTerm
           );
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_get_concept_evolution': {
+          const conceptName = args?.concept_name as string;
+          const options = {
+            startDate: args?.start_date as number | undefined,
+            endDate: args?.end_date as number | undefined,
+            groupBy: args?.group_by as any
+          };
+          const result = await getConceptEvolution(client, conceptName, options);
           return {
             content: [
               {
@@ -753,6 +799,24 @@ async function main() {
               endDate,
               searchTerm
             );
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_get_concept_evolution': {
+            const conceptName = args?.concept_name as string;
+            const options = {
+              startDate: args?.start_date as number | undefined,
+              endDate: args?.end_date as number | undefined,
+              groupBy: args?.group_by as any
+            };
+            const result = await getConceptEvolution(client, conceptName, options);
             return {
               content: [
                 {
