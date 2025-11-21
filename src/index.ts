@@ -21,6 +21,7 @@ import { getEntityTimeline } from './tools/get-entity-timeline.js';
 import { getConceptNetwork } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
+import { getContextForQuery } from './tools/get-context-for-query.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -239,6 +240,30 @@ const TOOLS = [
       required: ['topic_name'],
     },
   },
+  {
+    name: 'logseq_get_context_for_query',
+    description: 'Get comprehensive context for a natural language query by extracting topics and gathering related information',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Natural language query (can include [[page references]] and #tags)',
+        },
+        max_topics: {
+          type: 'number',
+          description: 'Maximum number of topics to extract context for (default: 5)',
+          default: 5,
+        },
+        max_search_results: {
+          type: 'number',
+          description: 'Maximum number of search results for queries without explicit topics (default: 20)',
+          default: 20,
+        },
+      },
+      required: ['query'],
+    },
+  },
 ];
 
 /**
@@ -427,6 +452,23 @@ export function createServer(): Server {
             includeTemporalContext: args?.include_temporal_context as boolean | undefined
           };
           const result = await buildContextForTopic(client, topicName, options);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_get_context_for_query': {
+          const query = args?.query as string;
+          const options = {
+            maxTopics: args?.max_topics as number | undefined,
+            maxSearchResults: args?.max_search_results as number | undefined
+          };
+          const result = await getContextForQuery(client, query, options);
           return {
             content: [
               {
@@ -631,6 +673,23 @@ async function main() {
               includeTemporalContext: args?.include_temporal_context as boolean | undefined
             };
             const result = await buildContextForTopic(client, topicName, options);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_get_context_for_query': {
+            const query = args?.query as string;
+            const options = {
+              maxTopics: args?.max_topics as number | undefined,
+              maxSearchResults: args?.max_search_results as number | undefined
+            };
+            const result = await getContextForQuery(client, query, options);
             return {
               content: [
                 {
