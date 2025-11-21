@@ -22,6 +22,7 @@ import { getConceptNetwork } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
 import { getContextForQuery } from './tools/get-context-for-query.js';
+import { queryByDateRange } from './tools/query-by-date-range.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -264,6 +265,28 @@ const TOOLS = [
       required: ['query'],
     },
   },
+  {
+    name: 'logseq_query_by_date_range',
+    description: 'Query journal entries within a date range with optional search filter',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date: {
+          type: 'number',
+          description: 'Start date in YYYYMMDD format (e.g., 20251115)',
+        },
+        end_date: {
+          type: 'number',
+          description: 'End date in YYYYMMDD format (e.g., 20251120)',
+        },
+        search_term: {
+          type: 'string',
+          description: 'Optional search term to filter blocks',
+        },
+      },
+      required: ['start_date', 'end_date'],
+    },
+  },
 ];
 
 /**
@@ -469,6 +492,26 @@ export function createServer(): Server {
             maxSearchResults: args?.max_search_results as number | undefined
           };
           const result = await getContextForQuery(client, query, options);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_query_by_date_range': {
+          const startDate = args?.start_date as number;
+          const endDate = args?.end_date as number;
+          const searchTerm = args?.search_term as string | undefined;
+          const result = await queryByDateRange(
+            client,
+            startDate,
+            endDate,
+            searchTerm
+          );
           return {
             content: [
               {
@@ -690,6 +733,26 @@ async function main() {
               maxSearchResults: args?.max_search_results as number | undefined
             };
             const result = await getContextForQuery(client, query, options);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_query_by_date_range': {
+            const startDate = args?.start_date as number;
+            const endDate = args?.end_date as number;
+            const searchTerm = args?.search_term as string | undefined;
+            const result = await queryByDateRange(
+              client,
+              startDate,
+              endDate,
+              searchTerm
+            );
             return {
               content: [
                 {
