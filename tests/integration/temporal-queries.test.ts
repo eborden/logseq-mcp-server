@@ -203,6 +203,40 @@ describe('Temporal Queries Integration Tests', () => {
         queryByDateRange(client, 20250131, 20250101)
       ).rejects.toThrow('Start date must be before or equal to end date');
     });
+
+    it.skipIf(skipTests)('should return journal entries for last 60 days', async () => {
+      // Calculate date range
+      const today = new Date();
+      const sixtyDaysAgo = new Date(today);
+      sixtyDaysAgo.setDate(today.getDate() - 60);
+
+      const endDate = parseInt(today.toISOString().slice(0, 10).replace(/-/g, ''));
+      const startDate = parseInt(sixtyDaysAgo.toISOString().slice(0, 10).replace(/-/g, ''));
+
+      const result = await queryByDateRange(client, startDate, endDate);
+
+      // Validate structure
+      expect(result).toHaveProperty('dateRange');
+      expect(result.dateRange.start).toBe(startDate);
+      expect(result.dateRange.end).toBe(endDate);
+      expect(Array.isArray(result.entries)).toBe(true);
+
+      // Should have at least some entries in the last 60 days
+      expect(result.entries.length).toBeGreaterThan(0);
+
+      // Validate all entries are within range
+      for (const entry of result.entries) {
+        expect(entry.date).toBeGreaterThanOrEqual(startDate);
+        expect(entry.date).toBeLessThanOrEqual(endDate);
+        expect(entry.page).toBeDefined();
+        expect(Array.isArray(entry.blocks)).toBe(true);
+      }
+
+      // Entries should be sorted by date
+      for (let i = 1; i < result.entries.length; i++) {
+        expect(result.entries[i].date).toBeGreaterThanOrEqual(result.entries[i - 1].date);
+      }
+    });
   });
 
   describe('logseq_get_concept_evolution', () => {

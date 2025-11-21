@@ -16,7 +16,7 @@ describe('queryByDateRange', () => {
         name: 'nov 15th, 2025',
         originalName: 'Nov 15th, 2025',
         journalDay: 20251115,
-        journal: true
+        'journal?': true
       },
       {
         id: 2,
@@ -24,7 +24,7 @@ describe('queryByDateRange', () => {
         name: 'nov 20th, 2025',
         originalName: 'Nov 20th, 2025',
         journalDay: 20251120,
-        journal: true
+        'journal?': true
       }
     ]);
 
@@ -62,7 +62,7 @@ describe('queryByDateRange', () => {
         name: 'nov 15th, 2025',
         originalName: 'Nov 15th, 2025',
         journalDay: 20251115,
-        journal: true
+        'journal?': true
       }
     ]);
 

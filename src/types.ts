@@ -32,6 +32,7 @@ export interface PageEntity {
   originalName: string;
   properties?: Record<string, any>;
   journal?: boolean;
+  'journal?'?: boolean; // Logseq uses this property name
   journalDay?: number;
   namespace?: IEntityID;
   children?: (PageEntity | BlockEntity)[];

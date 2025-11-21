@@ -71,7 +71,7 @@ export async function queryByDateRange(
   // Filter by journal pages in date range
   const journalsInRange = (allPages || []).filter(page => {
     return (
-      page.journal &&
+      page['journal?'] &&
       page.journalDay &&
       page.journalDay >= startDate &&
       page.journalDay <= endDate
