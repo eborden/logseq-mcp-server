@@ -5,7 +5,6 @@ import { access } from 'fs/promises';
 import { loadConfig } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getRelatedPages } from '../../src/tools/get-related-pages.js';
-import { getEntityTimeline } from '../../src/tools/get-entity-timeline.js';
 import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
 
 /**
@@ -125,126 +124,6 @@ describe('Graph Traversal Tools Integration Tests', () => {
       await expect(
         getRelatedPages(client, 'NonExistentPageForGraphTools12345', 1)
       ).rejects.toThrow('Page not found');
-    });
-  });
-
-  describe('logseq_get_entity_timeline', () => {
-    it.skipIf(skipTests)('should return timeline structure', async () => {
-      // Find any page to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        console.warn('No pages found for get_entity_timeline test');
-        return;
-      }
-
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
-
-      const result = await getEntityTimeline(client, pageName);
-
-      // Validate structure
-      expect(result).toHaveProperty('entity');
-      expect(result).toHaveProperty('timeline');
-      expect(result.entity).toBe(pageName);
-      expect(Array.isArray(result.timeline)).toBe(true);
-
-      // If timeline has entries, validate structure
-      if (result.timeline.length > 0) {
-        const entry = result.timeline[0];
-        expect(entry).toHaveProperty('date');
-        expect(entry).toHaveProperty('block');
-
-        // date should be either number or null
-        expect(entry.date === null || typeof entry.date === 'number').toBe(true);
-
-        // Block should have expected properties
-        expect(entry.block).toHaveProperty('id');
-        expect(entry.block).toHaveProperty('content');
-      }
-    });
-
-    it.skipIf(skipTests)('should filter by date range', async () => {
-      // Find a journal page to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/journal? true]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        console.warn('No journal pages found for date range test');
-        return;
-      }
-
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
-
-      // Test with date range (future dates - should return empty or filtered)
-      const result = await getEntityTimeline(
-        client,
-        pageName,
-        20300101,  // Start date far in future
-        20301231   // End date far in future
-      );
-
-      expect(result).toHaveProperty('timeline');
-      expect(Array.isArray(result.timeline)).toBe(true);
-
-      // All returned entries should be within range or null
-      for (const entry of result.timeline) {
-        if (entry.date !== null) {
-          expect(entry.date).toBeGreaterThanOrEqual(20300101);
-          expect(entry.date).toBeLessThanOrEqual(20301231);
-        }
-      }
-    });
-
-    it.skipIf(skipTests)('should sort timeline chronologically', async () => {
-      // Find any page with multiple references
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        return;
-      }
-
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
-
-      const result = await getEntityTimeline(client, pageName);
-
-      // Check that dates are sorted (non-null dates before nulls, and in ascending order)
-      let lastDate: number | null = null;
-      let seenNull = false;
-
-      for (const entry of result.timeline) {
-        if (entry.date === null) {
-          seenNull = true;
-        } else {
-          // If we've seen a null, no more non-null dates should appear
-          expect(seenNull).toBe(false);
-
-          // Check ascending order
-          if (lastDate !== null) {
-            expect(entry.date).toBeGreaterThanOrEqual(lastDate);
-          }
-          lastDate = entry.date;
-        }
-      }
     });
   });
 

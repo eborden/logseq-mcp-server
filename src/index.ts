@@ -17,7 +17,6 @@ import { getBlock } from './tools/get-block.js';
 import { searchBlocks } from './tools/search-blocks.js';
 import { queryByProperty } from './tools/query-by-property.js';
 import { getRelatedPages } from './tools/get-related-pages.js';
-import { getEntityTimeline } from './tools/get-entity-timeline.js';
 import { getConceptNetwork } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
@@ -137,28 +136,6 @@ const TOOLS = [
         },
       },
       required: ['page_name'],
-    },
-  },
-  {
-    name: 'logseq_get_entity_timeline',
-    description: 'Get timeline of blocks mentioning an entity, sorted chronologically',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        entity_name: {
-          type: 'string',
-          description: 'Name of the entity (page name)',
-        },
-        start_date: {
-          type: 'number',
-          description: 'Optional start date in YYYYMMDD format',
-        },
-        end_date: {
-          type: 'number',
-          description: 'Optional end date in YYYYMMDD format',
-        },
-      },
-      required: ['entity_name'],
     },
   },
   {
@@ -438,26 +415,6 @@ export function createServer(): Server {
           };
         }
 
-        case 'logseq_get_entity_timeline': {
-          const entityName = args?.entity_name as string;
-          const startDate = args?.start_date as number | undefined;
-          const endDate = args?.end_date as number | undefined;
-          const result = await getEntityTimeline(
-            client,
-            entityName,
-            startDate,
-            endDate
-          );
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        }
-
         case 'logseq_get_concept_network': {
           const conceptName = args?.concept_name as string;
           const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
@@ -687,26 +644,6 @@ async function main() {
             const pageName = args?.page_name as string;
             const depth = Math.min((args?.depth as number) ?? 1, 3);
             const result = await getRelatedPages(client, pageName, depth);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_entity_timeline': {
-            const entityName = args?.entity_name as string;
-            const startDate = args?.start_date as number | undefined;
-            const endDate = args?.end_date as number | undefined;
-            const result = await getEntityTimeline(
-              client,
-              entityName,
-              startDate,
-              endDate
-            );
             return {
               content: [
                 {

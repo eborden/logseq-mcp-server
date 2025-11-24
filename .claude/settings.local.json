@@ -45,7 +45,8 @@
       "Bash(rm:*)",
       "Bash(git reset:*)",
       "Bash(git restore:*)",
-      "mcp__logseq__logseq_get_backlinks"
+      "mcp__logseq__logseq_get_backlinks",
+      "Bash(npx vitest run:*)"
     ],
     "deny": [],
     "ask": []
