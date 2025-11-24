@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity, BlockEntity } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
+import { getBacklinks } from './get-backlinks.js';
 
 export interface ContextOptions {
   maxBlocks?: number;
@@ -77,9 +78,8 @@ export async function buildContextForTopic(
     .filter(block => block != null)
     .slice(0, maxBlocks);
 
-  // Query 2: Get related pages and backlinks using same pattern as get-concept-network
+  // Query 3: Get related pages using same pattern as get-concept-network
   const relatedPages: TopicContext['relatedPages'] = [];
-  const references: TopicContext['references'] = [];
 
   // Get pages connected to main page (similar to concept network depth=1)
   if (mainPage.id) {
@@ -110,6 +110,27 @@ export async function buildContextForTopic(
     } catch (error) {
       // No connections found, continue with empty related pages
     }
+  }
+
+  // Query 4: Get reference blocks (blocks that mention this topic)
+  const references: TopicContext['references'] = [];
+  try {
+    const backlinks = await getBacklinks(client, topicName);
+    if (backlinks && backlinks.length > 0) {
+      // Each backlink is [sourcePage, blocks[]]
+      for (const [sourcePage, blocks] of backlinks) {
+        for (const block of blocks) {
+          if (references.length >= maxReferences) break;
+          references.push({
+            block,
+            sourcePage
+          });
+        }
+        if (references.length >= maxReferences) break;
+      }
+    }
+  } catch (error) {
+    // No backlinks found, continue with empty references
   }
 
   // Build temporal context if requested
