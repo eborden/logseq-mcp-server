@@ -2,10 +2,10 @@
 
 ## Overview
 
-This is an MCP (Model Context Protocol) server that provides Claude with 18 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
+This is an MCP (Model Context Protocol) server that provides Claude with 11 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
 
 **Key Stats:**
-- 18 MCP tools for graph operations, search, and temporal queries
+- 11 MCP tools for graph operations, search, and temporal queries
 - 191 test cases (unit + integration + property-based)
 - 70-88% API call reduction via Datalog optimization
 - Direct Datalog implementation (simplified architecture as of Nov 2024)
@@ -376,6 +376,15 @@ export function buildQuery(pageName: string) {
 - **Commits:**
   - c108174 "fix: implement case-insensitive page lookup" (reverted)
   - d6c3151 "fix: handle pages without blocks by splitting into separate queries"
+
+### Phase 5: Tool Simplification (Nov 24, 2024)
+- Removed redundant get_entity_timeline (subset of get_concept_evolution)
+- Removed incomplete get_related_pages (replaced by get_concept_network)
+- Net: -2 tools, -195 lines
+- **Result:** 13 → 11 tools (15% reduction)
+- **Commits:**
+  - 9642558 "refactor: remove redundant get_entity_timeline tool"
+  - 34a699a "refactor: remove incomplete get_related_pages tool"
 
 ### Lessons Learned
 

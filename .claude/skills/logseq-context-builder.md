@@ -23,7 +23,7 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 
 ## Available MCP Tools
 
-Quick reference for all 18 LogSeq MCP tools organized by category:
+Quick reference for all 11 LogSeq MCP tools organized by category:
 
 ### Basic Tools (5 tools)
 
@@ -35,12 +35,10 @@ Quick reference for all 18 LogSeq MCP tools organized by category:
 | `logseq_get_block` | Get specific block by UUID | block_uuid, include_children |
 | `logseq_query_by_property` | Find blocks by property value | property_key, property_value |
 
-### Graph Traversal Tools (3 tools)
+### Graph Traversal Tools (1 tool)
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `logseq_get_related_pages` | Find pages connected through references/backlinks | page_name, depth (max: 3) |
-| `logseq_get_entity_timeline` | Track when/where entity is mentioned over time | entity_name, start_date, end_date |
 | `logseq_get_concept_network` | Build graph network with nodes and edges | concept_name, max_depth (max: 3) |
 
 ### Semantic Search Tools (1 tool)
@@ -198,21 +196,21 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
 
 **3-Phase Approach:**
 
-### Phase 1: Discover Connections
-```
-logseq_get_related_pages(topic, depth=2)
-```
-- Returns both inbound (backlinks) and outbound (references)
-- Shows relationship type and distance
-- Use depth=1 for immediate connections, depth=2-3 for broader network
-
-### Phase 2: Visualize Network
+### Phase 1: Visualize Network
 ```
 logseq_get_concept_network(topic, max_depth=2)
 ```
 - Returns nodes (pages) and edges (connections)
 - Good for understanding topic centrality
 - Identifies hub pages vs. leaf pages
+- Shows relationship type and distance
+
+### Phase 2: Get Backlinks
+```
+logseq_get_backlinks(topic)
+```
+- Find pages that reference the topic
+- Complements concept_network with detailed backlink context
 
 ### Phase 3: Present Insights
 - **Core connections**: Pages at distance 1
@@ -224,11 +222,11 @@ logseq_get_concept_network(topic, max_depth=2)
 ```
 User: "Show me everything connected to [[Machine Learning]]"
 
-1. logseq_get_related_pages("Machine Learning", depth=2)
-   → 23 related pages found
-
-2. logseq_get_concept_network("Machine Learning", max_depth=2)
+1. logseq_get_concept_network("Machine Learning", max_depth=2)
    → 23 nodes, 47 edges
+
+2. logseq_get_backlinks("Machine Learning")
+   → 15 pages with backlinks
 
 3. Present:
    "CORE CONNECTIONS (depth 1):
@@ -266,12 +264,6 @@ logseq_get_concept_evolution(concept, start_date?, end_date?, group_by?)
 - Tracks how concept appears over time
 - Supports grouping: 'day', 'week', 'month'
 - Shows temporal patterns and gaps
-
-**For Entity Timeline:**
-```
-logseq_get_entity_timeline(entity, start_date?, end_date?)
-```
-- Shows when entity is mentioned
 - Sorted chronologically
 - Distinguishes journal vs. non-journal pages
 
@@ -400,15 +392,13 @@ User: "Give me full context on [[Q4 Planning]]"
 
 **Discovering connections:**
 - `logseq_get_backlinks` (pages linking to this one)
-- `logseq_get_related_pages` (bidirectional connections)
-- `logseq_get_concept_network` (full network visualization)
+- `logseq_get_concept_network` (full network visualization with nodes and edges)
 
 **Relationship-based search:**
 - `logseq_search_by_relationship` (find blocks based on topic relationships)
 
 **Time-based analysis:**
-- `logseq_get_entity_timeline` (when entity is mentioned)
-- `logseq_get_concept_evolution` (track concept over time)
+- `logseq_get_concept_evolution` (track concept over time, includes timeline)
 - `logseq_query_by_date_range` (journal queries)
 
 **Specific blocks:**
@@ -419,12 +409,12 @@ User: "Give me full context on [[Q4 Planning]]"
 | Question | Best Tool(s) |
 |----------|-------------|
 | "What do I know about X?" | `get_context_for_query` or `build_context` |
-| "Show me everything connected to X" | `get_related_pages` + `get_concept_network` |
+| "Show me everything connected to X" | `get_concept_network` + `get_backlinks` |
 | "How did X evolve over time?" | `get_concept_evolution` |
 | "What was I doing last week?" | `query_by_date_range` |
 | "Find blocks about A that mention B" | `search_by_relationship` |
 | "What are my TODOs?" | `search_blocks` + `query_by_property` |
-| "When did I mention X?" | `get_entity_timeline` |
+| "When did I mention X?" | `get_concept_evolution` (without grouping) |
 | "Get full details on page X" | `build_context` or `get_page` |
 
 ## Common Pitfalls
@@ -435,7 +425,7 @@ User: "Give me full context on [[Q4 Planning]]"
 | Incomplete context | Use `build_context` or get backlinks |
 | Poor search results | Use `get_context_for_query` for natural language |
 | Date queries unclear | Use `query_by_date_range` with YYYYMMDD format |
-| Lost connections | Use `get_related_pages` with depth=2 |
+| Lost connections | Use `get_concept_network` with max_depth=2 |
 | Manual aggregation | Use `build_context` instead of multiple queries |
 | Shallow exploration | Use `get_concept_network` to see full graph |
 | Time patterns unclear | Use `get_concept_evolution` with grouping |
@@ -505,11 +495,11 @@ User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]
 1. logseq_search_by_relationship("TypeScript", "GraphQL", "connected-within", max_distance=3)
    → Found connection at distance 2
 
-2. logseq_get_related_pages("TypeScript", depth=2)
-   → 15 related pages including [[GraphQL]]
+2. logseq_get_concept_network("TypeScript", max_depth=2)
+   → Network analysis: 15 nodes including [[GraphQL]], 28 edges
 
-3. logseq_get_concept_network("TypeScript", max_depth=2)
-   → Network analysis
+3. logseq_get_backlinks("TypeScript")
+   → 12 pages with backlinks
 
 4. Present:
    "CONNECTION FOUND (Distance 2):

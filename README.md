@@ -4,7 +4,7 @@ Turn your LogSeq knowledge graph into an AI-accessible database.
 
 ## What This Does
 
-Provides 18 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+Provides 11 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
 
 ## Quick Start
 
@@ -20,7 +20,7 @@ Provides 18 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 4. Install: `npm install -g logseq-mcp-server`
 5. Add to Claude Desktop MCP settings
 
-## 18 Tools at a Glance
+## 11 Tools at a Glance
 
 ### Basic Operations (5)
 | Tool | Purpose |
@@ -31,11 +31,9 @@ Provides 18 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 | `get_block` | Get specific block by UUID |
 | `query_by_property` | Find blocks by property key/value |
 
-### Graph Traversal (3)
+### Graph Traversal (1)
 | Tool | Purpose |
 |------|---------|
-| `get_related_pages` | Find connected pages (inbound/outbound) |
-| `get_entity_timeline` | Track when/where entity appears |
 | `get_concept_network` | Build network graph with nodes/edges |
 
 ### Semantic Search (1)
@@ -53,7 +51,7 @@ Provides 18 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 | Tool | Purpose |
 |------|---------|
 | `query_by_date_range` | Query journal entries by date |
-| `get_concept_evolution` | Track concept mentions over time |
+| `get_concept_evolution` | Track concept mentions over time (replaces get_entity_timeline) |
 
 ## Example Usage
 
