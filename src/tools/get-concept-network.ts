@@ -1,6 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { getConnectedPageIds } from './get-connected-page-ids.js';
+import { getBacklinks } from './get-backlinks.js';
 
 export interface ConceptNetworkResult {
   concept: string;
@@ -76,21 +76,28 @@ export async function getConceptNetwork(
     for (const sourceId of currentFrontier) {
       // Get page name for this ID
       const sourcePage = nodeMap.get(sourceId);
-      if (!sourcePage) continue;
+      if (!sourcePage) {
+        throw new Error(`BUG: Source page ID ${sourceId} not found in nodeMap at depth ${depth}`);
+      }
 
-      // Get connected page IDs via HTTP API
-      const connectedIds = await getConnectedPageIds(client, sourcePage.name);
+      // Get backlinks via HTTP API (returns page entities directly)
+      const backlinks = await getBacklinks(client, sourcePage.name);
 
-      // Fetch page details for connected pages
-      for (const connectedId of connectedIds) {
-        // Get page entity via Datalog
-        const pageQuery = `[:find (pull ?p [*]) :where [?p :db/id ${connectedId}]]`;
-        const pageResults = await client.executeDatalogQuery<Array<[any]>>(pageQuery);
+      if (!backlinks || backlinks.length === 0) {
+        continue; // No connections for this page
+      }
 
-        if (pageResults && pageResults.length > 0) {
-          const connectedPage = pageResults[0][0];
-          newConnections.push([sourceId, connectedPage, 'inbound']);
+      // Extract page entities from backlinks
+      for (const [connectedPage, blocks] of backlinks) {
+        // Source page is either the tuple's first element or block.page
+        const actualPage = connectedPage || (blocks.length > 0 ? blocks[0].page : null);
+
+        if (!actualPage) {
+          // Skip malformed backlink entries (some have both null)
+          continue;
         }
+
+        newConnections.push([sourceId, actualPage, 'inbound']);
       }
     }
 

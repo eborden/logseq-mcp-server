@@ -37,7 +37,15 @@
       "WebFetch(domain:discuss.logseq.com)",
       "Skill(superpowers:verification-before-completion)",
       "Bash(echo:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(mv:*)",
+      "Bash(git checkout:*)",
+      "Bash(src/tools/get-concept-network-datalog.test.ts)",
+      "Bash(src/tools/build-context-datalog.test.ts)",
+      "Bash(rm:*)",
+      "Bash(git reset:*)",
+      "Bash(git restore:*)",
+      "mcp__logseq__logseq_get_backlinks"
     ],
     "deny": [],
     "ask": []
