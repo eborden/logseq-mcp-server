@@ -3,27 +3,32 @@ import { buildContextForTopic } from './build-context.js';
 import { LogseqClient } from '../client.js';
 
 describe('buildContextForTopic', () => {
-  it('should execute Datalog query and transform results to context', async () => {
+  it('should execute Datalog queries and transform results to context', async () => {
     const mockClient = {
       config: {},
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock Query 1: Get page and blocks
+    // Mock Query 1: Get page
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [{ id: 1, name: 'Topic', properties: {} }, { id: 10, content: 'Block 1' }],
-      [{ id: 1, name: 'Topic', properties: {} }, { id: 11, content: 'Block 2' }]
+      [{ id: 1, name: 'Topic', properties: {} }]
     ]);
 
-    // Mock Query 2: Get connected pages
+    // Mock Query 2: Get blocks
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [{ id: 10, content: 'Block 1' }],
+      [{ id: 11, content: 'Block 2' }]
+    ]);
+
+    // Mock Query 3: Get connected pages
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
       [1, { id: 2, name: 'Related Page' }, 'outbound']
     ]);
 
     const result = await buildContextForTopic(mockClient, 'Topic', {});
 
-    // Should make 2 queries (page+blocks, then connections)
-    expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(2);
+    // Should make 3 queries (page, blocks, connections)
+    expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(3);
     expect(result.topic).toBe('Topic');
     expect(result.mainPage.id).toBe(1);
     expect(result.directBlocks.length).toBe(2); // Two blocks found
@@ -50,12 +55,19 @@ describe('buildContextForTopic', () => {
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    const manyBlocks = Array.from({ length: 100 }, (_, i) => [
-      { id: 1, name: 'Topic', properties: {} },
-      { id: 10 + i, content: `Block ${i}` }
+    // Mock Query 1: Get page
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [{ id: 1, name: 'Topic', properties: {} }]
     ]);
 
-    (mockClient.executeDatalogQuery as any).mockResolvedValue(manyBlocks);
+    // Mock Query 2: Get many blocks
+    const manyBlocks = Array.from({ length: 100 }, (_, i) => [
+      { id: 10 + i, content: `Block ${i}` }
+    ]);
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce(manyBlocks);
+
+    // Mock Query 3: Get connected pages
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
     const result = await buildContextForTopic(mockClient, 'Topic', {
       maxBlocks: 10
@@ -70,11 +82,15 @@ describe('buildContextForTopic', () => {
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock responses for any casing
+    // Mock Query 1: Get page (lowercase in DB)
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [{ id: 1, name: 'christy', properties: {} }, { id: 10, content: 'Block' }]
+      [{ id: 1, name: 'christy', properties: {} }]
     ]);
 
+    // Mock Query 2: Get blocks (empty)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
+    // Mock Query 3: Get connected pages (empty)
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
     // Should work with capital C
@@ -82,11 +98,11 @@ describe('buildContextForTopic', () => {
 
     expect(result.topic).toBe('Christy');
     expect(result.mainPage.id).toBe(1);
+    expect(result.directBlocks.length).toBe(0); // No blocks
 
-    // Verify query was called with lowercased parameter
+    // Verify query has lowercase embedded in it
     expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
-      expect.stringContaining(':in $ ?page-name-lower'),
-      'christy'  // Lowercased
+      expect.stringContaining('christy')  // Lowercased embedded in query
     );
   });
 });

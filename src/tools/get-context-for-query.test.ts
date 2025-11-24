@@ -37,16 +37,22 @@ describe('getContextForQuery', () => {
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock executeDatalogQuery to return simple page+block data for any topic
+    // Mock executeDatalogQuery to return data for any topic (3 queries per topic)
     let callCount = 0;
     (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
       callCount++;
-      // Odd calls: page+blocks, Even calls: connections
-      if (callCount % 2 === 1) {
-        const pageId = Math.floor(callCount / 2) + 1;
-        return [[{ id: pageId, name: `Topic ${pageId}`, properties: {} }, { id: pageId * 10, content: `Block ${pageId}` }]];
+      const topicIndex = Math.floor((callCount - 1) / 3);
+      const queryType = (callCount - 1) % 3; // 0=page, 1=blocks, 2=connections
+
+      if (queryType === 0) {
+        // Page query
+        return [[{ id: topicIndex + 1, name: `Topic ${topicIndex + 1}`, properties: {} }]];
+      } else if (queryType === 1) {
+        // Blocks query
+        return [[{ id: (topicIndex + 1) * 10, content: `Block ${topicIndex + 1}` }]];
       } else {
-        return []; // No connections
+        // Connections query
+        return [];
       }
     });
 
@@ -91,19 +97,28 @@ describe('getContextForQuery', () => {
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock Datalog queries for both topics
+    // Mock Datalog queries for both topics (3 queries per topic: page, blocks, connections)
     let callCount = 0;
     (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
       callCount++;
-      // Odd calls: page+blocks query, Even calls: connections query
       if (callCount === 1) {
-        return [[{ id: 1, name: 'Topic A', properties: {} }, { id: 10, content: 'Block A' }]];
+        // Topic A: page
+        return [[{ id: 1, name: 'Topic A', properties: {} }]];
       } else if (callCount === 2) {
-        return []; // No connections for Topic A
+        // Topic A: blocks
+        return [[{ id: 10, content: 'Block A' }]];
       } else if (callCount === 3) {
-        return [[{ id: 2, name: 'Topic B', properties: {} }, { id: 20, content: 'Block B' }]];
+        // Topic A: connections
+        return [];
       } else if (callCount === 4) {
-        return []; // No connections for Topic B
+        // Topic B: page
+        return [[{ id: 2, name: 'Topic B', properties: {} }]];
+      } else if (callCount === 5) {
+        // Topic B: blocks
+        return [[{ id: 20, content: 'Block B' }]];
+      } else if (callCount === 6) {
+        // Topic B: connections
+        return [];
       }
       return [];
     });

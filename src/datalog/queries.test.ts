@@ -3,19 +3,19 @@ import { DatalogQueryBuilder } from './queries.js';
 
 describe('DatalogQueryBuilder', () => {
   describe('conceptNetwork', () => {
-    it('should generate basic concept network query with parameter', () => {
+    it('should generate basic concept network query with embedded lowercase', () => {
       const query = DatalogQueryBuilder.conceptNetwork('Machine Learning', 2);
 
       expect(query).toContain(':find');
       expect(query).toContain(':where');
-      expect(query).toContain(':in $ ?root-name-lower'); // Uses lowercased parameter
+      expect(query).toContain('machine learning'); // Embedded lowercased name
     });
 
     it('should generate depth=0 query that returns only root', () => {
       const query = DatalogQueryBuilder.conceptNetwork('Testing', 0);
 
       expect(query).toContain(':find (pull ?p [*])');
-      expect(query).toContain(':in $ ?root-name-lower'); // Uses lowercased parameter
+      expect(query).toContain('testing'); // Embedded lowercased name
       expect(query).not.toContain('?connected'); // No connections at depth 0
     });
 
@@ -53,7 +53,7 @@ describe('DatalogQueryBuilder', () => {
   });
 
   describe('buildContext', () => {
-    it('should generate context building query with parameter', () => {
+    it('should generate context building query with embedded lowercase', () => {
       const query = DatalogQueryBuilder.buildContext('TypeScript', {
         maxBlocks: 50,
         maxRelatedPages: 10,
@@ -62,14 +62,14 @@ describe('DatalogQueryBuilder', () => {
 
       expect(query).toContain(':find');
       expect(query).toContain(':where');
-      expect(query).toContain(':in $ ?page-name-lower'); // Uses lowercased parameter
+      expect(query).toContain('typescript'); // Embedded lowercased name
     });
 
     it('should handle default limits', () => {
       const query = DatalogQueryBuilder.buildContext('React', {});
 
       expect(query).toContain(':find');
-      expect(query).toContain(':in $ ?page-name-lower'); // Uses lowercased parameter
+      expect(query).toContain('react'); // Embedded lowercased name
       expect(query).toBeTruthy();
     });
   });

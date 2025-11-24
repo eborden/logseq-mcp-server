@@ -68,15 +68,10 @@ export class LogseqClient {
   /**
    * Execute a Datalog query via logseq.DB.datascriptQuery
    * @param query - The Datalog query string
-   * @param params - Optional parameters to pass to the query
    * @returns The query results
    * @throws Error if the query fails
    */
-  async executeDatalogQuery<T = any>(query: string, ...params: any[]): Promise<T> {
-    // If query has :in parameters, pass them; otherwise just the query
-    if (params.length > 0) {
-      return this.callAPI<T>('logseq.DB.datascriptQuery', [query, ...params]);
-    }
+  async executeDatalogQuery<T = any>(query: string): Promise<T> {
     return this.callAPI<T>('logseq.DB.datascriptQuery', [query]);
   }
 }

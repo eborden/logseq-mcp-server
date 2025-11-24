@@ -93,10 +93,9 @@ describe('getConceptNetwork (Datalog)', () => {
     expect(result.concept).toBe('Christy');
     expect(result.nodes[0].name).toBe('christy'); // DB returns lowercase
 
-    // Verify query was called with lowercased parameter
+    // Verify query has lowercase embedded in it
     expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
-      expect.stringContaining(':in $ ?root-name-lower'),
-      'christy'  // Lowercased
+      expect.stringContaining('christy')  // Lowercased embedded in query
     );
   });
 });

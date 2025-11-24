@@ -56,33 +56,26 @@ export async function buildContextForTopic(
     includeTemporalContext = true
   } = options;
 
-  // Generate Datalog query (case-insensitive via lowercased parameter)
-  const query = DatalogQueryBuilder.buildContext(topicName, {
-    maxBlocks,
-    maxRelatedPages,
-    maxReferences
-  });
-
-  // Execute query with lowercased topicName parameter - returns array of tuples [[page, block]]
-  const results = await client.executeDatalogQuery<Array<[any, any]>>(query, topicName.toLowerCase());
+  // Query 1: Get the main page (case-insensitive)
+  const pageQuery = DatalogQueryBuilder.getPage(topicName);
+  const pageResults = await client.executeDatalogQuery<Array<[any]>>(pageQuery);
 
   // If no results, page doesn't exist
-  if (!results || results.length === 0) {
+  if (!pageResults || pageResults.length === 0) {
     throw new Error(`Page not found: ${topicName}`);
   }
 
-  // Extract unique main page
-  const mainPage = results[0][0];
+  const mainPage = pageResults[0][0];
 
-  // Extract unique blocks
-  const blockMap = new Map();
-  for (const [page, block] of results) {
-    if (block && !blockMap.has(block.id)) {
-      blockMap.set(block.id, block);
-    }
-  }
+  // Query 2: Get blocks for the page (may be empty)
+  const blocksQuery = DatalogQueryBuilder.getPageBlocks(topicName);
+  const blockResults = await client.executeDatalogQuery<Array<[any]>>(blocksQuery);
 
-  const directBlocks = Array.from(blockMap.values()).slice(0, maxBlocks);
+  // Extract blocks (empty array if no blocks exist)
+  const directBlocks = (blockResults || [])
+    .map(result => result[0])
+    .filter(block => block != null)
+    .slice(0, maxBlocks);
 
   // Query 2: Get related pages and backlinks using same pattern as get-concept-network
   const relatedPages: TopicContext['relatedPages'] = [];

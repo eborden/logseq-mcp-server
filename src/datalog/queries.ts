@@ -17,20 +17,20 @@ export class DatalogQueryBuilder {
    * @returns Datalog query string
    */
   static conceptNetwork(rootName: string, maxDepth: number): string {
-    // For depth=0, return only the root page (case-insensitive via parameter)
+    const rootNameLower = rootName.toLowerCase();
+
+    // For depth=0, return only the root page (case-insensitive)
     if (maxDepth === 0) {
       return `[:find (pull ?p [*])
-               :in $ ?root-name-lower
                :where
-               [?p :block/name ?root-name-lower]]`;
+               [?p :block/name "${rootNameLower}"]]`;
     }
 
-    // For depth >= 1, find root page and connected pages (case-insensitive via parameter)
+    // For depth >= 1, find root page and connected pages (case-insensitive)
     return `[:find (pull ?p [*]) (pull ?connected [*]) ?rel-type
-             :in $ ?root-name-lower
              :where
-             ;; Find root page by name (case-insensitive via lowercased parameter)
-             [?p :block/name ?root-name-lower]
+             ;; Find root page by name (case-insensitive)
+             [?p :block/name "${rootNameLower}"]
 
              ;; Find connected pages via references
              (or-join [?p ?connected ?rel-type]
@@ -92,18 +92,35 @@ export class DatalogQueryBuilder {
    * @param limits - Limits for blocks, related pages, and references
    * @returns Datalog query string
    */
-  static buildContext(pageName: string, limits: ContextLimits): string {
-    // Query to find page and its blocks (case-insensitive via parameter)
-    return `[:find (pull ?page [*]) (pull ?block [*])
-             :in $ ?page-name-lower
+  /**
+   * Generate Datalog query to get a page by name
+   * @param pageName - The page name
+   * @returns Datalog query string
+   */
+  static getPage(pageName: string): string {
+    const pageNameLower = pageName.toLowerCase();
+    return `[:find (pull ?page [*])
              :where
-             ;; Find main page (case-insensitive via lowercased parameter)
-             [?page :block/name ?page-name-lower]
+             [?page :block/name "${pageNameLower}"]]`;
+  }
 
-             ;; Find blocks on the page (optional)
-             (or-join [?page ?block]
-               [?block :block/page ?page]
-               [(ground nil) ?block])]`;
+  /**
+   * Generate Datalog query to get blocks for a page
+   * @param pageName - The page name
+   * @returns Datalog query string
+   */
+  static getPageBlocks(pageName: string): string {
+    const pageNameLower = pageName.toLowerCase();
+    return `[:find (pull ?block [*])
+             :where
+             [?page :block/name "${pageNameLower}"]
+             [?block :block/page ?page]]`;
+  }
+
+  // Deprecated: Use getPage() and getPageBlocks() instead
+  // Kept for backwards compatibility with tests
+  static buildContext(pageName: string, limits: ContextLimits): string {
+    return DatalogQueryBuilder.getPage(pageName);
   }
 
   /**

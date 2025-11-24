@@ -31,9 +31,9 @@ export async function getConceptNetwork(
   const edges: ConceptNetworkResult['edges'] = [];
   const visited = new Set<number>();
 
-  // Query 0: Get root page only (case-insensitive via lowercased parameter)
+  // Query 0: Get root page only (case-insensitive)
   const rootQuery = DatalogQueryBuilder.conceptNetwork(conceptName, 0);
-  const rootResults = await client.executeDatalogQuery<Array<[any]>>(rootQuery, conceptName.toLowerCase());
+  const rootResults = await client.executeDatalogQuery<Array<[any]>>(rootQuery);
 
   if (!rootResults || rootResults.length === 0) {
     throw new Error(`Page not found: ${conceptName}`);
