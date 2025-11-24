@@ -156,4 +156,35 @@ describe('buildContextForTopic', () => {
     expect(result.references[1].sourcePage.name).toBe('Page B');
     expect(result.summary.totalReferences).toBe(2);
   });
+
+  it('should handle db/id property format from Datalog queries', async () => {
+    const mockClient = {
+      config: {},
+      executeDatalogQuery: vi.fn(),
+      callAPI: vi.fn()
+    } as unknown as LogseqClient;
+
+    // Mock Query 1: Get page with db/id (Datalog format)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [{ 'db/id': 22, name: 'zach', properties: {} }]
+    ]);
+
+    // Mock Query 2: Get blocks
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
+    // Mock Query 3: Get connected pages (should work with db/id)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [22, { 'db/id': 95, name: 'Core' }, 'inbound']
+    ]);
+
+    // Mock Query 4: Get backlinks
+    (mockClient.callAPI as any).mockResolvedValueOnce([]);
+
+    const result = await buildContextForTopic(mockClient, 'Zach', {});
+
+    expect(result.mainPage['db/id']).toBe(22);
+    expect(result.relatedPages.length).toBe(1);
+    expect(result.relatedPages[0].page.name).toBe('Core');
+    expect(result.relatedPages[0].relationshipType).toBe('inbound');
+  });
 });

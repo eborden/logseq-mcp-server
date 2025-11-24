@@ -82,12 +82,13 @@ export async function buildContextForTopic(
   const relatedPages: TopicContext['relatedPages'] = [];
 
   // Get pages connected to main page (similar to concept network depth=1)
-  if (mainPage.id) {
+  const mainPageId = mainPage.id || mainPage['db/id'];
+  if (mainPageId) {
     try {
-      const connectionsQuery = DatalogQueryBuilder.getConnectedPages([mainPage.id]);
+      const connectionsQuery = DatalogQueryBuilder.getConnectedPages([mainPageId]);
       const connections = await client.executeDatalogQuery<Array<[number, any, string]>>(connectionsQuery);
 
-      const seenPageIds = new Set<number>([mainPage.id]);
+      const seenPageIds = new Set<number>([mainPageId]);
 
       if (connections && connections.length > 0) {
         for (const [sourceId, connectedPage, relType] of connections) {
