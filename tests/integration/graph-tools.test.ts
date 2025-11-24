@@ -4,7 +4,6 @@ import { homedir } from 'os';
 import { access } from 'fs/promises';
 import { loadConfig } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
-import { getRelatedPages } from '../../src/tools/get-related-pages.js';
 import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
 
 /**
@@ -51,80 +50,6 @@ describe('Graph Traversal Tools Integration Tests', () => {
       skipTests = true;
       skipReason = `Setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
-  });
-
-  describe('logseq_get_related_pages', () => {
-    it.skipIf(skipTests)('should return structure with sourcePage and relatedPages', async () => {
-      // Find any page to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        console.warn('No pages found for get_related_pages test');
-        return;
-      }
-
-      // Get first page name
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        console.warn('Could not determine page name');
-        return;
-      }
-
-      const result = await getRelatedPages(client, pageName, 1);
-
-      // Validate structure
-      expect(result).toHaveProperty('sourcePage');
-      expect(result).toHaveProperty('relatedPages');
-      expect(result.sourcePage).toHaveProperty('id');
-      expect(result.sourcePage).toHaveProperty('name');
-      expect(Array.isArray(result.relatedPages)).toBe(true);
-
-      // If there are related pages, validate their structure
-      if (result.relatedPages.length > 0) {
-        const related = result.relatedPages[0];
-        expect(related).toHaveProperty('page');
-        expect(related).toHaveProperty('relationshipType');
-        expect(related).toHaveProperty('distance');
-        expect(['outbound-reference', 'inbound-reference']).toContain(related.relationshipType);
-        expect(typeof related.distance).toBe('number');
-      }
-    });
-
-    it.skipIf(skipTests)('should respect depth parameter', async () => {
-      // Find a page
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        return;
-      }
-
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
-
-      // Test with depth 0
-      const resultDepth0 = await getRelatedPages(client, pageName, 0);
-      expect(resultDepth0.relatedPages).toHaveLength(0);
-
-      // Test with depth 1 (should return results or empty array)
-      const resultDepth1 = await getRelatedPages(client, pageName, 1);
-      expect(Array.isArray(resultDepth1.relatedPages)).toBe(true);
-    });
-
-    it.skipIf(skipTests)('should throw error for non-existent page', async () => {
-      await expect(
-        getRelatedPages(client, 'NonExistentPageForGraphTools12345', 1)
-      ).rejects.toThrow('Page not found');
-    });
   });
 
   describe('logseq_get_concept_network', () => {

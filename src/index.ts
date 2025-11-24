@@ -16,7 +16,6 @@ import { getBacklinks } from './tools/get-backlinks.js';
 import { getBlock } from './tools/get-block.js';
 import { searchBlocks } from './tools/search-blocks.js';
 import { queryByProperty } from './tools/query-by-property.js';
-import { getRelatedPages } from './tools/get-related-pages.js';
 import { getConceptNetwork } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
@@ -117,25 +116,6 @@ const TOOLS = [
         },
       },
       required: ['property_key', 'property_value'],
-    },
-  },
-  {
-    name: 'logseq_get_related_pages',
-    description: 'Get pages related to a source page through references and backlinks',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        page_name: {
-          type: 'string',
-          description: 'Name of the source page',
-        },
-        depth: {
-          type: 'number',
-          description: 'Maximum depth to traverse (default: 1, max: 3)',
-          default: 1,
-        },
-      },
-      required: ['page_name'],
     },
   },
   {
@@ -401,20 +381,6 @@ export function createServer(): Server {
           };
         }
 
-        case 'logseq_get_related_pages': {
-          const pageName = args?.page_name as string;
-          const depth = Math.min((args?.depth as number) ?? 1, 3);
-          const result = await getRelatedPages(client, pageName, depth);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        }
-
         case 'logseq_get_concept_network': {
           const conceptName = args?.concept_name as string;
           const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
@@ -630,20 +596,6 @@ async function main() {
             const propertyKey = args?.property_key as string;
             const propertyValue = args?.property_value as string;
             const result = await queryByProperty(client, propertyKey, propertyValue);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_related_pages': {
-            const pageName = args?.page_name as string;
-            const depth = Math.min((args?.depth as number) ?? 1, 3);
-            const result = await getRelatedPages(client, pageName, depth);
             return {
               content: [
                 {
