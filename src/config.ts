@@ -39,8 +39,7 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
 
     return {
       apiUrl,
-      authToken: config.authToken,
-      features: config.features
+      authToken: config.authToken
     };
   } catch (error) {
     // Re-throw validation errors as-is

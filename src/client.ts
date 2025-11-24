@@ -5,7 +5,7 @@ import { LogseqMCPConfig, LogseqAPIRequest, LogseqAPIResponse } from './types.js
  * Handles authentication, error handling, and API communication
  */
 export class LogseqClient {
-  public config: LogseqMCPConfig;
+  private config: LogseqMCPConfig;
 
   constructor(config: LogseqMCPConfig) {
     this.config = config;

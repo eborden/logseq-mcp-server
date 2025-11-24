@@ -1,155 +1,75 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getConceptNetwork } from './get-concept-network.js';
 import { LogseqClient } from '../client.js';
-import * as httpImpl from './get-concept-network-http.js';
-import * as datalogImpl from './get-concept-network-datalog.js';
 
-// Mock the implementations
-vi.mock('./get-concept-network-http.js', () => ({
-  getConceptNetworkHTTP: vi.fn(),
-  ConceptNetworkResult: {}
-}));
-
-vi.mock('./get-concept-network-datalog.js', () => ({
-  getConceptNetworkDatalog: vi.fn()
-}));
-
-describe('getConceptNetwork router', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-  it('should use HTTP implementation when Datalog is not enabled', async () => {
+describe('getConceptNetwork', () => {
+  it('should execute multi-query BFS and transform results to network', async () => {
     const mockClient = {
-      config: {
-        apiUrl: 'http://localhost:12315',
-        authToken: 'test'
-      },
-      callAPI: vi.fn()
-    } as unknown as LogseqClient;
-
-    const mockResult = {
-      concept: 'Test',
-      nodes: [],
-      edges: []
-    };
-
-    (httpImpl.getConceptNetworkHTTP as any).mockResolvedValue(mockResult);
-
-    const result = await getConceptNetwork(mockClient, 'Test', 2);
-
-    expect(httpImpl.getConceptNetworkHTTP).toHaveBeenCalledWith(mockClient, 'Test', 2);
-    expect(datalogImpl.getConceptNetworkDatalog).not.toHaveBeenCalled();
-    expect(result).toBe(mockResult);
-  });
-
-  it('should use HTTP implementation when Datalog is explicitly disabled', async () => {
-    const mockClient = {
-      config: {
-        apiUrl: 'http://localhost:12315',
-        authToken: 'test',
-        features: {
-          useDatalog: false
-        }
-      },
-      callAPI: vi.fn()
-    } as unknown as LogseqClient;
-
-    const mockResult = {
-      concept: 'Test',
-      nodes: [],
-      edges: []
-    };
-
-    (httpImpl.getConceptNetworkHTTP as any).mockResolvedValue(mockResult);
-
-    await getConceptNetwork(mockClient, 'Test', 2);
-
-    expect(httpImpl.getConceptNetworkHTTP).toHaveBeenCalled();
-    expect(datalogImpl.getConceptNetworkDatalog).not.toHaveBeenCalled();
-  });
-
-  it('should use Datalog implementation when globally enabled', async () => {
-    const mockClient = {
-      config: {
-        apiUrl: 'http://localhost:12315',
-        authToken: 'test',
-        features: {
-          useDatalog: true
-        }
-      },
+      config: {},
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    const mockResult = {
-      concept: 'Test',
-      nodes: [],
-      edges: []
-    };
+    // Mock Query 0: Get root page (depth=0)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [{ id: 1, name: 'Root Page' }]
+    ]);
 
-    (datalogImpl.getConceptNetworkDatalog as any).mockResolvedValue(mockResult);
+    // Mock Query 1: Get pages connected to root (depth=1)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [1, { id: 2, name: 'Connected A' }, 'outbound'],
+      [1, { id: 3, name: 'Connected B' }, 'inbound']
+    ]);
 
-    const result = await getConceptNetwork(mockClient, 'Test', 2);
+    // Mock Query 2: Get pages connected to depth=1 nodes (depth=2)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [2, { id: 4, name: 'Level 2 Page' }, 'outbound']
+    ]);
 
-    expect(datalogImpl.getConceptNetworkDatalog).toHaveBeenCalledWith(mockClient, 'Test', 2);
-    expect(httpImpl.getConceptNetworkHTTP).not.toHaveBeenCalled();
-    expect(result).toBe(mockResult);
+    const result = await getConceptNetwork(mockClient, 'Root Page', 2);
+
+    // Should make 3 queries (depth 0, 1, 2)
+    expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(3);
+
+    expect(result.concept).toBe('Root Page');
+    expect(result.nodes.length).toBe(4);
+    expect(result.nodes).toContainEqual({ id: 1, name: 'Root Page', depth: 0 });
+    expect(result.nodes).toContainEqual(expect.objectContaining({ id: 2, name: 'Connected A', depth: 1 }));
+    expect(result.nodes).toContainEqual(expect.objectContaining({ id: 3, name: 'Connected B', depth: 1 }));
+    expect(result.nodes).toContainEqual(expect.objectContaining({ id: 4, name: 'Level 2 Page', depth: 2 }));
+    expect(result.edges.length).toBe(3);
   });
 
-  it('should use Datalog implementation when enabled for conceptNetwork specifically', async () => {
+  it('should throw error when page not found', async () => {
     const mockClient = {
-      config: {
-        apiUrl: 'http://localhost:12315',
-        authToken: 'test',
-        features: {
-          useDatalog: {
-            conceptNetwork: true,
-            buildContext: false
-          }
-        }
-      },
+      config: {},
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    const mockResult = {
-      concept: 'Test',
-      nodes: [],
-      edges: []
-    };
+    // Empty results = page not found
+    (mockClient.executeDatalogQuery as any).mockResolvedValue([]);
 
-    (datalogImpl.getConceptNetworkDatalog as any).mockResolvedValue(mockResult);
-
-    await getConceptNetwork(mockClient, 'Test', 2);
-
-    expect(datalogImpl.getConceptNetworkDatalog).toHaveBeenCalled();
-    expect(httpImpl.getConceptNetworkHTTP).not.toHaveBeenCalled();
+    await expect(
+      getConceptNetwork(mockClient, 'NonExistent', 2)
+    ).rejects.toThrow('Page not found: NonExistent');
   });
 
-  it('should use HTTP implementation when conceptNetwork is disabled in per-tool config', async () => {
+  it('should handle page with no connections', async () => {
     const mockClient = {
-      config: {
-        apiUrl: 'http://localhost:12315',
-        authToken: 'test',
-        features: {
-          useDatalog: {
-            conceptNetwork: false,
-            buildContext: true
-          }
-        }
-      },
-      callAPI: vi.fn()
+      config: {},
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    const mockResult = {
-      concept: 'Test',
-      nodes: [],
-      edges: []
-    };
+    // Mock Query 0: Get root page (depth=0)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [{ id: 1, name: 'Isolated Page' }]
+    ]);
 
-    (httpImpl.getConceptNetworkHTTP as any).mockResolvedValue(mockResult);
+    // Mock Query 1: No connections found (empty results)
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
-    await getConceptNetwork(mockClient, 'Test', 2);
+    const result = await getConceptNetwork(mockClient, 'Isolated Page', 2);
 
-    expect(httpImpl.getConceptNetworkHTTP).toHaveBeenCalled();
-    expect(datalogImpl.getConceptNetworkDatalog).not.toHaveBeenCalled();
+    expect(result.nodes.length).toBe(1);
+    expect(result.edges.length).toBe(0);
   });
 });

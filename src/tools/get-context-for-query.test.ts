@@ -1,40 +1,54 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getContextForQuery } from './get-context-for-query.js';
 import { LogseqClient } from '../client.js';
 
+// Helper to create mock client with standard Datalog responses
+function createMockClient() {
+  const mockClient = {
+    config: { apiUrl: 'http://test', authToken: 'test' },
+    callAPI: vi.fn(),
+    executeDatalogQuery: vi.fn()
+  } as unknown as LogseqClient;
+
+  // Default mock: return minimal page+block for any Datalog query
+  let queryCount = 0;
+  (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
+    queryCount++;
+    if (queryCount % 2 === 1) {
+      // Odd calls: page+blocks query
+      return [[{ id: queryCount, name: `Page ${queryCount}`, properties: {} }, { id: queryCount * 10, content: `Block ${queryCount}` }]];
+    } else {
+      // Even calls: connections query
+      return [];
+    }
+  });
+
+  return mockClient;
+}
+
 describe('getContextForQuery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
   it('should extract topics from query and build context', async () => {
     const mockClient = {
       config: { apiUrl: 'http://test', authToken: 'test' },
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock search for topics mentioned in query
-    (mockClient.callAPI as any).mockResolvedValueOnce({
-      id: 1,
-      name: 'Project X',
-      properties: {}
+    // Mock executeDatalogQuery to return simple page+block data for any topic
+    let callCount = 0;
+    (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
+      callCount++;
+      // Odd calls: page+blocks, Even calls: connections
+      if (callCount % 2 === 1) {
+        const pageId = Math.floor(callCount / 2) + 1;
+        return [[{ id: pageId, name: `Topic ${pageId}`, properties: {} }, { id: pageId * 10, content: `Block ${pageId}` }]];
+      } else {
+        return []; // No connections
+      }
     });
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      { id: 10, content: 'Relevant block' }
-    ]);
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-
-    (mockClient.callAPI as any).mockResolvedValueOnce({
-      id: 2,
-      name: 'Team Meeting',
-      properties: {}
-    });
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      { id: 11, content: 'Meeting notes' }
-    ]);
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     const result = await getContextForQuery(
       mockClient,
@@ -52,7 +66,8 @@ describe('getContextForQuery', () => {
   it('should handle queries with no explicit topics', async () => {
     const mockClient = {
       config: { apiUrl: 'http://test', authToken: 'test' },
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
     // Mock search results
@@ -72,28 +87,26 @@ describe('getContextForQuery', () => {
   it('should combine multiple topic contexts efficiently', async () => {
     const mockClient = {
       config: { apiUrl: 'http://test', authToken: 'test' },
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock Topic A
-    (mockClient.callAPI as any).mockResolvedValueOnce({
-      id: 1,
-      name: 'Topic A'
+    // Mock Datalog queries for both topics
+    let callCount = 0;
+    (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
+      callCount++;
+      // Odd calls: page+blocks query, Even calls: connections query
+      if (callCount === 1) {
+        return [[{ id: 1, name: 'Topic A', properties: {} }, { id: 10, content: 'Block A' }]];
+      } else if (callCount === 2) {
+        return []; // No connections for Topic A
+      } else if (callCount === 3) {
+        return [[{ id: 2, name: 'Topic B', properties: {} }, { id: 20, content: 'Block B' }]];
+      } else if (callCount === 4) {
+        return []; // No connections for Topic B
+      }
+      return [];
     });
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-
-    // Mock Topic B
-    (mockClient.callAPI as any).mockResolvedValueOnce({
-      id: 2,
-      name: 'Topic B'
-    });
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     const result = await getContextForQuery(
       mockClient,
@@ -107,21 +120,23 @@ describe('getContextForQuery', () => {
   it('should extract hashtags from query', async () => {
     const mockClient = {
       config: { apiUrl: 'http://test', authToken: 'test' },
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock #tag page
-    (mockClient.callAPI as any).mockResolvedValueOnce({
-      id: 1,
-      name: 'important'
+    // Mock Datalog queries for hashtag
+    let callCount = 0;
+    (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // First query: page+blocks
+        return [[{ id: 1, name: 'important', properties: {} }, { id: 10, content: 'Tagged content' }]];
+      } else if (callCount === 2) {
+        // Second query: connections
+        return [];
+      }
+      return [];
     });
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      { id: 10, content: 'Tagged content' }
-    ]);
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     const result = await getContextForQuery(
       mockClient,
@@ -135,17 +150,21 @@ describe('getContextForQuery', () => {
   it('should deduplicate extracted topics', async () => {
     const mockClient = {
       config: { apiUrl: 'http://test', authToken: 'test' },
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    (mockClient.callAPI as any).mockResolvedValueOnce({
-      id: 1,
-      name: 'Topic'
+    // Mock Datalog queries - topic appears twice but should only query once
+    let callCount = 0;
+    (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return [[{ id: 1, name: 'Topic', properties: {} }, { id: 10, content: 'Block' }]];
+      } else if (callCount === 2) {
+        return []; // No connections
+      }
+      return [];
     });
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     const result = await getContextForQuery(
       mockClient,
@@ -159,21 +178,26 @@ describe('getContextForQuery', () => {
   it('should skip topics that do not exist', async () => {
     const mockClient = {
       config: { apiUrl: 'http://test', authToken: 'test' },
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // First topic exists
-    (mockClient.callAPI as any).mockResolvedValueOnce({
-      id: 1,
-      name: 'Exists'
+    // Mock Datalog queries
+    let callCount = 0;
+    (mockClient.executeDatalogQuery as any).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // First topic exists
+        return [[{ id: 1, name: 'Exists', properties: {} }, { id: 10, content: 'Block' }]];
+      } else if (callCount === 2) {
+        // Connections for first topic
+        return [];
+      } else if (callCount === 3) {
+        // Second topic doesn't exist - empty result
+        return [];
+      }
+      return [];
     });
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
-
-    // Second topic doesn't exist
-    (mockClient.callAPI as any).mockResolvedValueOnce(null);
 
     const result = await getContextForQuery(
       mockClient,

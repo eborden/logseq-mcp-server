@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { buildContextForTopicDatalog } from './build-context-datalog.js';
+import { buildContextForTopic } from './build-context.js';
 import { LogseqClient } from '../client.js';
 
-describe('buildContextForTopicDatalog', () => {
+describe('buildContextForTopic', () => {
   it('should execute Datalog query and transform results to context', async () => {
     const mockClient = {
       config: {},
@@ -20,7 +20,7 @@ describe('buildContextForTopicDatalog', () => {
       [1, { id: 2, name: 'Related Page' }, 'outbound']
     ]);
 
-    const result = await buildContextForTopicDatalog(mockClient, 'Topic', {});
+    const result = await buildContextForTopic(mockClient, 'Topic', {});
 
     // Should make 2 queries (page+blocks, then connections)
     expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(2);
@@ -40,7 +40,7 @@ describe('buildContextForTopicDatalog', () => {
     (mockClient.executeDatalogQuery as any).mockResolvedValue([]);
 
     await expect(
-      buildContextForTopicDatalog(mockClient, 'NonExistent', {})
+      buildContextForTopic(mockClient, 'NonExistent', {})
     ).rejects.toThrow('Page not found: NonExistent');
   });
 
@@ -57,7 +57,7 @@ describe('buildContextForTopicDatalog', () => {
 
     (mockClient.executeDatalogQuery as any).mockResolvedValue(manyBlocks);
 
-    const result = await buildContextForTopicDatalog(mockClient, 'Topic', {
+    const result = await buildContextForTopic(mockClient, 'Topic', {
       maxBlocks: 10
     });
 

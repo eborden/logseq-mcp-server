@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getConceptNetworkDatalog } from './get-concept-network-datalog.js';
+import { getConceptNetwork } from './get-concept-network.js';
 import { LogseqClient } from '../client.js';
 
-describe('getConceptNetworkDatalog', () => {
+describe('getConceptNetwork (Datalog)', () => {
   it('should execute multi-query BFS and transform results to network', async () => {
     const mockClient = {
       config: {},
@@ -25,7 +25,7 @@ describe('getConceptNetworkDatalog', () => {
       [2, { id: 4, name: 'Level 2 Page' }, 'outbound']
     ]);
 
-    const result = await getConceptNetworkDatalog(mockClient, 'Root Page', 2);
+    const result = await getConceptNetwork(mockClient, 'Root Page', 2);
 
     // Should make 3 queries (depth 0, 1, 2)
     expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(3);
@@ -49,7 +49,7 @@ describe('getConceptNetworkDatalog', () => {
     (mockClient.executeDatalogQuery as any).mockResolvedValue([]);
 
     await expect(
-      getConceptNetworkDatalog(mockClient, 'NonExistent', 2)
+      getConceptNetwork(mockClient, 'NonExistent', 2)
     ).rejects.toThrow('Page not found: NonExistent');
   });
 
@@ -67,7 +67,7 @@ describe('getConceptNetworkDatalog', () => {
     // Mock Query 1: No connections found (empty results)
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
-    const result = await getConceptNetworkDatalog(mockClient, 'Isolated Page', 2);
+    const result = await getConceptNetwork(mockClient, 'Isolated Page', 2);
 
     expect(result.nodes.length).toBe(1);
     expect(result.edges.length).toBe(0);
