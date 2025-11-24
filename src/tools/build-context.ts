@@ -56,15 +56,15 @@ export async function buildContextForTopic(
     includeTemporalContext = true
   } = options;
 
-  // Generate Datalog query (parameters embedded in query)
+  // Generate Datalog query (case-insensitive via lowercased parameter)
   const query = DatalogQueryBuilder.buildContext(topicName, {
     maxBlocks,
     maxRelatedPages,
     maxReferences
   });
 
-  // Execute query - returns array of tuples [[page, block]]
-  const results = await client.executeDatalogQuery<Array<[any, any]>>(query);
+  // Execute query with lowercased topicName parameter - returns array of tuples [[page, block]]
+  const results = await client.executeDatalogQuery<Array<[any, any]>>(query, topicName.toLowerCase());
 
   // If no results, page doesn't exist
   if (!results || results.length === 0) {

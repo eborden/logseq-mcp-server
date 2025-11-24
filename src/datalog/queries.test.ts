@@ -3,19 +3,19 @@ import { DatalogQueryBuilder } from './queries.js';
 
 describe('DatalogQueryBuilder', () => {
   describe('conceptNetwork', () => {
-    it('should generate basic concept network query', () => {
+    it('should generate basic concept network query with parameter', () => {
       const query = DatalogQueryBuilder.conceptNetwork('Machine Learning', 2);
 
       expect(query).toContain(':find');
       expect(query).toContain(':where');
-      expect(query).toContain('machine learning'); // Embedded page name
+      expect(query).toContain(':in $ ?root-name-lower'); // Uses lowercased parameter
     });
 
     it('should generate depth=0 query that returns only root', () => {
       const query = DatalogQueryBuilder.conceptNetwork('Testing', 0);
 
       expect(query).toContain(':find (pull ?p [*])');
-      expect(query).toContain('testing'); // Embedded page name
+      expect(query).toContain(':in $ ?root-name-lower'); // Uses lowercased parameter
       expect(query).not.toContain('?connected'); // No connections at depth 0
     });
 
@@ -53,7 +53,7 @@ describe('DatalogQueryBuilder', () => {
   });
 
   describe('buildContext', () => {
-    it('should generate context building query with page name', () => {
+    it('should generate context building query with parameter', () => {
       const query = DatalogQueryBuilder.buildContext('TypeScript', {
         maxBlocks: 50,
         maxRelatedPages: 10,
@@ -62,13 +62,14 @@ describe('DatalogQueryBuilder', () => {
 
       expect(query).toContain(':find');
       expect(query).toContain(':where');
-      expect(query).toContain('typescript'); // Embedded page name
+      expect(query).toContain(':in $ ?page-name-lower'); // Uses lowercased parameter
     });
 
     it('should handle default limits', () => {
       const query = DatalogQueryBuilder.buildContext('React', {});
 
       expect(query).toContain(':find');
+      expect(query).toContain(':in $ ?page-name-lower'); // Uses lowercased parameter
       expect(query).toBeTruthy();
     });
   });

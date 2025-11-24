@@ -17,20 +17,20 @@ export class DatalogQueryBuilder {
    * @returns Datalog query string
    */
   static conceptNetwork(rootName: string, maxDepth: number): string {
-    const rootNameLower = rootName.toLowerCase();
-
-    // For depth=0, return only the root page
+    // For depth=0, return only the root page (case-insensitive via parameter)
     if (maxDepth === 0) {
       return `[:find (pull ?p [*])
+               :in $ ?root-name-lower
                :where
-               [?p :block/name "${rootNameLower}"]]`;
+               [?p :block/name ?root-name-lower]]`;
     }
 
-    // For depth >= 1, find root page and connected pages
+    // For depth >= 1, find root page and connected pages (case-insensitive via parameter)
     return `[:find (pull ?p [*]) (pull ?connected [*]) ?rel-type
+             :in $ ?root-name-lower
              :where
-             ;; Find root page by name
-             [?p :block/name "${rootNameLower}"]
+             ;; Find root page by name (case-insensitive via lowercased parameter)
+             [?p :block/name ?root-name-lower]
 
              ;; Find connected pages via references
              (or-join [?p ?connected ?rel-type]
@@ -93,13 +93,12 @@ export class DatalogQueryBuilder {
    * @returns Datalog query string
    */
   static buildContext(pageName: string, limits: ContextLimits): string {
-    const pageNameLower = pageName.toLowerCase();
-
-    // Query to find page and its blocks
+    // Query to find page and its blocks (case-insensitive via parameter)
     return `[:find (pull ?page [*]) (pull ?block [*])
+             :in $ ?page-name-lower
              :where
-             ;; Find main page
-             [?page :block/name "${pageNameLower}"]
+             ;; Find main page (case-insensitive via lowercased parameter)
+             [?page :block/name ?page-name-lower]
 
              ;; Find blocks on the page (optional)
              (or-join [?page ?block]

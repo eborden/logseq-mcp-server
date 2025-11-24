@@ -72,4 +72,31 @@ describe('getConceptNetwork (Datalog)', () => {
     expect(result.nodes.length).toBe(1);
     expect(result.edges.length).toBe(0);
   });
+
+  it('should handle case-insensitive page names', async () => {
+    const mockClient = {
+      config: {},
+      executeDatalogQuery: vi.fn()
+    } as unknown as LogseqClient;
+
+    // Mock Query 0: Get root page - name stored lowercase in DB
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [{ id: 1, name: 'christy' }]
+    ]);
+
+    // Mock Query 1: No connections
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
+    // Should work with capital C
+    const result = await getConceptNetwork(mockClient, 'Christy', 1);
+
+    expect(result.concept).toBe('Christy');
+    expect(result.nodes[0].name).toBe('christy'); // DB returns lowercase
+
+    // Verify query was called with lowercased parameter
+    expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
+      expect.stringContaining(':in $ ?root-name-lower'),
+      'christy'  // Lowercased
+    );
+  });
 });

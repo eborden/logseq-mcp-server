@@ -63,4 +63,30 @@ describe('buildContextForTopic', () => {
 
     expect(result.directBlocks.length).toBeLessThanOrEqual(10);
   });
+
+  it('should handle case-insensitive page names', async () => {
+    const mockClient = {
+      config: {},
+      executeDatalogQuery: vi.fn()
+    } as unknown as LogseqClient;
+
+    // Mock responses for any casing
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
+      [{ id: 1, name: 'christy', properties: {} }, { id: 10, content: 'Block' }]
+    ]);
+
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
+    // Should work with capital C
+    const result = await buildContextForTopic(mockClient, 'Christy', {});
+
+    expect(result.topic).toBe('Christy');
+    expect(result.mainPage.id).toBe(1);
+
+    // Verify query was called with lowercased parameter
+    expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
+      expect.stringContaining(':in $ ?page-name-lower'),
+      'christy'  // Lowercased
+    );
+  });
 });
