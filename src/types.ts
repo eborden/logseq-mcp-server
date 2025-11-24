@@ -27,9 +27,11 @@ export interface BlockEntity {
 // Page entity structure
 export interface PageEntity {
   id: number;
+  'db/id'?: number; // Datalog queries return db/id instead of id
   uuid: string;
   name: string;
   originalName: string;
+  'original-name'?: string; // Datalog queries use kebab-case
   properties?: Record<string, any>;
   journal?: boolean;
   'journal?'?: boolean; // Logseq uses this property name
