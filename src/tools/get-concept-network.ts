@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
+import { getConnectedPageIds } from './get-connected-page-ids.js';
 
 export interface ConceptNetworkResult {
   concept: string;
@@ -68,17 +69,37 @@ export async function getConceptNetwork(
     if (currentFrontier.length === 0) break;
 
     // Query N: Get pages connected to current frontier
-    const query = DatalogQueryBuilder.getConnectedPages(currentFrontier);
-    const results = await client.executeDatalogQuery<Array<[number, any, string]>>(query);
+    // Use HTTP API which correctly handles LogSeq's reference structure
+    const nextFrontier: number[] = [];
+    const newConnections: Array<[number, any, string]> = [];
 
-    if (!results || results.length === 0) {
+    for (const sourceId of currentFrontier) {
+      // Get page name for this ID
+      const sourcePage = nodeMap.get(sourceId);
+      if (!sourcePage) continue;
+
+      // Get connected page IDs via HTTP API
+      const connectedIds = await getConnectedPageIds(client, sourcePage.name);
+
+      // Fetch page details for connected pages
+      for (const connectedId of connectedIds) {
+        // Get page entity via Datalog
+        const pageQuery = `[:find (pull ?p [*]) :where [?p :db/id ${connectedId}]]`;
+        const pageResults = await client.executeDatalogQuery<Array<[any]>>(pageQuery);
+
+        if (pageResults && pageResults.length > 0) {
+          const connectedPage = pageResults[0][0];
+          newConnections.push([sourceId, connectedPage, 'inbound']);
+        }
+      }
+    }
+
+    if (newConnections.length === 0) {
       break; // No more connections
     }
 
-    const nextFrontier: number[] = [];
-
     // Process connections
-    for (const [sourceId, connectedPage, relType] of results) {
+    for (const [sourceId, connectedPage, relType] of newConnections) {
       if (!connectedPage) continue; // Skip null connected pages
 
       const connectedId = connectedPage.id || connectedPage['db/id'];

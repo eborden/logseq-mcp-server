@@ -78,60 +78,50 @@ export async function buildContextForTopic(
     .filter(block => block != null)
     .slice(0, maxBlocks);
 
-  // Query 3: Get related pages using same pattern as get-concept-network
-  const relatedPages: TopicContext['relatedPages'] = [];
-
-  // Get pages connected to main page (similar to concept network depth=1)
-  const mainPageId = mainPage.id || mainPage['db/id'];
-  if (mainPageId) {
-    try {
-      const connectionsQuery = DatalogQueryBuilder.getConnectedPages([mainPageId]);
-      const connections = await client.executeDatalogQuery<Array<[number, any, string]>>(connectionsQuery);
-
-      const seenPageIds = new Set<number>([mainPageId]);
-
-      if (connections && connections.length > 0) {
-        for (const [sourceId, connectedPage, relType] of connections) {
-          if (!connectedPage) continue;
-
-          const connectedId = connectedPage.id || connectedPage['db/id'];
-          if (!connectedId || seenPageIds.has(connectedId)) continue;
-
-          seenPageIds.add(connectedId);
-
-          // Add to related pages
-          if (relatedPages.length < maxRelatedPages) {
-            relatedPages.push({
-              page: connectedPage,
-              relationshipType: relType === 'outbound' ? 'outbound' : 'inbound'
-            });
-          }
-        }
-      }
-    } catch (error) {
-      // No connections found, continue with empty related pages
-    }
-  }
-
-  // Query 4: Get reference blocks (blocks that mention this topic)
+  // Query 3: Get reference blocks and derive related pages
+  // Use HTTP API (getBacklinks) which correctly handles LogSeq's reference structure
   const references: TopicContext['references'] = [];
+  const relatedPages: TopicContext['relatedPages'] = [];
+  const seenPageIds = new Set<number>();
+
   try {
     const backlinks = await getBacklinks(client, topicName);
     if (backlinks && backlinks.length > 0) {
       // Each backlink is [sourcePage, blocks[]]
+      // Note: sourcePage can be null for journal page entries
       for (const [sourcePage, blocks] of backlinks) {
+        // For each block, extract the actual source page
         for (const block of blocks) {
-          if (references.length >= maxReferences) break;
-          references.push({
-            block,
-            sourcePage
-          });
+          if (references.length >= maxReferences && relatedPages.length >= maxRelatedPages) break;
+
+          // Source page is either the tuple's first element or block.page
+          const actualSourcePage = sourcePage || block.page;
+          if (!actualSourcePage) continue;
+
+          const sourcePageId = actualSourcePage.id || actualSourcePage['db/id'];
+
+          // Add source page to related pages (inbound connection)
+          if (sourcePageId && !seenPageIds.has(sourcePageId) && relatedPages.length < maxRelatedPages) {
+            seenPageIds.add(sourcePageId);
+            relatedPages.push({
+              page: actualSourcePage,
+              relationshipType: 'inbound'
+            });
+          }
+
+          // Add block to references
+          if (references.length < maxReferences) {
+            references.push({
+              block,
+              sourcePage: actualSourcePage
+            });
+          }
         }
-        if (references.length >= maxReferences) break;
+        if (references.length >= maxReferences && relatedPages.length >= maxRelatedPages) break;
       }
     }
   } catch (error) {
-    // No backlinks found, continue with empty references
+    // No backlinks found, continue with empty references and related pages
   }
 
   // Build temporal context if requested

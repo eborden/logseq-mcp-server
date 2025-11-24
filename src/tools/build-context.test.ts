@@ -21,25 +21,21 @@ describe('buildContextForTopic', () => {
       [{ id: 11, content: 'Block 2' }]
     ]);
 
-    // Mock Query 3: Get connected pages
-    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [1, { id: 2, name: 'Related Page' }, 'outbound']
-    ]);
-
-    // Mock Query 4: Get backlinks (references) - format: [page, [blocks]]
+    // Mock Query 3: Get backlinks (references) - format: [page, [blocks]]
+    // relatedPages will be derived from this
     (mockClient.callAPI as any).mockResolvedValueOnce([
       [{ id: 3, name: 'Source Page' }, [{ id: 20, content: 'Block referencing Topic' }]]
     ]);
 
     const result = await buildContextForTopic(mockClient, 'Topic', {});
 
-    // Should make 3 Datalog queries + 1 HTTP API call
-    expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(3);
+    // Should make 2 Datalog queries (page, blocks) + 1 HTTP API call (backlinks)
+    expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(2);
     expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
     expect(result.topic).toBe('Topic');
     expect(result.mainPage.id).toBe(1);
     expect(result.directBlocks.length).toBe(2); // Two blocks found
-    expect(result.relatedPages.length).toBe(1); // One related page found
+    expect(result.relatedPages.length).toBe(1); // One related page (derived from backlinks)
     expect(result.references.length).toBe(1); // One reference found
   });
 
@@ -75,10 +71,7 @@ describe('buildContextForTopic', () => {
     ]);
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce(manyBlocks);
 
-    // Mock Query 3: Get connected pages
-    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
-
-    // Mock Query 4: Get backlinks
+    // Mock Query 3: Get backlinks
     (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     const result = await buildContextForTopic(mockClient, 'Topic', {
@@ -103,10 +96,7 @@ describe('buildContextForTopic', () => {
     // Mock Query 2: Get blocks (empty)
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
-    // Mock Query 3: Get connected pages (empty)
-    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
-
-    // Mock Query 4: Get backlinks (empty)
+    // Mock Query 3: Get backlinks (empty)
     (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     // Should work with capital C
@@ -138,10 +128,7 @@ describe('buildContextForTopic', () => {
     // Mock Query 2: Get blocks
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
-    // Mock Query 3: Get connected pages
-    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
-
-    // Mock Query 4: Get backlinks with multiple references - format: [page, [blocks]]
+    // Mock Query 3: Get backlinks with multiple references - format: [page, [blocks]]
     (mockClient.callAPI as any).mockResolvedValueOnce([
       [{ id: 3, name: 'Page A' }, [{ id: 20, content: 'First reference' }]],
       [{ id: 4, name: 'Page B' }, [{ id: 21, content: 'Second reference' }]]
@@ -155,6 +142,10 @@ describe('buildContextForTopic', () => {
     expect(result.references[1].block.content).toBe('Second reference');
     expect(result.references[1].sourcePage.name).toBe('Page B');
     expect(result.summary.totalReferences).toBe(2);
+    // Related pages should be derived from backlinks
+    expect(result.relatedPages.length).toBe(2);
+    expect(result.relatedPages[0].page.name).toBe('Page A');
+    expect(result.relatedPages[1].page.name).toBe('Page B');
   });
 
   it('should handle db/id property format from Datalog queries', async () => {
@@ -172,13 +163,10 @@ describe('buildContextForTopic', () => {
     // Mock Query 2: Get blocks
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
-    // Mock Query 3: Get connected pages (should work with db/id)
-    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [22, { 'db/id': 95, name: 'Core' }, 'inbound']
+    // Mock Query 3: Get backlinks - relatedPages derived from this
+    (mockClient.callAPI as any).mockResolvedValueOnce([
+      [{ 'db/id': 95, name: 'Core' }, [{ id: 100, content: 'Mentions Zach' }]]
     ]);
-
-    // Mock Query 4: Get backlinks
-    (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     const result = await buildContextForTopic(mockClient, 'Zach', {});
 

@@ -49,42 +49,6 @@ export class DatalogQueryBuilder {
                  [(ground "inbound") ?rel-type]))]`;
   }
 
-  /**
-   * Generate a Datalog query to find pages connected to a list of source page IDs
-   * Used for BFS traversal - gets next depth level
-   * @param pageIds - Array of source page IDs to find connections for
-   * @returns Datalog query string
-   */
-  static getConnectedPages(pageIds: number[]): string {
-    // Build OR clauses for each source page ID
-    const sourceClauses = pageIds
-      .map(id => `[?source :db/id ${id}]`)
-      .join('\n                 ');
-
-    return `[:find ?source-id (pull ?connected [*]) ?rel-type
-             :where
-             ;; Match any of the source page IDs
-             (or
-               ${sourceClauses})
-
-             [?source :db/id ?source-id]
-
-             ;; Find pages connected to source
-             (or-join [?source ?connected ?rel-type]
-               ;; Outbound: blocks on source page that reference other pages
-               (and
-                 [?block :block/page ?source]
-                 [?block :block/refs ?connected]
-                 [?connected :block/name]
-                 [(ground "outbound") ?rel-type])
-
-               ;; Inbound: blocks on other pages that reference source
-               (and
-                 [?block :block/refs ?source]
-                 [?block :block/page ?connected]
-                 [?connected :block/name]
-                 [(ground "inbound") ?rel-type]))]`;
-  }
 
   /**
    * Generate a Datalog query for building context about a topic

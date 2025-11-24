@@ -27,31 +27,6 @@ describe('DatalogQueryBuilder', () => {
     });
   });
 
-  describe('getConnectedPages', () => {
-    it('should generate query for single page ID', () => {
-      const query = DatalogQueryBuilder.getConnectedPages([123]);
-
-      expect(query).toContain(':find');
-      expect(query).toContain(':where');
-      expect(query).toContain('123'); // Contains the ID
-    });
-
-    it('should generate query for multiple page IDs', () => {
-      const query = DatalogQueryBuilder.getConnectedPages([123, 456, 789]);
-
-      expect(query).toContain('123');
-      expect(query).toContain('456');
-      expect(query).toContain('789');
-    });
-
-    it('should find outbound and inbound connections', () => {
-      const query = DatalogQueryBuilder.getConnectedPages([100]);
-
-      expect(query).toContain('?connected'); // Finds connected pages
-      expect(query).toContain('?rel-type'); // Returns relationship type
-    });
-  });
-
   describe('buildContext', () => {
     it('should generate context building query with embedded lowercase', () => {
       const query = DatalogQueryBuilder.buildContext('TypeScript', {
