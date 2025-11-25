@@ -96,6 +96,52 @@ export async function getConceptEvolution(
     new Map(allBlocks.map(b => [b.id, b])).values()
   );
 
+  // Enrich blocks with full page data using batch query
+  // This is needed because blocks from API only have page IDs, not full page entities
+  const pageIds = new Set<number>();
+  for (const block of uniqueBlocks) {
+    const pageRef = block.page as any;
+    const pageId = pageRef?.id || pageRef?.['db/id'];
+    if (pageId && typeof pageId === 'number') {
+      pageIds.add(pageId);
+    }
+  }
+
+  // Fetch all pages in single query
+  const pageIdsArray = Array.from(pageIds);
+  let pageMap = new Map<number, PageEntity>();
+
+  if (pageIdsArray.length > 0) {
+    const pagesQuery = `[:find (pull ?page [*])
+                         :where
+                         [(ground [${pageIdsArray.join(' ')}]) [?id ...]]
+                         [?page :db/id ?id]]`;
+
+    try {
+      const pagesResults = await client.executeDatalogQuery(pagesQuery);
+      if (pagesResults && pagesResults.length > 0) {
+        for (const [pageEntity] of pagesResults) {
+          const pageId = pageEntity.id || pageEntity['db/id'];
+          if (pageId) {
+            pageMap.set(pageId, pageEntity);
+          }
+        }
+      }
+    } catch (error) {
+      // If page enrichment fails, continue with partial data
+      console.warn(`Failed to enrich pages: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  // Replace block.page references with full page entities
+  for (const block of uniqueBlocks) {
+    const pageRef = block.page as any;
+    const pageId = pageRef?.id || pageRef?.['db/id'];
+    if (pageId && pageMap.has(pageId)) {
+      block.page = pageMap.get(pageId)!;
+    }
+  }
+
   // Filter by date range
   let filteredBlocks = uniqueBlocks;
   if (startDate || endDate) {
