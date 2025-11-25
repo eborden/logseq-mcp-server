@@ -81,8 +81,22 @@ export async function getConceptEvolution(
     [conceptName]
   );
 
+  // Get full page data for the concept page to enrich blocks from getPageBlocksTree
+  const conceptPage = await client.callAPI<PageEntity>(
+    'logseq.Editor.getPage',
+    [conceptName]
+  );
+
+  // Enrich blocks from getPageBlocksTree with full page data
+  if (blocks && conceptPage) {
+    for (const block of blocks) {
+      block.page = conceptPage as any;
+    }
+  }
+
   // Also search for inline mentions using Datalog
-  const inlineMentionsQuery = `[:find (pull ?block [*])
+  // Use nested pull pattern {:block/page [*]} to get full page data including journalDay
+  const inlineMentionsQuery = `[:find (pull ?block [:db/id :block/uuid :block/content :block/marker :block/properties :block/format {:block/page [*]}])
                                  :where
                                  [?page :block/name "${conceptNameLower}"]
                                  [?block :block/refs ?page]]`;
@@ -96,59 +110,14 @@ export async function getConceptEvolution(
     new Map(allBlocks.map(b => [b.id, b])).values()
   );
 
-  // Enrich blocks with full page data using batch query
-  // This is needed because blocks from API only have page IDs, not full page entities
-  const pageIds = new Set<number>();
-  for (const block of uniqueBlocks) {
-    const pageRef = block.page as any;
-    const pageId = pageRef?.id || pageRef?.['db/id'];
-    if (pageId && typeof pageId === 'number') {
-      pageIds.add(pageId);
-    }
-  }
-
-  // Fetch all pages in single query
-  const pageIdsArray = Array.from(pageIds);
-  let pageMap = new Map<number, PageEntity>();
-
-  if (pageIdsArray.length > 0) {
-    const pagesQuery = `[:find (pull ?page [*])
-                         :where
-                         [(ground [${pageIdsArray.join(' ')}]) [?id ...]]
-                         [?page :db/id ?id]]`;
-
-    try {
-      const pagesResults = await client.executeDatalogQuery(pagesQuery);
-      if (pagesResults && pagesResults.length > 0) {
-        for (const [pageEntity] of pagesResults) {
-          const pageId = pageEntity.id || pageEntity['db/id'];
-          if (pageId) {
-            pageMap.set(pageId, pageEntity);
-          }
-        }
-      }
-    } catch (error) {
-      // If page enrichment fails, continue with partial data
-      console.warn(`Failed to enrich pages: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  // Replace block.page references with full page entities
-  for (const block of uniqueBlocks) {
-    const pageRef = block.page as any;
-    const pageId = pageRef?.id || pageRef?.['db/id'];
-    if (pageId && pageMap.has(pageId)) {
-      block.page = pageMap.get(pageId)!;
-    }
-  }
-
   // Filter by date range
   let filteredBlocks = uniqueBlocks;
   if (startDate || endDate) {
     filteredBlocks = uniqueBlocks.filter(block => {
       // Type guard to check if page has journalDay property
-      const page = block.page as PageEntity | undefined;
-      const blockDate = page?.journalDay;
+      // Handle both camelCase (HTTP API) and kebab-case (Datalog)
+      const page = block.page as any;
+      const blockDate = page?.journalDay || page?.['journal-day'];
       if (!blockDate) return true; // Keep non-journal blocks
 
       if (startDate && blockDate < startDate) return false;
@@ -162,8 +131,9 @@ export async function getConceptEvolution(
 
   for (const block of filteredBlocks) {
     // Type guard to check if page has journalDay property
-    const page = block.page as PageEntity | undefined;
-    const date = page?.journalDay || null;
+    // Handle both camelCase (HTTP API) and kebab-case (Datalog)
+    const page = block.page as any;
+    const date = page?.journalDay || page?.['journal-day'] || null;
 
     if (!timelineMap.has(date)) {
       timelineMap.set(date, []);
@@ -189,8 +159,9 @@ export async function getConceptEvolution(
     groupedTimeline = new Map();
 
     for (const block of filteredBlocks) {
-      const page = block.page as PageEntity | undefined;
-      const date = page?.journalDay;
+      // Handle both camelCase (HTTP API) and kebab-case (Datalog)
+      const page = block.page as any;
+      const date = page?.journalDay || page?.['journal-day'];
       if (!date) continue;
 
       let periodKey: string;
@@ -217,8 +188,9 @@ export async function getConceptEvolution(
   // Build summary
   const dates = filteredBlocks
     .map(b => {
-      const page = b.page as PageEntity | undefined;
-      return page?.journalDay;
+      // Handle both camelCase (HTTP API) and kebab-case (Datalog)
+      const page = b.page as any;
+      return page?.journalDay || page?.['journal-day'];
     })
     .filter((d): d is number => d !== undefined && d !== null);
 

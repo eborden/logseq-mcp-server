@@ -132,48 +132,53 @@ describe('getConceptEvolution', () => {
     expect(result.timeline[0].date).toBe(20251115);
   });
 
-  it('should enrich blocks with full page data', async () => {
+  it('should enrich blocks with page data from both HTTP and Datalog', async () => {
     const mockClient = {
       callAPI: vi.fn(),
       executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock getPageBlocksTree - blocks with minimal page data (just ID)
+    // Mock getPageBlocksTree - returns block from the Concept page
     (mockClient.callAPI as any).mockResolvedValueOnce([
       {
         id: 1,
-        content: 'First mention',
-        page: { id: 100 }  // Only ID, no journalDay
-      },
-      {
-        id: 2,
-        content: 'Second mention',
-        page: { id: 200 }  // Only ID, no journalDay
+        content: 'On concept page',
+        page: { id: 100 }
       }
     ]);
 
-    // Mock Datalog query for inline mentions - empty
-    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+    // Mock getPage - returns full page data for Concept page
+    (mockClient.callAPI as any).mockResolvedValueOnce({
+      id: 100,
+      name: 'concept',
+      'journal?': false,
+      journalDay: undefined
+    });
 
-    // Mock Datalog query for page enrichment - return full page data
+    // Mock Datalog query for inline mentions - returns blocks from journal pages
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [{ 'db/id': 100, id: 100, journalDay: 20251101, name: 'nov 1st, 2025' }],
-      [{ 'db/id': 200, id: 200, journalDay: 20251102, name: 'nov 2nd, 2025' }]
+      [{
+        id: 2,
+        content: 'Inline mention in journal',
+        page: {
+          id: 200,
+          name: 'nov 1st, 2025',
+          'journal?': true,
+          'journal-day': 20251101  // Datalog uses kebab-case
+        }
+      }]
     ]);
 
     const result = await getConceptEvolution(mockClient, 'Concept');
 
-    // Verify enrichment worked
+    // Should have 1 journal entry and 1 non-journal entry
     expect(result.timeline).toHaveLength(2);
-    expect(result.timeline[0].date).toBe(20251101);
-    expect(result.timeline[1].date).toBe(20251102);
+    expect(result.summary.journalMentions).toBe(1);
+    expect(result.summary.nonJournalMentions).toBe(1);
 
-    // Verify the enrichment query was called
-    expect(mockClient.executeDatalogQuery).toHaveBeenCalledTimes(2);
-
-    // Verify the second call is the page enrichment query
-    const enrichmentCall = (mockClient.executeDatalogQuery as any).mock.calls[1][0];
-    expect(enrichmentCall).toContain('ground');
-    expect(enrichmentCall).toContain('100 200');
+    // Find the journal entry
+    const journalEntry = result.timeline.find(e => e.date === 20251101);
+    expect(journalEntry).toBeDefined();
+    expect(journalEntry?.blocks).toHaveLength(1);
   });
 });
