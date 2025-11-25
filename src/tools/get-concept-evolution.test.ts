@@ -5,10 +5,11 @@ import { LogseqClient } from '../client.js';
 describe('getConceptEvolution', () => {
   it('should track how concept appears over time', async () => {
     const mockClient = {
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
-    // Mock search for concept
+    // Mock search for concept - getPageBlocksTree
     (mockClient.callAPI as any).mockResolvedValueOnce([
       {
         id: 1,
@@ -27,6 +28,9 @@ describe('getConceptEvolution', () => {
       }
     ]);
 
+    // Mock Datalog query for inline mentions
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
     const result = await getConceptEvolution(mockClient, 'Concept');
 
     expect(result).toHaveProperty('concept', 'Concept');
@@ -38,7 +42,8 @@ describe('getConceptEvolution', () => {
 
   it('should group mentions by time period', async () => {
     const mockClient = {
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
     (mockClient.callAPI as any).mockResolvedValueOnce([
@@ -59,6 +64,9 @@ describe('getConceptEvolution', () => {
       }
     ]);
 
+    // Mock Datalog query for inline mentions
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
     const result = await getConceptEvolution(
       mockClient,
       'Concept',
@@ -71,7 +79,8 @@ describe('getConceptEvolution', () => {
 
   it('should handle concepts with no temporal data', async () => {
     const mockClient = {
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
     (mockClient.callAPI as any).mockResolvedValueOnce([
@@ -82,6 +91,9 @@ describe('getConceptEvolution', () => {
       }
     ]);
 
+    // Mock Datalog query for inline mentions
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
     const result = await getConceptEvolution(mockClient, 'Concept');
 
     expect(result.timeline).toHaveLength(1);
@@ -90,7 +102,8 @@ describe('getConceptEvolution', () => {
 
   it('should filter by date range', async () => {
     const mockClient = {
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as unknown as LogseqClient;
 
     (mockClient.callAPI as any).mockResolvedValueOnce([
@@ -105,6 +118,9 @@ describe('getConceptEvolution', () => {
         page: { journalDay: 20251115 }
       }
     ]);
+
+    // Mock Datalog query for inline mentions
+    (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([]);
 
     const result = await getConceptEvolution(
       mockClient,

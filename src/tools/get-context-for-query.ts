@@ -93,15 +93,25 @@ export async function getContextForQuery(
       .filter(word => word.length > 3 && !commonWords.has(word))
       .slice(0, 3);
 
-    // Search for blocks containing keywords
+    // Search for blocks containing keywords using searchBlocks
+    // Note: logseq.DB.q doesn't work via HTTP API, need to use HTTP methods
     if (keywords.length > 0) {
       try {
-        const blocks = await client.callAPI<BlockEntity[]>(
-          'logseq.DB.q',
-          [`(and ${keywords.map(k => `(block-content "${k}")`).join(' ')})`]
-        );
+        // Import searchBlocks dynamically to search for keywords
+        const { searchBlocks } = await import('./search-blocks.js');
 
-        searchResults = (blocks || []).slice(0, maxSearchResults);
+        // Search for first keyword and filter results manually
+        const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, false);
+
+        if (blocks) {
+          // Filter to blocks that contain all keywords
+          searchResults = blocks.filter(block => {
+            const contentLower = block.content.toLowerCase();
+            return keywords.every(k => contentLower.includes(k));
+          }).slice(0, maxSearchResults);
+        } else {
+          searchResults = [];
+        }
       } catch (error) {
         // Search failed, continue without results
         searchResults = [];

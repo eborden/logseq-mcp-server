@@ -73,20 +73,25 @@ export async function getConceptEvolution(
 ): Promise<ConceptEvolutionResult> {
   const { startDate, endDate, groupBy } = options;
 
+  const conceptNameLower = conceptName.toLowerCase();
+
   // Search for blocks mentioning the concept
   const blocks = await client.callAPI<BlockEntity[]>(
     'logseq.Editor.getPageBlocksTree',
     [conceptName]
   );
 
-  // Also search for inline mentions
-  const searchBlocks = await client.callAPI<BlockEntity[]>(
-    'logseq.DB.q',
-    [`(block-content "[[${conceptName}]]")`]
-  );
+  // Also search for inline mentions using Datalog
+  const inlineMentionsQuery = `[:find (pull ?block [*])
+                                 :where
+                                 [?page :block/name "${conceptNameLower}"]
+                                 [?block :block/refs ?page]]`;
+
+  const searchResults = await client.executeDatalogQuery(inlineMentionsQuery);
+  const searchBlocks = (searchResults || []).map((r: any[]) => r[0] as BlockEntity);
 
   // Combine and deduplicate
-  const allBlocks = [...(blocks || []), ...(searchBlocks || [])];
+  const allBlocks = [...(blocks || []), ...searchBlocks];
   const uniqueBlocks = Array.from(
     new Map(allBlocks.map(b => [b.id, b])).values()
   );
