@@ -81,22 +81,6 @@ export class DatalogQueryBuilder {
              [?block :block/page ?page]]`;
   }
 
-  /**
-   * Generate Datalog query to get multiple pages by their IDs
-   * @param pageIds - Array of page IDs to fetch
-   * @returns Datalog query string
-   */
-  static getPagesByIds(pageIds: number[]): string {
-    if (pageIds.length === 0) {
-      return '[:find (pull ?page [*]) :where [(ground []) [?page ...]]]';
-    }
-
-    return `[:find (pull ?page [*])
-             :where
-             [(ground [${pageIds.join(' ')}]) [?id ...]]
-             [?page :db/id ?id]]`;
-  }
-
   // Deprecated: Use getPage() and getPageBlocks() instead
   // Kept for backwards compatibility with tests
   static buildContext(pageName: string, limits: ContextLimits): string {

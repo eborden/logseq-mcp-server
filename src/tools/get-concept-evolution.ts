@@ -15,7 +15,7 @@ export interface ConceptEvolutionResult {
     date: number | null;
     blocks: BlockEntity[];
   }>;
-  groupedTimeline?: Map<string, BlockEntity[]>;
+  groupedTimeline?: Record<string, BlockEntity[]>;
   summary: {
     totalMentions: number;
     dateRange: {
@@ -207,7 +207,7 @@ export async function getConceptEvolution(
   return {
     concept: conceptName,
     timeline,
-    groupedTimeline,
+    groupedTimeline: groupedTimeline ? Object.fromEntries(groupedTimeline) : undefined,
     summary
   };
 }

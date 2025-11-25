@@ -75,6 +75,7 @@ describe('getConceptEvolution', () => {
 
     expect(result).toHaveProperty('groupedTimeline');
     expect(result.groupedTimeline).toBeDefined();
+    expect(Object.keys(result.groupedTimeline!).length).toBeGreaterThan(0);
   });
 
   it('should handle concepts with no temporal data', async () => {
