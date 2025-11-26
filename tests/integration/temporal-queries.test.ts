@@ -15,46 +15,44 @@ import { getConceptEvolution } from '../../src/tools/get-concept-evolution.js';
  * 2. Config file at ~/.logseq-mcp/config.json
  * 3. Test data in LogSeq graph
  *
- * Tests will be skipped if prerequisites are not met.
+ * Tests will FAIL if prerequisites are not met.
  */
 
 describe('Temporal Queries Integration Tests', () => {
   let client: LogseqClient;
-  let skipTests = false;
-  let skipReason = '';
 
   beforeAll(async () => {
+    // Check if config file exists
+    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+
     try {
-      // Check if config file exists
-      const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+      await access(configPath);
+    } catch {
+      throw new Error(
+        'Config file not found at ~/.logseq-mcp/config.json. ' +
+        'Integration tests require LogSeq configuration. ' +
+        'See tests/integration/setup.md for setup instructions.'
+      );
+    }
 
-      try {
-        await access(configPath);
-      } catch {
-        skipTests = true;
-        skipReason = 'Config file not found. See tests/integration/setup.md for setup instructions.';
-        return;
-      }
+    // Load config
+    const config = await loadConfig(configPath);
+    client = new LogseqClient(config);
 
-      // Load config
-      const config = await loadConfig(configPath);
-      client = new LogseqClient(config);
-
-      // Test connection to LogSeq
-      try {
-        await client.callAPI('logseq.App.getCurrentGraph');
-      } catch (error) {
-        skipTests = true;
-        skipReason = `Cannot connect to LogSeq: ${error instanceof Error ? error.message : 'Unknown error'}. Ensure LogSeq is running with HTTP server enabled.`;
-      }
+    // Test connection to LogSeq - fail hard if not available
+    try {
+      await client.callAPI('logseq.App.getCurrentGraph');
     } catch (error) {
-      skipTests = true;
-      skipReason = `Setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      throw new Error(
+        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
+        'Ensure LogSeq is running with HTTP server enabled. ' +
+        'See tests/integration/setup.md'
+      );
     }
   });
 
   describe('logseq_query_by_date_range', () => {
-    it.skipIf(skipTests)('should return date range structure with entries', async () => {
+    it('should return date range structure with entries', async () => {
       // Query last 7 days
       const today = new Date();
       const endDate = parseInt(
@@ -101,7 +99,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should filter entries by date range', async () => {
+    it('should filter entries by date range', async () => {
       // Query a specific date range
       const startDate = 20250101;
       const endDate = 20250131;
@@ -118,7 +116,7 @@ describe('Temporal Queries Integration Tests', () => {
       expect(result.summary.totalDays).toBe(result.entries.length);
     });
 
-    it.skipIf(skipTests)('should filter blocks by search term', async () => {
+    it('should filter blocks by search term', async () => {
       // Query with a search term
       const today = new Date();
       const endDate = parseInt(
@@ -151,7 +149,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should return entries sorted by date', async () => {
+    it('should return entries sorted by date', async () => {
       // Query a range that should have multiple entries
       const today = new Date();
       const endDate = parseInt(
@@ -173,7 +171,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should handle empty date range', async () => {
+    it('should handle empty date range', async () => {
       // Query a future date range with no entries
       const startDate = 20300101;
       const endDate = 20300131;
@@ -186,7 +184,7 @@ describe('Temporal Queries Integration Tests', () => {
       expect(result.summary.totalBlocks).toBe(0);
     });
 
-    it.skipIf(skipTests)('should throw error for invalid date format', async () => {
+    it('should throw error for invalid date format', async () => {
       // Test invalid start date
       await expect(
         queryByDateRange(client, 99999999, 20250131)
@@ -198,13 +196,13 @@ describe('Temporal Queries Integration Tests', () => {
       ).rejects.toThrow('Invalid date format');
     });
 
-    it.skipIf(skipTests)('should throw error when start date is after end date', async () => {
+    it('should throw error when start date is after end date', async () => {
       await expect(
         queryByDateRange(client, 20250131, 20250101)
       ).rejects.toThrow('Start date must be before or equal to end date');
     });
 
-    it.skipIf(skipTests)('should return journal entries for last 60 days', async () => {
+    it('should return journal entries for last 60 days', async () => {
       // Calculate date range
       const today = new Date();
       const sixtyDaysAgo = new Date(today);
@@ -240,24 +238,24 @@ describe('Temporal Queries Integration Tests', () => {
   });
 
   describe('logseq_get_concept_evolution', () => {
-    it.skipIf(skipTests)('should return concept evolution structure', async () => {
+    it('should return concept evolution structure', async () => {
       // Find any page to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
+      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
       ]);
 
-      if (!searchResult || searchResult.length === 0) {
-        console.warn('No pages found for get_concept_evolution test');
-        return;
-      }
+      // Validate API contract
+      expect(Array.isArray(searchResult)).toBe(true);
+      expect(searchResult.length).toBeGreaterThan(0,
+        'No pages found. Create at least one page in LogSeq graph. ' +
+        'See tests/integration/setup.md'
+      );
 
-      const firstPage = searchResult[0];
+      // Datalog returns nested arrays [[page1], [page2]]
+      const firstPage = searchResult[0][0];
+      expect(firstPage).toBeDefined();
       const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        console.warn('Could not determine page name');
-        return;
-      }
+      expect(pageName).toBeTruthy('Page missing name property - data integrity issue');
 
       const result = await getConceptEvolution(client, pageName);
 
@@ -290,7 +288,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should track timeline chronologically', async () => {
+    it('should track timeline chronologically', async () => {
       // Find a page with multiple mentions
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -329,7 +327,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should filter by date range', async () => {
+    it('should filter by date range', async () => {
       // Find a page
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -364,7 +362,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should group mentions by day', async () => {
+    it('should group mentions by day', async () => {
       // Find a page
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -404,7 +402,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should group mentions by week', async () => {
+    it('should group mentions by week', async () => {
       // Find a page
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -437,7 +435,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should group mentions by month', async () => {
+    it('should group mentions by month', async () => {
       // Find a page
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -470,7 +468,7 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should handle concepts with no mentions', async () => {
+    it('should handle concepts with no mentions', async () => {
       const result = await getConceptEvolution(
         client,
         'NonExistentConceptForTesting12345'
@@ -485,7 +483,7 @@ describe('Temporal Queries Integration Tests', () => {
       expect(result.summary.dateRange.latest).toBeNull();
     });
 
-    it.skipIf(skipTests)('should distinguish journal from non-journal mentions', async () => {
+    it('should distinguish journal from non-journal mentions', async () => {
       // Find a page that appears in both journal and non-journal contexts
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -510,7 +508,7 @@ describe('Temporal Queries Integration Tests', () => {
       ).toBe(result.summary.totalMentions);
     });
 
-    it.skipIf(skipTests)('should track earliest and latest mentions', async () => {
+    it('should track earliest and latest mentions', async () => {
       // Find a page with mentions
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -564,11 +562,4 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
   });
-
-  // Display skip reason if tests were skipped
-  if (skipTests) {
-    it.skip(`Tests skipped: ${skipReason}`, () => {
-      // This test is just to display the skip reason
-    });
-  }
 });

@@ -14,62 +14,61 @@ import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
  * 2. Config file at ~/.logseq-mcp/config.json
  * 3. Test data in LogSeq graph
  *
- * Tests will be skipped if prerequisites are not met.
+ * Tests will FAIL if prerequisites are not met.
  */
 
 describe('Graph Traversal Tools Integration Tests', () => {
   let client: LogseqClient;
-  let skipTests = false;
-  let skipReason = '';
 
   beforeAll(async () => {
+    // Check if config file exists
+    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+
     try {
-      // Check if config file exists
-      const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+      await access(configPath);
+    } catch {
+      throw new Error(
+        'Config file not found at ~/.logseq-mcp/config.json. ' +
+        'Integration tests require LogSeq configuration. ' +
+        'See tests/integration/setup.md for setup instructions.'
+      );
+    }
 
-      try {
-        await access(configPath);
-      } catch {
-        skipTests = true;
-        skipReason = 'Config file not found. See tests/integration/setup.md for setup instructions.';
-        return;
-      }
+    // Load config
+    const config = await loadConfig(configPath);
+    client = new LogseqClient(config);
 
-      // Load config
-      const config = await loadConfig(configPath);
-      client = new LogseqClient(config);
-
-      // Test connection to LogSeq
-      try {
-        await client.callAPI('logseq.App.getCurrentGraph');
-      } catch (error) {
-        skipTests = true;
-        skipReason = `Cannot connect to LogSeq: ${error instanceof Error ? error.message : 'Unknown error'}. Ensure LogSeq is running with HTTP server enabled.`;
-      }
+    // Test connection to LogSeq - fail hard if not available
+    try {
+      await client.callAPI('logseq.App.getCurrentGraph');
     } catch (error) {
-      skipTests = true;
-      skipReason = `Setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      throw new Error(
+        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
+        'Ensure LogSeq is running with HTTP server enabled. ' +
+        'See tests/integration/setup.md'
+      );
     }
   });
 
   describe('logseq_get_concept_network', () => {
-    it.skipIf(skipTests)('should return network structure with nodes and edges', async () => {
+    it('should return network structure with nodes and edges', async () => {
       // Find any page to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
+      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
       ]);
 
-      if (!searchResult || searchResult.length === 0) {
-        console.warn('No pages found for get_concept_network test');
-        return;
-      }
+      // Validate API contract
+      expect(Array.isArray(searchResult)).toBe(true);
+      expect(searchResult.length).toBeGreaterThan(0,
+        'No pages found. Create at least one page in LogSeq graph. ' +
+        'See tests/integration/setup.md'
+      );
 
-      const firstPage = searchResult[0];
+      // Datalog returns nested arrays [[page1], [page2]]
+      const firstPage = searchResult[0][0];
+      expect(firstPage).toBeDefined();
       const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
+      expect(pageName).toBeTruthy('Page missing name property - data integrity issue');
 
       const result = await getConceptNetwork(client, pageName, 2);
 
@@ -103,7 +102,7 @@ describe('Graph Traversal Tools Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should respect maxDepth parameter', async () => {
+    it('should respect maxDepth parameter', async () => {
       // Find a page
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -139,7 +138,7 @@ describe('Graph Traversal Tools Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should not have duplicate nodes', async () => {
+    it('should not have duplicate nodes', async () => {
       // Find a page
       const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
@@ -164,17 +163,10 @@ describe('Graph Traversal Tools Integration Tests', () => {
       expect(nodeIds.length).toBe(uniqueNodeIds.size);
     });
 
-    it.skipIf(skipTests)('should throw error for non-existent page', async () => {
+    it('should throw error for non-existent page', async () => {
       await expect(
         getConceptNetwork(client, 'NonExistentConceptForGraphTools12345', 2)
       ).rejects.toThrow('Page not found');
     });
   });
-
-  // Display skip reason if tests were skipped
-  if (skipTests) {
-    it.skip(`Tests skipped: ${skipReason}`, () => {
-      // This test is just to display the skip reason
-    });
-  }
 });

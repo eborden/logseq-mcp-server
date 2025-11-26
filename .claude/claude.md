@@ -460,6 +460,63 @@ for (const page of pages) {
 - **Integration tests** (with real LogSeq): API connectivity, actual graph queries
 - **Property tests**: Universal invariants, equivalence validation
 
+### Integration Test Requirements (Hard Failures)
+
+Integration tests must fail loud on BOTH setup issues AND missing test data.
+
+**Rules:**
+1. **NO it.skipIf() for integration tests** - Tests must run or fail, never skip
+2. **NO console.warn() in tests** - Silent warnings hide real failures
+3. **REQUIRE prerequisites explicitly** - Config file, LogSeq connection, test data
+4. **Fail with helpful messages** - Point to setup.md for resolution steps
+
+**Pattern:**
+```typescript
+// ❌ BAD: Silent skip/warn
+beforeAll(async () => {
+  try {
+    await access(configPath);
+  } catch {
+    skipTests = true; // Silent skip - test suite passes without testing!
+  }
+});
+it.skipIf(skipTests)('test', async () => { ... });
+
+// ❌ BAD: Silent warn
+const result = await searchBlocks(client, 'test');
+if (!result || result.length === 0) {
+  console.warn('No data found'); // Test passes without proving anything!
+  return;
+}
+
+// ✅ GOOD: Fail loud with clear message
+beforeAll(async () => {
+  try {
+    await access(configPath);
+  } catch {
+    throw new Error(
+      'Config file not found at ~/.logseq-mcp/config.json. ' +
+      'See tests/integration/setup.md for setup instructions.'
+    );
+  }
+});
+
+it('test', async () => {
+  const result = await searchBlocks(client, 'test');
+  expect(result).toBeDefined();
+  expect(result.length).toBeGreaterThan(0,
+    'No pages found. Create test data in LogSeq graph. ' +
+    'See tests/integration/setup.md'
+  );
+});
+```
+
+**Why:**
+- Skipped tests provide false confidence
+- Passing tests that found no data prove nothing
+- Integration tests must test real integration
+- Clear failures guide developers to fix actual problems
+
 ---
 
 ## Performance Benchmarks

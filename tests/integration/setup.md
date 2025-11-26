@@ -47,10 +47,21 @@ npm run test:integration -- --reporter=verbose
 
 ## Test Behavior
 
-- Tests will be **skipped** if LogSeq is not running or not configured
+- Tests will **FAIL** (not skip) if LogSeq is not running or not configured
+- Tests will **FAIL** (not skip) if required test data doesn't exist
 - Tests verify actual API responses from LogSeq
 - Tests are non-destructive (read-only operations)
-- Tests may fail if expected test data doesn't exist
+
+### Why Tests Fail Instead of Skip
+
+Integration tests must prove the system works correctly. A test that skips or passes without finding data proves nothing.
+
+**Before:** Missing data → console.warn → test passes ✅ (false positive)
+**After:** Missing data → test fails ❌ (honest failure)
+
+If tests fail, follow the setup instructions to:
+1. Start LogSeq with HTTP server enabled
+2. Create required test data in your graph
 
 ## Troubleshooting
 

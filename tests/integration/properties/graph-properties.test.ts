@@ -21,42 +21,41 @@ import {
  * and validate universal properties that must hold for ANY graph structure.
  *
  * No specific test data required - works with any LogSeq graph!
+ * Tests will FAIL if prerequisites are not met.
  */
 
 describe('Property: Graph Traversal Invariants', () => {
   let client: LogseqClient;
-  let skipTests = false;
-  let skipReason = '';
 
   beforeAll(async () => {
+    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+
     try {
-      const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+      await access(configPath);
+    } catch {
+      throw new Error(
+        'Config file not found at ~/.logseq-mcp/config.json. ' +
+        'Integration tests require LogSeq configuration. ' +
+        'See tests/integration/setup.md for setup instructions.'
+      );
+    }
 
-      try {
-        await access(configPath);
-      } catch {
-        skipTests = true;
-        skipReason = 'Config file not found at ~/.logseq-mcp/config.json';
-        return;
-      }
+    const config = await loadConfig(configPath);
+    client = new LogseqClient(config);
 
-      const config = await loadConfig(configPath);
-      client = new LogseqClient(config);
-
-      try {
-        await client.callAPI('logseq.App.getCurrentGraph');
-      } catch (error) {
-        skipTests = true;
-        skipReason = `Cannot connect to LogSeq: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      }
+    try {
+      await client.callAPI('logseq.App.getCurrentGraph');
     } catch (error) {
-      skipTests = true;
-      skipReason = `Setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      throw new Error(
+        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
+        'Ensure LogSeq is running with HTTP server enabled. ' +
+        'See tests/integration/setup.md'
+      );
     }
   });
 
   describe('Universal Graph Properties', () => {
-    it.skipIf(skipTests)('should have no duplicate nodes for any discovered page', async () => {
+    it('should have no duplicate nodes for any discovered page', async () => {
       const pages = await discoverPages(client, 5);
 
       // REQUIRE data - don't skip if empty
@@ -74,7 +73,7 @@ describe('Property: Graph Traversal Invariants', () => {
       }
     });
 
-    it.skipIf(skipTests)('should maintain referential integrity for all edges', async () => {
+    it('should maintain referential integrity for all edges', async () => {
       const pages = await discoverPagesWithLinks(client, 1, 10);
 
       // REQUIRE pages with links - fail if empty
@@ -90,7 +89,7 @@ describe('Property: Graph Traversal Invariants', () => {
       }
     });
 
-    it.skipIf(skipTests)('should respect depth constraints', async () => {
+    it('should respect depth constraints', async () => {
       const pages = await discoverPages(client, 5);
 
       // REQUIRE data - fail if empty
@@ -108,7 +107,7 @@ describe('Property: Graph Traversal Invariants', () => {
       }
     });
 
-    it.skipIf(skipTests)('should always have a root node at depth 0', async () => {
+    it('should always have a root node at depth 0', async () => {
       const pages = await discoverPages(client, 5);
 
       // REQUIRE data - fail if empty
@@ -126,7 +125,7 @@ describe('Property: Graph Traversal Invariants', () => {
       }
     });
 
-    it.skipIf(skipTests)('should have monotonic depth increases along edges', async () => {
+    it('should have monotonic depth increases along edges', async () => {
       const pages = await discoverPagesWithLinks(client, 1, 10);
 
       // REQUIRE pages with links - fail if empty
@@ -142,7 +141,7 @@ describe('Property: Graph Traversal Invariants', () => {
       }
     });
 
-    it.skipIf(skipTests)('should maintain graph connectivity from root', async () => {
+    it('should maintain graph connectivity from root', async () => {
       const pages = await discoverPagesWithLinks(client, 2, 10);
 
       // REQUIRE pages with multiple links - fail if empty
@@ -163,7 +162,7 @@ describe('Property: Graph Traversal Invariants', () => {
   });
 
   describe('Metamorphic Properties', () => {
-    it.skipIf(skipTests)('should never lose nodes when increasing depth', async () => {
+    it('should never lose nodes when increasing depth', async () => {
       const pages = await discoverPagesWithLinks(client, 1, 5);
 
       // REQUIRE pages with links - fail if empty
@@ -184,7 +183,7 @@ describe('Property: Graph Traversal Invariants', () => {
       }
     });
 
-    it.skipIf(skipTests)('should return identical results on repeated calls (idempotence)', async () => {
+    it('should return identical results on repeated calls (idempotence)', async () => {
       const pages = await discoverPages(client, 3);
 
       // REQUIRE data - fail if empty
@@ -202,7 +201,7 @@ describe('Property: Graph Traversal Invariants', () => {
   });
 
   describe('Boundary Conditions', () => {
-    it.skipIf(skipTests)('should return only root node at depth 0', async () => {
+    it('should return only root node at depth 0', async () => {
       const pages = await discoverPages(client, 3);
 
       // REQUIRE data - fail if empty
@@ -218,16 +217,11 @@ describe('Property: Graph Traversal Invariants', () => {
       }
     });
 
-    it.skipIf(skipTests)('should throw error for non-existent pages', async () => {
+    it('should throw error for non-existent pages', async () => {
       const nonExistentPage = `NonExistent-Page-${Date.now()}`;
 
       // Property: Missing pages throw consistent error
       await expect(getConceptNetwork(client, nonExistentPage, 2)).rejects.toThrow(/not found/i);
     });
   });
-
-  // Display skip reason if tests were skipped
-  if (skipTests) {
-    it.skip(`Tests skipped: ${skipReason}`, () => {});
-  }
 });

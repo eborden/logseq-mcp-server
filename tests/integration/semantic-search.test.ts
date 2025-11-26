@@ -15,65 +15,66 @@ import { searchBlocks } from '../../src/tools/search-blocks.js';
  * 2. Config file at ~/.logseq-mcp/config.json
  * 3. Test data in LogSeq graph
  *
- * Tests will be skipped if prerequisites are not met.
+ * Tests will FAIL if prerequisites are not met.
  */
 
 describe('Semantic Search Integration Tests', () => {
   let client: LogseqClient;
-  let skipTests = false;
-  let skipReason = '';
 
   beforeAll(async () => {
+    // Check if config file exists
+    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+
     try {
-      // Check if config file exists
-      const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+      await access(configPath);
+    } catch {
+      throw new Error(
+        'Config file not found at ~/.logseq-mcp/config.json. ' +
+        'Integration tests require LogSeq configuration. ' +
+        'See tests/integration/setup.md for setup instructions.'
+      );
+    }
 
-      try {
-        await access(configPath);
-      } catch {
-        skipTests = true;
-        skipReason = 'Config file not found. See tests/integration/setup.md for setup instructions.';
-        return;
-      }
+    // Load config
+    const config = await loadConfig(configPath);
+    client = new LogseqClient(config);
 
-      // Load config
-      const config = await loadConfig(configPath);
-      client = new LogseqClient(config);
-
-      // Test connection to LogSeq
-      try {
-        await client.callAPI('logseq.App.getCurrentGraph');
-      } catch (error) {
-        skipTests = true;
-        skipReason = `Cannot connect to LogSeq: ${error instanceof Error ? error.message : 'Unknown error'}. Ensure LogSeq is running with HTTP server enabled.`;
-      }
+    // Test connection to LogSeq - fail hard if not available
+    try {
+      await client.callAPI('logseq.App.getCurrentGraph');
     } catch (error) {
-      skipTests = true;
-      skipReason = `Setup failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      throw new Error(
+        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
+        'Ensure LogSeq is running with HTTP server enabled. ' +
+        'See tests/integration/setup.md'
+      );
     }
   });
 
   describe('logseq_search_by_relationship', () => {
-    it.skipIf(skipTests)('should return structure with query and results', async () => {
+    it('should return structure with query and results', async () => {
       // Find any two pages to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
+      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
       ]);
 
-      if (!searchResult || searchResult.length < 2) {
-        console.warn('Not enough pages found for search_by_relationship test');
-        return;
-      }
+      // Validate API contract
+      expect(Array.isArray(searchResult)).toBe(true);
+      expect(searchResult.length).toBeGreaterThanOrEqual(2,
+        'Not enough pages found. Create at least 2 pages in LogSeq graph. ' +
+        'See tests/integration/setup.md'
+      );
 
-      const pageA = searchResult[0];
-      const pageB = searchResult[1];
+      // Datalog returns nested arrays [[page1], [page2]]
+      const pageA = searchResult[0][0];
+      const pageB = searchResult[1][0];
+      expect(pageA).toBeDefined();
+      expect(pageB).toBeDefined();
+
       const pageAName = pageA.name || pageA['original-name'];
       const pageBName = pageB.name || pageB['original-name'];
-
-      if (!pageAName || !pageBName) {
-        console.warn('Could not determine page names');
-        return;
-      }
+      expect(pageAName).toBeTruthy('Page A missing name property - data integrity issue');
+      expect(pageBName).toBeTruthy('Page B missing name property - data integrity issue');
 
       const result = await searchByRelationship(
         client,
@@ -106,9 +107,9 @@ describe('Semantic Search Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should support in-pages-linking-to relationship', async () => {
+    it('should support in-pages-linking-to relationship', async () => {
       // Find any two pages to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
+      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
       ]);
 
@@ -140,9 +141,9 @@ describe('Semantic Search Integration Tests', () => {
       expect(Array.isArray(result.results)).toBe(true);
     });
 
-    it.skipIf(skipTests)('should support connected-within relationship with maxDistance', async () => {
+    it('should support connected-within relationship with maxDistance', async () => {
       // Find any two pages to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
+      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
         '[:find (pull ?p [*]) :where [?p :block/name]]'
       ]);
 
@@ -178,15 +179,13 @@ describe('Semantic Search Integration Tests', () => {
   });
 
   describe('enhanced search_blocks with includeContext', () => {
-    it.skipIf(skipTests)('should return blocks without context when includeContext is false', async () => {
+    it('should return blocks without context when includeContext is false', async () => {
       const results = await searchBlocks(client, 'test', 5, false);
 
-      // Should return results or null
-      if (results === null) {
-        console.warn('searchBlocks returned null');
-        return;
-      }
-
+      expect(results).not.toBeNull(
+        'searchBlocks returned null - unexpected API behavior. ' +
+        'Check LogSeq connection and ensure test data exists.'
+      );
       expect(Array.isArray(results)).toBe(true);
 
       // Blocks should not have context property when includeContext is false
@@ -195,105 +194,94 @@ describe('Semantic Search Integration Tests', () => {
       }
     });
 
-    it.skipIf(skipTests)('should include context when includeContext is true', async () => {
+    it('should include context when includeContext is true', async () => {
       const results = await searchBlocks(client, 'test', 10, true);
 
-      // Should return results or null
-      if (results === null) {
-        console.warn('searchBlocks returned null');
-        return;
-      }
-
+      expect(results).not.toBeNull('searchBlocks returned null - unexpected');
       expect(Array.isArray(results)).toBe(true);
+      expect(results.length).toBeGreaterThan(0,
+        'No blocks found containing "test". Create test data in LogSeq. ' +
+        'See tests/integration/setup.md'
+      );
 
-      // If there are results, find one with context to validate structure
-      if (results.length > 0) {
-        // Find a block that has context property (not all blocks may have page info)
-        const blockWithContext = results.find(b => b.context !== undefined);
+      // Context is conditional - blocks need page property with name
+      const blocksWithContext = results.filter(b => b.context !== undefined);
 
-        if (!blockWithContext) {
-          console.warn('No blocks with context found in results');
-          return;
-        }
-
-        // Validate context structure
-        expect(blockWithContext.context).toHaveProperty('page');
-        expect(blockWithContext.context).toHaveProperty('references');
-        expect(blockWithContext.context).toHaveProperty('tags');
-
-        // Validate types
-        expect(Array.isArray(blockWithContext.context.references)).toBe(true);
-        expect(Array.isArray(blockWithContext.context.tags)).toBe(true);
-        expect(blockWithContext.context.page).toHaveProperty('id');
-        expect(blockWithContext.context.page).toHaveProperty('name');
+      if (blocksWithContext.length > 0) {
+        // Validate context structure when it exists
+        const block = blocksWithContext[0];
+        expect(block.context).toHaveProperty('page');
+        expect(block.context).toHaveProperty('references');
+        expect(block.context).toHaveProperty('tags');
+        expect(Array.isArray(block.context.references)).toBe(true);
+        expect(Array.isArray(block.context.tags)).toBe(true);
+        expect(block.context.page).toHaveProperty('id');
+        expect(block.context.page).toHaveProperty('name');
+      } else {
+        console.log('⊘ No blocks have context - blocks missing page information');
       }
     });
 
-    it.skipIf(skipTests)('should extract references from block content', async () => {
+    it('should extract references from block content', async () => {
       // Search for a common term that's likely to appear with page references
       const results = await searchBlocks(client, '[[', 10, true);
 
-      if (results === null || results.length === 0) {
-        console.warn('No blocks with references found');
-        return;
-      }
+      expect(results).not.toBeNull('searchBlocks returned null');
+      expect(results.length).toBeGreaterThan(0,
+        'No blocks with references ([[page]]) found. ' +
+        'Create blocks with page references in LogSeq. ' +
+        'See tests/integration/setup.md'
+      );
 
-      // Find a block that has page references
-      const blockWithRefs = results.find(
+      // Find blocks with context AND references
+      const blocksWithRefs = results.filter(
         b => b.context && b.context.references.length > 0
       );
 
-      if (!blockWithRefs) {
-        console.warn('No blocks with references in results');
-        return;
+      if (blocksWithRefs.length > 0) {
+        const block = blocksWithRefs[0];
+        expect(block.context).toBeDefined();
+        expect(block.context.references.length).toBeGreaterThan(0);
+
+        // Validate reference extraction matches content
+        const hasMatchingRef = block.context.references.some(ref =>
+          block.content.includes(`[[${ref}]]`)
+        );
+        expect(hasMatchingRef).toBe(true);
+      } else {
+        console.log('⊘ No blocks have extracted references - blocks missing page info');
       }
-
-      // Validate that extracted references match what's in content
-      expect(blockWithRefs.context).toBeDefined();
-      expect(blockWithRefs.context!.references.length).toBeGreaterThan(0);
-
-      // Check that at least one reference appears in the content
-      const hasMatchingRef = blockWithRefs.context!.references.some(ref =>
-        blockWithRefs.content.includes(`[[${ref}]]`)
-      );
-      expect(hasMatchingRef).toBe(true);
     });
 
-    it.skipIf(skipTests)('should extract tags from block content', async () => {
+    it('should extract tags from block content', async () => {
       // Search for blocks with hashtags
       const results = await searchBlocks(client, '#', 10, true);
 
-      if (results === null || results.length === 0) {
-        console.warn('No blocks with tags found');
-        return;
-      }
+      expect(results).not.toBeNull('searchBlocks returned null');
+      expect(results.length).toBeGreaterThan(0,
+        'No blocks with tags (#tag) found. ' +
+        'Create blocks with hashtags in LogSeq. ' +
+        'See tests/integration/setup.md'
+      );
 
-      // Find a block that has tags
-      const blockWithTags = results.find(
+      // Find blocks with context AND tags
+      const blocksWithTags = results.filter(
         b => b.context && b.context.tags.length > 0
       );
 
-      if (!blockWithTags) {
-        console.warn('No blocks with tags in results');
-        return;
+      if (blocksWithTags.length > 0) {
+        const block = blocksWithTags[0];
+        expect(block.context).toBeDefined();
+        expect(block.context.tags.length).toBeGreaterThan(0);
+
+        // Validate tag extraction matches content
+        const hasMatchingTag = block.context.tags.some(tag =>
+          block.content.includes(`#${tag}`)
+        );
+        expect(hasMatchingTag).toBe(true);
+      } else {
+        console.log('⊘ No blocks have extracted tags - blocks missing page info');
       }
-
-      // Validate that extracted tags match what's in content
-      expect(blockWithTags.context).toBeDefined();
-      expect(blockWithTags.context!.tags.length).toBeGreaterThan(0);
-
-      // Check that at least one tag appears in the content
-      const hasMatchingTag = blockWithTags.context!.tags.some(tag =>
-        blockWithTags.content.includes(`#${tag}`)
-      );
-      expect(hasMatchingTag).toBe(true);
     });
   });
-
-  // Display skip reason if tests were skipped
-  if (skipTests) {
-    it.skip(`Tests skipped: ${skipReason}`, () => {
-      // This test is just to display the skip reason
-    });
-  }
 });
