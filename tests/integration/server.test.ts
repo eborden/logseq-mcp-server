@@ -183,23 +183,23 @@ describe('LogSeq MCP Server Integration Tests', () => {
 
   describe('logseq_query_by_property', () => {
     it('should query blocks by property', async () => {
-      // Try to find blocks with a status property
+      // Query for blocks with a status property
       const result = await queryByProperty(client, 'status', 'testing');
 
-      // Validate API contract - returns array (possibly empty)
+      // Validate API contract
       expect(Array.isArray(result)).toBe(true);
+      expect(result.length).toBeGreaterThan(0,
+        'No blocks with status::testing property. Add blocks with this property. ' +
+        'See tests/integration/setup.md'
+      );
 
-      // If blocks exist with this property, validate their structure
-      if (result.length > 0) {
-        result.forEach(block => {
-          expect(block).toHaveProperty('uuid');
-          expect(block).toHaveProperty('properties');
-          expect(block.properties).toHaveProperty('status');
-          expect(block.properties.status).toBe('testing');
-        });
-      } else {
-        console.log('⊘ No blocks with status::testing property found');
-      }
+      // Validate structure of returned blocks
+      result.forEach(block => {
+        expect(block).toHaveProperty('uuid');
+        expect(block).toHaveProperty('properties');
+        expect(block.properties).toHaveProperty('status');
+        expect(block.properties.status).toBe('testing');
+      });
     });
 
     it('should return empty array for non-existent property', async () => {

@@ -204,22 +204,22 @@ describe('Semantic Search Integration Tests', () => {
         'See tests/integration/setup.md'
       );
 
-      // Context is conditional - blocks need page property with name
+      // Validate that includeContext actually adds context to blocks
       const blocksWithContext = results.filter(b => b.context !== undefined);
+      expect(blocksWithContext.length).toBeGreaterThan(0,
+        'No blocks have context. Blocks are missing page information. ' +
+        'Ensure blocks have page references. See tests/integration/setup.md'
+      );
 
-      if (blocksWithContext.length > 0) {
-        // Validate context structure when it exists
-        const block = blocksWithContext[0];
-        expect(block.context).toHaveProperty('page');
-        expect(block.context).toHaveProperty('references');
-        expect(block.context).toHaveProperty('tags');
-        expect(Array.isArray(block.context.references)).toBe(true);
-        expect(Array.isArray(block.context.tags)).toBe(true);
-        expect(block.context.page).toHaveProperty('id');
-        expect(block.context.page).toHaveProperty('name');
-      } else {
-        console.log('⊘ No blocks have context - blocks missing page information');
-      }
+      // Validate context structure
+      const block = blocksWithContext[0];
+      expect(block.context).toHaveProperty('page');
+      expect(block.context).toHaveProperty('references');
+      expect(block.context).toHaveProperty('tags');
+      expect(Array.isArray(block.context.references)).toBe(true);
+      expect(Array.isArray(block.context.tags)).toBe(true);
+      expect(block.context.page).toHaveProperty('id');
+      expect(block.context.page).toHaveProperty('name');
     });
 
     it('should extract references from block content', async () => {
@@ -233,24 +233,25 @@ describe('Semantic Search Integration Tests', () => {
         'See tests/integration/setup.md'
       );
 
-      // Find blocks with context AND references
+      // Validate that references are extracted from block content
       const blocksWithRefs = results.filter(
         b => b.context && b.context.references.length > 0
       );
 
-      if (blocksWithRefs.length > 0) {
-        const block = blocksWithRefs[0];
-        expect(block.context).toBeDefined();
-        expect(block.context.references.length).toBeGreaterThan(0);
+      expect(blocksWithRefs.length).toBeGreaterThan(0,
+        'No blocks with extracted references. Create blocks with [[page references]]. ' +
+        'See tests/integration/setup.md'
+      );
 
-        // Validate reference extraction matches content
-        const hasMatchingRef = block.context.references.some(ref =>
-          block.content.includes(`[[${ref}]]`)
-        );
-        expect(hasMatchingRef).toBe(true);
-      } else {
-        console.log('⊘ No blocks have extracted references - blocks missing page info');
-      }
+      const block = blocksWithRefs[0];
+      expect(block.context).toBeDefined();
+      expect(block.context.references.length).toBeGreaterThan(0);
+
+      // Validate reference extraction matches content
+      const hasMatchingRef = block.context.references.some(ref =>
+        block.content.includes(`[[${ref}]]`)
+      );
+      expect(hasMatchingRef).toBe(true);
     });
 
     it('should extract tags from block content', async () => {
@@ -264,24 +265,25 @@ describe('Semantic Search Integration Tests', () => {
         'See tests/integration/setup.md'
       );
 
-      // Find blocks with context AND tags
+      // Validate that tags are extracted from block content
       const blocksWithTags = results.filter(
         b => b.context && b.context.tags.length > 0
       );
 
-      if (blocksWithTags.length > 0) {
-        const block = blocksWithTags[0];
-        expect(block.context).toBeDefined();
-        expect(block.context.tags.length).toBeGreaterThan(0);
+      expect(blocksWithTags.length).toBeGreaterThan(0,
+        'No blocks with extracted tags. Create blocks with #tags. ' +
+        'See tests/integration/setup.md'
+      );
 
-        // Validate tag extraction matches content
-        const hasMatchingTag = block.context.tags.some(tag =>
-          block.content.includes(`#${tag}`)
-        );
-        expect(hasMatchingTag).toBe(true);
-      } else {
-        console.log('⊘ No blocks have extracted tags - blocks missing page info');
-      }
+      const block = blocksWithTags[0];
+      expect(block.context).toBeDefined();
+      expect(block.context.tags.length).toBeGreaterThan(0);
+
+      // Validate tag extraction matches content
+      const hasMatchingTag = block.context.tags.some(tag =>
+        block.content.includes(`#${tag}`)
+      );
+      expect(hasMatchingTag).toBe(true);
     });
   });
 });
