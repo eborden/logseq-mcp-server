@@ -8,7 +8,8 @@ describe('searchBlocks', () => {
 
   beforeEach(() => {
     mockClient = {
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn()
     } as any;
   });
 
@@ -342,25 +343,16 @@ describe('searchBlocks', () => {
       }
     ];
 
-    const mockPageDetails: PageEntity = {
-      id: 100,
-      uuid: 'page-uuid-1',
-      name: 'Container Page',
-      originalName: 'Container Page',
-      properties: { tags: 'important' }
-    };
-
     (mockClient.callAPI as any)
       .mockResolvedValueOnce(mockPages)      // getAllPages
-      .mockResolvedValueOnce(mockBlocks)     // getPageBlocksTree
-      .mockResolvedValueOnce(mockPageDetails); // getPage for context
+      .mockResolvedValueOnce(mockBlocks);    // getPageBlocksTree
 
     const result = await searchBlocks(mockClient, 'Test', undefined, true);
 
     expect(result).toHaveLength(1);
     expect(result![0]).toHaveProperty('context');
     expect(result![0].context).toHaveProperty('page');
-    expect(result![0].context!.page).toEqual(mockPageDetails);
+    expect(result![0].context!.page).toEqual(mockPages[0]);
     expect(result![0].context).toHaveProperty('references');
     expect(result![0].context!.references).toEqual(['PageA']);
     expect(result![0].context).toHaveProperty('tags');
@@ -388,17 +380,9 @@ describe('searchBlocks', () => {
       }
     ];
 
-    const mockPageDetails: PageEntity = {
-      id: 100,
-      uuid: 'page-uuid-1',
-      name: 'test-page',
-      originalName: 'Test Page'
-    };
-
     (mockClient.callAPI as any)
       .mockResolvedValueOnce(mockPages)      // getAllPages
-      .mockResolvedValueOnce(mockBlocks)     // getPageBlocksTree
-      .mockResolvedValueOnce(mockPageDetails); // getPage for context
+      .mockResolvedValueOnce(mockBlocks);    // getPageBlocksTree
 
     const result = await searchBlocks(mockClient, 'Complex', undefined, true);
 

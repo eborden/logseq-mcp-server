@@ -86,27 +86,36 @@ export async function searchBlocks(
 
     // Add context if requested
     if (includeContext) {
+      // Build a map of page IDs to page entities for efficient lookup
+      const pageMap = new Map<number, PageEntity>();
+      for (const page of pages) {
+        pageMap.set(page.id, page);
+      }
+
       const enrichedResults: SearchBlocksResult[] = [];
 
       for (const block of results) {
         const enriched: SearchBlocksResult = { ...block };
 
         if (block.page) {
-          // Get full page details
-          // Note: block.page might be a full PageEntity or just IEntityID
+          // Get page ID from block.page
           const pageRef = block.page as any;
-          const pageName = pageRef.name || pageRef.originalName;
+          const pageId = pageRef.id || pageRef['db/id'];
 
-          if (!pageName) {
-            // If we don't have page name, skip context for this block
+          if (!pageId) {
+            // If we don't have page ID, skip context for this block
             enrichedResults.push(enriched);
             continue;
           }
 
-          const page = await client.callAPI<PageEntity>(
-            'logseq.Editor.getPage',
-            [pageName]
-          );
+          // Look up page from our map
+          const page = pageMap.get(pageId);
+
+          if (!page) {
+            // Page not found in map, skip context for this block
+            enrichedResults.push(enriched);
+            continue;
+          }
 
           // Extract references from block content
           const refMatches = block.content.matchAll(/\[\[([^\]]+)\]\]/g);
