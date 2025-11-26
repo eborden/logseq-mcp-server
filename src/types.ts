@@ -22,6 +22,14 @@ export interface BlockEntity {
     properties?: any;
     timestamps?: any;
   };
+  // Additional properties from search/query results
+  pathRefs?: IEntityID[]; // Path of entity references from root to this block
+  refs?: IEntityID[]; // Page references in block content (e.g., [[PageName]])
+  marker?: string; // TODO/DONE/etc status
+  'journal?'?: boolean; // Whether this is a journal block
+  journalDay?: number; // Journal date in YYYYMMDD format
+  scheduled?: number; // Scheduled date in YYYYMMDD format
+  deadline?: number; // Deadline date in YYYYMMDD format
 }
 
 // Page entity structure
