@@ -1,71 +1,10 @@
----
-name: logseq-context-builder
-description: Use when user asks about tasks, research, notes, or references their LogSeq knowledge graph - builds comprehensive context from disparate blocks via bidirectional links, searches for TODO/DOING tasks, and synthesizes information from the user's personal knowledge base
----
+# LogSeq Context Builder Workflows
 
-# LogSeq Context Builder
+Detailed workflows for building comprehensive context from LogSeq knowledge graphs.
 
 ## Overview
 
 Build comprehensive context from LogSeq knowledge graphs by searching blocks, following backlinks, and discovering connections. Core principle: **Start broad (search), then focus (get pages), then discover (backlinks)**.
-
-## When to Use
-
-**Use when:**
-- User asks about their tasks, TODOs, or what to work on
-- User asks "what do I know about X?"
-- User references their LogSeq notes or knowledge graph
-- User wants to find stale or forgotten tasks
-
-**Don't use when:**
-- Question doesn't relate to their LogSeq graph
-- User asks about general knowledge (not their personal notes)
-
-## Available MCP Tools
-
-Quick reference for all 11 LogSeq MCP tools organized by category:
-
-### Basic Tools (5 tools)
-
-| Tool | Purpose | Key Parameters |
-|------|---------|----------------|
-| `logseq_search_blocks` | Full-text search with optional semantic context | query, limit, include_context |
-| `logseq_get_page` | Get complete page content | page_name, include_children |
-| `logseq_get_backlinks` | Find all references to a page | page_name |
-| `logseq_get_block` | Get specific block by UUID | block_uuid, include_children |
-| `logseq_query_by_property` | Find blocks by property value | property_key, property_value |
-
-### Graph Traversal Tools (1 tool)
-
-| Tool | Purpose | Key Parameters |
-|------|---------|----------------|
-| `logseq_get_concept_network` | Build graph network with nodes and edges | concept_name, max_depth (max: 3) |
-
-### Semantic Search Tools (1 tool)
-
-| Tool | Purpose | Key Parameters |
-|------|---------|----------------|
-| `logseq_search_by_relationship` | Find blocks based on topic relationships | topic_a, topic_b, relationship_type, max_distance |
-
-**Relationship types:**
-- `references`: Blocks about A that reference B
-- `referenced-by`: Blocks about A in pages referenced by B
-- `in-pages-linking-to`: Blocks about A in pages linking to B
-- `connected-within`: A and B connected within N hops
-
-### Context Building Tools (2 tools)
-
-| Tool | Purpose | Key Parameters |
-|------|---------|----------------|
-| `logseq_build_context` | Gather comprehensive context for a topic | topic_name, max_blocks, max_related_pages, max_references |
-| `logseq_get_context_for_query` | Parse natural language query and build context | query, max_topics, max_search_results |
-
-### Temporal Query Tools (2 tools)
-
-| Tool | Purpose | Key Parameters |
-|------|---------|----------------|
-| `logseq_query_by_date_range` | Query journal entries in date range | start_date, end_date, search_term |
-| `logseq_get_concept_evolution` | Track concept evolution over time | concept_name, start_date, end_date, group_by |
 
 ## Workflow 1: Research Assistant
 
@@ -374,49 +313,6 @@ User: "Give me full context on [[Q4 Planning]]"
 - Suggest creating pages unless asked
 - Make changes to LogSeq structure (read-only assistance)
 
-## Tool Selection Guide
-
-### By Use Case:
-
-**Initial exploration:**
-- `logseq_search_blocks` (broad text search)
-- `logseq_get_context_for_query` (natural language queries)
-
-**Structured queries:**
-- `logseq_query_by_property` (tasks, status, priorities)
-- `logseq_query_by_date_range` (journal entries by date)
-
-**Deep dives:**
-- `logseq_get_page` with `includeChildren=true` (full page content)
-- `logseq_build_context` (comprehensive topic context)
-
-**Discovering connections:**
-- `logseq_get_backlinks` (pages linking to this one)
-- `logseq_get_concept_network` (full network visualization with nodes and edges)
-
-**Relationship-based search:**
-- `logseq_search_by_relationship` (find blocks based on topic relationships)
-
-**Time-based analysis:**
-- `logseq_get_concept_evolution` (track concept over time, includes timeline)
-- `logseq_query_by_date_range` (journal queries)
-
-**Specific blocks:**
-- `logseq_get_block` (when you have a UUID)
-
-### By Question Type:
-
-| Question | Best Tool(s) |
-|----------|-------------|
-| "What do I know about X?" | `get_context_for_query` or `build_context` |
-| "Show me everything connected to X" | `get_concept_network` + `get_backlinks` |
-| "How did X evolve over time?" | `get_concept_evolution` |
-| "What was I doing last week?" | `query_by_date_range` |
-| "Find blocks about A that mention B" | `search_by_relationship` |
-| "What are my TODOs?" | `search_blocks` + `query_by_property` |
-| "When did I mention X?" | `get_concept_evolution` (without grouping) |
-| "Get full details on page X" | `build_context` or `get_page` |
-
 ## Common Pitfalls
 
 | Pitfall | Solution |
@@ -456,7 +352,7 @@ User: "Give me full context on [[Q4 Planning]]"
 
 ## Example Complete Sessions
 
-### Session 1: Weekly Planning (Enhanced)
+### Session 1: Weekly Planning
 
 ```
 User: "Help me plan my week"
@@ -487,7 +383,7 @@ User: "Help me plan my week"
 4. Ask: "Want to dive deeper into any project?"
 ```
 
-### Session 2: Knowledge Graph Exploration (NEW)
+### Session 2: Knowledge Graph Exploration
 
 ```
 User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]]?"
@@ -518,7 +414,7 @@ User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]
     RECOMMENDATION: Review [[API Development]] to see how you use them together."
 ```
 
-### Session 3: Temporal Analysis (NEW)
+### Session 3: Temporal Analysis
 
 ```
 User: "How has my approach to testing changed this year?"
@@ -561,7 +457,7 @@ User: "How has my approach to testing changed this year?"
 
 ## Summary
 
-This skill teaches effective LogSeq knowledge graph queries through:
+Effective LogSeq knowledge graph queries through:
 
 1. **Smart tool selection** - Use single-call solutions when available (build_context, get_context_for_query)
 2. **Graph traversal** - Leverage bidirectional links (get_related_pages, get_concept_network)
@@ -573,23 +469,4 @@ This skill teaches effective LogSeq knowledge graph queries through:
 
 Remember: You're helping the user leverage their own knowledge, not imposing structure.
 
-## New Capabilities Summary
-
-The enhanced MCP server now supports MegaMem-inspired features:
-
-**Graph Intelligence:**
-- Discover bidirectional page relationships
-- Build visual network graphs
-- Track entity mentions across the graph
-
-**Temporal Intelligence:**
-- Query journal entries by date range
-- Track how concepts evolve over time
-- Analyze writing patterns and gaps
-
-**Context Intelligence:**
-- Single-call comprehensive context gathering
-- Natural language query parsing
-- Relationship-aware semantic search
-
-**Best Practice:** Start with high-level tools (build_context, get_context_for_query) and drill down with specific tools (get_page, search_blocks) only when needed.
+For complete tool documentation, see `mcp-tools-reference.md`.
