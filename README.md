@@ -58,6 +58,21 @@ Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 |------|---------|
 | `get_graph_info` | Get current LogSeq graph information including filesystem path |
 
+## Skills
+
+Beyond individual tools, the `logseq-skills` provides structured workflows that combine multiple tools:
+
+**Available workflows:**
+- **Research Assistant** - "What do I know about X?" - comprehensive topic research
+- **Task Prioritization** - "What should I work on?" - find and organize TODOs
+- **Stale Task Detection** - Find tasks with no recent activity
+- **Weekly Summary** - Generate structured summaries from journal entries
+- **Graph Exploration** - Discover connections between concepts
+- **Temporal Analysis** - Track how concepts evolved over time
+- **Smart Context Building** - Natural language queries with automatic context gathering
+
+See `.claude/skills/logseq-skills/` for complete workflow documentation.
+
 ## Example Usage
 
 **"What do I know about React?"**
