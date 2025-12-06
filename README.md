@@ -4,7 +4,7 @@ Turn your LogSeq knowledge graph into an AI-accessible database.
 
 ## What This Does
 
-Provides 11 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
 
 ## Quick Start
 
@@ -20,7 +20,7 @@ Provides 11 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 4. Install: `npm install -g logseq-mcp-server`
 5. Add to Claude Desktop MCP settings
 
-## 11 Tools at a Glance
+## 12 Tools at a Glance
 
 ### Basic Operations (5)
 | Tool | Purpose |
@@ -52,6 +52,11 @@ Provides 11 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 |------|---------|
 | `query_by_date_range` | Query journal entries by date |
 | `get_concept_evolution` | Track concept mentions over time (replaces get_entity_timeline) |
+
+### Graph Information (1)
+| Tool | Purpose |
+|------|---------|
+| `get_graph_info` | Get current LogSeq graph information including filesystem path |
 
 ## Example Usage
 
