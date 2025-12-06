@@ -71,7 +71,7 @@ Write the summary to LogSeq pages directory using the naming convention:
 
 **File structure**:
 ```markdown
-tags:: [[Mon Xth, 2025]], [[Tue Xth, 2025]], [[Wed Xth, 2025]], [[Thu Xth, 2025]], [[Fri Xth, 2025]]
+tags:: [[Weekly Summary]], [[Mon Xth, 2025]], [[Tue Xth, 2025]], [[Wed Xth, 2025]], [[Thu Xth, 2025]], [[Fri Xth, 2025]]
 
 - **Week**: [1-2 sentence gist of what this week was about]
 - ## Signals
@@ -124,7 +124,7 @@ tags:: [[Mon Xth, 2025]], [[Tue Xth, 2025]], [[Wed Xth, 2025]], [[Thu Xth, 2025]
 
 **AFTER (compressed with salience):**
 ```markdown
-tags:: [[Dec 1st, 2025]], [[Dec 2nd, 2025]], [[Dec 3rd, 2025]], [[Dec 4th, 2025]], [[Dec 5th, 2025]]
+tags:: [[Weekly Summary]], [[Dec 1st, 2025]], [[Dec 2nd, 2025]], [[Dec 3rd, 2025]], [[Dec 4th, 2025]], [[Dec 5th, 2025]]
 
 - **Week**: Platform migration sprint - mostly execution with persistent alignment friction
 - ## Signals
