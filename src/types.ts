@@ -68,3 +68,10 @@ export interface LogseqMCPConfig {
   apiUrl: string;
   authToken: string;
 }
+
+// Graph info structure
+export interface GraphInfo {
+  url: string;
+  name: string;
+  path: string;
+}

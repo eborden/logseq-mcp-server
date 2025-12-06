@@ -22,6 +22,7 @@ import { buildContextForTopic } from './tools/build-context.js';
 import { getContextForQuery } from './tools/get-context-for-query.js';
 import { queryByDateRange } from './tools/query-by-date-range.js';
 import { getConceptEvolution } from './tools/get-concept-evolution.js';
+import { getGraphInfo } from './tools/get-graph-info.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -272,6 +273,15 @@ const TOOLS = [
       required: ['concept_name'],
     },
   },
+  {
+    name: 'logseq_get_graph_info',
+    description: 'Get information about the current LogSeq graph including filesystem path',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 /**
@@ -481,6 +491,18 @@ export function createServer(): Server {
             groupBy: args?.group_by as any
           };
           const result = await getConceptEvolution(client, conceptName, options);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_get_graph_info': {
+          const result = await getGraphInfo(client);
           return {
             content: [
               {
@@ -706,6 +728,18 @@ async function main() {
               groupBy: args?.group_by as any
             };
             const result = await getConceptEvolution(client, conceptName, options);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_get_graph_info': {
+            const result = await getGraphInfo(client);
             return {
               content: [
                 {

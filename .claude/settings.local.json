@@ -46,7 +46,17 @@
       "Bash(git reset:*)",
       "Bash(git restore:*)",
       "mcp__logseq__logseq_get_backlinks",
-      "Bash(npx vitest run:*)"
+      "Bash(npx vitest run:*)",
+      "Skill(superpowers:testing-anti-patterns)",
+      "Bash(zip:*)",
+      "Bash(unzip:*)",
+      "Bash(grep:*)",
+      "Bash(git -C /Users/evanborden/Code/logseq-mcp-server log --all --oneline \"--grep=getCurrentGraph\\|getInfo\\|path\\|directory\")",
+      "WebFetch(domain:docs.logseq.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:plugins-doc.logseq.com)",
+      "WebFetch(domain:logseq.github.io)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "deny": [],
     "ask": []
