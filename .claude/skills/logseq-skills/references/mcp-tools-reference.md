@@ -20,18 +20,20 @@ Full-text search across all blocks with optional semantic context.
 
 **Parameters:**
 - `query` (required): Search term or phrase
-- `limit` (optional): Maximum results to return (default: 10)
-- `include_context` (optional): Include parent/child blocks for context (default: false)
+- `limit` (optional): Maximum results to return (default: 10, **recommend: 5**)
+- `include_context` (optional): Include parent/child blocks for context (default: false, **keep false unless needed**)
+
+**Context cost:** ~200-500 tokens per result. With `include_context=true`: ~500-1000 per result.
 
 **Use when:**
 - Initial exploration ("what do I know about X?")
 - Finding all mentions of a topic
-- Casting wide net before focusing
+- Needle searches ("find the X from Y")
 
 **Example:**
 ```
-logseq_search_blocks("React hooks", 15)
-logseq_search_blocks("TODO", 50, include_context=true)
+logseq_search_blocks("React hooks", 5)
+logseq_search_blocks("Nancy budget", 5)
 ```
 
 ---
@@ -189,13 +191,15 @@ logseq_search_by_relationship("React", "Testing", "references")
 
 ### logseq_build_context
 
-Gather comprehensive context for a topic in a single call.
+Gather comprehensive context for a topic in a single call. **This is often the only tool you need.**
 
 **Parameters:**
 - `topic_name` (required): Page name to build context for
-- `max_blocks` (optional): Maximum blocks to return (default: 50)
+- `max_blocks` (optional): Maximum blocks to return (default: 50, **recommend: 20**)
 - `max_related_pages` (optional): Maximum related pages (default: 10)
 - `max_references` (optional): Maximum reference blocks (default: 20)
+
+**Context cost:** ~3-8k tokens depending on limits. Still cheaper than manual aggregation.
 
 **Returns:**
 - Main page with properties
@@ -207,16 +211,15 @@ Gather comprehensive context for a topic in a single call.
 
 **Use when:**
 - Need complete picture of a topic
-- Single-call context gathering
+- "What do I know about X?" questions
 - Deep dive into specific page
 
 **Example:**
 ```
-logseq_build_context("Q4 Planning")
-logseq_build_context("React", max_blocks=100, max_related_pages=15)
+logseq_build_context("Q4 Planning", max_blocks=20)
 ```
 
-**Performance:** Replaces 5+ separate queries with one call.
+**Performance:** Replaces 5+ separate queries with one call. **Don't add search_blocks or get_backlinks after this - it already includes that information.**
 
 ---
 
@@ -251,25 +254,29 @@ logseq_get_context_for_query("Show me notes on #react and #typescript")
 
 ### logseq_query_by_date_range
 
-Query journal entries within a date range.
+Query journal entries within a date range. **Preferred tool for time-bounded questions.**
 
 **Parameters:**
 - `start_date` (required): Start date in YYYYMMDD format (e.g., 20251101)
 - `end_date` (required): End date in YYYYMMDD format (e.g., 20251130)
 - `search_term` (optional): Filter blocks containing this term
 
+**Context cost:** ~1-3k tokens for a week's worth of filtered results. Much cheaper than broad search_blocks.
+
 **Use when:**
+- User says "this week", "recently", "in November", etc.
 - Journal entry queries
-- "What was I doing last week?"
 - Time-bounded searches
 
 **Example:**
 ```
-logseq_query_by_date_range(20251201, 20251205)  # Dec 1-5, 2025
+logseq_query_by_date_range(20251201, 20251208, "Zach")  # This week's Zach mentions
 logseq_query_by_date_range(20251101, 20251130, "testing")  # November mentions of "testing"
 ```
 
 **Date Format:** Always use YYYYMMDD (20251101 = November 1, 2025)
+
+**IMPORTANT:** If timeframe is ambiguous ("the X that Y sent"), ASK USER about recency before choosing between this tool and search_blocks.
 
 ---
 

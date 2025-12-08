@@ -38,6 +38,12 @@ Use this skill when:
 - Tool comparison tables and selection guidance
 - Read this when verifying tool syntax or discovering capabilities
 
+**`references/context-efficiency.md`** - Context-efficient querying patterns
+- Token cost awareness and conservative defaults
+- Decision flowchart for tool selection
+- Anti-patterns to avoid (parallel overlapping searches, high limits)
+- **ALWAYS read this before making LogSeq queries**
+
 ## Quick Tool Selection
 
 | User Request | Best Approach |
@@ -64,11 +70,14 @@ Use this skill when:
 
 ## Core Principles
 
-1. **Start broad, then focus** - Search → Get pages → Follow backlinks
-2. **Leverage bidirectional links** - Backlinks reveal hidden context
-3. **Multiple indicators** - Check both markers (TODO) and properties (status::doing)
-4. **Synthesize, don't dump** - Provide context and recommendations, not raw data
-5. **Read-only assistance** - Never modify LogSeq structure without explicit request
+1. **Start narrow, expand if needed** - Default limit=5, include_context=false; expand only when needed
+2. **Clarify recency for ambiguous queries** - Ask user "Was this recent?" before querying when timeframe unclear
+3. **Leverage bidirectional links** - Backlinks reveal hidden context
+4. **Multiple indicators** - Check both markers (TODO) and properties (status::doing)
+5. **Synthesize, don't dump** - Provide context and recommendations, not raw data
+6. **Read-only assistance** - Never modify LogSeq structure without explicit request
+
+**CRITICAL:** Read `references/context-efficiency.md` before making LogSeq queries to avoid context waste.
 
 ## Tool Categories
 
