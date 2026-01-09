@@ -23,6 +23,7 @@ import { getContextForQuery } from './tools/get-context-for-query.js';
 import { queryByDateRange } from './tools/query-by-date-range.js';
 import { getConceptEvolution } from './tools/get-concept-evolution.js';
 import { getGraphInfo } from './tools/get-graph-info.js';
+import { listPages } from './tools/list-pages.js';
 
 // Define MCP tool schemas for all 5 tools
 const TOOLS = [
@@ -282,6 +283,20 @@ const TOOLS = [
       required: [],
     },
   },
+  {
+    name: 'logseq_list_pages',
+    description: 'List all pages in the LogSeq graph to discover available topics and vocabulary. Use this early in a conversation to understand what concepts exist before searching. Excludes journal pages.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name_contains: {
+          type: 'string',
+          description: 'Filter page names containing this text (case-insensitive)',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 /**
@@ -503,6 +518,20 @@ export function createServer(): Server {
 
         case 'logseq_get_graph_info': {
           const result = await getGraphInfo(client);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_list_pages': {
+          const result = await listPages(client, {
+            nameContains: args?.name_contains as string | undefined,
+          });
           return {
             content: [
               {
@@ -740,6 +769,20 @@ async function main() {
 
           case 'logseq_get_graph_info': {
             const result = await getGraphInfo(client);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(result, null, 2),
+                },
+              ],
+            };
+          }
+
+          case 'logseq_list_pages': {
+            const result = await listPages(client, {
+              nameContains: args?.name_contains as string | undefined,
+            });
             return {
               content: [
                 {
