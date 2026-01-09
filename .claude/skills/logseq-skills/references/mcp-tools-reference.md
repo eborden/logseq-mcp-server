@@ -1,18 +1,18 @@
 # LogSeq MCP Tools Reference
 
-Complete documentation for all 11 LogSeq MCP tools organized by category.
+Complete documentation for all 13 LogSeq MCP tools organized by category.
 
 ## Tool Categories Overview
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
-| Basic Tools | 5 tools | Core search, retrieval, and property queries |
+| Basic Tools | 6 tools | Core search, retrieval, and property queries |
 | Graph Traversal | 1 tool | Network visualization and relationship discovery |
 | Semantic Search | 1 tool | Topic-based relationship queries |
 | Context Building | 2 tools | Comprehensive multi-source context aggregation |
 | Temporal Query | 2 tools | Time-based analysis and journal queries |
 
-## Basic Tools (5 tools)
+## Basic Tools (6 tools)
 
 ### logseq_search_blocks
 
@@ -121,6 +121,35 @@ logseq_query_by_property("scheduled", "*")  # All scheduled items
 ```
 
 **Note:** Use with wildcard `"*"` to find all blocks with that property.
+
+---
+
+### logseq_list_pages
+
+List all non-journal page names to discover graph vocabulary.
+
+**Parameters:**
+- `name_contains` (optional): Filter page names containing this text (case-insensitive)
+
+**Returns:**
+- `pages`: Sorted array of page names (strings)
+- `total`: Count of pages returned
+
+**Context cost:** ~50-200 tokens depending on graph size (<1000 pages typical)
+
+**Use when:**
+- Starting a new conversation about the user's knowledge graph
+- Search queries are returning empty results (vocabulary mismatch)
+- User asks "what pages do I have about X?"
+- You need to discover what topics/concepts exist before searching
+
+**Example:**
+```
+logseq_list_pages()  # Get all non-journal pages
+logseq_list_pages(name_contains="project")  # Filter to pages containing "project"
+```
+
+**Why critical:** Prevents wasted searches for compound phrases that don't match the graph's actual vocabulary. Call this FIRST when you don't know what pages exist.
 
 ---
 
@@ -317,6 +346,7 @@ logseq_get_concept_evolution("Machine Learning")  # All time
 
 | Use Case | Best Tool(s) |
 |----------|-------------|
+| "What pages do I have?" | `list_pages` |
 | "What do I know about X?" | `build_context` or `get_context_for_query` |
 | "Show me everything connected to X" | `get_concept_network` + `get_backlinks` |
 | "How did X evolve over time?" | `get_concept_evolution` |
@@ -437,9 +467,9 @@ All temporal queries use **YYYYMMDD format:**
 
 ## Summary
 
-11 MCP tools organized into 5 categories:
+13 MCP tools organized into 5 categories:
 
-1. **Basic Tools (5)** - Core search, retrieval, property queries
+1. **Basic Tools (6)** - Core search, retrieval, property queries
 2. **Graph Traversal (1)** - Network visualization
 3. **Semantic Search (1)** - Relationship-based queries
 4. **Context Building (2)** - Comprehensive aggregation

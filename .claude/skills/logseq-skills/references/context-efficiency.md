@@ -14,7 +14,16 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 
 **Red Flag:** If you're about to set limit=20 or higher, STOP and reconsider.
 
-### 2. Clarify Recency Before Querying
+### 2. Discover Vocabulary Before Guessing
+
+If you don't know what pages exist in the user's graph:
+→ **Call `logseq_list_pages()` FIRST** before searching
+→ Review page names to understand the vocabulary
+→ Then search using terms that actually exist
+
+**Red Flag:** About to search for a compound phrase like "engineering experiment"? Check if those pages exist first with `list_pages`.
+
+### 3. Clarify Recency Before Querying
 
 If time scope is ambiguous (no explicit date/timeframe):
 → **ASK USER:** "Was this recent (last week or so) or could it be from any time?"
@@ -26,20 +35,20 @@ If user provides explicit timeframe ("this week", "in November", "recently"):
 
 **Red Flag:** About to search without knowing timeframe? ASK FIRST.
 
-### 3. Skip Context Unless Synthesizing
+### 4. Skip Context Unless Synthesizing
 
 `include_context=true` adds page metadata, refs, tags to EVERY result.
 → Only use when you need to understand relationships
 → Default to `include_context=false`
 
-### 4. One Query Beats Three Overlapping
+### 5. One Query Beats Three Overlapping
 
 - **DON'T:** search "nancy budget" AND "nancy spreadsheet" AND "budget document" in parallel
 - **DO:** Single search "nancy budget" with limit=5, expand only if no results
 
 **Red Flag:** Planning multiple searches with similar terms? Use ONE query first.
 
-### 5. Trust High-Level Tools
+### 6. Trust High-Level Tools
 
 `build_context` replaces manual aggregation chains. Don't follow it with:
 - `search_blocks` (already searched)
@@ -51,6 +60,13 @@ Only add follow-up queries if `build_context` returns insufficient results.
 ## Decision Flowchart
 
 ```
+Do you know what pages exist in the graph?
+  │
+  ├─ NO → logseq_list_pages() first
+  │        → Then continue with search using known vocabulary
+  │
+  └─ YES → [Continue below]
+
 Does the question have an EXPLICIT timeframe?
 ("this week", "in November", "today", "recently")
   │
@@ -80,6 +96,7 @@ Does the question have an EXPLICIT timeframe?
 | Multiple parallel overlapping searches | 2-3x waste | Single targeted search | 1x |
 | `build_context` + `search_blocks` + `get_backlinks` | 15-25k | `build_context` alone | 5-8k |
 | "Backup" searches "just in case" | +5-10k each | Expand ONLY if needed | 0 |
+| Searching for compound phrases blindly | wasted turns | `list_pages` → targeted search | 1 extra call |
 
 ## Common Rationalizations (Don't Fall For These)
 
@@ -98,4 +115,6 @@ Does the question have an EXPLICIT timeframe?
 | "this week" / explicit time | `query_by_date_range` | search_term filter | No |
 | "the X that Y sent" | - | - | YES - about recency |
 | "what do I know about X" | `build_context` | max_blocks=20 | No |
+| "what pages do I have" | `list_pages` | name_contains filter | No |
+| searching blind | `list_pages` | - | No - call first |
 | "find X" (general) | `search_blocks` | limit=5 | Maybe |

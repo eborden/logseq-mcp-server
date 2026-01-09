@@ -34,7 +34,7 @@ Use this skill when:
 - Read this when user asks for research help, task management, or graph exploration
 
 **`references/mcp-tools-reference.md`** - Complete MCP tool documentation
-- All 11 LogSeq MCP tools with parameters and examples
+- All 13 LogSeq MCP tools with parameters and examples
 - Tool comparison tables and selection guidance
 - Read this when verifying tool syntax or discovering capabilities
 
@@ -52,6 +52,7 @@ Use this skill when:
 | "Summarize my week" | Load skills/weekly-summary.md |
 | "What do I know about X?" | Load context-builder.md → Workflow 1 (Research Assistant) |
 | "Show connections to X" | Load context-builder.md → Workflow 5 (Graph Exploration) |
+| "What pages exist?" | Use `logseq_list_pages` for vocabulary discovery |
 | "How did X evolve over time?" | Load context-builder.md → Workflow 6 (Temporal Analysis) |
 | "Need tool syntax" | Load mcp-tools-reference.md |
 
@@ -76,12 +77,13 @@ Use this skill when:
 4. **Multiple indicators** - Check both markers (TODO) and properties (status::doing)
 5. **Synthesize, don't dump** - Provide context and recommendations, not raw data
 6. **Read-only assistance** - Never modify LogSeq structure without explicit request
+7. **Discover before searching** - Call `list_pages` when you don't know the graph vocabulary
 
 **CRITICAL:** Read `references/context-efficiency.md` before making LogSeq queries to avoid context waste.
 
 ## Tool Categories
 
-**Basic Tools (5):** search_blocks, get_page, get_backlinks, get_block, query_by_property
+**Basic Tools (6):** search_blocks, get_page, get_backlinks, get_block, query_by_property, list_pages
 **Graph Traversal (1):** get_concept_network
 **Semantic Search (1):** search_by_relationship
 **Context Building (2):** build_context, get_context_for_query
