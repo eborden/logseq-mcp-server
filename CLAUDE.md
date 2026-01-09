@@ -2,10 +2,10 @@
 
 ## Overview
 
-This is an MCP (Model Context Protocol) server that provides Claude with 12 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
+This is an MCP (Model Context Protocol) server that provides Claude with 13 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
 
 **Key Stats:**
-- 12 MCP tools for graph operations, search, and temporal queries
+- 13 MCP tools for graph operations, search, and temporal queries
 - 191 test cases (unit + integration + property-based)
 - 70-88% API call reduction via Datalog optimization
 - Direct Datalog implementation (simplified architecture as of Nov 2024)
