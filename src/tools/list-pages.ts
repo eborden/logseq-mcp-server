@@ -30,8 +30,8 @@ export async function listPages(
   }
 
   const pages = filtered
-    .map(p => p.name)
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(p => p.originalName || p.name);
 
   return { pages, total: pages.length };
 }

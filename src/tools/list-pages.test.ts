@@ -22,7 +22,7 @@ describe('listPages', () => {
     const result = await listPages(mockClient);
 
     expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getAllPages');
-    expect(result.pages).toEqual(['alpha', 'beta']);
+    expect(result.pages).toEqual(['Alpha', 'Beta']);
     expect(result.total).toBe(2);
   });
 
@@ -36,7 +36,7 @@ describe('listPages', () => {
 
     const result = await listPages(mockClient);
 
-    expect(result.pages).toEqual(['project']);
+    expect(result.pages).toEqual(['Project']);
     expect(result.total).toBe(1);
   });
 
@@ -50,7 +50,7 @@ describe('listPages', () => {
 
     const result = await listPages(mockClient, { nameContains: 'EXP' });
 
-    expect(result.pages).toEqual(['experiment']);
+    expect(result.pages).toEqual(['Experiment']);
   });
 
   it('should handle null response', async () => {
@@ -77,6 +77,21 @@ describe('listPages', () => {
 
     const result = await listPages(mockClient);
 
-    expect(result.pages).toEqual(['alpha', 'zebra']);
+    expect(result.pages).toEqual(['Alpha', 'Zebra']);
+  });
+
+  it('should sort by lowercase name but return original casing', async () => {
+    const mockPages: PageEntity[] = [
+      { id: 1, uuid: 'u1', name: 'api', originalName: 'API', content: '' },
+      { id: 2, uuid: 'u2', name: 'apple', originalName: 'Apple', content: '' },
+      { id: 3, uuid: 'u3', name: 'aaa', originalName: 'AAA', content: '' },
+    ];
+    (mockClient.callAPI as any).mockResolvedValue(mockPages);
+
+    const result = await listPages(mockClient);
+
+    // Sorted by lowercase: aaa, api, apple
+    // Returns original casing: AAA, API, Apple
+    expect(result.pages).toEqual(['AAA', 'API', 'Apple']);
   });
 });
