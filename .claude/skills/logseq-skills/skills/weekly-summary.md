@@ -12,11 +12,36 @@ Identify the work week to summarize:
 - If the user says "this week," use the current week's Monday through today (or Friday if complete)
 - The Monday date becomes the identifier for the weekly summary file
 
+### Step 1.5: Pre-Flight Validation
+
+**MANDATORY CHECKS - Do not proceed without completing ALL:**
+
+1. **Verify current year**
+   - Check system date or ask user to confirm the year
+   - Common error: Using wrong year in date calculations (e.g., using 2025 when it's 2026)
+
+2. **Search for unresolved items**
+   - Query TODO markers: `logseq_query_by_property(property_key="marker", property_value="TODO", slim_results=true)`
+   - Search DOING items: `logseq_search_blocks(query="DOING", slim_results=true, limit=10)`
+   - Filter results to only items from the current week's date range
+
+3. **Load previous context (MANDATORY)**
+   - List weekly summaries: `logseq_list_pages(name_contains="Weekly")`
+   - Read 2-3 most recent weekly summaries to understand:
+     - Ongoing situations (personnel, budget, initiatives)
+     - Trend trajectories (escalating, improving, stable)
+     - Carry-over concerns
+
+**If any check is skipped, STOP and complete it before proceeding.**
+
 ### Step 2: Query LogSeq Journal Entries
 
 Use the `mcp__logseq__logseq_query_by_date_range` tool to fetch journal entries:
-- `start_date`: Monday in YYYYMMDD format (e.g., 20251201)
-- `end_date`: Friday in YYYYMMDD format (e.g., 20251205)
+- `start_date`: Monday in YYYYMMDD format (e.g., 20260120)
+- `end_date`: Friday in YYYYMMDD format (e.g., 20260123)
+- `slim_results`: true (reduces token usage by 40-50%)
+
+**Token efficiency note:** Always use `slim_results=true` unless user explicitly requests full context.
 
 ### Step 3: Compress and Select Content
 
@@ -48,6 +73,16 @@ Use the `mcp__logseq__logseq_query_by_date_range` tool to fetch journal entries:
 - **No theme scaffolding** - flat list, themes emerge from links
 - **Week gist** (1-2 sentences) - What was this week about overall?
 
+**Contextualization with Previous Weeks:**
+
+When compressing signals, consider trend context from previous summaries (loaded in Step 1.5):
+- **Escalating situations**: Topic that was minor concern now critical (e.g., "Technical debt now blocking feature delivery" vs. previous "considering refactor")
+- **Trend changes**: Direction shifts (e.g., "Team velocity improving after tooling changes" vs. previous "multiple sprint misses")
+- **First occurrences**: Novel events worth flagging (e.g., "**Unusual:** First customer escalation in 6 months")
+- **Continuing themes**: Persistent topics across weeks (e.g., "Hiring still stalled - third week waiting on approvals")
+
+This context transforms raw signals into meaningful narrative progression.
+
 **When to use emotional markers:**
 - **Win:** Achievement that felt satisfying (milestone reached, breakthrough, completion)
 - **Frustration:** Persistent friction with no clear resolution path (not one-time issues)
@@ -59,8 +94,14 @@ Use the `mcp__logseq__logseq_query_by_date_range` tool to fetch journal entries:
 
 1. **Week Gist** (1-2 sentences) - Overall theme
 2. **Signals** (max 10 items) - Salient events with reconstruction cues
-3. **Unresolved** (block refs) - `((uuid))` for open TODOs
+3. **Unresolved** (block refs) - `((uuid))` for open TODOs from Pre-Flight checks
 4. **Personal** (if any) - Non-work items worth remembering
+
+**Finding Unresolved Items:**
+- Include TODOs/DOING items from Pre-Flight checks (Step 1.5)
+- Only include items that are ACTUALLY unresolved (check DONE status)
+- Use block UUIDs `((uuid))` format for proper linking
+- If none exist, leave section present but empty (don't omit section)
 
 ### Step 4: Create the Summary Page
 
@@ -71,7 +112,7 @@ Write the summary to LogSeq pages directory using the naming convention:
 
 **File structure**:
 ```markdown
-tags:: [[Weekly Summary]], [[Mon Xth, 2025]], [[Tue Xth, 2025]], [[Wed Xth, 2025]], [[Thu Xth, 2025]], [[Fri Xth, 2025]]
+tags:: [[Weekly Summary]], [[Mon Xth, 2026]], [[Tue Xth, 2026]], [[Wed Xth, 2026]], [[Thu Xth, 2026]], [[Fri Xth, 2026]]
 
 - **Week**: [1-2 sentence gist of what this week was about]
 - ## Signals
@@ -83,6 +124,7 @@ tags:: [[Weekly Summary]], [[Mon Xth, 2025]], [[Tue Xth, 2025]], [[Wed Xth, 2025
 - ## Unresolved
 	- ((block-uuid-1))
 	- ((block-uuid-2))
+	- [Leave empty if no unresolved items, but section is MANDATORY]
 - ## Personal
 	- [If any non-work items]
 ```
@@ -124,7 +166,7 @@ tags:: [[Weekly Summary]], [[Mon Xth, 2025]], [[Tue Xth, 2025]], [[Wed Xth, 2025
 
 **AFTER (compressed with salience):**
 ```markdown
-tags:: [[Weekly Summary]], [[Dec 1st, 2025]], [[Dec 2nd, 2025]], [[Dec 3rd, 2025]], [[Dec 4th, 2025]], [[Dec 5th, 2025]]
+tags:: [[Weekly Summary]], [[Dec 1st, 2026]], [[Dec 2nd, 2026]], [[Dec 3rd, 2026]], [[Dec 4th, 2026]], [[Dec 5th, 2026]]
 
 - **Week**: Platform migration sprint - mostly execution with persistent alignment friction
 - ## Signals
