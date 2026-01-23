@@ -83,7 +83,7 @@ describe('LogseqClient', () => {
 
       await expect(
         client.callAPI('logseq.Editor.getBlock', ['block-uuid'])
-      ).rejects.toThrow('Failed to connect to LogSeq API');
+      ).rejects.toThrow(/Cannot connect to LogSeq/);
     });
 
     it('should throw error on network timeout', async () => {
@@ -93,7 +93,7 @@ describe('LogseqClient', () => {
 
       await expect(
         client.callAPI('logseq.Editor.getBlock', ['block-uuid'])
-      ).rejects.toThrow('Failed to connect to LogSeq API');
+      ).rejects.toThrow(/Cannot connect to LogSeq/);
     });
 
     it('should handle API error response', async () => {

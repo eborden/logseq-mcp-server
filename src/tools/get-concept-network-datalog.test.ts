@@ -55,7 +55,7 @@ describe('getConceptNetwork (Datalog)', () => {
 
     await expect(
       getConceptNetwork(mockClient, 'NonExistent', 2)
-    ).rejects.toThrow('Page not found: NonExistent');
+    ).rejects.toThrow(/Page not found/);
   });
 
   it('should handle page with no connections', async () => {

@@ -166,7 +166,7 @@ describe('Graph Traversal Tools Integration Tests', () => {
     it('should throw error for non-existent page', async () => {
       await expect(
         getConceptNetwork(client, 'NonExistentConceptForGraphTools12345', 2)
-      ).rejects.toThrow('Page not found');
+      ).rejects.toThrow(/Page not found/);
     });
   });
 });

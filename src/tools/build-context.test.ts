@@ -50,7 +50,7 @@ describe('buildContextForTopic', () => {
 
     await expect(
       buildContextForTopic(mockClient, 'NonExistent', {})
-    ).rejects.toThrow('Page not found: NonExistent');
+    ).rejects.toThrow(/Page not found/);
   });
 
   it('should respect limits from options', async () => {

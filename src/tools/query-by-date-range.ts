@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity, BlockEntity } from '../types.js';
+import { InvalidParameterError } from '../errors.js';
 
 export interface DateRangeResult {
   dateRange: {
@@ -54,13 +55,28 @@ export async function queryByDateRange(
 ): Promise<DateRangeResult> {
   // Validate dates
   if (!isValidDateFormat(startDate)) {
-    throw new Error(`Invalid date format: ${startDate}`);
+    throw new InvalidParameterError(
+      'start_date',
+      startDate,
+      'Date in YYYYMMDD format (8 digits, valid year/month/day)',
+      '20251115 for November 15, 2025'
+    );
   }
   if (!isValidDateFormat(endDate)) {
-    throw new Error(`Invalid date format: ${endDate}`);
+    throw new InvalidParameterError(
+      'end_date',
+      endDate,
+      'Date in YYYYMMDD format (8 digits, valid year/month/day)',
+      '20251120 for November 20, 2025'
+    );
   }
   if (startDate > endDate) {
-    throw new Error('Start date must be before or equal to end date');
+    throw new InvalidParameterError(
+      'date_range',
+      `${startDate} to ${endDate}`,
+      'start_date must be before or equal to end_date',
+      'start_date: 20251115, end_date: 20251120'
+    );
   }
 
   // Query for all journal pages using Editor API

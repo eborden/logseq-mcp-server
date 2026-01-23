@@ -24,12 +24,13 @@ import { queryByDateRange } from './tools/query-by-date-range.js';
 import { getConceptEvolution } from './tools/get-concept-evolution.js';
 import { getGraphInfo } from './tools/get-graph-info.js';
 import { listPages } from './tools/list-pages.js';
+import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 
-// Define MCP tool schemas for all 5 tools
+// Define MCP tool schemas for all 13 tools
 const TOOLS = [
   {
     name: 'logseq_get_page',
-    description: 'Get a LogSeq page by name with optional child blocks/pages',
+    description: TOOL_DESCRIPTIONS.logseq_get_page,
     inputSchema: {
       type: 'object',
       properties: {
@@ -48,7 +49,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_get_backlinks',
-    description: 'Get all pages/blocks that link to a specific page',
+    description: TOOL_DESCRIPTIONS.logseq_get_backlinks,
     inputSchema: {
       type: 'object',
       properties: {
@@ -62,7 +63,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_get_block',
-    description: 'Get a LogSeq block by UUID with optional child blocks',
+    description: TOOL_DESCRIPTIONS.logseq_get_block,
     inputSchema: {
       type: 'object',
       properties: {
@@ -81,7 +82,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_search_blocks',
-    description: 'Search for blocks containing specific text with optional semantic context',
+    description: TOOL_DESCRIPTIONS.logseq_search_blocks,
     inputSchema: {
       type: 'object',
       properties: {
@@ -104,7 +105,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_query_by_property',
-    description: 'Query blocks by a specific property name and value',
+    description: TOOL_DESCRIPTIONS.logseq_query_by_property,
     inputSchema: {
       type: 'object',
       properties: {
@@ -122,7 +123,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_get_concept_network',
-    description: 'Get network of pages related to a concept with nodes and edges',
+    description: TOOL_DESCRIPTIONS.logseq_get_concept_network,
     inputSchema: {
       type: 'object',
       properties: {
@@ -141,7 +142,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_search_by_relationship',
-    description: 'Search for blocks based on relationship between topics (e.g., blocks about X that reference Y)',
+    description: TOOL_DESCRIPTIONS.logseq_search_by_relationship,
     inputSchema: {
       type: 'object',
       properties: {
@@ -169,7 +170,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_build_context',
-    description: 'Build comprehensive context for a topic including related pages, blocks, and references',
+    description: TOOL_DESCRIPTIONS.logseq_build_context,
     inputSchema: {
       type: 'object',
       properties: {
@@ -203,7 +204,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_get_context_for_query',
-    description: 'Get comprehensive context for a natural language query by extracting topics and gathering related information',
+    description: TOOL_DESCRIPTIONS.logseq_get_context_for_query,
     inputSchema: {
       type: 'object',
       properties: {
@@ -227,7 +228,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_query_by_date_range',
-    description: 'Query journal entries within a date range with optional search filter',
+    description: TOOL_DESCRIPTIONS.logseq_query_by_date_range,
     inputSchema: {
       type: 'object',
       properties: {
@@ -249,7 +250,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_get_concept_evolution',
-    description: 'Track how a concept evolves over time through journal entries',
+    description: TOOL_DESCRIPTIONS.logseq_get_concept_evolution,
     inputSchema: {
       type: 'object',
       properties: {
@@ -276,7 +277,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_get_graph_info',
-    description: 'Get information about the current LogSeq graph including filesystem path',
+    description: TOOL_DESCRIPTIONS.logseq_get_graph_info,
     inputSchema: {
       type: 'object',
       properties: {},
@@ -285,7 +286,7 @@ const TOOLS = [
   },
   {
     name: 'logseq_list_pages',
-    description: 'List all pages in the LogSeq graph to discover available topics and vocabulary. Use this early in a conversation to understand what concepts exist before searching. Excludes journal pages.',
+    description: TOOL_DESCRIPTIONS.logseq_list_pages,
     inputSchema: {
       type: 'object',
       properties: {
@@ -302,7 +303,7 @@ const TOOLS = [
 /**
  * Create and configure the MCP server
  */
-export function createServer(): Server {
+export function createServer(client: LogseqClient): Server {
   const server = new Server(
     {
       name: 'logseq-mcp-server',
@@ -315,9 +316,6 @@ export function createServer(): Server {
     }
   );
 
-  // Load config and create client (will be initialized in main)
-  let client: LogseqClient | null = null;
-
   // Handler for listing available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
@@ -327,9 +325,6 @@ export function createServer(): Server {
 
   // Handler for calling tools
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (!client) {
-      throw new Error('LogSeq client not initialized');
-    }
 
     const { name, arguments: args } = request.params;
 
@@ -574,241 +569,8 @@ async function main() {
     // Create LogSeq client
     const client = new LogseqClient(config);
 
-    // Create and configure server
-    const server = createServer();
-
-    // Set the client on the server instance (using a closure hack)
-    // This is a workaround since we can't easily pass the client through the handler
-    const originalHandler = server.setRequestHandler.bind(server);
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      // Re-bind client in closure
-      const { name, arguments: args } = request.params;
-
-      try {
-        switch (name) {
-          case 'logseq_get_page': {
-            const pageName = args?.page_name as string;
-            const includeChildren = (args?.include_children as boolean) ?? false;
-            const result = await getPage(client, pageName, includeChildren);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_backlinks': {
-            const pageName = args?.page_name as string;
-            const result = await getBacklinks(client, pageName);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_block': {
-            const blockUuid = args?.block_uuid as string;
-            const includeChildren = (args?.include_children as boolean) ?? false;
-            const result = await getBlock(client, blockUuid, includeChildren);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_search_blocks': {
-            const query = args?.query as string;
-            const limit = args?.limit as number | undefined;
-            const includeContext = (args?.include_context as boolean) ?? false;
-            let result = await searchBlocks(client, query, limit, includeContext);
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_query_by_property': {
-            const propertyKey = args?.property_key as string;
-            const propertyValue = args?.property_value as string;
-            const result = await queryByProperty(client, propertyKey, propertyValue);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_concept_network': {
-            const conceptName = args?.concept_name as string;
-            const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
-            const result = await getConceptNetwork(client, conceptName, maxDepth);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_search_by_relationship': {
-            const topicA = args?.topic_a as string;
-            const topicB = args?.topic_b as string;
-            const relationshipType = args?.relationship_type as any;
-            const maxDistance = (args?.max_distance as number) ?? 2;
-            const result = await searchByRelationship(
-              client,
-              topicA,
-              topicB,
-              relationshipType,
-              maxDistance
-            );
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_build_context': {
-            const topicName = args?.topic_name as string;
-            const options = {
-              maxBlocks: args?.max_blocks as number | undefined,
-              maxRelatedPages: args?.max_related_pages as number | undefined,
-              maxReferences: args?.max_references as number | undefined,
-              includeTemporalContext: args?.include_temporal_context as boolean | undefined
-            };
-            const result = await buildContextForTopic(client, topicName, options);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_context_for_query': {
-            const query = args?.query as string;
-            const options = {
-              maxTopics: args?.max_topics as number | undefined,
-              maxSearchResults: args?.max_search_results as number | undefined
-            };
-            const result = await getContextForQuery(client, query, options);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_query_by_date_range': {
-            const startDate = args?.start_date as number;
-            const endDate = args?.end_date as number;
-            const searchTerm = args?.search_term as string | undefined;
-            const result = await queryByDateRange(
-              client,
-              startDate,
-              endDate,
-              searchTerm
-            );
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_concept_evolution': {
-            const conceptName = args?.concept_name as string;
-            const options = {
-              startDate: args?.start_date as number | undefined,
-              endDate: args?.end_date as number | undefined,
-              groupBy: args?.group_by as any
-            };
-            const result = await getConceptEvolution(client, conceptName, options);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_get_graph_info': {
-            const result = await getGraphInfo(client);
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          case 'logseq_list_pages': {
-            const result = await listPages(client, {
-              nameContains: args?.name_contains as string | undefined,
-            });
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(result, null, 2),
-                },
-              ],
-            };
-          }
-
-          default:
-            throw new Error(`Unknown tool: ${name}`);
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ error: errorMessage }, null, 2),
-            },
-          ],
-          isError: true,
-        };
-      }
-    });
+    // Create and configure server with client
+    const server = createServer(client);
 
     // Create transport and connect
     const transport = new StdioServerTransport();

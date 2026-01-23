@@ -188,18 +188,18 @@ describe('Temporal Queries Integration Tests', () => {
       // Test invalid start date
       await expect(
         queryByDateRange(client, 99999999, 20250131)
-      ).rejects.toThrow('Invalid date format');
+      ).rejects.toThrow(/Invalid parameter.*start_date/);
 
       // Test invalid end date
       await expect(
         queryByDateRange(client, 20250101, 12345)
-      ).rejects.toThrow('Invalid date format');
+      ).rejects.toThrow(/Invalid parameter.*end_date/);
     });
 
     it('should throw error when start date is after end date', async () => {
       await expect(
         queryByDateRange(client, 20250131, 20250101)
-      ).rejects.toThrow('Start date must be before or equal to end date');
+      ).rejects.toThrow(/Invalid parameter.*date_range/);
     });
 
     it('should return journal entries for last 60 days', async () => {

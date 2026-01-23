@@ -2,6 +2,8 @@ import { LogseqClient } from '../client.js';
 import { PageEntity, BlockEntity } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { getBacklinks } from './get-backlinks.js';
+import { PageNotFoundError } from '../errors.js';
+import Fuzzysort from 'fuzzysort';
 
 export interface ContextOptions {
   maxBlocks?: number;
@@ -61,9 +63,27 @@ export async function buildContextForTopic(
   const pageQuery = DatalogQueryBuilder.getPage(topicName);
   const pageResults = await client.executeDatalogQuery<Array<[any]>>(pageQuery);
 
-  // If no results, page doesn't exist
+  // If no results, page doesn't exist - provide fuzzy match suggestions
   if (!pageResults || pageResults.length === 0) {
-    throw new Error(`Page not found: ${topicName}`);
+    // Get fuzzy match suggestions
+    try {
+      const allPages = await client.callAPI<PageEntity[]>('logseq.Editor.getAllPages', []);
+      if (allPages && allPages.length > 0) {
+        const matches = Fuzzysort.go(topicName, allPages, {
+          key: 'originalName',
+          limit: 3,
+          threshold: -10000
+        });
+        const suggestions = matches.map(m => m.obj.originalName);
+        throw new PageNotFoundError(topicName, suggestions);
+      }
+    } catch (error) {
+      if (error instanceof PageNotFoundError) {
+        throw error;
+      }
+    }
+
+    throw new PageNotFoundError(topicName);
   }
 
   const mainPage = pageResults[0][0];

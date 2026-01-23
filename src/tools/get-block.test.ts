@@ -57,7 +57,7 @@ describe('getBlock', () => {
 
     await expect(
       getBlock(mockClient, 'nonexistent-uuid', false)
-    ).rejects.toThrow('Block not found: nonexistent-uuid');
+    ).rejects.toThrow(/Block not found/);
   });
 
   it('should return BlockEntity with all properties', async () => {

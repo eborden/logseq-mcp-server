@@ -162,7 +162,7 @@ describe('Context Building Tools Integration Tests', () => {
     it('should throw error for non-existent page', async () => {
       await expect(
         buildContextForTopic(client, 'NonExistentPageForContextBuilding12345')
-      ).rejects.toThrow('Page not found');
+      ).rejects.toThrow(/Page not found/);
     });
 
     it('should aggregate related pages correctly', async () => {

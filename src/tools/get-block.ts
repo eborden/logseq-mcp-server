@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity } from '../types.js';
+import { BlockNotFoundError } from '../errors.js';
 
 /**
  * Get a LogSeq block by UUID
@@ -7,7 +8,7 @@ import { BlockEntity } from '../types.js';
  * @param blockUuid - UUID of the block to retrieve
  * @param includeChildren - Whether to include child blocks
  * @returns BlockEntity
- * @throws Error if block not found
+ * @throws BlockNotFoundError if block not found
  */
 export async function getBlock(
   client: LogseqClient,
@@ -30,7 +31,7 @@ export async function getBlock(
 
   // Check if block was found
   if (result === null) {
-    throw new Error(`Block not found: ${blockUuid}`);
+    throw new BlockNotFoundError(blockUuid);
   }
 
   return result;

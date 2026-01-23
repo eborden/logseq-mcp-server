@@ -1,4 +1,5 @@
 import { LogseqMCPConfig, LogseqAPIRequest, LogseqAPIResponse } from './types.js';
+import { LogSeqNotRunningError } from './errors.js';
 
 /**
  * HTTP client for LogSeq API
@@ -53,14 +54,19 @@ export class LogseqClient {
       return responseData as T;
     } catch (error) {
       // Handle connection errors (ECONNREFUSED, ETIMEDOUT, etc.)
-      if (error instanceof Error && 'code' in error) {
+      if (error instanceof Error) {
+        // Check for network/connection errors
         const errorCode = (error as any).code;
-        if (errorCode === 'ECONNREFUSED' || errorCode === 'ETIMEDOUT') {
-          throw new Error(`Failed to connect to LogSeq API at ${url}: ${error.message}`);
+        if (errorCode === 'ECONNREFUSED' ||
+            errorCode === 'ETIMEDOUT' ||
+            errorCode === 'ENOTFOUND' ||
+            error.message.includes('fetch failed') ||
+            error.message.includes('ECONNREFUSED')) {
+          throw new LogSeqNotRunningError(this.config.apiUrl, error);
         }
       }
 
-      // Re-throw other errors
+      // Re-throw other errors (API errors, JSON parse errors, etc.)
       throw error;
     }
   }

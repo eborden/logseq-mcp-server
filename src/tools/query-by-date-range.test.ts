@@ -100,6 +100,6 @@ describe('queryByDateRange', () => {
     } as unknown as LogseqClient;
 
     await expect(queryByDateRange(mockClient, 99999999, 20251120))
-      .rejects.toThrow('Invalid date format');
+      .rejects.toThrow(/Invalid parameter.*start_date/);
   });
 });

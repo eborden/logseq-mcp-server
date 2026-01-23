@@ -75,3 +75,17 @@ export interface GraphInfo {
   name: string;
   path: string;
 }
+
+// Pagination metadata for paginated results
+export interface PaginationMetadata {
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+// Generic paginated result wrapper
+export interface PaginatedResult<T> {
+  results: T[];
+  pagination: PaginationMetadata;
+}

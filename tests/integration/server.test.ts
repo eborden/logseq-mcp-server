@@ -127,7 +127,7 @@ describe('LogSeq MCP Server Integration Tests', () => {
     it('should throw error for non-existent page', async () => {
       await expect(
         getPage(client, 'NonExistentPageThatShouldNeverExist12345', false)
-      ).rejects.toThrow('Page not found');
+      ).rejects.toThrow(/Page not found/);
     });
   });
 

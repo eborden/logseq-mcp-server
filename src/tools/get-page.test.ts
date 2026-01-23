@@ -53,7 +53,7 @@ describe('getPage', () => {
 
     await expect(
       getPage(mockClient, 'nonexistent-page', false)
-    ).rejects.toThrow('Page not found: nonexistent-page');
+    ).rejects.toThrow(/Page not found/);
   });
 
   it('should return PageEntity with all properties', async () => {
