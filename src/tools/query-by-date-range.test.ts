@@ -102,4 +102,195 @@ describe('queryByDateRange', () => {
     await expect(queryByDateRange(mockClient, 99999999, 20251120))
       .rejects.toThrow(/Invalid parameter.*start_date/);
   });
+
+  // Slim results tests
+  describe('slim results mode', () => {
+    it('should return slim results when slimResults=true', async () => {
+      const mockClient = {
+        callAPI: vi.fn()
+      } as unknown as LogseqClient;
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 1,
+          uuid: 'uuid-1',
+          name: 'nov 15th, 2025',
+          originalName: 'Nov 15th, 2025',
+          journalDay: 20251115,
+          'journal?': true
+        }
+      ]);
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Meeting with #team about [[Project]]',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 }
+        }
+      ]);
+
+      const result = await queryByDateRange(
+        mockClient,
+        20251115,
+        20251115,
+        undefined,
+        true
+      );
+
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0]).toHaveProperty('pageName', 'Nov 15th, 2025');
+      expect(result.entries[0]).not.toHaveProperty('page');
+
+      const block = result.entries[0].blocks[0];
+      expect(block).toHaveProperty('content', 'Meeting with #team about [[Project]]');
+      expect(block).toHaveProperty('pageName', 'Nov 15th, 2025');
+      expect(block).toHaveProperty('tags', ['team']);
+      expect(block).toHaveProperty('pageRefs', ['Project']);
+      expect(block).toHaveProperty('uuid', 'block-uuid');
+      expect(block).not.toHaveProperty('id');
+      expect(block).not.toHaveProperty('page');
+    });
+
+    it('should preserve block hierarchy in slim results', async () => {
+      const mockClient = {
+        callAPI: vi.fn()
+      } as unknown as LogseqClient;
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 1,
+          uuid: 'uuid-1',
+          name: 'nov 15th, 2025',
+          originalName: 'Nov 15th, 2025',
+          journalDay: 20251115,
+          'journal?': true
+        }
+      ]);
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Parent block',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 },
+          children: [
+            {
+              id: 11,
+              uuid: 'child-uuid',
+              content: 'Child block',
+              page: { id: 1 },
+              parent: { id: 10 },
+              left: { id: 10 }
+            }
+          ]
+        }
+      ]);
+
+      const result = await queryByDateRange(
+        mockClient,
+        20251115,
+        20251115,
+        undefined,
+        true
+      );
+
+      const block = result.entries[0].blocks[0];
+      expect(block.children).toHaveLength(1);
+      expect(block.children![0].content).toBe('Child block');
+      expect(block.children![0].uuid).toBe('child-uuid');
+      expect(block.children![0]).not.toHaveProperty('id');
+    });
+
+    it('should return full results when slimResults=false (default)', async () => {
+      const mockClient = {
+        callAPI: vi.fn()
+      } as unknown as LogseqClient;
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 1,
+          uuid: 'uuid-1',
+          name: 'nov 15th, 2025',
+          originalName: 'Nov 15th, 2025',
+          journalDay: 20251115,
+          'journal?': true
+        }
+      ]);
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Test block',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 }
+        }
+      ]);
+
+      const result = await queryByDateRange(
+        mockClient,
+        20251115,
+        20251115,
+        undefined,
+        false
+      );
+
+      expect(result.entries[0]).toHaveProperty('page');
+      expect(result.entries[0]).not.toHaveProperty('pageName');
+
+      const block = result.entries[0].blocks[0];
+      expect(block).toHaveProperty('id', 10);
+      expect(block).toHaveProperty('uuid', 'block-uuid');
+      expect(block).toHaveProperty('page');
+    });
+
+    it('should omit empty fields in slim results', async () => {
+      const mockClient = {
+        callAPI: vi.fn()
+      } as unknown as LogseqClient;
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 1,
+          uuid: 'uuid-1',
+          name: 'nov 15th, 2025',
+          originalName: 'Nov 15th, 2025',
+          journalDay: 20251115,
+          'journal?': true
+        }
+      ]);
+
+      (mockClient.callAPI as any).mockResolvedValueOnce([
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Simple block with no extras',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 }
+        }
+      ]);
+
+      const result = await queryByDateRange(
+        mockClient,
+        20251115,
+        20251115,
+        undefined,
+        true
+      );
+
+      const block = result.entries[0].blocks[0];
+      expect(block).not.toHaveProperty('properties');
+      expect(block).not.toHaveProperty('marker');
+      expect(block).not.toHaveProperty('tags');
+      expect(block).not.toHaveProperty('pageRefs');
+      expect(block).not.toHaveProperty('children');
+    });
+  });
 });

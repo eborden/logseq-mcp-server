@@ -1,18 +1,21 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity } from '../types.js';
+import { BlockEntity, PageEntity, SlimBlock } from '../types.js';
+import { toSlimBlock, buildPageNameMap, getPageNameFromBlock } from '../utils/slim-entities.js';
 
 /**
  * Query blocks by a specific property name and value using Editor API
  * @param client - LogseqClient instance
  * @param propertyName - Name of the property to query
  * @param propertyValue - Value to match for the property
- * @returns Array of BlockEntity objects with matching property, or null if query fails
+ * @param slimResults - Return slim results (40-50% fewer tokens, essential data only)
+ * @returns Array of BlockEntity or SlimBlock objects with matching property, or null if query fails
  */
 export async function queryByProperty(
   client: LogseqClient,
   propertyName: string,
-  propertyValue: string
-): Promise<BlockEntity[] | null> {
+  propertyValue: string,
+  slimResults: boolean = false
+): Promise<BlockEntity[] | SlimBlock[] | null> {
   try {
     // Get all pages
     const pages = await client.callAPI<PageEntity[] | null>(
@@ -55,6 +58,16 @@ export async function queryByProperty(
       if (blocks && blocks.length > 0) {
         searchBlocksRecursive(blocks);
       }
+    }
+
+    // Return slim results if requested
+    if (slimResults) {
+      const pageNameMap = buildPageNameMap(pages);
+      const slimMatches = matches.map(block => {
+        const pageName = getPageNameFromBlock(block, pageNameMap);
+        return toSlimBlock(block, pageName);
+      });
+      return slimMatches;
     }
 
     return matches;

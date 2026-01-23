@@ -415,4 +415,192 @@ describe('searchBlocks', () => {
     expect(result).toHaveLength(1);
     expect(result![0]).not.toHaveProperty('context');
   });
+
+  // Slim results tests
+  describe('slim results mode', () => {
+    it('should return slim results when slimResults=true', async () => {
+      const mockPages: PageEntity[] = [
+        { id: 1, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks: BlockEntity[] = [
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Search with #tag and [[Reference]]',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 }
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await searchBlocks(mockClient, 'Search', 100, false, true);
+
+      expect(result).toHaveLength(1);
+      const block = result![0];
+      expect(block).toHaveProperty('content', 'Search with #tag and [[Reference]]');
+      expect(block).toHaveProperty('pageName', 'Test Page');
+      expect(block).toHaveProperty('tags', ['tag']);
+      expect(block).toHaveProperty('pageRefs', ['Reference']);
+      expect(block).toHaveProperty('uuid', 'block-uuid');
+      expect(block).not.toHaveProperty('id');
+      expect(block).not.toHaveProperty('page');
+    });
+
+    it('should return slim results with context when both includeContext and slimResults are true', async () => {
+      const mockPages: PageEntity[] = [
+        {
+          id: 100,
+          uuid: 'page-uuid-1',
+          name: 'container page',
+          originalName: 'Container Page',
+          properties: { type: 'notes' },
+          'journal?': false
+        }
+      ];
+
+      const mockBlocks: BlockEntity[] = [
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Block with [[Link]] and #hashtag',
+          page: { id: 100 },
+          parent: { id: 100 },
+          left: { id: 100 }
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await searchBlocks(mockClient, 'Block', 100, true, true);
+
+      expect(result).toHaveLength(1);
+      const block = result![0];
+
+      // Check slim block properties
+      expect(block).toHaveProperty('content');
+      expect(block).toHaveProperty('pageName', 'Container Page');
+      expect(block).toHaveProperty('uuid', 'block-uuid');
+      expect(block).not.toHaveProperty('id');
+
+      // Check slim context
+      expect(block).toHaveProperty('context');
+      expect(block.context!.page).toEqual({
+        name: 'container page',
+        originalName: 'Container Page',
+        properties: { type: 'notes' }
+      });
+      expect(block.context!.references).toEqual(['Link']);
+      expect(block.context!.tags).toEqual(['hashtag']);
+
+      // Verify context.page doesn't have verbose fields
+      expect(block.context!.page).not.toHaveProperty('id');
+      expect(block.context!.page).not.toHaveProperty('uuid');
+    });
+
+    it('should preserve nested children in slim results', async () => {
+      const mockPages: PageEntity[] = [
+        { id: 1, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks: BlockEntity[] = [
+        {
+          id: 10,
+          uuid: 'parent-uuid',
+          content: 'Parent with keyword',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 },
+          children: [
+            {
+              id: 11,
+              uuid: 'child-uuid',
+              content: 'Child block',
+              page: { id: 1 },
+              parent: { id: 10 },
+              left: { id: 10 }
+            }
+          ]
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await searchBlocks(mockClient, 'keyword', 100, false, true);
+
+      expect(result).toHaveLength(1);
+      const block = result![0];
+      expect(block.children).toHaveLength(1);
+      expect(block.children![0].content).toBe('Child block');
+      expect(block.children![0].uuid).toBe('child-uuid');
+      expect(block.children![0]).not.toHaveProperty('id');
+    });
+
+    it('should return full results when slimResults=false (default)', async () => {
+      const mockPages: PageEntity[] = [
+        { id: 1, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks: BlockEntity[] = [
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Test block',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 }
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await searchBlocks(mockClient, 'Test', 100, false, false);
+
+      expect(result).toHaveLength(1);
+      const block = result![0];
+      expect(block).toHaveProperty('id', 10);
+      expect(block).toHaveProperty('uuid', 'block-uuid');
+      expect(block).toHaveProperty('page');
+    });
+
+    it('should omit empty fields in slim results', async () => {
+      const mockPages: PageEntity[] = [
+        { id: 1, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks: BlockEntity[] = [
+        {
+          id: 10,
+          uuid: 'block-uuid',
+          content: 'Simple block no extras',
+          page: { id: 1 },
+          parent: { id: 1 },
+          left: { id: 1 }
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await searchBlocks(mockClient, 'Simple', 100, false, true);
+
+      const block = result![0];
+      expect(block).not.toHaveProperty('properties');
+      expect(block).not.toHaveProperty('marker');
+      expect(block).not.toHaveProperty('tags');
+      expect(block).not.toHaveProperty('pageRefs');
+      expect(block).not.toHaveProperty('children');
+    });
+  });
 });

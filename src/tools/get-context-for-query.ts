@@ -75,7 +75,7 @@ export async function getContextForQuery(
   }
 
   // If no explicit topics, do a text search
-  let searchResults: BlockEntity[] | undefined;
+  let searchResults: import('./search-blocks.js').SearchBlocksResult[] | undefined;
 
   if (extractedTopics.length === 0) {
     // Extract keywords from query (simple approach: remove common words)
@@ -101,14 +101,15 @@ export async function getContextForQuery(
         const { searchBlocks } = await import('./search-blocks.js');
 
         // Search for first keyword and filter results manually
-        const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, false);
+        // Note: slimResults=false returns SearchBlocksResult[]
+        const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, false, false);
 
         if (blocks) {
           // Filter to blocks that contain all keywords
           searchResults = blocks.filter(block => {
             const contentLower = block.content.toLowerCase();
             return keywords.every(k => contentLower.includes(k));
-          }).slice(0, maxSearchResults);
+          }).slice(0, maxSearchResults) as import('./search-blocks.js').SearchBlocksResult[];
         } else {
           searchResults = [];
         }

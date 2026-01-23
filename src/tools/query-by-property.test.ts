@@ -299,4 +299,144 @@ describe('queryByProperty', () => {
     expect(result[0].uuid).toBe('block-uuid-2');
     expect(result[1].uuid).toBe('block-uuid-3');
   });
+
+  // Slim results tests
+  describe('slim results mode', () => {
+    it('should return slim results when slimResults=true', async () => {
+      const mockPages = [
+        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks = [
+        {
+          id: 1,
+          uuid: 'block-uuid-1',
+          content: 'Block with #tag and [[Link]]',
+          page: { id: 10 },
+          parent: { id: 10 },
+          left: { id: 10 },
+          properties: { status: 'done', priority: 'high' }
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await queryByProperty(mockClient, 'status', 'done', true);
+
+      expect(result).toHaveLength(1);
+      const block = result[0];
+      expect(block).toHaveProperty('content', 'Block with #tag and [[Link]]');
+      expect(block).toHaveProperty('pageName', 'Test Page');
+      expect(block).toHaveProperty('properties', { status: 'done', priority: 'high' });
+      expect(block).toHaveProperty('tags', ['tag']);
+      expect(block).toHaveProperty('pageRefs', ['Link']);
+      expect(block).toHaveProperty('uuid', 'block-uuid-1');
+      expect(block).not.toHaveProperty('id');
+      expect(block).not.toHaveProperty('page');
+    });
+
+    it('should preserve nested children in slim results', async () => {
+      const mockPages = [
+        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks = [
+        {
+          id: 1,
+          uuid: 'parent-uuid',
+          content: 'Parent block',
+          page: { id: 10 },
+          parent: { id: 10 },
+          left: { id: 10 },
+          properties: { status: 'done' },
+          children: [
+            {
+              id: 2,
+              uuid: 'child-uuid',
+              content: 'Child block',
+              page: { id: 10 },
+              parent: { id: 1 },
+              left: { id: 1 }
+            }
+          ]
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await queryByProperty(mockClient, 'status', 'done', true);
+
+      expect(result).toHaveLength(1);
+      const block = result[0];
+      expect(block.children).toHaveLength(1);
+      expect(block.children![0].content).toBe('Child block');
+      expect(block.children![0].uuid).toBe('child-uuid');
+      expect(block.children![0]).not.toHaveProperty('id');
+    });
+
+    it('should return full results when slimResults=false (default)', async () => {
+      const mockPages = [
+        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks = [
+        {
+          id: 1,
+          uuid: 'block-uuid-1',
+          content: 'Test block',
+          page: { id: 10 },
+          parent: { id: 10 },
+          left: { id: 10 },
+          properties: { status: 'done' }
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await queryByProperty(mockClient, 'status', 'done', false);
+
+      expect(result).toHaveLength(1);
+      const block = result[0];
+      expect(block).toHaveProperty('id', 1);
+      expect(block).toHaveProperty('uuid', 'block-uuid-1');
+      expect(block).toHaveProperty('page');
+    });
+
+    it('should omit empty fields in slim results', async () => {
+      const mockPages = [
+        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
+      ];
+
+      const mockBlocks = [
+        {
+          id: 1,
+          uuid: 'block-uuid-1',
+          content: 'Simple block',
+          page: { id: 10 },
+          parent: { id: 10 },
+          left: { id: 10 },
+          properties: { type: 'note' }
+        }
+      ];
+
+      (mockClient.callAPI as any)
+        .mockResolvedValueOnce(mockPages)
+        .mockResolvedValueOnce(mockBlocks);
+
+      const result = await queryByProperty(mockClient, 'type', 'note', true);
+
+      const block = result[0];
+      expect(block).toHaveProperty('properties', { type: 'note' });
+      expect(block).not.toHaveProperty('marker');
+      expect(block).not.toHaveProperty('tags');
+      expect(block).not.toHaveProperty('pageRefs');
+      expect(block).not.toHaveProperty('children');
+    });
+  });
 });

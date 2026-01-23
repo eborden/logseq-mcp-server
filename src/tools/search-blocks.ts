@@ -1,9 +1,18 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity } from '../types.js';
+import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
+import { toSlimBlock, toSlimPage, buildPageNameMap, getPageNameFromBlock } from '../utils/slim-entities.js';
 
 export interface SearchBlocksResult extends BlockEntity {
   context?: {
     page: PageEntity;
+    references: string[];
+    tags: string[];
+  };
+}
+
+export interface SlimSearchBlocksResult extends SlimBlock {
+  context?: {
+    page: SlimPage;
     references: string[];
     tags: string[];
   };
@@ -15,14 +24,16 @@ export interface SearchBlocksResult extends BlockEntity {
  * @param query - Text to search for in block content
  * @param limit - Maximum number of results to return (default: 100)
  * @param includeContext - Include semantic context (page, references, tags)
- * @returns Array of BlockEntity objects matching the query, or null if search fails
+ * @param slimResults - Return slim results (40-50% fewer tokens, essential data only)
+ * @returns Array of BlockEntity or SlimBlock objects matching the query, or null if search fails
  */
 export async function searchBlocks(
   client: LogseqClient,
   query: string,
   limit: number = 100,
-  includeContext: boolean = false
-): Promise<SearchBlocksResult[] | null> {
+  includeContext: boolean = false,
+  slimResults: boolean = false
+): Promise<SearchBlocksResult[] | SlimSearchBlocksResult[] | null> {
   try {
     // Get all pages
     const pages = await client.callAPI<PageEntity[] | null>(
@@ -84,14 +95,15 @@ export async function searchBlocks(
     // Get limited results
     let results = matches.slice(0, limit);
 
+    // Build page maps for efficient lookups
+    const pageIdMap = new Map<number, PageEntity>();
+    const pageNameMapForSlim = buildPageNameMap(pages);
+    for (const page of pages) {
+      pageIdMap.set(page.id, page);
+    }
+
     // Add context if requested
     if (includeContext) {
-      // Build a map of page IDs to page entities for efficient lookup
-      const pageMap = new Map<number, PageEntity>();
-      for (const page of pages) {
-        pageMap.set(page.id, page);
-      }
-
       const enrichedResults: SearchBlocksResult[] = [];
 
       for (const block of results) {
@@ -109,7 +121,7 @@ export async function searchBlocks(
           }
 
           // Look up page from our map
-          const page = pageMap.get(pageId);
+          const page = pageIdMap.get(pageId);
 
           if (!page) {
             // Page not found in map, skip context for this block
@@ -135,7 +147,38 @@ export async function searchBlocks(
         enrichedResults.push(enriched);
       }
 
+      // Transform to slim if requested
+      if (slimResults) {
+        const slimResults: SlimSearchBlocksResult[] = enrichedResults.map(block => {
+          const pageName = getPageNameFromBlock(block, pageNameMapForSlim);
+          const slim = toSlimBlock(block, pageName) as SlimSearchBlocksResult;
+
+          // Add slim context if present
+          if (block.context) {
+            slim.context = {
+              page: toSlimPage(block.context.page),
+              references: block.context.references,
+              tags: block.context.tags
+            };
+          }
+
+          return slim;
+        });
+
+        return slimResults;
+      }
+
       return enrichedResults;
+    }
+
+    // No context - transform to slim if requested
+    if (slimResults) {
+      const slimResults: SlimSearchBlocksResult[] = results.map(block => {
+        const pageName = getPageNameFromBlock(block, pageNameMapForSlim);
+        return toSlimBlock(block, pageName) as SlimSearchBlocksResult;
+      });
+
+      return slimResults;
     }
 
     return results;

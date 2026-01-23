@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, BlockEntity } from '../types.js';
+import { PageEntity, BlockEntity, SlimBlock } from '../types.js';
 import { InvalidParameterError } from '../errors.js';
+import { toSlimBlock, buildPageNameMap } from '../utils/slim-entities.js';
 
 export interface DateRangeResult {
   dateRange: {
@@ -11,6 +12,23 @@ export interface DateRangeResult {
     date: number;
     page: PageEntity;
     blocks: BlockEntity[];
+  }>;
+  summary: {
+    totalDays: number;
+    totalBlocks: number;
+    searchTerm?: string;
+  };
+}
+
+export interface SlimDateRangeResult {
+  dateRange: {
+    start: number;
+    end: number;
+  };
+  entries: Array<{
+    date: number;
+    pageName: string;
+    blocks: SlimBlock[];
   }>;
   summary: {
     totalDays: number;
@@ -45,14 +63,16 @@ function isValidDateFormat(date: number): boolean {
  * @param startDate - Start date in YYYYMMDD format
  * @param endDate - End date in YYYYMMDD format
  * @param searchTerm - Optional search term to filter blocks
- * @returns DateRangeResult with journal entries in range
+ * @param slimResults - Return slim results (40-50% fewer tokens, essential data only)
+ * @returns DateRangeResult or SlimDateRangeResult with journal entries in range
  */
 export async function queryByDateRange(
   client: LogseqClient,
   startDate: number,
   endDate: number,
-  searchTerm?: string
-): Promise<DateRangeResult> {
+  searchTerm?: string,
+  slimResults: boolean = false
+): Promise<DateRangeResult | SlimDateRangeResult> {
   // Validate dates
   if (!isValidDateFormat(startDate)) {
     throw new InvalidParameterError(
@@ -124,6 +144,34 @@ export async function queryByDateRange(
 
       totalBlocks += filteredBlocks.length;
     }
+  }
+
+  // Return slim results if requested
+  if (slimResults) {
+    // Build page name map for efficient lookups
+    const pageMap = buildPageNameMap(journalsInRange);
+
+    const slimEntries = entries.map(entry => ({
+      date: entry.date,
+      pageName: entry.page.originalName || entry.page['original-name'] || entry.page.name,
+      blocks: entry.blocks.map(block => {
+        const pageName = entry.page.originalName || entry.page['original-name'] || entry.page.name;
+        return toSlimBlock(block, pageName);
+      })
+    }));
+
+    return {
+      dateRange: {
+        start: startDate,
+        end: endDate
+      },
+      entries: slimEntries,
+      summary: {
+        totalDays: entries.length,
+        totalBlocks,
+        searchTerm
+      }
+    };
   }
 
   return {

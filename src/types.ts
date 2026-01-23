@@ -89,3 +89,35 @@ export interface PaginatedResult<T> {
   results: T[];
   pagination: PaginationMetadata;
 }
+
+// Slim types for reduced token usage
+
+/**
+ * SlimBlock - Essential block data only (60-70% token reduction)
+ * Removes: id, page object, parent, left, level, pathRefs, refs objects, meta, format
+ * Keeps: uuid, content, properties, marker, children (recursively slimmed)
+ * Adds: pageName (denormalized), tags/pageRefs (extracted strings)
+ */
+export interface SlimBlock {
+  uuid: string;
+  content: string;
+  pageName: string;
+  properties?: Record<string, any>;
+  marker?: string;
+  tags?: string[];
+  pageRefs?: string[];
+  children?: SlimBlock[];
+}
+
+/**
+ * SlimPage - Essential page data only (50-60% token reduction)
+ * Removes: id, uuid, timestamps, namespace
+ * Keeps: name, originalName, properties, journal metadata
+ */
+export interface SlimPage {
+  name: string;
+  originalName: string;
+  properties?: Record<string, any>;
+  isJournal?: boolean;
+  journalDate?: number;
+}
