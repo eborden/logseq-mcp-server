@@ -99,6 +99,11 @@ const TOOLS = [
           description: 'Include semantic context (page, references, tags)',
           default: false,
         },
+        slim_results: {
+          type: 'boolean',
+          description: 'Return slim results (40-50% fewer tokens, essential data only)',
+          default: false,
+        },
       },
       required: ['query'],
     },
@@ -116,6 +121,11 @@ const TOOLS = [
         property_value: {
           type: 'string',
           description: 'Value to match for the property',
+        },
+        slim_results: {
+          type: 'boolean',
+          description: 'Return slim results (40-50% fewer tokens, essential data only)',
+          default: false,
         },
       },
       required: ['property_key', 'property_value'],
@@ -244,6 +254,11 @@ const TOOLS = [
           type: 'string',
           description: 'Optional search term to filter blocks',
         },
+        slim_results: {
+          type: 'boolean',
+          description: 'Return slim results (40-50% fewer tokens, essential data only)',
+          default: false,
+        },
       },
       required: ['start_date', 'end_date'],
     },
@@ -338,7 +353,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -351,7 +366,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -365,7 +380,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -375,13 +390,14 @@ export function createServer(client: LogseqClient): Server {
           const query = args?.query as string;
           const limit = args?.limit as number | undefined;
           const includeContext = (args?.include_context as boolean) ?? false;
-          let result = await searchBlocks(client, query, limit, includeContext);
+          const slimResults = (args?.slim_results as boolean) ?? false;
+          let result = await searchBlocks(client, query, limit, includeContext, slimResults);
 
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -390,12 +406,13 @@ export function createServer(client: LogseqClient): Server {
         case 'logseq_query_by_property': {
           const propertyKey = args?.property_key as string;
           const propertyValue = args?.property_value as string;
-          const result = await queryByProperty(client, propertyKey, propertyValue);
+          const slimResults = (args?.slim_results as boolean) ?? false;
+          const result = await queryByProperty(client, propertyKey, propertyValue, slimResults);
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -409,7 +426,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -431,7 +448,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -450,7 +467,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -467,7 +484,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -477,17 +494,19 @@ export function createServer(client: LogseqClient): Server {
           const startDate = args?.start_date as number;
           const endDate = args?.end_date as number;
           const searchTerm = args?.search_term as string | undefined;
+          const slimResults = (args?.slim_results as boolean) ?? false;
           const result = await queryByDateRange(
             client,
             startDate,
             endDate,
-            searchTerm
+            searchTerm,
+            slimResults
           );
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -505,7 +524,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -517,7 +536,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -531,7 +550,7 @@ export function createServer(client: LogseqClient): Server {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(result),
               },
             ],
           };
@@ -546,7 +565,7 @@ export function createServer(client: LogseqClient): Server {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({ error: errorMessage }, null, 2),
+            text: JSON.stringify({ error: errorMessage }),
           },
         ],
         isError: true,
