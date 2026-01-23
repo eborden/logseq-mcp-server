@@ -16,18 +16,10 @@ export async function getPage(
   pageName: string,
   includeChildren: boolean
 ): Promise<PageEntity> {
-  // Build arguments for API call
-  const args: any[] = [pageName];
-
-  // Add options if includeChildren is true
-  if (includeChildren) {
-    args.push({ includeChildren: true });
-  }
-
-  // Call the LogSeq API
+  // Call the LogSeq API to get page metadata
   const result = await client.callAPI<PageEntity | null>(
     'logseq.Editor.getPage',
-    args
+    [pageName]
   );
 
   // Check if page was found
@@ -52,6 +44,19 @@ export async function getPage(
     }
 
     throw new PageNotFoundError(pageName);
+  }
+
+  // If includeChildren is requested, fetch the page blocks tree
+  if (includeChildren) {
+    const blocks = await client.callAPI<any[]>(
+      'logseq.Editor.getPageBlocksTree',
+      [pageName]
+    );
+
+    // Add blocks as children to the result
+    if (blocks && blocks.length > 0) {
+      result.children = blocks;
+    }
   }
 
   return result;
