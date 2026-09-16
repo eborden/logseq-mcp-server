@@ -1,6 +1,6 @@
 ---
 name: logseq-skills
-description: Use when user asks about tasks, research, notes, or references their LogSeq knowledge graph - provides context building workflows, weekly and monthly summaries, and comprehensive MCP tool guidance for querying personal knowledge bases
+description: Use when user asks about tasks, research, notes, or references their LogSeq knowledge graph, or asks to add [[links]] or tag existing concepts in notes they already wrote - provides context building workflows, weekly and monthly summaries, concept linking with identity-safety rules, and comprehensive MCP tool guidance for querying personal knowledge bases
 ---
 
 # LogSeq Skills
@@ -16,6 +16,7 @@ Use this skill when:
 - User wants to explore connections between concepts
 - User asks for a weekly or monthly summary of journal entries
 - User needs temporal analysis of their notes
+- User asks to add `[[links]]` or tag existing concepts in notes they already wrote
 
 ## Available Resources
 
@@ -34,7 +35,21 @@ Use this skill when:
 - Read this when user explicitly requests monthly summaries
 - **Also read `references/summary-compression.md`**
 
+**`skills/concept-linking.md`** - Add `[[refs]]` to existing notes for concepts that already have pages
+- Trigger: "add links to this block", "link the concepts in", "tag existing pages in these notes", "auto-link my journal"
+- Source: a block ref `((uuid))`, page, or date range → the same file, brackets added and nothing else changed
+- Proposes a diff and waits for confirmation; never creates pages, reports recurring unlinked terms instead
+- Read this when user asks to link or tag concepts in notes they already wrote
+- **Also read `references/link-resolution.md`**
+
 ### References
+
+**`references/link-resolution.md`** - Resolution semantics and safety rules for adding `[[refs]]`
+- How LogSeq matches refs (case-insensitive, alias-aware, never fuzzy) and substring bracketing
+- The link / ask / skip decision table, and what counts as corroboration for a partial name
+- Anti-patterns: rewording to force a match, expanding abbreviations, linking adjectival mentions
+- **ALWAYS read this alongside `skills/concept-linking.md`**
+- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; skip an uncorroborated partial name rather than linking it. Validate with `scripts/check-link-safety.sh <before> <after> [graph-root]` before reporting done.
 
 **`references/summary-compression.md`** - Compression philosophy shared by all summary granularities
 - Salience filtering, emotional markers, the hard word budget, merge-vs-drop
@@ -49,6 +64,14 @@ Use this skill when:
 - Detects weekly vs monthly from the filename and applies that budget
 - Reports per-signal word counts, totals, item count, em-dashes, two-sentence bullets, missing sections
 - Exits non-zero on violation; rewrite and re-run rather than explaining the failure away
+
+**`scripts/check-link-safety.sh`** - Mandatory validation gate for any linking pass
+- Usage: `check-link-safety.sh <before> <after> [graph-root] [page-list]`
+- Asserts stripping all `[[ ]]` from before and after leaves them byte-identical, so the pass only added brackets
+- Checks bracket balance, and resolvability against a `list_pages` listing (page *files* are a subset of pages, so without a listing that check only warns)
+- Infers the graph root from the file path when not passed one
+- Proves an edit was safe, never that the classification was right; a pass that links nothing passes every check
+- Exits non-zero on violation; fix the edit and re-run rather than explaining the failure away
 
 **`references/context-builder.md`** - Detailed workflows for context building and research
 - 7 comprehensive workflows: research, tasks, stale detection, page context, graph exploration, temporal analysis, smart context building
@@ -73,6 +96,7 @@ Use this skill when:
 | "What should I work on?" | Load context-builder.md → Workflow 2 (Task Prioritization) |
 | "Summarize my week" | Load skills/weekly-summary.md + references/summary-compression.md |
 | "Summarize my month" | Load skills/monthly-summary.md + references/summary-compression.md |
+| "Add links to this block" | Load skills/concept-linking.md + references/link-resolution.md |
 | "What do I know about X?" | Load context-builder.md → Workflow 1 (Research Assistant) |
 | "Show connections to X" | Load context-builder.md → Workflow 5 (Graph Exploration) |
 | "What pages exist?" | Use `logseq_list_pages` for vocabulary discovery |
@@ -90,6 +114,11 @@ Use this skill when:
 - Read the matching sub-skill for cadence specifics: `skills/weekly-summary.md` or `skills/monthly-summary.md`
 - Optionally read `references/mcp-tools-reference.md` for tool syntax
 - Adding a new granularity (quarterly, annual) means adding one sub-skill; the compression rules are inherited from the reference
+
+**For linking concepts in existing notes:**
+- Read `references/link-resolution.md` for resolution semantics and the link/ask/skip decision table
+- Read `skills/concept-linking.md` for the workflow
+- The fixture at `tests/fixtures/graph-linking/` is the worked example and the regression suite
 
 **For tool verification:**
 - Read `references/mcp-tools-reference.md` for parameters and examples

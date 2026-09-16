@@ -1,0 +1,8 @@
+- Platform sync notes
+  id:: 11111111-1111-4111-8111-111111111111
+	- [[Priya Raghavan]] walked [[Kofi]] Mensah through the migration plan; [[Devon]] took the rollback owner slot.
+	- Tobias raised concerns about the retry budget during the review.
+	- Marisol asked whether the change lands before the freeze.
+	- [[Beacon]]'s rollout slipped a week; [[NorthWind]] is unaffected.
+	- We agreed to invest in [[Structured Logging]] before adding automation-driven alerting.
+	- Carried over from [[Quarterly Planning]]: confirm the automation budget.
