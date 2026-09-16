@@ -27,21 +27,38 @@ Call `list_pages` once, use that listing as the candidate set, and keep it for t
 
 ### Substring bracketing
 
-When a page title is a prefix of the phrase in the prose, bracket the title and leave the remainder outside the brackets:
+When a page title is a prefix of the phrase in the prose, you can often bracket the title and leave the remainder outside the brackets. Read the next subsection before using it, because "often" is doing real work in that sentence:
 
 ```
-Beacon's rollout slipped      ->  [[Beacon]]'s rollout slipped
-the Atlas Squad roadmap       ->  the [[Atlas Squad]] roadmap
-Kofi Mensah walked us through ->  [[Kofi]] Mensah walked us through
+Beacon's rollout slipped   ->  [[Beacon]]'s rollout slipped
+a Northwind-wide freeze    ->  a [[Northwind]]-wide freeze
+the Atlas Squad roadmap    ->  the [[Atlas Squad]] roadmap
 ```
 
-This is what lets a link coexist with plurals, possessives, hyphenated suffixes and surnames without touching a character of the original text.
+This is what lets a link coexist with plurals, possessives and hyphenated suffixes without touching a character of the original text. `[[Beacon]]'s` is the case to copy: the leftover `'s` is morphology hanging off the noun, and splitting it out changes nothing about what the note names.
+
+#### The leftover decides
+
+Substring bracketing is not uniformly safe, and whether it is safe has nothing to do with which string is longer. It depends on what the text left outside the brackets turns out to be.
+
+- **Leftover is an inflection.** A possessive, a plural, a hyphenated modifier. Safe, as above. Those characters attach to the noun rather than belonging to it.
+- **Leftover is part of the same proper noun**, which in practice means a surname. **This fragments the name**, and it is a defect even though the brackets sit in a legal place:
+
+```
+Kofi Mensah walked us through  ->  [[Kofi]] Mensah walked us through   # fragments the name
+```
+
+The rendered characters are identical to the original, so the gate passes this without complaint. What the gate cannot see is that the note now names a person in two pieces, a ref to a first name plus an orphaned surname, and the graph records an edge to `Kofi` rather than to the person the note actually named. Nobody writes `Kofi Mensah` meaning `Kofi` followed by a stray word, so treating the surname as leftover misreads the prose even while preserving it.
+
+So when the title is a proper-name prefix and the remainder belongs to that same name, do not bracket it silently. Prefer an `alias::` carrying the **full** name on the target page: `alias:: Kofi Mensah` on the `Kofi` page makes `[[Kofi Mensah]]` resolve whole, the prose keeps every character, and the edge points at the person as the note named them. That writes to a page outside the note, so it needs the owner's consent, exactly like the alias remedy in the next section. Ask rather than fragment.
+
+`Priya` carrying `alias:: Priya Raghavan`, which yields `[[Priya Raghavan]]`, is not a quirk of one page. It is the pattern to aim for with any full name, and it is why aliases are worth checking before substring bracketing is considered at all.
 
 ### Mismatch direction
 
-Substring bracketing only works in one direction, so whenever the prose and a candidate title differ by more than case, work out which one contains the other before deciding anything else. The check is mechanical: take the phrase as the note wrote it and the title as the graph spells it, and see which is the substring of which.
+Whenever the prose and a candidate title differ by more than case, work out which one contains the other before deciding anything else. The check is mechanical: take the phrase as the note wrote it and the title as the graph spells it, and see which is the substring of which.
 
-- **Title inside the prose.** Prose says `Kofi Mensah`, the page is `Kofi`. Bracketable. Bracket the title, leave the remainder outside, and the note keeps every character: `[[Kofi]] Mensah`.
+- **Title inside the prose.** Prose says `Beacon's`, the page is `Beacon`. Bracketable, subject to the leftover test above: an inflection is safe, the rest of a proper noun is not.
 - **Prose inside the title.** Prose says `Wren`, the page is `Wren Calloway`. **Not bracketable at all**, by any arrangement of brackets. `[[Wren]]` resolves to a page called `Wren`, which is a different page and usually an empty new one. `[[Wren Calloway]]` puts a surname into the note that the writer never typed. There is no third bracketing to reach for, which is why this direction needs its own handling rather than a harder look at the text.
 
 Run this check on every partial name, including the ones corroboration has already settled. Corroboration answers who the mention refers to; direction answers whether that answer can be honoured with brackets. Being certain `Wren` means Wren Calloway does nothing to make `[[Wren]]` resolve there, and treating the two questions as one is how a surname ends up silently inserted into somebody's journal.
@@ -54,23 +71,28 @@ When the prose sits inside the title there are exactly three responses:
 2. **Expand the prose to the full title.** Available only if the writer explicitly asks for it, because it changes what the note says. It is an edit to the note rather than a linking pass, so the gate will reject it against the original baseline, correctly.
 3. **Leave it unlinked.** Always available and always safe. A missing edge costs retrieval; a reworded note costs the record.
 
+Hold `Kofi` and `Wren` side by side, because together they say what neither says alone. `Kofi Mensah` against a `Kofi` page is title-inside-prose, so brackets can be placed legally; `Wren` against a `Wren Calloway` page is prose-inside-title, so they cannot be placed at all. Mechanically those are opposite cases, and both arrive at the same remedy: an `alias::` on the target page, with the owner's consent, carrying the full name in one case and the short form in the other. Direction tells you whether brackets are *possible*. The leftover tells you whether they are *right*. Neither question answers the other, and a name is at stake in both.
+
 ## Decision Table
 
 | Prose relative to candidate page | Action |
 |---|---|
 | Identical ignoring case | **Link.** Bracket the text exactly as written |
 | Matches an `alias::` value | **Link** the full alias string |
-| Page title is a substring, remainder is a suffix, possessive or surname | **Link** the substring only |
+| Page title is a substring, remainder is an inflection (possessive, plural, hyphenated suffix) | **Link** the substring only |
+| Page title is a substring, remainder is the rest of the same proper noun (a surname) | **Ask.** See The leftover decides: offer a full-name `alias::` rather than fragmenting the name |
 | Partial name (first name), two or more candidate pages | **Ask.** Never pick |
 | Partial name, exactly one candidate page, no corroboration | **Ask.** Never link on candidate count alone |
-| Partial name, exactly one candidate page, corroborated | **Link** the substring |
+| Partial name, exactly one candidate page, corroborated | **Link** the substring, provided the leftover test allows it |
 | Prose is a substring of the candidate page title | **Not bracketable.** See Mismatch direction: offer the `alias::`, and state the prose cost of the alternative |
 | A different string for the same concept | **Skip.** Report it if it recurs |
 | Generic or adjectival use of a concept page | **Skip** |
 | Already bracketed | **Leave alone.** Never double-bracket |
 | No candidate page at all | **Skip.** Report if it recurs |
 
-Note the fourth and fifth rows. **A lone candidate is not evidence.** That exactly one page happens to share a first name says nothing about whether this mention is that person. Candidate count measures the graph's vocabulary, not the identity of the mention, so one candidate and five candidates get the same treatment: ask.
+Note the two candidate-count rows. **A lone candidate is not evidence.** That exactly one page happens to share a first name says nothing about whether this mention is that person. Candidate count measures the graph's vocabulary, not the identity of the mention, so one candidate and five candidates get the same treatment: ask.
+
+Note also that the surname row and the prose-inside-title row land on the same remedy from opposite mechanics. Four of the twelve rows send a name to a question rather than to a link, and that proportion is the table working rather than the table being timid: names are where this goes wrong, and a question is cheaper than an edge recorded against the wrong person or against half of a right one.
 
 ## Asking Is Part of the Job
 
@@ -104,6 +126,8 @@ Each corroboration check costs one or two tool calls, so only run them on partia
 
 **Substituting a page title for a name.** Prose says a person's full name and the graph represents them with a page under a different label. Replacing the name with the label alters what the note says, and a note that others will read should keep the name. Skip it.
 
+**Fragmenting a proper noun.** Prose says `Kofi Mensah` and the page is `Kofi`, so `[[Kofi]] Mensah` is available and preserves every character. Do it anyway and the note names a person half in a ref and half in plain text. This one is worth listing separately because it feels like the safe move: the prose is intact, the gate is green, and the mistake is only visible to someone who reads the name as a name. Ask for a full-name `alias::` instead. Doing this at scale, ten names in one pass, turns a graph's people into first-name stubs.
+
 **Expanding abbreviations.** Prose says `TS`, the page is `TypeScript`. That is a different string, so it is a new page, and the expansion is a guess about intent. Skip it.
 
 **Linking generic or adjectival mentions.** A page named `Automation` does not mean every `automation-driven` and `the automation budget` should carry a ref. Link a concept where the note is about it, not everywhere the word appears. When in doubt, once per block at most, at the mention that carries the meaning.
@@ -130,4 +154,9 @@ Exits non-zero on violation. Fix the edit and re-run rather than explaining the 
 
 ### What the gate cannot do
 
-It proves an edit was **safe**, not that the classification was **right**. A pass that links nothing at all passes every check. Identity errors, the failure this skill exists to prevent, are invisible to it: `[[Kofi]]` and a wrongly-linked `[[Devon]]` are equally well-formed. Corroboration in step 6 is the only defence there, and the gate is no substitute for it.
+It proves an edit was **safe**, not that the classification was **right**. A pass that links nothing at all passes every check. Two whole classes of error are invisible to it:
+
+- **Identity errors**, the failure this skill exists to prevent. A wrongly-linked `[[Devon]]` is as well-formed as a right one. Corroboration in step 6 is the only defence.
+- **Fragmented names.** `[[Kofi]] Mensah` preserves the prose byte for byte, balances its brackets, and resolves to a real page, so all three checks pass while the note has stopped naming a person in one piece. The leftover test in step 6 is the only defence.
+
+Both failures are judgement, and the gate does not do judgement. Do not read a green gate as a correct pass.

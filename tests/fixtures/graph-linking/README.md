@@ -22,36 +22,47 @@ the one the directory listing makes convenient.
 
 ## Case map
 
-Each line of `journals/2024_03_11.md` tests exactly one branch of the decision table.
+Each term in `journals/2024_03_11.md` tests exactly one branch of the decision table. The rows run
+patterns-to-copy first, then the cases that must go to a question.
 
 | Prose in the input | Candidate page | Correct action | Rule under test |
 |---|---|---|---|
-| `Priya Raghavan` | `Priya` with `alias:: Priya Raghavan` | `[[Priya Raghavan]]` | Alias resolution beats substring bracketing |
-| `Kofi Mensah` | `Kofi` | `[[Kofi]] Mensah` | Partial name, corroborated by `Atlas Squad.manager` |
+| `Priya Raghavan` | `Priya` with `alias:: Priya Raghavan` | `[[Priya Raghavan]]` | **The preferred pattern for any full name:** a full-name alias links it whole |
+| `Beacon's` | `Beacon` | `[[Beacon]]'s` | **The canonical safe substring case:** the leftover `'s` is inflection, not part of the noun |
 | `Devon` | `Devon` | `[[Devon]]` | Exact title match |
-| `Tobias` | `Tobias Fenn` | ask; plain unless confirmed | **Regression: a lone candidate is not evidence.** Identity only; the direction question is `Wren`'s |
+| `Kofi Mensah` | `Kofi` | ask; plain without an alias | **Regression: a proper-noun leftover fragments the name.** Corroborated by `Atlas Squad.manager`, and still not bracketable safely |
+| `Wren` | `Wren Calloway`, in `Atlas Squad.teamMembers` | ask; plain without an alias | **Regression: prose inside the title is not bracketable at all, however certain the identity** |
+| `Tobias` | `Tobias Fenn` | ask; plain unless confirmed | **Regression: a lone candidate is not evidence.** Identity only; the mechanics questions are `Kofi`'s and `Wren`'s |
 | `Marisol` | `Marisol Vega`, `Marisol Okonkwo` | ask; plain unless confirmed | Two candidates means never pick |
-| `Wren` | `Wren Calloway`, in `Atlas Squad.teamMembers` | ask; plain without an alias | **Regression: prose inside the title is not bracketable, however certain the identity** |
-| `Beacon's` | `Beacon` | `[[Beacon]]'s` | Possessive stays outside the brackets |
 | `NorthWind` | `Northwind` | `[[NorthWind]]` | Case-only difference links, prose spelling kept |
 | `structured logs` | `Structured Logging` | leave plain | Different string, so a new page; skip and report |
 | `automation-driven`, `the automation budget` | `Automation` | leave plain | Generic and adjectival mentions |
 | `[[Quarterly Planning]]` | `Quarterly Planning` | unchanged | Never double-bracket |
 
-The corroboration chain for `Kofi` is deliberate: the block names Priya, Kofi and Devon, and
-`Atlas Squad` carries Priya and Devon as `teamMembers::` with Kofi as `manager::`. One page
-fetch settles the name. `Tobias Fenn` is attached to nothing, which is what makes it the
-regression case, and it now tests identity alone.
+The corroboration chain is deliberate, and one page fetch settles three names at once: the journal
+names Priya, Kofi, Devon and Wren, and `Atlas Squad` carries Priya, Devon and Wren Calloway as
+`teamMembers::` with Kofi as `manager::`. That leaves exactly two identity questions in the fixture,
+`Tobias`, which is attached to nothing, and `Marisol`, which has two candidates. `Tobias Fenn` is
+the regression case for candidate count, and it now tests identity alone.
 
-`Wren` is the other half of that split, and the two cases fail for unrelated reasons. `Wren Calloway`
-sits in the same `Atlas Squad` roster as Priya and Devon, so the one page fetch that settles `Kofi`
-settles `Wren` too and there is no identity question left. The link is still unavailable, because the
-prose is a substring of the title rather than the other way round: `[[Wren]]` would point at a
-different page and `[[Wren Calloway]]` would add a surname the note never carried. The remedy is an
-`alias:: Wren` on that page, which needs the graph owner's consent since it edits a page outside the
-note. `expected/` shows the outcome where consent was not given, so `Wren` stays plain there. The
-case exists to prove that corroboration and bracketability are independent: full certainty about who
-is meant does not make a link mechanically possible.
+`Kofi` and `Wren` are the two halves of the mechanics question, and they fail for opposite reasons.
+
+`Kofi Mensah` against a `Kofi` page is title-inside-prose, so `[[Kofi]] Mensah` can be written and
+preserves every character. It is still wrong, because the leftover is a surname rather than an
+inflection, and the result names a person half in a ref and half in plain text while the graph
+records an edge to a first name. This is the case that looks safest and is not: the prose is intact
+and all three gate checks pass. Compare `Beacon's`, where the leftover really is inflection.
+
+`Wren` against a `Wren Calloway` page is prose-inside-title, so brackets cannot be placed at all:
+`[[Wren]]` points at a different page and `[[Wren Calloway]]` adds a surname the note never carried.
+Identity is not the issue in either case. `Wren Calloway` sits in the same `Atlas Squad` roster as
+Priya and Devon, so the one page fetch that settles `Kofi` settles `Wren` too.
+
+Both arrive at the same remedy, an `alias::` on the target page with the owner's consent, carrying
+the full name for `Kofi` and the short form for `Wren`. That is what `Priya` already demonstrates.
+`expected/` shows the outcome where consent was not given, so both stay plain there. Together the pair proves that direction decides whether brackets
+are *possible* and the leftover decides whether they are *right*, and that neither question answers
+the other.
 
 ## Negative cases
 
@@ -82,5 +93,5 @@ F=tests/fixtures/graph-linking
 ```
 
 The gate proves an edit was safe. It cannot prove the classification was right, since a pass that
-links nothing at all passes every check. Judgement cases (`Tobias`, `Marisol`, `Wren`, `structured logs`)
+links nothing at all passes every check. Judgement cases (`Kofi`, `Wren`, `Tobias`, `Marisol`, `structured logs`)
 need the case map above as their expectation, compared against `expected/2024_03_11.md`.

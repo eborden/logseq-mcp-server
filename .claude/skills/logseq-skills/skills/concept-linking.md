@@ -85,23 +85,31 @@ cp <file> /tmp/link-baseline-$(basename <file>)
 
 Walk the target's text against the page listing and sort each candidate term into link, ask, or skip using the decision table in the reference. Build the classification before making any edit, because the ask branch has to be resolved first and because a term appearing several times should be decided once.
 
-### Step 6: Corroborate Identity, Then Check Direction
+### Step 6: Settle Identity, Then Settle Mechanics
 
-Two separate determinations, in this order. Running them together is the mistake: the first says who a name refers to, the second says whether that can be expressed in brackets, and a term can pass one and fail the other.
+Two kinds of determination, in this order. Running them together is the mistake: identity says who a name refers to, mechanics says whether that answer can be expressed in brackets, and a term can pass one and fail the other. Only a term that clears both gets linked without asking.
 
 **Identity.** For every partial name you are inclined to link, find independent evidence it refers to that page, per the corroboration section of the reference. Fetch the team or roster pages covering the people named in the block; one page often settles several names at once.
 
 Corroboration exists to shrink the next step, not to replace it. What it settles, carry forward. What it cannot settle goes to step 7 rather than being linked on a hunch or dropped on a shrug.
 
-**Direction.** Then, for every term whose prose differs from its candidate title by more than case, including the ones identity just settled, check which string contains which, per the mismatch direction section of the reference. If the title sits inside the prose, substring bracketing handles it. If the prose sits inside the title, no bracketing exists: `Wren` cannot be linked to `Wren Calloway` without either an `alias:: Wren` on that page or extra words in the note.
+**Mechanics.** Then, for every term whose prose differs from its candidate title by more than case, including the ones identity just settled, run two checks from the reference:
 
-Do this as a mechanical pass over the candidate list rather than trusting yourself to notice. Certainty about identity is exactly what makes it tempting to type the full title, and the pass that nearly wrote a surname into somebody's journal was a pass that had the identity right.
+1. **Direction**, per the mismatch direction section. Which string contains which? If the prose sits inside the title, no bracketing exists at all: `Wren` cannot be linked to `Wren Calloway` without either an `alias:: Wren` on that page or extra words in the note.
+2. **The leftover**, per the leftover-decides section, whenever the title does sit inside the prose. Look at what falls outside the brackets. An inflection is fine, so `[[Beacon]]'s` links. The rest of a proper noun is not, so `[[Kofi]] Mensah` fragments a person's name into a ref plus an orphan word and belongs in step 7 asking for an `alias:: Kofi Mensah` instead.
+
+Do both as a mechanical pass over the candidate list rather than trusting yourself to notice. Neither is caught by anything downstream: the gate passes a fragmented name without complaint, and certainty about identity is exactly what makes bracketing a first name feel settled. The pass that nearly wrote a surname into somebody's journal, and the pass that split ten names in one sitting, both had the identity right.
 
 ### Step 7: Ask, Then Propose the Diff
 
 Put everything corroboration left open into **one batched question**, one row per term, each row offering the real candidate pages plus a "leave unlinked" choice. Read the asking-well section of the reference before writing the question; the short version is batch it, offer real options, and state the prose cost when honouring a link would change the wording.
 
-The direction check changes what a row should offer, which is why it runs first. A term whose prose sits inside its title cannot be offered as a plain link at all; its options are an `alias::` on the target page (naming the page that gains it, since that edit reaches outside this note), expanding the prose, or leaving it unlinked. Offering "link it" there is offering something that does not exist, and whoever answers yes has not agreed to either of the things that would actually have to happen.
+The mechanics checks change what a row should offer, which is why they run first. Neither blocker can be offered as a plain link:
+
+- **Prose inside the title** (`Wren` against `Wren Calloway`). Options are an `alias:: Wren` on the target page, expanding the prose, or leaving it unlinked. Offering "link it" here is offering something that does not exist, and whoever answers yes has not agreed to either of the things that would actually have to happen.
+- **Proper-noun leftover** (`Kofi Mensah` against `Kofi`). Options are an `alias:: Kofi Mensah` on the target page, leaving it unlinked, or fragmenting the name. Offer the first two. If you name the third at all, say plainly that it links a first name and leaves the surname outside, because "link it" reads as a clean link to anyone who has not been staring at the brackets.
+
+Both options that actually work write to a page outside the note, so say which page gains the property. That is a broader edit than a linking pass was asked for and it changes how every other note in the graph resolves that string, which is the user's call and not yours.
 
 Asking is the designed path here, not a fallback. The person who wrote the note knows who they meant, and a two-second answer beats both a confident guess and a silent skip.
 
@@ -119,7 +127,7 @@ All three checks must pass. The prose-preservation check is the important one: i
 
 The most common way to trip it is inserting a word so a ref reads naturally. Wanting to link a page called `Ledger Service` from prose that says `the ledger`, and writing `the [[Ledger Service]]`, adds two words the note never said. Bracket what is there or skip it.
 
-The gate cannot see identity errors. A confidently wrong `[[Devon]]` passes every check, so step 6 is what protects against that, not this.
+The gate cannot see identity errors or fragmented names. A confidently wrong `[[Devon]]` and a `[[Kofi]] Mensah` both pass every check, because the prose is intact and the refs resolve. Step 6 is what protects against those, not this. A green gate means the edit was safe, never that it was right.
 
 ### Step 9: Report
 
@@ -147,14 +155,20 @@ Wren owns the failover runbook.
 becomes
 
 ```
-[[Priya Raghavan]] walked [[Kofi]] Mensah through the migration plan; [[Devon]] took the rollback owner slot.
+[[Priya Raghavan]] walked Kofi Mensah through the migration plan; [[Devon]] took the rollback owner slot.
 Tobias raised concerns about the retry budget during the review.
 [[Beacon]]'s rollout slipped a week; [[NorthWind]] is unaffected.
 Wren owns the failover runbook.
 ```
 
-`Priya Raghavan` resolved through an alias, so the whole string is bracketed. `Kofi` is a first name corroborated by a roster page and gets substring bracketing. `Devon` matched a page title exactly. `Beacon` took a possessive outside the brackets. `NorthWind` differs from its page title only in case, so it links while keeping the spelling the note used.
+`Priya Raghavan` resolved through an `alias:: Priya Raghavan` on the `Priya` page, so the whole name is bracketed as one ref. That is the pattern to aim for with any full name, and it is worth noticing that the graph had to be set up for it. `Devon` matched a page title exactly. `Beacon` took a possessive outside the brackets, which is the model case for substring bracketing because `'s` is inflection rather than part of the noun. `NorthWind` differs from its page title only in case, so it links while keeping the spelling the note used.
 
 `Tobias` and `Marisol` both went into the batched question, and both stayed plain here: `Marisol` because two pages carry that first name, `Tobias` because the single page carrying it had nothing corroborating this mention. Note that `Tobias` is the interesting one. A pass that linked it without asking would look identical to a correct pass, right up until the wrong person read the note.
 
-`Wren` is the direction case, and it fails for a different reason than `Tobias`. `Atlas Squad` lists `Wren Calloway` in its roster alongside two other people the block names, so identity is settled outright; there is no doubt who is meant. The prose still sits inside the title, so no bracketing links it. It stays plain because the question came back without consent for an `alias:: Wren` on that page, and the alternative would have been typing a surname the note never carried.
+`Kofi` and `Wren` also stayed plain, and neither of them for `Tobias`'s reason. Both had identity settled outright; both failed on mechanics instead.
+
+`Kofi Mensah` stays plain even though `[[Kofi]] Mensah` was available and would have passed the gate. `Atlas Squad` carries Kofi as `manager::` alongside two other people the block names, so identity was never in doubt. The leftover is what stops it: `Mensah` is the rest of the name, not an inflection, and bracketing around it would have recorded an edge to a first name while leaving the surname stranded in plain text. The remedy is an `alias:: Kofi Mensah` on the `Kofi` page, which would make `[[Kofi Mensah]]` resolve whole. Nobody granted it here, so the name is left alone.
+
+`Wren` stays plain for the opposite mechanical reason. `Atlas Squad` lists `Wren Calloway` in its roster, so identity is again settled outright, but the prose sits inside the title rather than the other way round and there is no bracketing to attempt at all. The remedy is an `alias:: Wren` on `Wren Calloway`, also not granted here.
+
+Read `Kofi` and `Wren` together. One is bracketable and wrong to bracket; the other is not bracketable at all. Both are fully corroborated, both want an alias plus the owner's consent, and neither has anything to do with how confident you are about who is meant.

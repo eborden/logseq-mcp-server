@@ -1,6 +1,6 @@
 - Platform sync notes
   id:: 11111111-1111-4111-8111-111111111111
-	- [[Priya Raghavan]] walked [[Kofi]] Mensah through the migration plan; [[Devon]] took the rollback owner slot.
+	- [[Priya Raghavan]] walked Kofi Mensah through the migration plan; [[Devon]] took the rollback owner slot.
 	- Tobias raised concerns about the retry budget during the review.
 	- Marisol asked whether the change lands before the freeze.
 	- Wren owns the failover runbook.
