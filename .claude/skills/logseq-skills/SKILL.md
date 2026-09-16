@@ -50,7 +50,7 @@ Use this skill when:
 - The link / ask / skip decision table, and what counts as corroboration for a partial name
 - Anti-patterns: rewording to force a match, expanding abbreviations, linking adjectival mentions
 - **ALWAYS read this alongside `skills/concept-linking.md`**
-- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; skip an uncorroborated partial name rather than linking it. Validate with `scripts/check-link-safety.sh <before> <after> [graph-root]` before reporting done.
+- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; an uncorroborated partial name goes into the batched question rather than being linked or silently dropped. Validate with `scripts/check-link-safety.sh <before> <after> [graph-root] [page-list]` before reporting done.
 
 **`references/summary-compression.md`** - Compression philosophy shared by all summary granularities
 - Salience filtering, emotional markers, the hard word budget, merge-vs-drop
