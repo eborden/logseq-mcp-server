@@ -45,14 +45,28 @@ This is what lets a link coexist with plurals, possessives, hyphenated suffixes 
 | Matches an `alias::` value | **Link** the full alias string |
 | Page title is a substring, remainder is a suffix, possessive or surname | **Link** the substring only |
 | Partial name (first name), two or more candidate pages | **Ask.** Never pick |
-| Partial name, exactly one candidate page, no corroboration | **Skip** |
+| Partial name, exactly one candidate page, no corroboration | **Ask.** Never link on candidate count alone |
 | Partial name, exactly one candidate page, corroborated | **Link** the substring |
+| Linking would require adding or expanding words in the prose | **Ask,** and state that cost in the question |
 | A different string for the same concept | **Skip.** Report it if it recurs |
 | Generic or adjectival use of a concept page | **Skip** |
 | Already bracketed | **Leave alone.** Never double-bracket |
 | No candidate page at all | **Skip.** Report if it recurs |
 
-Note the fourth and fifth rows. **A lone candidate is not evidence.** That exactly one page happens to share a first name says nothing about whether this mention is that person. Candidate count measures the graph's vocabulary, not the identity of the mention. Treat one-candidate and many-candidate the same way: neither justifies a link on its own, one is worth asking about, the other is worth skipping.
+Note the fourth and fifth rows. **A lone candidate is not evidence.** That exactly one page happens to share a first name says nothing about whether this mention is that person. Candidate count measures the graph's vocabulary, not the identity of the mention, so one candidate and five candidates get the same treatment: ask.
+
+## Asking Is Part of the Job
+
+This workflow is not trying to be autonomous. The person who wrote the note knows who they meant, and they can settle in two seconds what no amount of graph traversal will resolve. A question is the cheapest instrument available here, and a good disambiguation exchange is the process working rather than the process failing.
+
+So do not price asking as a cost to be minimised. Price it against the alternative, which is either a confidently wrong link or a silently dropped one.
+
+Ask well:
+
+- **Batch.** Corroborate first, then put everything corroboration could not settle into one question with one row per term. Six separate questions about six names is an interrogation; one question with six rows is a checklist.
+- **Offer the real options.** Name the candidate pages as they exist in the graph, and include a "leave it unlinked" choice, because that is frequently the right answer.
+- **State the cost when there is one.** If honouring a link means changing the prose, say which words change. Someone choosing a link target has not thereby agreed to have their note reworded, and conflating those two is how a note ends up claiming something the meeting never said.
+- **Do not ask what the graph already answers.** A term with no candidate page has nothing to choose between, and an exact title match needs no permission. Spend the question budget on genuine ambiguity.
 
 ## What Counts as Corroboration
 

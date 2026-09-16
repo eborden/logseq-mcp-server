@@ -38,7 +38,8 @@ Use this skill when:
 **`skills/concept-linking.md`** - Add `[[refs]]` to existing notes for concepts that already have pages
 - Trigger: "add links to this block", "link the concepts in", "tag existing pages in these notes", "auto-link my journal"
 - Source: a block ref `((uuid))`, page, or date range → the same file, brackets added and nothing else changed
-- Proposes a diff and waits for confirmation; never creates pages, reports recurring unlinked terms instead
+- Batches genuine ambiguity into one question, proposes a diff, waits for confirmation
+- Never creates pages; reports recurring unlinked terms instead
 - Read this when user asks to link or tag concepts in notes they already wrote
 - **Also read `references/link-resolution.md`**
 

@@ -29,8 +29,8 @@ Each line of `journals/2024_03_11.md` tests exactly one branch of the decision t
 | `Priya Raghavan` | `Priya` with `alias:: Priya Raghavan` | `[[Priya Raghavan]]` | Alias resolution beats substring bracketing |
 | `Kofi Mensah` | `Kofi` | `[[Kofi]] Mensah` | Partial name, corroborated by `Atlas Squad.manager` |
 | `Devon` | `Devon` | `[[Devon]]` | Exact title match |
-| `Tobias` | `Tobias Fenn` | leave plain | **Regression: a lone candidate is not evidence** |
-| `Marisol` | `Marisol Vega`, `Marisol Okonkwo` | ask, leave plain | Two candidates means never pick |
+| `Tobias` | `Tobias Fenn` | ask; plain unless confirmed | **Regression: a lone candidate is not evidence** |
+| `Marisol` | `Marisol Vega`, `Marisol Okonkwo` | ask; plain unless confirmed | Two candidates means never pick |
 | `Beacon's` | `Beacon` | `[[Beacon]]'s` | Possessive stays outside the brackets |
 | `NorthWind` | `Northwind` | `[[NorthWind]]` | Case-only difference links, prose spelling kept |
 | `structured logs` | `Structured Logging` | leave plain | Different string, so a new page; skip and report |

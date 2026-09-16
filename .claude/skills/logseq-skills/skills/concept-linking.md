@@ -89,11 +89,13 @@ Walk the target's text against the page listing and sort each candidate term int
 
 For every partial name you are inclined to link, find independent evidence it refers to that page, per the corroboration section of the reference. Fetch the team or roster pages covering the people named in the block; one page often settles several names at once.
 
-No corroboration means skip, even when exactly one page shares the name. This is the single most common way a linking pass goes wrong, and it fails silently.
+Corroboration exists to shrink the next step, not to replace it. What it settles, link. What it cannot settle goes to step 7 rather than being linked on a hunch or dropped on a shrug.
 
-### Step 7: Ask About Ambiguity, Then Propose the Diff
+### Step 7: Ask, Then Propose the Diff
 
-Ask about genuinely ambiguous cases only: a short name with two or more candidate pages, or a concept whose intended referent changes the link. Do not ask about terms with no candidate page, since there is nothing to choose between.
+Put everything corroboration left open into **one batched question**, one row per term, each row offering the real candidate pages plus a "leave unlinked" choice. Read the asking-well section of the reference before writing the question; the short version is batch it, offer real options, and state the prose cost when honouring a link would change the wording.
+
+Asking is the designed path here, not a fallback. The person who wrote the note knows who they meant, and a two-second answer beats both a confident guess and a silent skip.
 
 Then show the proposed edits as a diff and wait for confirmation before writing. Anyone can eyeball twenty bracket insertions in a diff; nobody can audit them after the fact inside a knowledge graph. Skip the confirmation only when the requester has said to.
 
@@ -141,4 +143,6 @@ Tobias raised concerns about the retry budget during the review.
 [[Beacon]]'s rollout slipped a week; [[NorthWind]] is unaffected.
 ```
 
-`Priya Raghavan` resolved through an alias, so the whole string is bracketed. `Kofi` is a first name corroborated by a roster page and gets substring bracketing. `Devon` matched a page title exactly. `Tobias` matched exactly one page and had no corroboration, so it stayed plain. `Beacon` took a possessive outside the brackets. `NorthWind` differs from its page title only in case, so it links while keeping the spelling the note used.
+`Priya Raghavan` resolved through an alias, so the whole string is bracketed. `Kofi` is a first name corroborated by a roster page and gets substring bracketing. `Devon` matched a page title exactly. `Beacon` took a possessive outside the brackets. `NorthWind` differs from its page title only in case, so it links while keeping the spelling the note used.
+
+`Tobias` and `Marisol` both went into the batched question, and both stayed plain here: `Marisol` because two pages carry that first name, `Tobias` because the single page carrying it had nothing corroborating this mention. Note that `Tobias` is the interesting one. A pass that linked it without asking would look identical to a correct pass, right up until the wrong person read the note.
