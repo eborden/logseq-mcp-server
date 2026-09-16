@@ -37,6 +37,23 @@ Kofi Mensah walked us through ->  [[Kofi]] Mensah walked us through
 
 This is what lets a link coexist with plurals, possessives, hyphenated suffixes and surnames without touching a character of the original text.
 
+### Mismatch direction
+
+Substring bracketing only works in one direction, so whenever the prose and a candidate title differ by more than case, work out which one contains the other before deciding anything else. The check is mechanical: take the phrase as the note wrote it and the title as the graph spells it, and see which is the substring of which.
+
+- **Title inside the prose.** Prose says `Kofi Mensah`, the page is `Kofi`. Bracketable. Bracket the title, leave the remainder outside, and the note keeps every character: `[[Kofi]] Mensah`.
+- **Prose inside the title.** Prose says `Wren`, the page is `Wren Calloway`. **Not bracketable at all**, by any arrangement of brackets. `[[Wren]]` resolves to a page called `Wren`, which is a different page and usually an empty new one. `[[Wren Calloway]]` puts a surname into the note that the writer never typed. There is no third bracketing to reach for, which is why this direction needs its own handling rather than a harder look at the text.
+
+Run this check on every partial name, including the ones corroboration has already settled. Corroboration answers who the mention refers to; direction answers whether that answer can be honoured with brackets. Being certain `Wren` means Wren Calloway does nothing to make `[[Wren]]` resolve there, and treating the two questions as one is how a surname ends up silently inserted into somebody's journal.
+
+When the prose sits inside the title there are exactly three responses:
+
+1. **Add an `alias::` to the target page.** Putting `alias:: Wren` on `Wren Calloway` makes a bare `[[Wren]]` resolve there, so the prose is bracketed exactly as written and nothing is reworded. This is usually the right answer, because it is the only response that both links this mention and fixes every future bare mention of that short form anywhere in the graph. Two conditions attach to it:
+   - **The short form must be unambiguous**, meaning exactly one page in the listing could claim it. If two pages carry `Chris`, an `alias:: Chris` on either one makes that page win every future `[[Chris]]` silently, including the mentions that meant the other person. An ambiguous short form never gets an alias.
+   - **It edits a page outside the note being worked on**, which is beyond what a linking pass was asked to do and affects every other note in the graph. Get the user's consent before writing it, and say which page gains the property.
+2. **Expand the prose to the full title.** Available only if the writer explicitly asks for it, because it changes what the note says. It is an edit to the note rather than a linking pass, so the gate will reject it against the original baseline, correctly.
+3. **Leave it unlinked.** Always available and always safe. A missing edge costs retrieval; a reworded note costs the record.
+
 ## Decision Table
 
 | Prose relative to candidate page | Action |
@@ -47,7 +64,7 @@ This is what lets a link coexist with plurals, possessives, hyphenated suffixes 
 | Partial name (first name), two or more candidate pages | **Ask.** Never pick |
 | Partial name, exactly one candidate page, no corroboration | **Ask.** Never link on candidate count alone |
 | Partial name, exactly one candidate page, corroborated | **Link** the substring |
-| Linking would require adding or expanding words in the prose | **Ask,** and state that cost in the question |
+| Prose is a substring of the candidate page title | **Not bracketable.** See Mismatch direction: offer the `alias::`, and state the prose cost of the alternative |
 | A different string for the same concept | **Skip.** Report it if it recurs |
 | Generic or adjectival use of a concept page | **Skip** |
 | Already bracketed | **Leave alone.** Never double-bracket |

@@ -46,11 +46,11 @@ Use this skill when:
 ### References
 
 **`references/link-resolution.md`** - Resolution semantics and safety rules for adding `[[refs]]`
-- How LogSeq matches refs (case-insensitive, alias-aware, never fuzzy) and substring bracketing
+- How LogSeq matches refs (case-insensitive, alias-aware, never fuzzy), substring bracketing, and which direction of prose/title mismatch is bracketable at all
 - The link / ask / skip decision table, and what counts as corroboration for a partial name
 - Anti-patterns: rewording to force a match, expanding abbreviations, linking adjectival mentions
 - **ALWAYS read this alongside `skills/concept-linking.md`**
-- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; an uncorroborated partial name goes into the batched question rather than being linked or silently dropped. Validate with `scripts/check-link-safety.sh <before> <after> [graph-root] [page-list]` before reporting done.
+- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; an uncorroborated partial name goes into the batched question rather than being linked or silently dropped. A short form that sits inside a page title cannot be bracketed at all, however certain the identity, so offer an `alias::` on the target page rather than expanding the prose. Validate with `scripts/check-link-safety.sh <before> <after> [graph-root] [page-list]` before reporting done.
 
 **`references/summary-compression.md`** - Compression philosophy shared by all summary granularities
 - Salience filtering, emotional markers, the hard word budget, merge-vs-drop

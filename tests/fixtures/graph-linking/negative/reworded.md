@@ -3,6 +3,7 @@
 	- [[Priya Raghavan]] walked [[Kofi]] Mensah through the migration plan; [[Devon]] took the rollback owner slot.
 	- Tobias raised concerns about the retry budget during the review.
 	- Marisol asked whether the change lands before the freeze.
+	- Wren owns the failover runbook.
 	- [[Beacon]]'s rollout slipped a week; [[NorthWind]] is unaffected.
 	- We agreed to invest in [[Structured Logging]] before adding automation-driven alerting.
 	- Carried over from [[Quarterly Planning]]: confirm the automation budget.
