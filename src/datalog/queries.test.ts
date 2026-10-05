@@ -63,6 +63,53 @@ describe('DatalogQueryBuilder', () => {
     });
   });
 
+  describe('resolvePage', () => {
+    it('matches the name and its aliases in one query, with the lowercased name as an input', () => {
+      const { query, inputs } = DatalogQueryBuilder.resolvePage('Bob');
+
+      expect(query).toContain(':in $ ?n');
+      expect(query).toContain('[?page :block/name ?n]');
+      expect(query).toContain('[?page :block/alias ?stub]');
+      expect(query).toContain('[(ground "alias") ?via]');
+      expect(query).not.toContain('journal-day');
+      expect(inputs).toEqual(['bob']);
+    });
+
+    it('adds the journal route, requiring a page name, when given a day', () => {
+      const { query, inputs } = DatalogQueryBuilder.resolvePage('2025-01-01', 20250101);
+
+      expect(query).toContain(':in $ ?n ?day');
+      expect(query).toContain('[?page :block/name] [?page :block/journal-day ?day]');
+      expect(inputs).toEqual(['2025-01-01', 20250101]);
+    });
+
+    it.each([1.5, NaN, Infinity])('rejects a journal day of %s', day => {
+      expect(() => DatalogQueryBuilder.resolvePage('x', day)).toThrow(/Invalid journal day/);
+    });
+
+    it.each(hostileNames)('keeps %s out of the query text', (_label, name) => {
+      const { query, inputs } = DatalogQueryBuilder.resolvePage(name);
+      expect(inputs).toEqual([name.toLowerCase()]);
+      expect(query).not.toContain(name.toLowerCase());
+    });
+  });
+
+  describe('namespaceLeafPages', () => {
+    it('matches namespaced pages ending in "/leaf" with the suffix as an input', () => {
+      const { query, inputs } = DatalogQueryBuilder.namespaceLeafPages('Atlas');
+
+      expect(query).toContain(':in $ ?suffix');
+      expect(query).toContain('[?page :block/namespace]');
+      expect(query).toContain('clojure.string/ends-with?');
+      expect(inputs).toEqual(['/atlas']);
+    });
+
+    it.each(hostileNames)('keeps %s out of the query text', (_label, name) => {
+      const { query } = DatalogQueryBuilder.namespaceLeafPages(name);
+      expect(query).not.toContain(name.toLowerCase());
+    });
+  });
+
   describe('getPageBlocks', () => {
     it('passes the lowercased name as an input', () => {
       const { query, inputs } = DatalogQueryBuilder.getPageBlocks('Alice');
