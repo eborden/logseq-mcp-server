@@ -45,6 +45,10 @@ This directory contains integration tests that require a live LogSeq instance wi
 
 `output-format.test.ts` (#43) needs a page with a file and at least 3 blocks, a page referenced from elsewhere, a page with a property block (properties at the top of the page), and the same alias and journal data as page resolution. It asserts structure only.
 
+### Alias data
+
+`alias-sets.test.ts` (#69) needs a page with an `alias:: x` declared by that page alone, where at least one other block links `[[x]]`. It also needs one page with a file and no alias, for the unchanged case. It asserts that asking by `x` and by the declaring page's name covers the same blocks.
+
 `temporal-queries.test.ts` also needs a page that exists but has no file, no blocks, no references and no aliases (a link target nobody links to any more), to check that `get_concept_evolution` returns an empty timeline for a page nothing mentions.
 
 ## Running Integration Tests
