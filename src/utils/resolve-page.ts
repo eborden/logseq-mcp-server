@@ -68,6 +68,19 @@ function distinctPages(pages: any[]): any[] {
   return out.sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 }
 
+/**
+ * The pages that declare an alias, not the stubs LogSeq made around them.
+ * `alias:: a, b, c` links all three names to each other, so in a group of
+ * three or more the stubs point at each other's names as well. Only the page
+ * with a file wrote the declaration: if one or more pages have a file, the
+ * stubs are not candidates. Two file-backed pages declaring the same name stay
+ * ambiguous.
+ */
+function declaringPages(pages: any[]): any[] {
+  const written = pages.filter(page => page.file != null);
+  return written.length > 0 ? written : pages;
+}
+
 function found(page: any, matchedBy: PageMatchReason, lookupName: string): PageResolution {
   return { kind: 'found', page, name: nameOf(page), originalName: originalNameOf(page), matchedBy, lookupName };
 }
@@ -118,7 +131,9 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
   // A row without a `via` is a plain page row, i.e. an exact match
   const byRoute = (via: string) => rows.filter(([, v]) => (v ?? 'name') === via).map(([page]) => page);
   const exact = byRoute('name')[0];
-  const aliasSources = distinctPages(byRoute('alias')).filter(page => !exact || idOf(page) !== idOf(exact));
+  const aliasSources = declaringPages(
+    distinctPages(byRoute('alias')).filter(page => !exact || idOf(page) !== idOf(exact))
+  );
   const journals = distinctPages(byRoute('journal-date'));
 
   if (exact) {
