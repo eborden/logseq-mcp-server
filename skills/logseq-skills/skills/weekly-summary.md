@@ -61,6 +61,8 @@ logseq_query_by_date_range(
 
 Always pass `slim_results=true`; it cuts 40-50% of tokens. This single call returns the week's blocks including their markers, so a separate TODO search against the graph is redundant.
 
+When the result has `summary.topConcepts` (`[{ name, count, days }]`, the pages linked most that week), start there. A concept with a high `days` came up all week and a high `count` with `days` of 1 was one busy day. Use it to pick which threads to read closely in the blocks; it is a starting point, not the salience filter. Pass `top_concepts_limit` to change the default of 10. Skip it when the field is absent.
+
 ### Step 5: Verify Open Items
 
 Confirm which TODOs remain genuinely open, and check for expired item text, per the Unresolved Items section of the reference:

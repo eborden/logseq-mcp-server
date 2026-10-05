@@ -308,6 +308,7 @@ Query journal entries within a date range. **Preferred tool for time-bounded que
 - `start_date` (required): Start date in YYYYMMDD format (e.g., 20251101)
 - `end_date` (required): End date in YYYYMMDD format (e.g., 20251130)
 - `search_term` (optional): Filter blocks containing this term
+- `top_concepts_limit` (optional): Size of `summary.topConcepts`, the pages linked most in the range as `{ name, count, days }` (default 10, 0 omits it)
 
 **Context cost:** ~1-3k tokens for a week's worth of filtered results. Much cheaper than broad search_blocks.
 
