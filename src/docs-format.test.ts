@@ -23,8 +23,9 @@ describe('docs/adr and docs/business-rules follow their format rules', () => {
     expect(result.violations.map(formatViolation)).toEqual([]);
   });
 
-  it('found the business rules (the guard is not checking an empty set)', () => {
-    expect(checkDocsDir(nodeFs(REPO_ROOT), 'business-rule').stems.length).toBeGreaterThan(0);
+  // Files are never deleted, so an empty directory means the guard is checking nothing.
+  it.each(['adr', 'business-rule'] as const)('found the %s files (the guard is not checking an empty set)', kind => {
+    expect(checkDocsDir(nodeFs(REPO_ROOT), kind).stems.length).toBeGreaterThan(0);
   });
 });
 
