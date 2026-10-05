@@ -21,6 +21,12 @@ export interface DatalogQuery {
   inputs: unknown[];
 }
 
+/** Strict shape of a block uuid, checked before one is embedded in query text. */
+export const BLOCK_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** How many levels below an embedded block {@link DatalogQueryBuilder.refTargets} fetches. */
+export const EMBED_DESCENDANT_LEVELS = 3;
+
 export class DatalogQueryBuilder {
   /**
    * Validate numeric entity ids and build a `ground` binding clause.
@@ -39,6 +45,88 @@ export class DatalogQueryBuilder {
       }
     }
     return `[(ground [${ids.join(' ')}]) [${variable} ...]]`;
+  }
+
+  /**
+   * Validate block uuids and build a `ground` binding clause of `#uuid` literals.
+   *
+   * `:block/uuid` holds UUID values, not strings, so `[(ground ["..."]) [?u ...]]`
+   * matches nothing (verified); the `#uuid "..."` tag is what matches. A string
+   * collection passed through `:in` would arrive as strings, so the uuids are
+   * embedded instead, which is why each must match the strict 8-4-4-4-12 hex
+   * pattern first. The pattern excludes quotes, brackets and whitespace, so a
+   * validated uuid cannot end the literal early.
+   * @param uuids - Block uuids (any hex casing)
+   * @param variable - Datalog variable to bind each uuid to
+   * @returns A where-clause such as `[(ground [#uuid "..." #uuid "..."]) [?u ...]]`
+   * @throws Error if any uuid does not match the pattern
+   */
+  static groundUuids(uuids: string[], variable: string = '?u'): string {
+    const literals = uuids.map(uuid => {
+      if (typeof uuid !== 'string' || !BLOCK_UUID_PATTERN.test(uuid)) {
+        throw new Error(`Invalid block uuid: ${JSON.stringify(uuid)} (expected 8-4-4-4-12 hex digits)`);
+      }
+      return `#uuid "${uuid.toLowerCase()}"`;
+    });
+    return `[(ground [${literals.join(' ')}]) [${variable} ...]]`;
+  }
+
+  /**
+   * Generate ONE Datalog query that fetches everything a level of `((uuid))`
+   * refs and `{{embed}}`s points at:
+   * - `blockUuids`: the referenced blocks themselves;
+   * - `descendantUuids`: every block up to {@link EMBED_DESCENDANT_LEVELS}
+   *   levels below those blocks (for `{{embed ((uuid))}}`);
+   * - `pageNames`: each page entity and its top-level blocks (for
+   *   `{{embed [[page]]}}`). Names are bound through `:in` as a collection and
+   *   lowercased here.
+   *
+   * Rows are flat pulls of `[id, uuid, content, name, original-name, left, parent, page]`.
+   * A uuid with no block, or a page with no entity, simply has no row.
+   * Rebuild trees from `parent` and order siblings with `left`.
+   * @returns Query and inputs (`[lowercased pageNames]` when there are pages, else none)
+   * @throws Error if all three lists are empty or a uuid is malformed
+   */
+  static refTargets(spec: {
+    blockUuids?: string[];
+    descendantUuids?: string[];
+    pageNames?: string[];
+  }): DatalogQuery {
+    const blockUuids = spec.blockUuids ?? [];
+    const descendantUuids = spec.descendantUuids ?? [];
+    const pageNames = (spec.pageNames ?? []).map(name => name.toLowerCase());
+    const branches: string[] = [];
+
+    if (blockUuids.length > 0) {
+      branches.push(`(and ${DatalogQueryBuilder.groundUuids(blockUuids, '?u')} [?e :block/uuid ?u])`);
+    }
+    if (descendantUuids.length > 0) {
+      branches.push(`(and ${DatalogQueryBuilder.groundUuids(descendantUuids, '?ru')}
+               [?r :block/uuid ?ru]
+               (or-join [?r ?e]
+                 [?e :block/parent ?r]
+                 (and [?m1 :block/parent ?r] [?e :block/parent ?m1])
+                 (and [?m1 :block/parent ?r] [?m2 :block/parent ?m1] [?e :block/parent ?m2])))`);
+    }
+    if (pageNames.length > 0) {
+      branches.push('[?e :block/name ?n]');
+      branches.push('(and [?pg :block/name ?n] [?e :block/parent ?pg])');
+    }
+    if (branches.length === 0) {
+      throw new Error('refTargets needs at least one uuid or page name');
+    }
+
+    const head = pageNames.length > 0 ? '[?e ?n]' : '[?e]';
+    return {
+      query: `[:find (pull ?e [:db/id :block/uuid :block/content :block/name :block/original-name
+                              {:block/left [:db/id]} {:block/parent [:db/id]}
+                              {:block/page [:db/id :block/name :block/original-name]}])
+             ${pageNames.length > 0 ? ':in $ [?n ...]' : ''}
+             :where
+             (or-join ${head}
+               ${branches.join('\n               ')})]`,
+      inputs: pageNames.length > 0 ? [pageNames] : []
+    };
   }
 
   /**
