@@ -34,7 +34,7 @@ One row per rule, sorted by number. See [Format rules](#format-rules) for what e
 - **The number is the ID.** It is unique in this directory, and it is never changed or reused. Rule files are never deleted, even once retired, so a number always names the same rule.
 - **Citation:** cite a rule as `BR-0003`. The slug may follow for readability: `BR-0003 (infrastructure-errors-propagate)`.
 - **Assigning a number:** a new rule takes the highest existing number + 1 in its PR. If another PR merges that number first, renumber on rebase before merge.
-- **First set:** the rules that existed when numbering started are numbered chronologically by origin (the earliest issue or PR their Changelog cites), with ties broken by slug.
+- **First set:** the rules that existed when numbering started are numbered chronologically by origin: by the lowest-numbered, and so earliest-created, issue or PR cited in the rule's Changelog, with ties broken by slug.
 
 ## Status vocabulary
 
