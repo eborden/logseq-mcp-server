@@ -18,6 +18,7 @@ import { getContextForQuery } from '../src/tools/get-context-for-query.js';
 import { getCurrentContext } from '../src/tools/get-current-context.js';
 import { getBlock } from '../src/tools/get-block.js';
 import { getPage } from '../src/tools/get-page.js';
+import { getPageOutline } from '../src/tools/get-page-outline.js';
 import { queryJournals } from '../src/tools/query-by-date-range.js';
 import { getBacklinks } from '../src/tools/get-backlinks.js';
 import { getConceptEvolution } from '../src/tools/get-concept-evolution.js';
@@ -99,6 +100,7 @@ async function main() {
     ['query_by_date_range 7d resolve_refs', () =>
       queryJournals(client, { startDate: ymd(start), endDate: ymd(end), resolveRefs: true })],
     ['get_page', () => getPage(client, subject, false)],
+    ['get_page_outline', () => getPageOutline(client, subject)],
     ['get_backlinks', () => getBacklinks(client, subject)],
     ['get_concept_evolution', () => getConceptEvolution(client, subject)],
     ['search_by_relationship references', () => searchByRelationship(client, subject, otherSubject, 'references')],
@@ -108,7 +110,8 @@ async function main() {
     ...(uniqueAlias
       ? ([
           ['build_context (alias)', () => buildContextForTopic(client, uniqueAlias)],
-          ['get_page (alias)', () => getPage(client, uniqueAlias, false)]
+          ['get_page (alias)', () => getPage(client, uniqueAlias, false)],
+          ['get_page_outline (alias)', () => getPageOutline(client, uniqueAlias)]
         ] as Array<[string, () => Promise<unknown>]>)
       : []),
     ...(sharedAlias
@@ -119,6 +122,7 @@ async function main() {
     ...(isoDay
       ? ([
           ['get_page (ISO date)', () => getPage(client, isoDay, false)],
+          ['get_page_outline (ISO date)', () => getPageOutline(client, isoDay)],
           ['build_context (ISO date)', () => buildContextForTopic(client, isoDay)]
         ] as Array<[string, () => Promise<unknown>]>)
       : []),

@@ -31,6 +31,13 @@ async function sizeOf(mcp: Client, name: string, args: Args): Promise<number> {
   return result.content.reduce((sum, block) => sum + Buffer.byteLength(block.text, 'utf8'), 0);
 }
 
+/** First content block of one call, parsed as JSON. Used only to find a block uuid; never printed. */
+async function jsonOf(mcp: Client, name: string, args: Args): Promise<any> {
+  const result = (await mcp.callTool({ name, arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
+  if (result.isError) throw new Error(`${name} returned isError`);
+  return JSON.parse(result.content[0].text);
+}
+
 const pct = (slim: number, full: number) => (full === 0 ? '  n/a' : `${(((full - slim) / full) * 100).toFixed(0).padStart(4)}%`);
 
 async function main() {
@@ -89,6 +96,43 @@ async function main() {
   console.log('\nno slim_results parameter (size in bytes):');
   for (const [label, tool, args] of plainCases) {
     console.log(`${label.padEnd(42)} ${String(await sizeOf(mcp, tool, args)).padStart(9)}`);
+  }
+
+  // format: "markdown" (#43) against the default JSON, and compact against full. Bytes only.
+  const outline = await jsonOf(mcp, 'logseq_get_page_outline', { page_name: subject });
+  const pick = (outline.blocks as Array<{ uuid: string; childCount: number }>).find(b => b.childCount > 0) ?? outline.blocks[0];
+  const formatCases: Array<[string, string, Args]> = [
+    ['get_page include_children', 'logseq_get_page', { page_name: subject, include_children: true }],
+    ...(pick ? ([['get_block include_children', 'logseq_get_block', { block_uuid: pick.uuid, include_children: true }]] as Array<[string, string, Args]>) : []),
+    ['build_context', 'logseq_build_context', { topic_name: subject }],
+    ['build_context (compact)', 'logseq_build_context', { topic_name: subject, compact: true }],
+    ['get_context_for_query', 'logseq_get_context_for_query', { query: `what about [[${subject}]]?` }],
+    ['get_concept_network depth 2', 'logseq_get_concept_network', { concept_name: subject, max_depth: 2 }]
+  ];
+  console.log(`\n${'format: markdown vs json (bytes)'.padEnd(42)} ${'json'.padStart(9)} ${'markdown'.padStart(9)}  saved`);
+  for (const [label, tool, args] of formatCases) {
+    const json = await sizeOf(mcp, tool, args);
+    const markdown = await sizeOf(mcp, tool, { ...args, format: 'markdown' });
+    console.log(`${label.padEnd(42)} ${String(json).padStart(9)} ${String(markdown).padStart(9)}  ${pct(markdown, json)}`);
+  }
+
+  // The page with the most blocks: where an outline or a Markdown page matters most
+  const sizeRows = await logseq.callAPI<Array<[string, number]>>('logseq.DB.datascriptQuery', [
+    `[:find ?n (count ?b) :where [?b :block/page ?p] [?p :block/name ?n] [?p :block/file]]`
+  ]);
+  const biggest = [...sizeRows].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (biggest) {
+    const pageJson = await sizeOf(mcp, 'logseq_get_page', { page_name: biggest, include_children: true });
+    const pageMarkdown = await sizeOf(mcp, 'logseq_get_page', { page_name: biggest, include_children: true, format: 'markdown' });
+    const outlineJson = await sizeOf(mcp, 'logseq_get_page_outline', { page_name: biggest });
+    const contextJson = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest });
+    const contextMarkdown = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest, format: 'markdown' });
+    const contextCompact = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest, compact: true });
+    console.log(`\n${'largest page (bytes)'.padEnd(42)} ${'json'.padStart(9)} ${'other'.padStart(9)}  saved`);
+    console.log(`${'get_page children: markdown'.padEnd(42)} ${String(pageJson).padStart(9)} ${String(pageMarkdown).padStart(9)}  ${pct(pageMarkdown, pageJson)}`);
+    console.log(`${'get_page children: outline'.padEnd(42)} ${String(pageJson).padStart(9)} ${String(outlineJson).padStart(9)}  ${pct(outlineJson, pageJson)}`);
+    console.log(`${'build_context: markdown'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextMarkdown).padStart(9)}  ${pct(contextMarkdown, contextJson)}`);
+    console.log(`${'build_context: compact json'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextCompact).padStart(9)}  ${pct(contextCompact, contextJson)}`);
   }
   await mcp.close();
 }
