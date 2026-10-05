@@ -80,18 +80,23 @@ Replace this guidance with the line below. The guard reads only `<tier>: <refere
 
 ## Format rules
 
-The CI guard in #78 parses these files. These rules are exact.
+The CI guard, `src/docs-format.test.ts` (#78), parses these files with `scripts/docs-format.ts`. These rules are exact. To check locally, run `npx tsx scripts/docs-format.ts`.
 
 1. **Rule set.** Every `*.md` file directly in this directory except `README.md`. Subdirectories and other files (such as `.gitkeep`) are ignored. The stem is the filename without `.md` and must match `^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*$`, so an `.md` file with no number or an uppercase name fails. No two files share a number.
-2. **Index.** The first markdown table in this README. Its first column holds `[<stem>](<stem>.md)` for each file, for example `[0003-infrastructure-errors-propagate](0003-infrastructure-errors-propagate.md)` (plain link text, no backticks), and covers the rule set exactly, with no extra rows. The Summary cell is one line of free text that the guard doesn't check. Rows are sorted by number, a convention the guard doesn't check.
+2. **Index.** The first markdown table in this README. Its first column holds `[<stem>](<stem>.md)` for each file, for example `[0003-infrastructure-errors-propagate](0003-infrastructure-errors-propagate.md)` (plain link text, no backticks), and covers the rule set exactly, with no extra rows. The Summary cell is one line of free text that the guard doesn't check. Rows are sorted by number, a convention the guard doesn't check. Every row of a table the guard reads, including the header and delimiter rows, starts with `|`. A table without leading pipes isn't read as a table.
 3. **Headings.** Each required heading is an exact, case-sensitive `## <Name>` line with no trailing whitespace, and appears exactly once: `## Statement`, `## Rationale`, `## Mechanical enforcement`, `## Changelog`. Order isn't enforced and extra headings are allowed. Lines inside fenced code blocks are ignored. The title is the file's single `#` heading.
 4. **Changelog.** The first markdown table under `## Changelog` has the columns Date, Change and Issue/PR, and at least one row besides the header and delimiter rows. A retired rule's last row cites the approving PR, the same as every other row.
-5. **Mechanical enforcement body.** At least one line or list item of the form `<tier>: <reference>`, where `<tier>` is one of `type`, `test`, `ci`, `reviewer` or `none-yet`. Other lines are ignored. Replace the template's placeholder line. The reference is:
-   - `type`, `test`, `ci`: a backticked repo-relative file path or workflow, which must exist (for example ``test: `src/index.test.ts` ``).
+5. **Mechanical enforcement body.** At least one line or list item of the form `<tier>: <reference>`. `<tier>` is one of `type`, `test`, `ci`, `reviewer` or `none-yet`, in plain lowercase, followed by a colon, a space and a non-empty reference. Replace the template's placeholder line. Other lines are ignored, except two kinds of broken tier line, which are errors:
+   - A line that starts with the exact tier and a colon but doesn't parse, such as `test:` with no space after the colon, or a `reviewer:` with nothing after it.
+   - A list item whose leading word, ignoring `**`, `__` or backticks around it, is a tier or `none yet` in any case, such as `- Test:`, `- **test:**` or ``- `ci`:``.
+
+   The reference is:
+   - `type`, `test`, `ci`: a backticked repo-relative file path, which must exist (for example ``test: `src/index.test.ts` ``). A workflow is named by its file path (for example ``ci: `.github/workflows/ci.yml` ``). Explanatory text may follow the path. Any further backticked span on the line that is a file path must exist too. A span counts as a file path when it has a directory and its last segment has an extension, such as `src/utils/result-meta.ts`. Other spans, such as `:block/name`, `Issue/PR` or `ResultMeta`, are prose.
    - `reviewer`: the checklist item, as plain text.
-   - `none-yet`: an issue link, `#N` or a full URL. It should be open when written, since the issue is meant to add the mechanism. The guard accepts open or closed.
+   - `none-yet`: an issue, written as `#N`, as `https://github.com/<owner>/<repo>/issues/N`, or as a markdown link to that URL. Explanatory text may follow it (for example `none-yet: #61 (adds a cap test)`). The issue should be open when written, since it is meant to add the mechanism. The guard checks only the form. It accepts open or closed issues and doesn't call GitHub.
 
    The numbered list in the template maps to tiers 1 `type`, 2 `test`, 3 `ci`, 4 `reviewer`, 5 `none-yet`, strongest first. Prefer the strongest that applies.
+6. **Links.** Every relative markdown link in these files and in this README resolves to a file or directory in the repo, matched case-sensitively. A `#fragment` isn't checked. Links inside fenced code blocks and code spans are skipped, and so are external URLs (such as `https:` and `mailto:`) and same-file `#anchor` links.
 
 ## Change process
 
