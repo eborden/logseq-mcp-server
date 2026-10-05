@@ -326,8 +326,8 @@ let currentFrontier = [rootId];
 
 for (let depth = 1; depth <= maxDepth; depth++) {
   // Query ALL pages at current depth in ONE call
-  const query = DatalogQueryBuilder.connectedPages(currentFrontier);
-  const results = await client.executeDatalogQuery(query.query, ...query.inputs);
+  const { query, inputs } = DatalogQueryBuilder.connectedPages(currentFrontier);
+  const results = await client.executeDatalogQuery(query, ...inputs);
 
   // Process results for next depth
   currentFrontier = extractNewPages(results);
@@ -338,7 +338,7 @@ for (let depth = 1; depth <= maxDepth; depth++) {
 
 > **Implemented in `get-concept-network.ts` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `maxNodes` 50 (root included) and `maxFanout` 15 new pages per page. Journal pages are leaves unless `expandJournals` is set, and `truncated: true` is set whenever a cap bites. MCP clients set them with `max_nodes` (≤ 500), `max_fanout` (≤ 100) and `expand_journals` on `logseq_get_concept_network`. Why every walk is capped: [ADR-0011 (bounded-calls-and-results)](docs/adr/0011-bounded-calls-and-results.md).
 
-**Real implementation:** `DatalogQueryBuilder.connectedPages` and `getConceptNetwork`. One `or-join` covers both directions (outbound: blocks on the source page that ref another page; inbound: blocks on another page that ref the source). Frontier ids are bound with `groundIds` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
+**Real implementation:** `DatalogQueryBuilder.connectedPages` and `getConceptNetwork`. When the root has aliases, depth 1 uses `connectedPagesGrouped` instead, so one query covers every name in the alias group (#69). One `or-join` covers both directions (outbound: blocks on the source page that ref another page; inbound: blocks on another page that ref the source). Frontier ids are bound with `groundIds` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
 
 ---
 
