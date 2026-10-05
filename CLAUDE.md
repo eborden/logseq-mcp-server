@@ -6,27 +6,39 @@ This is an MCP (Model Context Protocol) server that provides Claude with 13 tool
 
 **Key Stats:**
 - 13 MCP tools for graph operations, search, and temporal queries
-- 191 test cases (unit + integration + property-based)
-- 70-88% API call reduction via Datalog optimization
-- Direct Datalog implementation (simplified architecture as of Nov 2024)
+- Unit tests (`npx vitest run src`) plus integration tests against a live graph (`npm run test:integration`). `npm test` runs both.
+- Hybrid implementation: Datalog for page/block lookups, `logseq.Editor.*` for everything else (see "Current Implementation Status" below)
 
 **Architecture:**
 ```
 Claude (via MCP) → HTTP API → LogSeq Desktop → DataScript Database
 ```
 
-The server translates high-level queries (e.g., "get context for topic") into optimized Datalog queries that run against LogSeq's internal DataScript database.
+The server translates high-level queries (e.g., "get context for topic") into calls against LogSeq's HTTP API: Datalog queries via `logseq.DB.datascriptQuery` where implemented, and `logseq.Editor.*` methods elsewhere.
 
 ## Why Datalog?
 
-### Performance Gains
-- **Before (HTTP):** Sequential API calls - O(n) calls for n entities
-- **After (Datalog):** Multi-query BFS - O(maxDepth) calls regardless of graph size
+### Performance Goal
+- **Editor API:** Sequential API calls - O(n) calls for n entities
+- **Datalog:** Batched queries - O(maxDepth) calls regardless of graph size
 
-**Concrete example (get-concept-network at depth=2):**
-- HTTP: 10-25 API calls
-- Datalog: 3 API calls
-- **Reduction: 70-88%**
+### Current Implementation Status
+
+Only `build_context`, `get_concept_network` and `get_concept_evolution` use Datalog, and the first two use it only for the page/block lookups. Traversal still goes through `logseq.Editor.getPageLinkedReferences`, one call per page.
+
+Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, 2,189-page graph, hub page with 118 direct neighbours):
+
+| Tool | API calls | Time | Notes |
+|---|---|---|---|
+| `build_context` | 3 | ~0.1s | 2 Datalog + 1 linked refs. Meets the goal. |
+| `get_context_for_query` (1 topic) | 3 | ~0.3s | Delegates to `build_context` |
+| `get_concept_network` depth=1 | 2 | ~0.2s | |
+| `get_concept_network` depth=2 | 119 | ~3s | One `getPageLinkedReferences` per frontier page, inbound only (#3) |
+| `search_blocks` | 133 | ~1.5-3s | `getAllPages` + `getPageBlocksTree` per page until the limit fills (#4) |
+| `query_by_date_range` (7 days) | 7 | ~0.9s | `getAllPages` + one call per journal day (#5) |
+| `query_by_property` | 2,177 | ~23s | `getAllPages` + one call per page in the graph |
+
+Re-run the script after changing any of these tools, and update this table.
 
 ### Trade-offs
 - **Pros:** Massive performance gains, expresses graph logic naturally, fewer round-trips
@@ -37,51 +49,47 @@ The server translates high-level queries (e.g., "get context for topic") into op
 
 LogSeq's Datalog implementation (via `logseq.DB.datascriptQuery`) has significant limitations compared to standard DataScript. Understanding these constraints is essential for writing working queries.
 
-### 1. No Parameterized Queries via HTTP API
+Every constraint below marked **Verified** is reproduced by `npx tsx scripts/probe-constraints.ts` (read-only, needs a running LogSeq). Re-run it after LogSeq upgrades.
 
-LogSeq's HTTP API doesn't support the `:in` clause for passing parameters to Datalog queries.
+### 1. `:in` Parameters Need EDN-Encoded Inputs
 
-**DON'T (doesn't work):**
-```clojure
-[:find (pull ?page [*])
- :in $ ?page-name    ; ← This doesn't work via logseq.DB.datascriptQuery
- :where
- [?page :block/name ?page-name]]
-```
+`:in` works, but LogSeq reads every input passed after the query string as EDN. A bare string is read as a **symbol**, so it matches nothing.
 
+| Call | Rows |
+|---|---|
+| `datascriptQuery(query-with-embedded-literal)` | 1 |
+| `datascriptQuery(query-with-:in, "senior leadership")` (bare string) | **0** |
+| `datascriptQuery(query-with-:in, "\"senior leadership\"")` (EDN-quoted) | 1 |
+
+**Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted.
+
+**Current practice:** `LogseqClient.executeDatalogQuery` only sends `[query]`, so every builder embeds parameters in the query string:
 ```typescript
-// This will fail or return 0 results
-const query = '[:find (pull ?page [*]) :in $ ?name :where [?page :block/name ?name]]';
-await client.executeDatalogQuery(query, 'my-page');
-```
-
-**DO (embed parameters in query string):**
-```typescript
-// Pre-process parameters in TypeScript
 const pageNameLower = pageName.toLowerCase();
-
-// Embed directly in query string
 const query = `[:find (pull ?page [*])
                 :where
-                [?page :block/name "${pageNameLower}"]]`;
-
+                [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
 await client.executeDatalogQuery(query);
 ```
 
-**Why:** LogSeq's HTTP API wrapper for DataScript doesn't pass additional parameters to the query engine. Only the query string itself is processed.
+**If you switch to `:in`:** extend `executeDatalogQuery` to take inputs and send them as `JSON.stringify(value)`. A JSON string literal is also a valid EDN string literal.
 
-**References:**
-- Discovered in: commit c108174 "fix: implement case-insensitive page lookup"
-- Test file: `test-simple-query.ts` demonstrated this limitation
-- Working in: `src/datalog/queries.ts` (all query builders embed parameters)
+**Embedded strings must be escaped.** See constraint 6.
 
 ---
 
-### 2. clojure.string Functions Not Available
+### 2. Most clojure.string Functions Work; `lower-case` Does Not
 
-DataScript via LogSeq's HTTP API doesn't support Clojure standard library functions.
+| Function | Result |
+|---|---|
+| `clojure.string/lower-case` | **Error:** `Unknown function 'clojure.string/lower-case` |
+| `clojure.string/starts-with?` | Works |
+| `clojure.string/includes?` | Works, including on `:block/content` |
+| `re-pattern` + `re-find`, e.g. `"(?i)foo"` | Works (case-insensitive matching) |
 
-**DON'T (doesn't work):**
+**Verified.** Lowercase in TypeScript before embedding. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
+
+**DON'T (lower-case doesn't work):**
 ```clojure
 [:find (pull ?page [*])
  :in $ ?page-name
@@ -103,15 +111,15 @@ const pageNameLower = pageName.toLowerCase();
 // Use pre-processed value in query
 const query = `[:find (pull ?page [*])
                 :where
-                [?page :block/name "${pageNameLower}"]]`;
+                [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
 ```
 
-**Why:** LogSeq's DataScript implementation is sandboxed and doesn't include Clojure's standard library functions. Only core DataScript functions are available.
+**Why:** LogSeq's DataScript exposes only some of `clojure.string`. `lower-case` is missing, while `includes?`, `starts-with?`, `re-pattern` and `re-find` are present.
 
 **References:**
 - Discovered in: commit c108174 integration tests
-- Attempted in: searchByRelationship (reverted)
-- Pattern used throughout: `src/datalog/queries.ts` (all methods pre-lowercase)
+- Probe: `scripts/probe-constraints.ts`
+- `DatalogQueryBuilder.searchByRelationship` still uses `lower-case` and bare `:in`, and is unused outside its own tests (#11)
 
 ---
 
@@ -143,7 +151,7 @@ The pattern `(or-join [?x ?y] ... [(ground nil) ?y])` doesn't work as expected f
 // Query 1: Get the page (always succeeds if page exists)
 const pageQuery = `[:find (pull ?page [*])
                     :where
-                    [?page :block/name "${pageNameLower}"]]`;
+                    [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
 const pageResults = await client.executeDatalogQuery(pageQuery);
 
 if (!pageResults || pageResults.length === 0) {
@@ -153,7 +161,7 @@ if (!pageResults || pageResults.length === 0) {
 // Query 2: Get blocks (may be empty array)
 const blocksQuery = `[:find (pull ?block [*])
                       :where
-                      [?page :block/name "${pageNameLower}"]
+                      [?page :block/name ${JSON.stringify(pageNameLower)}]
                       [?block :block/page ?page]]`;
 const blockResults = await client.executeDatalogQuery(blocksQuery);
 
@@ -165,30 +173,33 @@ const blocks = (blockResults || []).map(r => r[0]);
 
 **References:**
 - Discovered in: commit d6c3151 "fix: handle pages without blocks"
-- Pattern used in: `src/tools/build-context.ts` (lines 59-78)
-- Also used in: `src/tools/get-concept-network.ts` (BFS traversal)
+- Pattern used in: `buildContextForTopic` in `src/tools/build-context.ts` (page query, then blocks query)
+- Empty pages are common: 1,372 of 2,189 pages in the reference graph are non-journal pages with no file (link targets only)
 
 ---
 
-### 4. Use logseq.DB.datascriptQuery (not logseq.DB.q)
+### 4. Datalog Goes to logseq.DB.datascriptQuery; logseq.DB.q Takes the Simple Query DSL
 
-LogSeq provides multiple query methods, but only one works correctly via HTTP API.
+`logseq.DB.q` is LogSeq's *simple query* engine (the `{{query ...}}` language), not a Datalog endpoint.
 
-**DON'T:**
-```typescript
-await client.callAPI('logseq.DB.q', [query]);  // Returns null
-```
+| Call | Result |
+|---|---|
+| `DB.q` with a Datalog string | `null` |
+| `DB.q` with `(task TODO)` | 30 blocks |
+| `DB.q` with `[[page name]]` | 10 blocks |
+| `datascriptQuery` with Datalog | Works |
+
+**Verified.**
 
 **DO:**
 ```typescript
-await client.callAPI('logseq.DB.datascriptQuery', [query]);  // Works
+await client.callAPI('logseq.DB.datascriptQuery', [datalogQuery]);
 ```
 
-**Why:** The `logseq.DB.q` method is designed for use within LogSeq's plugin system, not the HTTP API. It returns null when called via HTTP.
+**Don't** treat a `null` from `DB.q` as "no results". It usually means the wrong dialect was sent.
 
 **References:**
-- Implemented in: `src/client.ts` (line 75)
-- Method name: `executeDatalogQuery()`
+- Implemented in: `executeDatalogQuery()` in `src/client.ts`
 
 ---
 
@@ -213,7 +224,7 @@ function getPage(pageName: string) {
 
   return `[:find (pull ?page [*])
            :where
-           [?page :block/name "${pageNameLower}"]]`;
+           [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
 }
 
 // All these work correctly:
@@ -227,7 +238,26 @@ getPage('CHRISTY')  // ✅ Finds "christy"
 **References:**
 - Pattern established in: commit ff0c96d
 - Used throughout: `src/datalog/queries.ts` (all query builders)
-- Verified with: test-find-pages.ts (showed name: "christy", original-name: "Christy")
+
+---
+
+### 6. Escape Every String You Embed
+
+Embedding a string that contains `"` produces a malformed query:
+
+```
+[?p :block/name "foo "bar"]   →  LogSeq API error: Unexpected EOF reading string starting ""]].
+```
+
+**Verified.** `JSON.stringify(value)` produces a valid EDN string literal for quotes, backslashes and newlines, and the escaped form runs correctly.
+
+**DO:**
+```typescript
+const query = `[:find (pull ?p [*]) :where [?p :block/name ${JSON.stringify(nameLower)}]]`;
+```
+
+- Check numeric IDs with `Number.isInteger` before embedding them in `ground` vectors.
+- `src/datalog/queries.ts` currently embeds names unescaped (#6).
 
 ---
 
@@ -264,14 +294,15 @@ const relatedData = (relatedResults || []).map(r => r[0]);
 - Matches HTTP API pattern
 
 **Used in:**
-- `src/tools/build-context.ts:59-78` - page + blocks + connections
-- `src/tools/get-concept-network.ts:34-95` - root + BFS traversal
+- `buildContextForTopic` in `src/tools/build-context.ts`: page query, blocks query, then linked references via `getPageLinkedReferences`
 
 ---
 
 ### Pattern 2: Multi-Query BFS for Graph Traversal
 
 Instead of recursive queries or N sequential API calls, use BFS with batched queries at each depth level.
+
+> **Status: not yet implemented.** `get-concept-network.ts` currently runs the per-page loop shown under "Traditional Approach" (one `getPageLinkedReferences` call per frontier page, inbound links only), and `getConnectedPages` below doesn't exist yet. It's tracked in #3. Whatever implements this pattern must cap `maxNodes` and per-page fan-out: journal pages link to almost everything, and the depth-2 walk measured above reached 213 nodes from one hub.
 
 **Traditional Approach (Inefficient):**
 ```typescript
@@ -295,11 +326,9 @@ for (let depth = 1; depth <= maxDepth; depth++) {
 }
 ```
 
-**Performance:**
-- Depth 2, 10 pages: HTTP = 25 calls, Datalog = 3 calls (88% reduction)
-- Depth 2, 5 pages: HTTP = 10 calls, Datalog = 3 calls (70% reduction)
+**Performance:** the target is maxDepth + 1 calls. Today, depth 2 from a hub with 118 neighbours makes 119 calls (see "Current Implementation Status").
 
-**Query Builder Pattern:**
+**Query Builder Pattern (proposed):**
 ```typescript
 static getConnectedPages(pageIds: number[]): string {
   return `[:find (pull ?source [*]) (pull ?connected [*]) ?rel-type
@@ -322,9 +351,7 @@ static getConnectedPages(pageIds: number[]): string {
 }
 ```
 
-**Used in:**
-- `src/tools/get-concept-network.ts:67-95` - BFS graph traversal
-- `src/datalog/queries.ts:52-88` - Query builder
+**Closest existing code:** `DatalogQueryBuilder.conceptNetwork` has the same `or-join`, but for a single root. `getConceptNetwork` only calls it with `maxDepth = 0`, to fetch the root page.
 
 ---
 
@@ -339,15 +366,21 @@ export function buildQuery(pageName: string) {
 
   return `[:find (pull ?page [*])
            :where
-           [?page :block/name "${pageNameLower}"]]`;
+           [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
 }
 ```
 
-**Used everywhere:**
-- `src/datalog/queries.ts:conceptNetwork()` - line 20
-- `src/datalog/queries.ts:getPage()` - line 101
-- `src/datalog/queries.ts:getPageBlocks()` - line 113
-- `src/datalog/queries.ts:searchByRelationship()` - lines 128, 141
+**Used in:** `conceptNetwork()`, `getPage()` and `getPageBlocks()` in `src/datalog/queries.ts`.
+
+**Not yet followed by:** `src/tools/search-by-relationship.ts`, which matches `[[topic]]` with a case-sensitive substring check (#7).
+
+---
+
+### Pattern 4: No Per-Page Crawls
+
+Never call `logseq.Editor.getAllPages` and then make one call per page. On a 2,189-page graph, `query_by_property` makes 2,177 calls and takes about 23s this way.
+
+Use one Datalog query, filtering in the query with `includes?` / `re-find`, or batched queries with `[(ground [ids...]) [?id ...]]`. `search_blocks`, `query_by_date_range` and `query_by_property` still crawl (#4, #5).
 
 ---
 
@@ -385,13 +418,20 @@ export function buildQuery(pageName: string) {
 - **Commits:**
   - 9642558 "refactor: remove redundant get_entity_timeline tool"
   - 34a699a "refactor: remove incomplete get_related_pages tool"
+- Later work added tools back. There are 13 registered in `src/index.ts` today.
+
+### Phase 6: Comparison With Other PKM MCP Servers (Oct 2026)
+- Reviewed 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers
+- Probed the Datalog constraints and measured API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`), which corrected constraints 1, 2 and 4
+- Roadmap tracked in GitHub issues #3–#18
 
 ### Lessons Learned
 
 1. **LogSeq's Datalog ≠ Standard DataScript**
-   - Parameterized queries don't work
-   - Clojure stdlib not available
+   - `:in` inputs must be EDN-encoded (bare strings become symbols)
+   - Only part of `clojure.string` is available (`lower-case` is missing)
    - or-join semantics differ
+   - Probe before concluding something "doesn't work": the original conclusions on `:in` and `clojure.string` were over-generalized from a single failing case
 
 2. **Simple is Better**
    - Multiple simple queries > One complex query
@@ -414,16 +454,35 @@ export function buildQuery(pageName: string) {
 
 Quick reference checklist for future work:
 
+**Queries**
 - [ ] Pre-lowercase page names before embedding in queries
-- [ ] Don't use `:in` clause or parameterized queries
-- [ ] Don't use `clojure.string/*` or other Clojure stdlib functions
+- [ ] Escape every embedded string with `JSON.stringify`, and check numeric IDs with `Number.isInteger`
+- [ ] If you use `:in`, send inputs EDN-encoded (`JSON.stringify(value)`), never bare strings
+- [ ] Don't use `clojure.string/lower-case`. `includes?`, `starts-with?`, `re-pattern` and `re-find` work.
 - [ ] Split queries when data might be empty (don't rely on or-join with ground nil)
-- [ ] Use `logseq.DB.datascriptQuery` (not `logseq.DB.q`)
+- [ ] Send Datalog to `logseq.DB.datascriptQuery`. `logseq.DB.q` takes the simple query DSL and returns `null` for Datalog.
 - [ ] Handle empty arrays from queries gracefully (`(results || [])`)
 - [ ] Page names in `:block/name` are lowercase, not original casing
 - [ ] Use `[(ground [id1 id2 id3]) [?id ...]]` for batch queries
-- [ ] Test with pages that have no blocks/connections
+- [ ] Never crawl `getAllPages` + one call per page (Pattern 4)
+- [ ] `:with` can't name a variable that's also aggregated in `:find` (error: `:find and :with should not use same variables`)
 - [ ] Remember: LogSeq Datalog ≠ Standard DataScript
+
+**Data shapes** (verified by `scripts/probe-constraints.ts`)
+- [ ] `:block/journal-day` is an integer `YYYYMMDD` (e.g. `20260422`). Parse its digits; never pass it to `new Date()`.
+- [ ] `logseq.Editor.getBlock` returns `page` and `parent` as bare `{id}` objects. Resolve them; don't expect names.
+- [ ] `:block/path-refs` includes refs inherited from ancestor blocks. Use it for "anything under a block tagged X".
+- [ ] `:block/updated-at` is missing on some pages (1,989 of 2,189 have it). Use `get-else` with a default.
+- [ ] Many pages are empty link targets with no blocks or file. Test with them.
+
+**HTTP API behaviour** (verified)
+- [ ] An unknown method returns **HTTP 200** with body `{"error": "MethodNotExist: ..."}`. Always check the body; `client.ts` does.
+- [ ] A bad token returns HTTP 401.
+- [ ] `logseq.Editor.getEditingBlockSelection` doesn't exist. Use `getSelectedBlocks`, which returns `null` when nothing is selected.
+
+**Tool behaviour**
+- [ ] Don't turn errors into empty results. A dropped connection must not look like "no data" (#10).
+- [ ] Never write to stdout (`console.log`). It's the MCP stdio channel; log with `console.error`.
 
 ---
 
@@ -456,8 +515,9 @@ for (const page of pages) {
 - Works across different LogSeq databases
 
 **Test Categories:**
-- **Unit tests** (182 tests): Query builders, data transformations, mocked clients
-- **Integration tests** (with real LogSeq): API connectivity, actual graph queries
+- **Unit tests** (`npx vitest run src`, 181 as of Oct 2026): Query builders, data transformations, mocked clients
+- **Integration tests** (`npm run test:integration`, 60 as of Oct 2026, with real LogSeq): API connectivity, actual graph queries
+- Note: `npm test` runs **both** suites (the default vitest config doesn't exclude `tests/integration/`), so it needs a running LogSeq
 - **Property tests**: Universal invariants, equivalence validation
 
 ### Integration Test Requirements (Hard Failures)
@@ -521,22 +581,14 @@ it('test', async () => {
 
 ## Performance Benchmarks
 
-### get-concept-network (Depth=2)
-- **HTTP:** 10-25 API calls
-- **Datalog:** 3 API calls
-- **Reduction:** 70-88%
+Measured numbers are in "Current Implementation Status" under "Why Datalog?". Regenerate them with:
 
-### build-context
-- **HTTP:** 4-11 API calls
-- **Datalog:** 3 API calls (page, blocks, connections)
-- **Reduction:** 50-73%
+```bash
+npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
+npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
+```
 
-### Typical Query (get-context-for-query with 2 topics)
-- **HTTP:** ~18 API calls
-- **Datalog:** 7 API calls (1 page + 1 blocks + 1 connections per topic + 1 search)
-- **Reduction:** ~61%
-
-**Calculation basis:** Measured on typical LogSeq graphs with 5-10 pages and depth=2 traversal.
+The earlier figures here (3 calls for `get_concept_network` at depth 2, 7 for `get_context_for_query`) came from 5-10 page test graphs and don't reflect the current code.
 
 ---
 
@@ -549,15 +601,21 @@ src/
 │   └── queries.ts                 - DatalogQueryBuilder with all query templates
 ├── tools/
 │   ├── build-context.ts           - Two-query pattern (page + blocks)
-│   ├── get-concept-network.ts     - Multi-query BFS pattern
+│   ├── get-concept-network.ts     - BFS (currently per-page; see Pattern 2)
 │   ├── search-by-relationship.ts  - Relationship search
-│   └── [9 other tools]
+│   └── [10 other tools]
 └── types.ts                       - TypeScript interfaces
 
 tests/
 ├── integration/                   - Tests against real LogSeq
 │   └── properties/                - Property-based tests
-└── [unit test files]              - Mocked tests
+└── [unit test files]              - Mocked tests (co-located in src/)
+
+scripts/
+├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live graph
+└── measure-api-calls.ts           - Counts API calls per tool against a live graph
+
+.claude/skills/logseq-skills/      - Claude Code skills (SKILL.md, skills/, references/, scripts/)
 ```
 
 **Key files:**
@@ -571,8 +629,11 @@ tests/
 ## Useful Commands
 
 ```bash
-# Run all tests
+# Run all tests (unit + integration; integration needs a running LogSeq)
 npm test
+
+# Run unit tests only
+npx vitest run src
 
 # Run specific test file
 npx vitest run src/tools/build-context.test.ts
@@ -581,7 +642,13 @@ npx vitest run src/tools/build-context.test.ts
 npm run build
 
 # Test against real LogSeq (requires running instance)
-npx vitest run tests/integration/
+npm run test:integration
+
+# Verify Datalog/API constraints against the live graph (read-only)
+npx tsx scripts/probe-constraints.ts
+
+# Count API calls per tool against the live graph (read-only)
+npx tsx scripts/measure-api-calls.ts
 
 # Debug Datalog query
 npx tsx scripts/test-datalog-query.ts
@@ -595,8 +662,9 @@ Checklist for new Datalog-based tools:
 
 1. **Query Builder** - Add static method to `DatalogQueryBuilder`
    - Pre-lowercase any page name parameters
-   - Embed parameters directly in query string
-   - Don't use `:in` clause or Clojure functions
+   - Embed parameters with `JSON.stringify` (or pass EDN-encoded `:in` inputs)
+   - Don't use `clojure.string/lower-case`
+   - No `getAllPages` + per-page crawls
 
 2. **Tool Implementation** - Follow two-query pattern if data is optional
    - Query 1: Main entity (fail if not found)
@@ -609,9 +677,11 @@ Checklist for new Datalog-based tools:
 
 4. **Integration Test** - Add to `tests/integration/`
    - Use property-based testing if possible
-   - Skip if no real data available
+   - Fail loud if no real data is available (never skip; see Integration Test Requirements)
 
 5. **Documentation** - Update MCP tool handler in `src/index.ts`
+
+6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
 
 ---
 
@@ -627,12 +697,15 @@ Checklist for new Datalog-based tools:
 
 ## Summary
 
-This project achieves significant performance gains through Datalog optimization, but requires careful handling of LogSeq's Datalog limitations. The key is to:
+Datalog is how this project gets its performance gains, but only some tools use it so far (see "Current Implementation Status"), and LogSeq's Datalog needs careful handling. The key is to:
 
-1. **Embed parameters** directly in query strings (no `:in` clause)
-2. **Pre-process** strings in TypeScript (no Clojure functions)
+1. **Embed escaped parameters** (`JSON.stringify`), or pass EDN-encoded `:in` inputs
+2. **Lowercase in TypeScript** (`clojure.string/lower-case` is unavailable; `includes?` / `re-find` work)
 3. **Split queries** for optional data (no or-join with ground nil)
 4. **Always lowercase** page names before queries
-5. **Handle empty results** gracefully
+5. **Handle empty results** gracefully, but never turn errors into empty results
+6. **Batch, don't crawl**: one query or `ground`-batched queries, never one call per page
+
+When a constraint seems to block you, re-run `scripts/probe-constraints.ts` before working around it.
 
 When in doubt, look at `src/datalog/queries.ts` for working patterns and `src/tools/build-context.ts` or `src/tools/get-concept-network.ts` for implementation examples.
