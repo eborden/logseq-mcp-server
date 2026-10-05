@@ -15,6 +15,7 @@ Nothing in the server writes to stdout. We log with `console.error`, sparingly, 
 - The protocol stream carries only protocol messages.
 - Diagnostics go to stderr. Inferred: whether a user sees them depends on the MCP client, so an error that matters to the caller goes in the tool result, not only in a log.
 - Nothing enforces this yet. One `console.log` in a new code path would corrupt the stream for every call that reaches it. Issue #82 tracks a guard.
+- The guard in #82 would catch stdout writes, not what a `console.error` line contains. Keeping graph data out of logs rests on review.
 
 ## Status
 
@@ -25,4 +26,7 @@ Date: 2026-10-05
 ## Mechanical enforcement
 
 - reviewer: No console.log, console.info, console.debug or process.stdout write in src outside tests.
+- reviewer: No log line includes block content, page names or other graph data.
+
+Not mechanised yet, and no issue is open for it: a check on what log lines contain.
 - none-yet: #82
