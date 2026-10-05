@@ -694,4 +694,33 @@ export class DatalogQueryBuilder {
       inputs: [pageName.toLowerCase()]
     };
   }
+
+  /**
+   * Generate Datalog query for the linked references of a whole alias group,
+   * the way `logseq.Editor.getPageLinkedReferences` counts them for one page:
+   * blocks whose `:block/path-refs` hold any of the pages (so children of a
+   * block that links the page count), except blocks that sit on one of the
+   * pages themselves. Probed against the Editor call on alias groups: the same
+   * block sets. Unlike that call it is symmetric across the group, whichever
+   * member is asked about.
+   *
+   * Rows are `[block]` with the block's page pulled as `{id, name, original-name}`.
+   * @param pageIds - Page entity ids (`:db/id`) of the group, each an integer
+   * @returns Query and no inputs (ids are embedded via `groundIds`)
+   * @throws Error if `pageIds` is empty or any id is not an integer
+   */
+  static linkedReferencesOfPages(pageIds: number[]): DatalogQuery {
+    if (pageIds.length === 0) {
+      throw new Error('linkedReferencesOfPages needs at least one page id');
+    }
+    return {
+      query: `[:find (pull ?block [* {:block/page [:db/id :block/name :block/original-name]}])
+             :where
+             ${DatalogQueryBuilder.groundIds(pageIds, '?p')}
+             [?block :block/path-refs ?p]
+             [?block :block/page ?source]
+             (not ${DatalogQueryBuilder.groundIds(pageIds, '?source')})]`,
+      inputs: []
+    };
+  }
 }

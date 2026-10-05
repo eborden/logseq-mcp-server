@@ -27,6 +27,22 @@ describe('DatalogQueryBuilder alias sets (#69)', () => {
     });
   });
 
+  describe('linkedReferencesOfPages', () => {
+    it('matches path-refs against any page of the group and skips blocks on those pages', () => {
+      const { query, inputs } = DatalogQueryBuilder.linkedReferencesOfPages([3, 4]);
+
+      expect(inputs).toEqual([]);
+      expect(query).toContain('[(ground [3 4]) [?p ...]]');
+      expect(query).toContain('[?block :block/path-refs ?p]');
+      expect(query).toContain('(not [(ground [3 4]) [?source ...]])');
+    });
+
+    it('rejects an empty list and ids that are not integers', () => {
+      expect(() => DatalogQueryBuilder.linkedReferencesOfPages([])).toThrow(/at least one/);
+      expect(() => DatalogQueryBuilder.linkedReferencesOfPages([NaN])).toThrow(/Invalid entity id/);
+    });
+  });
+
   describe('aliasSetByName', () => {
     it('passes the lowercased name as an input and keeps it out of the query text', () => {
       const { query, inputs } = DatalogQueryBuilder.aliasSetByName('Jordan "JR" Rivera');
