@@ -1,5 +1,7 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, BlockEntity, SlimBlock } from '../types.js';
+import { PageEntity, BlockEntity, SlimBlock, ResolveRefsMeta } from '../types.js';
+import { resolveBlockRefs } from '../utils/resolve-refs.js';
+import { buildResultMeta } from '../utils/result-meta.js';
 import { InvalidParameterError } from '../errors.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
@@ -29,7 +31,8 @@ export interface DateRangeSummary {
   topConcepts?: TopConcept[];
 }
 
-export interface DateRangeResult {
+/** `hasMore` / `warnings` are present only when `resolve_refs` is on. */
+export interface DateRangeResult extends ResolveRefsMeta {
   dateRange: {
     start: number;
     end: number;
@@ -42,7 +45,7 @@ export interface DateRangeResult {
   summary: DateRangeSummary;
 }
 
-export interface SlimDateRangeResult {
+export interface SlimDateRangeResult extends ResolveRefsMeta {
   dateRange: {
     start: number;
     end: number;
@@ -96,6 +99,13 @@ export interface DateRangeOptions extends DateRangeSelection {
   includeContent?: boolean;
   /** Entries in `summary.topConcepts`, 0 to leave it out (default 10) */
   topConceptsLimit?: number;
+  /**
+   * Resolve `((uuid))` refs and `{{embed}}`s in the returned blocks, adding
+   * `resolvedContent` / `resolvedRefs` (also on slim blocks) and `hasMore` /
+   * `warnings` to the result. At most 2 extra Datalog queries however many days.
+   * Ignored when `includeContent` is false. Default false.
+   */
+  resolveRefs?: boolean;
 }
 
 /** The validated, resolved form of a {@link DateRangeSelection}. */
@@ -304,7 +314,8 @@ export async function queryJournals(
     searchTerm,
     slimResults = false,
     includeContent = true,
-    topConceptsLimit = DEFAULT_TOP_CONCEPTS_LIMIT
+    topConceptsLimit = DEFAULT_TOP_CONCEPTS_LIMIT,
+    resolveRefs = false
   } = options;
   if (!Number.isInteger(topConceptsLimit) || topConceptsLimit < 0) {
     throw new InvalidParameterError(
@@ -409,6 +420,19 @@ export async function queryJournals(
     };
   }
 
+  // Opt-in (#18): resolve once over every returned block, whatever the number of days
+  let resolveMeta: ResolveRefsMeta = {};
+  if (resolveRefs) {
+    const resolved = await resolveBlockRefs(client, entries.flatMap(entry => entry.blocks));
+    let offset = 0;
+    for (const entry of entries) {
+      entry.blocks = resolved.blocks.slice(offset, offset + entry.blocks.length);
+      offset += entry.blocks.length;
+    }
+    const { hasMore, warnings } = buildResultMeta(resolved.warnings);
+    resolveMeta = { hasMore, warnings };
+  }
+
   // Return slim results if requested
   if (slimResults) {
     return {
@@ -421,9 +445,10 @@ export async function queryJournals(
           blocks: entry.blocks.map(block => toSlimBlock(block, pageName))
         };
       }),
-      summary
+      summary,
+      ...resolveMeta
     };
   }
 
-  return { dateRange, entries, summary };
+  return { dateRange, entries, summary, ...resolveMeta };
 }
