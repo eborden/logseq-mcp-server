@@ -10,7 +10,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 ### Added
 
-- **npm package.** `npx -y logseq-mcp-server` works: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 18 or newer), `prepublishOnly`, `repository` and `keywords`, plus an ISC `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
+- **npm package.** `npx -y logseq-mcp-server` works: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 18 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
 - **MCP prompts**: `weekly_summary`, `monthly_summary`, `continue_on`, `what_do_i_know` and `prioritize_tasks`. Each tells the model which tools to call and what limits to keep, and defers to the `logseq-skills` workflow when the host has it (#46).
 - **MCP resources**: `logseq://guide` (the reading guide) and the `logseq://page/{name}` template (a page as Markdown text). Both are read-only (#46).
 - **Claude Code plugin and marketplace manifests**, with the skills moved to a root `skills/` directory so a plugin can find them. Skills refer to tools by bare name so they work under any host prefix (#45).

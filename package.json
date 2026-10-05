@@ -36,7 +36,7 @@
     "claude"
   ],
   "author": "Evan Rutledge Borden (https://github.com/eborden)",
-  "license": "ISC",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/eborden/logseq-mcp-server.git"

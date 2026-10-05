@@ -19,7 +19,9 @@ describe('package.json publish fields (#46)', () => {
   });
 
   it('carries the metadata npm shows', () => {
-    expect(pkg.license).toBe('ISC');
+    expect(pkg.license).toBe('MIT');
+    const license = readFileSync(new URL('../LICENSE', import.meta.url), 'utf-8');
+    expect(license.split('\n')[0]).toBe('MIT License');
     expect(pkg.repository.url).toContain('github.com/eborden/logseq-mcp-server');
     expect(pkg.keywords.length).toBeGreaterThan(0);
     expect(pkg.description).toBeTruthy();
