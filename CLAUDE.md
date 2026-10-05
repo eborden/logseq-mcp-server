@@ -190,7 +190,7 @@ Pass raw values as inputs. The client does the EDN encoding, so never `JSON.stri
 
 **Verified.** Lowercase in TypeScript (`pageName.toLowerCase()`) and pass the result as an `:in` input, as in constraint 1. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
 
-Calling `lower-case` in a query fails with:
+**DON'T** call `clojure.string/lower-case` in a query. It fails with:
 ```
 LogSeq API error: Unknown function 'clojure.string/lower-case in [(clojure.string/lower-case ?page-name) ?page-name-lower]
 ```
