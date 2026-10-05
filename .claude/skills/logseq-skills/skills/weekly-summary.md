@@ -48,7 +48,7 @@ Read the 2-3 most recent `Weekly *` pages to pick up ongoing situations, trend t
 ### Step 4: Fetch the Week's Journals
 
 ```
-mcp__logseq__logseq_query_by_date_range(
+logseq_query_by_date_range(
   start_date=<Monday YYYYMMDD>,
   end_date=<Friday YYYYMMDD>,
   slim_results=true

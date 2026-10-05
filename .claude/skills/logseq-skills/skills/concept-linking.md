@@ -22,7 +22,7 @@ Add `[[refs]]` to existing notes for concepts that already have pages, without c
 For a block ref, fetch it with children:
 
 ```
-mcp__logseq__logseq_get_block(block_uuid="<uuid>", include_children=true)
+logseq_get_block(block_uuid="<uuid>", include_children=true)
 ```
 
 For a page, use `logseq_get_page`. For a date range, `logseq_query_by_date_range` with `slim_results=true`.
@@ -32,7 +32,7 @@ Note the scope you were given. A block ref means that block and its descendants,
 ### Step 2: Discover the Graph's Vocabulary
 
 ```
-mcp__logseq__logseq_list_pages()
+logseq_list_pages()
 ```
 
 One call gives every page title, which is the candidate set. Do not guess at page names, and do not assume a concept has a page because it plainly deserves one. This listing is also what tells you a term has zero candidates, which is a skip and not a question.
@@ -50,7 +50,7 @@ EOF
 Find the graph root, then the file:
 
 ```
-mcp__logseq__logseq_get_graph_info()
+logseq_get_graph_info()
 ```
 
 Journals live at `<graph>/journals/YYYY_MM_DD.md` and pages at `<graph>/pages/<Title>.md`. Never hardcode a path; different graphs sit in different places.

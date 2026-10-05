@@ -7,6 +7,8 @@ description: Use when user asks about tasks, research, notes, or references thei
 
 Comprehensive suite of workflows for querying and analyzing LogSeq knowledge graphs via MCP tools.
 
+**Tool names:** this skill refers to tools by their bare names (`logseq_get_page`). Your host may show them with a prefix, such as `mcp__logseq__logseq_get_page` or `mcp__plugin_<plugin>_logseq__logseq_get_page`. Call whichever form your tool list shows.
+
 ## When to Use
 
 Use this skill when:
