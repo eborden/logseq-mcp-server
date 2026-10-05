@@ -128,3 +128,60 @@ describe('logseq_get_block arguments', () => {
     expect(withExtra.apiCalls).toEqual(plain.apiCalls);
   });
 });
+
+/** The error text of a rejected call, after checking it made no call to LogSeq. */
+async function rejection(name: string, args: Record<string, unknown>): Promise<string> {
+  const { result, apiCalls, queries } = await call(name, args);
+  expect(result.isError).toBe(true);
+  expect(apiCalls).toEqual([]);
+  expect(queries).toEqual([]);
+  return JSON.parse(result.content[0].text).error;
+}
+
+describe.each([
+  ['logseq_get_page', 'page_name', { page_name: 'Alice' }],
+  ['logseq_get_backlinks', 'page_name', { page_name: 'Alice' }],
+  ['logseq_get_block', 'block_uuid', { block_uuid: UUID_A }],
+] as const)('%s rejects malformed arguments before calling LogSeq', (tool, required, valid) => {
+  it(`reports a missing ${required}, also when sent as null`, async () => {
+    for (const args of [{}, { [required]: null }]) {
+      const error = await rejection(tool, args);
+      expect(error).toContain(`Invalid parameter '${required}': missing`);
+      expect(error).toContain('a string (required)');
+    }
+  });
+
+  it(`rejects a ${required} of the wrong type`, async () => {
+    expect(await rejection(tool, { [required]: ['Alice'] })).toMatch(new RegExp(`'${required}'.*a string, not an array`, 's'));
+    expect(await rejection(tool, { [required]: true })).toMatch(new RegExp(`'${required}'.*a string, not a boolean`, 's'));
+  });
+
+  it(`rejects a negative or NaN number as ${required}`, async () => {
+    expect(await rejection(tool, { [required]: -1 })).toMatch(new RegExp(`'${required}': -1.*a string, not a number`, 's'));
+    expect(await rejection(tool, { [required]: NaN })).toContain(`Invalid parameter '${required}'`);
+  });
+
+  it('still folds an alias in before parsing', async () => {
+    const alias = required === 'block_uuid' ? 'uuid' : 'name';
+    const viaAlias = await call(tool, { [alias]: valid[required as keyof typeof valid] });
+    const canonical = await call(tool, valid);
+    expect(viaAlias.result).toEqual(canonical.result);
+    expect(viaAlias.apiCalls).toEqual(canonical.apiCalls);
+  });
+});
+
+describe.each(['logseq_get_page', 'logseq_get_block'] as const)('%s rejects malformed options', tool => {
+  const valid = tool === 'logseq_get_page' ? { page_name: 'Alice' } : { block_uuid: UUID_A };
+
+  it.each([
+    ['include_children', 'true', /'include_children': "true".*true or false, not a string/s],
+    ['include_children', 1, /'include_children': 1.*true or false, not a number/s],
+    ['include_children', -1, /'include_children': -1.*true or false, not a number/s],
+    ['include_children', NaN, /'include_children': NaN/],
+    ['resolve_refs', 'yes', /'resolve_refs': "yes".*true or false, not a string/s],
+    ['format', 'html', /'format': "html".*one of "json", "markdown"/s],
+    ['format', 0, /'format': 0/],
+  ] as const)('%s: %j', async (param, value, message) => {
+    expect(await rejection(tool, { ...valid, [param]: value })).toMatch(message);
+  });
+});
