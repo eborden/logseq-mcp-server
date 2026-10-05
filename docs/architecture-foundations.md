@@ -9,10 +9,11 @@ This server is a small TypeScript program that sits between an MCP client and a 
 **Precedence.** When instructions conflict, apply them in this order:
 
 1. The maintainer's explicit instruction for the current task.
-2. The hard rules in section 2. They hold even against local convention, unless the maintainer explicitly waives one for this task.
-3. The conventions in `CLAUDE.md` and the existing patterns in the code.
-4. The principles in this document.
-5. General habits.
+2. `CLAUDE.md`: its privacy rules, development workflow, review gate, merge policy and conventions. This document never overrides it.
+3. The hard rules in section 2. They hold against existing code patterns, unless the maintainer explicitly waives one for this task.
+4. The existing patterns in the code.
+5. The principles in this document.
+6. General habits.
 
 **Existing code vs. new code.** When you edit existing code, follow its local idioms, even if they differ from what this document prefers. Don't migrate a module as a side effect of an unrelated task. Apply the principles fully when you write something new. If a local convention looks harmful, follow it and flag it in your notes. Don't fix it uninvited.
 
@@ -33,7 +34,7 @@ Agents make code nearly free to produce. They don't make it free to understand, 
 
 ## 2. Hard rules
 
-These are not judgment calls. If you can't satisfy one, stop and say so.
+These are not judgment calls for code you add or change. Existing code that doesn't meet them yet is tracked in #58. Don't fix that as a side effect of another task (section 0), but don't make it worse. If your change can't satisfy one, stop and say so.
 
 1. **Never remove or weaken a safeguard you don't understand.** Caps, guards, odd early returns, "don't touch" comments, timeouts and validation exist for a reason you may not see. Keep them, give them a clear name, and ask about them in your notes.
 2. **When refactoring, preserve behavior exactly.** Pin current behavior with tests before you restructure. If you believe existing behavior is a bug, keep it and flag it. Changing it is a separate, explicit decision.
@@ -43,7 +44,7 @@ These are not judgment calls. If you can't satisfy one, stop and say so.
 6. **No secrets in source, and no personal graph data in committed files or logs.** The graph this server runs against is personal data. `CLAUDE.md` lists what may never be committed or posted: page names, block content, people's names, journal dates and raw output from the probe scripts or integration tests. Use made-up examples.
 7. **No new dependency without verifying it exists, is maintained and is needed.** Check the standard library and existing dependencies first. Never install a package name from memory without confirming it in the registry.
 8. **Tool contracts change additively.** Clients and skills call tools by name with named parameters. Add optional parameters and new tools. A rename or removal needs an explicit decision and a migration note.
-9. **Never take destructive actions on your own.** That includes force-pushing, rewriting git history and deleting branches. Propose them. The maintainer runs them.
+9. **Never take destructive actions on your own outside the `CLAUDE.md` workflow.** Rebasing and force-pushing your own feature branch, and deleting it on merge, are part of that workflow. Rewriting `main`'s history, force-pushing or deleting someone else's branch, and deleting data are not. Propose those; the maintainer runs them.
 10. **Don't report success you haven't verified.** Tool outputs, status fields, summaries and notes must report what actually happened, not what was intended.
 
 ## 3. Before you write code
