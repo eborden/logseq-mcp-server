@@ -362,67 +362,21 @@ Use one Datalog query, filtering in the query with `includes?` / `re-find` / `ge
 
 ## Migration History
 
-### Phase 1: HTTP-Only Implementation (Initial)
-- Sequential API calls using `logseq.Editor.*` methods
-- Simple but slow (N API calls for N entities)
+The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
 
-### Phase 2: Dual Implementation with Feature Flags (Nov 21, 2024)
-- Added Datalog implementations alongside HTTP
-- Feature flags for gradual rollout per tool
-- Property-based equivalence testing (18 tests)
-- **Commits:** df7503a "feat: add Datalog optimization with property-based testing"
-
-### Phase 3: Datalog-Only Simplification (Nov 21, 2024)
-- Removed feature flag architecture
-- Removed HTTP implementations
-- Embedded Datalog directly in tools
-- Net: -1,110 lines of code
-- **Commits:** 37fe0d6 "refactor: simplify to direct Datalog implementation"
-
-### Phase 4: Bug Fixes (Nov 24, 2024)
-- Fixed case-sensitivity issues
-- Fixed empty page handling
-- **Commits:**
-  - c108174 "fix: implement case-insensitive page lookup" (reverted)
-  - d6c3151 "fix: handle pages without blocks by splitting into separate queries"
-
-### Phase 5: Tool Simplification (Nov 24, 2024)
-- Removed redundant get_entity_timeline (subset of get_concept_evolution)
-- Removed incomplete get_related_pages (replaced by get_concept_network)
-- Net: -2 tools, -195 lines
-- **Result:** 13 → 11 tools (15% reduction)
-- **Commits:**
-  - 9642558 "refactor: remove redundant get_entity_timeline tool"
-  - 34a699a "refactor: remove incomplete get_related_pages tool"
-- Later work added tools back. There are 15 registered in `src/index.ts` today.
-
-### Phase 6: Comparison With Other PKM MCP Servers (Oct 2026)
-- Reviewed 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers
-- Probed the Datalog constraints and measured API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`), which corrected constraints 1, 2 and 4
-- Roadmap tracked in GitHub issues #3–#18
+- Editor API crawls (O(n) calls), then batched Datalog: [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md)
+- A feature-flagged dual HTTP/Datalog implementation, replaced by Datalog only (df7503a, 37fe0d6): [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md)
+- Strings embedded in query text, later bound with `:in` once probing showed it works: [ADR-0006](docs/adr/0006-embed-strings-in-datalog-queries.md), superseded by [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)
+- Pages without blocks, fixed by splitting queries (d6c3151): [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md)
+- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 15 registered in `src/index.ts` today.
+- Oct 2026: a review of 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers set the roadmap in GitHub issues #3–#18. Probing the Datalog constraints and measuring API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`) corrected constraints 1, 2 and 4.
 
 ### Lessons Learned
 
-1. **LogSeq's Datalog ≠ Standard DataScript**
-   - `:in` inputs must be EDN-encoded (bare strings become symbols)
-   - Only part of `clojure.string` is available (`lower-case` is missing)
-   - or-join semantics differ
-   - Probe before concluding something "doesn't work": the original conclusions on `:in` and `clojure.string` were over-generalized from a single failing case
-
-2. **Simple is Better**
-   - Multiple simple queries > One complex query
-   - Explicit > Clever (no fancy or-join tricks)
-   - Two queries that always work > One query that sometimes works
-
-3. **Test with Real Data**
-   - Property-based tests discovered edge cases
-   - Empty pages revealed or-join limitations
-   - Case sensitivity found through integration testing
-
-4. **Feature Flags Added Complexity**
-   - Maintained dual implementations
-   - Eventually removed in favor of simplicity
-   - Direct Datalog is cleaner and easier to maintain
+1. **LogSeq's Datalog ≠ standard DataScript.** Probe before concluding something "doesn't work": the original conclusions on `:in` and `clojure.string` were over-generalized from a single failing case (constraints 1 and 2, ADR-0013).
+2. **Simple is better.** Two queries that always work beat one query that sometimes works. No clever `or-join` tricks (Pattern 1, ADR-0007).
+3. **Test with real data.** Property-style tests against a live graph found the empty-page and case-sensitivity bugs (Testing Philosophy, below).
+4. **Feature flags added complexity.** They maintained dual implementations and were eventually removed in favor of simplicity: one direct Datalog path (ADR-0005).
 
 ---
 
