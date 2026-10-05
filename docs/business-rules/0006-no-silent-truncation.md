@@ -1,0 +1,23 @@
+# Never cut results silently
+
+## Statement
+
+Never cut results silently. Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`src/types.ts`): `hasMore`, `warnings: [{ code, message, howToFetchAll? }]`, and `totals` where already known (no extra API call just to count). `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise and a value. Object results get these fields. A tool that returns a bare array keeps it as the first content block and sends `{ "meta": ... }` as a second one (`metaContent`).
+
+The `warnings` entry is the truncation signal, not `hasMore`. A result cut at a hard maximum carries a warning with `hasMore: false`, and that warning must say the maximum was reached and that the rest can't be fetched in one call. Helpers live in `src/utils/result-meta.ts`.
+
+## Rationale
+
+The reader is an LLM that acts on what it is shown. A result silently cut at a cap looks complete and leads to wrong conclusions. Introduced with the shared `ResultMeta` convention (#40).
+
+## Mechanical enforcement
+
+test: `src/truncation-meta.test.ts`
+test: `src/utils/result-meta.test.ts`
+reviewer: Any new cap, limit or maximum on a tool result reports through `ResultMeta`.
+
+## Changelog
+
+| Date | Change | Issue/PR |
+|---|---|---|
+| 2026-10-05 | Introduced. | #52 |
