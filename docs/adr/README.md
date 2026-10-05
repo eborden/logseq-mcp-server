@@ -40,6 +40,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0021-rebase-merge-to-main](0021-rebase-merge-to-main.md) | Merge pull requests by rebase to keep atomic commits on main | accepted |
 | [0022-minimum-node-22-12](0022-minimum-node-22-12.md) | Require Node 22.12 or newer | accepted |
 | [0023-mit-license](0023-mit-license.md) | License the project under MIT | accepted |
+| [0024-baseline-test-before-skill-edits](0024-baseline-test-before-skill-edits.md) | Baseline-test a skill before editing it | accepted |
 
 ## File naming rule
 
