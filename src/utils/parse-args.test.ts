@@ -72,6 +72,13 @@ describe('parseArgs', () => {
       /'format': "html".*Expected: one of "json", "markdown"/s
     );
   });
+
+  it('ends with an Example: line holding a legal value', () => {
+    expect(errorFor({ page_name: 'my page', format: 'html' }).message).toMatch(/\nExample: format: "markdown"$/);
+    expect(errorFor({ page_name: 'my page', include_children: 'true' }).message).toMatch(/\nExample: include_children: true$/);
+    expect(errorFor({ page_name: 'my page', limit: '5' }).message).toMatch(/\nExample: limit: 5$/);
+    expect(errorFor({}).message).toMatch(/\nExample: page_name: "\.\.\."$/);
+  });
 });
 
 describe('toInputSchema', () => {
