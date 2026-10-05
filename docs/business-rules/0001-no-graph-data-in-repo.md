@@ -17,10 +17,11 @@ The repo and its GitHub project are public, and integration tests, probes and sc
 
 ## Mechanical enforcement
 
-reviewer: The privacy grep of the diff, commit messages, PR body and review comments and replies (CLAUDE.md, Verification before merge) finds no names, content or dates from the graph.
+test: `src/repo-hygiene.test.ts` (fails when a raw-output file from the integration tests or the probe and measure scripts is tracked, or when .gitignore stops ignoring one)
+reviewer: The privacy grep of the diff, commit messages, PR body and review comments and replies (CLAUDE.md, Verification before merge) finds no names, content or dates from the graph. This stays the fallback for names typed into code, docs or GitHub text, which the test can't see.
 
-Real names can't be listed in a repo check without publishing them. A CI guard for tracked raw-output files and a local hook that reads names at run time can enforce it without that.
-none-yet: #95
+Real names can't be listed in a repo check without publishing them. A local hook that reads names from the graph at run time can check diffs and GitHub text without that.
+none-yet: #98 (local hook)
 
 ## Changelog
 
@@ -28,3 +29,4 @@ none-yet: #95
 |---|---|---|
 | 2026-10-05 | Introduced. | #20 |
 | 2026-10-05 | Restated as a hard rule in the foundations doc. | #38 |
+| 2026-10-05 | Enforcement: the tracked raw-output test replaces `none-yet: #95`, the reviewer step stays as the fallback, and the local hook is tracked as `none-yet: #98`. | #99, #103 |
