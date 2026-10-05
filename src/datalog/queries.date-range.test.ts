@@ -43,8 +43,16 @@ describe('DatalogQueryBuilder journal range queries', () => {
   it('getJournalBlocksInRange pulls blocks on those pages', () => {
     const { query } = DatalogQueryBuilder.getJournalBlocksInRange(20250101, 20250102);
 
-    expect(query).toContain('(pull ?block [*])');
+    expect(query).toContain('(pull ?block [*');
     expect(query).toContain('[?block :block/page ?page]');
+  });
+});
+
+describe('DatalogQueryBuilder.getJournalBlocksInRange refs', () => {
+  it('pulls the referenced pages (id, names, journal markers) in the same query', () => {
+    const { query } = DatalogQueryBuilder.getJournalBlocksInRange(20250101, 20250102);
+
+    expect(query).toContain('{:block/refs [:db/id :block/name :block/original-name :block/journal? :block/journal-day]}');
   });
 });
 

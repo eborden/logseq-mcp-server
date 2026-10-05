@@ -178,7 +178,12 @@ export class DatalogQueryBuilder {
 
   /**
    * Generate Datalog query for every block on the journal pages in a range
-   * (flat; callers rebuild the tree from `:block/parent` and `:block/left`)
+   * (flat; callers rebuild the tree from `:block/parent` and `:block/left`).
+   *
+   * Each block's `refs` come back as referenced-page maps (`id`, `name`,
+   * `original-name`, `journal?`, `journal-day` when set) instead of bare `{id}`,
+   * so a roll-up of referenced concepts needs no further call. A ref to a block
+   * (`((uuid))`) has no `name`.
    * @param startDate - First journal day, inclusive (YYYYMMDD integer)
    * @param endDate - Last journal day, inclusive (YYYYMMDD integer)
    * @returns Query and inputs (`[startDate, endDate]`)
@@ -187,7 +192,7 @@ export class DatalogQueryBuilder {
   static getJournalBlocksInRange(startDate: number, endDate: number): DatalogQuery {
     DatalogQueryBuilder.assertJournalBounds(startDate, endDate);
     return {
-      query: `[:find (pull ?block [*])
+      query: `[:find (pull ?block [* {:block/refs [:db/id :block/name :block/original-name :block/journal? :block/journal-day]}])
              :in $ ?start ?end
              :where
              [?page :block/name]
