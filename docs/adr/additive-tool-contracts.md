@@ -31,6 +31,6 @@ Date: 2026-10-05
 
 The tool-list snapshot records every tool's name, description, annotations and input schema, so a rename, removal or new required parameter appears as a snapshot diff that a reviewer must accept deliberately.
 
-- test: `src/tool-list.test.ts` (snapshot at `src/__snapshots__/tool-list.test.ts.snap`)
+- test: `src/tool-list.test.ts` (snapshot at src/__snapshots__/tool-list.test.ts.snap)
 - test: `src/index.aliases.test.ts` (the canonical parameter stays required for every aliased tool)
 - reviewer: A PR that changes a result field or a default must say so as a contract change and add a CHANGELOG note.

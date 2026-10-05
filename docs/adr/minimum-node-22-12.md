@@ -28,4 +28,4 @@ Date: 2026-10-05
 ## Mechanical enforcement
 
 - test: `src/package-metadata.test.ts` (the Node floor matches the dev toolchain)
-- ci: `.github/workflows/ci.yml` (type-check and unit tests on Node 22 and 24 for every PR and push to `main`)
+- ci: `.github/workflows/ci.yml` (type-check and unit tests on Node 22 and 24 for every PR and push to main)

@@ -33,7 +33,7 @@ Date: 2025-11-21
 
 Call-count tests pin the batching, so a crawl that reappears fails a test.
 
-- test: `src/tools/get-concept-network.test.ts` (asserts at most `maxDepth + 1` calls however wide the graph is)
+- test: `src/tools/get-concept-network.test.ts` (asserts at most maxDepth + 1 calls however wide the graph is)
 - test: `src/tools/search-blocks.test.ts` (asserts one call per search)
 - test: `src/tools/query-by-property.test.ts` (asserts one query)
 - test: `src/tools/query-by-date-range.test.ts` (asserts two queries)
