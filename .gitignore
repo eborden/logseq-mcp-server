@@ -5,3 +5,7 @@ dist/
 .DS_Store
 coverage/
 .claude/worktrees/
+
+# Raw test/probe output can contain real graph data; never commit it
+*-output.txt
+integration-test-output*
