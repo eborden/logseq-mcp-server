@@ -122,9 +122,7 @@ The server translates high-level queries (e.g., "get context for topic") into ca
 
 ## Why Datalog?
 
-### Performance Goal
-- **Editor API:** Sequential API calls - O(n) calls for n entities
-- **Datalog:** Batched queries - O(maxDepth) calls regardless of graph size
+Editor API calls return one entity per call, so a crawl costs O(n) calls for n entities. Batched Datalog costs O(maxDepth) calls, or a fixed few, whatever the graph size. The decision, its history and its costs (a narrower dialect, see the constraints below): [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md).
 
 ### Current Implementation Status
 
@@ -151,11 +149,6 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 | `get_current_context` | 3-4 | ~0.01s | 3 Editor calls (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`) + 1 Datalog pull by `:db/id` only when a block's page isn't the open page (#15) |
 
 Re-run the script after changing any of these tools, and update this table.
-
-### Trade-offs
-- **Pros:** Massive performance gains, expresses graph logic naturally, fewer round-trips
-- **Cons:** More constraints than standard DataScript, requires workarounds for limitations
-- **Decision:** Performance gains outweigh constraints for this use case
 
 ## Critical LogSeq Datalog Constraints
 
