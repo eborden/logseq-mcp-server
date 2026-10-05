@@ -178,3 +178,39 @@ describe('format and compact on logseq_get_context_for_query', () => {
     expect(result.content[0].text).not.toContain('second line');
   });
 });
+
+describe('format on logseq_get_concept_network', () => {
+  const root = { id: 1, name: 'project atlas', 'original-name': 'Project Atlas', file: { id: 5 } };
+  // [sourceId, connectedId, name, originalName, isJournal, relType, count]
+  const rows = [[1, 2, 'alice', 'Alice', false, 'outbound', 3]];
+  const datalog: Datalog = query => (query.includes(':in $ ?n') ? [[root, 'name']] : rows);
+
+  it('returns the network as Markdown with the cap warning in the footer', async () => {
+    const result = await call(
+      'logseq_get_concept_network',
+      { concept_name: 'Project Atlas', max_depth: 1, max_nodes: 1, format: 'markdown' },
+      () => null,
+      datalog
+    );
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].text.startsWith('# Concept network: [[Project Atlas]]\n\n(no linked pages)\n')).toBe(true);
+    expect(result.content[0].text).toContain('---\nWarnings:\n- network_truncated:');
+    expect(result.content[0].text).toContain('hasMore: true');
+  });
+
+  it('lists the pages and links', async () => {
+    const result = await call('logseq_get_concept_network', { concept_name: 'Project Atlas', max_depth: 1, format: 'markdown' }, () => null, datalog);
+    expect(result.content[0].text).toBe(
+      '# Concept network: [[Project Atlas]]\n\n## Depth 1 (1)\n\n[[Alice]]\n\n## Links (1)\n\n- [[Project Atlas]] -> [[Alice]] (3)\n'
+    );
+  });
+
+  it('keeps JSON unchanged by default', async () => {
+    const result = await call('logseq_get_concept_network', { concept_name: 'Project Atlas', max_depth: 1 }, () => null, datalog);
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      concept: 'Project Atlas',
+      nodes: [{ id: 1, name: 'Project Atlas', depth: 0 }, { id: 2, name: 'Alice', depth: 1 }],
+      truncated: false,
+    });
+  });
+});

@@ -208,6 +208,14 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.",
           "type": "boolean",
         },
+        "format": {
+          "description": "json (default), or markdown for plain text",
+          "enum": [
+            "json",
+            "markdown",
+          ],
+          "type": "string",
+        },
         "max_depth": {
           "default": 2,
           "description": "Maximum depth to traverse (default: 2, max: 3)",

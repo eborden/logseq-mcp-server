@@ -40,7 +40,7 @@ import { ambiguousPageResult } from './utils/resolve-page.js';
 import { wantsSlim } from './utils/slim-entities.js';
 import { parseCompact, parseFormat } from './utils/output-format.js';
 import { compactQueryContext, compactTopicContext } from './utils/compact.js';
-import { renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
+import { renderNetwork, renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 
 /**
@@ -227,6 +227,7 @@ const TOOLS = [
           description: 'Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.',
           default: false,
         },
+        format: FORMAT_PARAM,
       },
       required: ['concept_name'],
     },
@@ -585,6 +586,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_get_concept_network': {
           const conceptName = args?.concept_name as string;
+          const format = parseFormat(args?.format);
           const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
           const maxNodes = args?.max_nodes as number | undefined;
           const maxFanout = args?.max_fanout as number | undefined;
@@ -593,6 +595,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
             maxFanout: maxFanout === undefined ? undefined : Math.min(maxFanout, 100),
             expandJournals: args?.expand_journals === true,
           });
+          if (format === 'markdown') return textResult(withFooter(renderNetwork(result), result));
           return {
             content: [
               {

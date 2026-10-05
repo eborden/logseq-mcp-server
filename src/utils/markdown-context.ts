@@ -1,3 +1,4 @@
+import type { ConceptNetworkResult } from '../tools/get-concept-network.js';
 import type { QueryContext, TopicQueryContext } from '../tools/get-context-for-query.js';
 import type { TopicContext } from '../tools/build-context.js';
 import { buildBlockTrees } from './block-tree.js';
@@ -151,4 +152,45 @@ export function renderQueryContext(context: QueryContext, options: Pick<ContextR
   }
 
   return `${parts.join('\n\n')}\n`;
+}
+
+/**
+ * A concept network: the pages grouped by distance from the root, then one line
+ * per linked pair. `A -> B` means blocks on A reference B, `A <- B` that blocks on
+ * B reference A, and `A <-> B (out/in)` both; the number is the reference count.
+ * `A` is always the page closer to the root.
+ */
+export function renderNetwork(network: ConceptNetworkResult): string {
+  const root = network.nodes.find(n => n.depth === 0);
+  const lines: string[] = [`# Concept network: [[${root?.name ?? network.concept}]]`, ''];
+  const note = resolvedFromLine(network.resolvedFrom);
+  if (note) lines.push(note, '');
+
+  const byDepth = new Map<number, string[]>();
+  for (const node of network.nodes) {
+    if (node.depth === 0) continue;
+    byDepth.set(node.depth, [...(byDepth.get(node.depth) ?? []), `[[${node.name}]]`]);
+  }
+  if (byDepth.size === 0) lines.push('(no linked pages)', '');
+  for (const depth of [...byDepth.keys()].sort((a, b) => a - b)) {
+    const names = byDepth.get(depth)!;
+    lines.push(`## Depth ${depth} (${names.length})`, '', names.join(', '), '');
+  }
+
+  const nameOf = new Map(network.nodes.map(n => [n.id, n.name]));
+  const links = network.edges.flatMap(edge => {
+    const from = nameOf.get(edge.from);
+    const to = nameOf.get(edge.to);
+    if (from === undefined || to === undefined) return [];
+    const link =
+      edge.outbound > 0 && edge.inbound > 0
+        ? `<-> [[${to}]] (${edge.outbound}/${edge.inbound})`
+        : edge.outbound > 0
+          ? `-> [[${to}]] (${edge.outbound})`
+          : `<- [[${to}]] (${edge.inbound})`;
+    return [`- [[${from}]] ${link}`];
+  });
+  if (links.length > 0) lines.push(`## Links (${links.length})`, '', ...links, '');
+
+  return `${lines.join('\n').trimEnd()}\n`;
 }
