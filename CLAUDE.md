@@ -23,13 +23,13 @@ The LogSeq instance this server is developed against is the maintainer's **perso
 
 ## Development Workflow
 
-Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.com/users/eborden/projects/1) project board. The main session orchestrates. Subagents implement and review.
+Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.com/users/eborden/projects/1) project board.
 
 ### Plans live in issues
 - Write a plan as GitHub issues, not as a file in `docs/plans/` and not only in the conversation. (`docs/plans/` holds old plans for reference. Don't add to it.)
 - Split anything multi-part into sub-issues linked to a parent. Record sequencing (waves, dependencies) in the parent or a comment on it. Close the parent when its sub-issues are done.
 - Sequence in waves so at most one open PR touches a given file area. Guardrails and conventions first, features next, output-wide changes last.
-- Add new issues to the board: *Backlog*, or *Ready* once the maintainer has approved the plan. When a plan changes, edit the issues (scope comments, new sub-issues, close obsolete ones). Don't keep a separate plan document.
+- Add new issues to the board: *Backlog*, or *Ready* once the maintainer has approved the plan. When a plan changes, edit the issues (scope comments, new sub-issues, close obsolete ones).
 
 ### Board statuses
 Flow: **Backlog → Ready → In progress → In review → Done**. Move an item to *In progress* when work starts, to *In review* when its PR opens (add the PR to the board too), and to *Done* on merge.
