@@ -31,7 +31,25 @@ export interface ConceptNetworkResult {
   concept: string;
   nodes: ConceptNetworkNode[];
   edges: ConceptNetworkEdge[];
+  /** True when `maxNodes` or `maxFanout` dropped at least one page from the network. */
+  truncated: boolean;
 }
+
+export interface ConceptNetworkOptions {
+  /** Hard cap on nodes in the result, root included. Default: 50. */
+  maxNodes?: number;
+  /** Most new pages any single page may add to the network. Default: 15. */
+  maxFanout?: number;
+  /**
+   * Journal pages link to nearly everything, so by default they appear as
+   * leaf nodes but are not expanded at the next depth. Set to true to walk
+   * through them like any other page. Default: false.
+   */
+  expandJournals?: boolean;
+}
+
+export const DEFAULT_MAX_NODES = 50;
+export const DEFAULT_MAX_FANOUT = 15;
 
 /** One row of `DatalogQueryBuilder.connectedPages`. */
 type ConnectedRow = [number, number, string, string, boolean, 'outbound' | 'inbound', number];
@@ -43,6 +61,10 @@ interface Candidate {
   id: number;
   name: string;
   isJournal: boolean;
+  /** Reference count per frontier page this candidate is linked to. */
+  bySource: Map<number, number>;
+  /** Sum of `bySource`. */
+  total: number;
 }
 
 const linkKey = (from: number, to: number) => `${from}>${to}`;
@@ -52,16 +74,27 @@ const linkKey = (from: number, to: number) => `${from}>${to}`;
  *
  * One query for the root plus one per depth level (at most maxDepth + 1
  * calls), each covering the whole BFS frontier in both link directions.
+ *
+ * Caps keep hub pages usable. When they bite, survivors are picked
+ * deterministically: non-journal pages first, then more references to the
+ * frontier, then lower id. `truncated` is set if any page was dropped.
  * @param client - LogseqClient instance
  * @param conceptName - Name of the root concept
  * @param maxDepth - Maximum depth to traverse (default: 2, max: 3)
- * @returns ConceptNetworkResult with nodes and edges
+ * @param options - Caps and journal handling (see ConceptNetworkOptions)
+ * @returns ConceptNetworkResult with nodes, edges and a truncated flag
  */
 export async function getConceptNetwork(
   client: LogseqClient,
   conceptName: string,
-  maxDepth: number = 2
+  maxDepth: number = 2,
+  options: ConceptNetworkOptions = {}
 ): Promise<ConceptNetworkResult> {
+  const maxNodes = normalizeCap(options.maxNodes, DEFAULT_MAX_NODES);
+  const maxFanout = normalizeCap(options.maxFanout, DEFAULT_MAX_FANOUT);
+  const expandJournals = options.expandJournals ?? false;
+  let truncated = false;
+
   const nodeMap = new Map<number, ConceptNetworkNode>();
   const links: LinkCounts = new Map();
 
@@ -103,19 +136,30 @@ export async function getConceptNetwork(
         links.set(linkKey(connectedId, sourceId), count);
       }
 
-      if (!nodeMap.has(connectedId) && !candidates.has(connectedId)) {
-        candidates.set(connectedId, {
+      if (nodeMap.has(connectedId)) continue;
+
+      let candidate = candidates.get(connectedId);
+      if (!candidate) {
+        candidate = {
           id: connectedId,
           name: originalName || name,
-          isJournal: isJournal === true
-        });
+          isJournal: isJournal === true,
+          bySource: new Map(),
+          total: 0
+        };
+        candidates.set(connectedId, candidate);
       }
+      candidate.bySource.set(sourceId, (candidate.bySource.get(sourceId) ?? 0) + count);
+      candidate.total += count;
     }
 
+    const admitted = selectCandidates(candidates, frontier, maxFanout, maxNodes - nodeMap.size);
+    if (admitted.length < candidates.size) truncated = true;
+
     const nextFrontier: number[] = [];
-    for (const candidate of [...candidates.values()].sort((a, b) => a.id - b.id)) {
+    for (const candidate of admitted) {
       nodeMap.set(candidate.id, { id: candidate.id, name: candidate.name, depth });
-      nextFrontier.push(candidate.id);
+      if (expandJournals || !candidate.isJournal) nextFrontier.push(candidate.id);
     }
     frontier = nextFrontier;
   }
@@ -123,8 +167,50 @@ export async function getConceptNetwork(
   return {
     concept: conceptName,
     nodes: Array.from(nodeMap.values()),
-    edges: buildEdges(nodeMap, links)
+    edges: buildEdges(nodeMap, links),
+    truncated
   };
+}
+
+/** Floor to an integer >= 1; `Infinity` means uncapped. */
+function normalizeCap(value: number | undefined, fallback: number): number {
+  if (value === undefined || Number.isNaN(value)) return fallback;
+  return Math.max(1, Math.floor(value));
+}
+
+/**
+ * Pick which candidates join the network at this depth.
+ *
+ * Rank: non-journal pages first, then more references, then lower id, so
+ * the choice never depends on query row order.
+ * 1. Each frontier page keeps its top `maxFanout` new neighbours (ranked by
+ *    the references to that page); the survivors are the union.
+ * 2. If that still exceeds the remaining node budget, the best by total
+ *    references are kept.
+ * Returns the admitted candidates in rank order.
+ */
+function selectCandidates(
+  candidates: Map<number, Candidate>,
+  frontier: number[],
+  maxFanout: number,
+  budget: number
+): Candidate[] {
+  const rank = (score: (c: Candidate) => number) => (a: Candidate, b: Candidate) =>
+    Number(a.isJournal) - Number(b.isJournal) || score(b) - score(a) || a.id - b.id;
+
+  const kept = new Set<number>();
+  for (const sourceId of frontier) {
+    const neighbours = [...candidates.values()].filter(c => c.bySource.has(sourceId));
+    neighbours
+      .sort(rank(c => c.bySource.get(sourceId) ?? 0))
+      .slice(0, maxFanout)
+      .forEach(c => kept.add(c.id));
+  }
+
+  return [...kept]
+    .map(id => candidates.get(id)!)
+    .sort(rank(c => c.total))
+    .slice(0, Math.max(0, budget));
 }
 
 /**
