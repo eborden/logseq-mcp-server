@@ -151,6 +151,16 @@ describe('resolveTipsEnabled', () => {
     expect(resolveTipsEnabled({}, { LOGSEQ_MCP_TIPS: value })).toBe(false);
   });
 
+  it.each(['1', 'true', 'on', 'yes', ' TRUE '])('turns on with LOGSEQ_MCP_TIPS=%s', value => {
+    expect(resolveTipsEnabled({ tips: false }, { LOGSEQ_MCP_TIPS: value })).toBe(true);
+  });
+
+  it.each(['disabled', 'none', 'n', 'offf', 'false;'])('rejects LOGSEQ_MCP_TIPS=%s instead of leaving tips on', value => {
+    expect(() => resolveTipsEnabled({}, { LOGSEQ_MCP_TIPS: value })).toThrow(
+      /Configuration validation failed: LOGSEQ_MCP_TIPS must be one of/
+    );
+  });
+
   it('lets the environment override the config file in both directions', () => {
     expect(resolveTipsEnabled({ tips: false }, { LOGSEQ_MCP_TIPS: '1' })).toBe(true);
     expect(resolveTipsEnabled({ tips: true }, { LOGSEQ_MCP_TIPS: 'off' })).toBe(false);
