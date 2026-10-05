@@ -23,8 +23,9 @@ export async function listPages(
   );
 
   // `null` is not `[]` (#64). An empty array is a graph with no pages. `null`
-  // can mean no graph is open or LogSeq is re-indexing, so the empty list is
-  // reported with a warning instead of passing for "none". `hasMore` stays
+  // may mean no graph is open or LogSeq is re-indexing (unconfirmed until the
+  // manual probes M1-M4 in scripts/probe-constraints.ts are run), so the empty
+  // list is reported with a warning instead of passing for "none". `hasMore` stays
   // false: no parameter fetches a page list that does not exist, so the
   // warning has no `howToFetchAll` (the retry advice is in the message).
   if (!allPages) {
@@ -35,7 +36,7 @@ export async function listPages(
         {
           code: 'pages_unavailable',
           message:
-            'LogSeq returned no page list (no graph open, or the graph is re-indexing), ' +
+            'LogSeq returned no page list (possibly no graph open or a re-index in progress), ' +
             'so the empty list may not mean the graph is empty. ' +
             'Retry in a moment, or call logseq_get_graph_info to check which graph is open.',
         },
