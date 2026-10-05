@@ -1,0 +1,595 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Build Context",
+    },
+    "description": "Build comprehensive context for a topic including related pages, blocks, and references.
+
+**When to use:**
+- Deep dive on a specific topic with full context
+- When you need both the page content AND related pages
+- To understand a concept holistically (direct content + connections)
+- Before answering complex questions about a topic
+- When the user asks to "research" or "explain" a topic
+
+**Alternatives:**
+- Use logseq_get_page for just the page content (no related pages)
+- Use logseq_get_concept_network for visual network structure (less detailed content)
+- Use logseq_get_context_for_query for natural language query interpretation",
+    "inputSchema": {
+      "properties": {
+        "include_temporal_context": {
+          "default": true,
+          "description": "Include temporal context for journal pages (default: true)",
+          "type": "boolean",
+        },
+        "max_blocks": {
+          "default": 50,
+          "description": "Maximum number of blocks to include (default: 50)",
+          "type": "number",
+        },
+        "max_references": {
+          "default": 20,
+          "description": "Maximum number of reference blocks to include (default: 20)",
+          "type": "number",
+        },
+        "max_related_pages": {
+          "default": 10,
+          "description": "Maximum number of related pages to include (default: 10)",
+          "type": "number",
+        },
+        "topic_name": {
+          "description": "Name of the topic to build context for",
+          "type": "string",
+        },
+      },
+      "required": [
+        "topic_name",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_build_context",
+    "title": "Build Context",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get Backlinks",
+    },
+    "description": "Get all pages and blocks that link to a specific page.
+
+**When to use:**
+- To find what content references a particular page
+- To understand how a concept is used across the knowledge graph
+- To discover related topics that explicitly mention the target page
+- When the user asks "what links to this page?" or "where is this mentioned?"
+
+**Alternatives:**
+- Use logseq_get_concept_network for a visual network of relationships (both inbound and outbound)
+- Use logseq_search_blocks to find content mentioning keywords (not just page links)
+- Use logseq_build_context for comprehensive related pages (not just backlinks)",
+    "inputSchema": {
+      "properties": {
+        "page_name": {
+          "description": "Name of the page to get backlinks for",
+          "type": "string",
+        },
+      },
+      "required": [
+        "page_name",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_get_backlinks",
+    "title": "Get Backlinks",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get Block",
+    },
+    "description": "Get a specific LogSeq block by UUID with optional child blocks.
+
+**When to use:**
+- When you have a block UUID from a previous query result
+- To retrieve a specific block and its nested children
+- When working with block-level granularity (not page-level)
+
+**Alternatives:**
+- Use logseq_get_page to retrieve an entire page instead of a single block
+- Use logseq_search_blocks to find blocks by content when you don't have the UUID",
+    "inputSchema": {
+      "properties": {
+        "block_uuid": {
+          "description": "UUID of the block to retrieve",
+          "type": "string",
+        },
+        "include_children": {
+          "default": false,
+          "description": "Whether to include child blocks",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "block_uuid",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_get_block",
+    "title": "Get Block",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get Concept Evolution",
+    },
+    "description": "Track how a concept evolves over time through journal entries with temporal analysis.
+
+**When to use:**
+- Understanding how a concept changed over time (trend analysis)
+- When the user asks "how has X evolved?" or "what's the history of Y?"
+- Temporal analysis with grouping by day/week/month
+- Discovering patterns in how concepts are discussed over time
+
+**Alternatives:**
+- Use logseq_query_by_date_range for simple date-based journal queries (no evolution analysis)
+- Use logseq_build_context with includeTemporalContext for journal page context (no evolution tracking)
+- Use logseq_search_blocks if you don't need temporal grouping",
+    "inputSchema": {
+      "properties": {
+        "concept_name": {
+          "description": "Name of the concept to track",
+          "type": "string",
+        },
+        "end_date": {
+          "description": "Optional end date in YYYYMMDD format",
+          "type": "number",
+        },
+        "group_by": {
+          "description": "Optional grouping period",
+          "enum": [
+            "day",
+            "week",
+            "month",
+          ],
+          "type": "string",
+        },
+        "start_date": {
+          "description": "Optional start date in YYYYMMDD format",
+          "type": "number",
+        },
+      },
+      "required": [
+        "concept_name",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_get_concept_evolution",
+    "title": "Get Concept Evolution",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get Concept Network",
+    },
+    "description": "Get network of pages related to a concept with nodes and edges for visualization.
+
+**When to use:**
+- To visualize how pages are connected in the knowledge graph
+- Understanding the relationship structure around a concept
+- Finding connected pages up to N hops away
+- When the user asks "show me how X relates to other topics"
+
+**Output:**
+- Follows links in both directions. One edge per page pair, with a reference count (outbound/inbound)
+- Capped at 50 pages (15 new pages per page); journal pages are shown but not expanded. If \`truncated\` is true, the strongest connections were kept and the rest were dropped. Raise \`max_nodes\` / \`max_fanout\` or set \`expand_journals\` for a wider network
+
+**Alternatives:**
+- Use logseq_build_context for detailed content with related pages (less structural)
+- Use logseq_get_backlinks for simpler inbound link queries (no network structure)
+- Use logseq_search_by_relationship for specific relationship patterns",
+    "inputSchema": {
+      "properties": {
+        "concept_name": {
+          "description": "Name of the root concept",
+          "type": "string",
+        },
+        "expand_journals": {
+          "default": false,
+          "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.",
+          "type": "boolean",
+        },
+        "max_depth": {
+          "default": 2,
+          "description": "Maximum depth to traverse (default: 2, max: 3)",
+          "type": "number",
+        },
+        "max_fanout": {
+          "default": 15,
+          "description": "Maximum new pages any one page may add (default: 15, max: 100)",
+          "type": "number",
+        },
+        "max_nodes": {
+          "default": 50,
+          "description": "Maximum pages in the network, root included (default: 50, max: 500)",
+          "type": "number",
+        },
+      },
+      "required": [
+        "concept_name",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_get_concept_network",
+    "title": "Get Concept Network",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get Context for Query",
+    },
+    "description": "Get comprehensive context for a natural language query by extracting topics and gathering related information.
+
+**When to use:**
+- When the user asks a complex, multi-topic question
+- To automatically identify relevant topics from natural language
+- When queries include [[page references]] and #tags
+- As a smart wrapper around multiple build_context calls
+
+**Alternatives:**
+- Use logseq_build_context if you already know the specific topic to explore
+- Use logseq_search_blocks for simple keyword search without topic extraction
+- Use logseq_list_pages + logseq_get_page for manual topic selection",
+    "inputSchema": {
+      "properties": {
+        "max_search_results": {
+          "default": 20,
+          "description": "Maximum number of search results for queries without explicit topics (default: 20)",
+          "type": "number",
+        },
+        "max_topics": {
+          "default": 5,
+          "description": "Maximum number of topics to extract context for (default: 5)",
+          "type": "number",
+        },
+        "query": {
+          "description": "Natural language query (can include [[page references]] and #tags)",
+          "type": "string",
+        },
+      },
+      "required": [
+        "query",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_get_context_for_query",
+    "title": "Get Context for Query",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get Graph Info",
+    },
+    "description": "Get information about the current LogSeq graph including filesystem path and name.
+
+**When to use:**
+- To understand the graph's location on disk
+- When debugging path-related issues
+- To provide context about which knowledge base is being accessed
+
+**Alternatives:**
+- Use logseq_list_pages to see what content exists in the graph
+- Use logseq_build_context for comprehensive topic exploration",
+    "inputSchema": {
+      "properties": {},
+      "required": [],
+      "type": "object",
+    },
+    "name": "logseq_get_graph_info",
+    "title": "Get Graph Info",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get Page",
+    },
+    "description": "Get a specific LogSeq page by name with optional child blocks.
+
+**When to use:**
+- When you know the exact page name and want its full content
+- To retrieve a page and its immediate child blocks/pages
+- After discovering page names via logseq_list_pages
+- When the user references a specific page by name
+
+**Alternatives:**
+- Use logseq_search_blocks if you only know keywords, not the exact page name
+- Use logseq_build_context for comprehensive topic exploration with related pages
+- Use logseq_list_pages first if you're unsure what pages exist",
+    "inputSchema": {
+      "properties": {
+        "include_children": {
+          "default": false,
+          "description": "Whether to include child blocks/pages",
+          "type": "boolean",
+        },
+        "page_name": {
+          "description": "Name of the page to retrieve",
+          "type": "string",
+        },
+      },
+      "required": [
+        "page_name",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_get_page",
+    "title": "Get Page",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "List Pages",
+    },
+    "description": "List all pages in the LogSeq graph to discover available topics and vocabulary.
+
+**When to use:**
+- At the start of a conversation to understand what concepts exist in the user's knowledge graph
+- Before searching for content when you're unsure what pages are available
+- To discover the naming conventions and vocabulary used in the graph
+- When the user asks "what do you have information about?"
+
+**Alternatives:**
+- Use logseq_get_graph_info to get high-level graph metadata (path, name)
+- Use logseq_search_blocks if you know specific keywords to search for
+- Use logseq_get_page if you already know the exact page name",
+    "inputSchema": {
+      "properties": {
+        "name_contains": {
+          "description": "Filter page names containing this text (case-insensitive)",
+          "type": "string",
+        },
+      },
+      "required": [],
+      "type": "object",
+    },
+    "name": "logseq_list_pages",
+    "title": "List Pages",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Query by Date Range",
+    },
+    "description": "Query journal entries within a date range with optional search filter.
+
+**When to use:**
+- Searching journal entries by date (e.g., "what did I do last week?")
+- Finding time-bound information in daily logs
+- Temporal analysis of concepts over specific periods
+- When the user mentions dates or time ranges
+
+**Alternatives:**
+- Use logseq_get_concept_evolution to track how a concept changes over time (includes analysis)
+- Use logseq_search_blocks for non-temporal content search
+- Use logseq_build_context with includeTemporalContext for journal page context",
+    "inputSchema": {
+      "properties": {
+        "end_date": {
+          "description": "End date in YYYYMMDD format (e.g., 20251120)",
+          "type": "number",
+        },
+        "search_term": {
+          "description": "Optional search term to filter blocks",
+          "type": "string",
+        },
+        "slim_results": {
+          "default": false,
+          "description": "Return slim results (40-50% fewer tokens, essential data only)",
+          "type": "boolean",
+        },
+        "start_date": {
+          "description": "Start date in YYYYMMDD format (e.g., 20251115)",
+          "type": "number",
+        },
+      },
+      "required": [
+        "start_date",
+        "end_date",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_query_by_date_range",
+    "title": "Query by Date Range",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Query by Property",
+    },
+    "description": "Query blocks by a specific property name and value.
+
+**When to use:**
+- When searching for structured metadata (custom properties)
+- To find blocks tagged with specific property values (e.g., status::done, type::project)
+- When the user references custom properties in their query
+- For precise property-based filtering
+
+**Matching:**
+- The property name can be written as stored (created-at) or camelCase (createdAt)
+- Values are compared as exact strings (numbers and booleans as "42" / "true")
+- For multi-value properties (e.g. type:: [[a]], [[b]]), a block matches if any one value equals the one you give
+- Results are a flat list of blocks (no children); the page name is included
+
+**Alternatives:**
+- Use logseq_search_blocks for full-text content search (not property-based)
+- Use logseq_query_by_date_range for temporal queries on journal entries",
+    "inputSchema": {
+      "properties": {
+        "property_key": {
+          "description": "Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)",
+          "type": "string",
+        },
+        "property_value": {
+          "description": "Value to match for the property. For multi-value properties, matches if any one value equals it",
+          "type": "string",
+        },
+        "slim_results": {
+          "default": false,
+          "description": "Return slim results (40-50% fewer tokens, essential data only)",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "property_key",
+        "property_value",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_query_by_property",
+    "title": "Query by Property",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Search Blocks",
+    },
+    "description": "Search for blocks containing specific text across your LogSeq graph.
+
+**When to use:**
+- Finding content by keyword when you don't know which page it's on
+- Discovering all mentions of a topic across pages
+- Exploratory search before using more specific tools
+- When the user asks "find all blocks about X"
+
+**Alternatives:**
+- Use logseq_list_pages first to discover what pages exist
+- Use logseq_get_page if you know the exact page name
+- Use logseq_build_context for comprehensive topic exploration with relationships
+- Use logseq_query_by_property for structured property-based queries",
+    "inputSchema": {
+      "properties": {
+        "include_context": {
+          "default": false,
+          "description": "Include semantic context (page, references, tags)",
+          "type": "boolean",
+        },
+        "limit": {
+          "description": "Maximum number of results to return (optional)",
+          "type": "number",
+        },
+        "query": {
+          "description": "Text to search for in block content",
+          "type": "string",
+        },
+        "slim_results": {
+          "default": false,
+          "description": "Return slim results (40-50% fewer tokens, essential data only)",
+          "type": "boolean",
+        },
+      },
+      "required": [
+        "query",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_search_blocks",
+    "title": "Search Blocks",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Search by Relationship",
+    },
+    "description": "Search for blocks based on specific relationship patterns between topics.
+
+**When to use:**
+- Finding blocks about topic A that reference topic B (complex relationships)
+- When you need precise control over relationship types (references, referenced-by, etc.)
+- For advanced graph queries with specific relationship semantics
+- When simpler tools like search_blocks are too broad
+
+**Alternatives:**
+- Use logseq_search_blocks for simple keyword search without relationship constraints
+- Use logseq_get_concept_network for general relationship exploration (less precise)
+- Use logseq_build_context for comprehensive topic context (automatic relationships)",
+    "inputSchema": {
+      "properties": {
+        "max_distance": {
+          "default": 2,
+          "description": "Maximum graph distance for connected-within (default: 2)",
+          "type": "number",
+        },
+        "relationship_type": {
+          "description": "Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)",
+          "enum": [
+            "references",
+            "referenced-by",
+            "in-pages-linking-to",
+            "connected-within",
+          ],
+          "type": "string",
+        },
+        "topic_a": {
+          "description": "Primary topic to search for",
+          "type": "string",
+        },
+        "topic_b": {
+          "description": "Related topic that defines the relationship",
+          "type": "string",
+        },
+      },
+      "required": [
+        "topic_a",
+        "topic_b",
+        "relationship_type",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_search_by_relationship",
+    "title": "Search by Relationship",
+  },
+]
+`;
