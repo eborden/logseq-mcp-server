@@ -639,7 +639,8 @@ scripts/
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live graph
 └── measure-api-calls.ts           - Counts API calls per tool against a live graph
 
-.claude/skills/logseq-skills/      - Claude Code skills (SKILL.md, skills/, references/, scripts/)
+skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
+.claude-plugin/                    - plugin.json + marketplace.json (server declared inline in plugin.json)
 ```
 
 **Key files:**

@@ -1,6 +1,6 @@
 # Fixture: concept linking
 
-A synthetic LogSeq graph for exercising `.claude/skills/logseq-skills/skills/concept-linking.md`
+A synthetic LogSeq graph for exercising `skills/logseq-skills/skills/concept-linking.md`
 and its gate, `scripts/check-link-safety.sh`.
 
 Every name, page and event here is invented. Nothing in this fixture comes from a real graph,
@@ -80,7 +80,7 @@ the note's does not. `unresolved-only.md` isolates check 3 by keeping the prose 
 ## Running
 
 ```bash
-S=.claude/skills/logseq-skills/scripts/check-link-safety.sh
+S=skills/logseq-skills/scripts/check-link-safety.sh
 F=tests/fixtures/graph-linking
 
 ./$S "$F/journals/2024_03_11.md" "$F/expected/2024_03_11.md"      "$F" "$F/pages.txt"  # exit 0
