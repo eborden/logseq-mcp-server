@@ -1,6 +1,17 @@
 import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
 
 /**
+ * Whether tools with a `slim_results` parameter slim their output when the
+ * caller doesn't say (#42). `slim_results: false` is the opt-out.
+ */
+export const DEFAULT_SLIM_RESULTS = true;
+
+/** The `slim_results` argument as a boolean: only an explicit boolean overrides the default. */
+export function wantsSlim(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_SLIM_RESULTS;
+}
+
+/**
  * Extract [[PageName]] references from block content
  * @param content - Block content text
  * @returns Array of page names (without brackets)

@@ -405,8 +405,8 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "string",
         },
         "slim_results": {
-          "default": false,
-          "description": "Return slim results (40-50% fewer tokens, essential data only)",
+          "default": true,
+          "description": "Slim blocks (default). false returns full entities",
           "type": "boolean",
         },
         "start_date": {
@@ -447,8 +447,8 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "string",
         },
         "slim_results": {
-          "default": false,
-          "description": "Return slim results (40-50% fewer tokens, essential data only)",
+          "default": true,
+          "description": "Slim blocks (default). false returns full entities",
           "type": "boolean",
         },
       },
@@ -489,8 +489,8 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "string",
         },
         "slim_results": {
-          "default": false,
-          "description": "Return slim results (40-50% fewer tokens, essential data only)",
+          "default": true,
+          "description": "Slim blocks (default). false returns full entities",
           "type": "boolean",
         },
       },
