@@ -28,6 +28,7 @@ import { listPages } from './tools/list-pages.js';
 import { getCurrentContext } from './tools/get-current-context.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 import { metaContent } from './utils/result-meta.js';
+import { SERVER_INSTRUCTIONS } from './instructions.js';
 
 /**
  * Hints shared by every tool. This server only reads from LogSeq, so each tool
@@ -426,6 +427,7 @@ export function createServer(client: LogseqClient): Server {
       capabilities: {
         tools: {},
       },
+      instructions: SERVER_INSTRUCTIONS,
     }
   );
 
