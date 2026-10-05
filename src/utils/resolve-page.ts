@@ -97,7 +97,8 @@ function pick(pages: any[], matchedBy: PageMatchReason, reason: string): PageRes
  * 2. **Alias.** The page(s) whose `:block/alias` points at the name. One source
  *    resolves to it; several are ambiguous.
  * 3. **ISO date** (`2025-01-01`): the journal page with that `:block/journal-day`,
- *    whatever the graph's journal title format is.
+ *    whatever the graph's journal title format is. It also beats a file-less stub
+ *    that merely has the date as its name; a real page named like the date wins.
  * 4. **Namespace leaf**: `atlas` finds `projects/atlas`. One page resolves to it;
  *    several are ambiguous.
  *
@@ -121,10 +122,18 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
 
   if (exact) {
     // A stub is a page nobody wrote: no file. Real pages keep the name.
-    const isBareAliasTarget = aliasSources.length > 0 && exact.file == null;
-    return isBareAliasTarget
-      ? pick(aliasSources, 'alias', `declares alias ${JSON.stringify(name)}`)
-      : found(exact, 'name', name);
+    const isStub = exact.file == null;
+    if (isStub && aliasSources.length > 0) {
+      return pick(aliasSources, 'alias', `declares alias ${JSON.stringify(name)}`);
+    }
+    // `[[2025-01-01]]` links and `date:: 2025-01-01` values create a stub named
+    // like the date when the graph's journal titles use another format. The
+    // journal for that day is the page the caller means.
+    const otherJournals = journals.filter(page => idOf(page) !== idOf(exact));
+    if (isStub && otherJournals.length > 0) {
+      return pick(otherJournals, 'journal-date', `journal page for ${name}`);
+    }
+    return found(exact, 'name', name);
   }
   if (aliasSources.length > 0) return pick(aliasSources, 'alias', `declares alias ${JSON.stringify(name)}`);
   if (journals.length > 0) return pick(journals, 'journal-date', `journal page for ${name}`);
