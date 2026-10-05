@@ -28,6 +28,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- ci: `.github/workflows/publish.yml` (triggered only by `workflow_dispatch`, `main` only, `dry_run` defaults to true)
+- ci: `.github/workflows/publish.yml` (triggered only by workflow_dispatch, main only, dry_run defaults to true)
 - test: `src/package-metadata.test.ts` (the package is built before publish and ships only built output, docs and the LICENSE)
-- test: `src/version.test.ts` (the plugin manifest carries the same version as `package.json`)
+- test: `src/version.test.ts` (the plugin manifest carries the same version as package.json)

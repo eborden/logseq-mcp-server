@@ -29,4 +29,4 @@ Date: 2025-11-24
 
 The config type and loader have no `features` section, so a flag cannot be read without adding one. Nothing blocks adding one, so review is the backstop.
 
-- reviewer: Reject a PR that adds a feature flag, a per-tool config toggle or a second implementation of a tool, unless it cites an ADR that supersedes `datalog-only-no-feature-flags`.
+- reviewer: Reject a PR that adds a feature flag, a per-tool config toggle or a second implementation of a tool, unless it cites an ADR that supersedes datalog-only-no-feature-flags.

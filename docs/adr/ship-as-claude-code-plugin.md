@@ -28,5 +28,5 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/version.test.ts` (the plugin manifest and the marketplace entry carry the `package.json` version)
+- test: `src/version.test.ts` (the plugin manifest and the marketplace entry carry the package.json version)
 - test: `src/prompts.test.ts` (prompts name only tools that exist, so a tool rename fails)

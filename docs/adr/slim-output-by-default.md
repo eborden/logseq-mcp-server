@@ -29,6 +29,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/index.slim-default.test.ts` (omitted means slim, `false` means full, every tool that advertises `slim_results` goes through `wantsSlim`, the schema advertises `default: true`)
+- test: `src/index.slim-default.test.ts` (omitted means slim, false means full, every tool that advertises slim_results goes through wantsSlim, the schema advertises default: true)
 - test: `src/index.minified.test.ts` (every tool writes minified JSON)
 - test: `src/utils/slim-entities.test.ts`

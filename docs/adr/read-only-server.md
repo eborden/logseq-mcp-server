@@ -30,6 +30,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/index.test.ts` (every tool is `readOnlyHint: true` with a title, and carries the other hints, with the non-idempotent exception pinned)
+- test: `src/index.test.ts` (every tool is readOnlyHint: true with a title, and carries the other hints, with the non-idempotent exception pinned)
 - test: `src/resources.test.ts` (reading a resource never calls a write method on LogSeq)
 - test: `src/prompts.test.ts`

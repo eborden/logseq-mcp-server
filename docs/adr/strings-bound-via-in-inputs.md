@@ -32,6 +32,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/client.test.ts` (exact arguments sent to `callAPI` for strings with quotes, backslashes and newlines)
+- test: `src/client.test.ts` (exact arguments sent to callAPI for strings with quotes, backslashes and newlines)
 - test: `src/datalog/queries.test.ts` (the query builders keep hostile names out of the query text)
-- test: `tests/integration/datalog-inputs.test.ts` (runs hostile names and `groundIds` against a live graph)
+- test: `tests/integration/datalog-inputs.test.ts` (runs hostile names and groundIds against a live graph)

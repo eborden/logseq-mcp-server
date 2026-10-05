@@ -38,5 +38,5 @@ Date: 2026-10-05
 ## Mechanical enforcement
 
 - test: `src/utils/resolve-page.test.ts` (resolver order, ambiguity, not-found guidance, error propagation)
-- test: `src/index.page-resolution.test.ts` (candidates, `resolvedFrom` and guidance reach the caller through MCP, including names given under a parameter alias)
+- test: `src/index.page-resolution.test.ts` (candidates, resolvedFrom and guidance reach the caller through MCP, including names given under a parameter alias)
 - test: `tests/integration/page-resolution.test.ts` (against a live graph)
