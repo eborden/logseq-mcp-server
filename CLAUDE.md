@@ -138,7 +138,6 @@ await client.executeDatalogQuery(query, pageNameLower);
 **References:**
 - Discovered in: commit c108174 integration tests
 - Probe: `scripts/probe-constraints.ts`
-- `DatalogQueryBuilder.searchByRelationship` still uses `lower-case` and bare `:in`, and is unused outside its own tests (#11)
 
 ---
 
@@ -269,7 +268,7 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 **Verified.** `JSON.stringify(value)` produces a valid EDN string literal for quotes, backslashes and newlines, and the escaped form runs correctly.
 
-**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. All of `src/datalog/queries.ts` works this way, except the dead `searchByRelationship` (#11).
+**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. All of `src/datalog/queries.ts` works this way.
 
 - Numeric IDs are still embedded, in `ground` vectors, because collection `:in` inputs are unprobed. Build them with `DatalogQueryBuilder.groundIds(ids)`, which throws unless every id passes `Number.isInteger`. Bind the ids straight to the entity variable (`groundIds(ids, '?p')` followed by a pattern on `?p`). `[?p :db/id ?id]` matches nothing, and a query whose only clause is the `ground` binding errors.
 - If you ever must embed a string literal, use `JSON.stringify(value)`. A string used inside `re-pattern` also needs regex metacharacters escaped first (#4).
