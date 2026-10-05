@@ -51,6 +51,8 @@ Nothing has been published to npm yet, so there is no released version to compar
 - A journal page is no longer matched twice when a block on it carries a scheduled or deadline date.
 - Property names from Datalog are camelCased the same way the Editor API returns them.
 - `LOGSEQ_MCP_TIPS` rejects an unrecognised value at startup instead of leaving tips on.
+- Link-following tools no longer miss references written under another name of the same page. With `alias:: Jordan Rivera` on `Jordan`, asking for either name now covers both: `get_backlinks`, `build_context` (and so `get_context_for_query`), `get_concept_evolution`, `get_concept_network`, `search_by_relationship` and `query_by_date_range` with a `search_term` that names the page. The result says which names it covered in `resolvedAliases` (in `meta` for `get_backlinks`, keyed by topic for `search_by_relationship`), absent for a page with no aliases. Costs at most one extra Datalog query, and none for a page without aliases (#69).
+- An alias shared by three or more names no longer reports the page's other stubs as competing candidates, so asking for any of its names resolves to the page that declares them (#69).
 
 ### Removed
 
