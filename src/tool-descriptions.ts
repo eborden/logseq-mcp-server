@@ -21,6 +21,14 @@ export const TOOL_DESCRIPTIONS = {
 - Use logseq_search_blocks if you know specific keywords to search for
 - Use logseq_get_page if you already know the exact page name`,
 
+  logseq_get_current_context: `Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.
+
+**When to use:**
+- The user says "this page", "this block" or "what I'm looking at" without naming it
+- Resolve the page, then pass its name to logseq_build_context or logseq_get_page
+
+Returns page: null with a message when no page is open. Reflects live UI state.`,
+
   logseq_get_graph_info: `Get information about the current LogSeq graph including filesystem path and name.
 
 **When to use:**
