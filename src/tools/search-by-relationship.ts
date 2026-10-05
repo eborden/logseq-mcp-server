@@ -4,6 +4,13 @@ import { buildResultMeta } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { requirePage, resolvedFromInfo, ResolvedPage } from '../utils/resolve-page.js';
 import { isInfrastructureError } from '../errors.js';
+import {
+  aliasIds,
+  aliasSetWarnings,
+  hasAliases,
+  resolveAliasSets,
+  resolvedAliases
+} from '../utils/alias-set.js';
 
 export type RelationshipType =
   | 'references' // Blocks about topicA that reference topicB
@@ -25,6 +32,11 @@ export interface SearchByRelationshipResult extends ResultMeta {
    * was redirected; absent when both topics were exact names.
    */
   resolvedFrom?: { topicA?: PageResolvedFrom; topicB?: PageResolvedFrom };
+  /**
+   * Present when a topic has aliases (#69): the original-case names whose
+   * references were matched, keyed by topic. A topic without aliases is absent.
+   */
+  resolvedAliases?: { topicA?: string[]; topicB?: string[] };
   results: BlockEntity[];
 }
 
@@ -82,7 +94,9 @@ async function resolveTopics(
  *   cut and the other topic is not found, a `frontier_truncated` warning says
  *   the "not connected" answer may be a false negative. A found connection is
  *   always real.
- * @returns SearchByRelationshipResult with matching blocks
+ * @returns SearchByRelationshipResult with matching blocks. A topic with aliases matches
+ *   references written under any of its names (`resolvedAliases` says which); this costs
+ *   one extra query for both topics together, and none when neither has an alias.
  * @throws PageNotFoundError if a topic matches no page (guidance with the closest names)
  * @throws AmbiguousPageError if a topic matches several pages (with the candidates)
  */
@@ -106,12 +120,20 @@ export async function searchByRelationship(
   const nameA = resolvedA.lookupName;
   const nameB = resolvedB.lookupName;
 
+  // The names each topic goes by (#69): one query for both, none when neither has an alias
+  const [setA, setB] = await resolveAliasSets(client, [resolvedA.page, resolvedB.page]);
+  const sameTopicPage = resolvedA.page?.id === resolvedB.page?.id;
+  warnings.push(...aliasSetWarnings(setA, ...(sameTopicPage ? [] : [setB])));
+
   switch (relationshipType) {
     case 'references': {
       // Blocks on topicA's page whose :block/refs include topicB's page.
       // Matching on refs (not content) is case-insensitive and covers
       // [[link]], #tag, #[[multi word]] and uuid-style refs.
-      const { query, inputs } = DatalogQueryBuilder.blocksOnPageReferencing(nameA, nameB);
+      const { query, inputs } =
+        hasAliases(setA) || hasAliases(setB)
+          ? DatalogQueryBuilder.blocksOnPagesReferencingIds(aliasIds(setA), aliasIds(setB))
+          : DatalogQueryBuilder.blocksOnPageReferencing(nameA, nameB);
       results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
       break;
     }
@@ -122,21 +144,33 @@ export async function searchByRelationship(
     // this inbound reading; that mismatch is unchanged here.)
     case 'referenced-by':
     case 'in-pages-linking-to': {
-      const { query, inputs } = DatalogQueryBuilder.blocksReferencingInPagesLinking(nameA, nameB);
+      const { query, inputs } =
+        hasAliases(setA) || hasAliases(setB)
+          ? DatalogQueryBuilder.blocksReferencingInPagesLinkingIds(aliasIds(setA), aliasIds(setB))
+          : DatalogQueryBuilder.blocksReferencingInPagesLinking(nameA, nameB);
       results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
       break;
     }
 
     case 'connected-within': {
-      // The ids come from the resolved pages, so no further lookups are needed
+      // The ids come from the resolved pages and their alias groups, so no further lookups
+      // are needed. Every name of a topic counts as that topic: the walk starts from all of
+      // A's names and ends at any of B's.
       const idA: number | undefined = resolvedA.page?.id;
       const idB: number | undefined = resolvedB.page?.id;
 
       if (idA !== undefined && idB !== undefined) {
+        const seedIds = hasAliases(setA) ? aliasIds(setA) : [idA];
+        const visited = new Set<number>(seedIds);
+        // B's page is the target as before. Its other names are targets too, except those
+        // that are also names of A: the walk starts there, so reaching them proves nothing.
+        const targetIds = new Set([
+          idB,
+          ...(hasAliases(setB) ? aliasIds(setB) : []).filter(id => !visited.has(id))
+        ]);
         // Level-synchronous BFS: one query per hop covers the whole frontier,
         // in both link directions, so the cost is O(maxDistance) calls.
-        const visited = new Set<number>([idA]);
-        let frontier = [idA];
+        let frontier = seedIds;
         let found = false;
         let cutAtDepth: { depth: number; reached: number } | null = null;
 
@@ -150,7 +184,7 @@ export async function searchByRelationship(
           const rows = await client.executeDatalogQuery<Array<[number]>>(query, ...inputs);
           const neighborIds = (rows || []).map(row => row[0]);
 
-          if (neighborIds.includes(idB)) {
+          if (neighborIds.some(id => targetIds.has(id))) {
             found = true;
             break;
           }
@@ -193,6 +227,8 @@ export async function searchByRelationship(
 
   const fromA = resolvedFromInfo(topicA, resolvedA);
   const fromB = resolvedFromInfo(topicB, resolvedB);
+  const aliasesA = resolvedAliases(setA).resolvedAliases;
+  const aliasesB = resolvedAliases(setB).resolvedAliases;
 
   return {
     query: {
@@ -203,6 +239,9 @@ export async function searchByRelationship(
     },
     relationshipType,
     ...(fromA || fromB ? { resolvedFrom: { ...(fromA && { topicA: fromA }), ...(fromB && { topicB: fromB }) } } : {}),
+    ...(aliasesA || aliasesB
+      ? { resolvedAliases: { ...(aliasesA && { topicA: aliasesA }), ...(aliasesB && { topicB: aliasesB }) } }
+      : {}),
     results,
     ...buildResultMeta(warnings)
   };

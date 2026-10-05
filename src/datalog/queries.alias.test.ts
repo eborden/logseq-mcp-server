@@ -67,6 +67,33 @@ describe('DatalogQueryBuilder alias sets (#69)', () => {
     });
   });
 
+  describe('relationship queries by id', () => {
+    it('blocksOnPagesReferencingIds matches any page of one group against any ref of the other', () => {
+      const { query, inputs } = DatalogQueryBuilder.blocksOnPagesReferencingIds([1, 2], [9]);
+
+      expect(inputs).toEqual([]);
+      expect(query).toContain('[(ground [1 2]) [?page ...]]');
+      expect(query).toContain('[(ground [9]) [?ref ...]]');
+      expect(query).toContain('[?block :block/page ?page]');
+      expect(query).toContain('[?block :block/refs ?ref]');
+    });
+
+    it('blocksReferencingInPagesLinkingIds binds both groups', () => {
+      const { query } = DatalogQueryBuilder.blocksReferencingInPagesLinkingIds([9], [1, 2]);
+
+      expect(query).toContain('[(ground [9]) [?a ...]]');
+      expect(query).toContain('[(ground [1 2]) [?b ...]]');
+      expect(query).toContain('[?linker :block/refs ?b]');
+      expect(query).toContain('[?block :block/refs ?a]');
+    });
+
+    it('reject an empty list and ids that are not integers', () => {
+      expect(() => DatalogQueryBuilder.blocksOnPagesReferencingIds([], [1])).toThrow(/at least one/);
+      expect(() => DatalogQueryBuilder.blocksReferencingInPagesLinkingIds([1], [])).toThrow(/at least one/);
+      expect(() => DatalogQueryBuilder.blocksOnPagesReferencingIds([1], [1.5])).toThrow(/Invalid entity id/);
+    });
+  });
+
   describe('connectedPagesGrouped', () => {
     it('binds [member group] pairs and counts distinct blocks per group', () => {
       const { query, inputs } = DatalogQueryBuilder.connectedPagesGrouped(
