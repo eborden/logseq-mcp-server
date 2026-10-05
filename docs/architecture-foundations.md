@@ -93,7 +93,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **Why.** An MCP client, a skill, or a prompt that names `logseq_search_blocks` and its parameters is a consumer you can't see. The schema is how it agrees with the server about reality.
 
-**In this repo.** Tool names, parameter names, required fields and the shape of results are the contract. Additive changes only: new optional parameters, new tools, new optional result fields. A test should fail loudly if a tool name or required parameter changes. Keep the read-only annotations on every tool.
+**In this repo.** Tool names, parameter names, required fields and the shape of results are the contract. Additive changes only: new optional parameters, new tools, new optional result fields. `src/tool-list.test.ts` snapshots the whole `tools/list` output (names, descriptions, schemas), so a rename or removal fails a test. Update the snapshot only for additive changes, and call out the diff in the PR. Keep the read-only annotations on every tool.
 
 **Agents get wrong.** "Simplifying" LogSeq's awkward API in tool output by leaking its quirks into the contract, or the reverse: reshaping a result field because it looks neater. Conform to LogSeq at the boundary with an adapter and keep its shape out of the tool contract.
 
@@ -180,7 +180,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **In this repo.**
 - Narrow, typed parameters and clear names. One tool, one job.
-- Tool descriptions live in `src/tool-descriptions.ts`. They are what the model reads to choose a tool, so keep them accurate when behavior changes.
+- Tool descriptions live in `src/tool-descriptions.ts`. They are what the model reads to choose a tool, so keep them accurate when behavior changes. Every client loads the whole tool list into its context, so `src/tool-list.test.ts` caps each description at 400 characters (with listed allowances) and the whole list at 18,500. Spend that budget deliberately.
 - Arguments from the model are untrusted input (4.2). A page name or search string may contain quotes, regex characters or very long text.
 - Results are sized for a context window: defaults and hard caps, optional slim output, and honest `ResultMeta`.
 - Text from the graph is data. Return it as content; never let it change what the server queries or how a tool behaves.
