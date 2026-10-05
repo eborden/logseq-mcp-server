@@ -3,6 +3,8 @@
  * Provides reusable query templates for common graph operations
  */
 
+import { escapeRegex } from '../utils/escape-regex.js';
+
 /**
  * A Datalog query plus the values bound to its `:in` variables.
  *
@@ -113,6 +115,46 @@ export class DatalogQueryBuilder {
              [?page :block/name ?page-name]
              [?block :block/page ?page]]`,
       inputs: [pageName.toLowerCase()]
+    };
+  }
+
+  /**
+   * Generate Datalog query for blocks whose content contains `text`
+   * (case-insensitive, literal match), each with its page's name inline.
+   *
+   * The pattern goes in as an `:in` input and `re-pattern` compiles it inside
+   * LogSeq. Two escaping layers apply: `escapeRegex` here makes the text match
+   * literally, and `LogseqClient.executeDatalogQuery` EDN-encodes the input.
+   * `(?i)` makes the match case-insensitive, since `lower-case` is unavailable.
+   *
+   * @param text - Literal text to search for
+   * @returns Query and inputs (`["(?i)" + escaped text]`)
+   */
+  static searchBlocks(text: string): DatalogQuery {
+    return {
+      query: `[:find (pull ?b [* {:block/page [:db/id :block/name :block/original-name]}])
+             :in $ ?pattern
+             :where
+             [?b :block/content ?c]
+             [(re-pattern ?pattern) ?re]
+             [(re-find ?re ?c)]]`,
+      inputs: ['(?i)' + escapeRegex(text)]
+    };
+  }
+
+  /**
+   * Generate Datalog query for full page entities by id
+   * @param pageIds - Page entity ids (`:db/id`), each an integer
+   * @returns Query and inputs (none: ids are validated integers)
+   * @throws Error if any id is not an integer
+   */
+  static getPagesByIds(pageIds: number[]): DatalogQuery {
+    return {
+      query: `[:find (pull ?p [*])
+             :where
+             ${DatalogQueryBuilder.groundIds(pageIds, '?p')}
+             [?p :block/name]]`,
+      inputs: []
     };
   }
 
