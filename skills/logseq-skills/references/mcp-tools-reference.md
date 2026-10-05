@@ -22,6 +22,7 @@ Full-text search across all blocks with optional semantic context.
 - `query` (required): Search term or phrase
 - `limit` (optional): Maximum results to return (default: 10, **recommend: 5**)
 - `include_context` (optional): Include parent/child blocks for context (default: false, **keep false unless needed**)
+- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
 
 **Context cost:** ~200-500 tokens per result. With `include_context=true`: ~500-1000 per result.
 
@@ -107,6 +108,7 @@ Find blocks by property key/value pairs.
 **Parameters:**
 - `property_key` (required): Property name (e.g., "status", "priority")
 - `property_value` (required): Property value (e.g., "doing", "high")
+- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
 
 **Use when:**
 - Structured data queries
@@ -309,6 +311,7 @@ Query journal entries within a date range. **Preferred tool for time-bounded que
 - `end_date` (required): End date in YYYYMMDD format (e.g., 20251130)
 - `search_term` (optional): Filter blocks containing this term
 - `top_concepts_limit` (optional): Size of `summary.topConcepts`, the pages linked most in the range as `{ name, count, days }` (default 10, 0 omits it)
+- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities. Entries carry `pageName`, so their blocks don't repeat it
 
 **Context cost:** ~1-3k tokens for a week's worth of filtered results. Much cheaper than broad search_blocks.
 
