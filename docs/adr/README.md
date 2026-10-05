@@ -63,6 +63,8 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 
 An accepted ADR is **immutable except for its status and a pointer** to its replacement. Don't reword the Context, Decision or Consequences. **A reversal is a new ADR**: write it, then mark the old one `superseded by <NNNN-new-slug>` in the same PR.
 
+When a file that an accepted ADR cites is deleted, the citation may be rewritten in place as a pinned `<commit>:<path>` reference to the file's last version (for example `` `df7503a:docs/datalog-debugging-summary.md` ``, readable with `git show`), with no other rewording.
+
 ## Template
 
 Copy this into `docs/adr/NNNN-<slug>.md`.
