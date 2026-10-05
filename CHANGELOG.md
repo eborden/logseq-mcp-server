@@ -31,6 +31,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 - `serverInfo.version` in `initialize` is now read from `package.json`. It was a hard-coded `1.0.0` (#46).
 - Graph traversal, search and date-range tools run as batched Datalog queries instead of one API call per page. `get_concept_network` at depth 2 went from over a hundred calls to three, `search_blocks` to one, and `query_by_date_range` to two regardless of range length.
+- **Slim output is the default** for `search_blocks`, `query_by_date_range` and `query_by_property` (and `get_current_context`). Pass `slim_results: false` to get full output. Slim blocks drop empty fields, and `pageName` is left off children and off blocks inside a date-range entry, which already carries it. The prompts and skills no longer pass `slim_results` (#42).
 - `query_by_property` runs as one Datalog query instead of crawling every page.
 - `get_page` looks up an exact name first and resolves only when that finds no real page.
 - `get_concept_network` is a capped breadth-first search: journal pages are leaves unless `expand_journals` is set, and `truncated` is set whenever a cap bites.
