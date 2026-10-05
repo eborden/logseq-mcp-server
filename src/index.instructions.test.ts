@@ -31,6 +31,20 @@ describe('server instructions (#44)', () => {
     }
   });
 
+  it('names exactly the tools whose schema has resolve_refs', async () => {
+    const mcpClient = await connect();
+    try {
+      const supporting = (await mcpClient.listTools()).tools
+        .filter(t => 'resolve_refs' in ((t.inputSchema as any).properties ?? {}))
+        .map(t => t.name.replace(/^logseq_/, ''))
+        .sort();
+      const listed = SERVER_INSTRUCTIONS.match(/resolve_refs \(([^)]+)\)/)?.[1].split(/,\s*/).sort();
+      expect(listed).toEqual(supporting);
+    } finally {
+      await mcpClient.close();
+    }
+  });
+
   it('only names tools that exist', () => {
     const named = SERVER_INSTRUCTIONS.match(/logseq_[a-z_]+/g) ?? [];
     expect(named.length).toBeGreaterThan(0);
