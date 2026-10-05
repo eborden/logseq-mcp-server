@@ -38,6 +38,8 @@ import { registerResources } from './resources.js';
 import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
 import { wantsSlim } from './utils/slim-entities.js';
+import { parseFormat } from './utils/output-format.js';
+import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 
 /**
  * Hints shared by every tool. This server only reads from LogSeq, so each tool
@@ -55,6 +57,13 @@ const READ_ONLY_HINTS = {
 function readOnlyAnnotations(title: string) {
   return { title, ...READ_ONLY_HINTS };
 }
+
+/** `format` parameter shared by the tools that can render Markdown (#43). */
+const FORMAT_PARAM = {
+  type: 'string',
+  enum: ['json', 'markdown'],
+  description: 'json (default), or markdown for plain text',
+} as const;
 
 // Define MCP tool schemas for all 14 tools
 const TOOLS = [
@@ -79,6 +88,7 @@ const TOOLS = [
           description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
           default: false,
         },
+        format: FORMAT_PARAM,
       },
       required: ['page_name'],
     },
@@ -119,6 +129,7 @@ const TOOLS = [
           description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
           default: false,
         },
+        format: FORMAT_PARAM,
       },
       required: ['block_uuid'],
     },
@@ -423,6 +434,11 @@ const TOOLS = [
   },
 ];
 
+/** A tool result that is one plain-text block, e.g. Markdown (#43). Not JSON-escaped. */
+function textResult(text: string) {
+  return { content: [{ type: 'text' as const, text }] };
+}
+
 /**
  * Create and configure the MCP server
  */
@@ -468,10 +484,15 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
       switch (name) {
         case 'logseq_get_page': {
           const pageName = args?.page_name as string;
+          const format = parseFormat(args?.format);
           const includeChildren = (args?.include_children as boolean) ?? false;
           const result = await getPage(client, pageName, includeChildren, {
             resolveRefs: args?.resolve_refs === true,
           });
+          if (format === 'markdown') {
+            const text = renderPage(result, { blocksFetched: includeChildren });
+            return textResult(withFooter(text, { ...result, tips: tipsFor(result) }));
+          }
           return {
             content: [
               {
@@ -499,10 +520,12 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_get_block': {
           const blockUuid = args?.block_uuid as string;
+          const format = parseFormat(args?.format);
           const includeChildren = (args?.include_children as boolean) ?? false;
           const result = await getBlock(client, blockUuid, includeChildren, {
             resolveRefs: args?.resolve_refs === true,
           });
+          if (format === 'markdown') return textResult(withFooter(renderBlock(result), result));
           return {
             content: [
               {
