@@ -47,3 +47,33 @@ describe('DatalogQueryBuilder journal range queries', () => {
     expect(query).toContain('[?block :block/page ?page]');
   });
 });
+
+describe('DatalogQueryBuilder.getJournalPagesUpTo', () => {
+  it('bounds :block/journal-day above with an :in input and requires a page name', () => {
+    const { query, inputs } = DatalogQueryBuilder.getJournalPagesUpTo(20250131);
+
+    expect(query).toContain(':in $ ?latest');
+    expect(query).toContain('[?page :block/name]');
+    expect(query).toContain('[?page :block/journal-day ?day]');
+    expect(query).toContain('[(<= ?day ?latest)]');
+    expect(inputs).toEqual([20250131]);
+  });
+
+  it('pulls only identifying attributes, not the whole page', () => {
+    const { query } = DatalogQueryBuilder.getJournalPagesUpTo(20250131);
+
+    expect(query).toContain(':block/journal-day :block/journal?');
+    expect(query).not.toContain('[*]');
+  });
+
+  it('does not embed the bound in the query text', () => {
+    expect(DatalogQueryBuilder.getJournalPagesUpTo(20250131).query).not.toContain('20250131');
+  });
+
+  it.each([NaN, Infinity, 20250101.5, '20250101' as any, null as any])(
+    'rejects a non-integer bound (%s)',
+    (bad) => {
+      expect(() => DatalogQueryBuilder.getJournalPagesUpTo(bad)).toThrow(/Invalid journal latest date/);
+    }
+  );
+});

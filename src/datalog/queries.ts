@@ -199,6 +199,33 @@ export class DatalogQueryBuilder {
     };
   }
 
+  /**
+   * Generate Datalog query for the journal pages on or before a day. The caller
+   * sorts by `journal-day` and slices the newest N in TypeScript, so one query
+   * finds "the last N journals that exist" however many days are missing.
+   *
+   * Pulls only the identifying attributes (a few hundred small maps on a graph
+   * with years of journals), not `[*]`. `[?page :block/name]` is required for the
+   * same reason as in {@link getJournalPagesInRange}.
+   * @param latestDay - Newest journal day to consider, inclusive (YYYYMMDD integer)
+   * @returns Query and inputs (`[latestDay]`)
+   * @throws Error if `latestDay` is not an integer
+   */
+  static getJournalPagesUpTo(latestDay: number): DatalogQuery {
+    if (!Number.isInteger(latestDay)) {
+      throw new Error(`Invalid journal latest date: ${String(latestDay)} (expected an integer)`);
+    }
+    return {
+      query: `[:find (pull ?page [:db/id :block/uuid :block/name :block/original-name :block/journal-day :block/journal?])
+             :in $ ?latest
+             :where
+             [?page :block/name]
+             [?page :block/journal-day ?day]
+             [(<= ?day ?latest)]]`,
+      inputs: [latestDay]
+    };
+  }
+
   private static assertJournalBounds(startDate: number, endDate: number): void {
     for (const [label, value] of [['start', startDate], ['end', endDate]] as const) {
       if (!Number.isInteger(value)) {
