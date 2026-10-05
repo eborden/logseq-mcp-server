@@ -175,7 +175,8 @@ describe('docs format guard: a valid tree', () => {
     ['checks a second backticked path but treats other spans as prose', f => {
       f['docs/business-rules/0001-no-bad-thing.md'] = rule({
         title: 'Never do the bad thing',
-        enforcement: 'test: `src/example.test.ts` (with `.github/workflows/ci.yml`; pins `ResultMeta` and `a b/c`)',
+        enforcement:
+          'test: `src/example.test.ts` (with `.github/workflows/ci.yml`; pins `ResultMeta`, `:block/name`, `Issue/PR` and `a b/c`)',
       });
     }],
     ['ignores tier-like prose outside list items, and list items that are not a tier word', f => {
@@ -463,6 +464,18 @@ describe('docs format guard: each violation fails', () => {
         f['docs/business-rules/0001-no-bad-thing.md'] = rule({
           title: 'Never do the bad thing',
           enforcement: 'test: `src/example.test.ts`, `src/utils/nope.test.ts`',
+        });
+      },
+    },
+    {
+      name: 'a missing second path among prose spans',
+      rule: 'enforcement',
+      file: 'docs/business-rules/0001-no-bad-thing.md',
+      message: /test: `\.github\/workflows\/nope\.yml` does not exist/,
+      mutate: f => {
+        f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+          title: 'Never do the bad thing',
+          enforcement: 'test: `src/example.test.ts` (pins `:block/name` and `Issue/PR`, run by `.github/workflows/nope.yml`)',
         });
       },
     },

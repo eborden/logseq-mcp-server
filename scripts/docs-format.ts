@@ -460,6 +460,8 @@ const TIER_LINE = /^(type|test|ci|reviewer|none-yet): (.*)$/;
 const BARE_TIER = /^(type|test|ci|reviewer|none-yet):/;
 /** A list item's leading word before a colon, allowing `**` / `__` / backticks around it: `**test:**`, `` `test`: ``, `Test:`. */
 const LEADING_TOKEN = /^[*_`]*([A-Za-z][A-Za-z -]*?)[*_`]*\s*:/;
+/** A relative file path with a directory and an extension: `src/x.test.ts`, `.github/workflows/ci.yml`. */
+const FILE_PATH_LIKE = /^\.?[\w-]+(?:\/[\w.-]+)*\/[\w.-]*\.\w+$/;
 const ISSUE_REF =
   /^(?:#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|\[[^\]]+\]\(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+\))(?=$|[\s.,;:)])/;
 
@@ -531,11 +533,12 @@ function checkEnforcement(fs: DocsFs, f: DocFile, secs: ReturnType<typeof sectio
         add(f.path, 'enforcement', `${tier}: reference must start with a backticked repo-relative path, e.g. \`src/index.test.ts\``, line.n);
         continue;
       }
-      // The first span is the path. A later span that looks like a path (a `/`, no
-      // whitespace) is checked too, so a second path on the line can't rot unnoticed;
-      // other spans, such as (pins `ResultMeta`), are prose.
+      // The first span is the path. A later span shaped like a file path (a directory and
+      // a last segment with an extension) is checked too, so a second path on the line
+      // can't rot unnoticed; other spans, such as `ResultMeta`, `:block/name` or
+      // `Issue/PR`, are prose.
       const spans = [...reference.matchAll(/`([^`]+)`/g)].map(s => s[1].trim());
-      const paths = [spans[0], ...spans.slice(1).filter(s => s.includes('/') && !/\s/.test(s))];
+      const paths = [spans[0], ...spans.slice(1).filter(s => FILE_PATH_LIKE.test(s))];
       for (const path of paths) {
         const normalized = posix.normalize(path);
         if (path.startsWith('/') || normalized.startsWith('..')) {
