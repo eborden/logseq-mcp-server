@@ -60,7 +60,12 @@ export function parseArgs<S extends z.ZodObject>(
   const issue = result.error.issues[0];
   const param = issue.path.length > 0 ? issue.path.map(String).join('.') : '(arguments)';
   const value = issue.path.length > 0 ? present[String(issue.path[0])] : present;
-  throw new InvalidParameterError(param, value === undefined ? 'missing' : showValue(value), issue.message);
+  throw new InvalidParameterError(
+    param,
+    value === undefined ? 'missing' : showValue(value),
+    issue.message,
+    exampleFor(param, issue)
+  );
 }
 
 function withoutNulls(args: Record<string, unknown>): Record<string, unknown> {
@@ -107,6 +112,27 @@ const expectedMessage: z.core.$ZodErrorMap = issue => {
       return undefined; // zod's own message
   }
 };
+
+/** A legal value of each type for the `Example:` line, which the unconverted tools' errors also carry. */
+const EXAMPLE_VALUE: Record<string, string> = {
+  string: '"..."',
+  boolean: 'true',
+  number: '5',
+  int: '5',
+};
+
+/** `param: value` with a legal value, or nothing when no sample fits the issue. */
+function exampleFor(param: string, issue: z.core.$ZodIssue): string | undefined {
+  if (issue.code === 'invalid_value') {
+    const last = issue.values[issue.values.length - 1];
+    return last === undefined ? undefined : `${param}: ${JSON.stringify(last)}`;
+  }
+  if (issue.code === 'invalid_type') {
+    const sample = EXAMPLE_VALUE[issue.expected];
+    return sample === undefined ? undefined : `${param}: ${sample}`;
+  }
+  return undefined;
+}
 
 function article(type: string): string {
   return /^[aeiou]/.test(type) ? `an ${type}` : `a ${type}`;
