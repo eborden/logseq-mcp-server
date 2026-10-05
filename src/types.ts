@@ -123,3 +123,36 @@ export interface SlimPage {
   isJournal?: boolean;
   journalDate?: number;
 }
+
+// Capped or partial results (#40)
+
+/**
+ * A non-fatal note about a result that is capped or partial. Connection,
+ * timeout, auth and unexpected errors are never warnings: they propagate.
+ */
+export interface ResultWarning {
+  /** Stable machine-readable code, e.g. `results_truncated` */
+  code: string;
+  message: string;
+  /** How to get the rest: the tool parameter to raise and a suggested value */
+  howToFetchAll?: string;
+}
+
+/**
+ * Shared convention for any tool that caps its output.
+ *
+ * - `hasMore` is true only when results were cut off AND a warning says how
+ *   to continue (`howToFetchAll`). Under the cap it is false.
+ * - `warnings` is always present; empty when nothing was cut.
+ * - `totals` holds real counts, only where the tool already had them (no
+ *   extra API call just to count).
+ *
+ * Tools that return an object add these fields to it. Tools that return a bare
+ * array keep the array as the first content block and send `{ "meta": ... }` as
+ * a second one, so the array shape is unchanged.
+ */
+export interface ResultMeta {
+  hasMore: boolean;
+  warnings: ResultWarning[];
+  totals?: Record<string, number>;
+}
