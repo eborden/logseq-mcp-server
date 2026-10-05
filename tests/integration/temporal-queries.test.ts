@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { resolve } from 'path';
 import { homedir } from 'os';
 import { access } from 'fs/promises';
+import { isDeepStrictEqual } from 'util';
 import { loadConfig } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
+import { PageEntity, BlockEntity } from '../../src/types.js';
 import { queryByDateRange } from '../../src/tools/query-by-date-range.js';
 import { getConceptEvolution } from '../../src/tools/get-concept-evolution.js';
 
@@ -169,6 +171,70 @@ describe('Temporal Queries Integration Tests', () => {
           result.entries[i - 1].date
         );
       }
+    });
+
+    describe('matches the Editor API crawl it replaced', () => {
+      // Reference implementation: getAllPages, then one getPageBlocksTree per journal day.
+      async function crawlJournals(startDate: number, endDate: number) {
+        const allPages = (await client.callAPI<PageEntity[]>('logseq.Editor.getAllPages')) || [];
+        const journals = allPages
+          .filter(p => p['journal?'] && p.journalDay && p.journalDay >= startDate && p.journalDay <= endDate)
+          .sort((a, b) => a.journalDay! - b.journalDay!);
+        const days: Array<{ date: number; blocks: BlockEntity[] }> = [];
+        for (const page of journals) {
+          const blocks = (await client.callAPI<BlockEntity[]>('logseq.Editor.getPageBlocksTree', [page.name])) || [];
+          days.push({ date: page.journalDay!, blocks });
+        }
+        return days;
+      }
+
+      // Tree shape as [id, level, children] so a mismatch reports ids, not content.
+      const shape = (blocks: BlockEntity[]): unknown[] =>
+        blocks.map(b => [b.id, b.level, shape(b.children || [])]);
+      const countAll = (blocks: BlockEntity[]): number =>
+        blocks.reduce((n, b) => n + 1 + countAll(b.children || []), 0);
+
+      function recentRange(days: number) {
+        const end = new Date();
+        const start = new Date(end);
+        start.setDate(end.getDate() - days);
+        const fmt = (d: Date) =>
+          d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+        return { startDate: fmt(start), endDate: fmt(end) };
+      }
+
+      it('returns the same days, block counts, ids and nesting order per day', async () => {
+        const { startDate, endDate } = recentRange(30);
+
+        const expected = await crawlJournals(startDate, endDate);
+        const actual = await queryByDateRange(client, startDate, endDate);
+
+        expect(
+          expected.length,
+          'No journal pages in the last 30 days. Create a few journal entries with nested blocks. See tests/integration/setup.md'
+        ).toBeGreaterThan(0);
+
+        expect(actual.entries.map(e => e.date)).toEqual(expected.map(d => d.date));
+        for (let i = 0; i < expected.length; i++) {
+          const entry = actual.entries[i] as { date: number; blocks: BlockEntity[] };
+          expect(countAll(entry.blocks), `total blocks for day index ${i}`).toBe(countAll(expected[i].blocks));
+          expect(entry.blocks.length, `top-level blocks for day index ${i}`).toBe(expected[i].blocks.length);
+          expect(shape(entry.blocks), `tree shape for day index ${i}`).toEqual(shape(expected[i].blocks));
+          // Boolean so a failure doesn't print block content into logs.
+          expect(isDeepStrictEqual(entry.blocks, expected[i].blocks), `full block data for day index ${i}`).toBe(true);
+        }
+      });
+
+      it('uses at most 2 API calls however long the range is', async () => {
+        const { startDate, endDate } = recentRange(90);
+        const spy = vi.spyOn(client, 'callAPI');
+        try {
+          await queryByDateRange(client, startDate, endDate);
+          expect(spy.mock.calls.length).toBeLessThanOrEqual(2);
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
 
     it('should handle empty date range', async () => {
