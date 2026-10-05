@@ -93,7 +93,7 @@ export interface DateRangeSelection {
 
 export interface DateRangeOptions extends DateRangeSelection {
   searchTerm?: string;
-  /** Slim blocks (ignored when `includeContent` is false) */
+  /** Slim blocks (ignored when `includeContent` is false). Direct calls default to full (false); the MCP handler defaults to slim via `wantsSlim` (#42) */
   slimResults?: boolean;
   /** `false` returns the outline shape (default true) */
   includeContent?: boolean;
@@ -265,7 +265,7 @@ async function fetchPages(
  * @param startDate - Start date in YYYYMMDD format
  * @param endDate - End date in YYYYMMDD format
  * @param searchTerm - Optional search term to filter blocks
- * @param slimResults - Return slim results (40-50% fewer tokens, essential data only)
+ * @param slimResults - Return slim results (40-50% fewer tokens, essential data only). Direct calls default to full (false); the MCP handler defaults to slim via `wantsSlim` (#42)
  * @returns DateRangeResult or SlimDateRangeResult with journal entries in range
  */
 export async function queryByDateRange(

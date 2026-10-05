@@ -29,7 +29,7 @@ function displayName(page: any): string {
  * @param client - LogseqClient instance
  * @param propertyName - Name of the property to query
  * @param propertyValue - Value to match for the property
- * @param slimResults - Return slim results (40-50% fewer tokens, essential data only)
+ * @param slimResults - Return slim results (40-50% fewer tokens, essential data only). Direct calls default to full (false); the MCP handler defaults to slim via `wantsSlim` (#42)
  * @returns Array of BlockEntity or SlimBlock objects with matching property (empty if none), or null if the API returns a null response
  * @throws InvalidParameterError if the property name has characters other than letters, digits, "-" and "_"
  */

@@ -180,6 +180,43 @@ describe('slim_results default (#42)', () => {
     });
   });
 
+  describe('handlers use wantsSlim', () => {
+    // Every tool with a slim_results parameter must be listed here with a call that returns
+    // data. Adding a slim_results parameter to a new tool fails the coverage test until the
+    // tool is added, and the other test fails if its handler skips wantsSlim (the tool
+    // functions themselves default to full output).
+    const SLIM_CAPABLE_CALLS: Record<string, Record<string, unknown>> = {
+      logseq_search_blocks: { query: 'alice' },
+      logseq_query_by_property: { property_key: 'status', property_value: 'active' },
+      logseq_query_by_date_range: { last_n: 1 },
+    };
+
+    it('lists every tool that advertises slim_results', async () => {
+      const server = createServer(stubClient());
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const mcpClient = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
+      await Promise.all([server.connect(serverTransport), mcpClient.connect(clientTransport)]);
+      try {
+        const names = (await mcpClient.listTools()).tools
+          .filter(t => 'slim_results' in ((t.inputSchema.properties as object) ?? {}))
+          .map(t => t.name)
+          .sort();
+        expect(names).toEqual(Object.keys(SLIM_CAPABLE_CALLS).sort());
+      } finally {
+        await mcpClient.close();
+      }
+    });
+
+    it.each(Object.entries(SLIM_CAPABLE_CALLS))(
+      '%s: omitting slim_results matches true and differs from false',
+      async (name, args) => {
+        const omitted = await call(name, args);
+        expect(omitted).toEqual(await call(name, { ...args, slim_results: true }));
+        expect(omitted).not.toEqual(await call(name, { ...args, slim_results: false }));
+      }
+    );
+  });
+
   describe('schema', () => {
     it('advertises default: true on every slim_results parameter, and there are three', async () => {
       const server = createServer(stubClient());
