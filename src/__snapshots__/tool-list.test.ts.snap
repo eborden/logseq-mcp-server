@@ -421,7 +421,7 @@ Returns page: null with a message when no page is open. Reflects live UI state."
 
 **When to use:**
 - "What did I do last week?" or "catch me up on recent days"
-- Time-bound information in daily logs
+- What a period was about (summary.topConcepts)
 
 **Alternatives:**
 - logseq_get_concept_evolution: change over time
@@ -466,6 +466,11 @@ Returns page: null with a message when no page is open. Reflects live UI state."
         },
         "start_date": {
           "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
+          "type": "number",
+        },
+        "top_concepts_limit": {
+          "default": 10,
+          "description": "Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it",
           "type": "number",
         },
       },

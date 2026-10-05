@@ -38,6 +38,27 @@ describe('logseq_query_by_date_range through MCP', () => {
     expect(schema.required).toBeUndefined();
   });
 
+  it('declares top_concepts_limit with a default of 10', async () => {
+    const tool = await withClient(async mcp =>
+      (await mcp.listTools()).tools.find(t => t.name === 'logseq_query_by_date_range')
+    );
+
+    const schema: any = tool!.inputSchema;
+    expect(schema.properties.top_concepts_limit).toMatchObject({ type: 'number', default: 10 });
+  });
+
+  it('returns isError for a bad top_concepts_limit without calling LogSeq', async () => {
+    global.fetch = vi.fn() as any;
+
+    const result: any = await withClient(mcp =>
+      mcp.callTool({ name: 'logseq_query_by_date_range', arguments: { last_n: 3, top_concepts_limit: -1 } })
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text).error).toContain('top_concepts_limit');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['no selection', {}],
     ['two selections', { last_n: 3, preset: 'today' }],
