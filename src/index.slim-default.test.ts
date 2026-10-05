@@ -180,11 +180,11 @@ describe('slim_results default (#42)', () => {
     });
   });
 
-  describe('handlers use wantsSlim', () => {
+  describe('handlers default to slim', () => {
     // Every tool with a slim_results parameter must be listed here with a call that returns
     // data. Adding a slim_results parameter to a new tool fails the coverage test until the
-    // tool is added, and the other test fails if its handler skips wantsSlim (the tool
-    // functions themselves default to full output).
+    // tool is added, and the other test fails if its handler skips the slim default (the
+    // tool functions themselves default to full output).
     const SLIM_CAPABLE_CALLS: Record<string, Record<string, unknown>> = {
       logseq_search_blocks: { query: 'alice' },
       logseq_query_by_property: { property_key: 'status', property_value: 'active' },

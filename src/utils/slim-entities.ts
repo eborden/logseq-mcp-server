@@ -4,16 +4,21 @@ import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
  * Whether tools with a `slim_results` parameter slim their output when the
  * caller doesn't say (#42). `slim_results: false` is the opt-out.
  *
- * The default lives in the MCP handlers in `src/index.ts`, which pass
- * `wantsSlim(args?.slim_results)` to the tool function. The tool functions
+ * The default lives at the MCP boundary: the argument schemas in
+ * `src/tool-args.ts` default `slim_results` to this value (#60), and the
+ * handlers pass the parsed boolean to the tool function. The tool functions
  * (`searchBlocks`, `queryByProperty`, `queryJournals`) still default their
  * `slimResults` parameter to `false`, so a direct call gets full output. A
- * new handler for a slim-capable tool must go through `wantsSlim`, or it
+ * new slim-capable tool must use the shared `slim_results` schema, or it
  * silently returns full output. `src/index.slim-default.test.ts` pins this.
  */
 export const DEFAULT_SLIM_RESULTS = true;
 
-/** The `slim_results` argument as a boolean: only an explicit boolean overrides the default. */
+/**
+ * The `slim_results` argument as a boolean: only an explicit boolean overrides the default.
+ * No handler calls it since #60 (the schema default replaced it). It stays until
+ * ADR 0010 and BR-0012, which name it, are updated.
+ */
 export function wantsSlim(value: unknown): boolean {
   return typeof value === 'boolean' ? value : DEFAULT_SLIM_RESULTS;
 }

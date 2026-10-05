@@ -71,7 +71,7 @@ function pulledPageToEntity(pulled: any): PageEntity {
  * @param query - Text to search for in block content
  * @param limit - Maximum number of results to return (default: 100)
  * @param includeContext - Include semantic context (page, references, tags)
- * @param slimResults - Return slim results (40-50% fewer tokens, essential data only). Direct calls default to full (false); the MCP handler defaults to slim via `wantsSlim` (#42)
+ * @param slimResults - Return slim results (40-50% fewer tokens, essential data only). Direct calls default to full (false); the MCP handler defaults to slim through its argument schema (#42, #60)
  * @returns Array of BlockEntity or SlimBlock objects matching the query, or null if the API returns a null response (no matches is an empty array)
  */
 export async function searchBlocks(
