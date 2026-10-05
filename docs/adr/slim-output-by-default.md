@@ -12,7 +12,7 @@ Measured through the real MCP server on a ~2k-page graph (`scripts/measure-outpu
 
 `slim_results` defaults to `true` on the three tools that have it: `search_blocks`, `query_by_property` and `query_by_date_range`. An explicit `false` returns the full entities, byte for byte as before. The MCP handlers apply the default through `wantsSlim`. The underlying tool functions still default to full output, so internal callers are unchanged.
 
-Slim output leaves out fields that say nothing: a blank `pageName`, properties with no value, and empty `references` or `tags`. It never repeats `pageName` on child blocks or on blocks inside a date-range entry. `uuid` and `content` always stay. `hasMore`, `warnings` and `totals` in result meta stay even when empty, because `hasMore: false` is the positive signal that nothing was cut (see `report-truncation-with-resultmeta`). Every tool writes minified JSON.
+Slim output leaves out fields that say nothing: a blank `pageName`, properties with no value, and empty `references` or `tags`. It never repeats `pageName` on child blocks or on blocks inside a date-range entry. `uuid` and `content` always stay. `hasMore`, `warnings` and `totals` in result meta stay even when empty, because `hasMore: false` is the positive signal that nothing was cut (see `resultmeta-for-capped-results`). Every tool writes minified JSON.
 
 ## Consequences
 
