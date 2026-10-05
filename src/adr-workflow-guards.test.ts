@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 
 // Guards for decisions held by the GitHub Actions workflows (#96).
 //
@@ -251,6 +251,35 @@ describe('ADR-0017: publish.yml is manual, main-only and dry-run by default', ()
         /^github\.ref == 'refs\/heads\/main'(?:\s*&&(?!.*\|\|).*)?$/,
       );
     }
+  });
+});
+
+/** Raw-text lines that publish to a registry or use npm's publish token. */
+function publishLines(name: string, text: string): string[] {
+  return text
+    .split('\n')
+    .map((line, i) => ({ line, n: i + 1 }))
+    .filter(({ line }) => /\b(?:npm|pnpm|yarn)\s+publish\b|\bNODE_AUTH_TOKEN\b|\bNPM_TOKEN\b/.test(line))
+    .map(({ n }) => `${name}:${n}`);
+}
+
+// The guards above read only publish.yml, so an `npm publish` step added to another
+// workflow (ci.yml runs on every push to main) would reverse ADR-0017 with all of
+// them green. This scans the raw text, because the YAML reader skips `run: |` bodies.
+describe('ADR-0017: no other workflow publishes', () => {
+  const WORKFLOWS_DIR = new URL('../.github/workflows/', import.meta.url);
+
+  it('flags publish commands and the npm token in raw workflow text', () => {
+    expect(
+      publishLines('x.yml', ['run: npm ci', '  npm  publish --access public', 'env: { NODE_AUTH_TOKEN: x }', 'pnpm publish', 'secrets.NPM_TOKEN', 'npm run publish-docs'].join('\n')),
+    ).toEqual(['x.yml:2', 'x.yml:3', 'x.yml:4', 'x.yml:5']);
+  });
+
+  it('no workflow besides publish.yml runs npm publish or reads NODE_AUTH_TOKEN or NPM_TOKEN', () => {
+    const others = readdirSync(WORKFLOWS_DIR).filter(name => /\.ya?ml$/.test(name) && name !== 'publish.yml');
+    expect(others.length).toBeGreaterThan(0);
+    const hits = others.flatMap(name => publishLines(name, readFileSync(new URL(name, WORKFLOWS_DIR), 'utf-8')));
+    expect(hits, 'publishing belongs only in publish.yml (ADR-0017)').toEqual([]);
   });
 });
 
