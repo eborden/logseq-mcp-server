@@ -101,4 +101,4 @@ The CI guard in #78 parses these files. These rules are exact.
 2. Open a PR that adds `docs/adr/<slug>.md` and its row in the Index above, starting at status `proposed`. Before merge, edit the status to `accepted` in that same PR. To reverse an ADR, the same PR also changes the old ADR's status to `superseded by <slug>`.
 3. Reviewers check each PR against the accepted ADRs and business rules. A PR that contradicts one must cite the change that allows it.
 
-Adding an ADR, including one that supersedes another, follows this normal PR and review process. It doesn't need the maintainer's explicit OK. (Loosening or removing a *business rule* does. See [`../business-rules/`](../business-rules/README.md).)
+**Approval gate.** Any PR that adds, changes, supersedes or retires an ADR or business-rule file needs the maintainer's explicit approval before merge. The approval is recorded on the PR.

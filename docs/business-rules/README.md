@@ -26,7 +26,7 @@ One row per slug, sorted by slug. See [Format rules](#format-rules) for what eac
 
 Rules have no status field. A rule in this directory is in force unless it is retired, and it is **edited in place**. Every edit adds a row to the file's Changelog table.
 
-**Retiring a rule.** Don't delete the file. Mark it retired: make the first non-empty line under `## Statement` read `Retired.`, keep the original text below it, add a Changelog row (change: `Retired.`) that cites the maintainer's OK (the issue or PR link), and start the Index summary with `Retired.`. The Index row stays, because every file needs a row. Since files are never deleted, a slug can't be reused, so no history-aware reuse check is needed.
+**Retiring a rule.** Don't delete the file. Mark it retired: make the first non-empty line under `## Statement` read `Retired.`, keep the original text below it, add a Changelog row (change: `Retired.`) that cites the approving PR (the maintainer's approval, per Change process), and start the Index summary with `Retired.`. The Index row stays, because every file needs a row. Since files are never deleted, a slug can't be reused, so no history-aware reuse check is needed.
 
 ## Template
 
@@ -85,4 +85,6 @@ The CI guard in #78 parses these files. These rules are exact.
 2. Open a PR with the file change **and a new Changelog row** (date, what changed, issue or PR). For a new rule, also add its Index row.
 3. Reviewers check each PR against the accepted ADRs and business rules. A PR that contradicts one must cite the change that allows it.
 
-Adding a rule doesn't need the maintainer's explicit OK. **Loosening or retiring a rule does**: record the maintainer's OK in the issue or PR, and cite it in the Changelog row.
+**Approval gate.** Any PR that adds, changes, supersedes or retires an ADR or business-rule file needs the maintainer's explicit approval before merge. The approval is recorded on the PR.
+
+Every Changelog row cites the approving PR, and the approval is the maintainer's.
