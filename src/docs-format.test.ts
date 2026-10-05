@@ -172,6 +172,12 @@ describe('docs format guard: a valid tree', () => {
         enforcement: 'The tests below pin it. Not: a tier line.\n\n- test: `src/example.test.ts`\n1. ci: `.github/workflows/ci.yml` (CI)',
       });
     }],
+    ['checks a second backticked path but treats other spans as prose', f => {
+      f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+        title: 'Never do the bad thing',
+        enforcement: 'test: `src/example.test.ts` (with `.github/workflows/ci.yml`; pins `ResultMeta` and `a b/c`)',
+      });
+    }],
     ['accepts none-yet as #N, a full issue URL or a markdown link to one', f => {
       f['docs/business-rules/0001-no-bad-thing.md'] = rule({
         title: 'Never do the bad thing',
@@ -419,6 +425,18 @@ describe('docs format guard: each violation fails', () => {
       message: /test: `src\/missing\.test\.ts` does not exist/,
       mutate: f => {
         f['docs/business-rules/0001-no-bad-thing.md'] = rule({ title: 'Never do the bad thing', enforcement: 'test: `src/missing.test.ts`' });
+      },
+    },
+    {
+      name: 'a missing second path on a tier line',
+      rule: 'enforcement',
+      file: 'docs/business-rules/0001-no-bad-thing.md',
+      message: /test: `src\/utils\/nope\.test\.ts` does not exist/,
+      mutate: f => {
+        f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+          title: 'Never do the bad thing',
+          enforcement: 'test: `src/example.test.ts`, `src/utils/nope.test.ts`',
+        });
       },
     },
     {

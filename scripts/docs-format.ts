@@ -509,17 +509,22 @@ function checkEnforcement(fs: DocsFs, f: DocFile, secs: ReturnType<typeof sectio
       continue;
     }
     if (tier === 'type' || tier === 'test' || tier === 'ci') {
-      const m = /^`([^`]+)`/.exec(reference);
-      if (!m) {
+      if (!/^`[^`]+`/.test(reference)) {
         add(f.path, 'enforcement', `${tier}: reference must start with a backticked repo-relative path, e.g. \`src/index.test.ts\``, line.n);
         continue;
       }
-      const path = m[1].trim();
-      const normalized = posix.normalize(path);
-      if (path.startsWith('/') || normalized.startsWith('..')) {
-        add(f.path, 'enforcement', `${tier}: \`${path}\` must be relative to the repo root`, line.n);
-      } else if (!fs.isFile(normalized)) {
-        add(f.path, 'enforcement', `${tier}: \`${path}\` does not exist in the repo (paths are case-sensitive)`, line.n);
+      // The first span is the path. A later span that looks like a path (a `/`, no
+      // whitespace) is checked too, so a second path on the line can't rot unnoticed;
+      // other spans, such as (pins `ResultMeta`), are prose.
+      const spans = [...reference.matchAll(/`([^`]+)`/g)].map(s => s[1].trim());
+      const paths = [spans[0], ...spans.slice(1).filter(s => s.includes('/') && !/\s/.test(s))];
+      for (const path of paths) {
+        const normalized = posix.normalize(path);
+        if (path.startsWith('/') || normalized.startsWith('..')) {
+          add(f.path, 'enforcement', `${tier}: \`${path}\` must be relative to the repo root`, line.n);
+        } else if (!fs.isFile(normalized)) {
+          add(f.path, 'enforcement', `${tier}: \`${path}\` does not exist in the repo (paths are case-sensitive)`, line.n);
+        }
       }
     } else if (tier === 'none-yet') {
       if (!ISSUE_REF.test(reference)) {
