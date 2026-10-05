@@ -15,7 +15,7 @@ Inferred, not recorded: a token in a public repository, a log or an error messag
 
 No token, key or password appears in source, fixtures, logs or error messages. Credentials come from the config file outside the repository or from repository secrets. Tests use obviously fake values.
 
-The graph-data half of hard rule 6 is a promise to the user, kept in the business rule `no-graph-data-in-repo` (PR #84).
+The graph-data half of hard rule 6 is a promise to the user, kept in the business rule [BR-0001 (no-graph-data-in-repo)](../business-rules/0001-no-graph-data-in-repo.md) (PR #84).
 
 ## Consequences
 
