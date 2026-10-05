@@ -67,6 +67,26 @@ describe('DatalogQueryBuilder alias sets (#69)', () => {
     });
   });
 
+  describe('connectedPagesGrouped', () => {
+    it('binds [member group] pairs and counts distinct blocks per group', () => {
+      const { query, inputs } = DatalogQueryBuilder.connectedPagesGrouped(
+        [1, 2, 7],
+        new Map([[2, 1]])
+      );
+
+      expect(inputs).toEqual([]);
+      expect(query).toContain('[(ground [[1 1] [2 1] [7 7]]) [[?source ?group] ...]]');
+      expect(query).toContain('(count-distinct ?block)');
+      expect(query).toContain('[(not= ?group ?connected)]');
+    });
+
+    it('rejects an empty frontier and ids that are not integers', () => {
+      expect(() => DatalogQueryBuilder.connectedPagesGrouped([], new Map())).toThrow(/at least one/);
+      expect(() => DatalogQueryBuilder.connectedPagesGrouped([1.5], new Map())).toThrow(/Invalid entity id/);
+      expect(() => DatalogQueryBuilder.connectedPagesGrouped([1], new Map([[1, NaN]]))).toThrow(/Invalid entity id/);
+    });
+  });
+
   describe('getBlocksOnPages', () => {
     it('binds the page ids straight to ?page and takes the blocks on them', () => {
       const { query, inputs } = DatalogQueryBuilder.getBlocksOnPages([5, 6]);

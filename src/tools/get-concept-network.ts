@@ -1,8 +1,17 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { ResultMeta } from '../types.js';
+import { ResultMeta, ResultWarning } from '../types.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
+import {
+  ResolvedAliases,
+  aliasIds,
+  aliasSetWarnings,
+  hasAliases,
+  resolveAliasSet,
+  resolvedAliases,
+  singleAliasSet
+} from '../utils/alias-set.js';
 
 export interface ConceptNetworkNode {
   id: number;
@@ -30,7 +39,7 @@ export interface ConceptNetworkEdge {
   inbound: number;
 }
 
-export interface ConceptNetworkResult extends ResultMeta, ResolvedFrom {
+export interface ConceptNetworkResult extends ResultMeta, ResolvedFrom, ResolvedAliases {
   concept: string;
   nodes: ConceptNetworkNode[];
   edges: ConceptNetworkEdge[];
@@ -79,6 +88,12 @@ const linkKey = (from: number, to: number) => `${from}>${to}`;
  * One query for the root plus one per depth level (at most maxDepth + 1
  * calls), each covering the whole BFS frontier in both link directions.
  *
+ * Aliases (#69): the root and the pages it is an alias of, or that alias it,
+ * are one concept, so they are one node. Their links are unioned (a block that
+ * links two of those names counts once), links among them are dropped, and
+ * `resolvedAliases` lists the names. This costs one query before the walk and
+ * only when the root has an alias.
+ *
  * Caps keep hub pages usable. When they bite, survivors are picked
  * deterministically: non-journal pages first, then more references to the
  * frontier, then lower id. `truncated` is set if any page was dropped.
@@ -117,17 +132,29 @@ export async function getConceptNetwork(
 
   nodeMap.set(rootId, { id: rootId, name: rootName, depth: 0 });
 
+  // The root's names (#69). Nothing is followed at depth 0, so nothing to look up.
+  const aliasSet = maxDepth >= 1 ? await resolveAliasSet(client, rootPage) : singleAliasSet(rootPage);
+  const aliasMemberIds = new Set(aliasIds(aliasSet));
+  const rootGroup = new Map<number, number>([...aliasMemberIds].map(id => [id, rootId]));
+  // Links to any name of the root are the root's, and the grouped depth-1 query already
+  // counted them across names. Later depths would overwrite that with a single name's count.
+  const foldedIds = hasAliases(aliasSet) ? aliasMemberIds : new Set<number>();
+
   // BFS: one batched query per depth level
   let frontier = [rootId];
 
   for (let depth = 1; depth <= maxDepth && frontier.length > 0; depth++) {
-    const q = DatalogQueryBuilder.connectedPages(frontier);
+    // At depth 1 the frontier is the root, expanded through every one of its names
+    const q =
+      depth === 1 && hasAliases(aliasSet)
+        ? DatalogQueryBuilder.connectedPagesGrouped(aliasIds(aliasSet), rootGroup)
+        : DatalogQueryBuilder.connectedPages(frontier);
     const rows = (await client.executeDatalogQuery<ConnectedRow[]>(q.query, ...q.inputs)) || [];
 
     const candidates = new Map<number, Candidate>();
     for (const [sourceId, connectedId, name, originalName, isJournal, relType, count] of rows) {
       // Self-loops are excluded in the query; guard anyway.
-      if (sourceId === connectedId) continue;
+      if (sourceId === connectedId || foldedIds.has(connectedId)) continue;
 
       // The same links are reported from both sides when two frontier pages
       // link to each other, so set (never add) the directed count.
@@ -171,19 +198,21 @@ export async function getConceptNetwork(
   const nodes = Array.from(nodeMap.values());
   // Alongside `truncated`, which stays as is. `dropped` counts only the pages
   // seen at the depths that were walked, so it is a lower bound.
-  const warnings = truncated
-    ? [{
-        code: 'network_truncated',
-        message: `Kept ${nodes.length} pages; at least ${dropped} more connected pages were dropped.`,
-        howToFetchAll:
-          `Set max_nodes to ${nodes.length + dropped} (max 500) and/or max_fanout higher (max 100), ` +
-          'or set expand_journals to walk through journal pages.'
-      }]
-    : [];
+  const warnings: ResultWarning[] = aliasSetWarnings(aliasSet);
+  if (truncated) {
+    warnings.push({
+      code: 'network_truncated',
+      message: `Kept ${nodes.length} pages; at least ${dropped} more connected pages were dropped.`,
+      howToFetchAll:
+        `Set max_nodes to ${nodes.length + dropped} (max 500) and/or max_fanout higher (max 100), ` +
+        'or set expand_journals to walk through journal pages.'
+    });
+  }
 
   return {
     concept: conceptName,
     ...resolvedFrom(conceptName, resolved),
+    ...resolvedAliases(aliasSet),
     nodes,
     edges: buildEdges(nodeMap, links),
     truncated,
