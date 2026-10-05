@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity } from '../types.js';
+import { BlockEntity, PageEntity, ResultMeta, ResultWarning } from '../types.js';
+import { buildResultMeta } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 
 export type RelationshipType =
@@ -8,7 +9,7 @@ export type RelationshipType =
   | 'in-pages-linking-to' // Blocks about topicA in pages that link to topicB
   | 'connected-within'; // Topics connected within N hops
 
-export interface SearchByRelationshipResult {
+export interface SearchByRelationshipResult extends ResultMeta {
   query: {
     topicA: string;
     topicB: string;
@@ -17,6 +18,18 @@ export interface SearchByRelationshipResult {
   };
   relationshipType: RelationshipType;
   results: BlockEntity[];
+}
+
+/**
+ * Most pages expanded in one `connected-within` hop. Journal pages link to
+ * almost everything, so the frontier can grow into the thousands; each hop
+ * embeds its ids in one query.
+ */
+export const DEFAULT_MAX_FRONTIER = 500;
+
+export interface SearchByRelationshipOptions {
+  /** Cap on pages expanded per `connected-within` hop (default 500) */
+  maxFrontier?: number;
 }
 
 /** Unwrap `[[block], ...]` Datalog rows; a null result means no rows. */
@@ -31,6 +44,10 @@ function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
  * @param topicB - Related topic that defines the relationship
  * @param relationshipType - Type of relationship to search
  * @param maxDistance - Maximum graph distance (for connected-within)
+ * @param options - `maxFrontier`: cap on pages expanded per hop. When a hop is
+ *   cut and the other topic is not found, a `frontier_truncated` warning says
+ *   the "not connected" answer may be a false negative. A found connection is
+ *   always real.
  * @returns SearchByRelationshipResult with matching blocks
  */
 export async function searchByRelationship(
@@ -38,9 +55,12 @@ export async function searchByRelationship(
   topicA: string,
   topicB: string,
   relationshipType: RelationshipType,
-  maxDistance: number = 2
+  maxDistance: number = 2,
+  options: SearchByRelationshipOptions = {}
 ): Promise<SearchByRelationshipResult> {
+  const { maxFrontier = DEFAULT_MAX_FRONTIER } = options;
   let results: BlockEntity[] = [];
+  const warnings: ResultWarning[] = [];
 
   switch (relationshipType) {
     case 'references': {
@@ -78,8 +98,14 @@ export async function searchByRelationship(
         const visited = new Set<number>([idA]);
         let frontier = [idA];
         let found = false;
+        let cutAtDepth: { depth: number; reached: number } | null = null;
 
         for (let depth = 1; depth <= maxDistance && frontier.length > 0 && !found; depth++) {
+          if (frontier.length > maxFrontier) {
+            // Deterministic cut: lowest ids (oldest pages) first
+            cutAtDepth ??= { depth, reached: frontier.length };
+            frontier = [...frontier].sort((a, b) => a - b).slice(0, maxFrontier);
+          }
           const { query, inputs } = DatalogQueryBuilder.neighborPages(frontier);
           const rows = await client.executeDatalogQuery<Array<[number]>>(query, ...inputs);
           const neighborIds = (rows || []).map(row => row[0]);
@@ -96,6 +122,15 @@ export async function searchByRelationship(
               frontier.push(id);
             }
           }
+        }
+
+        if (!found && cutAtDepth) {
+          warnings.push({
+            code: 'frontier_truncated',
+            message:
+              `Hop ${cutAtDepth.depth} reached ${cutAtDepth.reached} pages; only ${maxFrontier} were expanded, ` +
+              'so "not connected" may be a false negative. Try a smaller max_distance or more specific topics.'
+          });
         }
 
         // If connected, return blocks from both topics
@@ -124,6 +159,7 @@ export async function searchByRelationship(
       maxDistance: relationshipType === 'connected-within' ? maxDistance : undefined
     },
     relationshipType,
-    results
+    results,
+    ...buildResultMeta(warnings)
   };
 }
