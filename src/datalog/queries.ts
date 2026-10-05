@@ -3,12 +3,6 @@
  * Provides reusable query templates for common graph operations
  */
 
-export interface ContextLimits {
-  maxBlocks?: number;
-  maxRelatedPages?: number;
-  maxReferences?: number;
-}
-
 /**
  * A Datalog query plus the values bound to its `:in` variables.
  *
@@ -137,11 +131,5 @@ export class DatalogQueryBuilder {
              [?block :block/refs ?page]]`,
       inputs: [pageName.toLowerCase()]
     };
-  }
-
-  // Deprecated: Use getPage() and getPageBlocks() instead
-  // Kept for backwards compatibility with tests
-  static buildContext(pageName: string, limits: ContextLimits): DatalogQuery {
-    return DatalogQueryBuilder.getPage(pageName);
   }
 }
