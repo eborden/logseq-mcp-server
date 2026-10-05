@@ -9,6 +9,11 @@ coverage/
 # Raw test/probe output can contain real graph data; never commit it
 *-output.txt
 integration-test-output*
+*.out
+# Redirected dumps of scripts/probe-*.ts and scripts/measure-*.ts
+probe-*.txt
+measure-*.txt
+# src/repo-hygiene.test.ts fails if a file matching these is tracked or a pattern is dropped
 
 # Personal Claude Code settings (permissions); never commit
 .claude/settings.local.json
