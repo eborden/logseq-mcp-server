@@ -172,6 +172,25 @@ describe('page outline and markdown output against a live graph (#43)', () => {
       expect(bytes(asMarkdown)).toBeLessThan(bytes(asJson));
     });
 
+    it('prints each page\'s property block exactly as stored, and not again as a bullet (#80)', async () => {
+      const rows = await logseq.callAPI<any[][]>('logseq.DB.datascriptQuery', [
+        `[:find ?n ?c :where [?b :block/pre-block? true] [?b :block/page ?p] [?p :block/name ?n] [?b :block/content ?c]]`,
+      ]);
+      const sample = rows.filter(([, content]) => typeof content === 'string' && content.trim() !== '').slice(0, 15);
+      expect(sample.length, `No page with a property block. ${SETUP_HINT}`).toBeGreaterThan(0);
+
+      let notVerbatim = 0;
+      let repeatedAsBullet = 0;
+      for (const [name, content] of sample) {
+        const text = (await call('logseq_get_page', { page_name: name, include_children: true, format: 'markdown' })).content[0].text;
+        if (!text.includes(String(content).trimEnd())) notVerbatim++;
+        if (text.includes(`\n- ${String(content).split('\n')[0]}`)) repeatedAsBullet++;
+      }
+      // Counts only: a failure must not echo a property key or value
+      expect(notVerbatim, `${notVerbatim} of ${sample.length} pages did not print their property block verbatim`).toBe(0);
+      expect(repeatedAsBullet, `${repeatedAsBullet} of ${sample.length} pages repeated the property block as a bullet`).toBe(0);
+    });
+
     it('build_context renders the blocks, related pages and references as sections', async () => {
       const text = (await call('logseq_build_context', { topic_name: hub, format: 'markdown' })).content[0].text;
 
