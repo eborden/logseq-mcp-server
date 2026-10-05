@@ -28,5 +28,7 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
+No test pins the packaging decision itself: skills could move back under .claude/, a root .mcp.json could appear, or plugin.json could lose its inline server, and nothing would fail. The test below covers only the version-equality consequence.
+
 - test: `src/version.test.ts` (the plugin manifest and the marketplace entry carry the package.json version)
-- test: `src/prompts.test.ts` (prompts name only tools that exist, so a tool rename fails)
+- none-yet: #96
