@@ -22,7 +22,7 @@ Capped or partial results carry a `ResultMeta` (`src/types.ts`): `hasMore: boole
 - A model can tell a complete result from a cut one, and knows which parameter to raise.
 - Additive: no existing field or shape changed, so clients that ignore `meta` work as before.
 - Clients that only read the first content block of an array result never see the warning. We accepted that and left the array block unchanged.
-- Each new capped tool must add a cap warning and a test for under, at and over the cap. Every call carries about 30 extra bytes.
+- Each new capped tool must add a cap warning and a test for under, at and over the cap. When nothing is cut, a result still carries `,"hasMore":false,"warnings":[]`, 30 characters by construction.
 - A cap that cannot be raised leaves `hasMore` false even though results were cut. The warning is the only signal there.
 
 ## Status
