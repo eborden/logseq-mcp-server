@@ -17,6 +17,23 @@ One row per slug, sorted by slug. See [Format rules](#format-rules) for what eac
 
 | Slug | Title | Status |
 |---|---|---|
+| [additive-tool-contracts](additive-tool-contracts.md) | Change tool contracts additively | accepted |
+| [datalog-only-no-feature-flags](datalog-only-no-feature-flags.md) | Ship one Datalog implementation per tool, with no feature flags | accepted |
+| [datalog-over-editor-api](datalog-over-editor-api.md) | Query the graph with batched Datalog, not per-entity Editor API calls | accepted |
+| [embed-strings-in-datalog-queries](embed-strings-in-datalog-queries.md) | Embed string parameters directly in Datalog query text | superseded by strings-bound-via-in-inputs |
+| [manual-npm-publish](manual-npm-publish.md) | Publish to npm only from a manual workflow run by the maintainer | accepted |
+| [minimum-node-22-12](minimum-node-22-12.md) | Require Node 22.12 or newer | accepted |
+| [mit-license](mit-license.md) | License the project under MIT | accepted |
+| [read-only-server](read-only-server.md) | Keep the server read-only | accepted |
+| [rebase-merge-to-main](rebase-merge-to-main.md) | Merge pull requests by rebase to keep atomic commits on main | accepted |
+| [remove-redundant-tools](remove-redundant-tools.md) | Remove tools that duplicate or only partly implement another tool | accepted |
+| [resolve-page-names-via-shared-resolver](resolve-page-names-via-shared-resolver.md) | Resolve page names in every page-taking tool through one shared resolver | accepted |
+| [resultmeta-for-capped-results](resultmeta-for-capped-results.md) | Mark capped results with one shared ResultMeta convention | accepted |
+| [ship-as-claude-code-plugin](ship-as-claude-code-plugin.md) | Ship the server and skills as a Claude Code plugin with skills at the repo root | accepted |
+| [slim-output-by-default](slim-output-by-default.md) | Return slim results by default and keep full output as an opt-out | accepted |
+| [strings-bound-via-in-inputs](strings-bound-via-in-inputs.md) | Bind Datalog string parameters with :in inputs | accepted |
+| [tool-list-size-guardrails](tool-list-size-guardrails.md) | Budget and snapshot the tool list that every session loads | accepted |
+| [two-query-pattern-for-optional-data](two-query-pattern-for-optional-data.md) | Split queries when related data may be empty | accepted |
 
 ## Slug naming rule
 
