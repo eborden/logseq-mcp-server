@@ -1,13 +1,13 @@
 ---
 name: logseq-skills
-description: Use when user asks about tasks, research, notes, or references their LogSeq knowledge graph, or asks to add [[links]] or tag existing concepts in notes they already wrote - provides context building workflows, weekly and monthly summaries, concept linking with identity-safety rules, and comprehensive MCP tool guidance for querying personal knowledge bases
+description: 'Query and organize a LogSeq knowledge graph with the logseq_* MCP tools: build topic context, find tasks, write weekly and monthly journal summaries, and add [[links]] to notes already written. Use when the user says "what do I know about X", "what should I work on", "summarize my week", "summarize my month", "add links to this block", "link the concepts in", or refers to their LogSeq notes, journal or graph. Routing: one week of journals goes to weekly-summary, trends across the weeks of a month go to monthly-summary, brackets on existing notes go to concept-linking. Read-only except for explicit summary and linking requests.'
 ---
 
 # LogSeq Skills
 
 Comprehensive suite of workflows for querying and analyzing LogSeq knowledge graphs via MCP tools.
 
-**Tool names:** this skill refers to tools by their bare names (`logseq_get_page`). Your host may show them with a prefix, such as `mcp__logseq__logseq_get_page` or `mcp__plugin_<plugin>_logseq__logseq_get_page`. Call whichever form your tool list shows.
+**Tool names:** this skill refers to tools by their bare names (`logseq_get_page`). Your host may show them with a prefix, such as `mcp__logseq__logseq_get_page` (manual MCP config) or `mcp__plugin_logseq_logseq__logseq_get_page` (plugin install). Call whichever form your tool list shows.
 
 **Paths:** `scripts/` and `references/` are relative to the directory holding this SKILL.md (`<skill-dir>` in the commands below). Resolve it from where you loaded this file; don't assume an install location.
 
