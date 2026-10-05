@@ -33,3 +33,12 @@ export function truncationWarning(
     howToFetchAll: `Set ${param} to ${total} (or higher) to get all ${total}.`
   };
 }
+
+/**
+ * Extra MCP content blocks that carry `meta` for a tool whose result is a bare
+ * array. The array stays the first block, unchanged; `{ "meta": ... }` follows
+ * as a second block. Empty when there is no meta (e.g. a null API response).
+ */
+export function metaContent(meta: ResultMeta | null): Array<{ type: 'text'; text: string }> {
+  return meta ? [{ type: 'text', text: JSON.stringify({ meta }) }] : [];
+}

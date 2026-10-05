@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
+import { BlockEntity, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
+import { buildResultMeta, truncationWarning } from '../utils/result-meta.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
 
 export interface SearchBlocksResult extends BlockEntity {
@@ -79,11 +80,27 @@ export async function searchBlocks(
   includeContext: boolean = false,
   slimResults: boolean = false
 ): Promise<SearchBlocksResult[] | SlimSearchBlocksResult[] | null> {
+  return (await searchBlocksWithMeta(client, query, limit, includeContext, slimResults)).results;
+}
+
+/**
+ * Same search as `searchBlocks`, plus a ResultMeta (#40): `totals.matches` is
+ * the number of matching blocks before `limit`, and a `results_truncated`
+ * warning says what `limit` to use to get them all. No extra API call: the one
+ * query already returns every match. `meta` is null when the API returned null.
+ */
+export async function searchBlocksWithMeta(
+  client: LogseqClient,
+  query: string,
+  limit: number = 100,
+  includeContext: boolean = false,
+  slimResults: boolean = false
+): Promise<{ results: SearchBlocksResult[] | SlimSearchBlocksResult[] | null; meta: ResultMeta | null }> {
   const { query: datalog, inputs } = DatalogQueryBuilder.searchBlocks(query);
   const rows = await client.executeDatalogQuery<BlockEntity[][] | null>(datalog, ...inputs);
 
   if (!rows) {
-    return null;
+    return { results: null, meta: null };
   }
 
   const matches: BlockEntity[] = rows
@@ -92,6 +109,13 @@ export async function searchBlocks(
     .sort(compareBlocks);
 
   const results: SearchBlocksResult[] = matches.slice(0, Math.max(0, limit));
+
+  const meta = buildResultMeta(
+    matches.length > results.length
+      ? [truncationWarning('matching blocks', results.length, matches.length, 'limit')]
+      : [],
+    { matches: matches.length }
+  );
 
   // Full page entities for context, in one batched call (not one per block)
   const pageById = new Map<number, PageEntity>();
@@ -133,10 +157,10 @@ export async function searchBlocks(
   });
 
   if (!slimResults) {
-    return enriched;
+    return { results: enriched, meta };
   }
 
-  return enriched.map(block => {
+  const slimmed = enriched.map(block => {
     const slim = toSlimBlock(block, displayName(block.page)) as SlimSearchBlocksResult;
 
     if (block.context) {
@@ -149,4 +173,6 @@ export async function searchBlocks(
 
     return slim;
   });
+
+  return { results: slimmed, meta };
 }

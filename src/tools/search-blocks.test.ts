@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchBlocks } from './search-blocks.js';
+import { searchBlocks, searchBlocksWithMeta } from './search-blocks.js';
 import { LogseqClient } from '../client.js';
 
 // Rows as logseq.DB.datascriptQuery returns them for (pull ?b [* {:block/page [...]}]):
@@ -218,6 +218,86 @@ describe('searchBlocks', () => {
       await searchBlocks(client, 'k', 10);
 
       expect(callAPI).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('truncation meta (#40)', () => {
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => block(i + 1, 'k', 1, 'a', 'A'));
+
+    it('has no warning and hasMore false when under the limit', async () => {
+      callAPI.mockResolvedValueOnce(rows(3));
+
+      const { results, meta } = await searchBlocksWithMeta(client, 'k', 10);
+
+      expect(results).toHaveLength(3);
+      expect(meta).toEqual({ hasMore: false, warnings: [], totals: { matches: 3 } });
+    });
+
+    it('has no warning when the match count equals the limit', async () => {
+      callAPI.mockResolvedValueOnce(rows(5));
+
+      const { meta } = await searchBlocksWithMeta(client, 'k', 5);
+
+      expect(meta!.hasMore).toBe(false);
+      expect(meta!.warnings).toEqual([]);
+    });
+
+    it('warns with the real total and the limit to use when over the limit', async () => {
+      callAPI.mockResolvedValueOnce(rows(12));
+
+      const { results, meta } = await searchBlocksWithMeta(client, 'k', 5);
+
+      expect(results).toHaveLength(5);
+      expect(meta).toEqual({
+        hasMore: true,
+        totals: { matches: 12 },
+        warnings: [
+          {
+            code: 'results_truncated',
+            message: 'Showing 5 of 12 matching blocks.',
+            howToFetchAll: 'Set limit to 12 (or higher) to get all 12.'
+          }
+        ]
+      });
+    });
+
+    it('counts only blocks with string content in the total', async () => {
+      callAPI.mockResolvedValueOnce([...rows(4), [{ id: 99, page: { id: 1 } }]]);
+
+      const { meta } = await searchBlocksWithMeta(client, 'k', 2);
+
+      expect(meta!.totals).toEqual({ matches: 4 });
+    });
+
+    it('warns for limit 0', async () => {
+      callAPI.mockResolvedValueOnce(rows(2));
+
+      const { meta } = await searchBlocksWithMeta(client, 'k', 0);
+
+      expect(meta!.hasMore).toBe(true);
+    });
+
+    it('returns null results and no meta when the API returns null', async () => {
+      callAPI.mockResolvedValueOnce(null);
+
+      expect(await searchBlocksWithMeta(client, 'k')).toEqual({ results: null, meta: null });
+    });
+
+    it('keeps the same call count with and without truncation', async () => {
+      callAPI.mockResolvedValueOnce(rows(500));
+
+      await searchBlocksWithMeta(client, 'k', 10);
+
+      expect(callAPI).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves searchBlocks returning the bare array', async () => {
+      callAPI.mockResolvedValueOnce(rows(12));
+
+      const result = await searchBlocks(client, 'k', 5);
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(result).toHaveLength(5);
     });
   });
 

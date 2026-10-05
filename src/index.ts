@@ -14,7 +14,7 @@ import { LogseqClient } from './client.js';
 import { getPage } from './tools/get-page.js';
 import { getBacklinks } from './tools/get-backlinks.js';
 import { getBlock } from './tools/get-block.js';
-import { searchBlocks } from './tools/search-blocks.js';
+import { searchBlocksWithMeta } from './tools/search-blocks.js';
 import { queryByProperty } from './tools/query-by-property.js';
 import { getConceptNetwork } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
@@ -27,6 +27,7 @@ import { getGraphInfo } from './tools/get-graph-info.js';
 import { listPages } from './tools/list-pages.js';
 import { getCurrentContext } from './tools/get-current-context.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
+import { metaContent } from './utils/result-meta.js';
 
 /**
  * Hints shared by every tool. This server only reads from LogSeq, so each tool
@@ -468,7 +469,7 @@ export function createServer(client: LogseqClient): Server {
           const limit = args?.limit as number | undefined;
           const includeContext = (args?.include_context as boolean) ?? false;
           const slimResults = (args?.slim_results as boolean) ?? false;
-          let result = await searchBlocks(client, query, limit, includeContext, slimResults);
+          const { results: result, meta } = await searchBlocksWithMeta(client, query, limit, includeContext, slimResults);
 
           return {
             content: [
@@ -476,6 +477,7 @@ export function createServer(client: LogseqClient): Server {
                 type: 'text',
                 text: JSON.stringify(result),
               },
+              ...metaContent(meta),
             ],
           };
         }

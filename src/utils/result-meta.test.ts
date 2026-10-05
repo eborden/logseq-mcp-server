@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildResultMeta, truncationWarning } from './result-meta.js';
+import { buildResultMeta, metaContent, truncationWarning } from './result-meta.js';
 
 describe('buildResultMeta', () => {
   it('has no more results when there are no warnings', () => {
@@ -24,5 +24,18 @@ describe('truncationWarning', () => {
       message: 'Showing 5 of 9 blocks.',
       howToFetchAll: 'Set limit to 9 (or higher) to get all 9.'
     });
+  });
+});
+
+describe('metaContent', () => {
+  it('is empty without meta', () => {
+    expect(metaContent(null)).toEqual([]);
+  });
+
+  it('wraps meta in a second text block', () => {
+    const meta = buildResultMeta([], { matches: 2 });
+    const blocks = metaContent(meta);
+    expect(blocks).toHaveLength(1);
+    expect(JSON.parse(blocks[0].text)).toEqual({ meta });
   });
 });
