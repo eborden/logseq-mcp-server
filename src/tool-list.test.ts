@@ -37,6 +37,8 @@ import { LogseqClient } from './client.js';
  * 15,650 across 15 tools: 5 x 99 for `format`, 2 x 118 for `compact`, 741 for the new tool and 41 for pointing
  * logseq_get_page at it, all inside the budget, so the budget was not raised (about 1,350 characters of headroom remain).
  * The longest description is 394 characters.
+ * Saying in the `format` text that Markdown has block uuids only on search hits and with `compact` (#80) added
+ * 5 x 53 characters, bringing it to about 15,915 (about 1,085 characters of headroom remain).
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.
