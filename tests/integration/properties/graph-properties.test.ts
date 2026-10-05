@@ -247,7 +247,7 @@ describe('Property: Graph Traversal Invariants', () => {
       const nonExistentPage = `NonExistent-Page-${Date.now()}`;
 
       // Property: Missing pages throw consistent error
-      await expect(getConceptNetwork(client, nonExistentPage, 2)).rejects.toThrow(/not found/i);
+      await expect(getConceptNetwork(client, nonExistentPage, 2)).rejects.toThrow(/^No page /);
     });
   });
 });
