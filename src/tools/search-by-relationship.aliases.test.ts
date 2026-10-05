@@ -16,8 +16,15 @@ const PAGES: Record<string, any> = { jordan, 'jordan rivera': jordanRivera, alic
 const GROUPS: Record<number, any[]> = { 1: [jordan, jordanRivera], 20: [atlas, projectAtlas] };
 const member = (p: any) => ({ id: p.id, name: p.name, 'original-name': p['original-name'] });
 
-function fakeClient(opts: { neighbors?: number[][]; aliasError?: Error } = {}) {
-  const neighbors = [...(opts.neighbors ?? [])];
+// Links between pages, either direction. As on a real graph, a declaring page's `alias::` block
+// refs its alias stub, so each declarer and its stub are neighbours of each other.
+const ALIAS_EDGES: Array<[number, number]> = [[1, 2], [20, 21]];
+
+function fakeClient(opts: { edges?: Array<[number, number]>; aliasError?: Error } = {}) {
+  const edges = [...ALIAS_EDGES, ...(opts.edges ?? [])];
+  const neighborsOf = (ids: number[]) => [
+    ...new Set(edges.flatMap(([a, b]) => [...(ids.includes(a) ? [b] : []), ...(ids.includes(b) ? [a] : [])]))
+  ];
   const executeDatalogQuery = vi.fn(async (query: string, ...inputs: unknown[]) => {
     if (query.includes(':in $ ?n')) {
       const name = inputs[0] as string;
@@ -31,7 +38,10 @@ function fakeClient(opts: { neighbors?: number[][]; aliasError?: Error } = {}) {
       const starts = [...query.matchAll(/\(ground \[([\d ]+)\]\) \[\?start/g)][0][1].split(' ').map(Number);
       return starts.flatMap(start => (GROUPS[start] ?? []).map(p => [start, member(p)]));
     }
-    if (query.includes('?p ...')) return (neighbors.shift() ?? []).map(id => [id]);
+    if (query.includes('?p ...')) {
+      const frontier = [...query.matchAll(/\(ground \[([\d ]+)\]\) \[\?p/g)][0][1].split(' ').map(Number);
+      return neighborsOf(frontier).map(id => [id]);
+    }
     return [[{ id: 500, content: 'a matching block' }]];
   });
   const callAPI = vi.fn(async (method: string, args: unknown[]) =>
@@ -100,8 +110,8 @@ describe('search_by_relationship across alias groups (#69)', () => {
   });
 
   it('connected-within: starts from every name of A and ends at any name of B', async () => {
-    // hop 1 from {1, 2} reaches page 21, a name of Atlas (B)
-    const { client, executeDatalogQuery, callAPI } = fakeClient({ neighbors: [[30, 21]] });
+    // hop 1 from {1, 2} reaches page 21, a name of Atlas (B), through a link on the stub
+    const { client, executeDatalogQuery, callAPI } = fakeClient({ edges: [[1, 30], [2, 21]] });
 
     const result = await searchByRelationship(client, 'Jordan', 'Atlas', 'connected-within', 2);
 
@@ -112,13 +122,40 @@ describe('search_by_relationship across alias groups (#69)', () => {
     expect(callAPI).toHaveBeenCalledWith('logseq.Editor.getPageBlocksTree', ['Atlas']);
   });
 
-  it('connected-within: topics that are two names of one page are not trivially connected', async () => {
-    // the page links its own alias stub, which is a name of A and so where the walk starts
-    const { client } = fakeClient({ neighbors: [[2], []] });
+  it('connected-within: two names of one page are the same topic, not a connection', async () => {
+    // hop 1 from {1, 2} would reach 1 and 2 again through the alias block, plus page 30
+    const { client, executeDatalogQuery, callAPI } = fakeClient({ edges: [[1, 30]] });
 
     const result = await searchByRelationship(client, 'Jordan', 'Jordan Rivera', 'connected-within', 2);
 
     expect(result.results).toEqual([]);
+    expect(result.warnings.map(w => w.code)).toEqual(['same_topic']);
+    expect(result.hasMore).toBe(false);
+    expect(executeDatalogQuery.mock.calls.some(([q]) => (q as string).includes('?p ...'))).toBe(false);
+    expect(callAPI).not.toHaveBeenCalled();
+  });
+
+  it('connected-within: the same name twice is the same topic, with or without aliases', async () => {
+    for (const name of ['Alice', 'Jordan']) {
+      const { client, executeDatalogQuery } = fakeClient({ edges: [[9, 1]] });
+
+      const result = await searchByRelationship(client, name, name, 'connected-within', 3);
+
+      expect(result.results).toEqual([]);
+      expect(result.warnings.map(w => w.code)).toEqual(['same_topic']);
+      expect(executeDatalogQuery.mock.calls.some(([q]) => (q as string).includes('?p ...'))).toBe(false);
+    }
+  });
+
+  it('connected-within: a link between the alias groups of two pages is a connection', async () => {
+    // Alice links the stub "Jordan Rivera" only
+    const { client, callAPI } = fakeClient({ edges: [[9, 2]] });
+
+    const result = await searchByRelationship(client, 'Alice', 'Jordan', 'connected-within', 1);
+
+    expect(result.results.map(b => b.id)).toEqual([600, 600]);
+    expect(result.warnings).toEqual([]);
+    expect(callAPI).toHaveBeenCalledWith('logseq.Editor.getPageBlocksTree', ['Jordan']);
   });
 
   it('propagates a failed alias lookup instead of searching under one name', async () => {
