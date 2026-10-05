@@ -28,7 +28,7 @@ This is an MCP (Model Context Protocol) server that provides Claude with 13 tool
 **Key Stats:**
 - 13 MCP tools for graph operations, search, and temporal queries
 - Unit tests (`npx vitest run src`) plus integration tests against a live graph (`npm run test:integration`). `npm test` runs both.
-- Hybrid implementation: Datalog for page/block lookups, `logseq.Editor.*` for everything else (see "Current Implementation Status" below)
+- Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*`, and `query_by_property` still crawls (see "Current Implementation Status" below)
 
 **Architecture:**
 ```
@@ -45,19 +45,20 @@ The server translates high-level queries (e.g., "get context for topic") into ca
 
 ### Current Implementation Status
 
-Only `build_context`, `get_concept_network` and `get_concept_evolution` use Datalog, and the first two use it only for the page/block lookups. Traversal still goes through `logseq.Editor.getPageLinkedReferences`, one call per page.
+Traversal, search and date-range tools now run as batched Datalog queries. `logseq.Editor.*` is still used for single lookups: `get_page`, `get_block`, `get_backlinks`, linked references in `build_context`, the fuzzy-match page list on "not found", and the two block fetches after `connected-within` finds a match. `query_by_property` is the one tool that still crawls the graph.
 
 Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, hub page with ~100 direct neighbours):
 
 | Tool | API calls | Time | Notes |
 |---|---|---|---|
-| `build_context` | 3 | ~0.1s | 2 Datalog + 1 linked refs. Meets the goal. |
-| `get_context_for_query` (1 topic) | 3 | ~0.3s | Delegates to `build_context` |
-| `get_concept_network` depth=1 | 2 | ~0.2s | |
-| `get_concept_network` depth=2 | ~120 | ~3s | One `getPageLinkedReferences` per frontier page, inbound only (#3) |
-| `search_blocks` | ~130 | ~1.5-3s | `getAllPages` + `getPageBlocksTree` per page until the limit fills (#4) |
-| `query_by_date_range` (7 days) | 7 | ~0.9s | `getAllPages` + one call per journal day (#5) |
-| `query_by_property` | ~2k (one per page) | ~20s+ | `getAllPages` + one call per page in the graph |
+| `build_context` | 3 | ~0.2s | 2 Datalog + 1 linked refs |
+| `get_context_for_query` (1 topic) | 3 | ~0.1s | Delegates to `build_context` |
+| `get_concept_network` depth=1 | 2 | ~0.1s | Default caps: 16 nodes |
+| `get_concept_network` depth=2 | 3 | ~0.2s | One batched query per depth, both directions. Default caps: 50 nodes. Was ~120 calls (#3) |
+| `search_blocks` | 1 | ~0.1s | One case-insensitive regex query. Was ~130 calls, or ~2k for a search with no match (#4) |
+| `query_by_date_range` (7 days) | 2 | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5) |
+| `search_by_relationship` | 1 | | `references` / `in-pages-linking-to`. `connected-within` is O(maxDistance) (#7) |
+| `query_by_property` | ~2k (one per page) | ~10-20s | Still `getAllPages` + `getPageBlocksTree` per page |
 
 Re-run the script after changing any of these tools, and update this table.
 
@@ -316,7 +317,7 @@ const relatedData = (relatedResults || []).map(r => r[0]);
 
 Instead of recursive queries or N sequential API calls, use BFS with batched queries at each depth level.
 
-> **Status: not yet implemented.** `get-concept-network.ts` currently runs the per-page loop shown under "Traditional Approach" (one `getPageLinkedReferences` call per frontier page, inbound links only), and `getConnectedPages` below doesn't exist yet. It's tracked in #3. Whatever implements this pattern must cap `maxNodes` and per-page fan-out: journal pages link to almost everything, and the depth-2 walk measured above reached ~200 nodes from one hub.
+> **Implemented in `get-concept-network.ts` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `maxNodes` 50 (root included) and `maxFanout` 15 new pages per page. Journal pages are leaves unless `expandJournals` is set, and `truncated: true` is set whenever a cap bites. These options are on `getConceptNetwork`'s fourth argument and aren't exposed in the MCP schema yet.
 
 **Traditional Approach (Inefficient):**
 ```typescript
@@ -340,9 +341,9 @@ for (let depth = 1; depth <= maxDepth; depth++) {
 }
 ```
 
-**Performance:** the target is maxDepth + 1 calls. Today, depth 2 from a hub with ~100 neighbours makes ~120 calls (see "Current Implementation Status").
+**Performance:** at most maxDepth + 1 calls, asserted by a unit test. Depth 2 from a hub with ~100 neighbours takes 3 calls, down from ~120.
 
-**Query Builder Pattern (proposed):**
+**Query Builder Pattern (simplified):**
 ```typescript
 static getConnectedPages(pageIds: number[]): string {
   return `[:find (pull ?source [*]) (pull ?connected [*]) ?rel-type
@@ -365,7 +366,7 @@ static getConnectedPages(pageIds: number[]): string {
 }
 ```
 
-**Closest existing code:** `DatalogQueryBuilder.conceptNetwork` has the same `or-join`, but for a single root. `getConceptNetwork` only calls it with `maxDepth = 0`, to fetch the root page.
+**Real implementation:** `DatalogQueryBuilder.connectedPages` and `getConceptNetwork`. Frontier ids are bound with `groundIds` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
 
 ---
 
@@ -390,7 +391,7 @@ export function buildQuery(pageName: string): DatalogQuery {
 
 **Used in:** `conceptNetwork()`, `getPage()`, `getPageBlocks()` and `getBlocksReferencingPage()` in `src/datalog/queries.ts`.
 
-**Not yet followed by:** `src/tools/search-by-relationship.ts`, which matches `[[topic]]` with a case-sensitive substring check (#7).
+**Also case-insensitive:** `search_by_relationship` matches `:block/refs` against lowercased names (#7), and `search_blocks` uses a `(?i)` regex (#4).
 
 ---
 
@@ -398,7 +399,7 @@ export function buildQuery(pageName: string): DatalogQuery {
 
 Never call `logseq.Editor.getAllPages` and then make one call per page. On a ~2k-page graph, `query_by_property` makes ~2k calls (one per page) and takes ~20s+ this way.
 
-Use one Datalog query, filtering in the query with `includes?` / `re-find`, or batched queries with `[(ground [ids...]) [?id ...]]`. `search_blocks`, `query_by_date_range` and `query_by_property` still crawl (#4, #5).
+Use one Datalog query, filtering in the query with `includes?` / `re-find`, or batched queries with `[(ground [ids...]) [?id ...]]`. `query_by_property` is the last tool that still crawls.
 
 ---
 
@@ -621,7 +622,7 @@ src/
 │   └── queries.ts                 - DatalogQueryBuilder with all query templates
 ├── tools/
 │   ├── build-context.ts           - Two-query pattern (page + blocks)
-│   ├── get-concept-network.ts     - BFS (currently per-page; see Pattern 2)
+│   ├── get-concept-network.ts     - Batched BFS with caps (Pattern 2)
 │   ├── search-by-relationship.ts  - Relationship search
 │   └── [10 other tools]
 └── types.ts                       - TypeScript interfaces
@@ -718,7 +719,7 @@ Checklist for new Datalog-based tools:
 
 ## Summary
 
-Datalog is how this project gets its performance gains, but only some tools use it so far (see "Current Implementation Status"), and LogSeq's Datalog needs careful handling. The key is to:
+Datalog is how this project gets its performance gains (see "Current Implementation Status"), and LogSeq's Datalog needs careful handling. The key is to:
 
 1. **Bind strings with `:in`** (`executeDatalogQuery` EDN-encodes the inputs); never embed them in the query text
 2. **Lowercase in TypeScript** (`clojure.string/lower-case` is unavailable; `includes?` / `re-find` work)
