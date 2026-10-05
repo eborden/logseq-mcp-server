@@ -27,6 +27,9 @@ export const BLOCK_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 /** How many levels below an embedded block {@link DatalogQueryBuilder.refTargets} fetches. */
 export const EMBED_DESCENDANT_LEVELS = 3;
 
+/** How many alias links {@link DatalogQueryBuilder.aliasSets} follows from a page. */
+export const ALIAS_MAX_HOPS = 2;
+
 export class DatalogQueryBuilder {
   /**
    * Validate numeric entity ids and build a `ground` binding clause.
@@ -622,6 +625,73 @@ export class DatalogQueryBuilder {
                  [(= ?s ?value)])
                [(contains? ?v ?value)])]`,
       inputs: [DatalogQueryBuilder.normalizePropertyKey(propertyName), String(propertyValue)]
+    };
+  }
+
+  // --- Alias sets (#69) -----------------------------------------------------
+
+  /** One alias link between two pages, followed in either direction. */
+  private static aliasHop(from: string, to: string): string {
+    return `(or-join [${from} ${to}] [${from} :block/alias ${to}] [${to} :block/alias ${from}])`;
+  }
+
+  /**
+   * Where-clause binding `member` to every page within {@link ALIAS_MAX_HOPS}
+   * alias links of `start`, in either direction. `start` itself comes back
+   * too (a link and its mirror form a cycle), so callers de-duplicate.
+   *
+   * The two hops are unrolled because rules can't be passed (`%` inputs are
+   * EDN-encoded values, not rule forms) and a third hop turns a 7-page group
+   * into a ~0.4s query. LogSeq stores each alias group as a clique (see the
+   * probe), so one hop already reaches everything; the second only matters
+   * for a chain a hand-edited graph could contain.
+   */
+  private static aliasClosure(start: string, member: string): string {
+    return `(or-join [${start} ${member}]
+               ${DatalogQueryBuilder.aliasHop(start, member)}
+               (and ${DatalogQueryBuilder.aliasHop(start, '?alias-mid')} ${DatalogQueryBuilder.aliasHop('?alias-mid', member)}))`;
+  }
+
+  /**
+   * Generate ONE Datalog query for the alias groups of several pages at once.
+   * Rows are `[startId, member]`, `member` a pull of `:db/id`, `:block/name`
+   * and `:block/original-name`: one row per page in the start page's group,
+   * the start page itself included whenever it has an alias at all. A page
+   * with no aliases has no rows. Aliases are followed in both directions for
+   * up to {@link ALIAS_MAX_HOPS} links.
+   * @param startIds - Page entity ids (`:db/id`), each an integer
+   * @returns Query and inputs (none: ids are validated integers)
+   * @throws Error if `startIds` is empty or any id is not an integer
+   */
+  static aliasSets(startIds: number[]): DatalogQuery {
+    if (startIds.length === 0) {
+      throw new Error('aliasSets needs at least one page id');
+    }
+    return {
+      query: `[:find ?start (pull ?m [:db/id :block/name :block/original-name])
+             :where
+             ${DatalogQueryBuilder.groundIds(startIds, '?start')}
+             ${DatalogQueryBuilder.aliasClosure('?start', '?m')}]`,
+      inputs: []
+    };
+  }
+
+  /**
+   * Same as {@link aliasSets} for a page known only by name, as
+   * `[startPage, member]` rows with both sides pulled. No rows when no page
+   * has the name or the page has no aliases, so a name that is not a page
+   * costs nothing and changes nothing.
+   * @param pageName - The page name (any casing)
+   * @returns Query and inputs (`[lowercased pageName]`)
+   */
+  static aliasSetByName(pageName: string): DatalogQuery {
+    return {
+      query: `[:find (pull ?s [:db/id :block/name :block/original-name]) (pull ?m [:db/id :block/name :block/original-name])
+             :in $ ?page-name
+             :where
+             [?s :block/name ?page-name]
+             ${DatalogQueryBuilder.aliasClosure('?s', '?m')}]`,
+      inputs: [pageName.toLowerCase()]
     };
   }
 }
