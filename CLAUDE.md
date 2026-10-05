@@ -89,9 +89,9 @@ Done by whoever merges:
 - A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
 
 ### Merge policy
-- **The maintainer merges by default.** Claude opens PRs and doesn't merge them.
-- Claude may merge its own PRs only when the maintainer has explicitly allowed it for a specific batch of work. Ask at the start of each new batch. Don't assume.
-- Even then, the verification and the merge gate above still apply. Raise decisions that belong to the maintainer (behaviour changes, publishing, accounts) instead of merging past them.
+- **Two actions need the maintainer's explicit OK:** merging a PR, and moving a board item from *Backlog* to *Ready*. Everything else (issues, PRs, reviews, resolving threads, pushing to feature branches, other status moves) is allowed by default.
+- **The maintainer merges by default.** Claude may merge its own PRs only if the maintainer has explicitly granted self-merge to the session. Without that grant, open the PR and stop.
+- Even with self-merge, the verification and the merge gate above still apply. Raise decisions that belong to the maintainer (behaviour changes, publishing, accounts) instead of merging past them.
 
 ---
 
