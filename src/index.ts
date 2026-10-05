@@ -32,6 +32,7 @@ import { buildTips } from './utils/tips.js';
 import type { ResultMeta } from './types.js';
 import { resolveParamAliases } from './utils/param-aliases.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
+import { SERVER_VERSION } from './version.js';
 import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
 
@@ -428,7 +429,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
   const server = new Server(
     {
       name: 'logseq-mcp-server',
-      version: '1.0.0',
+      version: SERVER_VERSION,
     },
     {
       capabilities: {
