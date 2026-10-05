@@ -855,7 +855,7 @@ Checklist for new Datalog-based tools:
 
 - **LogSeq HTTP API:** http://127.0.0.1:12315/api (default)
 - **DataScript Docs:** https://github.com/tonsky/datascript (note: LogSeq subset only)
-- **Migration Docs:** `docs/datalog-performance-complete.md`
+- **Decisions and rules:** [`docs/adr/`](docs/adr/README.md) (why we chose X) and [`docs/business-rules/`](docs/business-rules/README.md) (what must stay true). The Datalog migration is recorded in [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md) and [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md).
 - **Example Scripts:** `scripts/test-datalog-query.ts`
 - **MCP Spec:** https://github.com/modelcontextprotocol
 
