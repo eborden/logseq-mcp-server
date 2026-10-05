@@ -268,8 +268,9 @@ main().catch((e) => {
 // (null, array(n), error text) and never paste page names or paths anywhere.
 //
 //   Helper, run from the repo root before and during each step. It prints the
-//   shape of each call and nothing else:
-//     npx tsx -e "
+//   shape of each call and nothing else. `--input-type=module` is required:
+//   without it `tsx -e` compiles to CJS and the top-level await fails.
+//     npx tsx --input-type=module -e "
 //       import {homedir} from 'os'; import {join} from 'path';
 //       import {loadConfig} from './src/config.js'; import {LogseqClient} from './src/client.js';
 //       const c = new LogseqClient(await loadConfig(join(homedir(), '.logseq-mcp', 'config.json')));
