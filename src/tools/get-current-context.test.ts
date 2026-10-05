@@ -144,6 +144,30 @@ describe('getCurrentContext', () => {
     expect(result.focusedBlock?.pageName).toBe('My Page');
   });
 
+  it('drops unfetched ["uuid", "id"] child tuples that the Editor API returns without includeChildren', async () => {
+    mockEditor({
+      page: PAGE,
+      block: block({ children: [['uuid', 'child-uuid-1'], ['uuid', 'child-uuid-2']] })
+    });
+
+    const result = await getCurrentContext(client);
+
+    expect(result.focusedBlock).toBeDefined();
+    expect(result.focusedBlock).not.toHaveProperty('children');
+  });
+
+  it('keeps children that are real block entities', async () => {
+    mockEditor({
+      page: PAGE,
+      block: block({ children: [block({ uuid: 'child-1', content: 'child content' })] })
+    });
+
+    const result = await getCurrentContext(client);
+
+    expect(result.focusedBlock?.children).toHaveLength(1);
+    expect(result.focusedBlock?.children![0]).toMatchObject({ uuid: 'child-1', pageName: 'My Page' });
+  });
+
   it('returns selected blocks', async () => {
     mockEditor({
       page: PAGE,
