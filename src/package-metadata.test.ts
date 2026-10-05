@@ -27,3 +27,18 @@ describe('package.json publish fields (#46)', () => {
     expect(pkg.description).toBeTruthy();
   });
 });
+
+describe('zod pin (#60)', () => {
+  const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf-8'));
+  const zodCopies = Object.entries(lock.packages as Record<string, { version: string }>).filter(
+    ([path]) => path === 'node_modules/zod' || path.endsWith('/node_modules/zod')
+  );
+
+  it('installs one copy of zod, shared with the MCP SDK, at the pinned version', () => {
+    // zod is pinned exactly and the SDK takes a caret range. If an SDK upgrade
+    // needs a zod the pin doesn't satisfy, npm nests a second copy instead of
+    // failing. Bump the pin together with the SDK, then check `npm ls zod`.
+    expect(zodCopies.map(([path]) => path)).toEqual(['node_modules/zod']);
+    expect(zodCopies[0][1].version).toBe(pkg.dependencies.zod);
+  });
+});
