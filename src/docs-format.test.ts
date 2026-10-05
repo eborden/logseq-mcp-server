@@ -178,6 +178,12 @@ describe('docs format guard: a valid tree', () => {
         enforcement: 'test: `src/example.test.ts` (with `.github/workflows/ci.yml`; pins `ResultMeta` and `a b/c`)',
       });
     }],
+    ['ignores tier-like prose outside list items, and list items that are not a tier word', f => {
+      f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+        title: 'Never do the bad thing',
+        enforcement: 'CI: runs on every push.\nTests: see below.\n- tests: plural is prose\n- Unit: not a tier\n\ntest: `src/example.test.ts`',
+      });
+    }],
     ['accepts none-yet as #N, a full issue URL or a markdown link to one', f => {
       f['docs/business-rules/0001-no-bad-thing.md'] = rule({
         title: 'Never do the bad thing',
@@ -458,14 +464,62 @@ describe('docs format guard: each violation fails', () => {
       },
     },
     {
-      name: 'a bad tier',
+      name: 'a bad tier: a capitalised tier in a list item',
       rule: 'enforcement',
       file: 'docs/business-rules/0001-no-bad-thing.md',
-      message: /"tests: `src\/example\.test\.ts`" looks like a tier line but its tier is not one of/,
+      message: /"Test: `src\/example\.test\.ts`" is not a tier line: write the tier as plain lowercase "test: <reference>"/,
       mutate: f => {
         f['docs/business-rules/0001-no-bad-thing.md'] = rule({
           title: 'Never do the bad thing',
-          enforcement: 'tests: `src/example.test.ts`\nreviewer: Checked by hand.',
+          enforcement: '- Test: `src/example.test.ts`\n- reviewer: Checked by hand.',
+        });
+      },
+    },
+    {
+      name: 'a bad tier: a bold tier in a list item',
+      rule: 'enforcement',
+      file: 'docs/business-rules/0001-no-bad-thing.md',
+      message: /"\*\*test:\*\* `src\/example\.test\.ts`" is not a tier line: write the tier as plain lowercase/,
+      mutate: f => {
+        f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+          title: 'Never do the bad thing',
+          enforcement: '- **test:** `src/example.test.ts`\n- reviewer: Checked by hand.',
+        });
+      },
+    },
+    {
+      name: 'a bad tier: "none yet" with a space in a list item',
+      rule: 'enforcement',
+      file: 'docs/business-rules/0001-no-bad-thing.md',
+      message: /write the tier as plain lowercase "none-yet: <reference>"/,
+      mutate: f => {
+        f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+          title: 'Never do the bad thing',
+          enforcement: '- None yet: #3\n- reviewer: Checked by hand.',
+        });
+      },
+    },
+    {
+      name: 'a tier with no space after the colon',
+      rule: 'enforcement',
+      file: 'docs/business-rules/0001-no-bad-thing.md',
+      message: /"test:`src\/example\.test\.ts`" is not a tier line: expected "test: <reference>" \(a space after the colon/,
+      mutate: f => {
+        f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+          title: 'Never do the bad thing',
+          enforcement: 'test:`src/example.test.ts`\nreviewer: Checked by hand.',
+        });
+      },
+    },
+    {
+      name: 'a tier with an empty reference',
+      rule: 'enforcement',
+      file: 'docs/business-rules/0001-no-bad-thing.md',
+      message: /"reviewer:" is not a tier line: expected "reviewer: <reference>" \(a space after the colon, and a non-empty reference\)/,
+      mutate: f => {
+        f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+          title: 'Never do the bad thing',
+          enforcement: 'test: `src/example.test.ts`\nreviewer:',
         });
       },
     },

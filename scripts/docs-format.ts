@@ -452,8 +452,10 @@ function checkChangelog(f: DocFile, secs: ReturnType<typeof sections>, add: Add)
 
 const LIST_MARKER = /^\s*(?:[-*+]|\d+[.)])\s+/;
 const TIER_LINE = /^(type|test|ci|reviewer|none-yet): (.*)$/;
-/** A line that starts like a tier line but with a word that is not quite a tier: `Test:`, `tests:`, `none yet:`. */
-const NEAR_TIER_LINE = /^([A-Za-z][A-Za-z _-]{0,15}):/;
+/** The exact tier word and a colon, but not a parseable tier line: `test:` with no space, or an empty reference. */
+const BARE_TIER = /^(type|test|ci|reviewer|none-yet):/;
+/** A list item's leading word before a colon, allowing `**` / `__` / backticks around it: `**test:**`, `` `test`: ``, `Test:`. */
+const LEADING_TOKEN = /^[*_`]*([A-Za-z][A-Za-z -]*?)[*_`]*\s*:/;
 const ISSUE_REF =
   /^(?:#\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|\[[^\]]+\]\(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+\))(?=$|[\s.,;:)])/;
 
@@ -463,38 +465,54 @@ export interface EnforcementLine {
   reference: string;
 }
 
-/** The `<tier>: <reference>` lines of a Mechanical enforcement body, list markers allowed. */
-export function enforcementLines(body: Line[]): { valid: EnforcementLine[]; nearMisses: Line[] } {
+/**
+ * The `<tier>: <reference>` lines of a Mechanical enforcement body, list markers allowed.
+ * Other lines are ignored (rule 5), with two exceptions reported as `malformed`, since
+ * each is an attempt at a tier line that would otherwise be dropped unnoticed:
+ * - a line that starts with the exact tier and a colon but doesn't parse
+ *   (`test:` with no space, an empty `reviewer:`);
+ * - a list item whose leading word, without `**` or backticks, is a tier or
+ *   "none yet" in any case (`- Test:`, `- **test:**`, `` - `ci`: ``).
+ * Prose such as `CI: runs on every push` outside a list item, or `- Tests: ...`, is ignored.
+ */
+export function enforcementLines(body: Line[]): { valid: EnforcementLine[]; malformed: { line: Line; message: string }[] } {
   const valid: EnforcementLine[] = [];
-  const nearMisses: Line[] = [];
+  const malformed: { line: Line; message: string }[] = [];
   for (const line of body) {
+    const isListItem = LIST_MARKER.test(line.text);
     const text = line.text.replace(LIST_MARKER, '').trimEnd();
     const m = TIER_LINE.exec(text);
-    if (m) {
+    if (m && m[2].trim() !== '') {
       valid.push({ line, tier: m[1] as Tier, reference: m[2].trim() });
       continue;
     }
-    const near = NEAR_TIER_LINE.exec(text);
-    if (near) {
-      const key = near[1].trim().toLowerCase().replace(/[\s_]+/g, '-').replace(/s$/, '');
-      if ((TIERS as readonly string[]).includes(key)) nearMisses.push(line);
+    const bare = BARE_TIER.exec(text);
+    if (bare) {
+      malformed.push({
+        line,
+        message: `"${text}" is not a tier line: expected "${bare[1]}: <reference>" (a space after the colon, and a non-empty reference)`,
+      });
+      continue;
+    }
+    if (!isListItem) continue;
+    const token = LEADING_TOKEN.exec(text);
+    const word = token?.[1].trim().toLowerCase();
+    if (word !== undefined && ((TIERS as readonly string[]).includes(word) || word === 'none yet')) {
+      const tier = word === 'none yet' ? 'none-yet' : word;
+      malformed.push({
+        line,
+        message: `"${text}" is not a tier line: write the tier as plain lowercase "${tier}: <reference>", with no bold or backticks around it`,
+      });
     }
   }
-  return { valid, nearMisses };
+  return { valid, malformed };
 }
 
 function checkEnforcement(fs: DocsFs, f: DocFile, secs: ReturnType<typeof sections>, add: Add): void {
   const section = secs.get('Mechanical enforcement')?.[0];
   if (!section) return; // reported as a missing heading
-  const { valid, nearMisses } = enforcementLines(section.body);
-  for (const line of nearMisses) {
-    add(
-      f.path,
-      'enforcement',
-      `"${line.text.trim()}" looks like a tier line but its tier is not one of ${TIERS.join(', ')} (lowercase, singular, then ": ")`,
-      line.n,
-    );
-  }
+  const { valid, malformed } = enforcementLines(section.body);
+  for (const { line, message } of malformed) add(f.path, 'enforcement', message, line.n);
   if (valid.length === 0) {
     add(
       f.path,
@@ -504,10 +522,6 @@ function checkEnforcement(fs: DocsFs, f: DocFile, secs: ReturnType<typeof sectio
     );
   }
   for (const { line, tier, reference } of valid) {
-    if (reference === '') {
-      add(f.path, 'enforcement', `${tier}: needs a reference`, line.n);
-      continue;
-    }
     if (tier === 'type' || tier === 'test' || tier === 'ci') {
       if (!/^`[^`]+`/.test(reference)) {
         add(f.path, 'enforcement', `${tier}: reference must start with a backticked repo-relative path, e.g. \`src/index.test.ts\``, line.n);
