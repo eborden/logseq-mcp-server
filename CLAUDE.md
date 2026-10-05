@@ -509,6 +509,7 @@ Quick reference checklist for future work:
 
 **Tool behaviour**
 - [ ] Don't turn errors into empty results. A dropped connection must not look like "no data" (#10). Re-throw infrastructure errors (`isInfrastructureError`) and unexpected ones; only an empty result is "none", and expected partial results go in a `warnings` field.
+- [ ] Never cut results silently (#40). Any cap reports `ResultMeta` (`src/types.ts`): `hasMore` (true only when a warning's `howToFetchAll` names the parameter to raise and a value), `warnings: [{ code, message, howToFetchAll? }]`, and `totals` where already known (no extra API call just to count). Object results get these fields; a tool that returns a bare array keeps it as the first content block and sends `{ "meta": ... }` as a second one (`metaContent`). Helpers: `src/utils/result-meta.ts`.
 - [ ] Never write to stdout (`console.log`). It's the MCP stdio channel; log with `console.error`.
 
 ---
