@@ -440,6 +440,33 @@ describe('searchBlocks', () => {
       expect(result[0]).not.toHaveProperty('properties');
     });
 
+    it('omits empty references and tags from slim context (#42)', async () => {
+      callAPI
+        .mockResolvedValueOnce([
+          block(1, 'No links here', 10, 'p', 'P'),
+          block(2, 'Only [[Bob]]', 10, 'p', 'P'),
+          block(3, 'Only #tag', 10, 'p', 'P')
+        ])
+        .mockResolvedValueOnce([fullPage(10, 'p', 'P')]);
+
+      const result: any[] = (await searchBlocks(client, 'x', 10, true, true)) as any[];
+      const byContent = new Map(result.map(r => [r.content, r.context]));
+
+      expect(byContent.get('No links here')).toEqual({ page: { name: 'p', originalName: 'P' } });
+      expect(byContent.get('Only [[Bob]]')).toEqual({ page: { name: 'p', originalName: 'P' }, references: ['Bob'] });
+      expect(byContent.get('Only #tag')).toEqual({ page: { name: 'p', originalName: 'P' }, tags: ['tag'] });
+    });
+
+    it('keeps empty references and tags in full context, unchanged', async () => {
+      callAPI
+        .mockResolvedValueOnce([block(1, 'No links here', 10, 'p', 'P')])
+        .mockResolvedValueOnce([fullPage(10, 'p', 'P')]);
+
+      const result: any[] = (await searchBlocks(client, 'x', 10, true, false)) as any[];
+
+      expect(result[0].context).toMatchObject({ references: [], tags: [] });
+    });
+
     it('returns full results when slimResults is false', async () => {
       callAPI.mockResolvedValueOnce([block(1, 'Full block', 10, 'p', 'P')]);
 

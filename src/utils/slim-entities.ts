@@ -71,21 +71,53 @@ export function getPageNameFromBlock(
 }
 
 /**
+ * A value that says nothing: null, undefined, an empty or blank string, an empty
+ * array or an empty plain object. `false` and `0` say something, so they are not empty.
+ */
+export function isEmptyValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value as object).length === 0;
+  return false;
+}
+
+/**
+ * The properties of a block or page without the empty ones, or undefined when
+ * none are left (#42). `status:: false` and `count:: 0` stay.
+ */
+export function nonEmptyProperties(properties: Record<string, any> | undefined | null): Record<string, any> | undefined {
+  if (!properties) return undefined;
+  const kept = Object.fromEntries(Object.entries(properties).filter(([, value]) => !isEmptyValue(value)));
+  return Object.keys(kept).length > 0 ? kept : undefined;
+}
+
+/**
  * Transform BlockEntity to SlimBlock (recursively handles children)
+ *
+ * Empty fields are left out (#42): `pageName` when it is blank, `properties` when
+ * none have a value. `uuid` and `content` always stay, even for an empty block.
+ * Children never carry `pageName`: they sit on their parent's page, which the
+ * parent names.
+ *
  * @param block - Full BlockEntity
- * @param pageName - Page name for denormalization
+ * @param pageName - Page name for denormalization. Pass '' to leave it out,
+ *   e.g. where the surrounding entry already names the page
  * @returns SlimBlock with essential data only
  */
 export function toSlimBlock(block: BlockEntity, pageName: string): SlimBlock {
   const slim: SlimBlock = {
     uuid: block.uuid,
-    content: block.content,
-    pageName
+    content: block.content
   };
 
-  // Only include non-empty properties
-  if (block.properties && Object.keys(block.properties).length > 0) {
-    slim.properties = block.properties;
+  if (!isEmptyValue(pageName)) {
+    slim.pageName = pageName;
+  }
+
+  const properties = nonEmptyProperties(block.properties);
+  if (properties) {
+    slim.properties = properties;
   }
 
   // Only include marker if present
@@ -132,9 +164,10 @@ export function toSlimPage(page: PageEntity): SlimPage {
     originalName: page.originalName || page['original-name'] || page.name
   };
 
-  // Only include non-empty properties
-  if (page.properties && Object.keys(page.properties).length > 0) {
-    slim.properties = page.properties;
+  // Only include properties that have a value
+  const properties = nonEmptyProperties(page.properties);
+  if (properties) {
+    slim.properties = properties;
   }
 
   // Only include journal metadata if it's a journal page

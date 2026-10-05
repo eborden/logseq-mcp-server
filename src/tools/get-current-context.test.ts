@@ -193,13 +193,13 @@ describe('getCurrentContext', () => {
     expect(result.focusedBlock?.uuid).toBe('block-uuid-1');
   });
 
-  it('leaves the page name empty when the Datalog pull finds nothing', async () => {
+  it('leaves the page name out when the Datalog pull finds nothing', async () => {
     mockEditor({ block: block({ page: { id: 77 } }) });
     executeDatalogQuery.mockResolvedValue(null);
 
     const result = await getCurrentContext(client);
 
-    expect(result.focusedBlock?.pageName).toBe('');
+    expect(result.focusedBlock).not.toHaveProperty('pageName');
     expect(result.page).toBeNull();
   });
 
