@@ -540,8 +540,6 @@ npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
 npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42), markdown and compact vs json (#43); bytes only, no names
 ```
 
-The earlier figures here (3 calls for `get_concept_network` at depth 2, 7 for `get_context_for_query`) came from 5-10 page test graphs and don't reflect the current code.
-
 ---
 
 ## Code Organization
