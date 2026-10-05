@@ -178,6 +178,79 @@ describe('Semantic Search Integration Tests', () => {
     });
   });
 
+  describe('logseq_search_by_relationship casing (issue #7)', () => {
+    let nameA: string;
+    let nameB: string;
+    let idB: number;
+
+    beforeAll(async () => {
+      // Discover any pair (A, B) where a block on A references B. Names
+      // come from the live graph at run time and are never asserted on.
+      const rows = await client.executeDatalogQuery<Array<[string, string, number]>>(
+        `[:find ?an ?bn ?b
+          :where
+          [?blk :block/page ?a]
+          [?blk :block/refs ?b]
+          [?a :block/name ?an]
+          [?b :block/name ?bn]
+          [(not= ?a ?b)]]`
+      );
+      // Need a name with letters, or upper-casing it proves nothing
+      const pair = (rows || []).find(([, bn]) => bn.toUpperCase() !== bn);
+      expect(pair).toBeDefined(
+        'No page with a block referencing another page whose name contains letters. ' +
+        'Create two pages where one links to the other. See tests/integration/setup.md'
+      );
+      [nameA, nameB, idB] = pair!;
+    });
+
+    it('references: every casing of topicB returns the same non-empty result', async () => {
+      const lower = await searchByRelationship(client, nameA, nameB.toLowerCase(), 'references');
+      const upper = await searchByRelationship(client, nameA, nameB.toUpperCase(), 'references');
+
+      expect(lower.results.length).toBeGreaterThan(0,
+        'references returned nothing for a pair known to be linked via :block/refs'
+      );
+      expect(upper.results.map(b => b.id).sort()).toEqual(lower.results.map(b => b.id).sort());
+    });
+
+    it('references: every returned block actually references topicB', async () => {
+      const result = await searchByRelationship(client, nameA, nameB.toUpperCase(), 'references');
+
+      expect(result.results.length).toBeGreaterThan(0);
+      for (const block of result.results) {
+        const refIds = (block.refs || []).map((ref: any) => ref.id);
+        expect(refIds).toContain(idB);
+      }
+    });
+
+    it('in-pages-linking-to: is case-insensitive in both topics', async () => {
+      // Pages with a block linking to B, searching for blocks that reference B
+      // themselves: any such page qualifies, so the result is non-empty.
+      const lower = await searchByRelationship(
+        client, nameB.toLowerCase(), nameB.toLowerCase(), 'in-pages-linking-to'
+      );
+      const upper = await searchByRelationship(
+        client, nameB.toUpperCase(), nameB.toUpperCase(), 'in-pages-linking-to'
+      );
+
+      expect(lower.results.length).toBeGreaterThan(0,
+        'in-pages-linking-to returned nothing for a page known to have inbound references'
+      );
+      expect(upper.results.map(b => b.id).sort()).toEqual(lower.results.map(b => b.id).sort());
+    });
+
+    it('connected-within: adjacent topics are connected whatever the casing', async () => {
+      const result = await searchByRelationship(
+        client, nameA.toUpperCase(), nameB.toUpperCase(), 'connected-within', 1
+      );
+
+      expect(result.results.length).toBeGreaterThan(0,
+        'connected-within found no connection between pages linked via :block/refs'
+      );
+    });
+  });
+
   describe('enhanced search_blocks with includeContext', () => {
     it('should return blocks without context when includeContext is false', async () => {
       const results = await searchBlocks(client, 'test', 5, false);
