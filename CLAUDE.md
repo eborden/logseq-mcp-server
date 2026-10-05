@@ -80,6 +80,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 
 ### PR conventions
 - Atomic commits, `Closes #N`, a design section, a test plan with checkboxes, and approximate measurements (no graph data, see Privacy).
+- A PR that edits a business rule adds a row to that rule's Changelog table citing the PR. The format check can't tell whether a row is new, so the reviewer checks it.
 - Rebase-merge so the atomic commits stay on `main`. Delete the branch on merge.
 
 ### Code review (required for every PR)
