@@ -16,6 +16,9 @@ import { queryByProperty } from '../src/tools/query-by-property.js';
 import { buildContextForTopic } from '../src/tools/build-context.js';
 import { getContextForQuery } from '../src/tools/get-context-for-query.js';
 import { getCurrentContext } from '../src/tools/get-current-context.js';
+import { getBlock } from '../src/tools/get-block.js';
+import { getPage } from '../src/tools/get-page.js';
+import { queryJournals } from '../src/tools/query-by-date-range.js';
 
 class CountingClient extends LogseqClient {
   calls = new Map<string, number>();
@@ -54,6 +57,16 @@ async function main() {
   }
   console.log(`graph pages: ${pages}   subject: ${JSON.stringify(subject)}\n`);
 
+  // A block that holds a ((uuid)) ref, for the resolve_refs cases (skipped if none)
+  const refRows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
+    `[:find (pull ?b [:block/uuid]) (pull ?p [:block/original-name]) :where
+      [?b :block/content ?c] [?b :block/page ?p]
+      [(re-pattern "\\\\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\\\)\\\\)") ?re]
+      [(re-find ?re ?c)]]`
+  ]);
+  const refBlock = refRows?.[0]?.[0]?.uuid as string | undefined;
+  const refPage = refRows?.[0]?.[1]?.['original-name'] as string | undefined;
+
   const end = new Date();
   const start = new Date(end.getTime() - 6 * 86400000);
 
@@ -65,7 +78,18 @@ async function main() {
     ['search_blocks', () => searchBlocks(client, subject.slice(0, 4), 10)],
     ['query_by_date_range (7 days)', () => queryByDateRange(client, ymd(start), ymd(end))],
     ['query_by_property', () => queryByProperty(client, 'type', 'x')],
-    ['get_current_context', () => getCurrentContext(client)]
+    ['get_current_context', () => getCurrentContext(client)],
+    ['build_context resolve_refs', () => buildContextForTopic(client, subject, { resolveRefs: true })],
+    ['query_by_date_range 7d resolve_refs', () =>
+      queryJournals(client, { startDate: ymd(start), endDate: ymd(end), resolveRefs: true })],
+    ...(refBlock && refPage
+      ? ([
+          ['get_block (ref block)', () => getBlock(client, refBlock, false)],
+          ['get_block resolve_refs', () => getBlock(client, refBlock, false, { resolveRefs: true })],
+          ['get_page children', () => getPage(client, refPage, true)],
+          ['get_page children resolve_refs', () => getPage(client, refPage, true, { resolveRefs: true })]
+        ] as Array<[string, () => Promise<unknown>]>)
+      : [])
   ];
 
   for (const [label, run] of cases) {
