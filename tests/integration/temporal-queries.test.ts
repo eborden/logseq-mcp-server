@@ -534,19 +534,10 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
-    it('should handle concepts with no mentions', async () => {
-      const result = await getConceptEvolution(
-        client,
-        'NonExistentConceptForTesting12345'
-      );
-
-      // Should return structure with empty results
-      expect(result.timeline).toHaveLength(0);
-      expect(result.summary.totalMentions).toBe(0);
-      expect(result.summary.journalMentions).toBe(0);
-      expect(result.summary.nonJournalMentions).toBe(0);
-      expect(result.summary.dateRange.earliest).toBeNull();
-      expect(result.summary.dateRange.latest).toBeNull();
+    it('should throw guidance for a concept that is not a page', async () => {
+      await expect(
+        getConceptEvolution(client, 'NonExistentConceptForTesting12345')
+      ).rejects.toThrow(/^No page "NonExistentConceptForTesting12345"\./);
     });
 
     it('should distinguish journal from non-journal mentions', async () => {
