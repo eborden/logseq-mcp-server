@@ -168,6 +168,90 @@ async function probeResolution(
   }
 }
 
+/**
+ * Alias-group probes (#69): how `alias::` is stored, which decides how the
+ * link-following tools find every name of a page. Prints counts and shapes
+ * only, never names. Every figure marked "must be 0" is an assumption the
+ * code relies on; a non-zero value means the alias-set resolver can miss names.
+ */
+async function probeAliasSets(
+  client: LogseqClient,
+  rawDq: (q: string, ...inputs: unknown[]) => Promise<Outcome>
+) {
+  const dq = (q: string, ...inputs: unknown[]) => rawDq(q, ...inputs.map(v => JSON.stringify(v)));
+  const query = <T = any>(q: string) => client.callAPI<T>('logseq.DB.datascriptQuery', [q]);
+  console.log('\n== Alias groups (#69)');
+
+  const edges = await query<Array<[number, number]>>(`[:find ?p ?a :where [?p :block/alias ?a]]`);
+  if (edges.length === 0) {
+    console.log('(graph has no aliases: skipping the rest)');
+    return;
+  }
+  const has = new Set(edges.map(([p, a]) => `${p}>${a}`));
+  const pairs = new Set(edges.map(([p, a]) => (p < a ? `${p}-${a}` : `${a}-${p}`)));
+  console.log(`${'directed alias links / distinct pairs'.padEnd(58)} ${edges.length} / ${pairs.size}`);
+  console.log(`${'links without the reverse link (must be 0)'.padEnd(58)} ${edges.filter(([p, a]) => !has.has(`${a}>${p}`)).length}`);
+  console.log(`${'links from a page to itself (must be 0)'.padEnd(58)} ${edges.filter(([p, a]) => p === a).length}`);
+
+  // Group sizes, whether each group is a clique (every page links every other), and the longest chain
+  const adj = new Map<number, Set<number>>();
+  for (const [p, a] of edges) {
+    for (const [x, y] of [[p, a], [a, p]]) adj.set(x, (adj.get(x) ?? new Set()).add(y));
+  }
+  const seen = new Set<number>();
+  const sizes = new Map<number, number>();
+  let notCliques = 0;
+  let longestChain = 0;
+  for (const start of adj.keys()) {
+    if (seen.has(start)) continue;
+    const group = [start];
+    seen.add(start);
+    for (let i = 0; i < group.length; i++) {
+      for (const next of adj.get(group[i])!) if (!seen.has(next)) { seen.add(next); group.push(next); }
+    }
+    sizes.set(group.length, (sizes.get(group.length) ?? 0) + 1);
+    if (!group.every(g => adj.get(g)!.size === group.length - 1)) notCliques++;
+    for (const g of group) {
+      const dist = new Map([[g, 0]]);
+      const queue = [g];
+      for (let i = 0; i < queue.length; i++) {
+        for (const next of adj.get(queue[i])!) if (!dist.has(next)) { dist.set(next, dist.get(queue[i])! + 1); queue.push(next); }
+      }
+      longestChain = Math.max(longestChain, ...dist.values());
+    }
+  }
+  console.log(`${'group size -> groups'.padEnd(58)} ${JSON.stringify(Object.fromEntries(sizes))}`);
+  console.log(`${'groups that are not cliques (must be 0)'.padEnd(58)} ${notCliques}`);
+  console.log(`${'most alias links between two pages of a group (cap: 2)'.padEnd(58)} ${longestChain}`);
+
+  // Which side holds the file: the declaring page has one, the page `alias::` names is a stub
+  report('pages declaring an alias that have a file', await dq(
+    `[:find (count ?p) . :where [?p :block/alias ?a] [?p :block/file]]`));
+  report('alias targets without a file (stubs)', await dq(`[:find (count ?a) . :where [?p :block/alias ?a] (not [?a :block/file])]`));
+  report('... stubs that link back to the declaring page', await dq(
+    `[:find (count ?a) . :where [?p :block/alias ?a] (not [?a :block/file]) [?a :block/alias ?p]]`));
+  const withFiles = await query<Array<[number]>>(`[:find ?p :where [?p :block/alias ?a] [?p :block/file] [?a :block/file]]`);
+  console.log(`${'alias links where both pages have a file'.padEnd(58)} ${withFiles.length}`);
+
+  // Why a page needs the whole group: a reference points at whichever name the block used
+  report('blocks referencing a stub of a group', await dq(
+    `[:find (count ?b) . :where [?p :block/alias ?a] (not [?a :block/file]) [?b :block/refs ?a]]`));
+  report('blocks referencing a declaring page', await dq(
+    `[:find (count ?b) . :where [?p :block/alias ?a] [?p :block/file] [?b :block/refs ?p]]`));
+
+  // The Editor API's linked references span the group for the declaring page, not for a stub
+  const pick = await query<Array<[number, string, string]>>(
+    `[:find ?p ?pn ?an :where [?p :block/alias ?a] [?p :block/file] (not [?a :block/file]) [?p :block/name ?pn] [?a :block/name ?an]]`
+  );
+  if (pick.length > 0) {
+    const [, declaring, stub] = pick[0];
+    const ids = async (n: string) =>
+      new Set(((await client.callAPI<any[]>('logseq.Editor.getPageLinkedReferences', [n])) ?? []).flatMap(g => g[1].map((b: any) => b.id)));
+    const [a, b] = [await ids(declaring), await ids(stub)];
+    console.log(`${'linked references: declaring page / stub (ids)'.padEnd(58)} ${a.size} / ${b.size}`);
+  }
+}
+
 async function main() {
   const config = await loadConfig(join(homedir(), '.logseq-mcp', 'config.json'));
   const client = new LogseqClient(config);
@@ -218,6 +302,7 @@ async function main() {
 
   await probeProperties(client, dq);
   await probeResolution(client, dq);
+  await probeAliasSets(client, dq);
 
   console.log('\n== Block uuids (:block/uuid) (#18)');
   const uuidRows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
