@@ -71,7 +71,7 @@ The CI guard in #78 parses these files. These rules are exact.
 1. **Slug set.** Every `*.md` file directly in this directory except `README.md`. Subdirectories and other files (such as `.gitkeep`) are ignored. The slug is the filename without `.md` and must match the slug naming rule, so an `.md` file with an uppercase name fails.
 2. **Index.** The first markdown table in this README. Its first column holds `[<slug>](<slug>.md)` for each slug (plain link text, no backticks) and covers the slug set exactly, with no extra rows. The Summary cell is one line of free text that the guard doesn't check. Sorting by slug is a convention the guard doesn't check.
 3. **Headings.** Each required heading is an exact, case-sensitive `## <Name>` line with no trailing whitespace, and appears exactly once: `## Statement`, `## Rationale`, `## Mechanical enforcement`, `## Changelog`. Order isn't enforced and extra headings are allowed. Lines inside fenced code blocks are ignored. The title is the file's single `#` heading.
-4. **Changelog.** The first markdown table under `## Changelog` has the columns Date, Change and Issue/PR, and at least one row besides the header and delimiter rows. A retired rule's last row cites the maintainer's OK.
+4. **Changelog.** The first markdown table under `## Changelog` has the columns Date, Change and Issue/PR, and at least one row besides the header and delimiter rows. A retired rule's last row cites the approving PR, the same as every other row.
 5. **Mechanical enforcement body.** At least one line or list item of the form `<tier>: <reference>`, where `<tier>` is one of `type`, `test`, `ci`, `reviewer` or `none-yet`. Other lines are ignored. Replace the template's placeholder line. The reference is:
    - `type`, `test`, `ci`: a backticked repo-relative file path or workflow, which must exist (for example ``test: `src/index.test.ts` ``).
    - `reviewer`: the checklist item, as plain text.
@@ -85,6 +85,6 @@ The CI guard in #78 parses these files. These rules are exact.
 2. Open a PR with the file change **and a new Changelog row** (date, what changed, issue or PR). For a new rule, also add its Index row.
 3. Reviewers check each PR against the accepted ADRs and business rules. A PR that contradicts one must cite the change that allows it.
 
-**Approval gate.** Any PR that adds, changes, supersedes or retires an ADR or business-rule file needs the maintainer's explicit approval before merge. The approval is recorded on the PR.
+**Approval gate.** Any PR that adds, changes, supersedes or retires an ADR or business-rule file needs the maintainer's explicit approval before merge. Record the approval like this. Before merging, a PR comment records the maintainer's approval: either the maintainer writes it, or Claude posts it, quoting the maintainer's approval message verbatim with its date. The Changelog row's Issue/PR column cites that PR. If the maintainer merges the PR themselves, the merge is the record.
 
 Every Changelog row cites the approving PR, and the approval is the maintainer's.
