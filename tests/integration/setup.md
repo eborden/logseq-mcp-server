@@ -71,7 +71,7 @@ If tests fail, follow the setup instructions to:
 - Check that HTTP server is enabled in settings
 - Verify the API URL in your config
 
-**Authentication Error (401):**
+**Authentication Error (401, `LogSeqAuthError`):**
 - Regenerate auth token in LogSeq settings
 - Update token in config file
 - Restart LogSeq after changing settings

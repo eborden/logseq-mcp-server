@@ -91,3 +91,20 @@ export class LogSeqTimeoutError extends Error {
     this.name = 'LogSeqTimeoutError';
   }
 }
+
+/**
+ * Thrown when LogSeq rejects the auth token (HTTP 401).
+ * The message never includes the token itself.
+ */
+export class LogSeqAuthError extends Error {
+  constructor(apiUrl: string) {
+    super(
+      `LogSeq at ${apiUrl} rejected the auth token (HTTP 401)\n\n` +
+      `Steps to fix:\n` +
+      `1. The token is invalid or has been changed. Regenerate it in LogSeq's API settings\n` +
+      `2. Update "authToken" in ~/.logseq-mcp/config.json\n` +
+      `3. See tests/integration/setup.md for details`
+    );
+    this.name = 'LogSeqAuthError';
+  }
+}
