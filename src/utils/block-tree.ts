@@ -25,7 +25,7 @@ export function camelizeKeys<T = any>(entity: Record<string, any>): T {
  * `propertiesOrder` (Datalog has `logseq.order-list-type`, the Editor API
  * `logseq.orderListType`).
  */
-function camelizeBlock(block: Record<string, any>): BlockEntity {
+export function camelizeBlock(block: Record<string, any>): BlockEntity {
   const out = camelizeKeys<Record<string, any>>(block);
   for (const key of ['properties', 'propertiesTextValues']) {
     const value = out[key];
