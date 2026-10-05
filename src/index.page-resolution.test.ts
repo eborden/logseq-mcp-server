@@ -17,10 +17,15 @@ describe('page resolution through MCP', () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  async function call(name: string, args: Record<string, unknown>, datalog: (query: string) => unknown) {
+  async function call(
+    name: string,
+    args: Record<string, unknown>,
+    datalog: (query: string) => unknown,
+    api: (method: string, args: unknown[]) => unknown = () => []
+  ) {
     const logseq = new LogseqClient({ apiUrl: 'http://localhost:12315', authToken: 'test-token-123' });
     vi.spyOn(logseq, 'executeDatalogQuery').mockImplementation(async (query: string) => datalog(query) as any);
-    vi.spyOn(logseq, 'callAPI').mockResolvedValue([] as any);
+    vi.spyOn(logseq, 'callAPI').mockImplementation(async (method: string, a: any[] = []) => api(method, a) as any);
 
     const server = createServer(logseq);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -107,6 +112,61 @@ describe('page resolution through MCP', () => {
       );
 
       expect(JSON.parse(result.content[0].text).resolvedFrom).toEqual({ topicA: resolvedFrom, topicB: resolvedFrom });
+    });
+  });
+
+  describe('a name given under a parameter alias (#44) goes through resolution (#41)', () => {
+    const declaring = { id: 1, name: 'project atlas', 'original-name': 'Project Atlas', file: { id: 9 } };
+    const viaAlias = (query: string) => (query.includes(':in $ ?n') ? [[declaring, 'alias']] : []);
+    // Editor.getPage: nothing answers to "atlas", the declaring page answers to its own name
+    const editor = (method: string, args: unknown[]) =>
+      method === 'logseq.Editor.getPage'
+        ? args[0] === 'project atlas'
+          ? { id: 1, name: 'project atlas', originalName: 'Project Atlas', file: { id: 9 } }
+          : null
+        : [];
+
+    it.each([
+      ['logseq_get_page', 'name'],
+      ['logseq_get_page', 'page']
+    ])('%s: %s reaches page_name and the page is resolved', async (tool, alias) => {
+      const result = await call(tool, { [alias]: 'Atlas' }, viaAlias, editor);
+
+      expect(result.isError).toBeUndefined();
+      const body = JSON.parse(result.content[0].text);
+      expect(body.name).toBe('project atlas');
+      expect(body.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' });
+    });
+
+    it('logseq_get_backlinks: name is resolved, and the meta block says so', async () => {
+      const result = await call('logseq_get_backlinks', { name: 'Atlas' }, viaAlias, editor);
+
+      const meta = result.content.map((c: any) => JSON.parse(c.text)).find((b: any) => b?.meta)?.meta;
+      expect(meta.resolvedFrom).toMatchObject({ name: 'Atlas', matchedBy: 'alias' });
+    });
+
+    it.each([
+      ['logseq_build_context', 'page'],
+      ['logseq_get_concept_network', 'name'],
+      ['logseq_get_concept_evolution', 'page']
+    ])('%s: %s reaches the concept/topic name and the page is resolved', async (tool, alias) => {
+      const result = await call(tool, { [alias]: 'Atlas' }, viaAlias, editor);
+
+      expect(result.isError).toBeUndefined();
+      expect(JSON.parse(result.content[0].text).resolvedFrom).toMatchObject({ name: 'Atlas', matchedBy: 'alias' });
+    });
+
+    it('an alias-supplied name that is ambiguous returns the candidates', async () => {
+      const result = await call('logseq_get_page', { name: 'Bob' }, () => [[stub, 'name'], ...sources]);
+
+      expect(JSON.parse(result.content[0].text)).toMatchObject({ ambiguous: true, pageName: 'Bob', totalCandidates: 2 });
+    });
+
+    it('an alias-supplied name that matches nothing is a not-found error with guidance', async () => {
+      const result = await call('logseq_get_page', { name: 'Nope' }, () => [], () => null);
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).error).toMatch(/^No page "Nope"\./);
     });
   });
 
