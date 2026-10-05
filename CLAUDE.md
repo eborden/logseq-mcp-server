@@ -708,6 +708,11 @@ Checklist for new Datalog-based tools:
 
 6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
 
+7. **Tool-list guardrails** - `src/tool-list.test.ts` checks the `tools/list` payload
+   - Size budget: `TOOL_LIST_BUDGET_CHARS` (~15% headroom over the size measured when it was added). If your tool or parameters push past it, trim first. If the growth is worth it, raise the constant and justify it in the PR description.
+   - Description cap: 400 characters per tool. A new tool gets no allowance. Existing long descriptions are listed in `DESCRIPTION_ALLOWANCES` and may shrink but not grow. Delete an entry once its tool fits the cap.
+   - Snapshot: any change to a name, title, annotation, description or input schema fails the snapshot test. Review the diff, then run `npx vitest run src/tool-list.test.ts -u` and commit `src/__snapshots__/tool-list.test.ts.snap`.
+
 ---
 
 ## References
