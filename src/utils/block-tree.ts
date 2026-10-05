@@ -49,7 +49,7 @@ export function camelizeBlock(block: Record<string, any>): BlockEntity {
  * is the previous one. Blocks the chain can't reach (a corrupt graph) are
  * appended in id order so nothing is dropped.
  */
-function orderSiblings(siblings: BlockEntity[]): BlockEntity[] {
+export function orderSiblings(siblings: BlockEntity[]): BlockEntity[] {
   if (siblings.length < 2) return siblings;
 
   const ids = new Set(siblings.map(s => s.id));

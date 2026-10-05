@@ -30,6 +30,9 @@ export interface BlockEntity {
   journalDay?: number; // Journal date in YYYYMMDD format
   scheduled?: number; // Scheduled date in YYYYMMDD format
   deadline?: number; // Deadline date in YYYYMMDD format
+  // Added only when a tool is called with resolve_refs (#18); `content` is never changed
+  resolvedContent?: string;
+  resolvedRefs?: ResolvedRef[];
 }
 
 // Page entity structure
@@ -108,6 +111,9 @@ export interface SlimBlock {
   marker?: string;
   tags?: string[];
   pageRefs?: string[];
+  /** Present only with resolve_refs, on blocks that hold a `((uuid))` ref or `{{embed}}` */
+  resolvedContent?: string;
+  resolvedRefs?: ResolvedRef[];
   children?: SlimBlock[];
 }
 
@@ -122,6 +128,31 @@ export interface SlimPage {
   properties?: Record<string, any>;
   isJournal?: boolean;
   journalDate?: number;
+}
+
+// Resolved block refs and embeds (#18)
+
+/**
+ * - `ok`: found; its text is in `resolvedContent`
+ * - `missing`: no such block or page (deleted?); the reference is left as written
+ * - `depth_limit`: not followed, because it sits deeper than the depth limit
+ * - `cycle`: not followed, because it is already being expanded on this path
+ */
+export type RefStatus = 'ok' | 'missing' | 'depth_limit' | 'cycle';
+
+/**
+ * One `((uuid))` ref, `{{embed ((uuid))}}` or `{{embed [[page]]}}` found in a block.
+ * `uuid` is the address to pass to logseq_get_block; page embeds have none.
+ */
+export interface ResolvedRef {
+  uuid?: string;
+  /** Set for embeds; absent for a plain `((uuid))` ref */
+  embed?: 'block' | 'page';
+  /** Text of the target, with its own refs resolved inline; null unless `ok` */
+  content: string | null;
+  /** Page the target block is on (the page itself for a page embed); null if unknown */
+  page: string | null;
+  status: RefStatus;
 }
 
 // Capped or partial results (#40)

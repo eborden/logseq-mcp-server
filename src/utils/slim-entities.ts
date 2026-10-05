@@ -94,6 +94,14 @@ export function toSlimBlock(block: BlockEntity, pageName: string): SlimBlock {
     slim.pageRefs = pageRefs;
   }
 
+  // Resolved refs (resolve_refs) ride along on slim blocks too, only when present
+  if (block.resolvedContent !== undefined) {
+    slim.resolvedContent = block.resolvedContent;
+  }
+  if (block.resolvedRefs && block.resolvedRefs.length > 0) {
+    slim.resolvedRefs = block.resolvedRefs;
+  }
+
   // Recursively transform children
   if (block.children && block.children.length > 0) {
     slim.children = block.children.map(child => toSlimBlock(child, pageName));
