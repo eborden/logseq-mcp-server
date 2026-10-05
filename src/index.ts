@@ -671,6 +671,17 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
             resolveRefs: args?.resolve_refs === true && !compact
           };
           const result = await buildContextForTopic(client, topicName, options);
+          // Compact output has no block bodies to resolve refs in. Say so rather than drop the request silently.
+          if (compact && args?.resolve_refs === true) {
+            result.warnings = [
+              ...result.warnings,
+              {
+                code: 'resolve_refs_ignored_in_compact',
+                message:
+                  'compact output has no block bodies, so resolve_refs was skipped. Set compact to false for resolved text, or read a block with logseq_get_block and resolve_refs.',
+              },
+            ];
+          }
           if (format === 'markdown') return textResult(withFooter(renderTopicContext(result, { compact }), result));
           return {
             content: [
