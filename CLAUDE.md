@@ -126,23 +126,23 @@ The server translates high-level queries (e.g., "get context for topic") into ca
 
 ### Current Implementation Status
 
-Traversal, search and date-range tools now run as batched Datalog queries. `logseq.Editor.*` is still used for single lookups: `get_page`, `get_block`, `get_backlinks`, linked references in `build_context`, the fuzzy-match page list on "not found", and the two block fetches after `connected-within` finds a match. Every page-taking tool resolves its page name first (exact name, alias, ISO date, namespace leaf; #41), which costs one Datalog query that replaces the page query where a tool already ran one. No tool crawls the graph any more.
+Traversal, search and date-range tools now run as batched Datalog queries. `logseq.Editor.*` is still used for single lookups: `get_page`, `get_block`, `get_backlinks`, linked references in `build_context`, the fuzzy-match page list on "not found", and the two block fetches after `connected-within` finds a match. Every page-taking tool resolves its page name first (exact name, alias, ISO date, namespace leaf; #41), which costs one Datalog query that replaces the page query where a tool already ran one. No tool crawls the graph any more. The link-following tools (`get_backlinks`, `build_context`, `get_context_for_query`, `get_concept_evolution`, `get_concept_network`, `search_by_relationship`, and `query_by_date_range` with a `search_term`) also cover every alias of the page they were asked about (#69): a page whose pulled entity has an alias link costs one more Datalog query, a page without costs nothing.
 
 Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, hub page with ~100 direct neighbours):
 
 | Tool | API calls | Time | Notes |
 |---|---|---|---|
-| `build_context` | 3 | ~0.2s | 2 Datalog + 1 linked refs |
-| `get_context_for_query` (1 topic) | 3 | ~0.1s | Delegates to `build_context` |
-| `get_concept_network` depth=1 | 2 | ~0.1s | Default caps: 16 nodes |
-| `get_concept_network` depth=2 | 3 | ~0.2s | One batched query per depth, both directions. Default caps: 50 nodes. Was ~120 calls (#3) |
+| `build_context` | 3 (4 with an alias) | ~0.2s | 2 Datalog + 1 linked refs. A page with aliases adds 1 alias-group query and takes its blocks and linked references from Datalog over the group instead of the Editor call (#69) |
+| `get_context_for_query` (1 topic) | 3 (4 with an alias) | ~0.1s | Delegates to `build_context` |
+| `get_concept_network` depth=1 | 2 (3 with an alias) | ~0.1s | Default caps: 16 nodes. A root with aliases adds 1 alias-group query; the depth-1 walk then covers every name in one grouped query (#69) |
+| `get_concept_network` depth=2 | 3 (4 with an alias) | ~0.2s | One batched query per depth, both directions. Default caps: 50 nodes. Was ~120 calls (#3) |
 | `search_blocks` | 1 | ~0.1s | One case-insensitive regex query. Was ~130 calls, or ~2k for a search with no match (#4) |
-| `query_by_date_range` (7 days) | 2 | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5) |
+| `query_by_date_range` (7 days) | 2 (3 with `search_term`) | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5). A `search_term` adds 1 query that looks for a page of that name and its aliases, skipped when no journal is in range (#69) |
 | `get_page` | 1 | ~0.01s | Exact name of a page with a file: `Editor.getPage` alone, no resolver query (2 with children). An alias, ISO date, namespace leaf, file-less stub or miss adds one resolver query: 3 for an alias or date, 4 for a miss (first lookup, resolve, leaf, `getAllPages`) (#41) |
 | `get_page_outline` | 2 | ~0.05s | 1 resolver query + 1 query for the page's top-level blocks and their direct children, so child counts need no call per block. An alias or ISO date costs the same 2; a namespace leaf adds 1, a miss adds the suggestion lookup. Capped at 200 blocks (#43) |
-| `get_backlinks` | 2 | ~0.2s | 1 resolver query + 1 linked-references call. Was 1 before page resolution (#41) |
-| `get_concept_evolution` | 4 | ~0.1s | 1 resolver query + page tree + page + 1 mentions query. Was 3 before page resolution (#41) |
-| `search_by_relationship` | 3 | ~0.05s | `references` / `in-pages-linking-to`: 2 resolver queries (run in parallel; 1 when both topics are the same name) + 1 query. Was 1 before page resolution (#41, #7). `connected-within` is O(maxDistance): 2 resolver queries, then 1 per hop, and the resolved ids seed the BFS |
+| `get_backlinks` | 2 (3 with an alias) | ~0.2s | 1 resolver query + 1 linked-references call. Was 1 before page resolution (#41). A page with aliases adds 1 alias-group query, and the references come from one Datalog query over the group in place of the Editor call (#69) |
+| `get_concept_evolution` | 4 (5 with an alias) | ~0.1s | 1 resolver query + page tree + page + 1 mentions query. Was 3 before page resolution (#41). A page with aliases adds 1 alias-group query; the mentions query then covers the whole group (#69) |
+| `search_by_relationship` | 3 (4 with an alias) | ~0.05s | `references` / `in-pages-linking-to`: 2 resolver queries (run in parallel; 1 when both topics are the same name) + 1 query. Was 1 before page resolution (#41, #7). `connected-within` is O(maxDistance): 2 resolver queries, then 1 per hop, and the resolved ids seed the BFS. Either topic having aliases adds 1 alias-group query for both topics together, and the queries match by the groups' ids (#69) |
 | `query_by_property` | 1 | ~0.02s | One query over `:block/properties`, page name inline. Blocks are flat (no `children`). Was ~2k calls, ~10s (#33) |
 | `resolve_refs: true` on `get_block`, `get_page` (with children), `build_context`, `query_by_date_range` | +0 to +2 | ~0.03-0.1s | Opt-in (#18). One batched query per nesting level, depth 2: +1 when the refs point at plain blocks, +2 when those hold refs of their own, +0 when nothing in the result has a ref. Same cost for 1 day or 30. Off: calls and output unchanged |
 | `format: "markdown"` on `get_page`, `get_block`, `build_context`, `get_context_for_query`, `get_concept_network` | +0 | | Rendering only, no extra call, except a no-topic `get_context_for_query` in markdown: +1 batched query for the hit pages. About 45-85% fewer bytes than the JSON (a long page ~80%, `build_context` ~75-80%, a depth-2 network ~45%). `compact` on `build_context` and `get_context_for_query` also saves calls: it skips `resolve_refs`, with a warning (#43) |
