@@ -500,7 +500,7 @@ Quick reference checklist for future work:
 - [ ] `logseq.Editor.getEditingBlockSelection` doesn't exist. Use `getSelectedBlocks`, which returns `null` when nothing is selected.
 
 **Tool behaviour**
-- [ ] Don't turn errors into empty results. A dropped connection must not look like "no data" (#10).
+- [ ] Don't turn errors into empty results. A dropped connection must not look like "no data" (#10). Re-throw infrastructure errors (`isInfrastructureError`) and unexpected ones; only an empty result is "none", and expected partial results go in a `warnings` field.
 - [ ] Never write to stdout (`console.log`). It's the MCP stdio channel; log with `console.error`.
 
 ---
