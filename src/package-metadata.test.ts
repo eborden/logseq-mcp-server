@@ -14,8 +14,8 @@ describe('package.json publish fields (#46)', () => {
     expect(pkg.files).toEqual(expect.arrayContaining(['dist', 'README.md', 'LICENSE']));
   });
 
-  it('declares a Node floor that has global fetch and AbortSignal.timeout', () => {
-    expect(pkg.engines.node).toBe('>=18');
+  it('declares a Node floor that matches the dev toolchain (vite 7) and has global fetch and AbortSignal.timeout', () => {
+    expect(pkg.engines.node).toBe('>=22.12.0');
   });
 
   it('carries the metadata npm shows', () => {

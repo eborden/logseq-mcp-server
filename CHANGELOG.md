@@ -10,7 +10,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 ### Added
 
-- **npm package.** `npx -y logseq-mcp-server` works: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 18 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
+- **npm package.** `npx -y logseq-mcp-server` works: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 22.12 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
 - **MCP prompts**: `weekly_summary`, `monthly_summary`, `continue_on`, `what_do_i_know` and `prioritize_tasks`. Each tells the model which tools to call and what limits to keep, and defers to the `logseq-skills` workflow when the host has it (#46).
 - **MCP resources**: `logseq://guide` (the reading guide) and the `logseq://page/{name}` template (a page as Markdown text). Both are read-only (#46).
 - **Claude Code plugin and marketplace manifests**, with the skills moved to a root `skills/` directory so a plugin can find them. Skills refer to tools by bare name so they work under any host prefix (#45).
@@ -29,6 +29,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 ### Changed
 
+- Minimum Node is now 22.12 (`engines.node` is `>=22.12.0`). Node 18 and 20 are past end of life, and 22.12 is the floor of the dev toolchain (vite 7). CI tests on Node 22 and 24.
 - `serverInfo.version` in `initialize` is now read from `package.json`. It was a hard-coded `1.0.0` (#46).
 - Graph traversal, search and date-range tools run as batched Datalog queries instead of one API call per page. `get_concept_network` at depth 2 went from over a hundred calls to three, `search_blocks` to one, and `query_by_date_range` to two regardless of range length.
 - **Slim output is the default** for `search_blocks`, `query_by_date_range` and `query_by_property` (and `get_current_context`). Pass `slim_results: false` to get full output. Slim blocks drop empty fields, and `pageName` is left off children and off blocks inside a date-range entry, which already carries it. The prompts and skills no longer pass `slim_results` (#42).
