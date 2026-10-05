@@ -13,10 +13,11 @@ export interface SearchBlocksResult extends BlockEntity {
 }
 
 export interface SlimSearchBlocksResult extends SlimBlock {
+  /** `references` and `tags` are left out when empty */
   context?: {
     page: SlimPage;
-    references: string[];
-    tags: string[];
+    references?: string[];
+    tags?: string[];
   };
 }
 
@@ -164,10 +165,11 @@ export async function searchBlocksWithMeta(
     const slim = toSlimBlock(block, displayName(block.page)) as SlimSearchBlocksResult;
 
     if (block.context) {
+      // Empty references / tags are left out (#42): the block is slim, so the lists add only bytes
       slim.context = {
         page: toSlimPage(block.context.page),
-        references: block.context.references,
-        tags: block.context.tags
+        ...(block.context.references.length > 0 && { references: block.context.references }),
+        ...(block.context.tags.length > 0 && { tags: block.context.tags })
       };
     }
 

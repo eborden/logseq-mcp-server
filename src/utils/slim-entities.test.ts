@@ -5,7 +5,9 @@ import {
   buildPageNameMap,
   getPageNameFromBlock,
   toSlimBlock,
-  toSlimPage
+  toSlimPage,
+  isEmptyValue,
+  nonEmptyProperties
 } from './slim-entities.js';
 import { BlockEntity, PageEntity } from '../types.js';
 
@@ -430,6 +432,63 @@ describe('toSlimBlock', () => {
     const slim = toSlimBlock(block, 'Project Plan');
 
     expect(slim).not.toHaveProperty('children');
+  });
+});
+
+describe('isEmptyValue (#42)', () => {
+  it.each([null, undefined, '', '   ', [], {}])('treats %j as empty', value => {
+    expect(isEmptyValue(value)).toBe(true);
+  });
+
+  it.each([false, 0, 'x', ['x'], { a: 1 }, [null]])('keeps %j, which says something', value => {
+    expect(isEmptyValue(value)).toBe(false);
+  });
+});
+
+describe('nonEmptyProperties (#42)', () => {
+  it('drops null, blank, empty-list and empty-object values but keeps false and 0', () => {
+    expect(
+      nonEmptyProperties({ a: null, b: '', c: [], d: {}, e: false, f: 0, g: 'x', h: ['y'] })
+    ).toEqual({ e: false, f: 0, g: 'x', h: ['y'] });
+  });
+
+  it('is undefined when nothing has a value, or there are no properties', () => {
+    expect(nonEmptyProperties({ a: '', b: null })).toBeUndefined();
+    expect(nonEmptyProperties({})).toBeUndefined();
+    expect(nonEmptyProperties(undefined)).toBeUndefined();
+  });
+});
+
+describe('slim output leaves out empty fields (#42)', () => {
+  const base = { id: 1, uuid: 'u', content: 'text', page: { id: 1 }, parent: { id: 1 }, left: { id: 1 } };
+
+  it('omits a blank pageName instead of sending an empty string', () => {
+    expect(toSlimBlock(base as BlockEntity, '')).toEqual({ uuid: 'u', content: 'text' });
+  });
+
+  it('omits properties whose values are all empty, and keeps false and 0', () => {
+    const empty = toSlimBlock({ ...base, properties: { note: '', tags: [] } } as BlockEntity, 'P');
+    expect(empty).not.toHaveProperty('properties');
+
+    const kept = toSlimBlock({ ...base, properties: { note: '', done: false, count: 0 } } as BlockEntity, 'P');
+    expect(kept.properties).toEqual({ done: false, count: 0 });
+  });
+
+  it('keeps uuid and content for an empty block', () => {
+    expect(toSlimBlock({ ...base, content: '' } as BlockEntity, 'P')).toEqual({ uuid: 'u', content: '', pageName: 'P' });
+  });
+
+  it('applies the same rules to children', () => {
+    const slim = toSlimBlock(
+      { ...base, children: [{ ...base, uuid: 'c', properties: { x: '' } }] } as unknown as BlockEntity,
+      ''
+    );
+    expect(slim.children).toEqual([{ uuid: 'c', content: 'text' }]);
+  });
+
+  it('omits page properties that have no value', () => {
+    const page = { id: 1, name: 'p', originalName: 'P', properties: { alias: [], title: '' } } as unknown as PageEntity;
+    expect(toSlimPage(page)).toEqual({ name: 'p', originalName: 'P' });
   });
 });
 

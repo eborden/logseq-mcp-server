@@ -63,17 +63,20 @@ function stubClient() {
   return client;
 }
 
-async function call(name: string, args: Record<string, unknown>) {
+async function callRaw(name: string, args: Record<string, unknown>) {
   const server = createServer(stubClient());
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const mcpClient = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
   await Promise.all([server.connect(serverTransport), mcpClient.connect(clientTransport)]);
   try {
-    const result = (await mcpClient.callTool({ name, arguments: args })) as any;
-    return JSON.parse(result.content[0].text);
+    return (await mcpClient.callTool({ name, arguments: args })) as any;
   } finally {
     await mcpClient.close();
   }
+}
+
+async function call(name: string, args: Record<string, unknown>) {
+  return JSON.parse((await callRaw(name, args)).content[0].text);
 }
 
 const SLIM_ONLY_KEYS = ['pageName'];
@@ -144,6 +147,34 @@ describe('slim_results default (#42)', () => {
       expect(entry.page).toMatchObject({ id: 20, uuid: 'page-uuid-20' });
       expect(entry).not.toHaveProperty('pageName');
       expect(entry.blocks[0]).toMatchObject({ id: 30, format: 'markdown' });
+    });
+  });
+
+  describe('empty-field policy', () => {
+    it('keeps hasMore: false and warnings: [] in meta, because they say nothing was cut', async () => {
+      const result = await callRaw('logseq_search_blocks', { query: 'alice' });
+      const { meta } = JSON.parse(result.content[1].text);
+      expect(meta.hasMore).toBe(false);
+      expect(meta.warnings).toEqual([]);
+      expect(meta.totals).toEqual({ matches: 1 });
+    });
+
+    it('keeps an empty day in the date-range result: blocks: [] is a day with no entries', async () => {
+      const client = stubClient();
+      vi.spyOn(client, 'executeDatalogQuery')
+        .mockResolvedValueOnce([[journal]])
+        .mockResolvedValueOnce([]);
+      const server = createServer(client);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const mcpClient = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
+      await Promise.all([server.connect(serverTransport), mcpClient.connect(clientTransport)]);
+      try {
+        const result = (await mcpClient.callTool({ name: 'logseq_query_by_date_range', arguments: { last_n: 1 } })) as any;
+        const [entry] = JSON.parse(result.content[0].text).entries;
+        expect(entry).toMatchObject({ date: 20250101, blocks: [] });
+      } finally {
+        await mcpClient.close();
+      }
     });
   });
 
