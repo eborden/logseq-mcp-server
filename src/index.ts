@@ -26,11 +26,29 @@ import { getGraphInfo } from './tools/get-graph-info.js';
 import { listPages } from './tools/list-pages.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 
+/**
+ * Hints shared by every tool. This server only reads from LogSeq, so each tool
+ * is read-only, non-destructive, idempotent, and talks to a single known local
+ * system rather than an open world. Per the MCP spec, omitting these makes
+ * clients assume a tool may be destructive and open-world.
+ */
+const READ_ONLY_HINTS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+
+function readOnlyAnnotations(title: string) {
+  return { title, ...READ_ONLY_HINTS };
+}
+
 // Define MCP tool schemas for all 13 tools
 const TOOLS = [
   {
     name: 'logseq_get_page',
     description: TOOL_DESCRIPTIONS.logseq_get_page,
+    annotations: readOnlyAnnotations('Get Page'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -50,6 +68,7 @@ const TOOLS = [
   {
     name: 'logseq_get_backlinks',
     description: TOOL_DESCRIPTIONS.logseq_get_backlinks,
+    annotations: readOnlyAnnotations('Get Backlinks'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -64,6 +83,7 @@ const TOOLS = [
   {
     name: 'logseq_get_block',
     description: TOOL_DESCRIPTIONS.logseq_get_block,
+    annotations: readOnlyAnnotations('Get Block'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -83,6 +103,7 @@ const TOOLS = [
   {
     name: 'logseq_search_blocks',
     description: TOOL_DESCRIPTIONS.logseq_search_blocks,
+    annotations: readOnlyAnnotations('Search Blocks'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -111,6 +132,7 @@ const TOOLS = [
   {
     name: 'logseq_query_by_property',
     description: TOOL_DESCRIPTIONS.logseq_query_by_property,
+    annotations: readOnlyAnnotations('Query by Property'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -134,6 +156,7 @@ const TOOLS = [
   {
     name: 'logseq_get_concept_network',
     description: TOOL_DESCRIPTIONS.logseq_get_concept_network,
+    annotations: readOnlyAnnotations('Get Concept Network'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -153,6 +176,7 @@ const TOOLS = [
   {
     name: 'logseq_search_by_relationship',
     description: TOOL_DESCRIPTIONS.logseq_search_by_relationship,
+    annotations: readOnlyAnnotations('Search by Relationship'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -181,6 +205,7 @@ const TOOLS = [
   {
     name: 'logseq_build_context',
     description: TOOL_DESCRIPTIONS.logseq_build_context,
+    annotations: readOnlyAnnotations('Build Context'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -215,6 +240,7 @@ const TOOLS = [
   {
     name: 'logseq_get_context_for_query',
     description: TOOL_DESCRIPTIONS.logseq_get_context_for_query,
+    annotations: readOnlyAnnotations('Get Context for Query'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -239,6 +265,7 @@ const TOOLS = [
   {
     name: 'logseq_query_by_date_range',
     description: TOOL_DESCRIPTIONS.logseq_query_by_date_range,
+    annotations: readOnlyAnnotations('Query by Date Range'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -266,6 +293,7 @@ const TOOLS = [
   {
     name: 'logseq_get_concept_evolution',
     description: TOOL_DESCRIPTIONS.logseq_get_concept_evolution,
+    annotations: readOnlyAnnotations('Get Concept Evolution'),
     inputSchema: {
       type: 'object',
       properties: {
@@ -293,6 +321,7 @@ const TOOLS = [
   {
     name: 'logseq_get_graph_info',
     description: TOOL_DESCRIPTIONS.logseq_get_graph_info,
+    annotations: readOnlyAnnotations('Get Graph Info'),
     inputSchema: {
       type: 'object',
       properties: {},
@@ -302,6 +331,7 @@ const TOOLS = [
   {
     name: 'logseq_list_pages',
     description: TOOL_DESCRIPTIONS.logseq_list_pages,
+    annotations: readOnlyAnnotations('List Pages'),
     inputSchema: {
       type: 'object',
       properties: {
