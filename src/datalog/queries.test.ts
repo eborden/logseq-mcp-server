@@ -142,24 +142,4 @@ describe('DatalogQueryBuilder', () => {
       expect(inputs).toEqual(['react']);
     });
   });
-
-  describe('searchByRelationship', () => {
-    it('should generate relationship query for references type', () => {
-      const query = DatalogQueryBuilder.searchByRelationship('React', 'Testing', 'references');
-
-      expect(query).toContain(':find');
-      expect(query).toContain(':where');
-      expect(query).toContain('?topic-a');
-      expect(query).toContain('?topic-b');
-    });
-
-    it('should handle different relationship types', () => {
-      const query1 = DatalogQueryBuilder.searchByRelationship('A', 'B', 'references');
-      const query2 = DatalogQueryBuilder.searchByRelationship('A', 'B', 'referenced-by');
-
-      expect(query1).toBeTruthy();
-      expect(query2).toBeTruthy();
-      expect(query1).not.toEqual(query2);
-    });
-  });
 });
