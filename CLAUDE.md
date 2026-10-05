@@ -87,7 +87,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 
 ### Verification before merge
 Done by whoever merges:
-- CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` and `vitest run src` on every PR and push to `main`. It must be green. The integration tests and measure script stay local.
+- CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` and `vitest run src` on Node 22 and 24 on every PR and push to `main`. It must be green. `engines.node` is `>=22.12.0`, the floor of the dev toolchain (vite 7). The integration tests and measure script stay local.
 - Privacy grep of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
 - `npx tsc --noEmit`
 - `npx vitest run src`
