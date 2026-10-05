@@ -122,6 +122,33 @@ describe('format and compact on logseq_build_context', () => {
     expect(queries).toHaveLength(2);
   });
 
+  it('warns when compact skipped resolve_refs, in JSON and in the Markdown footer (#80)', async () => {
+    const json = await call('logseq_build_context', { topic_name: 'Project Atlas', compact: true, resolve_refs: true }, api, datalog);
+    const warning = JSON.parse(json.content[0].text).warnings.find((w: any) => w.code === 'resolve_refs_ignored_in_compact');
+    expect(warning.message).toContain('compact output has no block bodies');
+    expect(warning.message).toContain('Set compact to false');
+    expect(warning.message).toContain('logseq_get_block');
+    // Advice only: nothing more to fetch with a parameter, so hasMore stays false
+    expect(JSON.parse(json.content[0].text).hasMore).toBe(false);
+
+    const md = await call(
+      'logseq_build_context',
+      { topic_name: 'Project Atlas', compact: true, resolve_refs: true, format: 'markdown' },
+      api,
+      datalog
+    );
+    expect(md.content[0].text).toContain('---\nWarnings:\n- resolve_refs_ignored_in_compact: compact output has no block bodies');
+  });
+
+  it('does not warn about resolve_refs when compact is off, or when resolve_refs is off', async () => {
+    const codes = async (args: Record<string, unknown>) =>
+      JSON.parse((await call('logseq_build_context', { topic_name: 'Project Atlas', ...args }, api, datalog)).content[0].text).warnings.map(
+        (w: any) => w.code
+      );
+    expect(await codes({ compact: true })).not.toContain('resolve_refs_ignored_in_compact');
+    expect(await codes({ resolve_refs: true })).not.toContain('resolve_refs_ignored_in_compact');
+  });
+
   it('rejects a non-boolean compact', async () => {
     const result = await call('logseq_build_context', { topic_name: 'Project Atlas', compact: 'yes' }, api, datalog);
     expect(result.isError).toBe(true);
