@@ -87,6 +87,8 @@ const isBlock = (value: unknown): value is BlockLike => typeof value === 'object
  * Render a block tree as an outline: one `- ` per block, tab-indented by depth, the
  * way LogSeq files store it. Stops at `budget` characters and reports whether it did.
  */
+const TRUNCATED_BLOCK_MARKER = '\n[This block is longer than the limit and was truncated here.]';
+
 function renderBlocks(blocks: unknown[], depth: number, budget: { left: number; cut: boolean }, out: string[]): void {
   for (const block of blocks) {
     if (budget.cut) return;
@@ -99,6 +101,12 @@ function renderBlocks(blocks: unknown[], depth: number, budget: { left: number; 
     const text = lines.join('\n');
     if (text.length + 1 > budget.left) {
       budget.cut = true;
+      // A first block over the cap would otherwise render as an empty page.
+      // Keep its start, with a marker, so the reader sees real content.
+      if (out.length === 0) {
+        const marker = TRUNCATED_BLOCK_MARKER;
+        out.push(`${text.slice(0, Math.max(0, budget.left - marker.length - 1))}${marker}`);
+      }
       return;
     }
     out.push(text);
@@ -153,7 +161,7 @@ export async function readPageResource(client: LogseqClient, uri: string): Promi
   const blocks = Array.isArray(page.children) ? page.children : [];
   renderBlocks(blocks, 0, budget, outline);
 
-  const body = outline.length > 0 ? outline.join('\n') : '(this page has no blocks)';
+  const body = outline.length > 0 || budget.cut ? outline.join('\n') : '(this page has no blocks)';
   const notice = budget.cut
     ? `\n\n[Cut at ${MAX_PAGE_CHARS} characters. The page continues. Use logseq_get_page or logseq_get_block for the rest.]`
     : '';

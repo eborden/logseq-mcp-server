@@ -164,6 +164,25 @@ describe('MCP resources (#46)', () => {
       }
     });
 
+    it('shows the start of a single block that exceeds the cap, with a notice', async () => {
+      const huge = [{ content: `START-OF-BLOCK ${'y'.repeat(MAX_PAGE_CHARS * 2)}` }];
+      const { mcp } = await connect(method => {
+        if (method === 'logseq.Editor.getPage') return { ...aliceEntity };
+        if (method === 'logseq.Editor.getPageBlocksTree') return huge;
+        return null;
+      });
+      try {
+        const text = textOf(await mcp.readResource({ uri: 'logseq://page/Alice' }));
+        expect(text).not.toContain('(this page has no blocks)');
+        expect(text).toContain('- START-OF-BLOCK yyy');
+        expect(text).toContain('This block is longer than the limit and was truncated');
+        expect(text).toContain(`Cut at ${MAX_PAGE_CHARS} characters`);
+        expect(text.length).toBeLessThan(MAX_PAGE_CHARS + 1000);
+      } finally {
+        await mcp.close();
+      }
+    });
+
     it('reports a missing page as resource not found, with guidance', async () => {
       const { mcp } = await connect();
       try {
