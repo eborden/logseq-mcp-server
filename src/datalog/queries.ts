@@ -696,6 +696,38 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * Generate Datalog query for blocks that reference any page of an alias
+   * group, plus (optionally) every block on some of its pages. Same pull as
+   * {@link getBlocksReferencingPage}, so rows carry the full page entity.
+   * Matching is on `:block/refs`, as there. A block that matches twice (it
+   * references two names of the group) is one row.
+   * @param refIds - Page ids whose references are wanted (`:db/id`), each an integer
+   * @param ownPageIds - Page ids whose own blocks are wanted too (may be empty)
+   * @returns Query and no inputs (ids are embedded via `groundIds`)
+   * @throws Error if `refIds` is empty or any id is not an integer
+   */
+  static getBlocksReferencingPages(refIds: number[], ownPageIds: number[] = []): DatalogQuery {
+    if (refIds.length === 0) {
+      throw new Error('getBlocksReferencingPages needs at least one page id');
+    }
+    const pull = `(pull ?block [:db/id :block/uuid :block/content :block/marker :block/properties :block/format {:block/page [*]}])`;
+    const refBranch = `${DatalogQueryBuilder.groundIds(refIds, '?ref')}
+                 [?block :block/refs ?ref]`;
+    if (ownPageIds.length === 0) {
+      return { query: `[:find ${pull}\n             :where\n             ${refBranch}]`, inputs: [] };
+    }
+    return {
+      query: `[:find ${pull}
+             :where
+             (or-join [?block]
+               (and ${refBranch})
+               (and ${DatalogQueryBuilder.groundIds(ownPageIds, '?own')}
+                 [?block :block/page ?own]))]`,
+      inputs: []
+    };
+  }
+
+  /**
    * Generate Datalog query for every block on any of several pages (flat, like
    * {@link getPageBlocks}). For an alias group, whose members each hold their
    * own blocks.

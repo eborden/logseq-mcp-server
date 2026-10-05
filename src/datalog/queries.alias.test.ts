@@ -43,6 +43,41 @@ describe('DatalogQueryBuilder alias sets (#69)', () => {
     });
   });
 
+  describe('getBlocksReferencingPages', () => {
+    it('matches refs against every id of the group with a plain ground binding', () => {
+      const { query, inputs } = DatalogQueryBuilder.getBlocksReferencingPages([3, 4]);
+
+      expect(inputs).toEqual([]);
+      expect(query).toContain('[(ground [3 4]) [?ref ...]]');
+      expect(query).toContain('[?block :block/refs ?ref]');
+      expect(query).not.toContain('or-join'); // one branch only
+    });
+
+    it('adds the blocks of the listed pages as a second branch of one or-join', () => {
+      const { query } = DatalogQueryBuilder.getBlocksReferencingPages([3, 4], [4]);
+
+      expect(query).toContain('(or-join [?block]');
+      expect(query).toContain('[(ground [4]) [?own ...]]');
+      expect(query).toContain('[?block :block/page ?own]');
+    });
+
+    it('rejects an empty list and ids that are not integers', () => {
+      expect(() => DatalogQueryBuilder.getBlocksReferencingPages([])).toThrow(/at least one/);
+      expect(() => DatalogQueryBuilder.getBlocksReferencingPages([1], [Infinity])).toThrow(/Invalid entity id/);
+    });
+  });
+
+  describe('getBlocksOnPages', () => {
+    it('binds the page ids straight to ?page and takes the blocks on them', () => {
+      const { query, inputs } = DatalogQueryBuilder.getBlocksOnPages([5, 6]);
+
+      expect(inputs).toEqual([]);
+      expect(query).toContain('[(ground [5 6]) [?page ...]]');
+      expect(query).toContain('[?block :block/page ?page]');
+      expect(() => DatalogQueryBuilder.getBlocksOnPages([])).toThrow(/at least one/);
+    });
+  });
+
   describe('aliasSetByName', () => {
     it('passes the lowercased name as an input and keeps it out of the query text', () => {
       const { query, inputs } = DatalogQueryBuilder.aliasSetByName('Jordan "JR" Rivera');
