@@ -84,6 +84,13 @@ async function main() {
   const someDay = journalDays?.[journalDays.length >> 1]?.[0] as number | undefined;
   const isoDay = someDay ? `${String(someDay).slice(0, 4)}-${String(someDay).slice(4, 6)}-${String(someDay).slice(6, 8)}` : undefined;
 
+  // A page that declares an alias another block links (#69), by its own name, to see the
+  // cost of the alias group on the link-following tools. Absent when the graph has none.
+  const groupRows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
+    `[:find ?pn ?an :where [?p :block/alias ?a] [?p :block/file] (not [?a :block/file]) [?p :block/name ?pn] [?a :block/name ?an] [?b :block/refs ?a]]`
+  ]);
+  const aliased = groupRows?.[0]?.[0] as string | undefined;
+
   const end = new Date();
   const start = new Date(end.getTime() - 6 * 86400000);
 
@@ -118,6 +125,19 @@ async function main() {
       ? ([['get_page (shared alias)', () => getPage(client, sharedAlias, false).catch(e => e.name)]] as Array<
           [string, () => Promise<unknown>]
         >)
+      : []),
+    ...(aliased
+      ? ([
+          ['get_backlinks (aliased page)', () => getBacklinks(client, aliased)],
+          ['build_context (aliased page)', () => buildContextForTopic(client, aliased)],
+          ['get_concept_evolution (aliased page)', () => getConceptEvolution(client, aliased)],
+          ['get_concept_network depth=1 (aliased page)', () => getConceptNetwork(client, aliased, 1)],
+          ['get_concept_network depth=2 (aliased page)', () => getConceptNetwork(client, aliased, 2)],
+          ['search_by_relationship references (aliased topic)', () => searchByRelationship(client, aliased, otherSubject, 'references')],
+          ['search_by_relationship connected-within (aliased topic)', () => searchByRelationship(client, aliased, otherSubject, 'connected-within', 1)],
+          ['query_by_date_range 7d search_term (aliased page)', () =>
+            queryJournals(client, { startDate: ymd(start), endDate: ymd(end), searchTerm: aliased })]
+        ] as Array<[string, () => Promise<unknown>]>)
       : []),
     ...(isoDay
       ? ([
