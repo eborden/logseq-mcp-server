@@ -111,6 +111,33 @@ describe('alias-aware link following against a live graph', () => {
     expect(missing).toBe(0);
   });
 
+  it('get_backlinks: a source page carries the same keys as the Editor call gives it', async () => {
+    const { results } = await getBacklinksWithMeta(client, target.canonical);
+    const keysOf = (page: object) => Object.keys(page).sort().join(',');
+    const editorKeys = new Map<number, string>();
+    for (const name of [target.canonical, target.alias]) {
+      const tuples = (await client.callAPI<any[]>('logseq.Editor.getPageLinkedReferences', [name])) ?? [];
+      for (const [page] of tuples) if (page?.id !== undefined) editorKeys.set(page.id, keysOf(page));
+    }
+
+    const shared = (results ?? []).filter(([page]) => editorKeys.has(page.id));
+    expect(shared.length, `No source page in both results. ${SETUP_HINT}`).toBeGreaterThan(0);
+    const mismatched = shared.filter(([page, blocks]) =>
+      keysOf(page) !== editorKeys.get(page.id) || blocks.some(b => keysOf(b.page as object) !== keysOf(page))
+    ).length;
+    expect(mismatched).toBe(0);
+  });
+
+  it('search_by_relationship: connected-within reports a page and its alias as the same topic', async () => {
+    const { result, calls } = await counted(() =>
+      searchByRelationship(client, target.canonical, target.alias, 'connected-within', 2)
+    );
+
+    expect(result.results).toEqual([]);
+    expect(result.warnings.map(w => w.code)).toEqual(['same_topic']);
+    expect(calls).toBeLessThanOrEqual(3); // resolvers and the alias group, no hop query
+  });
+
   it('get_concept_evolution: either name yields the same block set, including alias-only blocks', async () => {
     const byName = await counted(() => getConceptEvolution(client, target.canonical));
     const byAlias = await counted(() => getConceptEvolution(client, target.alias));
