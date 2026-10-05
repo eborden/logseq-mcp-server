@@ -24,6 +24,7 @@ import { queryByDateRange } from './tools/query-by-date-range.js';
 import { getConceptEvolution } from './tools/get-concept-evolution.js';
 import { getGraphInfo } from './tools/get-graph-info.js';
 import { listPages } from './tools/list-pages.js';
+import { getCurrentContext } from './tools/get-current-context.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 
 /**
@@ -43,7 +44,7 @@ function readOnlyAnnotations(title: string) {
   return { title, ...READ_ONLY_HINTS };
 }
 
-// Define MCP tool schemas for all 13 tools
+// Define MCP tool schemas for all 14 tools
 const TOOLS = [
   {
     name: 'logseq_get_page',
@@ -344,6 +345,18 @@ const TOOLS = [
     },
   },
   {
+    name: 'logseq_get_current_context',
+    description: TOOL_DESCRIPTIONS.logseq_get_current_context,
+    // Read-only like every other tool, but not idempotent: the result depends on
+    // what the user has open in the LogSeq UI, which changes between calls.
+    annotations: { ...readOnlyAnnotations('Get Current Context'), idempotentHint: false },
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'logseq_list_pages',
     description: TOOL_DESCRIPTIONS.logseq_list_pages,
     annotations: readOnlyAnnotations('List Pages'),
@@ -583,6 +596,18 @@ export function createServer(client: LogseqClient): Server {
 
         case 'logseq_get_graph_info': {
           const result = await getGraphInfo(client);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result),
+              },
+            ],
+          };
+        }
+
+        case 'logseq_get_current_context': {
+          const result = await getCurrentContext(client);
           return {
             content: [
               {

@@ -38,8 +38,8 @@ describe('MCP Server', () => {
       }
     }
 
-    it('lists all 13 tools', async () => {
-      expect(await listTools()).toHaveLength(13);
+    it('lists all 14 tools', async () => {
+      expect(await listTools()).toHaveLength(14);
     });
 
     it('marks every tool read-only with a title (server never writes to LogSeq)', async () => {
@@ -50,12 +50,32 @@ describe('MCP Server', () => {
       }
     });
 
-    it('declares non-destructive, idempotent, closed-world hints on every tool', async () => {
+    /**
+     * Tools whose result depends on live UI state rather than graph content, so they
+     * are read-only but not idempotent. Every other tool must be idempotent.
+     */
+    const NON_IDEMPOTENT_TOOLS = ['logseq_get_current_context'];
+
+    it('declares non-destructive, idempotent, closed-world hints on every other tool', async () => {
       const tools = await listTools();
-      for (const tool of tools) {
+      for (const tool of tools.filter(t => !NON_IDEMPOTENT_TOOLS.includes(t.name))) {
         expect(tool.annotations, tool.name).toMatchObject({
           destructiveHint: false,
           idempotentHint: true,
+          openWorldHint: false,
+        });
+      }
+    });
+
+    it('marks UI-state tools non-idempotent but still read-only and closed-world', async () => {
+      const tools = await listTools();
+      for (const name of NON_IDEMPOTENT_TOOLS) {
+        const tool = tools.find(t => t.name === name);
+        expect(tool, `${name} must be registered`).toBeDefined();
+        expect(tool!.annotations, name).toMatchObject({
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: false,
           openWorldHint: false,
         });
       }
