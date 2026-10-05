@@ -9,11 +9,13 @@ import type { PageCandidate } from '../types.js';
  * and unexpected errors are never warnings: they propagate.
  */
 export interface QueryWarning extends ResultWarning {
-  code: 'topic_not_found' | 'topic_truncated' | 'topics_truncated' | 'ambiguous_page';
+  code: 'topic_not_found' | 'topic_truncated' | 'topics_truncated' | 'ambiguous_page' | 'candidates_truncated';
   /** The extracted topic the warning is about (absent when it concerns all topics) */
   topic?: string;
   /** For `ambiguous_page`: the pages the topic could mean (the topic was skipped) */
   candidates?: PageCandidate[];
+  /** For `ambiguous_page`: how many pages matched; more than `candidates.length` when the list was cut */
+  totalCandidates?: number;
 }
 
 /**
@@ -136,8 +138,13 @@ export async function getContextForQuery(
           code: 'ambiguous_page',
           message: error.message,
           topic,
-          candidates: error.candidates
+          candidates: error.candidates,
+          totalCandidates: error.totalCandidates
         });
+        // A cut list is reported by a warning, not by hasMore: no parameter fetches the rest
+        if (error.truncationNote) {
+          warnings.push({ code: 'candidates_truncated', topic, message: error.truncationNote });
+        }
         continue;
       }
       throw error;

@@ -37,18 +37,32 @@ export class AmbiguousPageError extends Error {
   readonly candidates: PageCandidate[];
   /** Matching pages in total; more than `candidates.length` when the list was capped */
   readonly totalCandidates: number;
+  /**
+   * Says that the list was cut at its maximum, that the rest can't be fetched in
+   * one call, and how to narrow the search. Set only when
+   * `totalCandidates > candidates.length`, so a cut list is never silent.
+   */
+  readonly truncationNote?: string;
 
   constructor(pageName: string, candidates: PageCandidate[], totalCandidates = candidates.length) {
     const listed = candidates.map(c => `${JSON.stringify(c.originalName)} (${c.reason})`).join('; ');
-    const more = totalCandidates > candidates.length ? ` and ${totalCandidates - candidates.length} more` : '';
+    const truncated = totalCandidates > candidates.length;
+    const more = truncated ? ` and ${totalCandidates - candidates.length} more` : '';
+    const truncationNote = truncated
+      ? `Showing ${candidates.length} of ${totalCandidates}, the most this lists; the rest can't be fetched in one call. ` +
+        `To narrow it down, call logseq_list_pages with name_contains set to part of the page name you mean, ` +
+        `or use its full namespaced name.`
+      : undefined;
     super(
       `${JSON.stringify(pageName)} matches ${totalCandidates} pages: ${listed}${more}. ` +
+      (truncationNote ? `${truncationNote} ` : '') +
       `Repeat the call with the exact name of one of them.`
     );
     this.name = 'AmbiguousPageError';
     this.pageName = pageName;
     this.candidates = candidates;
     this.totalCandidates = totalCandidates;
+    this.truncationNote = truncationNote;
   }
 }
 

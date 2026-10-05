@@ -2,7 +2,8 @@ import Fuzzysort from 'fuzzysort';
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { AmbiguousPageError, PageNotFoundError, isInfrastructureError } from '../errors.js';
-import type { PageCandidate, PageEntity, PageMatchReason, PageResolvedFrom, ResultWarning } from '../types.js';
+import type { PageCandidate, PageEntity, PageMatchReason, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
+import { buildResultMeta } from './result-meta.js';
 
 /** Most candidates listed for an ambiguous name; the rest are only counted. */
 export const MAX_CANDIDATES = 10;
@@ -208,14 +209,19 @@ export function resolvedFrom(input: string, resolved: ResolvedPage): ResolvedFro
   return info ? { resolvedFrom: info } : {};
 }
 
-/** What the MCP layer returns for an {@link AmbiguousPageError}: a result, not an error. */
-export interface AmbiguousPageResult {
+/**
+ * What the MCP layer returns for an {@link AmbiguousPageError}: a result, not an
+ * error. Follows the ResultMeta convention for a hard maximum: `totals.candidates`
+ * is the real count, and a list cut at {@link MAX_CANDIDATES} adds a
+ * `candidates_truncated` warning saying the maximum was reached, that the rest
+ * can't be fetched in one call, and how to narrow the search. `hasMore` stays
+ * false, because no parameter can be raised to get the rest.
+ */
+export interface AmbiguousPageResult extends ResultMeta {
   ambiguous: true;
   pageName: string;
   candidates: PageCandidate[];
   totalCandidates: number;
-  hasMore: false;
-  warnings: ResultWarning[];
 }
 
 export function ambiguousPageResult(error: AmbiguousPageError): AmbiguousPageResult {
@@ -224,12 +230,13 @@ export function ambiguousPageResult(error: AmbiguousPageError): AmbiguousPageRes
     pageName: error.pageName,
     candidates: error.candidates,
     totalCandidates: error.totalCandidates,
-    hasMore: false,
-    warnings: [ambiguousPageWarning(error)]
+    ...buildResultMeta(ambiguousPageWarnings(error), { candidates: error.totalCandidates })
   };
 }
 
-/** The `ambiguous_page` warning. It has no `howToFetchAll`, so it never sets `hasMore`. */
-export function ambiguousPageWarning(error: AmbiguousPageError): ResultWarning {
-  return { code: 'ambiguous_page', message: error.message };
+/** The `ambiguous_page` warning, plus `candidates_truncated` when the candidate list was cut. */
+export function ambiguousPageWarnings(error: AmbiguousPageError): ResultWarning[] {
+  const warnings: ResultWarning[] = [{ code: 'ambiguous_page', message: error.message }];
+  if (error.truncationNote) warnings.push({ code: 'candidates_truncated', message: error.truncationNote });
+  return warnings;
 }

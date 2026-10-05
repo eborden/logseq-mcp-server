@@ -400,13 +400,48 @@ describe('result helpers', () => {
     });
   });
 
-  it('ambiguousPageResult is a structured result with an ambiguous_page warning and no hasMore', () => {
-    const candidates = [{ name: 'a', originalName: 'A', matchedBy: 'alias' as const, reason: 'declares alias "x"' }];
-    const result = ambiguousPageResult(new AmbiguousPageError('x', candidates, 3));
+  it('ambiguousPageResult has hasMore false and a single warning when every candidate is listed', () => {
+    const candidates = [
+      { name: 'a', originalName: 'A', matchedBy: 'alias' as const, reason: 'declares alias "x"' },
+      { name: 'b', originalName: 'B', matchedBy: 'alias' as const, reason: 'declares alias "x"' }
+    ];
+    const result = ambiguousPageResult(new AmbiguousPageError('x', candidates));
 
-    expect(result).toMatchObject({ ambiguous: true, pageName: 'x', candidates, totalCandidates: 3, hasMore: false });
+    expect(result).toMatchObject({
+      ambiguous: true,
+      pageName: 'x',
+      candidates,
+      totalCandidates: 2,
+      hasMore: false,
+      totals: { candidates: 2 }
+    });
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0].code).toBe('ambiguous_page');
     expect(result.warnings[0].howToFetchAll).toBeUndefined();
+    expect(result.warnings[0].message).not.toContain('logseq_list_pages');
+  });
+
+  it('ambiguousPageResult warns that the list was cut, with the real count and how to narrow it', () => {
+    const candidates = Array.from({ length: MAX_CANDIDATES }, (_, i) => ({
+      name: `p${i}`,
+      originalName: `P${i}`,
+      matchedBy: 'namespace-leaf' as const,
+      reason: 'namespace page'
+    }));
+    const result = ambiguousPageResult(new AmbiguousPageError('x', candidates, MAX_CANDIDATES + 5));
+
+    expect(result.totalCandidates).toBe(MAX_CANDIDATES + 5);
+    expect(result.totals).toEqual({ candidates: MAX_CANDIDATES + 5 });
+    // A hard maximum: no parameter fetches the rest, so hasMore stays false and the warning is the signal
+    expect(result.hasMore).toBe(false);
+    expect(result.warnings.map(w => w.code)).toEqual(['ambiguous_page', 'candidates_truncated']);
+    expect(result.warnings.every(w => w.howToFetchAll === undefined)).toBe(true);
+    const note = result.warnings[1].message;
+    expect(note).toContain(`Showing ${MAX_CANDIDATES} of ${MAX_CANDIDATES + 5}`);
+    expect(note).toContain("can't be fetched in one call");
+    expect(note).toContain('logseq_list_pages');
+    expect(note).toContain('name_contains');
+    expect(result.warnings[0].message).toContain('and 5 more');
+    expect(result.warnings[0].message).toContain('logseq_list_pages');
   });
 });
