@@ -71,18 +71,28 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
   }
 }
 
+const TIPS_OFF_VALUES = ['0', 'false', 'off', 'no'];
+const TIPS_ON_VALUES = ['1', 'true', 'on', 'yes'];
+
 /**
  * Whether next-step tips (#44) are on. They are on by default; `"tips": false` in
- * the config file or `LOGSEQ_MCP_TIPS` set to `0`, `false`, `off` or `no` turns
- * them off. The environment variable wins, so a host can override the file.
+ * the config file turns them off. `LOGSEQ_MCP_TIPS` overrides the file: `off`,
+ * `false`, `0` or `no` turn tips off, `on`, `true`, `1` or `yes` turn them on
+ * (case-insensitive, surrounding spaces ignored). An empty variable is ignored.
+ * Any other value throws, so a typo such as `disabled` can't leave tips on silently.
  */
 export function resolveTipsEnabled(
   config: Pick<LogseqMCPConfig, 'tips'>,
   env: Record<string, string | undefined> = process.env
 ): boolean {
-  const flag = env.LOGSEQ_MCP_TIPS?.trim().toLowerCase();
+  const raw = env.LOGSEQ_MCP_TIPS;
+  const flag = raw?.trim().toLowerCase();
   if (flag !== undefined && flag !== '') {
-    return !['0', 'false', 'off', 'no'].includes(flag);
+    if (TIPS_OFF_VALUES.includes(flag)) return false;
+    if (TIPS_ON_VALUES.includes(flag)) return true;
+    throw new Error(
+      `Configuration validation failed: LOGSEQ_MCP_TIPS must be one of ${[...TIPS_ON_VALUES, ...TIPS_OFF_VALUES].join(', ')} (got "${raw}")`
+    );
   }
   return config.tips !== false;
 }
