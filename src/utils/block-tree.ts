@@ -1,5 +1,8 @@
 import { BlockEntity } from '../types.js';
 
+const camelize = (key: string): string =>
+  key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+
 /**
  * Convert the top-level kebab-case keys of a Datalog pull result to the
  * camelCase keys the `logseq.Editor.*` API returns (`journal-day` becomes
@@ -11,9 +14,31 @@ import { BlockEntity } from '../types.js';
 export function camelizeKeys<T = any>(entity: Record<string, any>): T {
   const out: Record<string, any> = {};
   for (const [key, value] of Object.entries(entity)) {
-    out[key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = value;
+    out[camelize(key)] = value;
   }
   return out as T;
+}
+
+/**
+ * Camelize a pulled block the way the Editor API does: its top-level keys, plus
+ * the property names inside `properties`, `propertiesTextValues` and
+ * `propertiesOrder` (Datalog has `logseq.order-list-type`, the Editor API
+ * `logseq.orderListType`).
+ */
+function camelizeBlock(block: Record<string, any>): BlockEntity {
+  const out = camelizeKeys<Record<string, any>>(block);
+  for (const key of ['properties', 'propertiesTextValues']) {
+    const value = out[key];
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = camelizeKeys(value);
+    }
+  }
+  if (Array.isArray(out.propertiesOrder)) {
+    out.propertiesOrder = out.propertiesOrder.map((k: unknown) =>
+      typeof k === 'string' ? camelize(k) : k
+    );
+  }
+  return out as BlockEntity;
 }
 
 /**
@@ -71,7 +96,7 @@ export function buildBlockTrees(
   blocks: Array<Record<string, any>>,
   pageIds: Iterable<number>
 ): Map<number, BlockEntity[]> {
-  const nodes = blocks.map(b => ({ ...camelizeKeys<BlockEntity>(b), children: [] as BlockEntity[] }));
+  const nodes = blocks.map(b => ({ ...camelizeBlock(b), children: [] as BlockEntity[] }));
   const nodeIds = new Set(nodes.map(n => n.id));
 
   const childrenOf = new Map<number, BlockEntity[]>();

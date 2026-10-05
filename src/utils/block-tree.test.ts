@@ -53,6 +53,23 @@ describe('buildBlockTrees', () => {
     expect(trees.get(1)!.map(r => r.id).sort()).toEqual([2, 3]);
   });
 
+  it('camelizes property names the way the Editor API does', () => {
+    const trees = buildBlockTrees(
+      [{
+        ...b(2, 1, 1, 1),
+        properties: { 'my-prop': 'a', plain: 'b' },
+        'properties-text-values': { 'my-prop': 'a' },
+        'properties-order': ['my-prop', 'plain']
+      }],
+      [1]
+    );
+    expect(trees.get(1)![0]).toMatchObject({
+      properties: { myProp: 'a', plain: 'b' },
+      propertiesTextValues: { myProp: 'a' },
+      propertiesOrder: ['myProp', 'plain']
+    });
+  });
+
   it('camelizes block keys', () => {
     const trees = buildBlockTrees([{ ...b(2, 1, 1, 1), 'path-refs': [{ id: 1 }] }], [1]);
     expect(trees.get(1)![0]).toMatchObject({ pathRefs: [{ id: 1 }] });
