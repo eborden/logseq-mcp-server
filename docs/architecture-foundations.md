@@ -36,16 +36,18 @@ Agents make code nearly free to produce. They don't make it free to understand, 
 
 These are not judgment calls for code you add or change. Existing code that doesn't meet them yet is tracked in #58. Don't fix that as a side effect of another task (section 0), but don't make it worse. If your change can't satisfy one, stop and say so.
 
+Rules 4, 6 (graph data), 8 and 10 are also promises the tools make to their user. Their full text, rationale and enforcement live in [`business-rules/`](business-rules/README.md), and the list below keeps a one-line summary of each. The other rules are stated in full here.
+
 1. **Never remove or weaken a safeguard you don't understand.** Caps, guards, odd early returns, "don't touch" comments, timeouts and validation exist for a reason you may not see. Keep them, give them a clear name, and ask about them in your notes.
 2. **When refactoring, preserve behavior exactly.** Pin current behavior with tests before you restructure. If you believe existing behavior is a bug, keep it and flag it. Changing it is a separate, explicit decision.
 3. **Parse all external input at the boundary before doing work.** External input means MCP tool arguments, LogSeq API responses, the config file and anything read from disk. Invalid input fails early with a clear error.
-4. **Tools stay read-only.** Every tool is declared read-only (`readOnlyHint: true`) and never writes to the graph. Keep each tool's other hints accurate. Most are idempotent, but `logseq_get_current_context` reads the live editor state and is declared `idempotentHint: false`. Adding a tool that writes to the graph is a contract change that needs the maintainer's sign-off.
+4. **Tools stay read-only.** See [BR-0002 (tools-read-only)](business-rules/0002-tools-read-only.md).
 5. **Bound everything.** Every network call has a timeout. Every loop over graph data has a cap. Every tool result has a size limit, because the reader is an LLM with a finite context window. No unbounded `Promise.all` over input-sized collections.
-6. **No secrets in source, and no personal graph data in committed files or logs.** The graph this server runs against is personal data. `CLAUDE.md` lists what may never be committed or posted: page names, block content, people's names, journal dates and raw output from the probe scripts or integration tests. Use made-up examples.
+6. **No secrets in source, and no personal graph data in committed files or logs.** The graph this server runs against is personal data. What may never be committed or posted is in [BR-0001 (no-graph-data-in-repo)](business-rules/0001-no-graph-data-in-repo.md).
 7. **No new dependency without verifying it exists, is maintained and is needed.** Check the standard library and existing dependencies first. Never install a package name from memory without confirming it in the registry.
-8. **Tool contracts change additively.** Clients and skills call tools by name with named parameters. Add optional parameters and new tools. A rename or removal needs an explicit decision and a migration note.
+8. **Tool contracts change additively.** See [BR-0004 (additive-tool-contracts)](business-rules/0004-additive-tool-contracts.md).
 9. **Never take destructive actions on your own outside the `CLAUDE.md` workflow.** Rebasing and force-pushing your own feature branch, and deleting it on merge, are part of that workflow. Rewriting `main`'s history, force-pushing or deleting someone else's branch, and deleting data are not. Propose those; the maintainer runs them.
-10. **Don't report success you haven't verified.** Tool outputs, status fields, summaries and notes must report what actually happened, not what was intended.
+10. **Don't report success you haven't verified.** See [BR-0005 (report-only-verified-success)](business-rules/0005-report-only-verified-success.md).
 
 ## 3. Before you write code
 
@@ -80,7 +82,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 **Why.** Checks that don't produce a typed result get skipped, duplicated or drift apart. Parsing first means bad input fails before any work is done.
 
 **In this repo.**
-- **MCP tool arguments:** each tool parses its arguments into a typed value in one place and throws `InvalidParameterError` on failure. Handlers never read raw `args`. The parser and the tool's `inputSchema` should come from the same definition so they can't drift. Parsing runs after `resolveParamAliases` (`src/utils/param-aliases.ts`). Aliases are best-effort and stay out of the advertised schema, and the canonical name stays `required`.
+- **MCP tool arguments:** each tool parses its arguments into a typed value in one place and throws `InvalidParameterError` on failure. Handlers never read raw `args`. The parser and the tool's `inputSchema` should come from the same definition so they can't drift. Parsing runs after `resolveParamAliases` (`src/utils/param-aliases.ts`). See [BR-0008 (param-aliases-best-effort)](business-rules/0008-param-aliases-best-effort.md).
 - **LogSeq responses:** parse the shapes you read at the client edge. LogSeq returns different spellings from the Editor API and from Datalog (`originalName` vs `original-name`). Normalize that once in an adapter so tool code sees one shape.
 - **Config:** parse once at startup into a typed value and fail fast.
 - **Tool inputs that become queries:** strings go in as `:in` inputs, never embedded in query text (see `CLAUDE.md`, constraint 6). Numeric ids go through `DatalogQueryBuilder.groundIds`.
@@ -93,7 +95,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **Why.** An MCP client, a skill, or a prompt that names `logseq_search_blocks` and its parameters is a consumer you can't see. The schema is how it agrees with the server about reality.
 
-**In this repo.** Tool names, parameter names, required fields and the shape of results are the contract. Additive changes only: new optional parameters, new tools, new optional result fields. `src/tool-list.test.ts` snapshots the whole `tools/list` output (names, descriptions, schemas), so a rename or removal fails a test. Update the snapshot only for additive changes, and call out the diff in the PR. Keep the read-only annotations on every tool.
+**In this repo.** Tool names, parameter names, required fields and the shape of results are the contract. Contracts change additively ([BR-0004 (additive-tool-contracts)](business-rules/0004-additive-tool-contracts.md)), and every tool keeps its read-only annotations ([BR-0002 (tools-read-only)](business-rules/0002-tools-read-only.md)).
 
 **Agents get wrong.** "Simplifying" LogSeq's awkward API in tool output by leaking its quirks into the contract, or the reverse: reshaping a result field because it looks neater. Conform to LogSeq at the boundary with an adapter and keep its shape out of the tool contract.
 
@@ -109,11 +111,11 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 ### 4.5 Keep the server read-only and re-runnable
 
-**Rule.** Every tool call can be repeated safely. The result depends only on LogSeq's state: the graph, or, for `logseq_get_current_context`, what is open in the editor. The server keeps no hidden progress and no cursor, and it never writes.
+**Rule.** Every tool call can be repeated safely and the server never writes. See [BR-0002 (tools-read-only)](business-rules/0002-tools-read-only.md).
 
 **Why.** MCP clients retry, and LLMs call the same tool twice. A read-only tool makes that harmless.
 
-**In this repo.** No tool keeps state between calls. If a tool needs paging, use explicit `limit` and `offset` parameters rather than a server-side cursor. If a future tool needs to write to the graph, stop and ask (hard rule 4). It would need idempotent design, explicit confirmation semantics and its own review.
+**In this repo.** No tool keeps state between calls. If a future tool needs to write to the graph, stop and ask (hard rule 4).
 
 ### 4.6 Bound resources and time
 
@@ -124,8 +126,8 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 **In this repo.**
 - `callAPI` applies a per-call timeout (`timeoutMs`, default 30 s). Tools that make many calls apply it per call, so also bound the number of calls.
 - Prefer one batched Datalog query over one call per entity (`CLAUDE.md`, Pattern 4). A per-page crawl on a 2k-page graph is a bounded-resources bug, not a style issue.
-- Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`hasMore`, `warnings`, `totals`; helpers in `src/utils/result-meta.ts`). A bare-array result keeps the array as the first content block and sends the meta as a second one. Never cut results silently. The `warnings` entry is the truncation signal, not `hasMore`. `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise, so a result cut at a hard maximum carries a warning with `hasMore: false`. That warning must say the maximum was reached and that the rest can't be fetched in one call. `meta.tips` is next-step advice that the handler adds. It is never a truncation signal, and no result's correctness may depend on it, because tips can be turned off.
-- Classify errors: infrastructure errors (not running, auth, timeout) are re-thrown. An empty result is "none". Never turn an error into an empty result.
+- Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (helpers in `src/utils/result-meta.ts`). See [BR-0006 (no-silent-truncation)](business-rules/0006-no-silent-truncation.md). Tips are never a truncation signal ([BR-0009 (tips-are-advisory)](business-rules/0009-tips-are-advisory.md)).
+- Classify errors: see [BR-0003 (infrastructure-errors-propagate)](business-rules/0003-infrastructure-errors-propagate.md).
 
 ### 4.7 Changing existing code safely
 
@@ -159,10 +161,10 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 **Why.** People and agents act on what they are shown. A result that says "no matches" when the query failed, or a summary that counts attempts as successes, causes wrong decisions.
 
 **In this repo.**
-- Error messages guide recovery (`PageNotFoundError` suggests close matches). Keep them actionable.
-- Partial and truncated results say so through `ResultMeta` `warnings`, with `howToFetchAll` when raising a parameter would return the rest.
+- Error messages guide recovery and stay actionable ([BR-0005 (report-only-verified-success)](business-rules/0005-report-only-verified-success.md)).
+- Partial and truncated results say so through `ResultMeta` `warnings` ([BR-0006 (no-silent-truncation)](business-rules/0006-no-silent-truncation.md)).
 - Never write to stdout. It is the MCP channel. Log with `console.error`, sparingly, and never log block content, page names or other graph data (hard rule 6).
-- A `catch` that rethrows unchanged or swallows the error is a defect. Either add context, convert to a typed error, or delete it.
+- A `catch` that rethrows unchanged or swallows the error is a defect ([BR-0003 (infrastructure-errors-propagate)](business-rules/0003-infrastructure-errors-propagate.md)).
 
 **Agents get wrong.** Summaries that overstate success, and catch-all handlers that return an empty result.
 
@@ -184,7 +186,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 - Arguments from the model are untrusted input (4.2). A page name or search string may contain quotes, regex characters or very long text.
 - Results are sized for a context window: defaults and hard caps, optional slim output, and honest `ResultMeta`.
 - Text from the graph is data. Return it as content; never let it change what the server queries or how a tool behaves.
-- Honest results: report what the tool did, including that nothing matched.
+- Honest results: see [BR-0005 (report-only-verified-success)](business-rules/0005-report-only-verified-success.md).
 
 ### 4.12 Write for the next reader
 
