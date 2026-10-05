@@ -21,6 +21,77 @@ The LogSeq instance this server is developed against is the maintainer's **perso
 
 ---
 
+## Development Workflow
+
+Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.com/users/eborden/projects/1) project board. The main session orchestrates. Subagents implement and review.
+
+### Plans live in issues
+- Write a plan as GitHub issues, not as a file in `docs/plans/` and not only in the conversation. (`docs/plans/` holds old plans for reference. Don't add to it.)
+- Split anything multi-part into sub-issues linked to a parent. Record sequencing (waves, dependencies) in the parent or a comment on it. Close the parent when its sub-issues are done.
+- Sequence in waves so at most one open PR touches a given file area. Guardrails and conventions first, features next, output-wide changes last.
+- Add new issues to the board: *Backlog*, or *Ready* once the maintainer has approved the plan. When a plan changes, edit the issues (scope comments, new sub-issues, close obsolete ones). Don't keep a separate plan document.
+
+### Board statuses
+Flow: **Backlog → Ready → In progress → In review → Done**. Move an item to *In progress* when work starts, to *In review* when its PR opens (add the PR to the board too), and to *Done* on merge.
+
+```bash
+gh project item-add 1 --owner eborden --url <issue-or-pr-url>
+gh project item-edit 1 --owner eborden --url <issue-or-pr-url> --field Status --value "In review"
+gh project item-list 1 --owner eborden --format json    # items[].status
+```
+
+These need the `project` scope: `gh auth refresh -s project`.
+
+### Ready items go to subagents
+- **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, reviews the PR and updates the board.
+- Each subagent works in its own git worktree branched from `origin/main`.
+- Run subagents in parallel only when their files don't overlap. Give each a distinct anchor for new `DatalogQueryBuilder` methods and its own new test file.
+- Subagents open PRs and don't merge. They stage files by explicit path and never commit `node_modules`, `dist`, local settings or draft docs.
+
+### PR conventions
+- Atomic commits, `Closes #N`, a design section, a test plan with checkboxes, and approximate measurements (no graph data, see Privacy).
+- Rebase-merge so the atomic commits stay on `main`. Delete the branch on merge.
+
+### Code review (required for every PR)
+1. After a PR opens, a **separate reviewer subagent** reviews it. It starts fresh, with only the PR number, the linked issue and this file.
+2. It posts **one review with inline comments** on specific lines. Each comment says what's wrong, why, and what to do. Focus on correctness, the constraints in this file, privacy, test gaps and contract changes. No nits about style the codebase doesn't enforce.
+   ```bash
+   gh api repos/eborden/logseq-mcp-server/pulls/<n>/reviews --input review.json
+   # review.json: {"event": "COMMENT", "body": "...",
+   #   "comments": [{"path": "src/x.ts", "line": 12, "side": "RIGHT", "body": "..."}]}
+   ```
+   Use `event: COMMENT`, never `REQUEST_CHANGES` or `APPROVE`. Every PR is opened by the same GitHub account as the reviewer, and GitHub rejects those two events on your own PR.
+3. A fixer subagent (the author or a fresh one) handles each thread. It either fixes it and replies with the commit SHA, or replies with a concrete reason for not changing it.
+   ```bash
+   gh api repos/eborden/logseq-mcp-server/pulls/<n>/comments/<comment-id>/replies -f body="Fixed in <sha>"
+   ```
+4. The reviewer re-checks each reply and **resolves** the threads it accepts. Threads it doesn't accept stay open. A disagreement that survives one round goes to the maintainer.
+   ```bash
+   # thread ids come from the reviewThreads query in step 5
+   gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread-id>"}) { thread { isResolved } } }'
+   ```
+5. **Merge gate: no PR merges while any review thread is unresolved.** Dismissing a comment means replying with the reason and resolving the thread. Nothing is dropped silently.
+   ```bash
+   gh api graphql -f query='query { repository(owner: "eborden", name: "logseq-mcp-server") { pullRequest(number: <n>) { reviewThreads(first: 100) { nodes { id isResolved } } } } }'
+   ```
+   The PR is clear only when every node has `isResolved: true`, or there are none.
+
+### Verification before merge
+Done by whoever merges:
+- Privacy grep of the diff and the PR body
+- `npx tsc --noEmit`
+- `npx vitest run src`
+- `npm run test:integration` against the live graph (read-only)
+- `npx tsx scripts/measure-api-calls.ts` still runs
+- A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
+
+### Merge policy
+- **The maintainer merges by default.** Claude opens PRs and doesn't merge them.
+- Claude may merge its own PRs only when the maintainer has explicitly allowed it for a specific batch of work. Ask at the start of each new batch. Don't assume.
+- Even then, the verification and the merge gate above still apply. Raise decisions that belong to the maintainer (behaviour changes, publishing, accounts) instead of merging past them.
+
+---
+
 ## Overview
 
 This is an MCP (Model Context Protocol) server that provides Claude with 14 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
