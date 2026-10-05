@@ -1,5 +1,26 @@
 # LogSeq MCP Server - Technical Context
 
+## Privacy: Never Commit Details From the Personal Graph
+
+The LogSeq instance this server is developed against is the maintainer's **personal** graph. Integration tests, probes and scripts read real data from it. None of that data may leave the machine through this repo or its GitHub project.
+
+**Never put any of the following in committed files** (code, tests, fixtures, docs, skills, CLAUDE.md), **commit messages, GitHub issues, PR descriptions or comments:**
+- Page names, journal titles, tags or property values from the graph
+- Block content, quotes or paraphrases of what the graph says
+- People's names (journals mention real colleagues, friends and family)
+- Dates of specific journal entries, or anything that reveals what happened on a given day
+- Raw output from `scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts` or integration-test runs. Their output includes real page names.
+
+**Do instead:**
+- Use made-up examples: `"Alice"`, `"Bob"`, `"my page"`, `"project atlas"`, `"20250101"`.
+- Report measurements as approximate aggregates without names: "~2k-page graph", "a hub page with ~100 neighbours", "~120 API calls".
+- When a test needs data shaped like the real graph, write a synthetic fixture. Don't copy an entity.
+- Before committing or posting anything, grep the diff and text for names you saw in tool output during the session.
+
+**Already in git history:** older commits contain a few real page names that have since been replaced with fictional ones. Removing them would require rewriting history, which is the maintainer's call, not something to do on your own.
+
+---
+
 ## Overview
 
 This is an MCP (Model Context Protocol) server that provides Claude with 13 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
@@ -26,17 +47,17 @@ The server translates high-level queries (e.g., "get context for topic") into ca
 
 Only `build_context`, `get_concept_network` and `get_concept_evolution` use Datalog, and the first two use it only for the page/block lookups. Traversal still goes through `logseq.Editor.getPageLinkedReferences`, one call per page.
 
-Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, 2,189-page graph, hub page with 118 direct neighbours):
+Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, hub page with ~100 direct neighbours):
 
 | Tool | API calls | Time | Notes |
 |---|---|---|---|
 | `build_context` | 3 | ~0.1s | 2 Datalog + 1 linked refs. Meets the goal. |
 | `get_context_for_query` (1 topic) | 3 | ~0.3s | Delegates to `build_context` |
 | `get_concept_network` depth=1 | 2 | ~0.2s | |
-| `get_concept_network` depth=2 | 119 | ~3s | One `getPageLinkedReferences` per frontier page, inbound only (#3) |
-| `search_blocks` | 133 | ~1.5-3s | `getAllPages` + `getPageBlocksTree` per page until the limit fills (#4) |
+| `get_concept_network` depth=2 | ~120 | ~3s | One `getPageLinkedReferences` per frontier page, inbound only (#3) |
+| `search_blocks` | ~130 | ~1.5-3s | `getAllPages` + `getPageBlocksTree` per page until the limit fills (#4) |
 | `query_by_date_range` (7 days) | 7 | ~0.9s | `getAllPages` + one call per journal day (#5) |
-| `query_by_property` | 2,177 | ~23s | `getAllPages` + one call per page in the graph |
+| `query_by_property` | ~2k (one per page) | ~20s+ | `getAllPages` + one call per page in the graph |
 
 Re-run the script after changing any of these tools, and update this table.
 
@@ -58,8 +79,8 @@ Every constraint below marked **Verified** is reproduced by `npx tsx scripts/pro
 | Call | Rows |
 |---|---|
 | `datascriptQuery(query-with-embedded-literal)` | 1 |
-| `datascriptQuery(query-with-:in, "senior leadership")` (bare string) | **0** |
-| `datascriptQuery(query-with-:in, "\"senior leadership\"")` (EDN-quoted) | 1 |
+| `datascriptQuery(query-with-:in, "my page")` (bare string) | **0** |
+| `datascriptQuery(query-with-:in, "\"my page\"")` (EDN-quoted) | 1 |
 
 **Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted.
 
@@ -174,7 +195,7 @@ const blocks = (blockResults || []).map(r => r[0]);
 **References:**
 - Discovered in: commit d6c3151 "fix: handle pages without blocks"
 - Pattern used in: `buildContextForTopic` in `src/tools/build-context.ts` (page query, then blocks query)
-- Empty pages are common: 1,372 of 2,189 pages in the reference graph are non-journal pages with no file (link targets only)
+- Empty pages are common: in a journal-heavy graph, most non-journal pages may have no file at all (they exist only as link targets)
 
 ---
 
@@ -210,8 +231,8 @@ LogSeq normalizes page names to lowercase in the `:block/name` attribute, but pr
 **Schema:**
 ```
 Page entity:
-  :block/name          - Lowercase normalized name (e.g., "christy")
-  :block/original-name - Original casing (e.g., "Christy")
+  :block/name          - Lowercase normalized name (e.g., "alice")
+  :block/original-name - Original casing (e.g., "Alice")
   :db/id              - Numeric ID
 ```
 
@@ -228,9 +249,9 @@ function getPage(pageName: string) {
 }
 
 // All these work correctly:
-getPage('Christy')  // ✅ Finds "christy"
-getPage('christy')  // ✅ Finds "christy"
-getPage('CHRISTY')  // ✅ Finds "christy"
+getPage('Alice')  // ✅ Finds "alice"
+getPage('alice')  // ✅ Finds "alice"
+getPage('ALICE')  // ✅ Finds "alice"
 ```
 
 **Why:** This matches LogSeq's own behavior - the UI is case-insensitive because it lowercases before lookup.
@@ -302,7 +323,7 @@ const relatedData = (relatedResults || []).map(r => r[0]);
 
 Instead of recursive queries or N sequential API calls, use BFS with batched queries at each depth level.
 
-> **Status: not yet implemented.** `get-concept-network.ts` currently runs the per-page loop shown under "Traditional Approach" (one `getPageLinkedReferences` call per frontier page, inbound links only), and `getConnectedPages` below doesn't exist yet. It's tracked in #3. Whatever implements this pattern must cap `maxNodes` and per-page fan-out: journal pages link to almost everything, and the depth-2 walk measured above reached 213 nodes from one hub.
+> **Status: not yet implemented.** `get-concept-network.ts` currently runs the per-page loop shown under "Traditional Approach" (one `getPageLinkedReferences` call per frontier page, inbound links only), and `getConnectedPages` below doesn't exist yet. It's tracked in #3. Whatever implements this pattern must cap `maxNodes` and per-page fan-out: journal pages link to almost everything, and the depth-2 walk measured above reached ~200 nodes from one hub.
 
 **Traditional Approach (Inefficient):**
 ```typescript
@@ -326,7 +347,7 @@ for (let depth = 1; depth <= maxDepth; depth++) {
 }
 ```
 
-**Performance:** the target is maxDepth + 1 calls. Today, depth 2 from a hub with 118 neighbours makes 119 calls (see "Current Implementation Status").
+**Performance:** the target is maxDepth + 1 calls. Today, depth 2 from a hub with ~100 neighbours makes ~120 calls (see "Current Implementation Status").
 
 **Query Builder Pattern (proposed):**
 ```typescript
@@ -378,7 +399,7 @@ export function buildQuery(pageName: string) {
 
 ### Pattern 4: No Per-Page Crawls
 
-Never call `logseq.Editor.getAllPages` and then make one call per page. On a 2,189-page graph, `query_by_property` makes 2,177 calls and takes about 23s this way.
+Never call `logseq.Editor.getAllPages` and then make one call per page. On a ~2k-page graph, `query_by_property` makes ~2k calls (one per page) and takes ~20s+ this way.
 
 Use one Datalog query, filtering in the query with `includes?` / `re-find`, or batched queries with `[(ground [ids...]) [?id ...]]`. `search_blocks`, `query_by_date_range` and `query_by_property` still crawl (#4, #5).
 
@@ -472,7 +493,7 @@ Quick reference checklist for future work:
 - [ ] `:block/journal-day` is an integer `YYYYMMDD` (e.g. `20260422`). Parse its digits; never pass it to `new Date()`.
 - [ ] `logseq.Editor.getBlock` returns `page` and `parent` as bare `{id}` objects. Resolve them; don't expect names.
 - [ ] `:block/path-refs` includes refs inherited from ancestor blocks. Use it for "anything under a block tagged X".
-- [ ] `:block/updated-at` is missing on some pages (1,989 of 2,189 have it). Use `get-else` with a default.
+- [ ] `:block/updated-at` is missing on some pages (roughly 1 in 10 pages lacked it in testing). Use `get-else` with a default.
 - [ ] Many pages are empty link targets with no blocks or file. Test with them.
 
 **HTTP API behaviour** (verified)
