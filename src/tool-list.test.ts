@@ -22,6 +22,8 @@ import { LogseqClient } from './client.js';
  * chars / 4) across 13 tools. The budget is that plus roughly 15% headroom.
  * Adding logseq_get_current_context (#15) brought it to 16,660 characters across 14 tools,
  * still inside the budget, so the budget was not raised.
+ * Adding the resolve_refs parameter to four tools (#18) added 568 characters (about 140 tokens),
+ * bringing it to 17,651, also inside the budget.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.

@@ -64,6 +64,11 @@ const TOOLS = [
           description: 'Whether to include child blocks/pages',
           default: false,
         },
+        resolve_refs: {
+          type: 'boolean',
+          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
+          default: false,
+        },
       },
       required: ['page_name'],
     },
@@ -97,6 +102,11 @@ const TOOLS = [
         include_children: {
           type: 'boolean',
           description: 'Whether to include child blocks',
+          default: false,
+        },
+        resolve_refs: {
+          type: 'boolean',
+          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
           default: false,
         },
       },
@@ -251,6 +261,11 @@ const TOOLS = [
           description: 'Include temporal context for journal pages (default: true)',
           default: true,
         },
+        resolve_refs: {
+          type: 'boolean',
+          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
+          default: false,
+        },
       },
       required: ['topic_name'],
     },
@@ -322,6 +337,11 @@ const TOOLS = [
           type: 'number',
           description: 'Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it',
           default: 10,
+        },
+        resolve_refs: {
+          type: 'boolean',
+          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
+          default: false,
         },
       },
     },
@@ -426,7 +446,9 @@ export function createServer(client: LogseqClient): Server {
         case 'logseq_get_page': {
           const pageName = args?.page_name as string;
           const includeChildren = (args?.include_children as boolean) ?? false;
-          const result = await getPage(client, pageName, includeChildren);
+          const result = await getPage(client, pageName, includeChildren, {
+            resolveRefs: args?.resolve_refs === true,
+          });
           return {
             content: [
               {
@@ -453,7 +475,9 @@ export function createServer(client: LogseqClient): Server {
         case 'logseq_get_block': {
           const blockUuid = args?.block_uuid as string;
           const includeChildren = (args?.include_children as boolean) ?? false;
-          const result = await getBlock(client, blockUuid, includeChildren);
+          const result = await getBlock(client, blockUuid, includeChildren, {
+            resolveRefs: args?.resolve_refs === true,
+          });
           return {
             content: [
               {
@@ -545,7 +569,8 @@ export function createServer(client: LogseqClient): Server {
             maxBlocks: args?.max_blocks as number | undefined,
             maxRelatedPages: args?.max_related_pages as number | undefined,
             maxReferences: args?.max_references as number | undefined,
-            includeTemporalContext: args?.include_temporal_context as boolean | undefined
+            includeTemporalContext: args?.include_temporal_context as boolean | undefined,
+            resolveRefs: args?.resolve_refs === true
           };
           const result = await buildContextForTopic(client, topicName, options);
           return {
@@ -585,6 +610,7 @@ export function createServer(client: LogseqClient): Server {
             slimResults: (args?.slim_results as boolean) ?? false,
             includeContent: (args?.include_content as boolean) ?? true,
             topConceptsLimit: args?.top_concepts_limit as number | undefined,
+            resolveRefs: args?.resolve_refs === true,
           });
           return {
             content: [

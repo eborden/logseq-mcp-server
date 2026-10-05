@@ -45,6 +45,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "description": "Maximum number of related pages to include (default: 10)",
           "type": "number",
         },
+        "resolve_refs": {
+          "default": false,
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "type": "boolean",
+        },
         "topic_name": {
           "description": "Name of the topic to build context for",
           "type": "string",
@@ -120,6 +125,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "include_children": {
           "default": false,
           "description": "Whether to include child blocks",
+          "type": "boolean",
+        },
+        "resolve_refs": {
+          "default": false,
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
           "type": "boolean",
         },
       },
@@ -367,6 +377,11 @@ Returns page: null with a message when no page is open. Reflects live UI state."
           "description": "Name of the page to retrieve",
           "type": "string",
         },
+        "resolve_refs": {
+          "default": false,
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "type": "boolean",
+        },
       },
       "required": [
         "page_name",
@@ -454,6 +469,11 @@ Returns page: null with a message when no page is open. Reflects live UI state."
             "year_to_date",
           ],
           "type": "string",
+        },
+        "resolve_refs": {
+          "default": false,
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "type": "boolean",
         },
         "search_term": {
           "description": "Optional search term to filter blocks",
