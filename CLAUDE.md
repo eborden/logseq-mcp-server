@@ -700,6 +700,7 @@ Checklist for new Datalog-based tools:
    - Fail loud if no real data is available (never skip; see Integration Test Requirements)
 
 5. **Documentation** - Update MCP tool handler in `src/index.ts`
+   - Give the tool `annotations: readOnlyAnnotations('Title')` (a guard test in `src/index.test.ts` fails without it)
 
 6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
 

@@ -12,6 +12,43 @@ describe('MCP Server', () => {
     expect(typeof server.setRequestHandler).toBe('function');
   });
 
+  describe('tool annotations', () => {
+    async function listTools() {
+      const server = createServer(new LogseqClient({ apiUrl: 'http://localhost:12315', authToken: 'test-token-123' }));
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const mcpClient = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
+      await Promise.all([server.connect(serverTransport), mcpClient.connect(clientTransport)]);
+      try {
+        return (await mcpClient.listTools()).tools;
+      } finally {
+        await mcpClient.close();
+      }
+    }
+
+    it('lists all 13 tools', async () => {
+      expect(await listTools()).toHaveLength(13);
+    });
+
+    it('marks every tool read-only with a title (server never writes to LogSeq)', async () => {
+      const tools = await listTools();
+      for (const tool of tools) {
+        expect(tool.annotations?.readOnlyHint, `${tool.name} must set readOnlyHint: true`).toBe(true);
+        expect(tool.annotations?.title, `${tool.name} must set a title`).toBeTruthy();
+      }
+    });
+
+    it('declares non-destructive, idempotent, closed-world hints on every tool', async () => {
+      const tools = await listTools();
+      for (const tool of tools) {
+        expect(tool.annotations, tool.name).toMatchObject({
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        });
+      }
+    });
+  });
+
   describe('client errors reach the MCP caller', () => {
     const config = { apiUrl: 'http://localhost:12315', authToken: 'test-token-123' };
     const realFetch = global.fetch;
