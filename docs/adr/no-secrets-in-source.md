@@ -5,7 +5,7 @@
 The repository is public (CLAUDE.md, Privacy). The server needs one secret, the LogSeq API token, and the release workflow needs another, the npm token.
 
 - The LogSeq token has come from `~/.logseq-mcp/config.json`, outside the repository, since the server's first commit (c8a9301). The plugin manifest carries no secrets for the same reason (`ship-as-claude-code-plugin`).
-- Issue #8 asked for an actionable error on a rejected token. PR #26 added `LogSeqAuthError`, whose message "never includes the token", and pinned that in tests.
+- Issue #8 asked for an actionable error on a rejected token, and PR #26 added `LogSeqAuthError`. What that error says is recorded in CLAUDE.md, Common Gotchas, "HTTP API behaviour".
 - The npm token is the `NPM_TOKEN` repository secret, read only by `.github/workflows/publish.yml` (issue #46, PR #70).
 - The foundations doc (PR #38) wrote the rule down as hard rule 6: "No secrets in source, and no personal graph data in committed files or logs."
 
@@ -19,7 +19,7 @@ The graph-data half of hard rule 6 is a promise to the user, kept in the busines
 
 ## Consequences
 
-- Error messages name the config field to fix (`authToken`), never its value.
+- Error messages point at the config field to fix (`authToken`).
 - Nothing scans commits for secrets, so a pasted token is caught only by review.
 
 ## Status
@@ -33,3 +33,5 @@ Date: 2026-10-05
 - test: `src/client.test.ts` (the LogSeqAuthError message never includes the token)
 - test: `src/index.test.ts` (the same through the MCP caller)
 - reviewer: No token, key or password appears in a diff, fixture, log line or error message.
+
+Not mechanised yet, and no issue is open for it: secret scanning of commits and PRs (for example GitHub secret scanning or a scanner in CI).
