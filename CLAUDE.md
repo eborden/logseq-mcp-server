@@ -63,18 +63,21 @@ These need the `project` scope: `gh auth refresh -s project`.
    Use `event: COMMENT`, never `REQUEST_CHANGES` or `APPROVE`. Every PR is opened by the same GitHub account as the reviewer, and GitHub rejects those two events on your own PR.
 3. A fixer subagent (the author or a fresh one) handles each thread. It either fixes it and replies with the commit SHA, or replies with a concrete reason for not changing it.
    ```bash
+   # <comment-id> is comments.nodes[0].databaseId from the step 5 query
    gh api repos/eborden/logseq-mcp-server/pulls/<n>/comments/<comment-id>/replies -f body="Fixed in <sha>"
    ```
-4. The reviewer re-checks each reply and **resolves** the threads it accepts. Threads it doesn't accept stay open. A disagreement that survives one round goes to the maintainer, who resolves the thread or tells the fixer what to change. It stays open until then.
+4. The reviewer re-checks each reply and **resolves** the threads it accepts. Threads it doesn't accept stay open. When done, it posts a short closing review (`event: COMMENT`, no inline comments) so the gate can see a review on the final commit. A disagreement that survives one round goes to the maintainer, who resolves the thread or tells the fixer what to change. It stays open until then.
    ```bash
-   # thread ids come from the reviewThreads query in step 5
+   # <thread-id> is nodes[].id from the step 5 query
    gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread-id>"}) { thread { isResolved } } }'
    ```
-5. **Merge gate: no PR merges while any review thread is unresolved.** Dismissing a comment means replying with the reason and resolving the thread. Nothing is dropped silently.
+5. **Merge gate: no PR merges while any review thread is unresolved, and none merges without a posted reviewer-subagent review on its head commit.** Dismissing a comment means replying with the reason and resolving the thread. Nothing is dropped silently. This one read-only query lists the threads (with the ids steps 3 and 4 need) and the gate result:
    ```bash
-   gh api graphql -f query='query { repository(owner: "eborden", name: "logseq-mcp-server") { pullRequest(number: <n>) { reviewThreads(first: 100) { nodes { id isResolved } } } } }'
+   gh api graphql -f query='query { repository(owner: "eborden", name: "logseq-mcp-server") { pullRequest(number: <n>) { headRefOid reviews(first: 100) { nodes { state submittedAt commit { oid } } } reviewThreads(first: 100) { nodes { id isResolved comments(first: 1) { nodes { databaseId path body } } } } } } }'
+   # gate summary: add this flag to the same command
+   #   --jq '.data.repository.pullRequest as $pr | {reviewsOnHead: ([$pr.reviews.nodes[] | select(.commit.oid == $pr.headRefOid)] | length), unresolvedThreads: ([$pr.reviewThreads.nodes[] | select(.isResolved | not)] | length)}'
    ```
-   The PR is clear only when every node has `isResolved: true`, or there are none.
+   The PR is clear only when `reviewsOnHead` is at least 1 **and** `unresolvedThreads` is 0. Zero threads with `reviewsOnHead: 0` is not clear, because an unreviewed PR also has no threads. A push after the last review (fixes, a rebase) moves the head, so the reviewer posts a new closing review (step 4).
 
 ### Verification before merge
 Done by whoever merges:
