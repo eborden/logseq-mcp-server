@@ -12,7 +12,7 @@ describe('getPage', () => {
     } as any;
   });
 
-  it('should call logseq.Editor.getPage with page name only when includeChildren is false', async () => {
+  it('should call logseq.Editor.getPage with page name only and skip the blocks tree when includeChildren is false', async () => {
     const mockPage: PageEntity = {
       id: 1,
       uuid: 'page-uuid-123',
@@ -24,28 +24,58 @@ describe('getPage', () => {
 
     const result = await getPage(mockClient, 'test page', false);
 
+    expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
     expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', ['test page']);
+    expect(mockClient.callAPI).not.toHaveBeenCalledWith(
+      'logseq.Editor.getPageBlocksTree',
+      expect.anything()
+    );
     expect(result).toEqual(mockPage);
+    expect(result.children).toBeUndefined();
   });
 
-  it('should call logseq.Editor.getPage with page name and options when includeChildren is true', async () => {
+  it('should fetch the blocks tree separately and set it as children when includeChildren is true', async () => {
     const mockPage: PageEntity = {
       id: 1,
       uuid: 'page-uuid-123',
       name: 'test page',
-      originalName: 'Test Page',
-      children: []
+      originalName: 'Test Page'
     };
+    const tree = [
+      { id: 10, uuid: 'block-uuid-1', content: 'First block' },
+      { id: 11, uuid: 'block-uuid-2', content: 'Second block' }
+    ];
 
-    (mockClient.callAPI as any).mockResolvedValue(mockPage);
+    (mockClient.callAPI as any).mockImplementation(async (method: string) => {
+      if (method === 'logseq.Editor.getPage') return { ...mockPage };
+      if (method === 'logseq.Editor.getPageBlocksTree') return tree;
+      throw new Error(`unexpected call: ${method}`);
+    });
 
     const result = await getPage(mockClient, 'test page', true);
 
-    expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', [
-      'test page',
-      { includeChildren: true }
-    ]);
-    expect(result).toEqual(mockPage);
+    expect(mockClient.callAPI).toHaveBeenCalledTimes(2);
+    expect(mockClient.callAPI).toHaveBeenNthCalledWith(1, 'logseq.Editor.getPage', ['test page']);
+    expect(mockClient.callAPI).toHaveBeenNthCalledWith(2, 'logseq.Editor.getPageBlocksTree', ['test page']);
+    expect(result.children).toEqual(tree);
+  });
+
+  it('should leave children unset when the blocks tree is empty', async () => {
+    const mockPage: PageEntity = {
+      id: 1,
+      uuid: 'page-uuid-123',
+      name: 'empty page',
+      originalName: 'Empty Page'
+    };
+
+    (mockClient.callAPI as any).mockImplementation(async (method: string) =>
+      method === 'logseq.Editor.getPage' ? { ...mockPage } : []
+    );
+
+    const result = await getPage(mockClient, 'empty page', true);
+
+    expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPageBlocksTree', ['empty page']);
+    expect(result.children).toBeUndefined();
   });
 
   it('should throw error if page not found (result is null)', async () => {
@@ -100,41 +130,6 @@ describe('getPage', () => {
 
     expect(result.journal).toBe(true);
     expect(result.journalDay).toBe(20241120);
-  });
-
-  it('should handle pages with children when includeChildren is true', async () => {
-    const mockPage: PageEntity = {
-      id: 1,
-      uuid: 'page-uuid-123',
-      name: 'test page',
-      originalName: 'Test Page',
-      children: [
-        {
-          id: 10,
-          uuid: 'block-uuid-1',
-          content: 'First block',
-          page: { id: 1 },
-          parent: { id: 1 },
-          left: { id: 1 }
-        },
-        {
-          id: 11,
-          uuid: 'block-uuid-2',
-          content: 'Second block',
-          page: { id: 1 },
-          parent: { id: 1 },
-          left: { id: 10 }
-        }
-      ]
-    };
-
-    (mockClient.callAPI as any).mockResolvedValue(mockPage);
-
-    const result = await getPage(mockClient, 'test page', true);
-
-    expect(result.children).toHaveLength(2);
-    expect(result.children?.[0]).toHaveProperty('content', 'First block');
-    expect(result.children?.[1]).toHaveProperty('content', 'Second block');
   });
 
   it('should propagate errors from the API client', async () => {
