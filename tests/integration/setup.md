@@ -43,7 +43,7 @@ This directory contains integration tests that require a live LogSeq instance wi
 - an alias declared by two or more pages (e.g. two pages that both say `alias:: x`);
 - a namespace leaf used under two or more namespaces (`a/leaf`, `b/leaf`) with no page or alias named just `leaf`.
 
-`output-format.test.ts` (#43) needs a page with a file and at least 3 blocks, a page referenced from elsewhere, and the same alias and journal data as page resolution. It asserts structure only.
+`output-format.test.ts` (#43) needs a page with a file and at least 3 blocks, a page referenced from elsewhere, a page with a property block (properties at the top of the page), and the same alias and journal data as page resolution. It asserts structure only.
 
 `temporal-queries.test.ts` also needs a page that exists but has no file, no blocks, no references and no aliases (a link target nobody links to any more), to check that `get_concept_evolution` returns an empty timeline for a page nothing mentions.
 
