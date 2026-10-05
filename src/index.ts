@@ -39,8 +39,8 @@ import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
 import { wantsSlim } from './utils/slim-entities.js';
 import { parseCompact, parseFormat } from './utils/output-format.js';
-import { compactTopicContext } from './utils/compact.js';
-import { renderTopicContext } from './utils/markdown-context.js';
+import { compactQueryContext, compactTopicContext } from './utils/compact.js';
+import { renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 
 /**
@@ -323,6 +323,8 @@ const TOOLS = [
           description: 'Maximum number of search results for queries without explicit topics (default: 20)',
           default: 20,
         },
+        format: FORMAT_PARAM,
+        compact: COMPACT_PARAM,
       },
       required: ['query'],
     },
@@ -649,16 +651,19 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_get_context_for_query': {
           const query = args?.query as string;
+          const format = parseFormat(args?.format);
+          const compact = parseCompact(args?.compact);
           const options = {
             maxTopics: args?.max_topics as number | undefined,
             maxSearchResults: args?.max_search_results as number | undefined
           };
           const result = await getContextForQuery(client, query, options);
+          if (format === 'markdown') return textResult(withFooter(renderQueryContext(result, { compact }), result));
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result),
+                text: JSON.stringify(compact ? compactQueryContext(result) : result),
               },
             ],
           };

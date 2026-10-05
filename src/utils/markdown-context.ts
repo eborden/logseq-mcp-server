@@ -1,4 +1,4 @@
-import type { TopicQueryContext } from '../tools/get-context-for-query.js';
+import type { QueryContext, TopicQueryContext } from '../tools/get-context-for-query.js';
 import type { TopicContext } from '../tools/build-context.js';
 import { buildBlockTrees } from './block-tree.js';
 import {
@@ -119,4 +119,36 @@ export function renderTopicContext(
   }
 
   return `${lines.join('\n').trimEnd()}\n`;
+}
+
+/**
+ * Context for a natural-language query: the topics found, each topic's context one
+ * heading level down, and the keyword search results when the query named no topic.
+ */
+export function renderQueryContext(context: QueryContext, options: Pick<ContextRenderOptions, 'compact'> = {}): string {
+  const { compact = false } = options;
+  const lines: string[] = [`# Context for: ${context.query}`, ''];
+  if (context.extractedTopics.length > 0) {
+    lines.push(`Topics: ${context.extractedTopics.map(t => `[[${t}]]`).join(', ')}`, '');
+  }
+
+  const parts = [lines.join('\n').trimEnd()];
+  for (const topic of context.contexts) {
+    parts.push(renderTopicContext(topic, { compact, headingLevel: 2 }).trimEnd());
+  }
+
+  if (context.searchResults !== undefined) {
+    const results = context.searchResults as Obj[];
+    const outline = renderOutline(
+      results.map(block => ({ ...block, children: [] })),
+      { compact }
+    );
+    parts.push(
+      [heading(2, `Search results (${results.length})`), '', ...(outline.lines.length > 0 ? outline.lines : ['(no matches)'])].join('\n')
+    );
+  } else if (context.contexts.length === 0) {
+    parts.push('(no results)');
+  }
+
+  return `${parts.join('\n\n')}\n`;
 }

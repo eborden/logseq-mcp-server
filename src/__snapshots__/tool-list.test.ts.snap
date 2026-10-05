@@ -246,6 +246,19 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
 **Alternatives:** logseq_build_context for one known topic.",
     "inputSchema": {
       "properties": {
+        "compact": {
+          "default": false,
+          "description": "Block snippets and uuids, no bodies. Read one with logseq_get_block",
+          "type": "boolean",
+        },
+        "format": {
+          "description": "json (default), or markdown for plain text",
+          "enum": [
+            "json",
+            "markdown",
+          ],
+          "type": "string",
+        },
         "max_search_results": {
           "default": 20,
           "description": "Maximum number of search results for queries without explicit topics (default: 20)",
