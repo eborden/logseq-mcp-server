@@ -93,7 +93,8 @@ async function resolveTopics(
  * @param options - `maxFrontier`: cap on pages expanded per hop. When a hop is
  *   cut and the other topic is not found, a `frontier_truncated` warning says
  *   the "not connected" answer may be a false negative. A found connection is
- *   always real.
+ *   always real. Two names of one page (the same name twice, or a page and its alias)
+ *   are not a connection: no walk, no results and a `same_topic` warning.
  * @returns SearchByRelationshipResult with matching blocks. A topic with aliases matches
  *   references written under any of its names (`resolvedAliases` says which); this costs
  *   one extra query for both topics together, and none when neither has an alias.
@@ -158,16 +159,25 @@ export async function searchByRelationship(
       // A's names and ends at any of B's.
       const idA: number | undefined = resolvedA.page?.id;
       const idB: number | undefined = resolvedB.page?.id;
+      const seedIds = idA === undefined ? [] : hasAliases(setA) ? aliasIds(setA) : [idA];
 
-      if (idA !== undefined && idB !== undefined) {
-        const seedIds = hasAliases(setA) ? aliasIds(setA) : [idA];
+      if (idB !== undefined && seedIds.includes(idB)) {
+        // Both topics are names of one page (the same name, or a page and its alias). There
+        // is nothing to connect, and a walk would "find" the page again through its own
+        // links (the `alias::` block refs the alias stub), so say so instead of walking.
+        warnings.push({
+          code: 'same_topic',
+          message:
+            `"${topicA}" and "${topicB}" are names of the same page, so connected-within has nothing to connect. ` +
+            'Ask about two different pages.'
+        });
+      } else if (idA !== undefined && idB !== undefined) {
         const visited = new Set<number>(seedIds);
-        // B's page is the target as before. Its other names are targets too, except those
-        // that are also names of A: the walk starts there, so reaching them proves nothing.
-        const targetIds = new Set([
-          idB,
-          ...(hasAliases(setB) ? aliasIds(setB) : []).filter(id => !visited.has(id))
-        ]);
+        // Any name of B ends the walk, except names B shares with A: the walk starts there,
+        // so reaching them proves nothing. B's own page is never one of them (checked above).
+        const targetIds = new Set(
+          [idB, ...(hasAliases(setB) ? aliasIds(setB) : [])].filter(id => !visited.has(id))
+        );
         // Level-synchronous BFS: one query per hop covers the whole frontier,
         // in both link directions, so the cost is O(maxDistance) calls.
         let frontier = seedIds;
