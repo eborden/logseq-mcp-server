@@ -124,7 +124,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 **In this repo.**
 - `callAPI` applies a per-call timeout (`timeoutMs`, default 30 s). Tools that make many calls apply it per call, so also bound the number of calls.
 - Prefer one batched Datalog query over one call per entity (`CLAUDE.md`, Pattern 4). A per-page crawl on a 2k-page graph is a bounded-resources bug, not a style issue.
-- Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`hasMore`, `warnings`, `totals`; helpers in `src/utils/result-meta.ts`). A bare-array result keeps the array as the first content block and sends the meta as a second one. Never cut results silently.
+- Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`hasMore`, `warnings`, `totals`; helpers in `src/utils/result-meta.ts`). A bare-array result keeps the array as the first content block and sends the meta as a second one. Never cut results silently. The `warnings` entry is the truncation signal, not `hasMore`. `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise, so a result cut at a hard maximum carries a warning with `hasMore: false`. That warning must say the maximum was reached and that the rest can't be fetched in one call.
 - Classify errors: infrastructure errors (not running, auth, timeout) are re-thrown. An empty result is "none". Never turn an error into an empty result.
 
 ### 4.7 Changing existing code safely
