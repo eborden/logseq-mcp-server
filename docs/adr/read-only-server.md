@@ -2,19 +2,19 @@
 
 ## Context
 
-The server connects an LLM to a personal knowledge graph through LogSeq's HTTP API, which can also write: it exposes `logseq.Editor.*` methods that insert, update and remove blocks. A write-capable tool means a model can lose or corrupt notes by mistake, and the graph here is a single person's data.
+The server connects an LLM to a personal knowledge graph through LogSeq's HTTP API, which can also write: it exposes `logseq.Editor.*` methods that insert, update and remove blocks. The server has never called one. It has been read-only since the first commit (2025-11-20), so there is no dated moment when the choice was made, and no early source records why.
 
-Under the MCP spec, a tool with no annotations defaults to possibly destructive and open-world, so clients cannot auto-approve calls even when every tool only reads (issue #9). That was the actual state until PR #28: the server was read-only in behaviour but looked destructive to clients.
+The recorded rationale came later, in the foundations doc (PR #38). Section 4.5: "MCP clients retry, and LLMs call the same tool twice. A read-only tool makes that harmless." It adds that a tool that writes would need "idempotent design, explicit confirmation semantics and its own review", and hard rule 4 makes adding one a contract change that needs the maintainer's sign-off.
 
-The alternative was to add write tools, perhaps behind a flag. The server's value is in reading and navigating the graph, and writing adds risk without being needed for that. Where the user explicitly asks for a summary or links to be recorded, the `logseq-skills` skill does it through the host's own tools, not through this server.
+Inferred, not recorded: a write-capable tool also means a model can lose or corrupt notes by mistake, in a graph that is one person's data, and the server's value is in reading and navigating the graph.
+
+Under the MCP spec, a tool with no annotations defaults to possibly destructive and open-world, so clients cannot auto-approve calls even when every tool only reads (issue #9). That was the state until PR #28 (2026-10-05): the server was read-only in behaviour but looked destructive to clients. The Status date is when PR #28 declared the property in annotations, not when it was chosen.
 
 ## Decision
 
-We keep the server read-only. No tool writes to the graph. Every tool declares `readOnlyHint: true`, `destructiveHint: false` and `openWorldHint: false`, plus a title. A tool is also declared `idempotentHint: true` unless it reads live editor state: `logseq_get_current_context` is read-only but `idempotentHint: false`. The hints live in one shared constant and each tool adds only its title.
+We keep the server read-only. No tool writes to the graph, and every tool declares it through MCP annotations (PR #28). Prompts and resources are read-only too.
 
-Prompts and resources are read-only too. A prompt that produces a summary says to show it in chat, and to write a page only if asked and file access exists.
-
-Adding a tool that writes to the graph is a contract change and needs the maintainer's explicit sign-off, with a new ADR that supersedes this one.
+The invariants that keep this true (which hints each tool declares, the one non-idempotent tool, and the sign-off needed for a tool that writes) live in the business rule `tools-read-only` in `docs/business-rules/` (PR #84) and in foundations hard rule 4. Reversing this decision needs a new ADR that supersedes this one.
 
 ## Consequences
 
