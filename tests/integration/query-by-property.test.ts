@@ -122,9 +122,11 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     for (const block of withProps) {
       for (const [key, v] of Object.entries<any>(block.properties!)) {
         if (!queryable.test(key) || !/[A-Z]/.test(key)) continue;
-        const value = Array.isArray(v) ? v[0] : v;
-        if (!['string', 'number', 'boolean'].includes(typeof value) || String(value) === '') continue;
-        camelCandidates.push({ label: 'camelCase key', key, value: String(value) });
+        // Every element of a set, so the pick doesn't depend on element order
+        for (const value of Array.isArray(v) ? v : [v]) {
+          if (!['string', 'number', 'boolean'].includes(typeof value) || String(value) === '') continue;
+          camelCandidates.push({ label: 'camelCase key', key, value: String(value) });
+        }
       }
     }
     camelCandidates.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
@@ -259,7 +261,8 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     ).toBeDefined();
     const { key, value } = camel!;
     const dashed = key.replace(/([A-Z])/g, '-$1').toLowerCase();
-    expect(dashed).toContain('-');
+    // The stored form must itself pass the tool's property-name rule (lowercase here)
+    expect(dashed).toMatch(/^[a-z0-9][a-z0-9_-]*$/);
 
     const a = (await queryByProperty(client, key, value)) as BlockEntity[];
     const b = (await queryByProperty(client, dashed, value)) as BlockEntity[];
