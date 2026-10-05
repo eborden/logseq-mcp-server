@@ -306,61 +306,28 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 ### Pattern 1: Two-Query Pattern for Optional Data
 
-When related data might not exist (e.g., pages without blocks, pages without connections), split into separate queries rather than using complex or-join patterns.
+When related data might not exist (pages without blocks, pages without connections), split into separate queries instead of an `or-join` (constraint 3):
 
-**Implementation:**
-```typescript
-// Step 1: Get the main entity
-const mainEntity = DatalogQueryBuilder.getPage(pageName);
-const mainResults = await client.executeDatalogQuery(mainEntity.query, ...mainEntity.inputs);
+1. Query the main entity. If it's absent, throw (page-taking tools throw `PageNotFoundError` through the resolver).
+2. Query the related data. An empty result is a valid answer: `(results || []).map(r => r[0])`.
 
-if (!mainResults || mainResults.length === 0) {
-  throw new Error(`Entity not found`);
-}
+Why, and what it costs: [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md).
 
-const entity = mainResults[0][0];
-
-// Step 2: Get related data (may be empty)
-const related = DatalogQueryBuilder.getRelatedData(pageName);
-const relatedResults = await client.executeDatalogQuery(related.query, ...related.inputs);
-
-// Handle empty results
-const relatedData = (relatedResults || []).map(r => r[0]);
-```
-
-**Benefits:**
-- Works with empty data (no or-join complexity)
-- Clear separation of concerns
-- Easy to debug and test
-- Matches HTTP API pattern
-
-**Used in:**
-- `buildContextForTopic` in `src/tools/build-context.ts`: page query, blocks query, then linked references via `getPageLinkedReferences`
+**Used in:** `buildContextForTopic` in `src/tools/build-context.ts`: page query, blocks query, then linked references via `getPageLinkedReferences`.
 
 ---
 
 ### Pattern 2: Multi-Query BFS for Graph Traversal
 
-Instead of recursive queries or N sequential API calls, use BFS with batched queries at each depth level.
+Instead of recursive queries or N sequential API calls, use BFS with one batched query per depth level:
 
-> **Implemented in `get-concept-network.ts` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `maxNodes` 50 (root included) and `maxFanout` 15 new pages per page. Journal pages are leaves unless `expandJournals` is set, and `truncated: true` is set whenever a cap bites. MCP clients set them with `max_nodes` (≤ 500), `max_fanout` (≤ 100) and `expand_journals` on `logseq_get_concept_network`.
-
-**Traditional Approach (Inefficient):**
-```typescript
-// For each page, get connections one at a time
-for (const page of pages) {
-  const connections = await getConnections(page);  // N calls
-}
-```
-
-**Datalog BFS Approach (Efficient):**
 ```typescript
 let currentFrontier = [rootId];
 
 for (let depth = 1; depth <= maxDepth; depth++) {
   // Query ALL pages at current depth in ONE call
-  const query = DatalogQueryBuilder.getConnectedPages(currentFrontier);
-  const results = await client.executeDatalogQuery(query);
+  const query = DatalogQueryBuilder.connectedPages(currentFrontier);
+  const results = await client.executeDatalogQuery(query.query, ...query.inputs);
 
   // Process results for next depth
   currentFrontier = extractNewPages(results);
@@ -369,51 +336,15 @@ for (let depth = 1; depth <= maxDepth; depth++) {
 
 **Performance:** at most maxDepth + 1 calls, asserted by a unit test. Depth 2 from a hub with ~100 neighbours takes 3 calls, down from ~120.
 
-**Query Builder Pattern (simplified):**
-```typescript
-static getConnectedPages(pageIds: number[]): string {
-  return `[:find (pull ?source [*]) (pull ?connected [*]) ?rel-type
-           :where
-           [(ground [${pageIds.join(' ')}]) [?source-id ...]]
-           [?source :db/id ?source-id]
+> **Implemented in `get-concept-network.ts` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `maxNodes` 50 (root included) and `maxFanout` 15 new pages per page. Journal pages are leaves unless `expandJournals` is set, and `truncated: true` is set whenever a cap bites. MCP clients set them with `max_nodes` (≤ 500), `max_fanout` (≤ 100) and `expand_journals` on `logseq_get_concept_network`. Why every walk is capped: [ADR-0011 (bounded-calls-and-results)](docs/adr/0011-bounded-calls-and-results.md).
 
-           (or-join [?source ?connected ?rel-type]
-             ;; Outbound: blocks on source page that reference other pages
-             (and [?block :block/page ?source]
-                  [?block :block/refs ?connected]
-                  [?connected :block/name]
-                  [(ground "outbound") ?rel-type])
-
-             ;; Inbound: blocks on other pages that reference source
-             (and [?block :block/refs ?source]
-                  [?block :block/page ?connected]
-                  [?connected :block/name]
-                  [(ground "inbound") ?rel-type]))]`;
-}
-```
-
-**Real implementation:** `DatalogQueryBuilder.connectedPages` and `getConceptNetwork`. Frontier ids are bound with `groundIds` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
+**Real implementation:** `DatalogQueryBuilder.connectedPages` and `getConceptNetwork`. One `or-join` covers both directions (outbound: blocks on the source page that ref another page; inbound: blocks on another page that ref the source). Frontier ids are bound with `groundIds` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
 
 ---
 
 ### Pattern 3: Case-Insensitive Lookup
 
-Always lowercase page names before passing them to queries to match LogSeq's normalization.
-
-**Standard Pattern:**
-```typescript
-export function buildQuery(pageName: string): DatalogQuery {
-  const pageNameLower = pageName.toLowerCase();
-
-  return {
-    query: `[:find (pull ?page [*])
-             :in $ ?page-name
-             :where
-             [?page :block/name ?page-name]]`,
-    inputs: [pageNameLower]
-  };
-}
-```
+Always lowercase page names in TypeScript before passing them as `:in` inputs, to match `:block/name` (constraints 1, 2 and 5).
 
 **Used in:** `conceptNetwork()`, `getPage()`, `getPageBlocks()` and `getBlocksReferencingPage()` in `src/datalog/queries.ts`.
 
@@ -425,7 +356,7 @@ export function buildQuery(pageName: string): DatalogQuery {
 
 Never call `logseq.Editor.getAllPages` and then make one call per page. On a ~2k-page graph, `query_by_property` used to make ~2k calls (one per page) and take ~10s this way (#33).
 
-Use one Datalog query, filtering in the query with `includes?` / `re-find` / `get` / `contains?`, or batched queries with `[(ground [ids...]) [?id ...]]`. No tool crawls any more.
+Use one Datalog query, filtering in the query with `includes?` / `re-find` / `get` / `contains?`, or batched queries with `[(ground [ids...]) [?id ...]]`. No tool crawls any more. The decision: [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md).
 
 ---
 
