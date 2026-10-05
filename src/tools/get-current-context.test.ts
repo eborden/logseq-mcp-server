@@ -165,7 +165,9 @@ describe('getCurrentContext', () => {
     const result = await getCurrentContext(client);
 
     expect(result.focusedBlock?.children).toHaveLength(1);
-    expect(result.focusedBlock?.children![0]).toMatchObject({ uuid: 'child-1', pageName: 'My Page' });
+    expect(result.focusedBlock?.pageName).toBe('My Page');
+    expect(result.focusedBlock?.children![0]).toMatchObject({ uuid: 'child-1' });
+    expect(result.focusedBlock?.children![0]).not.toHaveProperty('pageName');
   });
 
   it('returns selected blocks', async () => {

@@ -147,7 +147,7 @@ export function toSlimBlock(block: BlockEntity, pageName: string): SlimBlock {
 
   // Recursively transform children
   if (block.children && block.children.length > 0) {
-    slim.children = block.children.map(child => toSlimBlock(child, pageName));
+    slim.children = block.children.map(child => toSlimBlock(child, ''));
   }
 
   return slim;
