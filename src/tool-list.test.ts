@@ -31,6 +31,8 @@ import { LogseqClient } from './client.js';
  * without trimming useful "Can't find" lines or raising the constant again.
  * Saying that page-name parameters take aliases and ISO dates (#41) added 161 characters (about 40 tokens),
  * bringing it to about 14,030. The longest description is 391 characters, inside the cap.
+ * Making slim_results default to true and shortening its description on three tools (#42) removed 39 characters,
+ * bringing it to about 13,990.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.

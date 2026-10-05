@@ -37,6 +37,7 @@ import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
+import { wantsSlim } from './utils/slim-entities.js';
 
 /**
  * Hints shared by every tool. This server only reads from LogSeq, so each tool
@@ -144,8 +145,8 @@ const TOOLS = [
         },
         slim_results: {
           type: 'boolean',
-          description: 'Return slim results (40-50% fewer tokens, essential data only)',
-          default: false,
+          description: 'Slim blocks (default). false returns full entities',
+          default: true,
         },
       },
       required: ['query'],
@@ -168,8 +169,8 @@ const TOOLS = [
         },
         slim_results: {
           type: 'boolean',
-          description: 'Return slim results (40-50% fewer tokens, essential data only)',
-          default: false,
+          description: 'Slim blocks (default). false returns full entities',
+          default: true,
         },
       },
       required: ['property_key', 'property_value'],
@@ -334,8 +335,8 @@ const TOOLS = [
         },
         slim_results: {
           type: 'boolean',
-          description: 'Return slim results (40-50% fewer tokens, essential data only)',
-          default: false,
+          description: 'Slim blocks (default). false returns full entities',
+          default: true,
         },
         include_content: {
           type: 'boolean',
@@ -516,7 +517,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
           const query = args?.query as string;
           const limit = args?.limit as number | undefined;
           const includeContext = (args?.include_context as boolean) ?? false;
-          const slimResults = (args?.slim_results as boolean) ?? false;
+          const slimResults = wantsSlim(args?.slim_results);
           const { results: result, meta } = await searchBlocksWithMeta(client, query, limit, includeContext, slimResults);
 
           return {
@@ -533,7 +534,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         case 'logseq_query_by_property': {
           const propertyKey = args?.property_key as string;
           const propertyValue = args?.property_value as string;
-          const slimResults = (args?.slim_results as boolean) ?? false;
+          const slimResults = wantsSlim(args?.slim_results);
           const result = await queryByProperty(client, propertyKey, propertyValue, slimResults);
           return {
             content: [
@@ -632,7 +633,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
             lastN: args?.last_n as number | undefined,
             preset: args?.preset as string | undefined,
             searchTerm: args?.search_term as string | undefined,
-            slimResults: (args?.slim_results as boolean) ?? false,
+            slimResults: wantsSlim(args?.slim_results),
             includeContent: (args?.include_content as boolean) ?? true,
             topConceptsLimit: args?.top_concepts_limit as number | undefined,
             resolveRefs: args?.resolve_refs === true,
