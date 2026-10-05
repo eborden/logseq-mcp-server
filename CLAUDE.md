@@ -43,7 +43,7 @@ gh project item-list 1 --owner eborden --format json    # items[].status
 These need the `project` scope: `gh auth refresh -s project`.
 
 ### Ready items go to subagents
-- **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, reviews the PR and updates the board.
+- **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, spawns a separate reviewer subagent for each PR it opens (see Code review) and updates the board.
 - Each subagent works in its own git worktree branched from `origin/main`.
 - Run subagents in parallel only when their files don't overlap. Give each a distinct anchor for new `DatalogQueryBuilder` methods and its own new test file.
 - Subagents open PRs and don't merge. They stage files by explicit path and never commit `node_modules`, `dist`, local settings or draft docs.
