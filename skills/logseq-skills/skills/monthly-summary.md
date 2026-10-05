@@ -65,7 +65,7 @@ Read every `Weekly *` page in the month, plus the 1-2 most recent `Monthly *` pa
 **Guard against lossy-of-lossy compression.** The weeklies are themselves compressed, so anything they dropped is invisible from here, and one weak weekly permanently distorts the month. Spot-check the raw journals for the month's highest-salience days — the ones the weeklies flagged with `**Milestone:**` or `**Frustration:**` — rather than trusting the summaries alone:
 
 ```
-logseq_query_by_date_range(start_date=..., end_date=..., slim_results=true)
+logseq_query_by_date_range(start_date=..., end_date=...)
 ```
 
 For the month's overall shape, `query_by_date_range` with `include_content=false` and `top_concepts_limit=20` returns `summary.topConcepts` (`[{ name, count, days }]`) without the blocks. A concept with a high `days` ran through the month, which makes it a candidate for a trajectory in Step 4. Check any candidate against the weeklies, because the roll-up counts links and knows nothing about salience. Skip this when the field is absent.
