@@ -45,6 +45,10 @@ describe('server instructions (#44)', () => {
     }
   });
 
+  it('puts the page outline before get_block as the way into a long page (#43)', () => {
+    expect(SERVER_INSTRUCTIONS).toMatch(/logseq_get_page_outline, then logseq_get_block/);
+  });
+
   it('only names tools that exist', () => {
     const named = SERVER_INSTRUCTIONS.match(/logseq_[a-z_]+/g) ?? [];
     expect(named.length).toBeGreaterThan(0);

@@ -169,6 +169,15 @@ export function buildTips(
       break;
     }
 
+    case 'logseq_get_page_outline': {
+      const blocks: unknown[] = Array.isArray(asObject(result)?.blocks) ? asObject(result)!.blocks : [];
+      // A block with children is the more useful read; otherwise the first block
+      const pick = asObject(blocks.find(b => (asObject(b)?.childCount ?? 0) > 0) ?? blocks[0]);
+      const uuid = nonEmptyString(pick?.uuid);
+      if (uuid) tips.push(`To read a block and its children: ${suggestCall('logseq_get_block', { block_uuid: uuid, include_children: true })}.`);
+      break;
+    }
+
     case 'logseq_get_backlinks': {
       const page = nonEmptyString(a.page_name);
       if (!page || !Array.isArray(result) || result.length === 0) break;

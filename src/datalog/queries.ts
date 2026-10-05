@@ -404,6 +404,31 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * Generate ONE Datalog query for a page's outline (#43): its top-level blocks,
+   * and the direct children of those blocks. The caller counts the children per
+   * parent, so the outline needs no query per block.
+   *
+   * A row is a top-level block when its `parent` is the page, and a child
+   * otherwise. Only the fields the outline reads are pulled; the page is bound by
+   * id (the resolver already has it), so no name is embedded.
+   * @param pageId - Page entity id (`:db/id`), an integer
+   * @returns Query and inputs (none: the id is a validated integer)
+   * @throws Error if `pageId` is not an integer
+   */
+  static pageOutlineBlocks(pageId: number): DatalogQuery {
+    return {
+      query: `[:find (pull ?b [:db/id :block/uuid :block/content :block/left :block/parent])
+             :where
+             ${DatalogQueryBuilder.groundIds([pageId], '?page')}
+             [?page :block/name]
+             (or-join [?page ?b]
+               (and [?b :block/parent ?page] [?b :block/page ?page])
+               (and [?top :block/parent ?page] [?b :block/parent ?top]))]`,
+      inputs: []
+    };
+  }
+
+  /**
    * Generate Datalog query for blocks whose content contains `text`
    * (case-insensitive, literal match), each with its page's name inline.
    *

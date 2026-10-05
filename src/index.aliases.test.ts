@@ -7,6 +7,7 @@ import { PARAM_ALIASES, resolveParamAliases } from './utils/param-aliases.js';
 
 const mocks = vi.hoisted(() => ({
   getPage: vi.fn(async () => ({ name: 'x' })),
+  getPageOutline: vi.fn(async () => ({ page: 'x', blocks: [] })),
   getBacklinks: vi.fn(async () => ({ results: [], meta: null })),
   getBlock: vi.fn(async () => ({ uuid: 'x' })),
   buildContextForTopic: vi.fn(async () => ({ topic: 'x' })),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getConceptEvolution: vi.fn(async () => ({ timeline: [] })),
 }));
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
+vi.mock('./tools/get-page-outline.js', () => ({ getPageOutline: mocks.getPageOutline }));
 vi.mock('./tools/get-backlinks.js', () => ({ getBacklinksWithMeta: mocks.getBacklinks }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
 vi.mock('./tools/build-context.js', () => ({ buildContextForTopic: mocks.buildContextForTopic }));
@@ -23,6 +25,7 @@ vi.mock('./tools/get-concept-evolution.js', () => ({ getConceptEvolution: mocks.
 /** The tool function each aliased MCP tool calls, and which argument index holds the aliased value. */
 const TARGETS: Record<string, { fn: ReturnType<typeof vi.fn>; argIndex: number }> = {
   logseq_get_page: { fn: mocks.getPage, argIndex: 1 },
+  logseq_get_page_outline: { fn: mocks.getPageOutline, argIndex: 1 },
   logseq_get_backlinks: { fn: mocks.getBacklinks, argIndex: 1 },
   logseq_get_block: { fn: mocks.getBlock, argIndex: 1 },
   logseq_build_context: { fn: mocks.buildContextForTopic, argIndex: 1 },

@@ -14,6 +14,7 @@ import { LogseqClient } from './client.js';
 import { getPage } from './tools/get-page.js';
 import { getBacklinksWithMeta } from './tools/get-backlinks.js';
 import { getBlock } from './tools/get-block.js';
+import { getPageOutline } from './tools/get-page-outline.js';
 import { searchBlocksWithMeta } from './tools/search-blocks.js';
 import { queryByProperty } from './tools/query-by-property.js';
 import { getConceptNetwork } from './tools/get-concept-network.js';
@@ -74,7 +75,7 @@ const COMPACT_PARAM = {
   default: false,
 } as const;
 
-// Define MCP tool schemas for all 14 tools
+// Define MCP tool schemas for all 15 tools
 const TOOLS = [
   {
     name: 'logseq_get_page',
@@ -98,6 +99,21 @@ const TOOLS = [
           default: false,
         },
         format: FORMAT_PARAM,
+      },
+      required: ['page_name'],
+    },
+  },
+  {
+    name: 'logseq_get_page_outline',
+    description: TOOL_DESCRIPTIONS.logseq_get_page_outline,
+    annotations: readOnlyAnnotations('Get Page Outline'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_name: {
+          type: 'string',
+          description: 'Page name, alias, or ISO date (2025-01-01) for a journal',
+        },
       },
       required: ['page_name'],
     },
@@ -507,6 +523,20 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
             const text = renderPage(result, { blocksFetched: includeChildren });
             return textResult(withFooter(text, { ...result, tips: tipsFor(result) }));
           }
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result),
+              },
+              ...metaContent(null, tipsFor(result)),
+            ],
+          };
+        }
+
+        case 'logseq_get_page_outline': {
+          const pageName = args?.page_name as string;
+          const result = await getPageOutline(client, pageName);
           return {
             content: [
               {

@@ -38,8 +38,8 @@ describe('MCP Server', () => {
       }
     }
 
-    it('lists all 14 tools', async () => {
-      expect(await listTools()).toHaveLength(14);
+    it('lists all 15 tools', async () => {
+      expect(await listTools()).toHaveLength(15);
     });
 
     it('marks every tool read-only with a title (server never writes to LogSeq)', async () => {

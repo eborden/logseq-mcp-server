@@ -125,6 +125,32 @@ describe('buildTips', () => {
     });
   });
 
+  describe('logseq_get_page_outline', () => {
+    const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+    it('suggests reading the first block that has children, with its children', () => {
+      const result = {
+        blocks: [
+          { uuid: U(1), snippet: 'leaf', childCount: 0 },
+          { uuid: U(2), snippet: 'parent', childCount: 3 },
+        ],
+      };
+      const tips = buildTips('logseq_get_page_outline', { page_name: 'Alice' }, result);
+      expect(argsOf(tips, 'logseq_get_block')).toEqual({ block_uuid: U(2), include_children: true });
+    });
+
+    it('falls back to the first block when none has children', () => {
+      const result = { blocks: [{ uuid: U(1), snippet: 'a', childCount: 0 }, { uuid: U(2), snippet: 'b', childCount: 0 }] };
+      const tips = buildTips('logseq_get_page_outline', { page_name: 'Alice' }, result);
+      expect(argsOf(tips, 'logseq_get_block')).toEqual({ block_uuid: U(1), include_children: true });
+    });
+
+    it('has no tip for an empty outline', () => {
+      expect(buildTips('logseq_get_page_outline', { page_name: 'Alice' }, { blocks: [] })).toEqual([]);
+      expect(buildTips('logseq_get_page_outline', { page_name: 'Alice' }, {})).toEqual([]);
+    });
+  });
+
   describe('logseq_get_page', () => {
     it('suggests the page blocks and the backlinks', () => {
       const tips = buildTips('logseq_get_page', { page_name: 'alice' }, { originalName: 'Alice' });

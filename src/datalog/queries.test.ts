@@ -126,6 +126,28 @@ describe('DatalogQueryBuilder', () => {
     });
   });
 
+  describe('pageOutlineBlocks (#43)', () => {
+    it('binds the page by id and takes the top-level blocks and their direct children', () => {
+      const { query, inputs } = DatalogQueryBuilder.pageOutlineBlocks(42);
+
+      expect(query).toContain('[(ground [42]) [?page ...]]');
+      expect(query).toContain('[?b :block/parent ?page]');
+      expect(query).toContain('[?b :block/page ?page]');
+      expect(query).toContain('[?top :block/parent ?page] [?b :block/parent ?top]');
+      expect(inputs).toEqual([]);
+    });
+
+    it('pulls only the fields the outline reads', () => {
+      const { query } = DatalogQueryBuilder.pageOutlineBlocks(42);
+
+      expect(query).toContain('(pull ?b [:db/id :block/uuid :block/content :block/left :block/parent])');
+    });
+
+    it.each([[NaN], [1.5], [Infinity], ['1]) [?x'] as unknown as [number]])('rejects the id %s', id => {
+      expect(() => DatalogQueryBuilder.pageOutlineBlocks(id)).toThrow(/Invalid entity id/);
+    });
+  });
+
   describe('getBlocksReferencingPage', () => {
     it('passes the lowercased name as an input and pulls the nested page', () => {
       const { query, inputs } = DatalogQueryBuilder.getBlocksReferencingPage('Alice');
