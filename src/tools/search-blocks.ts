@@ -24,19 +24,9 @@ function displayName(page: any): string {
   return page?.['original-name'] || page?.originalName || page?.name || '';
 }
 
-/** Page name for ordering: lowercase, code-point order so it is locale-independent. */
-function sortKey(page: any): string {
-  return String(page?.name || displayName(page)).toLowerCase();
-}
-
-/** Deterministic order: page name, then block id (document order within a page). */
+/** Deterministic order: newest first (highest block id first). Ids are unique. */
 function compareBlocks(a: BlockEntity, b: BlockEntity): number {
-  const pa = sortKey(a.page);
-  const pb = sortKey(b.page);
-  if (pa !== pb) {
-    return pa < pb ? -1 : 1;
-  }
-  return a.id - b.id;
+  return b.id - a.id;
 }
 
 /**
@@ -69,8 +59,8 @@ function pulledPageToEntity(pulled: any): PageEntity {
  * Search for blocks containing a specific text query using one Datalog query
  *
  * Matching is a case-insensitive, literal substring match on block content,
- * done inside LogSeq (`re-pattern` / `re-find`). Results are sorted by page
- * name, then block id, and cut to `limit` client-side because Datalog here has
+ * done inside LogSeq (`re-pattern` / `re-find`). Results are sorted newest
+ * first (highest block id), and cut to `limit` client-side because Datalog here has
  * no `:limit`. Blocks come back flat (no `children`).
  *
  * API calls: 1, or 2 with `includeContext` (one batched page lookup).

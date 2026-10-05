@@ -153,7 +153,7 @@ describe('searchBlocks', () => {
   });
 
   describe('limit and ordering', () => {
-    it('sorts by page name, then block id, regardless of API order', async () => {
+    it('sorts newest first (highest block id), regardless of API order', async () => {
       callAPI.mockResolvedValueOnce([
         block(30, 'k', 3, 'zeta', 'Zeta'),
         block(12, 'k', 1, 'alpha', 'Alpha'),
@@ -164,7 +164,7 @@ describe('searchBlocks', () => {
 
       const result = await searchBlocks(client, 'k');
 
-      expect(result!.map(b => b.id)).toEqual([11, 12, 20, 30, 31]);
+      expect(result!.map(b => b.id)).toEqual([31, 30, 20, 12, 11]);
     });
 
     it('is deterministic for any input order', async () => {
@@ -181,7 +181,7 @@ describe('searchBlocks', () => {
       expect(first!.map(b => b.id)).toEqual(second!.map(b => b.id));
     });
 
-    it('slices to limit after sorting', async () => {
+    it('slices to limit after sorting (keeps the newest)', async () => {
       callAPI.mockResolvedValueOnce([
         block(4, 'k', 2, 'beta', 'Beta'),
         block(3, 'k', 1, 'alpha', 'Alpha'),
@@ -191,7 +191,7 @@ describe('searchBlocks', () => {
 
       const result = await searchBlocks(client, 'k', 2);
 
-      expect(result!.map(b => b.id)).toEqual([2, 3]);
+      expect(result!.map(b => b.id)).toEqual([5, 4]);
     });
 
     it('returns an empty array for limit 0', async () => {
@@ -249,13 +249,14 @@ describe('searchBlocks', () => {
       expect(args).toHaveLength(1);
       expect(args[0]).toContain('[(ground [10 20]) [?p ...]]');
 
-      expect(result![0].context!.references).toEqual(['Project Atlas', 'Alice']);
-      expect(result![0].context!.tags).toEqual(['planning', 'q1']);
-      expect(result![0].context!.page).toMatchObject({ id: 10, name: 'page a', originalName: 'Page A' });
-      // sorted by page name: block 1, block 3 (page a), then block 2 (page b)
-      expect(result!.map(b => b.id)).toEqual([1, 3, 2]);
-      expect(result![1].context!.page.id).toBe(10);
-      expect(result![2].context!.page).toMatchObject({ id: 20, originalName: 'Page B' });
+      expect(result![2].context!.references).toEqual(['Project Atlas', 'Alice']);
+      expect(result![2].context!.tags).toEqual(['planning', 'q1']);
+      expect(result![2].context!.page).toMatchObject({ id: 10, name: 'page a', originalName: 'Page A' });
+      // newest first: block 3 (page a), block 2 (page b), block 1 (page a)
+      expect(result!.map(b => b.id)).toEqual([3, 2, 1]);
+      expect(result![0].context!.page.id).toBe(10);
+      expect(result![1].context!.page).toMatchObject({ id: 20, originalName: 'Page B' });
+      expect(result![2].context!.page.id).toBe(10);
     });
 
     it('converts pulled page keys to the camelCase PageEntity shape', async () => {
@@ -290,11 +291,11 @@ describe('searchBlocks', () => {
           block(2, 'x', 20, 'b', 'B'),
           block(3, 'x', 30, 'c', 'C')
         ])
-        .mockResolvedValueOnce([fullPage(10, 'a', 'A')]);
+        .mockResolvedValueOnce([fullPage(30, 'c', 'C')]);
 
       await searchBlocks(client, 'x', 1, true);
 
-      expect(callAPI.mock.calls[1][1][0]).toContain('[(ground [10]) [?p ...]]');
+      expect(callAPI.mock.calls[1][1][0]).toContain('[(ground [30]) [?p ...]]');
     });
   });
 
