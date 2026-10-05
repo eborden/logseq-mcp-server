@@ -488,6 +488,7 @@ Quick reference checklist for future work:
 
 **Data shapes** (verified by `scripts/probe-constraints.ts`)
 - [ ] `:block/journal-day` is an integer `YYYYMMDD` (e.g. `20260422`). Parse its digits; never pass it to `new Date()`.
+- [ ] Blocks with a scheduled/deadline date also carry `:block/journal-day`. A query for journal pages must require `[?page :block/name]`, or those blocks match as duplicate "pages" for the same day.
 - [ ] `logseq.Editor.getBlock` returns `page` and `parent` as bare `{id}` objects. Resolve them; don't expect names.
 - [ ] `:block/path-refs` includes refs inherited from ancestor blocks. Use it for "anything under a block tagged X".
 - [ ] `:block/updated-at` is missing on some pages (roughly 1 in 10 pages lacked it in testing). Use `get-else` with a default.

@@ -103,7 +103,9 @@ export class DatalogQueryBuilder {
   }
 
   /**
-   * Generate Datalog query for journal pages whose date falls in a range
+   * Generate Datalog query for journal pages whose date falls in a range.
+   * `[?page :block/name]` is required: blocks with a scheduled/deadline date
+   * also carry `:block/journal-day`, and without it they match as pages.
    * @param startDate - First journal day, inclusive (YYYYMMDD integer)
    * @param endDate - Last journal day, inclusive (YYYYMMDD integer)
    * @returns Query and inputs (`[startDate, endDate]`)
@@ -115,6 +117,7 @@ export class DatalogQueryBuilder {
       query: `[:find (pull ?page [*])
              :in $ ?start ?end
              :where
+             [?page :block/name]
              [?page :block/journal-day ?day]
              [(>= ?day ?start)]
              [(<= ?day ?end)]]`,
@@ -136,6 +139,7 @@ export class DatalogQueryBuilder {
       query: `[:find (pull ?block [*])
              :in $ ?start ?end
              :where
+             [?page :block/name]
              [?page :block/journal-day ?day]
              [(>= ?day ?start)]
              [(<= ?day ?end)]
