@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getBacklinks } from './get-backlinks.js';
 import { LogseqClient } from '../client.js';
+import { AmbiguousPageError, LogSeqTimeoutError, PageNotFoundError } from '../errors.js';
 
 describe('getBacklinks', () => {
   let mockClient: LogseqClient;
 
   beforeEach(() => {
+    // The name resolves to an existing page unless a test says otherwise
     mockClient = {
-      callAPI: vi.fn()
+      callAPI: vi.fn(),
+      executeDatalogQuery: vi.fn().mockResolvedValue([[{ id: 1, name: 'test page' }, 'name']])
     } as any;
   });
 
@@ -59,12 +62,49 @@ describe('getBacklinks', () => {
     expect(result).toEqual([]);
   });
 
-  it('should return null when API returns null', async () => {
+  it('should return null when the page exists but the API returns null', async () => {
     (mockClient.callAPI as any).mockResolvedValue(null);
 
-    const result = await getBacklinks(mockClient, 'nonexistent-page');
+    const result = await getBacklinks(mockClient, 'test page');
 
     expect(result).toBeNull();
+  });
+
+  it('should resolve an alias and ask for the backlinks of the page behind it', async () => {
+    (mockClient.executeDatalogQuery as any).mockResolvedValue([
+      [{ id: 7, name: 'project atlas', 'original-name': 'Project Atlas' }, 'alias'],
+      [{ id: 8, name: 'atlas', 'original-name': 'Atlas' }, 'name']
+    ]);
+    (mockClient.callAPI as any).mockResolvedValue([]);
+
+    await getBacklinks(mockClient, 'Atlas');
+
+    expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPageLinkedReferences', ['project atlas']);
+  });
+
+  it('should throw PageNotFoundError guidance when no page matches', async () => {
+    (mockClient.executeDatalogQuery as any).mockResolvedValue([]);
+    (mockClient.callAPI as any).mockResolvedValue([]);
+
+    await expect(getBacklinks(mockClient, 'nonexistent-page')).rejects.toThrow(PageNotFoundError);
+    expect(mockClient.callAPI).not.toHaveBeenCalledWith('logseq.Editor.getPageLinkedReferences', expect.anything());
+  });
+
+  it('should throw AmbiguousPageError without fetching when an alias is shared', async () => {
+    (mockClient.executeDatalogQuery as any).mockResolvedValue([
+      [{ id: 7, name: 'project atlas', 'original-name': 'Project Atlas' }, 'alias'],
+      [{ id: 9, name: 'atlas cafe', 'original-name': 'Atlas Cafe' }, 'alias']
+    ]);
+
+    await expect(getBacklinks(mockClient, 'Atlas')).rejects.toThrow(AmbiguousPageError);
+    expect(mockClient.callAPI).not.toHaveBeenCalled();
+  });
+
+  it('should propagate infrastructure errors from the page lookup', async () => {
+    const error = new LogSeqTimeoutError('http://test', 1000);
+    (mockClient.executeDatalogQuery as any).mockRejectedValue(error);
+
+    await expect(getBacklinks(mockClient, 'test page')).rejects.toBe(error);
   });
 
   it('should handle blocks with properties and metadata', async () => {

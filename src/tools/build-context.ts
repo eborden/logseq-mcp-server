@@ -3,9 +3,8 @@ import { PageEntity, BlockEntity, ResultMeta, ResultWarning } from '../types.js'
 import { buildResultMeta, truncationWarning } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
-import { getBacklinks } from './get-backlinks.js';
-import { PageNotFoundError, isInfrastructureError } from '../errors.js';
-import Fuzzysort from 'fuzzysort';
+import { fetchBacklinks } from './get-backlinks.js';
+import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 
 export interface ContextOptions {
   maxBlocks?: number;
@@ -20,7 +19,7 @@ export interface ContextOptions {
   resolveRefs?: boolean;
 }
 
-export interface TopicContext extends Omit<ResultMeta, 'totals'> {
+export interface TopicContext extends Omit<ResultMeta, 'totals'>, ResolvedFrom {
   topic: string;
   mainPage: PageEntity;
   directBlocks: BlockEntity[];
@@ -60,9 +59,11 @@ export interface TopicContext extends Omit<ResultMeta, 'totals'> {
 /**
  * Build comprehensive context for a topic using Datalog queries
  * @param client - LogseqClient instance
- * @param topicName - Name of the topic
+ * @param topicName - Page name, alias, or ISO date (`2025-01-01`) of a journal
  * @param options - Options for context building
  * @returns TopicContext with all relevant information
+ * @throws PageNotFoundError if no page matches (guidance with the closest names)
+ * @throws AmbiguousPageError if several pages match (with the candidates)
  */
 export async function buildContextForTopic(
   client: LogseqClient,
@@ -77,38 +78,14 @@ export async function buildContextForTopic(
     resolveRefs = false
   } = options;
 
-  // Query 1: Get the main page (case-insensitive)
-  const page = DatalogQueryBuilder.getPage(topicName);
-  const pageResults = await client.executeDatalogQuery<Array<[any]>>(page.query, ...page.inputs);
-
-  // If no results, page doesn't exist - provide fuzzy match suggestions
-  if (!pageResults || pageResults.length === 0) {
-    // Get fuzzy match suggestions
-    try {
-      const allPages = await client.callAPI<PageEntity[]>('logseq.Editor.getAllPages', []);
-      if (allPages && allPages.length > 0) {
-        const matches = Fuzzysort.go(topicName, allPages, {
-          key: 'originalName',
-          limit: 3,
-          threshold: -10000
-        });
-        const suggestions = matches.map(m => m.obj.originalName);
-        throw new PageNotFoundError(topicName, suggestions);
-      }
-    } catch (error) {
-      if (error instanceof PageNotFoundError || isInfrastructureError(error)) {
-        throw error;
-      }
-      // Suggestions are best-effort: fall through to a plain PageNotFoundError
-    }
-
-    throw new PageNotFoundError(topicName);
-  }
-
-  const mainPage = pageResults[0][0];
+  // Query 1: Resolve the main page (exact name, alias or ISO date, in one query).
+  // Throws PageNotFoundError (with suggestions) or AmbiguousPageError (with candidates).
+  const resolved = await requirePage(client, topicName);
+  const mainPage = resolved.page;
+  const lookupName = resolved.lookupName;
 
   // Query 2: Get blocks for the page (may be empty)
-  const blocks = DatalogQueryBuilder.getPageBlocks(topicName);
+  const blocks = DatalogQueryBuilder.getPageBlocks(lookupName);
   const blockResults = await client.executeDatalogQuery<Array<[any]>>(blocks.query, ...blocks.inputs);
 
   // Extract blocks (empty array if no blocks exist)
@@ -125,7 +102,7 @@ export async function buildContextForTopic(
 
   // null or [] means the page has no backlinks. A thrown error (connection,
   // timeout, auth, unexpected) must propagate rather than look like "none".
-  const backlinks = await getBacklinks(client, topicName);
+  const backlinks = await fetchBacklinks(client, lookupName);
   if (backlinks && backlinks.length > 0) {
     // Each backlink is [sourcePage, blocks[]]
     // Note: sourcePage can be null for journal page entries
@@ -212,6 +189,7 @@ export async function buildContextForTopic(
 
   return {
     topic: topicName,
+    ...resolvedFrom(topicName, resolved),
     mainPage,
     directBlocks,
     relatedPages,
