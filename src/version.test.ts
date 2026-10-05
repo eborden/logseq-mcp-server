@@ -34,4 +34,8 @@ describe('server version (#46)', () => {
   it('keeps the Claude Code plugin manifest on the same version', () => {
     expect(readJson('../.claude-plugin/plugin.json').version).toBe(pkg.version);
   });
+
+  it('keeps the marketplace entry on the same version', () => {
+    expect(readJson('../.claude-plugin/marketplace.json').plugins[0].version).toBe(pkg.version);
+  });
 });
