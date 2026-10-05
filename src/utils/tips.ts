@@ -15,6 +15,8 @@
  * backslashes or newlines stays a valid call.
  */
 
+import type { ResultMeta } from '../types.js';
+
 export const MAX_TIPS = 2;
 
 /** A suggested call: the tool name followed by its arguments as JSON. */
@@ -69,10 +71,16 @@ function mostCommonPage(blocks: unknown[]): string | undefined {
 
 /**
  * Tips for one finished tool call. `args` are the arguments after alias
- * resolution; `result` is the tool's return value. Returns [] when there is
+ * resolution; `result` is the tool's return value; `meta` is the ResultMeta the tool
+ * reported, if any (a search uses it to tell a real miss from `limit: 0`). Returns [] when there is
  * nothing useful to add.
  */
-export function buildTips(tool: string, args: Record<string, unknown> | undefined, result: unknown): string[] {
+export function buildTips(
+  tool: string,
+  args: Record<string, unknown> | undefined,
+  result: unknown,
+  meta?: Pick<ResultMeta, 'totals'> | null
+): string[] {
   const tips: string[] = [];
   const a = args ?? {};
 
@@ -80,6 +88,9 @@ export function buildTips(tool: string, args: Record<string, unknown> | undefine
     case 'logseq_search_blocks': {
       if (!Array.isArray(result)) break;
       if (result.length === 0) {
+        // An empty array is a miss only if nothing matched: `limit: 0` also returns [] (totals.matches > 0)
+        const matches = meta?.totals?.matches;
+        if (typeof matches === 'number' && matches > 0) break;
         const word = nonEmptyString(a.query)?.trim().split(/\s+/)[0];
         tips.push(
           'No match. Search is literal (no synonyms): try a shorter or different word' +

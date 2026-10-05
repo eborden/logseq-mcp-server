@@ -29,6 +29,7 @@ import { getCurrentContext } from './tools/get-current-context.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 import { metaContent } from './utils/result-meta.js';
 import { buildTips } from './utils/tips.js';
+import type { ResultMeta } from './types.js';
 import { resolveParamAliases } from './utils/param-aliases.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
 
@@ -451,7 +452,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
       // Fold unadvertised aliases (`name`, `page`, ...) into their canonical parameter (#44)
       const args = resolveParamAliases(name, rawArgs);
       // Next-step tips ride in the trailing meta block (#44); none when disabled
-      const tipsFor = (result: unknown) => (tipsEnabled ? buildTips(name, args, result) : []);
+      const tipsFor = (result: unknown, meta?: ResultMeta | null) => (tipsEnabled ? buildTips(name, args, result, meta) : []);
       switch (name) {
         case 'logseq_get_page': {
           const pageName = args?.page_name as string;
@@ -513,7 +514,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(meta, tipsFor(result)),
+              ...metaContent(meta, tipsFor(result, meta)),
             ],
           };
         }

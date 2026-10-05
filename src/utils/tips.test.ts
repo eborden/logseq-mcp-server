@@ -58,6 +58,16 @@ describe('buildTips', () => {
       expect(argsOf(tips, 'logseq_list_pages')).toEqual({ name_contains: 'project' });
     });
 
+    it('gives no miss tip when limit: 0 returns [] although blocks matched', () => {
+      const meta = { hasMore: true, warnings: [], totals: { matches: 5 } };
+      expect(buildTips('logseq_search_blocks', { query: 'x', limit: 0 }, [], meta)).toEqual([]);
+    });
+
+    it('still says "No match" when the meta confirms zero matches', () => {
+      const meta = { hasMore: false, warnings: [], totals: { matches: 0 } };
+      expect(buildTips('logseq_search_blocks', { query: 'x' }, [], meta)[0]).toContain('No match');
+    });
+
     it('gives no tip for a null result', () => {
       expect(buildTips('logseq_search_blocks', { query: 'x' }, null)).toEqual([]);
     });
