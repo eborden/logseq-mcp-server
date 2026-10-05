@@ -1,5 +1,5 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity } from '../types.js';
+import { BlockEntity, ResultWarning } from '../types.js';
 import { buildContextForTopic, TopicContext } from './build-context.js';
 import { PageNotFoundError } from '../errors.js';
 
@@ -7,20 +7,28 @@ import { PageNotFoundError } from '../errors.js';
  * A non-fatal problem that made the result partial. Connection, timeout, auth
  * and unexpected errors are never warnings: they propagate.
  */
-export interface QueryWarning {
-  code: 'topic_not_found';
-  /** The extracted topic the warning is about */
-  topic: string;
-  message: string;
+export interface QueryWarning extends ResultWarning {
+  code: 'topic_not_found' | 'topic_truncated' | 'topics_truncated';
+  /** The extracted topic the warning is about (absent when it concerns all topics) */
+  topic?: string;
 }
+
+/**
+ * A topic's context as returned here. The nested `hasMore` / `warnings` /
+ * `totals` of `buildContextForTopic` are not repeated: its advice names
+ * `logseq_build_context` parameters, so it is rolled up into `warnings` below.
+ */
+export type TopicQueryContext = Omit<TopicContext, 'hasMore' | 'warnings' | 'totals'>;
 
 export interface QueryContext {
   query: string;
   extractedTopics: string[];
-  contexts: TopicContext[];
+  contexts: TopicQueryContext[];
   searchResults?: BlockEntity[];
-  /** Always present; empty when nothing was skipped */
+  /** Always present; empty when nothing was skipped or cut */
   warnings: QueryWarning[];
+  /** True when a warning says how to fetch what was cut */
+  hasMore: boolean;
   summary: {
     totalTopics: number;
     totalBlocks: number;
@@ -72,8 +80,16 @@ export async function getContextForQuery(
   const extractedTopics = extractTopicsFromQuery(query);
 
   // Build context for each extracted topic
-  const contexts: TopicContext[] = [];
+  const contexts: TopicQueryContext[] = [];
   const warnings: QueryWarning[] = [];
+
+  if (extractedTopics.length > maxTopics) {
+    warnings.push({
+      code: 'topics_truncated',
+      message: `Found ${extractedTopics.length} topics; only the first ${maxTopics} were used.`,
+      howToFetchAll: `Set max_topics to ${extractedTopics.length} (or higher) to use all of them.`
+    });
+  }
 
   for (const topic of extractedTopics.slice(0, maxTopics)) {
     try {
@@ -82,7 +98,23 @@ export async function getContextForQuery(
         maxRelatedPages: 5,
         maxReferences: 10
       });
-      contexts.push(context);
+      const { hasMore: _hasMore, warnings: _warnings, totals, ...topicContext } = context;
+      contexts.push(topicContext);
+
+      if (context.hasMore) {
+        warnings.push({
+          code: 'topic_truncated',
+          topic,
+          message:
+            `Context for "${topic}" is capped: showing ${context.directBlocks.length}/${totals.blocks} blocks, ` +
+            `${context.references.length}/${totals.references} references, ` +
+            `${context.relatedPages.length}/${totals.relatedPages} related pages.`,
+          howToFetchAll:
+            `Call logseq_build_context with topic_name ${JSON.stringify(topic)} and raise ` +
+            `max_blocks (${totals.blocks}), max_references (${totals.references}) and ` +
+            `max_related_pages (${totals.relatedPages}).`
+        });
+      }
     } catch (error) {
       // A missing topic page is an expected partial result: skip it and say so.
       // Everything else (connection, timeout, auth, unexpected) propagates.
@@ -157,6 +189,7 @@ export async function getContextForQuery(
     contexts,
     searchResults,
     warnings,
+    hasMore: warnings.some(w => w.howToFetchAll !== undefined),
     summary: {
       totalTopics: contexts.length,
       totalBlocks,
