@@ -17,11 +17,12 @@ The repo and its GitHub project are public, and integration tests, probes and sc
 
 ## Mechanical enforcement
 
-test: `src/repo-hygiene.test.ts` (fails when a raw-output file from the integration tests or the probe and measure scripts is tracked, or when .gitignore stops ignoring one)
-reviewer: The privacy grep of the diff, commit messages, PR body and review comments and replies (CLAUDE.md, Verification before merge) finds no names, content or dates from the graph. This stays the fallback for names typed into code, docs or GitHub text, which the test can't see.
+- test: `src/repo-hygiene.test.ts` (fails when a raw-output file from the integration tests or the probe and measure scripts is tracked, or when .gitignore stops ignoring one)
+- reviewer: The privacy grep of the diff, commit messages, PR body and review comments and replies (CLAUDE.md, Verification before merge) finds no names, content or dates from the graph. This stays the fallback for names typed into code, docs or GitHub text, which the test can't see.
 
 Real names can't be listed in a repo check without publishing them. A local hook that reads names from the graph at run time can check diffs and GitHub text without that.
-none-yet: #98 (local hook)
+
+- none-yet: #98 (local hook)
 
 ## Changelog
 
