@@ -2,7 +2,7 @@
 
 ## Context
 
-The first tools (2025-11-20) mixed two APIs. `search_blocks` and `query_by_property` were written against `logseq.DB.q` with a Datalog query (commits 33da3ac and f57f8cf), and were rewritten the same day to crawl the graph with `logseq.Editor.getAllPages` plus `getPageBlocksTree` (commits 75c5b1f and 39cf948). Those commits say only "replace Datalog with stable Editor API"; they don't record why. The traversal tools used `logseq.Editor.*` calls, one per page.
+The first tools (2025-11-20) mixed two APIs. `search_blocks` and `query_by_property` were written against `logseq.DB.q` with a Datalog query (commits 33da3ac and f57f8cf), and were rewritten the same day to crawl the graph with `logseq.Editor.getAllPages` plus `getPageBlocksTree` (commits 75c5b1f and 39cf948). Those commits say only "replace Datalog with stable Editor API"; they don't record why. The traversal tools used `logseq.Editor.*` calls, one per page (for example `get_concept_network`, commit f3b5993).
 
 Editor calls return one entity per call, so a crawl costs O(n) HTTP calls for n pages or journal days. Measured on a ~2k-page graph (CLAUDE.md, "Current Implementation Status"), the old shapes were roughly: ~120 calls for a depth-2 concept network from a hub page (issue #3), ~130 calls for a text search and about 2k when nothing matched (issue #4), one call per journal day for a date range (issue #5), and ~2k calls taking ~10s for a property query (issue #33). The foundations doc (PR #38, section 4.6) classes a per-page crawl like that as a bounded-resources bug, not a style issue.
 
