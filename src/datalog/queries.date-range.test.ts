@@ -12,6 +12,7 @@ describe('DatalogQueryBuilder journal range queries', () => {
       const { query, inputs } = build(20250101, 20250131);
 
       expect(query).toContain(':in $ ?start ?end');
+      expect(query).toContain('[?page :block/name]');
       expect(query).toContain('[?page :block/journal-day ?day]');
       expect(query).toContain('[(>= ?day ?start)]');
       expect(query).toContain('[(<= ?day ?end)]');
