@@ -63,7 +63,7 @@ const TOOLS = [
       properties: {
         page_name: {
           type: 'string',
-          description: 'Name of the page to retrieve',
+          description: 'Page name, alias, or ISO date (2025-01-01) for a journal',
         },
         include_children: {
           type: 'boolean',
@@ -88,7 +88,7 @@ const TOOLS = [
       properties: {
         page_name: {
           type: 'string',
-          description: 'Name of the page to get backlinks for',
+          description: 'Page to get backlinks for (name, alias or ISO date)',
         },
       },
       required: ['page_name'],
@@ -181,7 +181,7 @@ const TOOLS = [
       properties: {
         concept_name: {
           type: 'string',
-          description: 'Name of the root concept',
+          description: 'Root concept (page name, alias or ISO date)',
         },
         max_depth: {
           type: 'number',
@@ -216,11 +216,11 @@ const TOOLS = [
       properties: {
         topic_a: {
           type: 'string',
-          description: 'Primary topic to search for',
+          description: 'Primary topic to search for (page name, alias or ISO date)',
         },
         topic_b: {
           type: 'string',
-          description: 'Related topic that defines the relationship',
+          description: 'Related topic that defines the relationship (page name, alias or ISO date)',
         },
         relationship_type: {
           type: 'string',
@@ -245,7 +245,7 @@ const TOOLS = [
       properties: {
         topic_name: {
           type: 'string',
-          description: 'Name of the topic to build context for',
+          description: 'Topic to build context for (page name, alias or ISO date)',
         },
         max_blocks: {
           type: 'number',
@@ -361,7 +361,7 @@ const TOOLS = [
       properties: {
         concept_name: {
           type: 'string',
-          description: 'Name of the concept to track',
+          description: 'Concept to track (page name, alias or ISO date)',
         },
         start_date: {
           type: 'number',

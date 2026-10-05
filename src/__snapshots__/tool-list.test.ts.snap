@@ -43,7 +43,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "boolean",
         },
         "topic_name": {
-          "description": "Name of the topic to build context for",
+          "description": "Topic to build context for (page name, alias or ISO date)",
           "type": "string",
         },
       },
@@ -71,7 +71,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
     "inputSchema": {
       "properties": {
         "page_name": {
-          "description": "Name of the page to get backlinks for",
+          "description": "Page to get backlinks for (name, alias or ISO date)",
           "type": "string",
         },
       },
@@ -135,7 +135,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
     "inputSchema": {
       "properties": {
         "concept_name": {
-          "description": "Name of the concept to track",
+          "description": "Concept to track (page name, alias or ISO date)",
           "type": "string",
         },
         "end_date": {
@@ -179,7 +179,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
     "inputSchema": {
       "properties": {
         "concept_name": {
-          "description": "Name of the root concept",
+          "description": "Root concept (page name, alias or ISO date)",
           "type": "string",
         },
         "expand_journals": {
@@ -310,7 +310,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "boolean",
         },
         "page_name": {
-          "description": "Name of the page to retrieve",
+          "description": "Page name, alias, or ISO date (2025-01-01) for a journal",
           "type": "string",
         },
         "resolve_refs": {
@@ -532,11 +532,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "string",
         },
         "topic_a": {
-          "description": "Primary topic to search for",
+          "description": "Primary topic to search for (page name, alias or ISO date)",
           "type": "string",
         },
         "topic_b": {
-          "description": "Related topic that defines the relationship",
+          "description": "Related topic that defines the relationship (page name, alias or ISO date)",
           "type": "string",
         },
       },
