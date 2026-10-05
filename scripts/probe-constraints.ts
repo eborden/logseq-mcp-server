@@ -279,19 +279,25 @@ main().catch((e) => {
 //           console.log(m, r === null ? 'null' : Array.isArray(r) ? 'array(' + r.length + ')' : typeof r);
 //         } catch (e) { console.log(m, 'ERROR', String(e.message).slice(0, 120)); } }"
 //
-//   M1. Empty graph: in LogSeq create a new, empty graph and open it. Run the
-//       helper. Is getAllPages an empty array, an array of built-in pages, or
-//       null? This answers whether null is ever "empty graph".
-//   M2. No graph open: in LogSeq open the graph switcher (left sidebar), choose
-//       "All graphs", and remove/unlink the throwaway graph so LogSeq sits on
-//       the graph chooser (or start LogSeq and don't open a graph). Run the
+//   Every step uses a THROWAWAY graph only, never the personal one. Check the
+//   graph name in LogSeq before each step.
+//
+//   M1. Empty graph: in LogSeq create a new, empty throwaway graph and open it.
+//       Run the helper. Is getAllPages an empty array, an array of built-in
+//       pages, or null? This answers whether null is ever "empty graph".
+//   M2. No graph open: in LogSeq open the graph switcher (left sidebar) and
+//       choose "All graphs". On the throwaway graph only, click "Remove graph".
+//       That only unlinks it from the list and does not delete any files on
+//       disk. Do not do this to the personal graph. LogSeq now sits on the
+//       graph chooser (or start LogSeq and don't open a graph). Run the
 //       helper. Record whether the HTTP server still answers, and the shape of
 //       getAllPages and getCurrentGraph (null, error, or an object).
-//   M3. During a re-index: open the throwaway graph, choose "Re-index" from
-//       the graph menu, and run the helper repeatedly (once a second) until the
-//       re-index finishes. Record the shapes seen and each transition (error,
-//       null, array(0), array(n)).
-//   M4. Switching graphs: switch from graph A to graph B and run the helper
+//   M3. During a re-index (throwaway graph only, never the personal one): open
+//       the throwaway graph, choose "Re-index" from the graph menu, and run the
+//       helper repeatedly (once a second) until the re-index finishes. Record
+//       the shapes seen and each transition (error, null, array(0), array(n)).
+//   M4. Switching graphs (A and B must both be throwaway graphs, never the
+//       personal one): switch from graph A to graph B and run the helper
 //       immediately, then again a few seconds later. Record whether the first
 //       call is null, an error, or the previous graph's pages.
 //
