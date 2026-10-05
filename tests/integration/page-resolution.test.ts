@@ -96,7 +96,8 @@ describe('page resolution against a live graph', () => {
     // Alias stubs and how many pages declare each
     const sourcesByStub = new Map<string, string[]>();
     const aliasRows = await raw(
-      `[:find ?n ?sn :where [?a :block/name ?n] (not [?a :block/file]) [?p :block/alias ?a] [?p :block/name ?sn]]`
+      // Only pages with a file declare a name; the other stubs of a 3+ name group point back at it (#69)
+      `[:find ?n ?sn :where [?a :block/name ?n] (not [?a :block/file]) [?p :block/alias ?a] [?p :block/file] [?p :block/name ?sn]]`
     );
     for (const [stub, source] of aliasRows) {
       sourcesByStub.set(stub, [...(sourcesByStub.get(stub) ?? []), source]);
