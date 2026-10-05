@@ -317,7 +317,7 @@ const relatedData = (relatedResults || []).map(r => r[0]);
 
 Instead of recursive queries or N sequential API calls, use BFS with batched queries at each depth level.
 
-> **Implemented in `get-concept-network.ts` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `maxNodes` 50 (root included) and `maxFanout` 15 new pages per page. Journal pages are leaves unless `expandJournals` is set, and `truncated: true` is set whenever a cap bites. These options are on `getConceptNetwork`'s fourth argument and aren't exposed in the MCP schema yet.
+> **Implemented in `get-concept-network.ts` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `maxNodes` 50 (root included) and `maxFanout` 15 new pages per page. Journal pages are leaves unless `expandJournals` is set, and `truncated: true` is set whenever a cap bites. MCP clients set them with `max_nodes` (≤ 500), `max_fanout` (≤ 100) and `expand_journals` on `logseq_get_concept_network`.
 
 **Traditional Approach (Inefficient):**
 ```typescript
