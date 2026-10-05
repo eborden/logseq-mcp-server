@@ -72,7 +72,7 @@ export interface LogseqMCPConfig {
   authToken: string;
   /** Per-request timeout in milliseconds. Defaults to 30000 when omitted. */
   timeoutMs?: number;
-  /** Next-step tips in results (#44). On unless set to `false`; `LOGSEQ_MCP_TIPS=off` also turns them off. */
+  /** Next-step tips in results (#44). On unless set to `false`. `LOGSEQ_MCP_TIPS` (`on`/`off` and variants) overrides this; other values are an error. */
   tips?: boolean;
 }
 

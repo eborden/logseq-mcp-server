@@ -18,6 +18,10 @@ Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts o
    }
    ```
    `apiUrl` defaults to `http://127.0.0.1:12315`. Optionally add `"timeoutMs"` (a positive number, default `30000`) to change how long each LogSeq API call may take before it fails with a timeout error. The limit applies per call, not per tool run.
+
+   Tips are on by default: six tools (`search_blocks`, `get_page`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `list_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
+
+   Some tools also accept `name`, `page` (and `page_name` or `uuid` where it fits) in place of their canonical parameter (`page_name`, `topic_name`, `concept_name`, `block_uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
 4. Install: `npm install -g logseq-mcp-server`
 5. Add to Claude Desktop MCP settings
 
