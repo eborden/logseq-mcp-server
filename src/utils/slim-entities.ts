@@ -3,6 +3,13 @@ import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
 /**
  * Whether tools with a `slim_results` parameter slim their output when the
  * caller doesn't say (#42). `slim_results: false` is the opt-out.
+ *
+ * The default lives in the MCP handlers in `src/index.ts`, which pass
+ * `wantsSlim(args?.slim_results)` to the tool function. The tool functions
+ * (`searchBlocks`, `queryByProperty`, `queryJournals`) still default their
+ * `slimResults` parameter to `false`, so a direct call gets full output. A
+ * new handler for a slim-capable tool must go through `wantsSlim`, or it
+ * silently returns full output. `src/index.slim-default.test.ts` pins this.
  */
 export const DEFAULT_SLIM_RESULTS = true;
 
