@@ -15,7 +15,7 @@ Inferred; no source records this: every tool is a description and schema that a 
 
 We remove a tool when another tool already provides its behaviour, or when it promises more than it implements and a complete tool replaces it. Commit 9642558 removed `get_entity_timeline`, and commit 34a699a removed `get_related_pages`, taking the count from 13 to 11. Their code and tests were deleted.
 
-Nothing had been released: the repository has no tags, and `CHANGELOG.md` says nothing has been published to npm. This is not a precedent for removing tools later: once clients and skills depend on tool names, `additive-tool-contracts` applies.
+Nothing had been released: the repository has no tags, and `CHANGELOG.md` says nothing has been published to npm. This is not a precedent for removing tools later: once clients and skills depend on tool names, [ADR-0020 (additive-tool-contracts)](0020-additive-tool-contracts.md) applies.
 
 ## Consequences
 

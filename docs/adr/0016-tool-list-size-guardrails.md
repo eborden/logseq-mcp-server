@@ -30,7 +30,7 @@ The constants in the test are the source of truth. This table is history and is 
 - Descriptions are short and say what a tool cannot find, not a manual. Longer guidance moves to the server instructions, the `logseq://guide` resource and the skills.
 - Any change to a description or schema touches a snapshot file, which adds churn to PRs. We accept it because that churn is the review signal.
 - The number of characters is an approximation of tokens, not a tokenizer count.
-- The snapshot also supports `additive-tool-contracts`, because renames and removals appear as diffs.
+- The snapshot also supports [ADR-0020 (additive-tool-contracts)](0020-additive-tool-contracts.md), because renames and removals appear as diffs.
 
 ## Status
 

@@ -4,7 +4,7 @@
 
 The foundations doc (PR #38) set this as hard rule 3 and section 4.2. External input means MCP tool arguments, LogSeq API responses, the config file and anything read from disk. Its reason: "Checks that don't produce a typed result get skipped, duplicated or drift apart. Parsing first means bad input fails before any work is done." Section 4.11 adds that arguments from the model are untrusted: "A page name or search string may contain quotes, regex characters or very long text."
 
-The code didn't meet it when it was written. The audit in issue #58 found tool arguments cast (`args?.x as T`, about 41 places) rather than parsed, and `loadConfig` parsing into `any`. Some parsing already existed: `timeoutMs` validated in the config (PR #26), `InvalidParameterError` for conflicting parameter aliases (issue #44), and string inputs bound with `:in` rather than embedded in query text (`strings-bound-via-in-inputs`).
+The code didn't meet it when it was written. The audit in issue #58 found tool arguments cast (`args?.x as T`, about 41 places) rather than parsed, and `loadConfig` parsing into `any`. Some parsing already existed: `timeoutMs` validated in the config (PR #26), `InvalidParameterError` for conflicting parameter aliases (issue #44), and string inputs bound with `:in` rather than embedded in query text ([ADR-0013 (strings-bound-via-in-inputs)](0013-strings-bound-via-in-inputs.md)).
 
 ## Decision
 

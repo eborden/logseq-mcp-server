@@ -16,7 +16,7 @@ The repository is both a Claude Code plugin and its own marketplace (`.claude-pl
 
 - Installation becomes a marketplace add and a plugin install, and skills trigger from the same package as the server.
 - Skills work under any host prefix, but a skill can no longer assume a tool's full name.
-- The plugin starts the server with `node ${CLAUDE_PLUGIN_ROOT}/dist/index.js`, which needs a built `dist/` that is gitignored, so a marketplace install of an unbuilt checkout has no server. Switching to `npx -y logseq-mcp-server` depends on a publish (see `manual-npm-publish`), which had not happened when this was written.
+- The plugin starts the server with `node ${CLAUDE_PLUGIN_ROOT}/dist/index.js`, which needs a built `dist/` that is gitignored, so a marketplace install of an unbuilt checkout has no server. Switching to `npx -y logseq-mcp-server` depends on a publish (see [ADR-0017 (manual-npm-publish)](0017-manual-npm-publish.md)), which had not happened when this was written.
 - Two version numbers (`package.json` and the plugin manifests) have to stay equal.
 - The plugin format and its manifest keys are an external contract that can change under us.
 

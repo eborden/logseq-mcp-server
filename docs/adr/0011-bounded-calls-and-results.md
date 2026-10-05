@@ -11,9 +11,9 @@ The foundations doc (PR #38) then made it general, as hard rule 5 and section 4.
 
 ## Decision
 
-Every network call has a timeout: `callAPI` applies `timeoutMs` to each call. Because that bounds each call and not a whole tool, the number of calls is bounded too (see `datalog-over-editor-api`). Every loop over graph data has a cap. Every tool result has a size limit, with a default and a maximum. There is no unbounded `Promise.all` over input-sized collections.
+Every network call has a timeout: `callAPI` applies `timeoutMs` to each call. Because that bounds each call and not a whole tool, the number of calls is bounded too (see [ADR-0002 (datalog-over-editor-api)](0002-datalog-over-editor-api.md)). Every loop over graph data has a cap. Every tool result has a size limit, with a default and a maximum. There is no unbounded `Promise.all` over input-sized collections.
 
-A cap that cuts a result reports it (see `resultmeta-for-capped-results`).
+A cap that cuts a result reports it (see [ADR-0012 (resultmeta-for-capped-results)](0012-resultmeta-for-capped-results.md)).
 
 ## Consequences
 

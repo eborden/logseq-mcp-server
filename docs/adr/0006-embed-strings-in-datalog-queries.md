@@ -20,11 +20,11 @@ We embed string parameters, such as page names, directly in the Datalog query te
 
 - Queries work with the API as then understood, and the early tools shipped.
 - Any value containing a double quote produces a malformed query (`Unexpected EOF reading string`), and a crafted page name can rewrite the query. Issue #6 recorded this.
-- The conclusion was drawn without a working encoding ever being tried. Later probing showed the failure was an encoding problem: LogSeq reads each extra input as EDN, so a bare string is read as a symbol and matches nothing. This ADR was replaced by `strings-bound-via-in-inputs` when that was found.
+- The conclusion was drawn without a working encoding ever being tried. Later probing showed the failure was an encoding problem: LogSeq reads each extra input as EDN, so a bare string is read as a symbol and matches nothing. This ADR was replaced by [ADR-0013 (strings-bound-via-in-inputs)](0013-strings-bound-via-in-inputs.md) when that was found.
 
 ## Status
 
-superseded by strings-bound-via-in-inputs
+superseded by 0013-strings-bound-via-in-inputs
 
 Date: 2026-10-05
 
