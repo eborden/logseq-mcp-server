@@ -21,6 +21,28 @@ Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 4. Install: `npm install -g logseq-mcp-server`
 5. Add to Claude Desktop MCP settings
 
+## Install as a Claude Code plugin
+
+The repo is both a Claude Code plugin and its own marketplace. The plugin bundles the MCP server and the `logseq-skills` workflows.
+
+First do steps 1-3 of Quick Start (HTTP server on, token, `~/.logseq-mcp/config.json`). The plugin carries no credentials.
+
+```bash
+claude plugin marketplace add eborden/logseq-mcp-server
+claude plugin install logseq@logseq-mcp-server
+```
+
+The plugin starts the server with `node dist/index.js`, and `dist/` is not committed. Until the package is published to npm (tracked in #14), a marketplace install has no built server. Build from a clone and load the plugin from there instead:
+
+```bash
+git clone https://github.com/eborden/logseq-mcp-server
+cd logseq-mcp-server
+npm ci && npm run build
+claude --plugin-dir .
+```
+
+Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The skills refer to them by bare name, so either form works.
+
 ## 12 Tools at a Glance
 
 ### Basic Operations (5)
@@ -72,7 +94,7 @@ Beyond individual tools, the `logseq-skills` provides structured workflows that 
 - **Temporal Analysis** - Track how concepts evolved over time
 - **Smart Context Building** - Natural language queries with automatic context gathering
 
-See `.claude/skills/logseq-skills/` for complete workflow documentation.
+See `skills/logseq-skills/` for complete workflow documentation (also reachable at `.claude/skills/logseq-skills/` through a symlink for project-local use).
 
 ## Example Usage
 
