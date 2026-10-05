@@ -26,7 +26,7 @@ We don't edit a skill without a baseline test first. Before changing a skill fil
 - Baselines often run against the personal graph, so their output stays local. Only approximate counts reach commits and PRs, and committed examples and fixtures are synthetic ([BR-0001 (no-graph-data-in-repo)](../business-rules/0001-no-graph-data-in-repo.md)).
 - Inferred: agent runs vary from run to run, so a baseline is a handful of runs, not a proof. Commit a569202 used 13.
 - No test runs a skill, so nothing mechanical stops an untested edit. The concept-linking fixture is run by hand.
-- The practice hasn't been followed on every edit. Several 2026-10-05 commits kept the skills in step with the server (tool names, parameter defaults, tool counts), and at least one changed behaviour: f9b7699 changed the trigger phrases and sibling routing in the skill descriptions. 174364a, which changed the summary workflow's first step, is borderline, since it follows a server feature (#17). None of them records a baseline. Whether in-step edits are exempt isn't recorded and is left open for the maintainer.
+- The practice hasn't been followed on every edit. Several 2026-10-05 commits kept the skills in step with the server (tool names, parameter defaults, tool counts), and at least one changed behaviour: f9b7699 changed the trigger phrases and sibling routing in the skill descriptions. 174364a, which tells the summaries to start from topConcepts, is borderline, since it follows a server feature (#17). None of them records a baseline. Whether in-step edits are exempt isn't recorded and is left open for the maintainer.
 
 ## Status
 
