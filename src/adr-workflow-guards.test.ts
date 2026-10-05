@@ -415,7 +415,11 @@ describe('ADR-0022: CI covers the engines.node floor', () => {
   it("the floor is the dev toolchain's (vite) lowest supported version in the floor's major or later", () => {
     const viteEngines = lock.packages['node_modules/vite']?.engines?.node;
     expect(viteEngines, 'vite is no longer in the lockfile; update ADR-0022 and this test').toBeDefined();
-    expect(lowestFrom(viteEngines, floor[0])?.join('.')).toBe(floor.join('.'));
+    expect(
+      lowestFrom(viteEngines, floor[0])?.join('.'),
+      `vite's Node floor (engines "${viteEngines}") and engines.node ("${pkg.engines.node}") differ. ` +
+        `ADR-0022's Decision sets the floor to >=22.12.0, the toolchain's, so moving it needs an ADR that supersedes ADR-0022`,
+    ).toBe(floor.join('.'));
   });
 
   it('reads engines ranges', () => {
