@@ -258,8 +258,8 @@ Gather comprehensive context for a topic in a single call. **This is often the o
 - `max_blocks` (optional): Maximum blocks to return (default: 50, **recommend: 20**)
 - `max_related_pages` (optional): Maximum related pages (default: 10)
 - `max_references` (optional): Maximum reference blocks (default: 20)
-- `format` (optional): `json` (default) or `markdown`. Markdown shows the blocks as a tree, related pages as links, and references grouped by source page, with truncation warnings in a footer. About 75% smaller.
-- `compact` (optional): Block snippets (first line, 80 characters) with their uuids instead of block bodies. In JSON each block becomes `{ uuid, snippet }`; `summary`, `totals`, `warnings` and `hasMore` are kept. Read the blocks you want with `logseq_get_block`. Worth it when blocks are long; for short blocks the uuids cost about as much as the text. Skips `resolve_refs`.
+- `format` (optional): `json` (default) or `markdown`. Markdown shows the blocks as a tree (no block uuids unless `compact`; page properties as stored), related pages as links, and references grouped by source page, with truncation warnings in a footer. About 75% smaller.
+- `compact` (optional): Block snippets (first line, 80 characters) with their uuids instead of block bodies. In JSON each block becomes `{ uuid, snippet }`; `summary`, `totals`, `warnings` and `hasMore` are kept. Read the blocks you want with `logseq_get_block`. Worth it when blocks are long; for short blocks the uuids cost about as much as the text. Skips `resolve_refs`. With `resolve_refs: true` the refs are not resolved and a `resolve_refs_ignored_in_compact` warning says so; set `compact` to false for resolved text.
 
 **Context cost:** ~3-8k tokens depending on limits. Still cheaper than manual aggregation.
 
@@ -293,7 +293,7 @@ Parse natural language query and build context automatically.
 - `query` (required): Natural language question
 - `max_topics` (optional): Maximum topics to extract (default: 3)
 - `max_search_results` (optional): Maximum search results per topic (default: 10)
-- `format` (optional): `json` (default) or `markdown` (each topic as a section)
+- `format` (optional): `json` (default) or `markdown` (each topic as a section; keyword search hits end with `((uuid)) (in [[Page]])` so you can follow them up)
 - `compact` (optional): Block snippets and uuids instead of bodies, as for `build_context`
 
 **How it works:**
