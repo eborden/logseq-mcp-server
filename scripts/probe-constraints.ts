@@ -125,6 +125,49 @@ async function probeProperties(
   report('... that are pre-blocks (:block/pre-block? true)', await dq(`[:find (count ?b) . :where [?b :block/properties ?p] [?b :block/pre-block? true]]`));
 }
 
+/**
+ * Page-resolution probes (#41): how aliases, namespaces and journal days are
+ * stored and which query forms work. Prints counts and shapes only, never names.
+ */
+async function probeResolution(
+  client: LogseqClient,
+  rawDq: (q: string, ...inputs: unknown[]) => Promise<Outcome>
+) {
+  const dq = (q: string, ...inputs: unknown[]) => rawDq(q, ...inputs.map(v => JSON.stringify(v)));
+  const query = <T = any>(q: string, ...inputs: unknown[]) =>
+    client.callAPI<T>('logseq.DB.datascriptQuery', [q, ...inputs.map(v => JSON.stringify(v))]);
+  console.log('\n== Page resolution: aliases, namespaces, journal days (#41)');
+
+  report('alias refs (page :block/alias target)', await dq(`[:find (count ?p) . :where [?p :block/alias ?a]]`));
+  const sample = await query<any[]>(`[:find (pull ?p [:block/alias]) . :where [?p :block/alias ?a]]`);
+  console.log(`${':block/alias value shape (pull)'.padEnd(58)} ${shapeOf((sample as any)?.alias)}`);
+  report('alias targets without :block/file (bare stubs)', await dq(`[:find (count ?a) . :where [?p :block/alias ?a] (not [?a :block/file])]`));
+  report('... stubs that also have blocks', await dq(`[:find (count ?a) . :where [?p :block/alias ?a] (not [?a :block/file]) [?b :block/page ?a]]`));
+  report('alias pairs stored in both directions', await dq(`[:find (count ?p) . :where [?p :block/alias ?a] [?a :block/alias ?p]]`));
+  const targets = await query<Array<[number, number]>>(`[:find ?a (count ?p) :where [?p :block/alias ?a]]`);
+  console.log(`${'alias targets / shared by more than one page'.padEnd(58)} ${targets.length} / ${targets.filter(([, n]) => n > 1).length}`);
+
+  const namespaced = await query<Array<[string]>>(`[:find ?n :where [?p :block/namespace ?x] [?p :block/name ?n]]`);
+  const leaves = new Map<string, number>();
+  for (const [n] of namespaced) leaves.set(n.split('/').pop()!, (leaves.get(n.split('/').pop()!) ?? 0) + 1);
+  console.log(`${'namespaced pages / distinct leaves / leaves shared'.padEnd(58)} ${namespaced.length} / ${leaves.size} / ${[...leaves.values()].filter(c => c > 1).length}`);
+  if (namespaced.length > 0) {
+    const leaf = namespaced[0][0].split('/').pop()!;
+    report('clojure.string/ends-with? on :block/name', await dq(`[:find (count ?p) . :in $ ?suffix :where [?p :block/name ?n] [?p :block/namespace] [(clojure.string/ends-with? ?n ?suffix)]]`, `/${leaf}`));
+  }
+
+  const day = (await query<number[][]>(`[:find ?d :where [?p :block/name] [?p :block/journal-day ?d]]`))[0]?.[0];
+  if (day !== undefined) {
+    const pull = `(pull ?page [:db/id :block/name])`;
+    report('journal page by :block/journal-day, number as :in', await dq(`[:find ${pull} :in $ ?day :where [?page :block/name] [?page :block/journal-day ?day]]`, day));
+    const combined = `[:find ${pull} ?via :in $ ?n ?day :where (or-join [?n ?day ?page ?via]
+      (and [?page :block/name ?n] [(ground "name") ?via])
+      (and [?stub :block/name ?n] [?page :block/alias ?stub] [(ground "alias") ?via])
+      (and [?page :block/name] [?page :block/journal-day ?day] [(ground "journal-date") ?via]))]`;
+    report('or-join name + alias + journal-day (unknown name, known day)', await dq(combined, 'no such page 41 probe', day));
+  }
+}
+
 async function main() {
   const config = await loadConfig(join(homedir(), '.logseq-mcp', 'config.json'));
   const client = new LogseqClient(config);
@@ -174,6 +217,7 @@ async function main() {
   report(':block/path-refs present', await dq(`[:find (count ?b) . :where [?b :block/path-refs]]`));
 
   await probeProperties(client, dq);
+  await probeResolution(client, dq);
 
   console.log('\n== Block uuids (:block/uuid) (#18)');
   const uuidRows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
