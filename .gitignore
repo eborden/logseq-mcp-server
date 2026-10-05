@@ -9,3 +9,6 @@ coverage/
 # Raw test/probe output can contain real graph data; never commit it
 *-output.txt
 integration-test-output*
+
+# Personal Claude Code settings (permissions); never commit
+.claude/settings.local.json
