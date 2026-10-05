@@ -299,7 +299,7 @@ Query journal entries within a date range. **Preferred tool for time-bounded que
 
 **Example:**
 ```
-logseq_query_by_date_range(20251201, 20251208, "Zach")  # This week's Zach mentions
+logseq_query_by_date_range(20251201, 20251208, "Alice")  # This week's Alice mentions
 logseq_query_by_date_range(20251101, 20251130, "testing")  # November mentions of "testing"
 ```
 

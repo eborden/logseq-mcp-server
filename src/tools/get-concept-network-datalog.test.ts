@@ -88,21 +88,21 @@ describe('getConceptNetwork (Datalog)', () => {
 
     // Mock Query 0: Get root page - name stored lowercase in DB
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [{ id: 1, name: 'christy' }]
+      [{ id: 1, name: 'alice' }]
     ]);
 
     // Mock HTTP API call: No connections
     (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     // Should work with capital C
-    const result = await getConceptNetwork(mockClient, 'Christy', 1);
+    const result = await getConceptNetwork(mockClient, 'Alice', 1);
 
-    expect(result.concept).toBe('Christy');
-    expect(result.nodes[0].name).toBe('christy'); // DB returns lowercase
+    expect(result.concept).toBe('Alice');
+    expect(result.nodes[0].name).toBe('alice'); // DB returns lowercase
 
     // Verify query has lowercase embedded in it
     expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
-      expect.stringContaining('christy')  // Lowercased embedded in query
+      expect.stringContaining('alice')  // Lowercased embedded in query
     );
   });
 });

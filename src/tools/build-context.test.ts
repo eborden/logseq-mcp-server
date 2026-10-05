@@ -90,7 +90,7 @@ describe('buildContextForTopic', () => {
 
     // Mock Query 1: Get page (lowercase in DB)
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [{ id: 1, name: 'christy', properties: {} }]
+      [{ id: 1, name: 'alice', properties: {} }]
     ]);
 
     // Mock Query 2: Get blocks (empty)
@@ -100,16 +100,16 @@ describe('buildContextForTopic', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce([]);
 
     // Should work with capital C
-    const result = await buildContextForTopic(mockClient, 'Christy', {});
+    const result = await buildContextForTopic(mockClient, 'Alice', {});
 
-    expect(result.topic).toBe('Christy');
+    expect(result.topic).toBe('Alice');
     expect(result.mainPage.id).toBe(1);
     expect(result.directBlocks.length).toBe(0); // No blocks
     expect(result.references.length).toBe(0); // No references
 
     // Verify query has lowercase embedded in it
     expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
-      expect.stringContaining('christy')  // Lowercased embedded in query
+      expect.stringContaining('alice')  // Lowercased embedded in query
     );
   });
 
@@ -157,7 +157,7 @@ describe('buildContextForTopic', () => {
 
     // Mock Query 1: Get page with db/id (Datalog format)
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [{ 'db/id': 22, name: 'zach', properties: {} }]
+      [{ 'db/id': 22, name: 'bob', properties: {} }]
     ]);
 
     // Mock Query 2: Get blocks
@@ -165,10 +165,10 @@ describe('buildContextForTopic', () => {
 
     // Mock Query 3: Get backlinks - relatedPages derived from this
     (mockClient.callAPI as any).mockResolvedValueOnce([
-      [{ 'db/id': 95, name: 'Core' }, [{ id: 100, content: 'Mentions Zach' }]]
+      [{ 'db/id': 95, name: 'Core' }, [{ id: 100, content: 'Mentions Bob' }]]
     ]);
 
-    const result = await buildContextForTopic(mockClient, 'Zach', {});
+    const result = await buildContextForTopic(mockClient, 'Bob', {});
 
     expect(result.mainPage['db/id']).toBe(22);
     expect(result.relatedPages.length).toBe(1);
