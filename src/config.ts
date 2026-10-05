@@ -37,9 +37,15 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
       throw new Error('Configuration validation failed: authToken must be a string');
     }
 
+    if (config.timeoutMs !== undefined &&
+        (typeof config.timeoutMs !== 'number' || !Number.isFinite(config.timeoutMs) || config.timeoutMs <= 0)) {
+      throw new Error('Configuration validation failed: timeoutMs must be a positive finite number');
+    }
+
     return {
       apiUrl,
-      authToken: config.authToken
+      authToken: config.authToken,
+      ...(config.timeoutMs !== undefined && { timeoutMs: config.timeoutMs })
     };
   } catch (error) {
     // Re-throw validation errors as-is

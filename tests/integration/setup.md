@@ -25,6 +25,7 @@ This directory contains integration tests that require a live LogSeq instance wi
      "authToken": "your-token-here"
    }
    ```
+   Optional: add `"timeoutMs"` (positive number, default `30000`) to change the per-call timeout.
 
 6. **Create Test Data**:
    In your LogSeq test graph, create the following pages:
@@ -74,6 +75,10 @@ If tests fail, follow the setup instructions to:
 - Regenerate auth token in LogSeq settings
 - Update token in config file
 - Restart LogSeq after changing settings
+
+**Timeout Error:**
+- LogSeq is reachable but not answering; check it is not busy or stuck
+- Raise `timeoutMs` in the config file if calls are legitimately slow
 
 **Test Failures:**
 - Verify test data exists in your graph

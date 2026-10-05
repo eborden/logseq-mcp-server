@@ -74,3 +74,20 @@ export class LogSeqNotRunningError extends Error {
     this.name = 'LogSeqNotRunningError';
   }
 }
+
+/**
+ * Thrown when a LogSeq API call does not complete within the configured timeout.
+ * LogSeq is reachable but not answering, which is different from LogSeqNotRunningError.
+ */
+export class LogSeqTimeoutError extends Error {
+  constructor(apiUrl: string, timeoutMs: number) {
+    super(
+      `LogSeq at ${apiUrl} did not respond within ${timeoutMs}ms\n\n` +
+      `Steps to fix:\n` +
+      `1. Check that LogSeq is not busy (indexing, a stuck window or a very large graph)\n` +
+      `2. Retry the request\n` +
+      `3. To allow slower calls, raise "timeoutMs" in ~/.logseq-mcp/config.json (default 30000, per API call)`
+    );
+    this.name = 'LogSeqTimeoutError';
+  }
+}
