@@ -1,5 +1,5 @@
 import type { TopicContext } from '../tools/build-context.js';
-import type { TopicQueryContext } from '../tools/get-context-for-query.js';
+import type { QueryContext, TopicQueryContext } from '../tools/get-context-for-query.js';
 import { firstLineSnippet } from './snippet.js';
 
 /**
@@ -58,5 +58,19 @@ export function compactTopicContext<T extends TopicQueryContext>(context: T): Co
     directBlocks: context.directBlocks.map(compactBlock),
     relatedPages: context.relatedPages.map(r => ({ ...r, page: compactPage(r.page) })),
     references: context.references.map(r => ({ block: compactBlock(r.block), sourcePage: compactPage(r.sourcePage) })),
+  };
+}
+
+export type CompactQueryContext = Omit<QueryContext, 'contexts' | 'searchResults'> & {
+  contexts: Array<CompactTopicContext<TopicQueryContext>>;
+  searchResults?: CompactBlock[];
+};
+
+/** A query's context with every topic compacted and the search hits reduced to snippets. */
+export function compactQueryContext(context: QueryContext): CompactQueryContext {
+  return {
+    ...context,
+    contexts: context.contexts.map(c => compactTopicContext(c)),
+    searchResults: context.searchResults?.map(compactBlock),
   };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compactBlock, compactPage, compactTopicContext } from './compact.js';
+import { compactBlock, compactPage, compactQueryContext, compactTopicContext } from './compact.js';
 import { SNIPPET_MAX_CHARS } from './snippet.js';
 
 const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -73,5 +73,45 @@ describe('compactTopicContext', () => {
     for (const body of ['more', 'second ref line', '"resolvedContent"', '"content"']) {
       expect(json, body).not.toContain(body);
     }
+  });
+});
+
+describe('compactQueryContext', () => {
+  const topic: any = {
+    topic: 'Atlas',
+    mainPage: { id: 1, name: 'atlas', 'original-name': 'Atlas' },
+    directBlocks: [{ id: 2, uuid: U(2), content: 'first\nsecond' }],
+    relatedPages: [],
+    references: [],
+    summary: { totalBlocks: 1, totalRelatedPages: 0, totalReferences: 0, pageProperties: {} },
+  };
+  const query: any = {
+    query: 'what about [[Atlas]]?',
+    extractedTopics: ['Atlas'],
+    contexts: [topic],
+    warnings: [{ code: 'topics_truncated', message: 'm', howToFetchAll: 'h' }],
+    hasMore: true,
+    summary: { totalTopics: 1, totalBlocks: 1, totalPages: 1 },
+  };
+
+  it('compacts every topic and keeps the query-level fields', () => {
+    const compact = compactQueryContext(query);
+    expect(compact.contexts[0].directBlocks).toEqual([{ uuid: U(2), snippet: 'first' }]);
+    expect(compact.contexts[0].mainPage).toEqual({ id: 1, name: 'atlas', originalName: 'Atlas' });
+    expect(compact.query).toBe(query.query);
+    expect(compact.extractedTopics).toEqual(['Atlas']);
+    expect(compact.warnings).toEqual(query.warnings);
+    expect(compact.hasMore).toBe(true);
+    expect(compact.summary).toEqual(query.summary);
+    expect('searchResults' in JSON.parse(JSON.stringify(compact))).toBe(false);
+  });
+
+  it('reduces keyword search hits to snippets', () => {
+    const compact = compactQueryContext({
+      ...query,
+      contexts: [],
+      searchResults: [{ id: 9, uuid: U(9), content: 'a hit\nmore', page: { id: 1 } }],
+    });
+    expect(compact.searchResults).toEqual([{ uuid: U(9), snippet: 'a hit' }]);
   });
 });

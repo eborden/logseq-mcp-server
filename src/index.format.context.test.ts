@@ -128,3 +128,53 @@ describe('format and compact on logseq_build_context', () => {
     expect(JSON.parse(result.content[0].text).error).toContain("Invalid parameter 'compact'");
   });
 });
+
+describe('format and compact on logseq_get_context_for_query', () => {
+  const page = { id: 1, name: 'project atlas', 'original-name': 'Project Atlas', file: { id: 5 } };
+  const blocks = [{ id: 11, uuid: U(11), content: 'top one\nsecond line', parent: { id: 1 }, left: { id: 1 }, page: { id: 1 } }];
+  const datalog: Datalog = query => (query.includes(':in $ ?n') ? [[page, 'name']] : blocks.map(b => [b]));
+  const api: Api = () => null;
+
+  /** Only "Project Atlas" exists; the resolver and the namespace-leaf lookup find nothing for other names. */
+  const onlyAtlas: Datalog = query => {
+    if (query.includes(':in $ ?suffix')) return [];
+    if (query.includes(':in $ ?n')) return [[page, 'name']];
+    return datalog(query);
+  };
+
+  it('renders each topic one heading level down, and warns about one it skipped', async () => {
+    const calls: string[] = [];
+    const result = await call(
+      'logseq_get_context_for_query',
+      { query: 'about [[Project Atlas]] and [[Missing]]', format: 'markdown' },
+      api,
+      query => {
+        calls.push(query);
+        // The first resolver query is for "Project Atlas"; the second, for "Missing", finds nothing
+        const resolverCalls = calls.filter(q => q.includes(':in $ ?n')).length;
+        return query.includes(':in $ ?n') && resolverCalls > 1 ? [] : onlyAtlas(query);
+      }
+    );
+    const text = result.content[0].text;
+    expect(result.content).toHaveLength(1);
+    expect(text.startsWith('# Context for: about [[Project Atlas]] and [[Missing]]\n\nTopics: [[Project Atlas]], [[Missing]]\n\n## Project Atlas\n')).toBe(true);
+    expect(text).toContain('### Blocks (1)\n\n- top one\n  second line');
+    expect(text).toContain('---\nWarnings:\n- topic_not_found: No page found for topic "Missing"; it was skipped.');
+  });
+
+  it('keeps JSON unchanged by default and compacts on request', async () => {
+    const plain = await call('logseq_get_context_for_query', { query: 'about [[Project Atlas]]' }, api, datalog);
+    expect(JSON.parse(plain.content[0].text).contexts[0].directBlocks[0]).toHaveProperty('content');
+
+    const compact = await call('logseq_get_context_for_query', { query: 'about [[Project Atlas]]', compact: true }, api, datalog);
+    const body = JSON.parse(compact.content[0].text);
+    expect(body.contexts[0].directBlocks).toEqual([{ uuid: U(11), snippet: 'top one' }]);
+    expect(compact.content[0].text).not.toContain('second line');
+  });
+
+  it('compact markdown shows snippets and uuids', async () => {
+    const result = await call('logseq_get_context_for_query', { query: 'about [[Project Atlas]]', format: 'markdown', compact: true }, api, datalog);
+    expect(result.content[0].text).toContain(`- top one ((${U(11)}))`);
+    expect(result.content[0].text).not.toContain('second line');
+  });
+});

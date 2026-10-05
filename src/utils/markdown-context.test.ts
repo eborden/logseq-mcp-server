@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { renderTopicContext } from './markdown-context.js';
-import type { TopicQueryContext } from '../tools/get-context-for-query.js';
+import { renderQueryContext, renderTopicContext } from './markdown-context.js';
+import type { QueryContext, TopicQueryContext } from '../tools/get-context-for-query.js';
 
 const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
@@ -138,5 +138,59 @@ describe('renderTopicContext', () => {
       );
       expect(text).toContain(`### [[Alice]]\n\n- long ref ((${U(21)}))`);
     });
+  });
+});
+
+describe('renderQueryContext', () => {
+  const query = (overrides: Partial<QueryContext> = {}): QueryContext => ({
+    query: 'what about [[Project Atlas]]?',
+    extractedTopics: ['Project Atlas'],
+    contexts: [context() as TopicQueryContext],
+    warnings: [],
+    hasMore: false,
+    summary: { totalTopics: 1, totalBlocks: 3, totalPages: 1 },
+    ...overrides,
+  });
+
+  it('renders the query, its topics, and each topic one heading level down', () => {
+    const text = renderQueryContext(query());
+    expect(text.startsWith('# Context for: what about [[Project Atlas]]?\n\nTopics: [[Project Atlas]]\n\n## Project Atlas\n')).toBe(true);
+    expect(text).toContain('### Blocks (3)');
+    expect(text).toContain('- top one\n  second line\n\t- child');
+  });
+
+  it('renders every topic', () => {
+    const second = context({ topic: 'Other', mainPage: { id: 5, 'original-name': 'Other' } as any, directBlocks: [] });
+    const text = renderQueryContext(query({ extractedTopics: ['Project Atlas', 'Other'], contexts: [context(), second] }));
+    expect(text).toContain('## Project Atlas');
+    expect(text).toContain('## Other\n\n(this page has no blocks)');
+  });
+
+  it('renders keyword search results when the query named no topic', () => {
+    const text = renderQueryContext(
+      query({
+        extractedTopics: [],
+        contexts: [],
+        searchResults: [{ id: 1, uuid: U(1), content: 'a hit\nmore lines', page: { id: 1 } } as any],
+      })
+    );
+    expect(text).toBe('# Context for: what about [[Project Atlas]]?\n\n## Search results (1)\n\n- a hit\n  more lines\n');
+  });
+
+  it('says when a keyword search found nothing, and when there was nothing to run', () => {
+    expect(renderQueryContext(query({ extractedTopics: [], contexts: [], searchResults: [] }))).toContain('(no matches)');
+    expect(renderQueryContext(query({ extractedTopics: [], contexts: [] }))).toContain('(no results)');
+  });
+
+  it('compact shows snippets and uuids for topics and search hits', () => {
+    const topics = renderQueryContext(query(), { compact: true });
+    expect(topics).toContain(`- top one ((${U(11)}))`);
+    expect(topics).not.toContain('second line');
+    const hits = renderQueryContext(
+      query({ extractedTopics: [], contexts: [], searchResults: [{ id: 1, uuid: U(1), content: 'a hit\nmore lines' } as any] }),
+      { compact: true }
+    );
+    expect(hits).toContain(`- a hit ((${U(1)}))`);
+    expect(hits).not.toContain('more lines');
   });
 });
