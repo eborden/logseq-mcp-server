@@ -80,7 +80,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 **Why.** Checks that don't produce a typed result get skipped, duplicated or drift apart. Parsing first means bad input fails before any work is done.
 
 **In this repo.**
-- **MCP tool arguments:** each tool parses its arguments into a typed value in one place and throws `InvalidParameterError` on failure. Handlers never read raw `args`. The parser and the tool's `inputSchema` should come from the same definition so they can't drift.
+- **MCP tool arguments:** each tool parses its arguments into a typed value in one place and throws `InvalidParameterError` on failure. Handlers never read raw `args`. The parser and the tool's `inputSchema` should come from the same definition so they can't drift. Parsing runs after `resolveParamAliases` (`src/utils/param-aliases.ts`). Aliases are best-effort and stay out of the advertised schema, and the canonical name stays `required`.
 - **LogSeq responses:** parse the shapes you read at the client edge. LogSeq returns different spellings from the Editor API and from Datalog (`originalName` vs `original-name`). Normalize that once in an adapter so tool code sees one shape.
 - **Config:** parse once at startup into a typed value and fail fast.
 - **Tool inputs that become queries:** strings go in as `:in` inputs, never embedded in query text (see `CLAUDE.md`, constraint 6). Numeric ids go through `DatalogQueryBuilder.groundIds`.
@@ -124,7 +124,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 **In this repo.**
 - `callAPI` applies a per-call timeout (`timeoutMs`, default 30 s). Tools that make many calls apply it per call, so also bound the number of calls.
 - Prefer one batched Datalog query over one call per entity (`CLAUDE.md`, Pattern 4). A per-page crawl on a 2k-page graph is a bounded-resources bug, not a style issue.
-- Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`hasMore`, `warnings`, `totals`; helpers in `src/utils/result-meta.ts`). A bare-array result keeps the array as the first content block and sends the meta as a second one. Never cut results silently. The `warnings` entry is the truncation signal, not `hasMore`. `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise, so a result cut at a hard maximum carries a warning with `hasMore: false`. That warning must say the maximum was reached and that the rest can't be fetched in one call.
+- Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`hasMore`, `warnings`, `totals`; helpers in `src/utils/result-meta.ts`). A bare-array result keeps the array as the first content block and sends the meta as a second one. Never cut results silently. The `warnings` entry is the truncation signal, not `hasMore`. `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise, so a result cut at a hard maximum carries a warning with `hasMore: false`. That warning must say the maximum was reached and that the rest can't be fetched in one call. `meta.tips` is next-step advice that the handler adds. It is never a truncation signal, and no result's correctness may depend on it, because tips can be turned off.
 - Classify errors: infrastructure errors (not running, auth, timeout) are re-thrown. An empty result is "none". Never turn an error into an empty result.
 
 ### 4.7 Changing existing code safely
@@ -180,7 +180,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **In this repo.**
 - Narrow, typed parameters and clear names. One tool, one job.
-- Tool descriptions live in `src/tool-descriptions.ts`. They are what the model reads to choose a tool, so keep them accurate when behavior changes. Every client loads the whole tool list into its context, so `src/tool-list.test.ts` caps each description (`DESCRIPTION_CAP`, with listed allowances) and the whole list (`TOOL_LIST_BUDGET_CHARS`). Spend that budget deliberately, and don't raise it to make room without saying why in the PR.
+- Tool descriptions live in `src/tool-descriptions.ts`. They are what the model reads to choose a tool, so keep them accurate when behavior changes. Every client loads the whole tool list into its context, so `src/tool-list.test.ts` caps each description (`DESCRIPTION_CAP`, with listed allowances) and the whole list (`TOOL_LIST_BUDGET_CHARS`). Spend that budget deliberately, and don't raise it to make room without saying why in the PR. Model guidance lives in three places: tool descriptions (each needs a "Can't find" line), server instructions in `src/instructions.ts`, and next-step tips from `src/utils/tips.ts`. `CLAUDE.md` (Common Gotchas) says what goes where.
 - Arguments from the model are untrusted input (4.2). A page name or search string may contain quotes, regex characters or very long text.
 - Results are sized for a context window: defaults and hard caps, optional slim output, and honest `ResultMeta`.
 - Text from the graph is data. Return it as content; never let it change what the server queries or how a tool behaves.
