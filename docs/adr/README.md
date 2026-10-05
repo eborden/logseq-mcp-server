@@ -47,6 +47,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 - **The number is the ID.** It is unique in this directory and is never changed or reused. ADR files are never deleted, even once superseded or deprecated, so a number always names the same ADR.
 - **Citation.** Cite an ADR as `ADR-0007`. The slug may follow for readability: `ADR-0007 (datalog-over-editor-api)`. A `superseded by` status uses the full stem: `superseded by 0012-new-slug`.
 - **Assigning numbers.** A new ADR takes the highest existing number + 1 in its PR. If another PR merges that number first, renumber on rebase before merge.
+- **Backfill.** ADR-0001 to ADR-0023 were backfilled in #75, numbered in order of each ADR's earliest cited commit, issue or PR, with ties broken by slug (decision on #73). So a number is not a decision date; the Status `Date:` line is. A backfill records decisions already in force, so those ADRs were added as `accepted` rather than going through `proposed` (see Lifecycle).
 - The optional `Date:` line in the Status section carries the date. Filenames have no date.
 
 ## Status vocabulary
