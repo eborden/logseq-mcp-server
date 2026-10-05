@@ -182,14 +182,22 @@ describe('alias-aware link following against a live graph', () => {
     expect(byName.resolvedAliases?.topicB).toBeUndefined();
   });
 
-  it('query_by_date_range: a search_term naming either name matches the same blocks', async () => {
+  it('query_by_date_range: a search_term naming either name matches the same blocks, bar in-word hits of the term', async () => {
     const range = { startDate: 20000101, endDate: 21001231 };
     const byName: any = await queryJournals(client, { ...range, searchTerm: target.canonical });
     const byAlias: any = await queryJournals(client, { ...range, searchTerm: target.alias });
 
-    const ids = (r: any) =>
-      new Set(r.entries.flatMap((e: any) => e.blocks.map((b: any) => b.id)));
-    expect(sameSet(ids(byName), ids(byAlias))).toBe(true);
+    const blocks = (r: any) => new Map<number, string>(
+      r.entries.flatMap((e: any) => e.blocks.map((b: any) => [b.id, String(b.content ?? '').toLowerCase()]))
+    );
+    const [nameBlocks, aliasBlocks] = [blocks(byName), blocks(byAlias)];
+    // The term itself also matches inside a word, as any term does; the group's other names
+    // match as whole words or refs only. So a block only one call finds holds that call's term.
+    const onlyIn = (a: Map<number, string>, b: Map<number, string>, term: string) =>
+      [...a].filter(([id]) => !b.has(id)).filter(([, content]) => !content.includes(term.toLowerCase())).length;
+    expect(nameBlocks.size).toBeGreaterThan(0);
+    expect(onlyIn(nameBlocks, aliasBlocks, target.canonical)).toBe(0);
+    expect(onlyIn(aliasBlocks, nameBlocks, target.alias)).toBe(0);
     expect(byName.resolvedAliases).toEqual(byAlias.resolvedAliases);
     expect((byName.resolvedAliases?.length ?? 0) >= 2).toBe(true);
   });
