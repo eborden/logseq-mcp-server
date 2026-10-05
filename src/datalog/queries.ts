@@ -4,6 +4,7 @@
  */
 
 import { escapeRegex } from '../utils/escape-regex.js';
+import { InvalidParameterError } from '../errors.js';
 
 /**
  * A Datalog query plus the values bound to its `:in` variables.
@@ -347,6 +348,75 @@ export class DatalogQueryBuilder {
                  [?block :block/page ?neighbor]
                  [?neighbor :block/name]))]`,
       inputs: []
+    };
+  }
+
+  /**
+   * Normalize a property name to the key LogSeq stores in `:block/properties`.
+   * LogSeq keeps property keys lowercase with dashes (`created-at`), while the
+   * Editor API returns them camelCase (`createdAt`). Both spellings are
+   * accepted here, plus underscores: `createdAt`, `created-at` and
+   * `Created_At` all become `created-at`.
+   * @param name - Property name in any of those spellings
+   * @returns The stored key, without a leading colon
+   * @throws InvalidParameterError unless the name is letters, digits, `-` and `_`
+   */
+  static normalizePropertyKey(name: string): string {
+    if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9_-]*$/i.test(name)) {
+      throw new InvalidParameterError(
+        'property_key',
+        String(name),
+        'a property name made of letters, digits, "-" and "_", starting with a letter or digit',
+        'status'
+      );
+    }
+    return name
+      .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+      .replace(/_/g, '-')
+      .toLowerCase();
+  }
+
+  /**
+   * Generate Datalog query for blocks whose property `propertyName` matches
+   * `propertyValue`, each with its page's name inline.
+   *
+   * Both the key and the value are `:in` inputs; nothing is embedded. The key
+   * is a string that `(keyword ?key)` turns into the keyword
+   * `:block/properties` is indexed by (`get` with a string key matches
+   * nothing, and an EDN-encoded string input cannot be a keyword).
+   *
+   * Matching, per property value `?v` (LogSeq has no `string?`/`coll?`
+   * predicates, so one rule covers both shapes):
+   * - scalars (string, number, boolean): `(str ?v)` equals the value, the same
+   *   as the old `String(value) === propertyValue`;
+   * - multi-value properties (sets, e.g. `type:: [[a]], [[b]]`): any element
+   *   equals the value (`contains?`). A one-element set therefore matches like
+   *   a scalar, as before. The old comma-joined match (`"a,b"`) is gone.
+   *
+   * `[?b :block/page]` keeps blocks only: page entities carry their own
+   * `:block/properties`, but the page's first block holds the same
+   * properties, and that is the one the Editor API returned.
+   *
+   * @param propertyName - Property name (see `normalizePropertyKey`)
+   * @param propertyValue - Value to match (compared as a string)
+   * @returns Query and inputs (`[normalized key, value]`)
+   * @throws InvalidParameterError if the property name is invalid
+   */
+  static blocksByProperty(propertyName: string, propertyValue: string): DatalogQuery {
+    return {
+      query: `[:find (pull ?b [* {:block/page [:db/id :block/name :block/original-name]}])
+             :in $ ?key ?value
+             :where
+             [?b :block/properties ?props]
+             [?b :block/page]
+             [(keyword ?key) ?kw]
+             [(get ?props ?kw) ?v]
+             (or-join [?v ?value]
+               (and
+                 [(str ?v) ?s]
+                 [(= ?s ?value)])
+               [(contains? ?v ?value)])]`,
+      inputs: [DatalogQueryBuilder.normalizePropertyKey(propertyName), String(propertyValue)]
     };
   }
 }
