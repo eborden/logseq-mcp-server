@@ -1,7 +1,9 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity, BlockEntity, SlimBlock } from '../types.js';
 import { InvalidParameterError } from '../errors.js';
-import { toSlimBlock, buildPageNameMap } from '../utils/slim-entities.js';
+import { toSlimBlock } from '../utils/slim-entities.js';
+import { DatalogQueryBuilder } from '../datalog/queries.js';
+import { buildBlockTrees, camelizeKeys } from '../utils/block-tree.js';
 
 export interface DateRangeResult {
   dateRange: {
@@ -43,6 +45,7 @@ export interface SlimDateRangeResult {
  * @returns true if valid
  */
 function isValidDateFormat(date: number): boolean {
+  if (!Number.isInteger(date)) return false;
   const str = date.toString();
   if (str.length !== 8) return false;
 
@@ -99,36 +102,43 @@ export async function queryByDateRange(
     );
   }
 
-  // Query for all journal pages using Editor API
-  const allPages = await client.callAPI<PageEntity[]>(
-    'logseq.Editor.getAllPages'
+  // Query 1: journal pages in range (may be empty)
+  const pagesQuery = DatalogQueryBuilder.getJournalPagesInRange(startDate, endDate);
+  const pageRows = await client.executeDatalogQuery<Array<[any]>>(
+    pagesQuery.query,
+    ...pagesQuery.inputs
   );
-
-  // Filter by journal pages in date range
-  const journalsInRange = (allPages || []).filter(page => {
-    return (
-      page['journal?'] &&
-      page.journalDay &&
-      page.journalDay >= startDate &&
-      page.journalDay <= endDate
-    );
-  });
+  const journalsInRange = (pageRows || [])
+    .map(row => row[0])
+    .filter(page => page != null)
+    .map(page => camelizeKeys<PageEntity>(page));
 
   // Sort by date
   journalsInRange.sort((a, b) => (a.journalDay || 0) - (b.journalDay || 0));
 
-  // Get blocks for each journal page
+  // Query 2: every block on those pages (may be empty), rebuilt into trees.
+  // Skipped when there are no pages; a second query never scales with range length.
+  let treesByPage = new Map<number, BlockEntity[]>();
+  if (journalsInRange.length > 0) {
+    const blocksQuery = DatalogQueryBuilder.getJournalBlocksInRange(startDate, endDate);
+    const blockRows = await client.executeDatalogQuery<Array<[any]>>(
+      blocksQuery.query,
+      ...blocksQuery.inputs
+    );
+    const flatBlocks = (blockRows || [])
+      .map(row => row[0])
+      .filter(block => block != null);
+    treesByPage = buildBlockTrees(flatBlocks, journalsInRange.map(page => page.id));
+  }
+
   const entries: DateRangeResult['entries'] = [];
   let totalBlocks = 0;
 
   for (const page of journalsInRange) {
-    const blocks = await client.callAPI<BlockEntity[]>(
-      'logseq.Editor.getPageBlocksTree',
-      [page.name]
-    );
+    const blocks = treesByPage.get(page.id) || [];
 
-    // Filter by search term if provided
-    let filteredBlocks = blocks || [];
+    // Filter top-level blocks by search term if provided
+    let filteredBlocks = blocks;
     if (searchTerm) {
       filteredBlocks = filteredBlocks.filter(block =>
         block.content.toLowerCase().includes(searchTerm.toLowerCase())
@@ -148,9 +158,6 @@ export async function queryByDateRange(
 
   // Return slim results if requested
   if (slimResults) {
-    // Build page name map for efficient lookups
-    const pageMap = buildPageNameMap(journalsInRange);
-
     const slimEntries = entries.map(entry => ({
       date: entry.date,
       pageName: entry.page.originalName || entry.page['original-name'] || entry.page.name,
