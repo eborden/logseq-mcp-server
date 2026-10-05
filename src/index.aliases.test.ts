@@ -132,6 +132,16 @@ describe('parameter aliases (#44)', () => {
       expect(mocks.getPage).not.toHaveBeenCalled();
     });
 
+    it('keeps the canonical name required for every aliased tool, so an alias is never the contract', async () => {
+      const tools = await withClient(async mcp => (await mcp.listTools()).tools);
+      for (const [tool, params] of Object.entries(PARAM_ALIASES)) {
+        const schema = tools.find(t => t.name === tool)!.inputSchema as any;
+        for (const canonical of Object.keys(params)) {
+          expect(schema.required, `${tool} requires ${canonical}`).toContain(canonical);
+        }
+      }
+    });
+
     it('does not advertise aliases in any input schema', async () => {
       const tools = await withClient(async mcp => (await mcp.listTools()).tools);
       for (const { tool, alias } of aliasCases) {

@@ -4,7 +4,15 @@ import { InvalidParameterError } from '../errors.js';
  * Parameter aliases (#44): alternative names the handler accepts for a
  * canonical parameter. They are NOT in the input schemas, so they cost no
  * tokens in tools/list. Models carry `name`, `page` or a neighbouring tool's
- * parameter over by habit, and this saves a failed call.
+ * parameter over by habit, and this can save a failed call.
+ *
+ * Best-effort, not a contract. An alias only helps when the client forwards
+ * arguments the schema doesn't list. A client that validates against
+ * `inputSchema` (`required: ["page_name"]`) rejects an alias-only call before it
+ * reaches the server, and the model never sees the aliases. So aliases are no
+ * substitute for the canonical names: tips, docs and instructions always use the
+ * canonical name, and the canonical parameter stays `required` in each schema
+ * (pinned by a test in index.aliases.test.ts).
  *
  * Only alias parameters that mean exactly the same thing. `topic_a` / `topic_b`,
  * `query` / `search_term` and `block_uuid` / `page_name` mean different things
