@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { searchByRelationship } from './search-by-relationship.js';
 import { LogseqClient } from '../client.js';
+import { AmbiguousPageError, PageNotFoundError } from '../errors.js';
 
 /**
  * A tiny stand-in for LogSeq's HTTP API. Pages and blocks are plain
@@ -76,10 +77,13 @@ function makeClient() {
       ).map(b => [b]) as any;
     }
 
-    if (query.includes(':in $ ?page-name')) {
+    if (query.includes(':in $ ?n')) {
       const id = PAGES[names[0]];
-      return (id ? [[{ id, name: names[0] }]] : []) as any;
+      return (id ? [[{ id, name: names[0] }, 'name']] : []) as any;
     }
+
+    // The namespace-leaf lookup, run when a name matched nothing
+    if (query.includes(':in $ ?suffix')) return [] as any;
 
     if (query.includes('?neighbor')) {
       const ids = query.match(/ground \[([\d ]+)\]/)![1].split(' ').map(Number);
@@ -112,8 +116,9 @@ describe('searchByRelationship', () => {
     it('sends lowercased names as EDN :in inputs in a single call', async () => {
       await searchByRelationship(ctx.client, 'Project Atlas', 'ALICE', 'references');
 
-      expect(ctx.client.callAPI).toHaveBeenCalledTimes(1);
-      const [method, args] = (ctx.client.callAPI as any).mock.calls[0];
+      // One resolve per topic, then the query itself
+      expect(ctx.client.callAPI).toHaveBeenCalledTimes(3);
+      const [method, args] = (ctx.client.callAPI as any).mock.calls[2];
       expect(method).toBe('logseq.DB.datascriptQuery');
       expect(args[0]).toContain(':in $ ?page-name ?ref-name');
       expect(args.slice(1)).toEqual(['"project atlas"', '"alice"']);
@@ -140,20 +145,54 @@ describe('searchByRelationship', () => {
       expect(result.results.map(b => b.id)).not.toContain(13);
     });
 
-    it('returns an empty list when topicA or topicB does not exist', async () => {
-      const missingA = await searchByRelationship(ctx.client, 'nope', 'alice', 'references');
-      const missingB = await searchByRelationship(ctx.client, 'project atlas', 'nope', 'references');
-
-      expect(missingA.results).toEqual([]);
-      expect(missingB.results).toEqual([]);
+    it('throws PageNotFoundError when topicA or topicB does not exist', async () => {
+      await expect(searchByRelationship(ctx.client, 'nope', 'alice', 'references')).rejects.toThrow(PageNotFoundError);
+      await expect(searchByRelationship(ctx.client, 'project atlas', 'nope', 'references')).rejects.toThrow(
+        /No page "nope"/
+      );
     });
 
     it('treats a null Datalog result as no matches', async () => {
-      vi.spyOn(ctx.client, 'callAPI').mockResolvedValue(null as any);
+      const original = (ctx.client.callAPI as any).getMockImplementation();
+      vi.spyOn(ctx.client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) =>
+        String(args[0]).includes(':in $ ?page-name ?ref-name') ? (null as any) : original(method, args)
+      );
 
-      const result = await searchByRelationship(ctx.client, 'a', 'b', 'references');
+      const result = await searchByRelationship(ctx.client, 'project atlas', 'alice', 'references');
 
       expect(result.results).toEqual([]);
+    });
+
+    it('resolves an alias and queries with the page that declares it', async () => {
+      const aliasOf = vi.fn();
+      const original = (ctx.client.callAPI as any).getMockImplementation();
+      vi.spyOn(ctx.client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) => {
+        const query = String(args[0]);
+        if (query.includes(':in $ ?n') && args[1] === '"atlas"') {
+          return [[{ id: 1, name: 'project atlas' }, 'alias']] as any;
+        }
+        if (query.includes(':in $ ?page-name ?ref-name')) aliasOf(args.slice(1));
+        return original(method, args);
+      });
+
+      const result = await searchByRelationship(ctx.client, 'Atlas', 'alice', 'references');
+
+      expect(aliasOf).toHaveBeenCalledWith(['"project atlas"', '"alice"']);
+      expect(result.results.map(b => b.id).sort()).toEqual([10, 11, 12]);
+    });
+
+    it('throws AmbiguousPageError when a topic matches several pages', async () => {
+      const original = (ctx.client.callAPI as any).getMockImplementation();
+      vi.spyOn(ctx.client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) =>
+        String(args[0]).includes(':in $ ?n') && args[1] === '"al"'
+          ? ([
+              [{ id: 2, name: 'alice' }, 'alias'],
+              [{ id: 3, name: 'bob' }, 'alias']
+            ] as any)
+          : original(method, args)
+      );
+
+      await expect(searchByRelationship(ctx.client, 'Al', 'alice', 'references')).rejects.toThrow(AmbiguousPageError);
     });
   });
 
@@ -161,8 +200,9 @@ describe('searchByRelationship', () => {
     it('sends lowercased [topicA, topicB] as EDN :in inputs in a single call', async () => {
       await searchByRelationship(ctx.client, 'ALICE', 'Project Atlas', type);
 
-      expect(ctx.client.callAPI).toHaveBeenCalledTimes(1);
-      const [method, args] = (ctx.client.callAPI as any).mock.calls[0];
+      // One resolve per topic, then the query itself
+      expect(ctx.client.callAPI).toHaveBeenCalledTimes(3);
+      const [method, args] = (ctx.client.callAPI as any).mock.calls[2];
       expect(method).toBe('logseq.DB.datascriptQuery');
       expect(args[0]).toContain(':in $ ?a-name ?b-name');
       expect(args.slice(1)).toEqual(['"alice"', '"project atlas"']);
@@ -235,10 +275,10 @@ describe('searchByRelationship', () => {
       expect(ctx.treeCalls()).toHaveLength(0);
     });
 
-    it('returns an empty result without walking when either page is missing', async () => {
-      const result = await searchByRelationship(ctx.client, 'alice', 'nope', 'connected-within', 2);
-
-      expect(result.results).toEqual([]);
+    it('throws PageNotFoundError without walking when either page is missing', async () => {
+      await expect(searchByRelationship(ctx.client, 'alice', 'nope', 'connected-within', 2)).rejects.toThrow(
+        PageNotFoundError
+      );
       expect(ctx.hopCalls()).toHaveLength(0);
     });
   });

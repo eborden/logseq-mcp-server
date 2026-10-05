@@ -2,6 +2,7 @@ import { LogseqClient } from '../client.js';
 import { BlockEntity, PageEntity, ResultMeta, ResultWarning } from '../types.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
+import { requirePage } from '../utils/resolve-page.js';
 
 export type RelationshipType =
   | 'references' // Blocks about topicA that reference topicB
@@ -40,8 +41,8 @@ function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
 /**
  * Search for blocks based on relationship between topics
  * @param client - LogseqClient instance
- * @param topicA - Primary topic to search for
- * @param topicB - Related topic that defines the relationship
+ * @param topicA - Primary topic to search for (page name, alias or ISO date)
+ * @param topicB - Related topic that defines the relationship (page name, alias or ISO date)
  * @param relationshipType - Type of relationship to search
  * @param maxDistance - Maximum graph distance (for connected-within)
  * @param options - `maxFrontier`: cap on pages expanded per hop. When a hop is
@@ -49,6 +50,8 @@ function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
  *   the "not connected" answer may be a false negative. A found connection is
  *   always real.
  * @returns SearchByRelationshipResult with matching blocks
+ * @throws PageNotFoundError if a topic matches no page (guidance with the closest names)
+ * @throws AmbiguousPageError if a topic matches several pages (with the candidates)
  */
 export async function searchByRelationship(
   client: LogseqClient,
@@ -62,12 +65,20 @@ export async function searchByRelationship(
   let results: BlockEntity[] = [];
   const warnings: ResultWarning[] = [];
 
+  // Resolve both topics first (exact name, alias or ISO date: one query each).
+  // A topic that matches no page or several pages throws PageNotFoundError or
+  // AmbiguousPageError instead of quietly returning nothing.
+  const resolvedA = await requirePage(client, topicA);
+  const resolvedB = await requirePage(client, topicB);
+  const nameA = resolvedA.lookupName;
+  const nameB = resolvedB.lookupName;
+
   switch (relationshipType) {
     case 'references': {
       // Blocks on topicA's page whose :block/refs include topicB's page.
       // Matching on refs (not content) is case-insensitive and covers
       // [[link]], #tag, #[[multi word]] and uuid-style refs.
-      const { query, inputs } = DatalogQueryBuilder.blocksOnPageReferencing(topicA, topicB);
+      const { query, inputs } = DatalogQueryBuilder.blocksOnPageReferencing(nameA, nameB);
       results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
       break;
     }
@@ -78,19 +89,15 @@ export async function searchByRelationship(
     // this inbound reading; that mismatch is unchanged here.)
     case 'referenced-by':
     case 'in-pages-linking-to': {
-      const { query, inputs } = DatalogQueryBuilder.blocksReferencingInPagesLinking(topicA, topicB);
+      const { query, inputs } = DatalogQueryBuilder.blocksReferencingInPagesLinking(nameA, nameB);
       results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
       break;
     }
 
     case 'connected-within': {
-      // Two lookups first. A missing page is an empty result, not an error.
-      const pageA = DatalogQueryBuilder.getPage(topicA);
-      const pageB = DatalogQueryBuilder.getPage(topicB);
-      const rowsA = await client.executeDatalogQuery<Array<[PageEntity]>>(pageA.query, ...pageA.inputs);
-      const rowsB = await client.executeDatalogQuery<Array<[PageEntity]>>(pageB.query, ...pageB.inputs);
-      const idA = rowsA?.[0]?.[0]?.id;
-      const idB = rowsB?.[0]?.[0]?.id;
+      // The ids come from the resolved pages, so no further lookups are needed
+      const idA: number | undefined = resolvedA.page?.id;
+      const idB: number | undefined = resolvedB.page?.id;
 
       if (idA !== undefined && idB !== undefined) {
         // Level-synchronous BFS: one query per hop covers the whole frontier,
@@ -137,11 +144,11 @@ export async function searchByRelationship(
         if (found) {
           const blocksA = await client.callAPI<BlockEntity[]>(
             'logseq.Editor.getPageBlocksTree',
-            [topicA]
+            [nameA]
           );
           const blocksB = await client.callAPI<BlockEntity[]>(
             'logseq.Editor.getPageBlocksTree',
-            [topicB]
+            [nameB]
           );
 
           results = [...(blocksA || []), ...(blocksB || [])];

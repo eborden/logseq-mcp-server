@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getConceptNetwork } from './get-concept-network.js';
 import { LogseqClient } from '../client.js';
+import { PageNotFoundError } from '../errors.js';
 
 type Rel = 'outbound' | 'inbound';
 
@@ -23,8 +24,8 @@ function row(
 function mockClient(root: unknown[] | null, levels: unknown[][][] = []) {
   const queue = [...levels];
   const executeDatalogQuery = vi.fn(async (query: string) => {
-    if (query.includes(':in $ ?root-name')) {
-      return root ? [[root]] : [];
+    if (query.includes(':in $ ?n')) {
+      return root ? [[root, 'name']] : [];
     }
     return queue.shift() ?? [];
   });
@@ -190,7 +191,7 @@ describe('getConceptNetwork', () => {
     it('should throw error when page not found', async () => {
       const { client } = mockClient(null);
 
-      await expect(getConceptNetwork(client, 'NonExistent', 2)).rejects.toThrow(/Page not found/);
+      await expect(getConceptNetwork(client, 'NonExistent', 2)).rejects.toThrow(PageNotFoundError);
     });
 
     it('should handle page with no connections', async () => {
@@ -211,7 +212,7 @@ describe('getConceptNetwork', () => {
       expect(result.nodes[0].name).toBe('alice');
       // The lowercased name is an :in input, not embedded in the query
       expect(executeDatalogQuery).toHaveBeenCalledWith(
-        expect.stringContaining(':in $ ?root-name'),
+        expect.stringContaining(':in $ ?n'),
         'alice'
       );
     });

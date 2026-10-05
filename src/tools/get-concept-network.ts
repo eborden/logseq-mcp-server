@@ -2,6 +2,7 @@ import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { ResultMeta } from '../types.js';
 import { buildResultMeta } from '../utils/result-meta.js';
+import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 
 export interface ConceptNetworkNode {
   id: number;
@@ -29,7 +30,7 @@ export interface ConceptNetworkEdge {
   inbound: number;
 }
 
-export interface ConceptNetworkResult extends ResultMeta {
+export interface ConceptNetworkResult extends ResultMeta, ResolvedFrom {
   concept: string;
   nodes: ConceptNetworkNode[];
   edges: ConceptNetworkEdge[];
@@ -82,7 +83,8 @@ const linkKey = (from: number, to: number) => `${from}>${to}`;
  * deterministically: non-journal pages first, then more references to the
  * frontier, then lower id. `truncated` is set if any page was dropped.
  * @param client - LogseqClient instance
- * @param conceptName - Name of the root concept
+ * @param conceptName - Page name, alias, or ISO date (`2025-01-01`) of the root; throws
+ *   PageNotFoundError if none matches and AmbiguousPageError if several do
  * @param maxDepth - Maximum depth to traverse (default: 2, max: 3)
  * @param options - Caps and journal handling (see ConceptNetworkOptions)
  * @returns ConceptNetworkResult with nodes, edges and a truncated flag
@@ -102,15 +104,10 @@ export async function getConceptNetwork(
   const nodeMap = new Map<number, ConceptNetworkNode>();
   const links: LinkCounts = new Map();
 
-  // Query 0: Get root page only (case-insensitive, name passed as :in input)
-  const root = DatalogQueryBuilder.conceptNetwork(conceptName, 0);
-  const rootResults = await client.executeDatalogQuery<Array<[any]>>(root.query, ...root.inputs);
-
-  if (!rootResults || rootResults.length === 0) {
-    throw new Error(`Page not found: ${conceptName}`);
-  }
-
-  const rootPage = rootResults[0][0];
+  // Query 0: Resolve the root page (exact name, alias or ISO date, in one query).
+  // Throws PageNotFoundError (with suggestions) or AmbiguousPageError (with candidates).
+  const resolved = await requirePage(client, conceptName);
+  const rootPage = resolved.page;
   const rootId = rootPage.id || rootPage['db/id'];
   const rootName = rootPage['original-name'] || rootPage.originalName || rootPage.name;
 
@@ -186,6 +183,7 @@ export async function getConceptNetwork(
 
   return {
     concept: conceptName,
+    ...resolvedFrom(conceptName, resolved),
     nodes,
     edges: buildEdges(nodeMap, links),
     truncated,
