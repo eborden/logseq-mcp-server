@@ -856,7 +856,9 @@ export class DatalogQueryBuilder {
    * block sets. Unlike that call it is symmetric across the group, whichever
    * member is asked about.
    *
-   * Rows are `[block]` with the block's page pulled as `{id, name, original-name}`.
+   * Rows are `[block]` with the block's page pulled as `{id, name, original-name,
+   * journal-day}`, the keys the Editor call gives a source page (`journal-day`
+   * only on a journal; checked against that call on a live graph).
    * @param pageIds - Page entity ids (`:db/id`) of the group, each an integer
    * @returns Query and no inputs (ids are embedded via `groundIds`)
    * @throws Error if `pageIds` is empty or any id is not an integer
@@ -866,7 +868,7 @@ export class DatalogQueryBuilder {
       throw new Error('linkedReferencesOfPages needs at least one page id');
     }
     return {
-      query: `[:find (pull ?block [* {:block/page [:db/id :block/name :block/original-name]}])
+      query: `[:find (pull ?block [* {:block/page [:db/id :block/name :block/original-name :block/journal-day]}])
              :where
              ${DatalogQueryBuilder.groundIds(pageIds, '?p')}
              [?block :block/path-refs ?p]

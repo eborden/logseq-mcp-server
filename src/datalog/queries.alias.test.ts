@@ -35,6 +35,8 @@ describe('DatalogQueryBuilder alias sets (#69)', () => {
       expect(query).toContain('[(ground [3 4]) [?p ...]]');
       expect(query).toContain('[?block :block/path-refs ?p]');
       expect(query).toContain('(not [(ground [3 4]) [?source ...]])');
+      // the source page keys the Editor call returns, journal-day included
+      expect(query).toContain('{:block/page [:db/id :block/name :block/original-name :block/journal-day]}');
     });
 
     it('rejects an empty list and ids that are not integers', () => {

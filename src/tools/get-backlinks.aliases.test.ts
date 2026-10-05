@@ -3,7 +3,7 @@ import { getBacklinks, getBacklinksWithMeta } from './get-backlinks.js';
 import { LogseqClient } from '../client.js';
 
 // Synthetic graph from the issue: "Jordan" declares `alias:: Jordan Rivera`.
-// Block 100 links [[Jordan]], block 200 links [[Jordan Rivera]], on journal pages.
+// Block 100 links [[Jordan]] on a journal page, block 200 links [[Jordan Rivera]] on a plain page.
 const file = { id: 900 };
 const jordan = { id: 1, name: 'jordan', 'original-name': 'Jordan', file, alias: [{ id: 2 }] };
 const jordanRivera = { id: 2, name: 'jordan rivera', 'original-name': 'Jordan Rivera', alias: [{ id: 1 }] };
@@ -12,14 +12,15 @@ const member = (p: { id: number; name: string; 'original-name': string }) => ({
   name: p.name,
   'original-name': p['original-name']
 });
-const journalA = { id: 50, name: 'day a', 'original-name': 'Day A' };
-const journalB = { id: 51, name: 'day b', 'original-name': 'Day B' };
-const refBlock = (id: number, page: typeof journalA, content: string) => ({
+// Source pages as the query pulls them: `journal-day` only on a journal
+const journal = { id: 50, name: 'jan 1st, 2025', 'original-name': 'Jan 1st, 2025', 'journal-day': 20250101 };
+const notes = { id: 51, name: 'my page', 'original-name': 'My page' };
+const refBlock = (id: number, page: Record<string, unknown>, content: string) => ({
   id,
   uuid: `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`,
   content,
   'path-refs': [{ id: 1 }],
-  page: { id: page.id, name: page.name, 'original-name': page['original-name'] }
+  page
 });
 
 function fakeClient() {
@@ -33,9 +34,9 @@ function fakeClient() {
     if (query.includes('?start')) return [[1, member(jordan)], [1, member(jordanRivera)]];
     if (query.includes(':block/path-refs')) {
       return [
-        [refBlock(100, journalA, 'Ship the migration [[Jordan]]')],
-        [refBlock(200, journalB, 'Review with [[Jordan Rivera]]')],
-        [refBlock(100, journalA, 'Ship the migration [[Jordan]]')] // same block twice
+        [refBlock(100, journal, 'Ship the migration [[Jordan]]')],
+        [refBlock(200, notes, 'Review with [[Jordan Rivera]]')],
+        [refBlock(100, journal, 'Ship the migration [[Jordan]]')] // same block twice
       ];
     }
     throw new Error(`unexpected query: ${query}`);
@@ -69,10 +70,25 @@ describe('get_backlinks across an alias group (#69)', () => {
   it('shapes the tuples like the Editor API: [page, blocks] with camelCase keys', async () => {
     const { results } = await getBacklinksWithMeta(fakeClient().client, 'Jordan');
 
-    const [page, blocks] = results![0] as any;
-    expect(page).toEqual({ id: 50, name: 'day a', originalName: 'Day A' });
+    const [page, blocks] = results!.find(([p]) => p.id === 50) as any;
     expect(blocks[0].pathRefs).toEqual([{ id: 1 }]);
     expect(blocks[0].page).toEqual(page);
+  });
+
+  it('gives each source page the keys the Editor call gives it, journalDay included on a journal', async () => {
+    // What logseq.Editor.getPageLinkedReferences returns as a source page (checked on a live graph)
+    const editorShaped = {
+      50: { id: 50, name: 'jan 1st, 2025', originalName: 'Jan 1st, 2025', journalDay: 20250101 },
+      51: { id: 51, name: 'my page', originalName: 'My page' }
+    } as Record<number, unknown>;
+
+    const { results } = await getBacklinksWithMeta(fakeClient().client, 'Jordan');
+
+    expect(results).toHaveLength(2);
+    for (const [page, blocks] of results!) {
+      expect(page).toStrictEqual(editorShaped[page.id]);
+      for (const block of blocks) expect(block.page).toStrictEqual(editorShaped[page.id]);
+    }
   });
 
   it('lists the covered names, original case, in meta.resolvedAliases', async () => {

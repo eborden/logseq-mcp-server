@@ -10,7 +10,7 @@ import {
   resolveAliasSet,
   resolvedAliases
 } from '../utils/alias-set.js';
-import { camelizeBlock } from '../utils/block-tree.js';
+import { camelizeBlock, camelizeKeys } from '../utils/block-tree.js';
 import { requirePage, resolvedFromInfo, ResolvedFrom } from '../utils/resolve-page.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 
@@ -72,7 +72,9 @@ export async function getBacklinksWithMeta(
  * Without `aliasSet`, or for a page with no aliases, this is the Editor API's
  * linked references of `resolvedName`, unchanged. For a page with aliases it is
  * one Datalog query over the ids of the whole group, shaped like that call's
- * result (camelCase entities, one `[page, blocks]` tuple per source page).
+ * result (camelCase entities, one `[page, blocks]` tuple per source page, and
+ * the same page keys: `id`, `name`, `originalName`, plus `journalDay` on a
+ * journal, as the tuple's page and as each block's `page`).
  */
 export async function fetchBacklinks(
   client: LogseqClient,
@@ -100,15 +102,11 @@ async function fetchAliasedBacklinks(
   for (const [row] of rows) {
     if (!row) continue;
     const block = camelizeBlock(row);
-    const page = block.page as any;
-    if (page?.id === undefined) continue;
-    let group = byPage.get(page.id);
+    if (block.page?.id === undefined) continue;
+    let group = byPage.get(block.page.id);
     if (!group) {
-      group = {
-        page: { id: page.id, name: page.name, originalName: page.originalName ?? page['original-name'] } as PageEntity,
-        blocks: new Map()
-      };
-      byPage.set(page.id, group);
+      group = { page: camelizeKeys<PageEntity>(block.page), blocks: new Map() };
+      byPage.set(group.page.id, group);
     }
     group.blocks.set(block.id, { ...block, page: group.page as any });
   }
