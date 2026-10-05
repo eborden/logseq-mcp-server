@@ -13,6 +13,7 @@ import { SERVER_INSTRUCTIONS } from './instructions.js';
 import { listPrompts } from './prompts.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 import { getPage } from './tools/get-page.js';
+import { renderPage } from './utils/markdown.js';
 
 /**
  * MCP resources (#46). Both are read-only and read-only is all this server does:
@@ -76,45 +77,6 @@ export function buildGuide(): string {
   ].join('\n');
 }
 
-interface BlockLike {
-  content?: unknown;
-  children?: unknown;
-}
-
-const isBlock = (value: unknown): value is BlockLike => typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/**
- * Render a block tree as an outline: one `- ` per block, tab-indented by depth, the
- * way LogSeq files store it. Stops at `budget` characters and reports whether it did.
- */
-const TRUNCATED_BLOCK_MARKER = '\n[This block is longer than the limit and was truncated here.]';
-
-function renderBlocks(blocks: unknown[], depth: number, budget: { left: number; cut: boolean }, out: string[]): void {
-  for (const block of blocks) {
-    if (budget.cut) return;
-    // Unfetched children come back as ["uuid", "<id>"] tuples, not blocks
-    if (!isBlock(block)) continue;
-    const content = typeof block.content === 'string' ? block.content : '';
-    const indent = '\t'.repeat(depth);
-    const [first, ...rest] = content.split('\n');
-    const lines = [`${indent}- ${first}`, ...rest.map(line => `${indent}  ${line}`)];
-    const text = lines.join('\n');
-    if (text.length + 1 > budget.left) {
-      budget.cut = true;
-      // A first block over the cap would otherwise render as an empty page.
-      // Keep its start, with a marker, so the reader sees real content.
-      if (out.length === 0) {
-        const marker = TRUNCATED_BLOCK_MARKER;
-        out.push(`${text.slice(0, Math.max(0, budget.left - marker.length - 1))}${marker}`);
-      }
-      return;
-    }
-    out.push(text);
-    budget.left -= text.length + 1;
-    if (Array.isArray(block.children)) renderBlocks(block.children, depth + 1, budget, out);
-  }
-}
-
 /** Page name from a `logseq://page/{name}` URI, or an InvalidParams error. */
 function pageNameFromUri(uri: string): string {
   const encoded = uri.slice(PAGE_URI_PREFIX.length);
@@ -149,25 +111,16 @@ export async function readPageResource(client: LogseqClient, uri: string): Promi
     throw error;
   }
 
-  const title = page.originalName ?? page['original-name'] ?? page.name ?? name;
-  const header = [`# ${String(title)}`];
-  if (page.resolvedFrom) {
-    header.push('', `(resolved from ${JSON.stringify(page.resolvedFrom.name)}, matched by ${page.resolvedFrom.matchedBy})`);
-  }
-  header.push('');
-
-  const outline: string[] = [];
-  const budget = { left: MAX_PAGE_CHARS, cut: false };
-  const blocks = Array.isArray(page.children) ? page.children : [];
-  renderBlocks(blocks, 0, budget, outline);
-
-  const body = outline.length > 0 || budget.cut ? outline.join('\n') : '(this page has no blocks)';
-  const notice = budget.cut
-    ? `\n\n[Cut at ${MAX_PAGE_CHARS} characters. The page continues. Use logseq_get_page or logseq_get_block for the rest.]`
-    : '';
+  // The one shared renderer (#43): the same text `logseq_get_page` returns with format: "markdown"
+  const text = renderPage(page, {
+    blocksFetched: true,
+    maxChars: MAX_PAGE_CHARS,
+    cutNotice: `[Cut at ${MAX_PAGE_CHARS} characters. The page continues. Use logseq_get_page or logseq_get_block for the rest.]`,
+    fallbackTitle: name,
+  });
 
   return {
-    contents: [{ uri, mimeType: MARKDOWN, text: `${header.join('\n')}\n${body}${notice}\n` }],
+    contents: [{ uri, mimeType: MARKDOWN, text }],
   };
 }
 

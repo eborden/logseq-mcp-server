@@ -127,6 +127,22 @@ describe('MCP resources (#46)', () => {
       }
     });
 
+    it('renders page properties before the blocks, through the shared renderer (#43)', async () => {
+      const tree = [{ content: 'type:: person', 'pre-block?': true }, { content: 'a block' }];
+      const { mcp } = await connect(method => {
+        if (method === 'logseq.Editor.getPage') return { ...aliceEntity, properties: { type: 'person' } };
+        if (method === 'logseq.Editor.getPageBlocksTree') return tree;
+        return null;
+      });
+      try {
+        expect(textOf(await mcp.readResource({ uri: 'logseq://page/Alice' }))).toBe(
+          '# Alice\n\ntype:: person\n\n- a block\n'
+        );
+      } finally {
+        await mcp.close();
+      }
+    });
+
     it('decodes a URL-encoded name and passes it to the page lookup', async () => {
       const { mcp, callAPI } = await connect(method => (method === 'logseq.Editor.getPage' ? { ...aliceEntity } : []));
       try {
