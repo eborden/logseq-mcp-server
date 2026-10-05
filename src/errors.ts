@@ -108,3 +108,15 @@ export class LogSeqAuthError extends Error {
     this.name = 'LogSeqAuthError';
   }
 }
+
+/**
+ * True for failures of the connection to LogSeq itself (not running, timeout,
+ * rejected token). These must never be turned into "no data".
+ */
+export function isInfrastructureError(error: unknown): boolean {
+  return (
+    error instanceof LogSeqNotRunningError ||
+    error instanceof LogSeqTimeoutError ||
+    error instanceof LogSeqAuthError
+  );
+}
