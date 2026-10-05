@@ -12,11 +12,11 @@ const member = (p: { id: number; name: string; 'original-name': string }) => ({
   name: p.name,
   'original-name': p['original-name']
 });
-const refBlock = (id: number, pageId: number, pageName: string) => ({
+const refBlock = (id: number, pageId: number, pageName: string, journalDay?: number) => ({
   id,
   content: `block ${id}`,
   'path-refs': [{ id: 1 }],
-  page: { id: pageId, name: pageName, 'original-name': pageName }
+  page: { id: pageId, name: pageName, 'original-name': pageName, ...(journalDay && { 'journal-day': journalDay }) }
 });
 
 function fakeClient(opts: { aliasError?: Error } = {}) {
@@ -31,7 +31,7 @@ function fakeClient(opts: { aliasError?: Error } = {}) {
       return [[1, member(jordan)], [1, member(jordanRivera)]];
     }
     if (query.includes(':block/path-refs')) {
-      return [[refBlock(100, 50, 'day a')], [refBlock(200, 51, 'day b')]];
+      return [[refBlock(100, 50, 'jan 1st, 2025', 20250101)], [refBlock(200, 51, 'my page')]];
     }
     if (query.includes('ground [1 2]')) {
       // blocks on either page of the group, aliases' blocks returned first on purpose
@@ -56,6 +56,16 @@ describe('build_context across an alias group (#69)', () => {
     expect(result.directBlocks.map(b => b.id)).toEqual([30, 31]); // the page's own blocks first
     expect(result.resolvedAliases).toEqual(['Jordan', 'Jordan Rivera']);
     expect(callAPI).not.toHaveBeenCalled();
+  });
+
+  it('keeps the source page shape of the Editor call, journalDay included', async () => {
+    const result = await buildContextForTopic(fakeClient().client, 'Jordan');
+
+    const journal = { id: 50, name: 'jan 1st, 2025', originalName: 'jan 1st, 2025', journalDay: 20250101 };
+    const plain = { id: 51, name: 'my page', originalName: 'my page' };
+    expect(result.relatedPages.map(r => r.page)).toEqual(expect.arrayContaining([journal, plain]));
+    expect(result.references.find(r => r.block.id === 100)?.sourcePage).toStrictEqual(journal);
+    expect(result.references.find(r => r.block.id === 200)?.sourcePage).toStrictEqual(plain);
   });
 
   it('gives the same blocks whether asked by the canonical name or the alias', async () => {
