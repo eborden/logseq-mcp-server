@@ -166,7 +166,7 @@ Every constraint below marked **Verified** is reproduced by `npx tsx scripts/pro
 | `datascriptQuery(query-with-:in, "my page")` (bare string) | **0** |
 | `datascriptQuery(query-with-:in, "\"my page\"")` (EDN-quoted) | 1 |
 
-**Verified.** Why strings were once embedded and are now bound with `:in`: [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md), which supersedes ADR-0006.
+**Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted. Why strings were once embedded and are now bound with `:in`: [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md), which supersedes ADR-0006.
 
 **Current practice:** string parameters go through `:in`. `LogseqClient.executeDatalogQuery(query, ...inputs)` sends each input as `JSON.stringify(value)` (a JSON string literal is also a valid EDN string literal), and every `DatalogQueryBuilder` method returns `{ query, inputs }`:
 ```typescript
