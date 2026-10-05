@@ -1,5 +1,6 @@
 import { z } from 'zod/v4';
 import type { OutputFormat } from './utils/output-format.js';
+import { DEFAULT_SLIM_RESULTS } from './utils/slim-entities.js';
 
 /**
  * Argument schemas of the tools whose arguments are parsed with zod (#60).
@@ -29,6 +30,15 @@ const formatArg = z.enum(OUTPUT_FORMAT_VALUES).optional().describe(FORMAT_DESCRI
 /** `resolve_refs` (#18): opt-in, default false. */
 const resolveRefsArg = z.boolean().default(false).describe(RESOLVE_REFS_DESCRIPTION);
 
+/**
+ * `slim_results` (#42): slim unless the caller sends `false`. The tool functions
+ * default to full output for direct callers, so the MCP default lives here.
+ */
+const slimResultsArg = z
+  .boolean()
+  .default(DEFAULT_SLIM_RESULTS)
+  .describe('Slim blocks (default). false returns full entities');
+
 export const getPageArgs = z.object({
   page_name: z.string().describe('Page name, alias, or ISO date (2025-01-01) for a journal'),
   include_children: z.boolean().default(false).describe('Whether to include child blocks/pages'),
@@ -45,4 +55,23 @@ export const getBlockArgs = z.object({
   include_children: z.boolean().default(false).describe('Whether to include child blocks'),
   resolve_refs: resolveRefsArg,
   format: formatArg,
+});
+
+export const searchBlocksArgs = z.object({
+  query: z.string().describe('Text to search for in block content'),
+  // No advertised default: absent reaches the tool as undefined, and the tool uses 100.
+  // No clamp either: a negative limit returns no blocks, as it always did.
+  limit: z.number().optional().describe('Maximum number of results to return (optional)'),
+  include_context: z.boolean().default(false).describe('Include semantic context (page, references, tags)'),
+  slim_results: slimResultsArg,
+});
+
+export const queryByPropertyArgs = z.object({
+  property_key: z
+    .string()
+    .describe('Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)'),
+  property_value: z
+    .string()
+    .describe('Value to match for the property. For multi-value properties, matches if any one value equals it'),
+  slim_results: slimResultsArg,
 });
