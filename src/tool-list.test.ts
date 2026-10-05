@@ -29,6 +29,8 @@ import { LogseqClient } from './client.js';
  * to add `format` and `compact` to five tools (about 200-250 characters of schema each, so 1,000-1,250) and a
  * `logseq_get_page_outline` tool (roughly 800 for description, schema and annotations). That fits in 17,000
  * without trimming useful "Can't find" lines or raising the constant again.
+ * Saying that page-name parameters take aliases and ISO dates (#41) added 161 characters (about 40 tokens),
+ * bringing it to about 14,030. The longest description is 391 characters, inside the cap.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.
