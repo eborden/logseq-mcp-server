@@ -166,7 +166,7 @@ Every constraint below marked **Verified** is reproduced by `npx tsx scripts/pro
 | `datascriptQuery(query-with-:in, "my page")` (bare string) | **0** |
 | `datascriptQuery(query-with-:in, "\"my page\"")` (EDN-quoted) | 1 |
 
-**Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted.
+**Verified.** Why strings were once embedded and are now bound with `:in`: [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md), which supersedes ADR-0006.
 
 **Current practice:** string parameters go through `:in`. `LogseqClient.executeDatalogQuery(query, ...inputs)` sends each input as `JSON.stringify(value)` (a JSON string literal is also a valid EDN string literal), and every `DatalogQueryBuilder` method returns `{ query, inputs }`:
 ```typescript
@@ -188,40 +188,12 @@ Pass raw values as inputs. The client does the EDN encoding, so never `JSON.stri
 | `clojure.string/includes?` | Works, including on `:block/content` |
 | `re-pattern` + `re-find`, e.g. `"(?i)foo"` | Works (case-insensitive matching) |
 
-**Verified.** Lowercase in TypeScript before passing the name to the query. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
+**Verified.** Lowercase in TypeScript (`pageName.toLowerCase()`) and pass the result as an `:in` input, as in constraint 1. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
 
-**DON'T (lower-case doesn't work):**
-```clojure
-[:find (pull ?page [*])
- :in $ ?page-name
- :where
- [(clojure.string/lower-case ?page-name) ?page-name-lower]  ; ← Error: "Unknown function"
- [?page :block/name ?page-name-lower]]
-```
-
-**Error message:**
+Calling `lower-case` in a query fails with:
 ```
 LogSeq API error: Unknown function 'clojure.string/lower-case in [(clojure.string/lower-case ?page-name) ?page-name-lower]
 ```
-
-**DO (process in TypeScript):**
-```typescript
-// Pre-process in TypeScript
-const pageNameLower = pageName.toLowerCase();
-
-// Pass the pre-processed value as an :in input
-const query = `[:find (pull ?page [*])
-                :in $ ?page-name
-                :where
-                [?page :block/name ?page-name]]`;
-await client.executeDatalogQuery(query, pageNameLower);
-```
-
-**Why:** LogSeq's DataScript exposes only some of `clojure.string`. `lower-case` is missing, while `includes?`, `starts-with?`, `re-pattern` and `re-find` are present.
-
-**References:**
-- Discovered in: commit c108174 integration tests
-- Probe: `scripts/probe-constraints.ts`
 
 ---
 
@@ -248,30 +220,9 @@ The pattern `(or-join [?x ?y] ... [(ground nil) ?y])` doesn't work as expected f
 4. LogSeq filters out result rows containing `nil`
 5. **Result:** Query returns 0 results (should return page with no blocks)
 
-**DO (split into separate queries):**
-```typescript
-// Query 1: Get the page (always succeeds if page exists)
-const page = DatalogQueryBuilder.getPage(pageName);
-const pageResults = await client.executeDatalogQuery(page.query, ...page.inputs);
+**DO:** split into separate queries (Pattern 1 below): the page first, failing if it's absent, then its blocks, where an empty array is a valid answer. The decision: [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md).
 
-if (!pageResults || pageResults.length === 0) {
-  throw new Error(`Page not found: ${pageName}`);
-}
-
-// Query 2: Get blocks (may be empty array)
-const blocksQuery = DatalogQueryBuilder.getPageBlocks(pageName);
-const blockResults = await client.executeDatalogQuery(blocksQuery.query, ...blocksQuery.inputs);
-
-// Handle empty results gracefully
-const blocks = (blockResults || []).map(r => r[0]);
-```
-
-**Why:** LogSeq's Datalog filters out nil values from results, making optional binding patterns impossible. The solution is to split into separate queries and handle empty arrays.
-
-**References:**
-- Discovered in: commit d6c3151 "fix: handle pages without blocks"
-- Pattern used in: `buildContextForTopic` in `src/tools/build-context.ts` (page query, then blocks query)
-- Empty pages are common: in a journal-heavy graph, most non-journal pages may have no file at all (they exist only as link targets)
+Empty pages are common: in a journal-heavy graph, most non-journal pages may have no file at all (they exist only as link targets).
 
 ---
 
@@ -312,33 +263,7 @@ Page entity:
   :db/id              - Numeric ID
 ```
 
-**Best Practice for Case-Insensitive Lookup:**
-```typescript
-// Accept any casing from user
-function getPage(pageName: string) {
-  // Lowercase before passing it as an :in input
-  const pageNameLower = pageName.toLowerCase();
-
-  return {
-    query: `[:find (pull ?page [*])
-             :in $ ?page-name
-             :where
-             [?page :block/name ?page-name]]`,
-    inputs: [pageNameLower]
-  };
-}
-
-// All these work correctly:
-getPage('Alice')  // ✅ Finds "alice"
-getPage('alice')  // ✅ Finds "alice"
-getPage('ALICE')  // ✅ Finds "alice"
-```
-
-**Why:** This matches LogSeq's own behavior - the UI is case-insensitive because it lowercases before lookup.
-
-**References:**
-- Pattern established in: commit ff0c96d
-- Used throughout: `src/datalog/queries.ts` (all query builders)
+Lowercase the name before passing it as an `:in` input, so `getPage('Alice')`, `getPage('alice')` and `getPage('ALICE')` all find `alice` (Pattern 3 below). This matches LogSeq's own UI, which lowercases before lookup. Every builder in `src/datalog/queries.ts` does it.
 
 ---
 
@@ -352,7 +277,7 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 **Verified.** `JSON.stringify(value)` produces a valid EDN string literal for quotes, backslashes and newlines, and the escaped form runs correctly.
 
-**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. All of `src/datalog/queries.ts` works this way.
+**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. All of `src/datalog/queries.ts` works this way ([ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)).
 
 - Numeric IDs are still embedded, in `ground` vectors, because collection `:in` inputs are unprobed. Build them with `DatalogQueryBuilder.groundIds(ids)`, which throws unless every id passes `Number.isInteger`. Bind the ids straight to the entity variable (`groundIds(ids, '?p')` followed by a pattern on `?p`). `[?p :db/id ?id]` matches nothing, and a query whose only clause is the `ground` binding errors.
 - If you ever must embed a string literal, use `JSON.stringify(value)`. A string used inside `re-pattern` also needs regex metacharacters escaped first (#4).
