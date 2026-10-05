@@ -25,12 +25,15 @@ import { LogseqClient } from './client.js';
  * Adding the resolve_refs parameter to four tools (#18) added 568 characters (about 140 tokens),
  * bringing it to 17,651, also inside the budget.
  * Rewriting every description to fit the cap and add a "Can't find" line (#44) brought it down to about 13,900,
- * and the budget came down to 16,000 (about 15% headroom) so the saving isn't spent by accident.
+ * and the budget was set to 17,000 (about 23% headroom over ~13,900). The headroom is deliberate: #43 is expected
+ * to add `format` and `compact` to five tools (about 200-250 characters of schema each, so 1,000-1,250) and a
+ * `logseq_get_page_outline` tool (roughly 800 for description, schema and annotations). That fits in 17,000
+ * without trimming useful "Can't find" lines or raising the constant again.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.
  */
-const TOOL_LIST_BUDGET_CHARS = 16_000;
+const TOOL_LIST_BUDGET_CHARS = 17_000;
 
 /** Rough token estimate. English text and JSON average about 4 characters per token. */
 const CHARS_PER_TOKEN = 4;
