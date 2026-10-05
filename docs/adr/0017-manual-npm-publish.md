@@ -31,4 +31,4 @@ Date: 2026-10-05
 - ci: `.github/workflows/publish.yml` (triggered only by workflow_dispatch, main only, dry_run defaults to true)
 - test: `src/package-metadata.test.ts` (prepublishOnly runs the build, and files includes dist, README.md and LICENSE)
 - test: `src/version.test.ts` (the plugin manifest carries the same version as package.json)
-- test: `src/adr-workflow-guards.test.ts` (publish.yml triggers only on workflow_dispatch, the dry_run input defaults to true, and every job is gated to refs/heads/main)
+- test: `src/adr-workflow-guards.test.ts` (publish.yml triggers only on workflow_dispatch, the dry_run input defaults to true and the Publish step runs npm publish --dry-run when it is set, every job is gated to refs/heads/main, and no other workflow runs npm publish)
