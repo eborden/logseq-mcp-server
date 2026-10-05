@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity, PageEntity } from '../types.js';
+import { DatalogQueryBuilder } from '../datalog/queries.js';
 
 export type RelationshipType =
   | 'references' // Blocks about topicA that reference topicB
@@ -16,6 +17,11 @@ export interface SearchByRelationshipResult {
   };
   relationshipType: RelationshipType;
   results: BlockEntity[];
+}
+
+/** Unwrap `[[block], ...]` Datalog rows; a null result means no rows. */
+function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
+  return (rows || []).map(row => row[0]).filter(block => block != null);
 }
 
 /**
@@ -38,177 +44,56 @@ export async function searchByRelationship(
 
   switch (relationshipType) {
     case 'references': {
-      // Find blocks that mention topicA and also reference topicB
-      const blocksAboutA = await client.callAPI<BlockEntity[]>(
-        'logseq.Editor.getPageBlocksTree',
-        [topicA]
-      );
-
-      // Filter blocks that contain reference to topicB
-      results = (blocksAboutA || []).filter(block => {
-        const content = block.content || '';
-        return (
-          content.includes(`[[${topicB}]]`) ||
-          content.includes(`#${topicB}`)
-        );
-      });
+      // Blocks on topicA's page whose :block/refs include topicB's page.
+      // Matching on refs (not content) is case-insensitive and covers
+      // [[link]], #tag, #[[multi word]] and uuid-style refs.
+      const { query, inputs } = DatalogQueryBuilder.blocksOnPageReferencing(topicA, topicB);
+      results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
       break;
     }
 
-    case 'referenced-by': {
-      // Get pages that reference topicB (backlinks to topicB)
-      const backlinks = await client.callAPI<[BlockEntity, PageEntity][]>(
-        'logseq.Editor.getPageLinkedReferences',
-        [topicB]
-      );
-
-      // Extract unique page names from backlinks
-      const referencingPageNames = new Set<string>();
-      for (const [block, page] of backlinks || []) {
-        if (page && page.name) {
-          referencingPageNames.add(page.name);
-        }
-      }
-
-      // Get blocks about topicA from those pages
-      for (const pageName of referencingPageNames) {
-        const blocks = await client.callAPI<BlockEntity[]>(
-          'logseq.Editor.getPageBlocksTree',
-          [pageName]
-        );
-
-        const matchingBlocks = (blocks || []).filter(block => {
-          const content = block.content || '';
-          return (
-            content.includes(`[[${topicA}]]`) ||
-            content.includes(`#${topicA}`)
-          );
-        });
-
-        results.push(...matchingBlocks);
-      }
-      break;
-    }
-
+    // Both types run the same query: blocks that reference topicA, on pages
+    // that also hold a block referencing topicB. (`referenced-by` is
+    // documented as "pages referenced by topicB" but has always implemented
+    // this inbound reading; that mismatch is unchanged here.)
+    case 'referenced-by':
     case 'in-pages-linking-to': {
-      // Get pages that link to topicB using getPageLinkedReferences
-      const backlinks = await client.callAPI<[BlockEntity, PageEntity][]>(
-        'logseq.Editor.getPageLinkedReferences',
-        [topicB]
-      );
-
-      // Extract unique page names from backlinks
-      const linkingPageNames = new Set<string>();
-      for (const [block, page] of backlinks || []) {
-        if (page && page.name) {
-          linkingPageNames.add(page.name);
-        }
-      }
-
-      // Get blocks about topicA from those pages
-      for (const pageName of linkingPageNames) {
-        const blocks = await client.callAPI<BlockEntity[]>(
-          'logseq.Editor.getPageBlocksTree',
-          [pageName]
-        );
-
-        const matchingBlocks = (blocks || []).filter(block => {
-          const content = block.content || '';
-          return (
-            content.includes(`[[${topicA}]]`) ||
-            content.includes(`#${topicA}`)
-          );
-        });
-
-        results.push(...matchingBlocks);
-      }
+      const { query, inputs } = DatalogQueryBuilder.blocksReferencingInPagesLinking(topicA, topicB);
+      results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
       break;
     }
 
     case 'connected-within': {
-      // Check if topicB is reachable from topicA within maxDistance hops
-      const visited = new Set<string>();
-      const queue: Array<{ pageName: string; depth: number }> = [];
+      // Two lookups first. A missing page is an empty result, not an error.
+      const pageA = DatalogQueryBuilder.getPage(topicA);
+      const pageB = DatalogQueryBuilder.getPage(topicB);
+      const rowsA = await client.executeDatalogQuery<Array<[PageEntity]>>(pageA.query, ...pageA.inputs);
+      const rowsB = await client.executeDatalogQuery<Array<[PageEntity]>>(pageB.query, ...pageB.inputs);
+      const idA = rowsA?.[0]?.[0]?.id;
+      const idB = rowsB?.[0]?.[0]?.id;
 
-      const rootPage = await client.callAPI<PageEntity | null>(
-        'logseq.Editor.getPage',
-        [topicA]
-      );
-
-      if (rootPage) {
-        visited.add(rootPage.name);
-        queue.push({ pageName: rootPage.name, depth: 0 });
-
+      if (idA !== undefined && idB !== undefined) {
+        // Level-synchronous BFS: one query per hop covers the whole frontier,
+        // in both link directions, so the cost is O(maxDistance) calls.
+        const visited = new Set<number>([idA]);
+        let frontier = [idA];
         let found = false;
 
-        while (queue.length > 0 && !found) {
-          const current = queue.shift()!;
+        for (let depth = 1; depth <= maxDistance && frontier.length > 0 && !found; depth++) {
+          const { query, inputs } = DatalogQueryBuilder.neighborPages(frontier);
+          const rows = await client.executeDatalogQuery<Array<[number]>>(query, ...inputs);
+          const neighborIds = (rows || []).map(row => row[0]);
 
-          if (current.depth >= maxDistance) {
-            continue;
-          }
-
-          // Get blocks to extract outbound references
-          const blocks = await client.callAPI<BlockEntity[]>(
-            'logseq.Editor.getPageBlocksTree',
-            [current.pageName]
-          );
-
-          // Extract page references from block content
-          const pageRefRegex = /\[\[([^\]]+)\]\]/g;
-          const referencedPageNames = new Set<string>();
-
-          const extractRefs = (blocks: BlockEntity[]) => {
-            for (const block of blocks) {
-              if (block.content) {
-                let match;
-                while ((match = pageRefRegex.exec(block.content)) !== null) {
-                  referencedPageNames.add(match[1]);
-                }
-              }
-              if (block.children) {
-                extractRefs(block.children);
-              }
-            }
-          };
-
-          extractRefs(blocks || []);
-
-          // Check if we found topicB
-          if (referencedPageNames.has(topicB)) {
+          if (neighborIds.includes(idB)) {
             found = true;
             break;
           }
 
-          // Add unvisited pages to queue
-          for (const refName of referencedPageNames) {
-            if (!visited.has(refName)) {
-              visited.add(refName);
-              queue.push({
-                pageName: refName,
-                depth: current.depth + 1
-              });
-            }
-          }
-
-          // Also check inbound references (backlinks)
-          const backlinks = await client.callAPI<[BlockEntity, PageEntity][]>(
-            'logseq.Editor.getPageLinkedReferences',
-            [current.pageName]
-          );
-
-          for (const [block, page] of backlinks || []) {
-            if (page.name === topicB) {
-              found = true;
-              break;
-            }
-
-            if (!visited.has(page.name)) {
-              visited.add(page.name);
-              queue.push({
-                pageName: page.name,
-                depth: current.depth + 1
-              });
+          frontier = [];
+          for (const id of neighborIds) {
+            if (!visited.has(id)) {
+              visited.add(id);
+              frontier.push(id);
             }
           }
         }
