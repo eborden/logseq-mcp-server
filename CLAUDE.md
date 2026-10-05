@@ -21,6 +21,12 @@ The LogSeq instance this server is developed against is the maintainer's **perso
 
 ---
 
+## Architectural Foundations
+
+Read `docs/architecture-foundations.md` before writing or changing code. It sets the principles (parse input at the boundary, bound calls and result sizes, preserve behavior when refactoring, additive tool contracts) and the handoff sections for PR descriptions. The code doesn't meet all of them yet: #58 tracks the gaps and the order of work.
+
+---
+
 ## Development Workflow
 
 Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.com/users/eborden/projects/1) project board.
