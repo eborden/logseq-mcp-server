@@ -382,7 +382,9 @@ describe('ADR-0022: CI covers the engines.node floor', () => {
   const unitTestJobs = () => {
     const ci = parseWorkflowYaml(readWorkflow('ci.yml'));
     return [...at(ci, 'jobs').map.entries()]
-      .filter(([, job]) => (job.map.get('steps')?.items ?? []).some(step => step.map.get('run')?.value === 'npx vitest run src'))
+      .filter(([, job]) =>
+        (job.map.get('steps')?.items ?? []).some(step => /^npx vitest run src(?:\s|$)/.test(step.map.get('run')?.value ?? '')),
+      )
       .map(([name, job]) => ({ name, job, nodes: listOf(at(job, 'strategy', 'matrix', 'node')) }));
   };
 
