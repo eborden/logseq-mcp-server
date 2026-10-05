@@ -1,5 +1,5 @@
 import { LogseqMCPConfig, LogseqAPIRequest, LogseqAPIResponse } from './types.js';
-import { LogSeqNotRunningError, LogSeqTimeoutError } from './errors.js';
+import { LogSeqAuthError, LogSeqNotRunningError, LogSeqTimeoutError } from './errors.js';
 
 /** Default per-call timeout when `timeoutMs` is not set in the config */
 export const DEFAULT_TIMEOUT_MS = 30000;
@@ -20,6 +20,7 @@ export class LogseqClient {
    * @param method - The API method to call (e.g., 'logseq.Editor.getBlock')
    * @param args - Optional array of arguments for the method
    * @returns The response data from the API
+   * @throws LogSeqAuthError if LogSeq rejects the auth token (HTTP 401)
    * @throws LogSeqTimeoutError if the call exceeds `timeoutMs`
    * @throws Error if the API call fails or returns an error
    */
@@ -44,6 +45,11 @@ export class LogseqClient {
         // tool run, so tools that make many calls are not cut short.
         signal: AbortSignal.timeout(timeoutMs)
       });
+
+      // A rejected token gets its own actionable error
+      if (response.status === 401) {
+        throw new LogSeqAuthError(this.config.apiUrl);
+      }
 
       // Handle HTTP errors
       if (!response.ok) {

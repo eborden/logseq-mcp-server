@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { LogseqClient } from './client.js';
-import { LogSeqNotRunningError, LogSeqTimeoutError } from './errors.js';
+import { LogSeqAuthError, LogSeqNotRunningError, LogSeqTimeoutError } from './errors.js';
 import { createServer, Server } from 'http';
 import { AddressInfo } from 'net';
 
@@ -158,16 +158,47 @@ describe('LogseqClient', () => {
       expect(result).toEqual(mockData);
     });
 
-    it('should throw error on HTTP 401 (unauthorized)', async () => {
+    it('should throw LogSeqAuthError on HTTP 401 (unauthorized)', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
         status: 401,
         statusText: 'Unauthorized'
       }) as any;
 
-      await expect(
-        client.callAPI('logseq.Editor.getBlock', ['block-uuid'])
-      ).rejects.toThrow('HTTP 401: Unauthorized');
+      const error = await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e);
+
+      expect(error).toBeInstanceOf(LogSeqAuthError);
+      expect(error).not.toBeInstanceOf(LogSeqNotRunningError);
+      expect(error.message).toContain('http://localhost:12315');
+      expect(error.message).toContain('Regenerate');
+      expect(error.message).toContain('authToken');
+      expect(error.message).toContain('~/.logseq-mcp/config.json');
+      expect(error.message).toContain('tests/integration/setup.md');
+    });
+
+    it('never includes the auth token in the LogSeqAuthError message', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized'
+      }) as any;
+
+      const error = await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e);
+
+      expect(error.message).not.toContain(mockConfig.authToken);
+    });
+
+    it('should throw a generic error on other HTTP failures (403)', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden'
+      }) as any;
+
+      const error = await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e);
+
+      expect(error).not.toBeInstanceOf(LogSeqAuthError);
+      expect(error.message).toBe('HTTP 403: Forbidden');
     });
 
     it('should throw error on HTTP 404 (not found)', async () => {
