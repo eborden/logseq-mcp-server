@@ -53,13 +53,39 @@ describe('listPages', () => {
     expect(result.pages).toEqual(['Experiment']);
   });
 
-  it('should handle null response', async () => {
-    (mockClient.callAPI as any).mockResolvedValue(null);
+  // CURRENT behavior, pinned by #64. NOT endorsed.
+  // When logseq.Editor.getAllPages returns null, listPages reports an empty
+  // list: no error, no warning. If null can mean "no graph open" or "mid
+  // re-index" rather than "empty graph", this reports a failure as "none"
+  // (foundations 2.10, 4.9). Whether to change that is the maintainer's call
+  // and would be a separate PR; update this test with that change.
+  describe('current behavior when getAllPages returns null (#64, not endorsed)', () => {
+    it('returns an empty list with no error or warning', async () => {
+      (mockClient.callAPI as any).mockResolvedValue(null);
 
-    const result = await listPages(mockClient);
+      const result = await listPages(mockClient);
 
-    expect(result.pages).toEqual([]);
-    expect(result.total).toBe(0);
+      expect(result).toEqual({ pages: [], total: 0 });
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
+      expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getAllPages');
+    });
+
+    it('returns the same empty list when a name filter is given', async () => {
+      (mockClient.callAPI as any).mockResolvedValue(null);
+
+      const result = await listPages(mockClient, { nameContains: 'anything' });
+
+      expect(result).toEqual({ pages: [], total: 0 });
+    });
+
+    it('is indistinguishable from an empty array response', async () => {
+      (mockClient.callAPI as any).mockResolvedValueOnce(null).mockResolvedValueOnce([]);
+
+      const fromNull = await listPages(mockClient);
+      const fromEmpty = await listPages(mockClient);
+
+      expect(fromNull).toEqual(fromEmpty);
+    });
   });
 
   it('should propagate API errors', async () => {
