@@ -750,7 +750,7 @@ src/
 │   ├── get-page-outline.ts        - Top-level blocks, snippets and child counts
 │   ├── get-concept-network.ts     - Batched BFS with caps (Pattern 2)
 │   ├── search-by-relationship.ts  - Relationship search
-│   └── [10 other tools]
+│   └── [12 other tools]
 ├── utils/
 │   ├── markdown.ts                - The one Markdown renderer (pages, blocks, footer); used by the page resource too
 │   ├── markdown-context.ts        - Markdown for build_context, get_context_for_query, get_concept_network

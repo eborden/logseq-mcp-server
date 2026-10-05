@@ -4,7 +4,7 @@ Turn your LogSeq knowledge graph into an AI-accessible database.
 
 ## What This Does
 
-Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+Provides 15 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
 
 ## Quick Start
 

@@ -84,7 +84,7 @@ Use this skill when:
 - Read this when user asks for research help, task management, or graph exploration
 
 **`references/mcp-tools-reference.md`** - Complete MCP tool documentation
-- All 13 LogSeq MCP tools with parameters and examples
+- All 15 LogSeq MCP tools with parameters and examples
 - Tool comparison tables and selection guidance
 - Read this when verifying tool syntax or discovering capabilities
 
