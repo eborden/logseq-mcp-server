@@ -2,6 +2,8 @@
 
 Generate a monthly summary by compressing the month's weekly summaries into month-altitude signals, each carrying an explicit trajectory against prior months.
 
+**Routing:** this is for a whole month, built from the `Weekly *` pages. For a single week, use `skills/weekly-summary.md` (and write the weeklies first if they are missing).
+
 **Read `references/summary-compression.md` first.** It holds the shared compression philosophy, emotional markers, output structure, formatting, and unresolved-item verification. This file covers only what is specific to the monthly cadence.
 
 ## Granularity Parameters

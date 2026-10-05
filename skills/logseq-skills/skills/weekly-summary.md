@@ -2,6 +2,8 @@
 
 Generate a weekly summary from journal entries, compressed to salient signals and linked back to the source journal days.
 
+**Routing:** this is for one Monday-Friday week, built from raw journals. For a month, or trends across weeks, use `skills/monthly-summary.md`. To add `[[links]]` to a note, use `skills/concept-linking.md`.
+
 **Read `references/summary-compression.md` first.** It holds the salience filtering, emotional markers, compression rules, output structure, formatting, unresolved-item verification, and trend contextualization shared by all granularities. This file covers only what is specific to the weekly cadence.
 
 ## Granularity Parameters

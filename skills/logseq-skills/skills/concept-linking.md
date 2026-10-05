@@ -2,6 +2,8 @@
 
 Add `[[refs]]` to existing notes for concepts that already have pages, without changing what the notes say and without guessing who a name refers to.
 
+**Routing:** this edits notes the user already wrote. For summaries use `skills/weekly-summary.md` or `skills/monthly-summary.md`; for questions about the graph, use `references/context-builder.md`.
+
 **Read `references/link-resolution.md` first.** It holds the resolution semantics, the decision table, what counts as corroboration, and the anti-patterns. This file covers only the workflow.
 
 ## Parameters
