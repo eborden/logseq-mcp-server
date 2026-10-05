@@ -2,26 +2,26 @@
 
 ## Context
 
-By 2025-11-24 the server had 13 tools, and every one is a description, schema and set of behaviours that a model must read each session and choose between. Two overlapped with others (`docs/plans/2024-11-24-simplify-mcp-tools.md`; the file name carries a typo in the year, the commits are from 2025):
+By 2025-11-24 the server had 13 tools. The plan in `docs/plans/2024-11-24-simplify-mcp-tools.md` (the file name carries a typo in the year; the commits are from 2025) set the goal of going from 13 tools to 10 or 11 "by removing redundant/incomplete implementations", and the commits give the reason as reducing the API surface. Two tools overlapped with others:
 
-- `get_entity_timeline` was a strict subset of `get_concept_evolution`, which returns the same data when called without its grouping option.
-- `get_related_pages` claimed to support depths 1 to 3 but implemented only depth 1, and `get_concept_network` covered the same ground in full.
+- `get_entity_timeline` was "a complete subset of `get_concept_evolution`", which returns the same data when called without its `groupBy` option (plan, Task 1; commit 9642558).
+- `get_related_pages` "claimed to support depth 1-3 but only implemented depth=1", and `get_concept_network` "provides complete, correct implementation" (commit 34a699a).
 
-The plan also floated merging two search tools into one interface. That was optional and was not taken.
+The plan also floated merging `search_blocks` and `query_by_property` into one tool (Phase 2, marked optional). That was not taken.
 
-Alternatives were to keep both for backward compatibility, or to finish the partial tool. Both keep a larger surface for no new capability.
+Inferred; no source records this: every tool is a description and schema that a model reads each session and chooses between, so overlapping tools also cost context and invite the wrong choice. No alternative, such as keeping the old names for compatibility or finishing the partial tool, is recorded as considered.
 
 ## Decision
 
 We remove a tool when another tool already provides its behaviour, or when it promises more than it implements and a complete tool replaces it. Commit 9642558 removed `get_entity_timeline`, and commit 34a699a removed `get_related_pages`, taking the count from 13 to 11. Their code and tests were deleted.
 
-The removal was cheap then because nothing had been released or published. It is not a precedent for removing tools later: once clients and skills depend on tool names, `additive-tool-contracts` applies.
+Nothing had been released: the repository has no tags, and `CHANGELOG.md` says nothing has been published to npm. This is not a precedent for removing tools later: once clients and skills depend on tool names, `additive-tool-contracts` applies.
 
 ## Consequences
 
-- A smaller tool list: less context spent on every session and less ambiguity about which tool to call.
-- Anyone calling a removed name gets "unknown tool". We accepted that, since the replacements were documented in the plan and commit messages.
-- The count has since grown again as capabilities were added (14 today), always through new tools rather than overlapping ones.
+- A smaller API surface: the plan records "15% reduction in API surface, ~195 lines removed, zero functional loss".
+- Anyone calling a removed name gets "unknown tool". The commit messages name the replacement for each (`get_concept_evolution` without `groupBy`, and `get_concept_network` at depth 1). No migration note beyond that was written.
+- The count has since grown again as capabilities were added (14 today) through new tools.
 - Removed tools are only in git history. Reviving one needs a new decision.
 
 ## Status
