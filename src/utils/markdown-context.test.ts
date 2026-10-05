@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { renderQueryContext, renderTopicContext } from './markdown-context.js';
+import { renderNetwork, renderQueryContext, renderTopicContext } from './markdown-context.js';
 import type { QueryContext, TopicQueryContext } from '../tools/get-context-for-query.js';
+import type { ConceptNetworkResult } from '../tools/get-concept-network.js';
 
 const U = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
@@ -192,5 +193,64 @@ describe('renderQueryContext', () => {
     );
     expect(hits).toContain(`- a hit ((${U(1)}))`);
     expect(hits).not.toContain('more lines');
+  });
+});
+
+describe('renderNetwork', () => {
+  const network = (overrides: Partial<ConceptNetworkResult> = {}): ConceptNetworkResult => ({
+    concept: 'atlas',
+    nodes: [
+      { id: 1, name: 'Project Atlas', depth: 0 },
+      { id: 2, name: 'Alice', depth: 1 },
+      { id: 3, name: 'Bob', depth: 1 },
+      { id: 4, name: 'Carol', depth: 2 },
+    ],
+    edges: [
+      { from: 1, to: 2, type: 'reference', count: 3, outbound: 3, inbound: 0 },
+      { from: 1, to: 3, type: 'backlink', count: 2, outbound: 0, inbound: 2 },
+      { from: 2, to: 4, type: 'reference', count: 3, outbound: 2, inbound: 1 },
+    ],
+    truncated: false,
+    hasMore: false,
+    warnings: [],
+    ...overrides,
+  });
+
+  it('groups pages by depth, then lists the links with their direction and count', () => {
+    expect(renderNetwork(network())).toBe(
+      [
+        '# Concept network: [[Project Atlas]]',
+        '',
+        '## Depth 1 (2)',
+        '',
+        '[[Alice]], [[Bob]]',
+        '',
+        '## Depth 2 (1)',
+        '',
+        '[[Carol]]',
+        '',
+        '## Links (3)',
+        '',
+        '- [[Project Atlas]] -> [[Alice]] (3)',
+        '- [[Project Atlas]] <- [[Bob]] (2)',
+        '- [[Alice]] <-> [[Carol]] (2/1)',
+        '',
+      ].join('\n')
+    );
+  });
+
+  it('says so for a root with no linked pages', () => {
+    const text = renderNetwork(network({ nodes: [{ id: 1, name: 'Project Atlas', depth: 0 }], edges: [] }));
+    expect(text).toBe('# Concept network: [[Project Atlas]]\n\n(no linked pages)\n');
+  });
+
+  it('notes the page a name resolved to', () => {
+    const text = renderNetwork(network({ resolvedFrom: { name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' } }));
+    expect(text).toContain('(resolved from "Atlas", matched by alias)');
+  });
+
+  it('skips an edge whose page is not in the network', () => {
+    const text = renderNetwork(network({ edges: [{ from: 1, to: 99, type: 'reference', count: 1, outbound: 1, inbound: 0 }] }));
+    expect(text).not.toContain('## Links');
   });
 });
