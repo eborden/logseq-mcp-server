@@ -77,9 +77,14 @@ export async function getContextForQuery(
   options: {
     maxTopics?: number;
     maxSearchResults?: number;
+    /**
+     * Add each keyword hit's page (`context.page`) in one extra batched query. For
+     * output that names the page of a hit, such as Markdown (#43); JSON leaves it off.
+     */
+    hitPages?: boolean;
   } = {}
 ): Promise<QueryContext> {
-  const { maxTopics = 5, maxSearchResults = 20 } = options;
+  const { maxTopics = 5, maxSearchResults = 20, hitPages = false } = options;
 
   // Extract topics from query
   const extractedTopics = extractTopicsFromQuery(query);
@@ -180,7 +185,7 @@ export async function getContextForQuery(
       // The search is the only data source on this path, so any failure
       // propagates: an empty result must mean "nothing matched".
       // Note: slimResults=false returns SearchBlocksResult[]
-      const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, false, false);
+      const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, hitPages, false);
 
       // A null response is a genuine "no matches"
       searchResults = (blocks || []).filter(block => {

@@ -172,6 +172,37 @@ describe('format and compact on logseq_get_context_for_query', () => {
     expect(compact.content[0].text).not.toContain('second line');
   });
 
+  describe('keyword search hits (a query with no topic)', () => {
+    const alice = { id: 2, name: 'alice', 'original-name': 'Alice' };
+    const hit = { id: 31, uuid: U(31), content: 'widgets are great\nmore on widgets', page: { id: 2, name: 'alice', 'original-name': 'Alice' } };
+    const searchApi: Datalog = query => {
+      if (query.includes('re-pattern')) return [[hit]];
+      if (query.includes('ground')) return [[alice]];
+      return [];
+    };
+
+    it('Markdown hits carry the block ((uuid)) and the page, so a follow-up call is possible (#80)', async () => {
+      const result = await call('logseq_get_context_for_query', { query: 'about widgets', format: 'markdown' }, api, searchApi);
+      expect(result.content[0].text).toContain(`- widgets are great ((${U(31)})) (in [[Alice]])\n  more on widgets`);
+    });
+
+    it('compact Markdown hits carry the same handle', async () => {
+      const result = await call('logseq_get_context_for_query', { query: 'about widgets', format: 'markdown', compact: true }, api, searchApi);
+      expect(result.content[0].text).toContain(`- widgets are great ((${U(31)})) (in [[Alice]])\n`);
+      expect(result.content[0].text).not.toContain('more on widgets');
+    });
+
+    it('JSON hits are unchanged: no page lookup, no context', async () => {
+      const queries: string[] = [];
+      const result = await call('logseq_get_context_for_query', { query: 'about widgets' }, api, query => {
+        queries.push(query);
+        return searchApi(query);
+      });
+      expect(queries.filter(q => q.includes('ground'))).toHaveLength(0);
+      expect(JSON.parse(result.content[0].text).searchResults[0]).not.toHaveProperty('context');
+    });
+  });
+
   it('compact markdown shows snippets and uuids', async () => {
     const result = await call('logseq_get_context_for_query', { query: 'about [[Project Atlas]]', format: 'markdown', compact: true }, api, datalog);
     expect(result.content[0].text).toContain(`- top one ((${U(11)}))`);

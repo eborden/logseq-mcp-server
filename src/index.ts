@@ -688,7 +688,9 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
           const compact = parseCompact(args?.compact);
           const options = {
             maxTopics: args?.max_topics as number | undefined,
-            maxSearchResults: args?.max_search_results as number | undefined
+            maxSearchResults: args?.max_search_results as number | undefined,
+            // Markdown names the page of each keyword hit; JSON hits keep their shape
+            hitPages: format === 'markdown'
           };
           const result = await getContextForQuery(client, query, options);
           if (format === 'markdown') return textResult(withFooter(renderQueryContext(result, { compact }), result));

@@ -45,6 +45,10 @@ export interface OutlineOptions {
   maxChars?: number;
   /** Leave out pre-blocks, whose text is the page properties already rendered above */
   skipPreBlocks?: boolean;
+  /** Append `((uuid))` to each block. Compact output always has it. Used for search hits, which would otherwise be a dead end. */
+  showUuid?: boolean;
+  /** Append `(in [[Page]])` to each block whose page name is known (`context.page`, or a `page` entity with a name) */
+  showPage?: boolean;
 }
 
 export interface Outline {
@@ -56,17 +60,28 @@ export interface Outline {
 /** Shown after the start of a first block that alone exceeds `maxChars`. */
 export const TRUNCATED_BLOCK_MARKER = '\n[This block is longer than the limit and was truncated here.]';
 
-function bulletText(block: Obj, depth: number, compact: boolean): string {
+/** The page a block sits on, when its name is known: a search hit's `context.page`, or a `page` entity with a name. */
+function blockPageLink(block: Obj): string | undefined {
+  for (const page of [block.context?.page, block.page]) {
+    if (isObj(page) && pageTitle(page) !== '') return pageLink(page);
+  }
+  return undefined;
+}
+
+function bulletText(block: Obj, depth: number, options: { compact: boolean; showUuid: boolean; showPage: boolean }): string {
   const indent = '\t'.repeat(depth);
-  if (compact) {
-    const uuid = nonEmpty(block.uuid);
+  const uuid = nonEmpty(block.uuid);
+  const page = options.showPage ? blockPageLink(block) : undefined;
+  const handle = [options.showUuid && uuid ? `((${uuid}))` : '', page ? `(in ${page})` : ''].filter(s => s !== '').join(' ');
+  if (options.compact) {
     const snippet = firstLineSnippet(block.content);
-    const text = [snippet, uuid ? `((${uuid}))` : ''].filter(s => s !== '').join(' ');
+    const text = [snippet, uuid ? `((${uuid}))` : '', page ? `(in ${page})` : ''].filter(s => s !== '').join(' ');
     return `${indent}- ${text}`.trimEnd();
   }
   const content = typeof block.content === 'string' ? block.content : '';
   const [first, ...rest] = content.split('\n');
-  const lines = [`${indent}- ${first}`, ...rest.map(line => `${indent}  ${line}`)];
+  // The handle goes on the first line, so it stays with the bullet however long the block is
+  const lines = [`${indent}- ${handle === '' ? first : `${first} ${handle}`}`, ...rest.map(line => `${indent}  ${line}`)];
   // `content` is never changed; the resolved text is shown beside it, not in place of it
   if (typeof block.resolvedContent === 'string' && block.resolvedContent !== content) {
     const [rFirst, ...rRest] = block.resolvedContent.split('\n');
@@ -81,7 +96,7 @@ function bulletText(block: Obj, depth: number, compact: boolean): string {
  * (unfetched `["uuid", "<id>"]` tuples) are skipped.
  */
 export function renderOutline(blocks: unknown[], options: OutlineOptions = {}): Outline {
-  const { compact = false, maxChars = Infinity, skipPreBlocks = false } = options;
+  const { compact = false, maxChars = Infinity, skipPreBlocks = false, showUuid = false, showPage = false } = options;
   const out: string[] = [];
   const budget = { left: maxChars, cut: false };
 
@@ -90,7 +105,7 @@ export function renderOutline(blocks: unknown[], options: OutlineOptions = {}): 
       if (budget.cut) return;
       if (!isObj(block)) continue;
       if (skipPreBlocks && (block['pre-block?'] === true || block['preBlock?'] === true)) continue;
-      const text = bulletText(block, depth, compact);
+      const text = bulletText(block, depth, { compact, showUuid, showPage });
       if (text.length + 1 > budget.left) {
         budget.cut = true;
         // A first block over the cap would otherwise render as an empty page.
