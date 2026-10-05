@@ -23,7 +23,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "boolean",
         },
         "format": {
-          "description": "json (default), or markdown for plain text",
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
           "enum": [
             "json",
             "markdown",
@@ -114,7 +114,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "string",
         },
         "format": {
-          "description": "json (default), or markdown for plain text",
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
           "enum": [
             "json",
             "markdown",
@@ -209,7 +209,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "boolean",
         },
         "format": {
-          "description": "json (default), or markdown for plain text",
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
           "enum": [
             "json",
             "markdown",
@@ -260,7 +260,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "boolean",
         },
         "format": {
-          "description": "json (default), or markdown for plain text",
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
           "enum": [
             "json",
             "markdown",
@@ -347,7 +347,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
     "inputSchema": {
       "properties": {
         "format": {
-          "description": "json (default), or markdown for plain text",
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
           "enum": [
             "json",
             "markdown",

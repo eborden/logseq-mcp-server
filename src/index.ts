@@ -65,7 +65,7 @@ function readOnlyAnnotations(title: string) {
 const FORMAT_PARAM = {
   type: 'string',
   enum: ['json', 'markdown'],
-  description: 'json (default), or markdown for plain text',
+  description: 'json (default), or markdown text. Markdown has block uuids only on search hits and with compact',
 } as const;
 
 /** `compact` parameter shared by the tools whose blocks can shrink to snippets (#43). */
