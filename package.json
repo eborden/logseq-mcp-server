@@ -1,22 +1,50 @@
 {
   "name": "logseq-mcp-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "MCP server that gives Claude read-only access to a LogSeq knowledge graph: context building, search, graph traversal and journal date ranges.",
   "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "logseq-mcp-server": "dist/index.js",
+    "logseq-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "CHANGELOG.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
-  "bin": {
-    "logseq-mcp": "./dist/index.js"
-  },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "logseq",
+    "knowledge-graph",
+    "pkm",
+    "notes",
+    "claude"
+  ],
+  "author": "Evan Rutledge Borden (https://github.com/eborden)",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eborden/logseq-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eborden/logseq-mcp-server/issues"
+  },
+  "homepage": "https://github.com/eborden/logseq-mcp-server#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.22.0",
     "fuzzysort": "^3.1.0"
