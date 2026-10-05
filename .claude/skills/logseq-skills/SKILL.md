@@ -9,6 +9,8 @@ Comprehensive suite of workflows for querying and analyzing LogSeq knowledge gra
 
 **Tool names:** this skill refers to tools by their bare names (`logseq_get_page`). Your host may show them with a prefix, such as `mcp__logseq__logseq_get_page` or `mcp__plugin_<plugin>_logseq__logseq_get_page`. Call whichever form your tool list shows.
 
+**Paths:** `scripts/` and `references/` are relative to the directory holding this SKILL.md (`<skill-dir>` in the commands below). Resolve it from where you loaded this file; don't assume an install location.
+
 ## When to Use
 
 Use this skill when:
