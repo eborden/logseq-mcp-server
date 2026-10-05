@@ -6,7 +6,7 @@ The first Datalog query builders needed a page name inside the query. The usual 
 
 What each source records:
 
-- `docs/datalog-debugging-summary.md` (added in commit df7503a, 2025-11-21) says only that "LogSeq's HTTP API doesn't support `:in` parameters in queries", and that the fix was to embed values in the query string. It doesn't say how `:in` was tried or what it returned. The same document records the wrong-API bug (`logseq.DB.q` returning `null`) fixed in that session.
+- `df7503a:docs/datalog-debugging-summary.md` (added in commit df7503a, 2025-11-21) says only that "LogSeq's HTTP API doesn't support `:in` parameters in queries", and that the fix was to embed values in the query string. It doesn't say how `:in` was tried or what it returned. The same document records the wrong-API bug (`logseq.DB.q` returning `null`) fixed in that session.
 - Commit c108174 (2025-11-24) tried `:in` again, passing lowercased page names as extra arguments to `datascriptQuery` unencoded, as bare strings. Commit d6c3151, the same day, removed those `:in` clauses and went back to names "embedded in queries". Neither message says why `:in` was dropped.
 - CLAUDE.md, constraint 1, written later from probing (issue #12, PR #19), explains the failure: a bare string input is read as an EDN symbol and matches nothing. That is a retrospective reading, not something recorded at the time.
 

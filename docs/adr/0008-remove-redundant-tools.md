@@ -2,7 +2,7 @@
 
 ## Context
 
-By 2025-11-24 the server had 13 tools. The plan in `docs/plans/2024-11-24-simplify-mcp-tools.md` (the file name carries a typo in the year; the commits are from 2025) set the goal of going from 13 tools to 10 or 11 "by removing redundant/incomplete implementations", and the commits give the reason as reducing the API surface. Two tools overlapped with others:
+By 2025-11-24 the server had 13 tools. The plan in `9642558:docs/plans/2024-11-24-simplify-mcp-tools.md` (the file name carries a typo in the year; the commits are from 2025) set the goal of going from 13 tools to 10 or 11 "by removing redundant/incomplete implementations", and the commits give the reason as reducing the API surface. Two tools overlapped with others:
 
 - `get_entity_timeline` was "a complete subset of `get_concept_evolution`", which returns the same data when called without its `groupBy` option (plan, Task 1; commit 9642558).
 - `get_related_pages` "claimed to support depth 1-3 but only implemented depth=1", and `get_concept_network` "provides complete, correct implementation" (commit 34a699a).
