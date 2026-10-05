@@ -28,7 +28,7 @@ This is an MCP (Model Context Protocol) server that provides Claude with 13 tool
 **Key Stats:**
 - 13 MCP tools for graph operations, search, and temporal queries
 - Unit tests (`npx vitest run src`) plus integration tests against a live graph (`npm run test:integration`). `npm test` runs both.
-- Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*`, and `query_by_property` still crawls (see "Current Implementation Status" below)
+- Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see "Current Implementation Status" below)
 
 **Architecture:**
 ```
@@ -45,7 +45,7 @@ The server translates high-level queries (e.g., "get context for topic") into ca
 
 ### Current Implementation Status
 
-Traversal, search and date-range tools now run as batched Datalog queries. `logseq.Editor.*` is still used for single lookups: `get_page`, `get_block`, `get_backlinks`, linked references in `build_context`, the fuzzy-match page list on "not found", and the two block fetches after `connected-within` finds a match. `query_by_property` is the one tool that still crawls the graph.
+Traversal, search and date-range tools now run as batched Datalog queries. `logseq.Editor.*` is still used for single lookups: `get_page`, `get_block`, `get_backlinks`, linked references in `build_context`, the fuzzy-match page list on "not found", and the two block fetches after `connected-within` finds a match. No tool crawls the graph any more.
 
 Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, hub page with ~100 direct neighbours):
 
@@ -58,7 +58,7 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 | `search_blocks` | 1 | ~0.1s | One case-insensitive regex query. Was ~130 calls, or ~2k for a search with no match (#4) |
 | `query_by_date_range` (7 days) | 2 | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5) |
 | `search_by_relationship` | 1 | | `references` / `in-pages-linking-to`. `connected-within` is O(maxDistance) (#7) |
-| `query_by_property` | ~2k (one per page) | ~10-20s | Still `getAllPages` + `getPageBlocksTree` per page |
+| `query_by_property` | 1 | ~0.02s | One query over `:block/properties`, page name inline. Blocks are flat (no `children`). Was ~2k calls, ~10s (#33) |
 
 Re-run the script after changing any of these tools, and update this table.
 
@@ -397,9 +397,9 @@ export function buildQuery(pageName: string): DatalogQuery {
 
 ### Pattern 4: No Per-Page Crawls
 
-Never call `logseq.Editor.getAllPages` and then make one call per page. On a ~2k-page graph, `query_by_property` makes ~2k calls (one per page) and takes ~20s+ this way.
+Never call `logseq.Editor.getAllPages` and then make one call per page. On a ~2k-page graph, `query_by_property` used to make ~2k calls (one per page) and take ~10s this way (#33).
 
-Use one Datalog query, filtering in the query with `includes?` / `re-find`, or batched queries with `[(ground [ids...]) [?id ...]]`. `query_by_property` is the last tool that still crawls.
+Use one Datalog query, filtering in the query with `includes?` / `re-find` / `get` / `contains?`, or batched queries with `[(ground [ids...]) [?id ...]]`. No tool crawls any more.
 
 ---
 
@@ -494,6 +494,9 @@ Quick reference checklist for future work:
 - [ ] `:block/path-refs` includes refs inherited from ancestor blocks. Use it for "anything under a block tagged X".
 - [ ] `:block/updated-at` is missing on some pages (roughly 1 in 10 pages lacked it in testing). Use `get-else` with a default.
 - [ ] Many pages are empty link targets with no blocks or file. Test with them.
+- [ ] `:block/properties` is a map keyed by **keywords**, lowercase and dashed. `[(get ?props ?key) ?v]` needs a keyword: a string key, or a string `:in` input, matches nothing. Build it with `[(keyword ?key) ?kw]` from a string `:in` input. The Editor API returns the same keys camelCase.
+- [ ] A property value is a string, number or boolean, or an array (a set) for multi-value properties and page refs. `(str ?v)` of a set is `#{...}`, so match scalars with `str` and set elements with `contains?`. `string?`, `coll?`, `seq` and `clojure.string/join` are unavailable.
+- [ ] Page entities and their first (pre-)block both carry `:block/properties`. Require `[?b :block/page]` to get blocks only.
 
 **HTTP API behaviour** (verified)
 - [ ] An unknown method returns **HTTP 200** with body `{"error": "MethodNotExist: ..."}`. Always check the body; `client.ts` does.
