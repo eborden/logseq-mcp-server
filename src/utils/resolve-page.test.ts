@@ -202,6 +202,42 @@ describe('resolvePage', () => {
       expect(await resolvePage(client, '2025-01-01')).toMatchObject({ matchedBy: 'name', name: '2025-01-01' });
     });
 
+    it('prefers the journal over a file-less stub that only has the date as its name', async () => {
+      // `[[2025-01-01]]` or `date:: 2025-01-01` in a graph with another journal title format
+      const { client } = fakeClient({
+        resolveRows: [
+          [stub(1, '2025-01-01', '2025-01-01'), 'name'],
+          [page(5, 'jan 1st, 2025', 'Jan 1st, 2025'), 'journal-date']
+        ]
+      });
+
+      expect(await resolvePage(client, '2025-01-01')).toMatchObject({
+        kind: 'found',
+        matchedBy: 'journal-date',
+        name: 'jan 1st, 2025',
+        lookupName: 'jan 1st, 2025'
+      });
+    });
+
+    it('keeps the stub when no journal exists for the day', async () => {
+      const { client } = fakeClient({ resolveRows: [[stub(1, '2025-01-01', '2025-01-01'), 'name']] });
+
+      expect(await resolvePage(client, '2025-01-01')).toMatchObject({ matchedBy: 'name', name: '2025-01-01' });
+    });
+
+    it('does not mistake the journal for a different page when it is itself named like the date', async () => {
+      // yyyy-MM-dd journal titles: one page matches by name and by journal-day
+      const journal = stub(7, '2025-01-01', '2025-01-01');
+      const { client } = fakeClient({
+        resolveRows: [
+          [journal, 'name'],
+          [journal, 'journal-date']
+        ]
+      });
+
+      expect(await resolvePage(client, '2025-01-01')).toMatchObject({ matchedBy: 'name', name: '2025-01-01' });
+    });
+
     it('is not found when there is no journal for the day, without a namespace lookup', async () => {
       const { client, executeDatalogQuery } = fakeClient();
 
