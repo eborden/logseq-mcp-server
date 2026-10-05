@@ -2,295 +2,368 @@ import { describe, it, expect, vi } from 'vitest';
 import { queryByDateRange } from './query-by-date-range.js';
 import { LogseqClient } from '../client.js';
 
+// Datalog pull `[*]` shapes: kebab-case keys, refs as `{id}`, no children/level.
+function journalPage(id: number, day: number, label: string) {
+  return {
+    id,
+    uuid: `page-uuid-${id}`,
+    name: label.toLowerCase(),
+    'original-name': label,
+    'journal-day': day,
+    'journal?': true
+  };
+}
+
+function block(id: number, pageId: number, parentId: number, leftId: number, content: string, extra: Record<string, any> = {}) {
+  return {
+    id,
+    uuid: `block-uuid-${id}`,
+    content,
+    format: 'markdown',
+    page: { id: pageId },
+    parent: { id: parentId },
+    left: { id: leftId },
+    ...extra
+  };
+}
+
+/** Client whose Datalog calls resolve to `pages` first, then `blocks`. */
+function mockClient(pages: any[], blocks: any[]) {
+  const executeDatalogQuery = vi
+    .fn()
+    .mockResolvedValueOnce(pages.map(p => [p]))
+    .mockResolvedValueOnce(blocks.map(b => [b]));
+  return { client: { executeDatalogQuery } as unknown as LogseqClient, executeDatalogQuery };
+}
+
 describe('queryByDateRange', () => {
   it('should return journal entries within date range', async () => {
-    const mockClient = {
-      callAPI: vi.fn()
-    } as unknown as LogseqClient;
-
-    // Mock query for pages
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      {
-        id: 1,
-        uuid: 'uuid-1',
-        name: 'nov 15th, 2025',
-        originalName: 'Nov 15th, 2025',
-        journalDay: 20251115,
-        'journal?': true
-      },
-      {
-        id: 2,
-        uuid: 'uuid-2',
-        name: 'nov 20th, 2025',
-        originalName: 'Nov 20th, 2025',
-        journalDay: 20251120,
-        'journal?': true
-      }
-    ]);
-
-    // Mock blocks for each page
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      { id: 10, content: 'Entry from Nov 15' }
-    ]);
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      { id: 20, content: 'Entry from Nov 20' }
-    ]);
-
-    const result = await queryByDateRange(
-      mockClient,
-      20251115,
-      20251120
+    const { client } = mockClient(
+      [journalPage(1, 20250101, 'Day One'), journalPage(2, 20250105, 'Day Five')],
+      [block(10, 1, 1, 1, 'Entry one'), block(20, 2, 2, 2, 'Entry five')]
     );
 
-    expect(result).toHaveProperty('dateRange');
-    expect(result.dateRange.start).toBe(20251115);
-    expect(result.dateRange.end).toBe(20251120);
-    expect(result).toHaveProperty('entries');
+    const result = await queryByDateRange(client, 20250101, 20250105);
+
+    expect(result.dateRange).toEqual({ start: 20250101, end: 20250105 });
     expect(result.entries).toHaveLength(2);
+    expect(result.entries.map(e => e.date)).toEqual([20250101, 20250105]);
+    expect(result.summary).toEqual({ totalDays: 2, totalBlocks: 2, searchTerm: undefined });
   });
 
-  it('should filter by search term if provided', async () => {
-    const mockClient = {
-      callAPI: vi.fn()
-    } as unknown as LogseqClient;
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      {
-        id: 1,
-        uuid: 'uuid-1',
-        name: 'nov 15th, 2025',
-        originalName: 'Nov 15th, 2025',
-        journalDay: 20251115,
-        'journal?': true
-      }
-    ]);
-
-    (mockClient.callAPI as any).mockResolvedValueOnce([
-      { id: 10, content: 'Important meeting notes' },
-      { id: 11, content: 'Random thoughts' }
-    ]);
-
-    const result = await queryByDateRange(
-      mockClient,
-      20251115,
-      20251115,
-      'meeting'
+  it('should send the date bounds as :in inputs and use at most 2 calls', async () => {
+    const { client, executeDatalogQuery } = mockClient(
+      [journalPage(1, 20250101, 'Day One')],
+      [block(10, 1, 1, 1, 'Entry')]
     );
 
-    expect(result.entries[0].blocks).toHaveLength(1);
-    expect(result.entries[0].blocks[0].content).toContain('meeting');
+    await queryByDateRange(client, 20250101, 20250131);
+
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+    for (const [query, ...inputs] of executeDatalogQuery.mock.calls) {
+      expect(query).toContain(':in $ ?start ?end');
+      expect(query).toContain(':block/journal-day');
+      expect(query).not.toContain('20250101');
+      expect(inputs).toEqual([20250101, 20250131]);
+    }
   });
 
-  it('should handle empty date range', async () => {
-    const mockClient = {
-      callAPI: vi.fn()
-    } as unknown as LogseqClient;
+  it('should not scale calls with the length of the range', async () => {
+    const pages = Array.from({ length: 31 }, (_, i) => journalPage(i + 1, 20250101 + i, `Day ${i + 1}`));
+    const blocks = pages.map(p => block(p.id * 100, p.id, p.id, p.id, 'Entry'));
+    const callAPI = vi.fn();
+    const { client, executeDatalogQuery } = mockClient(pages, blocks);
+    (client as any).callAPI = callAPI;
 
-    (mockClient.callAPI as any).mockResolvedValue([]);
+    const result = await queryByDateRange(client, 20250101, 20250131);
 
-    const result = await queryByDateRange(mockClient, 20990101, 20990102);
-
-    expect(result.entries).toHaveLength(0);
+    expect(result.entries).toHaveLength(31);
+    expect(executeDatalogQuery.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(callAPI).not.toHaveBeenCalled();
   });
 
-  it('should validate date format', async () => {
-    const mockClient = {
-      callAPI: vi.fn()
-    } as unknown as LogseqClient;
+  it('should sort entries by date even when the query returns them out of order', async () => {
+    const { client } = mockClient(
+      [journalPage(2, 20250103, 'Day Three'), journalPage(1, 20250101, 'Day One')],
+      []
+    );
 
-    await expect(queryByDateRange(mockClient, 99999999, 20251120))
-      .rejects.toThrow(/Invalid parameter.*start_date/);
+    const result = await queryByDateRange(client, 20250101, 20250103);
+
+    expect(result.entries.map(e => e.date)).toEqual([20250101, 20250103]);
+  });
+
+  it('should return Editor-API-shaped pages and blocks (camelCase, children, level)', async () => {
+    const { client } = mockClient(
+      [journalPage(1, 20250101, 'Day One')],
+      [block(10, 1, 1, 1, 'Entry', { 'path-refs': [{ id: 1 }] })]
+    );
+
+    const result: any = await queryByDateRange(client, 20250101, 20250101);
+
+    expect(result.entries[0].page).toMatchObject({
+      id: 1,
+      journalDay: 20250101,
+      originalName: 'Day One',
+      'journal?': true
+    });
+    expect(result.entries[0].blocks[0]).toMatchObject({
+      id: 10,
+      content: 'Entry',
+      pathRefs: [{ id: 1 }],
+      level: 1,
+      children: []
+    });
+  });
+
+  describe('block tree rebuild', () => {
+    it('should nest children under their parents', async () => {
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [
+          block(10, 1, 1, 1, 'Top'),
+          block(11, 1, 10, 10, 'Child'),
+          block(12, 1, 11, 11, 'Grandchild')
+        ]
+      );
+
+      const result: any = await queryByDateRange(client, 20250101, 20250101);
+
+      const top = result.entries[0].blocks;
+      expect(top).toHaveLength(1);
+      expect(top[0].children.map((b: any) => b.content)).toEqual(['Child']);
+      expect(top[0].children[0].children.map((b: any) => b.content)).toEqual(['Grandchild']);
+      expect(top[0].level).toBe(1);
+      expect(top[0].children[0].level).toBe(2);
+      expect(top[0].children[0].children[0].level).toBe(3);
+      expect(result.summary.totalBlocks).toBe(1);
+    });
+
+    it('should order siblings by the :block/left chain, not by result order', async () => {
+      // Chain: first (left = page) -> second -> third. Results arrive shuffled.
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [
+          block(30, 1, 1, 20, 'third'),
+          block(10, 1, 1, 1, 'first'),
+          block(20, 1, 1, 10, 'second')
+        ]
+      );
+
+      const result: any = await queryByDateRange(client, 20250101, 20250101);
+
+      const top = result.entries[0].blocks;
+      expect(top.map((b: any) => b.content)).toEqual(['first', 'second', 'third']);
+    });
+
+    it('should order nested siblings by the left chain', async () => {
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [
+          block(10, 1, 1, 1, 'parent'),
+          block(13, 1, 10, 12, 'c'),
+          block(11, 1, 10, 10, 'a'),
+          block(12, 1, 10, 11, 'b')
+        ]
+      );
+
+      const result: any = await queryByDateRange(client, 20250101, 20250101);
+
+      expect(result.entries[0].blocks[0].children.map((b: any) => b.content)).toEqual(['a', 'b', 'c']);
+    });
+
+    it('should keep every block when the left chain is broken', async () => {
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [block(10, 1, 1, 1, 'one'), block(20, 1, 1, 999, 'two'), block(30, 1, 1, 998, 'three')]
+      );
+
+      const result: any = await queryByDateRange(client, 20250101, 20250101);
+
+      expect(result.entries[0].blocks.map((b: any) => b.content).sort()).toEqual(['one', 'three', 'two']);
+    });
+
+    it('should assign blocks to the page they belong to', async () => {
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One'), journalPage(2, 20250102, 'Day Two')],
+        [
+          block(20, 2, 2, 2, 'on day two'),
+          block(10, 1, 1, 1, 'on day one'),
+          block(21, 2, 20, 20, 'child on day two')
+        ]
+      );
+
+      const result: any = await queryByDateRange(client, 20250101, 20250102);
+
+      expect(result.entries[0].blocks.map((b: any) => b.content)).toEqual(['on day one']);
+      expect(result.entries[1].blocks.map((b: any) => b.content)).toEqual(['on day two']);
+      expect(result.entries[1].blocks[0].children[0].content).toBe('child on day two');
+    });
+  });
+
+  describe('search term', () => {
+    it('should filter top-level blocks case-insensitively and keep their children', async () => {
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [
+          block(10, 1, 1, 1, 'Important MEETING notes'),
+          block(11, 1, 10, 10, 'unrelated child'),
+          block(12, 1, 1, 10, 'Random thoughts')
+        ]
+      );
+
+      const result: any = await queryByDateRange(client, 20250101, 20250101, 'meeting');
+
+      expect(result.entries[0].blocks).toHaveLength(1);
+      expect(result.entries[0].blocks[0].content).toContain('MEETING');
+      expect(result.entries[0].blocks[0].children).toHaveLength(1);
+      expect(result.summary).toMatchObject({ totalBlocks: 1, searchTerm: 'meeting' });
+    });
+
+    it('should not match on children alone and drops days with no matches', async () => {
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One'), journalPage(2, 20250102, 'Day Two')],
+        [
+          block(10, 1, 1, 1, 'Top'),
+          block(11, 1, 10, 10, 'needle in a child'),
+          block(20, 2, 2, 2, 'has needle')
+        ]
+      );
+
+      const result: any = await queryByDateRange(client, 20250101, 20250102, 'needle');
+
+      expect(result.entries.map((e: any) => e.date)).toEqual([20250102]);
+      expect(result.summary.totalDays).toBe(1);
+    });
+  });
+
+  describe('days without blocks', () => {
+    it('should return an entry with no blocks when there is no search term', async () => {
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One'), journalPage(2, 20250102, 'Day Two')],
+        [block(20, 2, 2, 2, 'only day two')]
+      );
+
+      const result = await queryByDateRange(client, 20250101, 20250102);
+
+      expect(result.entries).toHaveLength(2);
+      expect(result.entries[0].blocks).toEqual([]);
+      expect(result.summary.totalDays).toBe(2);
+      expect(result.summary.totalBlocks).toBe(1);
+    });
+
+    it('should handle an empty date range', async () => {
+      const executeDatalogQuery = vi.fn().mockResolvedValue([]);
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      const result = await queryByDateRange(client, 20990101, 20990102);
+
+      expect(result.entries).toHaveLength(0);
+      expect(result.summary).toMatchObject({ totalDays: 0, totalBlocks: 0 });
+    });
+
+    it('should treat a null Datalog result as empty', async () => {
+      const executeDatalogQuery = vi.fn().mockResolvedValue(null);
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      const result = await queryByDateRange(client, 20990101, 20990102);
+
+      expect(result.entries).toHaveLength(0);
+    });
+  });
+
+  describe('validation', () => {
+    it('should reject an invalid start date without querying', async () => {
+      const executeDatalogQuery = vi.fn();
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      await expect(queryByDateRange(client, 99999999, 20251120)).rejects.toThrow(/Invalid parameter.*start_date/);
+      expect(executeDatalogQuery).not.toHaveBeenCalled();
+    });
+
+    it.each([NaN, Infinity, 20250101.5])('should reject non-integer date %s', async (bad) => {
+      const executeDatalogQuery = vi.fn();
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      await expect(queryByDateRange(client, bad, 20251120)).rejects.toThrow(/Invalid parameter/);
+      await expect(queryByDateRange(client, 20250101, bad)).rejects.toThrow(/Invalid parameter/);
+      expect(executeDatalogQuery).not.toHaveBeenCalled();
+    });
+
+    it('should reject start after end', async () => {
+      const client = { executeDatalogQuery: vi.fn() } as unknown as LogseqClient;
+
+      await expect(queryByDateRange(client, 20250105, 20250101)).rejects.toThrow(/date_range/);
+    });
   });
 
   // Slim results tests
   describe('slim results mode', () => {
     it('should return slim results when slimResults=true', async () => {
-      const mockClient = {
-        callAPI: vi.fn()
-      } as unknown as LogseqClient;
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 1,
-          uuid: 'uuid-1',
-          name: 'nov 15th, 2025',
-          originalName: 'Nov 15th, 2025',
-          journalDay: 20251115,
-          'journal?': true
-        }
-      ]);
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 10,
-          uuid: 'block-uuid',
-          content: 'Meeting with #team about [[Project]]',
-          page: { id: 1 },
-          parent: { id: 1 },
-          left: { id: 1 }
-        }
-      ]);
-
-      const result = await queryByDateRange(
-        mockClient,
-        20251115,
-        20251115,
-        undefined,
-        true
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [block(10, 1, 1, 1, 'Meeting with #team about [[Project]]')]
       );
 
+      const result = await queryByDateRange(client, 20250101, 20250101, undefined, true);
+
       expect(result.entries).toHaveLength(1);
-      expect(result.entries[0]).toHaveProperty('pageName', 'Nov 15th, 2025');
+      expect(result.entries[0]).toHaveProperty('pageName', 'Day One');
       expect(result.entries[0]).not.toHaveProperty('page');
 
-      const block = result.entries[0].blocks[0];
-      expect(block).toHaveProperty('content', 'Meeting with #team about [[Project]]');
-      expect(block).toHaveProperty('pageName', 'Nov 15th, 2025');
-      expect(block).toHaveProperty('tags', ['team']);
-      expect(block).toHaveProperty('pageRefs', ['Project']);
-      expect(block).toHaveProperty('uuid', 'block-uuid');
-      expect(block).not.toHaveProperty('id');
-      expect(block).not.toHaveProperty('page');
+      const slim = result.entries[0].blocks[0];
+      expect(slim).toHaveProperty('content', 'Meeting with #team about [[Project]]');
+      expect(slim).toHaveProperty('pageName', 'Day One');
+      expect(slim).toHaveProperty('tags', ['team']);
+      expect(slim).toHaveProperty('pageRefs', ['Project']);
+      expect(slim).toHaveProperty('uuid', 'block-uuid-10');
+      expect(slim).not.toHaveProperty('id');
+      expect(slim).not.toHaveProperty('page');
     });
 
     it('should preserve block hierarchy in slim results', async () => {
-      const mockClient = {
-        callAPI: vi.fn()
-      } as unknown as LogseqClient;
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 1,
-          uuid: 'uuid-1',
-          name: 'nov 15th, 2025',
-          originalName: 'Nov 15th, 2025',
-          journalDay: 20251115,
-          'journal?': true
-        }
-      ]);
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 10,
-          uuid: 'block-uuid',
-          content: 'Parent block',
-          page: { id: 1 },
-          parent: { id: 1 },
-          left: { id: 1 },
-          children: [
-            {
-              id: 11,
-              uuid: 'child-uuid',
-              content: 'Child block',
-              page: { id: 1 },
-              parent: { id: 10 },
-              left: { id: 10 }
-            }
-          ]
-        }
-      ]);
-
-      const result = await queryByDateRange(
-        mockClient,
-        20251115,
-        20251115,
-        undefined,
-        true
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [block(10, 1, 1, 1, 'Parent block'), block(11, 1, 10, 10, 'Child block')]
       );
 
-      const block = result.entries[0].blocks[0];
-      expect(block.children).toHaveLength(1);
-      expect(block.children![0].content).toBe('Child block');
-      expect(block.children![0].uuid).toBe('child-uuid');
-      expect(block.children![0]).not.toHaveProperty('id');
+      const result = await queryByDateRange(client, 20250101, 20250101, undefined, true);
+
+      const slim = result.entries[0].blocks[0];
+      expect(slim.children).toHaveLength(1);
+      expect(slim.children![0].content).toBe('Child block');
+      expect(slim.children![0].uuid).toBe('block-uuid-11');
+      expect(slim.children![0]).not.toHaveProperty('id');
     });
 
     it('should return full results when slimResults=false (default)', async () => {
-      const mockClient = {
-        callAPI: vi.fn()
-      } as unknown as LogseqClient;
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 1,
-          uuid: 'uuid-1',
-          name: 'nov 15th, 2025',
-          originalName: 'Nov 15th, 2025',
-          journalDay: 20251115,
-          'journal?': true
-        }
-      ]);
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 10,
-          uuid: 'block-uuid',
-          content: 'Test block',
-          page: { id: 1 },
-          parent: { id: 1 },
-          left: { id: 1 }
-        }
-      ]);
-
-      const result = await queryByDateRange(
-        mockClient,
-        20251115,
-        20251115,
-        undefined,
-        false
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [block(10, 1, 1, 1, 'Test block')]
       );
+
+      const result = await queryByDateRange(client, 20250101, 20250101, undefined, false);
 
       expect(result.entries[0]).toHaveProperty('page');
       expect(result.entries[0]).not.toHaveProperty('pageName');
-
-      const block = result.entries[0].blocks[0];
-      expect(block).toHaveProperty('id', 10);
-      expect(block).toHaveProperty('uuid', 'block-uuid');
-      expect(block).toHaveProperty('page');
+      expect(result.entries[0].blocks[0]).toMatchObject({ id: 10, uuid: 'block-uuid-10' });
+      expect(result.entries[0].blocks[0]).toHaveProperty('page');
     });
 
     it('should omit empty fields in slim results', async () => {
-      const mockClient = {
-        callAPI: vi.fn()
-      } as unknown as LogseqClient;
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 1,
-          uuid: 'uuid-1',
-          name: 'nov 15th, 2025',
-          originalName: 'Nov 15th, 2025',
-          journalDay: 20251115,
-          'journal?': true
-        }
-      ]);
-
-      (mockClient.callAPI as any).mockResolvedValueOnce([
-        {
-          id: 10,
-          uuid: 'block-uuid',
-          content: 'Simple block with no extras',
-          page: { id: 1 },
-          parent: { id: 1 },
-          left: { id: 1 }
-        }
-      ]);
-
-      const result = await queryByDateRange(
-        mockClient,
-        20251115,
-        20251115,
-        undefined,
-        true
+      const { client } = mockClient(
+        [journalPage(1, 20250101, 'Day One')],
+        [block(10, 1, 1, 1, 'Simple block with no extras')]
       );
 
-      const block = result.entries[0].blocks[0];
-      expect(block).not.toHaveProperty('properties');
-      expect(block).not.toHaveProperty('marker');
-      expect(block).not.toHaveProperty('tags');
-      expect(block).not.toHaveProperty('pageRefs');
-      expect(block).not.toHaveProperty('children');
+      const result = await queryByDateRange(client, 20250101, 20250101, undefined, true);
+
+      const slim = result.entries[0].blocks[0];
+      expect(slim).not.toHaveProperty('properties');
+      expect(slim).not.toHaveProperty('marker');
+      expect(slim).not.toHaveProperty('tags');
+      expect(slim).not.toHaveProperty('pageRefs');
+      expect(slim).not.toHaveProperty('children');
     });
   });
 });
