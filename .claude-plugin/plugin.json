@@ -1,0 +1,20 @@
+{
+  "name": "logseq",
+  "displayName": "LogSeq",
+  "version": "1.0.0",
+  "description": "Query your LogSeq knowledge graph from Claude: context building, graph traversal, journal date ranges, weekly and monthly summaries, and safe concept linking. Needs LogSeq running with its HTTP API enabled.",
+  "author": {
+    "name": "Evan Rutledge Borden",
+    "url": "https://github.com/eborden"
+  },
+  "homepage": "https://github.com/eborden/logseq-mcp-server",
+  "repository": "https://github.com/eborden/logseq-mcp-server",
+  "keywords": ["logseq", "knowledge-graph", "pkm", "mcp", "notes", "journal"],
+  "skills": ["./skills/"],
+  "mcpServers": {
+    "logseq": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"]
+    }
+  }
+}

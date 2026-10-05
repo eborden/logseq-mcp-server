@@ -1,0 +1,20 @@
+{
+  "name": "logseq-mcp-server",
+  "owner": {
+    "name": "Evan Rutledge Borden",
+    "url": "https://github.com/eborden"
+  },
+  "metadata": {
+    "description": "LogSeq MCP server and skills for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "logseq",
+      "source": "./",
+      "description": "Query your LogSeq knowledge graph from Claude: context building, graph traversal, journal date ranges, weekly and monthly summaries, and safe concept linking.",
+      "version": "1.0.0",
+      "category": "productivity",
+      "tags": ["logseq", "knowledge-graph", "pkm", "mcp"]
+    }
+  ]
+}
