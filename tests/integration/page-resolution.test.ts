@@ -5,9 +5,12 @@ import { access } from 'fs/promises';
 import { loadConfig } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getPage } from '../../src/tools/get-page.js';
-import { getBacklinks } from '../../src/tools/get-backlinks.js';
+import { getBacklinks, getBacklinksWithMeta } from '../../src/tools/get-backlinks.js';
 import { buildContextForTopic } from '../../src/tools/build-context.js';
 import { getContextForQuery } from '../../src/tools/get-context-for-query.js';
+import { getConceptEvolution } from '../../src/tools/get-concept-evolution.js';
+import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
+import { searchByRelationship } from '../../src/tools/search-by-relationship.js';
 import { resolvePage } from '../../src/utils/resolve-page.js';
 import { AmbiguousPageError, PageNotFoundError } from '../../src/errors.js';
 
@@ -234,6 +237,60 @@ describe('page resolution against a live graph', () => {
     });
   });
 
+  describe('the tools that changed behaviour in #41', () => {
+    const MISSING = 'no such page 41 integration probe';
+
+    it('get_concept_evolution, get_concept_network and get_backlinks throw guidance for a missing page', async () => {
+      for (const run of [
+        () => getConceptEvolution(client, MISSING),
+        () => getConceptNetwork(client, MISSING, 1),
+        () => getBacklinks(client, MISSING)
+      ]) {
+        const error = await run().catch(e => e);
+        expect(error instanceof PageNotFoundError).toBe(true);
+      }
+    });
+
+    it('search_by_relationship throws for a missing topic in either position, for every relationship type', async () => {
+      for (const type of ['references', 'in-pages-linking-to', 'connected-within'] as const) {
+        expect(await searchByRelationship(client, MISSING, exact, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
+        expect(await searchByRelationship(client, exact, MISSING, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
+      }
+    });
+
+    it('get_concept_evolution, get_concept_network and search_by_relationship return candidates for a shared alias', async () => {
+      const errors = [
+        await getConceptEvolution(client, shared.stub).catch(e => e),
+        await getConceptNetwork(client, shared.stub, 1).catch(e => e),
+        await searchByRelationship(client, shared.stub, exact, 'references').catch(e => e),
+        await searchByRelationship(client, exact, shared.stub, 'references').catch(e => e)
+      ];
+      for (const error of errors) {
+        expect(error instanceof AmbiguousPageError).toBe(true);
+        expect(error.totalCandidates).toBe(shared.sources);
+      }
+    });
+
+    it('get_backlinks, get_concept_evolution and search_by_relationship say which page an alias stood for', async () => {
+      const { meta } = await getBacklinksWithMeta(client, unique.stub);
+      const evolution = await getConceptEvolution(client, unique.stub);
+      const relationship = await searchByRelationship(client, unique.stub, exact, 'references');
+
+      expect(meta?.resolvedFrom?.matchedBy).toBe('alias');
+      expect(meta?.resolvedFrom?.resolvedTo.toLowerCase() === unique.source).toBe(true);
+      expect(evolution.resolvedFrom?.matchedBy).toBe('alias');
+      expect(relationship.resolvedFrom?.topicA?.matchedBy).toBe('alias');
+      expect(relationship.resolvedFrom?.topicB).toBeUndefined();
+    });
+
+    it('get_page costs one call for an exact name of a page with a file', async () => {
+      const { result, calls } = await countedCalls(() => getPage(client, exact, false));
+
+      expect(result.resolvedFrom).toBeUndefined();
+      expect(calls).toBe(1);
+    });
+  });
+
   describe('not found', () => {
     it('returns guidance: no page, then the tools to try', async () => {
       const error = await getPage(client, 'no such page 41 integration probe', false).catch(e => e);
@@ -246,11 +303,11 @@ describe('page resolution against a live graph', () => {
       expect(Array.isArray(error.suggestions) && error.suggestions.length <= 3).toBe(true);
     });
 
-    it('costs one query, one getAllPages call and nothing else on the not-found path', async () => {
+    it('costs the first lookup, two queries and one getAllPages call on the not-found path', async () => {
       const { calls } = await countedCalls(() => getPage(client, 'no such page 41 probe', false).catch(() => null));
 
-      // resolve + namespace-leaf (Datalog) + getAllPages for suggestions
-      expect(calls).toBe(3);
+      // Editor.getPage (null) + resolve + namespace-leaf (Datalog) + getAllPages for suggestions
+      expect(calls).toBe(4);
     });
   });
 
