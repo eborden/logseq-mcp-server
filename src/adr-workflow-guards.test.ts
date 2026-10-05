@@ -7,8 +7,10 @@ import { readFileSync, readdirSync } from 'fs';
 // it, so this reads the workflows with a minimal block-YAML reader. It handles
 // what the workflows use: `key: value` maps nested by indentation, block lists
 // (`- item`), inline lists (`[a, b]`), quoted scalars, comments and block scalars
-// (`run: |`, kept as their dedented text). Anything it can't read throws, so a workflow rewritten in a form it
-// doesn't know fails the test loudly instead of passing it by accident.
+// (`run: |`, kept as their dedented text). An empty flow map (`{}`) reads as an
+// empty map. Anything else it can't read throws, including flow maps, anchors,
+// aliases, tags and merge keys, so a workflow rewritten in a form it doesn't know
+// fails the test loudly instead of passing it by accident.
 
 interface YamlNode {
   /** The scalar after `key:` or `- `, unquoted, or a block scalar's dedented text. Empty when the value is a nested block. */
@@ -42,6 +44,19 @@ function stripComment(text: string): string {
     }
   }
   return text.trimEnd();
+}
+
+/**
+ * A plain or quoted scalar from `key: value` or `- value`. `{}` reads as an empty
+ * map (returned as ''). A value starting with `{`, `&`, `*` or `!` throws.
+ */
+function scalarValue(raw: string, lineNo: number): string {
+  const s = raw.trim();
+  if (s === '{}') return '';
+  if (/^[{&*!]/.test(s)) {
+    throw new Error(`Can't read line ${lineNo}: flow maps, anchors, aliases and tags aren't supported ("${s}")`);
+  }
+  return unquote(s);
 }
 
 /** Split `key: value` (or `key:`). Returns null when the text is not a mapping entry. */
@@ -109,7 +124,7 @@ function parseWorkflowYaml(source: string): YamlNode {
       }
       const kv = splitKey(rest);
       if (!kv) {
-        item.value = unquote(rest);
+        item.value = scalarValue(rest, lineNo);
         continue;
       }
       // `- key: value` opens a map whose further keys sit at the indent of `key`.
@@ -125,12 +140,13 @@ function parseWorkflowYaml(source: string): YamlNode {
     if (owner.map.has(kv.key)) throw new Error(`Duplicate key "${kv.key}" on line ${lineNo}`);
     const child = newNode('', lineNo);
     owner.map.set(kv.key, child);
-    if (kv.value === '') {
+    const value = /^[|>][+-]?\d*$/.test(kv.value) ? kv.value : scalarValue(kv.value, lineNo);
+    if (value === '') {
       stack.push({ node: child, indent: -1, opener: entryIndent, listAtOpener: true });
-    } else if (/^[|>][+-]?\d*$/.test(kv.value)) {
+    } else if (/^[|>][+-]?\d*$/.test(value)) {
       blockScalar = { indent: entryIndent, node: child, lines: [] };
     } else {
-      child.value = unquote(kv.value);
+      child.value = value;
     }
   }
   closeBlockScalar();
@@ -236,6 +252,23 @@ describe('workflow YAML reader', () => {
     expect(() => parseWorkflowYaml('on: push\n"on": pull_request')).toThrow(/Duplicate key/);
     expect(() => triggers(parseWorkflowYaml('on: push\ntrue: pull_request'))).toThrow(/exactly one/);
     expect(() => parseWorkflowYaml('steps:\n  - a\n  next: b')).toThrow(/among list items/);
+  });
+
+  it('throws on flow maps, anchors, aliases, tags and merge keys, and reads {} as an empty map', () => {
+    for (const doc of [
+      'on: {workflow_dispatch: {}}',
+      'on:\n  workflow_dispatch: &wd\n    inputs:',
+      'on:\n  push: *wd',
+      'on:\n  push: !!map',
+      'steps:\n  - *step',
+      'jobs:\n  a:\n    <<: *base',
+    ]) {
+      expect(() => parseWorkflowYaml(doc), doc).toThrow(/Can't read/);
+    }
+    const doc = parseWorkflowYaml('on:\n  workflow_dispatch: {}\n  push: "{not a map}"');
+    expect(triggers(doc)).toEqual(['workflow_dispatch', 'push']);
+    expect(at(doc, 'on', 'workflow_dispatch').map.size).toBe(0);
+    expect(at(doc, 'on', 'push').value).toBe('{not a map}');
   });
 });
 
