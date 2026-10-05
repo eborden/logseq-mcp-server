@@ -65,7 +65,7 @@ These need the `project` scope: `gh auth refresh -s project`.
    ```bash
    gh api repos/eborden/logseq-mcp-server/pulls/<n>/comments/<comment-id>/replies -f body="Fixed in <sha>"
    ```
-4. The reviewer re-checks each reply and **resolves** the threads it accepts. Threads it doesn't accept stay open. A disagreement that survives one round goes to the maintainer.
+4. The reviewer re-checks each reply and **resolves** the threads it accepts. Threads it doesn't accept stay open. A disagreement that survives one round goes to the maintainer, who resolves the thread or tells the fixer what to change. It stays open until then.
    ```bash
    # thread ids come from the reviewThreads query in step 5
    gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "<thread-id>"}) { thread { isResolved } } }'
