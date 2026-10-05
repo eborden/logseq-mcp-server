@@ -33,6 +33,7 @@ import type { ResultMeta } from './types.js';
 import { resolveParamAliases } from './utils/param-aliases.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
 import { SERVER_VERSION } from './version.js';
+import { registerPrompts } from './prompts.js';
 import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
 
@@ -434,10 +435,14 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
     {
       capabilities: {
         tools: {},
+        prompts: {},
       },
       instructions: SERVER_INSTRUCTIONS,
     }
   );
+
+  // Prompts (#46): read-only, handlers live in their own module
+  registerPrompts(server);
 
   // Handler for listing available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
