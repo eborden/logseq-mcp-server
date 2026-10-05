@@ -20,7 +20,8 @@ import { getConceptNetwork } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
 import { getContextForQuery } from './tools/get-context-for-query.js';
-import { queryByDateRange } from './tools/query-by-date-range.js';
+import { queryJournals } from './tools/query-by-date-range.js';
+import { DATE_PRESETS } from './utils/date-presets.js';
 import { getConceptEvolution } from './tools/get-concept-evolution.js';
 import { getGraphInfo } from './tools/get-graph-info.js';
 import { listPages } from './tools/list-pages.js';
@@ -287,11 +288,20 @@ const TOOLS = [
       properties: {
         start_date: {
           type: 'number',
-          description: 'Start date in YYYYMMDD format (e.g., 20251115)',
+          description: 'Start date in YYYYMMDD format (e.g., 20251115). Needs end_date',
         },
         end_date: {
           type: 'number',
-          description: 'End date in YYYYMMDD format (e.g., 20251120)',
+          description: 'End date in YYYYMMDD format (e.g., 20251120). Needs start_date',
+        },
+        last_n: {
+          type: 'number',
+          description: 'The N most recent journals that exist (whole number, 1+), newest first',
+        },
+        preset: {
+          type: 'string',
+          enum: [...DATE_PRESETS],
+          description: 'Named period in local time; weeks run Monday to Sunday',
         },
         search_term: {
           type: 'string',
@@ -302,8 +312,12 @@ const TOOLS = [
           description: 'Return slim results (40-50% fewer tokens, essential data only)',
           default: false,
         },
+        include_content: {
+          type: 'boolean',
+          description: 'false returns only per-day block counts and top-level snippets',
+          default: true,
+        },
       },
-      required: ['start_date', 'end_date'],
     },
   },
   {
@@ -555,17 +569,15 @@ export function createServer(client: LogseqClient): Server {
         }
 
         case 'logseq_query_by_date_range': {
-          const startDate = args?.start_date as number;
-          const endDate = args?.end_date as number;
-          const searchTerm = args?.search_term as string | undefined;
-          const slimResults = (args?.slim_results as boolean) ?? false;
-          const result = await queryByDateRange(
-            client,
-            startDate,
-            endDate,
-            searchTerm,
-            slimResults
-          );
+          const result = await queryJournals(client, {
+            startDate: args?.start_date as number | undefined,
+            endDate: args?.end_date as number | undefined,
+            lastN: args?.last_n as number | undefined,
+            preset: args?.preset as string | undefined,
+            searchTerm: args?.search_term as string | undefined,
+            slimResults: (args?.slim_results as boolean) ?? false,
+            includeContent: (args?.include_content as boolean) ?? true,
+          });
           return {
             content: [
               {

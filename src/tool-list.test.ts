@@ -54,7 +54,6 @@ const DESCRIPTION_ALLOWANCES: Record<string, number> = {
   logseq_search_by_relationship: 654,
   logseq_build_context: 638,
   logseq_get_context_for_query: 600,
-  logseq_query_by_date_range: 560,
   logseq_get_concept_evolution: 636,
   logseq_list_pages: 624,
 };

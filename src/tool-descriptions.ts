@@ -111,18 +111,15 @@ Returns page: null with a message when no page is open. Reflects live UI state.`
 - Use logseq_search_blocks for full-text content search (not property-based)
 - Use logseq_query_by_date_range for temporal queries on journal entries`,
 
-  logseq_query_by_date_range: `Query journal entries within a date range with optional search filter.
+  logseq_query_by_date_range: `Query journal entries by date range, last N journals, or named period, with optional search. Give exactly one of: start_date + end_date, last_n, preset.
 
 **When to use:**
-- Searching journal entries by date (e.g., "what did I do last week?")
-- Finding time-bound information in daily logs
-- Temporal analysis of concepts over specific periods
-- When the user mentions dates or time ranges
+- "What did I do last week?" or "catch me up on recent days"
+- Time-bound information in daily logs
 
 **Alternatives:**
-- Use logseq_get_concept_evolution to track how a concept changes over time (includes analysis)
-- Use logseq_search_blocks for non-temporal content search
-- Use logseq_build_context with includeTemporalContext for journal page context`,
+- logseq_get_concept_evolution: change over time
+- logseq_search_blocks: non-temporal search`,
 
   // Context Building Tools (comprehensive exploration)
   logseq_build_context: `Build comprehensive context for a topic including related pages, blocks, and references.

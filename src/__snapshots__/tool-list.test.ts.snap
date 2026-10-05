@@ -417,23 +417,43 @@ Returns page: null with a message when no page is open. Reflects live UI state."
       "readOnlyHint": true,
       "title": "Query by Date Range",
     },
-    "description": "Query journal entries within a date range with optional search filter.
+    "description": "Query journal entries by date range, last N journals, or named period, with optional search. Give exactly one of: start_date + end_date, last_n, preset.
 
 **When to use:**
-- Searching journal entries by date (e.g., "what did I do last week?")
-- Finding time-bound information in daily logs
-- Temporal analysis of concepts over specific periods
-- When the user mentions dates or time ranges
+- "What did I do last week?" or "catch me up on recent days"
+- Time-bound information in daily logs
 
 **Alternatives:**
-- Use logseq_get_concept_evolution to track how a concept changes over time (includes analysis)
-- Use logseq_search_blocks for non-temporal content search
-- Use logseq_build_context with includeTemporalContext for journal page context",
+- logseq_get_concept_evolution: change over time
+- logseq_search_blocks: non-temporal search",
     "inputSchema": {
       "properties": {
         "end_date": {
-          "description": "End date in YYYYMMDD format (e.g., 20251120)",
+          "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date",
           "type": "number",
+        },
+        "include_content": {
+          "default": true,
+          "description": "false returns only per-day block counts and top-level snippets",
+          "type": "boolean",
+        },
+        "last_n": {
+          "description": "The N most recent journals that exist (whole number, 1+), newest first",
+          "type": "number",
+        },
+        "preset": {
+          "description": "Named period in local time; weeks run Monday to Sunday",
+          "enum": [
+            "today",
+            "yesterday",
+            "this_week",
+            "last_week",
+            "this_month",
+            "last_month",
+            "this_year",
+            "year_to_date",
+          ],
+          "type": "string",
         },
         "search_term": {
           "description": "Optional search term to filter blocks",
@@ -445,14 +465,10 @@ Returns page: null with a message when no page is open. Reflects live UI state."
           "type": "boolean",
         },
         "start_date": {
-          "description": "Start date in YYYYMMDD format (e.g., 20251115)",
+          "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
           "type": "number",
         },
       },
-      "required": [
-        "start_date",
-        "end_date",
-      ],
       "type": "object",
     },
     "name": "logseq_query_by_date_range",
