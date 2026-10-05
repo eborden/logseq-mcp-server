@@ -1,7 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity, PageEntity } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { requirePage } from '../utils/resolve-page.js';
+import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 
 export type GroupByPeriod = 'day' | 'week' | 'month';
 
@@ -11,7 +11,7 @@ export interface ConceptEvolutionOptions {
   groupBy?: GroupByPeriod;
 }
 
-export interface ConceptEvolutionResult {
+export interface ConceptEvolutionResult extends ResolvedFrom {
   concept: string;
   timeline: Array<{
     date: number | null;
@@ -67,7 +67,8 @@ function getMonthIdentifier(date: number): string {
  * @param conceptName - Page name, alias, or ISO date (`2025-01-01`) of the concept; throws
  *   PageNotFoundError if none matches and AmbiguousPageError if several do
  * @param options - Options for evolution tracking
- * @returns ConceptEvolutionResult with timeline of mentions
+ * @returns ConceptEvolutionResult with timeline of mentions. When the name was an alias,
+ *   date or namespace leaf rather than an exact name, `resolvedFrom` says which page was used.
  */
 export async function getConceptEvolution(
   client: LogseqClient,
@@ -78,7 +79,8 @@ export async function getConceptEvolution(
 
   // Resolve the name first (exact name, alias or ISO date, in one query).
   // Throws PageNotFoundError (with suggestions) or AmbiguousPageError (with candidates).
-  const { lookupName } = await requirePage(client, conceptName);
+  const resolved = await requirePage(client, conceptName);
+  const lookupName = resolved.lookupName;
 
   // Search for blocks mentioning the concept
   const blocks = await client.callAPI<BlockEntity[]>(
@@ -207,6 +209,7 @@ export async function getConceptEvolution(
 
   return {
     concept: conceptName,
+    ...resolvedFrom(conceptName, resolved),
     timeline,
     groupedTimeline: groupedTimeline ? Object.fromEntries(groupedTimeline) : undefined,
     summary

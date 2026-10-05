@@ -208,6 +208,19 @@ export type ResolveRefsMeta = Partial<Pick<ResultMeta, 'hasMore' | 'warnings'>>;
 /** How a page name was matched to a page. `name` is the exact, case-insensitive match. */
 export type PageMatchReason = 'name' | 'alias' | 'journal-date' | 'namespace-leaf';
 
+/**
+ * Says that a tool used another page than the one named: how the name matched
+ * (`alias`, `journal-date`, `namespace-leaf`) and the page it resolved to.
+ * Absent for exact matches.
+ */
+export interface PageResolvedFrom {
+  /** The name the caller passed */
+  name: string;
+  matchedBy: PageMatchReason;
+  /** Original-case name of the page that was used */
+  resolvedTo: string;
+}
+
 /** One page a name could refer to, when it is ambiguous. */
 export interface PageCandidate {
   /** Lowercased `:block/name`, safe to pass back to any page-taking tool */

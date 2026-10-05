@@ -2,7 +2,7 @@ import Fuzzysort from 'fuzzysort';
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { AmbiguousPageError, PageNotFoundError, isInfrastructureError } from '../errors.js';
-import type { PageCandidate, PageEntity, PageMatchReason, ResultWarning } from '../types.js';
+import type { PageCandidate, PageEntity, PageMatchReason, PageResolvedFrom, ResultWarning } from '../types.js';
 
 /** Most candidates listed for an ambiguous name; the rest are only counted. */
 export const MAX_CANDIDATES = 10;
@@ -184,11 +184,19 @@ export async function requirePage(client: LogseqClient, input: string): Promise<
  * matches, so default output is unchanged.
  */
 export interface ResolvedFrom {
-  resolvedFrom?: { name: string; matchedBy: PageMatchReason };
+  resolvedFrom?: PageResolvedFrom;
+}
+
+/** The {@link PageResolvedFrom} for a resolved page, or undefined for an exact match. */
+export function resolvedFromInfo(input: string, resolved: ResolvedPage): PageResolvedFrom | undefined {
+  return resolved.matchedBy === 'name'
+    ? undefined
+    : { name: input, matchedBy: resolved.matchedBy, resolvedTo: resolved.originalName };
 }
 
 export function resolvedFrom(input: string, resolved: ResolvedPage): ResolvedFrom {
-  return resolved.matchedBy === 'name' ? {} : { resolvedFrom: { name: input, matchedBy: resolved.matchedBy } };
+  const info = resolvedFromInfo(input, resolved);
+  return info ? { resolvedFrom: info } : {};
 }
 
 /** What the MCP layer returns for an {@link AmbiguousPageError}: a result, not an error. */

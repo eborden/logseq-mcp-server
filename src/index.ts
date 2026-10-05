@@ -12,7 +12,7 @@ import { fileURLToPath } from 'url';
 import { loadConfig, resolveTipsEnabled } from './config.js';
 import { LogseqClient } from './client.js';
 import { getPage } from './tools/get-page.js';
-import { getBacklinks } from './tools/get-backlinks.js';
+import { getBacklinksWithMeta } from './tools/get-backlinks.js';
 import { getBlock } from './tools/get-block.js';
 import { searchBlocksWithMeta } from './tools/search-blocks.js';
 import { queryByProperty } from './tools/query-by-property.js';
@@ -475,14 +475,14 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_get_backlinks': {
           const pageName = args?.page_name as string;
-          const result = await getBacklinks(client, pageName);
+          const { results: result, meta } = await getBacklinksWithMeta(client, pageName);
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(null, tipsFor(result)),
+              ...metaContent(meta, tipsFor(result, meta)),
             ],
           };
         }

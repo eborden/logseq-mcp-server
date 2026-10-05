@@ -233,6 +233,44 @@ describe('getConceptEvolution', () => {
       expect(executeDatalogQuery).toHaveBeenCalledWith(expect.stringContaining(':in $ ?page-name'), 'concept');
     });
 
+    it('says which page was tracked when the name was an alias', async () => {
+      const mockClient = {
+        callAPI: vi.fn().mockResolvedValue([]),
+        executeDatalogQuery: vi.fn(async (query: string) =>
+          query.includes(':in $ ?n') ? [[{ id: 100, name: 'concept', 'original-name': 'Concept' }, 'alias']] : []
+        )
+      } as unknown as LogseqClient;
+
+      const result = await getConceptEvolution(mockClient, 'Cpt');
+
+      expect(result.concept).toBe('Cpt');
+      expect(result.resolvedFrom).toEqual({ name: 'Cpt', matchedBy: 'alias', resolvedTo: 'Concept' });
+    });
+
+    it('says which page was tracked when the name was a namespace leaf', async () => {
+      const executeDatalogQuery = vi.fn(async (query: string) =>
+        query.includes(':in $ ?suffix') ? [[{ id: 5, name: 'work/cpt', 'original-name': 'Work/Cpt' }]] : []
+      );
+      const mockClient = { callAPI: vi.fn().mockResolvedValue([]), executeDatalogQuery } as unknown as LogseqClient;
+
+      const result = await getConceptEvolution(mockClient, 'Cpt');
+
+      expect(result.resolvedFrom).toEqual({ name: 'Cpt', matchedBy: 'namespace-leaf', resolvedTo: 'Work/Cpt' });
+    });
+
+    it('omits resolvedFrom for an exact name', async () => {
+      const mockClient = {
+        callAPI: vi.fn().mockResolvedValue([]),
+        executeDatalogQuery: vi.fn(async (query: string) =>
+          query.includes(':in $ ?n') ? [[{ id: 100, name: 'concept', 'original-name': 'Concept' }, 'name']] : []
+        )
+      } as unknown as LogseqClient;
+
+      const result = await getConceptEvolution(mockClient, 'Concept');
+
+      expect(result).not.toHaveProperty('resolvedFrom');
+    });
+
     it('throws PageNotFoundError guidance instead of an empty timeline for an unknown concept', async () => {
       const mockClient = {
         callAPI: vi.fn().mockResolvedValue([]),

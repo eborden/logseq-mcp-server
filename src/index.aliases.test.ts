@@ -7,14 +7,14 @@ import { PARAM_ALIASES, resolveParamAliases } from './utils/param-aliases.js';
 
 const mocks = vi.hoisted(() => ({
   getPage: vi.fn(async () => ({ name: 'x' })),
-  getBacklinks: vi.fn(async () => []),
+  getBacklinks: vi.fn(async () => ({ results: [], meta: null })),
   getBlock: vi.fn(async () => ({ uuid: 'x' })),
   buildContextForTopic: vi.fn(async () => ({ topic: 'x' })),
   getConceptNetwork: vi.fn(async () => ({ nodes: [], edges: [] })),
   getConceptEvolution: vi.fn(async () => ({ timeline: [] })),
 }));
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
-vi.mock('./tools/get-backlinks.js', () => ({ getBacklinks: mocks.getBacklinks }));
+vi.mock('./tools/get-backlinks.js', () => ({ getBacklinksWithMeta: mocks.getBacklinks }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
 vi.mock('./tools/build-context.js', () => ({ buildContextForTopic: mocks.buildContextForTopic }));
 vi.mock('./tools/get-concept-network.js', () => ({ getConceptNetwork: mocks.getConceptNetwork }));

@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity } from '../types.js';
-import { requirePage } from '../utils/resolve-page.js';
+import { BlockEntity, PageEntity, ResultMeta } from '../types.js';
+import { requirePage, resolvedFromInfo, ResolvedFrom } from '../utils/resolve-page.js';
+import { buildResultMeta } from '../utils/result-meta.js';
 
 /**
  * Get all pages/blocks that link to a specific page
@@ -15,8 +16,24 @@ export async function getBacklinks(
   client: LogseqClient,
   pageName: string
 ): Promise<[PageEntity, BlockEntity[]][] | null> {
-  const { lookupName } = await requirePage(client, pageName);
-  return fetchBacklinks(client, lookupName);
+  return (await getBacklinksWithMeta(client, pageName)).results;
+}
+
+/**
+ * Same as {@link getBacklinks}, plus a meta for the second MCP content block.
+ * The result is a bare array with no room for a field, so when the name was an
+ * alias, date or namespace leaf rather than an exact name, `meta.resolvedFrom`
+ * says which page the backlinks belong to. `meta` is null for an exact match,
+ * so default output is unchanged.
+ */
+export async function getBacklinksWithMeta(
+  client: LogseqClient,
+  pageName: string
+): Promise<{ results: [PageEntity, BlockEntity[]][] | null; meta: (ResultMeta & ResolvedFrom) | null }> {
+  const resolved = await requirePage(client, pageName);
+  const results = await fetchBacklinks(client, resolved.lookupName);
+  const resolvedFrom = resolvedFromInfo(pageName, resolved);
+  return { results, meta: resolvedFrom ? { ...buildResultMeta([]), resolvedFrom } : null };
 }
 
 /**
