@@ -146,6 +146,10 @@ export const TOOL_DESCRIPTIONS = {
 - Finding connected pages up to N hops away
 - When the user asks "show me how X relates to other topics"
 
+**Output:**
+- Follows links in both directions. One edge per page pair, with a reference count (outbound/inbound)
+- Capped at 50 pages (15 new pages per page); journal pages are shown but not expanded. If \`truncated\` is true, the strongest connections were kept and the rest were dropped
+
 **Alternatives:**
 - Use logseq_build_context for detailed content with related pages (less structural)
 - Use logseq_get_backlinks for simpler inbound link queries (no network structure)
