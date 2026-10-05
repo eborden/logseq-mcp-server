@@ -1,5 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
+import { ResultMeta } from '../types.js';
+import { buildResultMeta } from '../utils/result-meta.js';
 
 export interface ConceptNetworkNode {
   id: number;
@@ -27,12 +29,13 @@ export interface ConceptNetworkEdge {
   inbound: number;
 }
 
-export interface ConceptNetworkResult {
+export interface ConceptNetworkResult extends ResultMeta {
   concept: string;
   nodes: ConceptNetworkNode[];
   edges: ConceptNetworkEdge[];
   /** True when `maxNodes` or `maxFanout` dropped at least one page from the network. */
   truncated: boolean;
+  /** `hasMore` mirrors `truncated`; `warnings` carries a `network_truncated` entry saying what to raise. */
 }
 
 export interface ConceptNetworkOptions {
@@ -94,6 +97,7 @@ export async function getConceptNetwork(
   const maxFanout = normalizeCap(options.maxFanout, DEFAULT_MAX_FANOUT);
   const expandJournals = options.expandJournals ?? false;
   let truncated = false;
+  let dropped = 0;
 
   const nodeMap = new Map<number, ConceptNetworkNode>();
   const links: LinkCounts = new Map();
@@ -154,7 +158,10 @@ export async function getConceptNetwork(
     }
 
     const admitted = selectCandidates(candidates, frontier, maxFanout, maxNodes - nodeMap.size);
-    if (admitted.length < candidates.size) truncated = true;
+    if (admitted.length < candidates.size) {
+      truncated = true;
+      dropped += candidates.size - admitted.length;
+    }
 
     const nextFrontier: number[] = [];
     for (const candidate of admitted) {
@@ -164,11 +171,25 @@ export async function getConceptNetwork(
     frontier = nextFrontier;
   }
 
+  const nodes = Array.from(nodeMap.values());
+  // Alongside `truncated`, which stays as is. `dropped` counts only the pages
+  // seen at the depths that were walked, so it is a lower bound.
+  const warnings = truncated
+    ? [{
+        code: 'network_truncated',
+        message: `Kept ${nodes.length} pages; at least ${dropped} more connected pages were dropped.`,
+        howToFetchAll:
+          `Set max_nodes to ${nodes.length + dropped} (max 500) and/or max_fanout higher (max 100), ` +
+          'or set expand_journals to walk through journal pages.'
+      }]
+    : [];
+
   return {
     concept: conceptName,
-    nodes: Array.from(nodeMap.values()),
+    nodes,
     edges: buildEdges(nodeMap, links),
-    truncated
+    truncated,
+    ...buildResultMeta(warnings)
   };
 }
 

@@ -239,6 +239,28 @@ describe('getConceptNetwork', () => {
       expect(result.nodes).toHaveLength(4);
     });
 
+    it('has no warning and hasMore false when nothing is dropped', async () => {
+      const { client } = mockClient(rootPage, [fan(3)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1);
+
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('adds a network_truncated warning alongside truncated, with a suggested max_nodes', async () => {
+      const { client } = mockClient(rootPage, [fan(10)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1, { maxNodes: 4, maxFanout: Infinity });
+
+      expect(result.truncated).toBe(true);
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0].code).toBe('network_truncated');
+      expect(result.warnings[0].message).toBe('Kept 4 pages; at least 7 more connected pages were dropped.');
+      expect(result.warnings[0].howToFetchAll).toContain('max_nodes to 11');
+    });
+
     it('defaults to maxNodes 50 and flags truncation', async () => {
       const { client } = mockClient(rootPage, [fan(80)]);
 
