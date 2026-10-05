@@ -128,7 +128,8 @@ describe('queryJournals resolve_refs', () => {
     ]);
     const result: any = await queryJournals(client, { ...opts, searchTerm: 'keep', resolveRefs: true });
     expect(result.entries).toHaveLength(1);
-    const refQuery = executeDatalogQuery.mock.calls[2][0] as string;
+    // journals, blocks, the search term's alias lookup (#69), then the ref query
+    const refQuery = executeDatalogQuery.mock.calls.map(c => c[0] as string).find(q => q.includes(REF))!;
     expect(refQuery).toContain(REF);
     expect(refQuery).not.toContain(uuidN(55));
   });
