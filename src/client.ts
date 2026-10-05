@@ -73,11 +73,21 @@ export class LogseqClient {
 
   /**
    * Execute a Datalog query via logseq.DB.datascriptQuery
-   * @param query - The Datalog query string
+   *
+   * LogSeq reads every input after the query string as EDN, so a bare string
+   * would be read as a symbol and match nothing. Each input is therefore sent
+   * as `JSON.stringify(value)`: a JSON string literal is a valid EDN string
+   * literal, and quotes, backslashes and newlines are escaped for us.
+   *
+   * @param query - The Datalog query string. Use `:in $ ?a ?b` for parameters.
+   * @param inputs - Values bound to the `:in` variables after `$`, in order
    * @returns The query results
    * @throws Error if the query fails
    */
-  async executeDatalogQuery<T = any>(query: string): Promise<T> {
-    return this.callAPI<T>('logseq.DB.datascriptQuery', [query]);
+  async executeDatalogQuery<T = any>(query: string, ...inputs: unknown[]): Promise<T> {
+    return this.callAPI<T>('logseq.DB.datascriptQuery', [
+      query,
+      ...inputs.map(value => JSON.stringify(value))
+    ]);
   }
 }
