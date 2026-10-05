@@ -109,27 +109,65 @@ export function renderOutline(blocks: unknown[], options: OutlineOptions = {}): 
   return { lines: out, cut: budget.cut };
 }
 
+/** `fooBar` back to `foo-bar`: the Editor API camelCases property keys, LogSeq files write them kebab-case. */
+const kebabKey = (key: string): string => key.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+
+const asLink = (value: string): string => (value.includes('[[') ? value : `[[${value}]]`);
+
 function propertyValue(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
   if (Array.isArray(value)) {
-    const parts = value.map(propertyValue).filter((v): v is string => v !== undefined);
+    // A multi-value property (a set in Datalog, an array from the Editor API) holds page refs
+    const parts = value
+      .map(item => (typeof item === 'string' && item.trim() !== '' ? asLink(item) : propertyValue(item)))
+      .filter((v): v is string => v !== undefined);
     return parts.length > 0 ? parts.join(', ') : undefined;
   }
+  if (value instanceof Set) return propertyValue([...value]);
   if (typeof value === 'object') return JSON.stringify(value);
   const text = String(value);
   return text.trim() === '' ? undefined : text;
 }
 
-/** Properties as LogSeq writes them, `key:: value`. Empty values are left out. */
+/**
+ * Properties as LogSeq writes them, `key:: value`, rebuilt from a `properties` map.
+ * Keys are shown kebab-case, multi-value properties as `[[a]], [[b]]`. Empty values
+ * are left out. This is the fallback for a page whose pre-block was not fetched: the
+ * pre-block's own text ({@link preBlockLines}) is the faithful form, and is preferred.
+ */
 export function renderProperties(properties: unknown): string[] {
   if (!isObj(properties)) return [];
   return Object.entries(properties).flatMap(([key, value]) => {
     const text = propertyValue(value);
-    return text === undefined ? [] : [`${key}:: ${text}`];
+    return text === undefined ? [] : [`${kebabKey(key)}:: ${text}`];
   });
 }
 
-const hasProperties = (properties: unknown): boolean => renderProperties(properties).length > 0;
+const isPreBlock = (block: Obj): boolean => block['pre-block?'] === true || block['preBlock?'] === true;
+
+/**
+ * The text of a page's pre-block (its property block) as lines, exactly as LogSeq
+ * stores it, or undefined when the tree has none or it is empty. No key or value
+ * mapping happens, so nothing is lost.
+ */
+export function preBlockLines(blocks: unknown): string[] | undefined {
+  if (!Array.isArray(blocks)) return undefined;
+  const pre = blocks.find((b): b is Obj => isObj(b) && isPreBlock(b) && nonEmpty(b.content) !== undefined);
+  if (!pre) return undefined;
+  const lines = String(pre.content).trimEnd().split('\n');
+  return lines.length > 0 ? lines : undefined;
+}
+
+/**
+ * The page-properties section: the pre-block's own text when the tree has one,
+ * else {@link renderProperties} on the `properties` map. `fromPreBlock` says which,
+ * so the caller knows whether the outline must skip the pre-block.
+ */
+export function propertyLines(properties: unknown, blocks?: unknown): { lines: string[]; fromPreBlock: boolean } {
+  const verbatim = preBlockLines(blocks);
+  if (verbatim) return { lines: verbatim, fromPreBlock: true };
+  return { lines: renderProperties(properties), fromPreBlock: false };
+}
 
 export interface PageRenderOptions {
   /**
@@ -162,17 +200,17 @@ export function renderPage(page: Obj, options: PageRenderOptions): string {
   const note = resolvedFromLine(page.resolvedFrom);
   if (note) lines.push(note, '');
 
-  const props = renderProperties(page.properties);
-  if (props.length > 0) lines.push(...props, '');
+  const blocks = Array.isArray(page.children) ? page.children : [];
+  const props = propertyLines(page.properties, options.blocksFetched ? blocks : undefined);
+  if (props.lines.length > 0) lines.push(...props.lines, '');
 
   if (!options.blocksFetched) return `${lines.join('\n').trimEnd()}\n`;
 
-  const blocks = Array.isArray(page.children) ? page.children : [];
   const outline = renderOutline(blocks, {
     compact: options.compact,
     maxChars: options.maxChars,
-    // The properties block is the page properties, which are rendered above
-    skipPreBlocks: props.length > 0,
+    // The pre-block is the page properties, which are rendered above from its own text
+    skipPreBlocks: props.fromPreBlock,
   });
   const body = outline.lines.length > 0 || outline.cut ? outline.lines.join('\n') : '(this page has no blocks)';
   const notice = outline.cut && options.cutNotice ? `\n\n${options.cutNotice}` : '';
