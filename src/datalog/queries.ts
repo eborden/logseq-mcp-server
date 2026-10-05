@@ -696,6 +696,57 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * {@link blocksOnPageReferencing} across alias groups: blocks on any of
+   * `pageIds` whose `:block/refs` include any of `refIds`. A block that
+   * references two names of the group is one row.
+   * @param pageIds - Page ids whose blocks are searched (`:db/id`)
+   * @param refIds - Page ids the blocks must reference
+   * @returns Query and no inputs (ids are embedded via `groundIds`)
+   * @throws Error if either list is empty or has an id that is not an integer
+   */
+  static blocksOnPagesReferencingIds(pageIds: number[], refIds: number[]): DatalogQuery {
+    DatalogQueryBuilder.assertNonEmptyIds('blocksOnPagesReferencingIds', pageIds, refIds);
+    return {
+      query: `[:find (pull ?block [*])
+             :where
+             ${DatalogQueryBuilder.groundIds(pageIds, '?page')}
+             ${DatalogQueryBuilder.groundIds(refIds, '?ref')}
+             [?block :block/page ?page]
+             [?block :block/refs ?ref]]`,
+      inputs: []
+    };
+  }
+
+  /**
+   * {@link blocksReferencingInPagesLinking} across alias groups: blocks that
+   * reference any of `aIds`, on pages where some block references any of `bIds`.
+   * @param aIds - Page ids the returned blocks must reference (`:db/id`)
+   * @param bIds - Page ids some other block on the same page must reference
+   * @returns Query and no inputs (ids are embedded via `groundIds`)
+   * @throws Error if either list is empty or has an id that is not an integer
+   */
+  static blocksReferencingInPagesLinkingIds(aIds: number[], bIds: number[]): DatalogQuery {
+    DatalogQueryBuilder.assertNonEmptyIds('blocksReferencingInPagesLinkingIds', aIds, bIds);
+    return {
+      query: `[:find (pull ?block [*])
+             :where
+             ${DatalogQueryBuilder.groundIds(aIds, '?a')}
+             ${DatalogQueryBuilder.groundIds(bIds, '?b')}
+             [?linker :block/refs ?b]
+             [?linker :block/page ?page]
+             [?block :block/page ?page]
+             [?block :block/refs ?a]]`,
+      inputs: []
+    };
+  }
+
+  private static assertNonEmptyIds(method: string, ...lists: number[][]): void {
+    if (lists.some(list => list.length === 0)) {
+      throw new Error(`${method} needs at least one page id in each list`);
+    }
+  }
+
+  /**
    * Like {@link connectedPages} for a frontier in which several pages stand
    * for one: `groupOf` maps a page id to the id of the page it is folded into
    * (an alias group is folded into its first page). Rows have the same shape
