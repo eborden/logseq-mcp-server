@@ -13,7 +13,7 @@ export const TOOL_DESCRIPTIONS = {
   logseq_list_pages: `List non-journal page names, optionally filtered by name_contains, to learn the graph's vocabulary.
 
 **Use when:** you're unsure which pages exist or what the user calls something.
-**Can't find:** journal pages (logseq_query_by_date_range) or block text (logseq_search_blocks). The filter is a substring, not fuzzy.
+**Can't find:** journal pages (logseq_query_by_date_range) or block text (logseq_search_blocks). The filter is a substring, not fuzzy. Warning pages_unavailable: list unknown, not empty.
 **Next:** logseq_get_page.`,
 
   logseq_get_current_context: `Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.
