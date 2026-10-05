@@ -115,7 +115,7 @@ Returns page: null with a message when no page is open. Reflects live UI state.`
 
 **When to use:**
 - "What did I do last week?" or "catch me up on recent days"
-- Time-bound information in daily logs
+- What a period was about (summary.topConcepts)
 
 **Alternatives:**
 - logseq_get_concept_evolution: change over time

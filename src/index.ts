@@ -317,6 +317,11 @@ const TOOLS = [
           description: 'false returns only per-day block counts and top-level snippets',
           default: true,
         },
+        top_concepts_limit: {
+          type: 'number',
+          description: 'Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it',
+          default: 10,
+        },
       },
     },
   },
@@ -577,6 +582,7 @@ export function createServer(client: LogseqClient): Server {
             searchTerm: args?.search_term as string | undefined,
             slimResults: (args?.slim_results as boolean) ?? false,
             includeContent: (args?.include_content as boolean) ?? true,
+            topConceptsLimit: args?.top_concepts_limit as number | undefined,
           });
           return {
             content: [
