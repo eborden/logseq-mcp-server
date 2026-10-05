@@ -224,4 +224,192 @@ describe('getConceptNetwork', () => {
       expect(result.nodes[1].name).toBe('Project Atlas');
     });
   });
+
+  describe('caps', () => {
+    /** Root links out to pages 100..100+n-1, in descending id order to defeat row-order luck. */
+    const fan = (n: number, count: (i: number) => number = () => 1) =>
+      Array.from({ length: n }, (_, k) => n - 1 - k).map(i => row(1, 100 + i, 'inbound', count(i)));
+
+    it('is not truncated when nothing is dropped', async () => {
+      const { client } = mockClient(rootPage, [fan(3)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1);
+
+      expect(result.truncated).toBe(false);
+      expect(result.nodes).toHaveLength(4);
+    });
+
+    it('defaults to maxNodes 50 and flags truncation', async () => {
+      const { client } = mockClient(rootPage, [fan(80)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1, { maxFanout: Infinity });
+
+      expect(result.nodes).toHaveLength(50);
+      expect(result.truncated).toBe(true);
+    });
+
+    it('stops at exactly maxNodes across depths', async () => {
+      const { client } = mockClient(rootPage, [
+        fan(3),
+        [row(100, 200, 'outbound'), row(101, 201, 'outbound'), row(102, 202, 'outbound')]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { maxNodes: 6 });
+
+      expect(result.nodes).toHaveLength(6);
+      expect(result.truncated).toBe(true);
+      // Every edge still points at kept nodes
+      const ids = new Set(result.nodes.map(n => n.id));
+      expect(result.edges.every(e => ids.has(e.from) && ids.has(e.to))).toBe(true);
+    });
+
+    it('treats maxNodes as including the root', async () => {
+      const { client } = mockClient(rootPage, [fan(5)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1, { maxNodes: 1 });
+
+      expect(result.nodes).toHaveLength(1);
+      expect(result.edges).toEqual([]);
+      expect(result.truncated).toBe(true);
+    });
+
+    it('caps how many new pages one page may add (default 15)', async () => {
+      const { client } = mockClient(rootPage, [fan(40)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1);
+
+      expect(result.nodes).toHaveLength(16);
+      expect(result.truncated).toBe(true);
+    });
+
+    it('applies the fanout cap per page, not globally', async () => {
+      const { client } = mockClient(rootPage, [
+        [row(1, 2, 'outbound'), row(1, 3, 'outbound')],
+        [
+          row(2, 10, 'outbound'), row(2, 11, 'outbound'), row(2, 12, 'outbound'),
+          row(3, 20, 'outbound'), row(3, 21, 'outbound'), row(3, 22, 'outbound')
+        ]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { maxFanout: 2 });
+
+      // Each depth-1 page keeps 2 of its 3 new neighbours: 1 + 2 + 4 nodes
+      expect(result.nodes).toHaveLength(7);
+      expect(result.truncated).toBe(true);
+    });
+
+    it('does not count links to already-known pages against the fanout cap', async () => {
+      const { client } = mockClient(rootPage, [
+        [row(1, 2, 'outbound'), row(1, 3, 'outbound')],
+        [row(2, 3, 'outbound'), row(2, 1, 'inbound'), row(2, 4, 'outbound'), row(2, 5, 'outbound')]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { maxFanout: 2 });
+
+      // Page 2 has four neighbours but only two are new
+      expect(result.nodes.map(n => n.id)).toEqual([1, 2, 3, 4, 5]);
+      expect(result.truncated).toBe(false);
+    });
+
+    it('keeps the highest-count pages when a cap bites, then lowest id', async () => {
+      const counts = [1, 5, 5, 2, 9, 1];
+      const { client } = mockClient(rootPage, [fan(6, i => counts[i])]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1, { maxFanout: 4 });
+
+      // 104 (9), 101 (5), 102 (5), then 103 (2)
+      expect(result.nodes.slice(1).map(n => n.id)).toEqual([104, 101, 102, 103]);
+    });
+
+    it('picks the same survivors whatever order the rows arrive in', async () => {
+      const rows = fan(30, i => (i % 4) + 1);
+      const reversed = [...rows].reverse();
+      const shuffled = [...rows].sort((a, b) => ((a[1] as number) * 7) % 11 - ((b[1] as number) * 7) % 11);
+
+      const run = async (input: unknown[][]) => {
+        const { client } = mockClient(rootPage, [input]);
+        return getConceptNetwork(client, 'Root Page', 1, { maxNodes: 10 });
+      };
+      const [a, b, c] = [await run(rows), await run(reversed), await run(shuffled)];
+
+      expect(b).toEqual(a);
+      expect(c).toEqual(a);
+    });
+
+    it('survivors across frontier pages are chosen by total references to the frontier', async () => {
+      const { client } = mockClient(rootPage, [
+        [row(1, 2, 'outbound'), row(1, 3, 'outbound')],
+        [
+          row(2, 10, 'outbound', 1), row(3, 10, 'outbound', 1), // total 2
+          row(2, 11, 'outbound', 1),                            // total 1
+          row(3, 12, 'outbound', 3)                             // total 3
+        ]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { maxNodes: 5 });
+
+      expect(result.nodes.filter(n => n.depth === 2).map(n => n.id)).toEqual([12, 10]);
+      expect(result.truncated).toBe(true);
+    });
+  });
+
+  describe('journal pages', () => {
+    const journalRow = (source: number, id: number) =>
+      row(source, id, 'inbound', 1, { name: `journal ${id}`, journal: true });
+
+    it('includes journal pages as leaves but does not expand them by default', async () => {
+      const { client, executeDatalogQuery } = mockClient(rootPage, [
+        [row(1, 2, 'outbound'), journalRow(1, 50)],
+        [row(2, 3, 'outbound')]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2);
+
+      expect(result.nodes.map(n => n.id)).toEqual([1, 2, 50, 3]);
+      expect(executeDatalogQuery.mock.calls[2][0]).toContain('[(ground [2]) [?source ...]]');
+    });
+
+    it('stops after depth 1 when only journal pages were found', async () => {
+      const { client, executeDatalogQuery } = mockClient(rootPage, [[journalRow(1, 50), journalRow(1, 51)]]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 3);
+
+      expect(result.nodes).toHaveLength(3);
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+    });
+
+    it('expands journal pages when expandJournals is set', async () => {
+      const { client, executeDatalogQuery } = mockClient(rootPage, [
+        [row(1, 2, 'outbound'), journalRow(1, 50)],
+        [row(50, 60, 'outbound')]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { expandJournals: true });
+
+      expect(executeDatalogQuery.mock.calls[2][0]).toContain('[(ground [2 50]) [?source ...]]');
+      expect(result.nodes.map(n => n.id)).toEqual([1, 2, 50, 60]);
+    });
+
+    it('still expands a journal page that is the root', async () => {
+      const { client } = mockClient({ id: 1, name: 'journal root', 'journal?': true }, [[row(1, 2, 'outbound')]]);
+
+      const result = await getConceptNetwork(client, 'Journal Root', 1);
+
+      expect(result.nodes.map(n => n.id)).toEqual([1, 2]);
+    });
+
+    it('ranks concept pages ahead of journal pages when a cap bites', async () => {
+      const { client } = mockClient(rootPage, [
+        [
+          journalRow(1, 50), journalRow(1, 51), journalRow(1, 52),
+          row(1, 2, 'outbound'), row(1, 3, 'outbound')
+        ]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 1, { maxFanout: 3 });
+
+      expect(result.nodes.slice(1).map(n => n.id)).toEqual([2, 3, 50]);
+      expect(result.truncated).toBe(true);
+    });
+  });
 });
