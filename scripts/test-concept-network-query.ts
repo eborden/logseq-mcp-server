@@ -10,17 +10,18 @@ async function testQuery() {
   const config = await loadConfig(configPath);
   const client = new LogseqClient(config);
 
-  const testPage = 'alex bramer';
+  const testPage = process.argv[2] ?? 'my page';
   console.log(`Testing concept network query for "${testPage}"...\n`);
 
   // Generate query
-  const query = DatalogQueryBuilder.conceptNetwork(testPage, 2);
+  const { query, inputs } = DatalogQueryBuilder.conceptNetwork(testPage, 2);
   console.log('Generated query:');
   console.log(query);
+  console.log('Inputs:', inputs);
   console.log();
 
   // Execute
-  const results = await client.executeDatalogQuery(query);
+  const results = await client.executeDatalogQuery(query, ...inputs);
   console.log(`Results length: ${results ? results.length : 'null'}`);
 
   if (results && results.length > 0) {

@@ -33,8 +33,8 @@ export async function getConceptNetwork(
   const visited = new Set<number>();
 
   // Query 0: Get root page only (case-insensitive)
-  const rootQuery = DatalogQueryBuilder.conceptNetwork(conceptName, 0);
-  const rootResults = await client.executeDatalogQuery<Array<[any]>>(rootQuery);
+  const root = DatalogQueryBuilder.conceptNetwork(conceptName, 0);
+  const rootResults = await client.executeDatalogQuery<Array<[any]>>(root.query, ...root.inputs);
 
   if (!rootResults || rootResults.length === 0) {
     throw new Error(`Page not found: ${conceptName}`);

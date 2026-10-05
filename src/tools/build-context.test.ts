@@ -107,9 +107,10 @@ describe('buildContextForTopic', () => {
     expect(result.directBlocks.length).toBe(0); // No blocks
     expect(result.references.length).toBe(0); // No references
 
-    // Verify query has lowercase embedded in it
+    // Verify the lowercased name is passed as an :in input, not embedded in the query
     expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
-      expect.stringContaining('alice')  // Lowercased embedded in query
+      expect.stringContaining(':in $ ?page-name'),
+      'alice'
     );
   });
 
