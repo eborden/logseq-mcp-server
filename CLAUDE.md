@@ -81,7 +81,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 
 ### Verification before merge
 Done by whoever merges:
-- Privacy grep of the diff and the PR body
+- Privacy grep of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
 - `npx tsc --noEmit`
 - `npx vitest run src`
 - `npm run test:integration` against the live graph (read-only)
