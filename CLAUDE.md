@@ -59,6 +59,7 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 | `query_by_date_range` (7 days) | 2 | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5) |
 | `search_by_relationship` | 1 | | `references` / `in-pages-linking-to`. `connected-within` is O(maxDistance) (#7) |
 | `query_by_property` | 1 | ~0.02s | One query over `:block/properties`, page name inline. Blocks are flat (no `children`). Was ~2k calls, ~10s (#33) |
+| `resolve_refs: true` on `get_block`, `get_page` (with children), `build_context`, `query_by_date_range` | +0 to +2 | ~0.03-0.1s | Opt-in (#18). One batched query per nesting level, depth 2: +1 when the refs point at plain blocks, +2 when those hold refs of their own, +0 when nothing in the result has a ref. Same cost for 1 day or 30. Off: calls and output unchanged |
 | `get_current_context` | 3-4 | ~0.01s | 3 Editor calls (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`) + 1 Datalog pull by `:db/id` only when a block's page isn't the open page (#15) |
 
 Re-run the script after changing any of these tools, and update this table.
@@ -277,6 +278,24 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 ---
 
+### 7. `:block/uuid` Holds UUID Values, Not Strings
+
+`:block/uuid` is a UUID type. A string never matches it, whatever the binding form:
+
+| Call | Rows |
+|---|---|
+| `[(ground ["<uuid>"]) [?u ...]] [?b :block/uuid ?u]` | **0** |
+| `[(ground [#uuid "<uuid>"]) [?u ...]] [?b :block/uuid ?u]` | 1 |
+| `[(ground [#uuid "<known>" #uuid "<absent>"]) [?u ...]] ...` | 1 (absent ones just have no row) |
+| `:in $ [?u ...]` with a JSON string collection | **0** |
+| `[(uuid ?s) ?u]` | **Error:** `Unknown function 'uuid` |
+
+**Verified** (`scripts/probe-constraints.ts`). The sketch in #18 used plain strings and would match nothing.
+
+**Current practice:** `DatalogQueryBuilder.groundUuids(uuids, '?u')` embeds `#uuid "..."` literals. It throws unless every uuid matches the strict 8-4-4-4-12 hex pattern first, and that pattern rules out quotes, brackets and whitespace, so nothing can escape the literal. Page names for embeds still go through `:in $ [?n ...]` (a string collection works for names), with the or-join head `[?e ?n]`. Block uuids come back from pulls as plain strings. See `DatalogQueryBuilder.refTargets` and `src/utils/resolve-refs.ts`.
+
+---
+
 ## Design Patterns
 
 ### Pattern 1: Two-Query Pattern for Optional Data
@@ -486,6 +505,7 @@ Quick reference checklist for future work:
 - [ ] Use `[(ground [id1 id2 id3]) [?id ...]]` for batch queries
 - [ ] Never crawl `getAllPages` + one call per page (Pattern 4)
 - [ ] `:with` can't name a variable that's also aggregated in `:find` (error: `:find and :with should not use same variables`)
+- [ ] Match `:block/uuid` with `#uuid "..."` literals via `groundUuids`; strings never match (constraint 7)
 - [ ] Remember: LogSeq Datalog ≠ Standard DataScript
 
 **Data shapes** (verified by `scripts/probe-constraints.ts`)
@@ -510,6 +530,7 @@ Quick reference checklist for future work:
 **Tool behaviour**
 - [ ] Don't turn errors into empty results. A dropped connection must not look like "no data" (#10). Re-throw infrastructure errors (`isInfrastructureError`) and unexpected ones; only an empty result is "none", and expected partial results go in a `warnings` field.
 - [ ] Never cut results silently (#40). Any cap reports `ResultMeta` (`src/types.ts`): `hasMore` (true only when a warning's `howToFetchAll` names the parameter to raise and a value), `warnings: [{ code, message, howToFetchAll? }]`, and `totals` where already known (no extra API call just to count). Object results get these fields; a tool that returns a bare array keeps it as the first content block and sends `{ "meta": ... }` as a second one (`metaContent`). Helpers: `src/utils/result-meta.ts`.
+- [ ] `resolve_refs` (#18) is opt-in and non-lossy: `content` never changes; a block holding a `((uuid))` ref or `{{embed}}` gains `resolvedContent` and `resolvedRefs: [{ uuid?, embed?, content, page, status }]` (`ok`, `missing`, `depth_limit`, `cycle`; unresolved refs stay as written), and the result gains `hasMore`/`warnings` (embed caps, depth limit). Slim blocks carry the same fields. One resolver, `resolveBlockRefs` in `src/utils/resolve-refs.ts`: one Datalog query per nesting level, `seen` tracked per path (siblings that share a target both resolve). Off means unchanged calls and output; a new tool that returns blocks should call the resolver rather than add its own.
 - [ ] Never write to stdout (`console.log`). It's the MCP stdio channel; log with `console.error`.
 
 ---

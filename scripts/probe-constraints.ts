@@ -175,6 +175,19 @@ async function main() {
 
   await probeProperties(client, dq);
 
+  console.log('\n== Block uuids (:block/uuid) (#18)');
+  const uuidRows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
+    `[:find ?u :where [?p :block/name ${JSON.stringify(name)}] [?b :block/page ?p] [?b :block/uuid ?u]]`
+  ]);
+  const uuidText = String(uuidRows[0][0]);
+  const pullUuid = `(pull ?b [:db/id :block/uuid {:block/page [:db/id :block/name]}])`;
+  report('ground [string] vs :block/uuid', await dq(`[:find ${pullUuid} :where [(ground [${JSON.stringify(uuidText)}]) [?u ...]] [?b :block/uuid ?u]]`));
+  report('ground [#uuid "..."] vs :block/uuid', await dq(`[:find ${pullUuid} :where [(ground [#uuid ${JSON.stringify(uuidText)}]) [?u ...]] [?b :block/uuid ?u]]`));
+  report('ground [#uuid known, #uuid absent]', await dq(`[:find ${pullUuid} :where [(ground [#uuid ${JSON.stringify(uuidText)} #uuid "00000000-0000-4000-8000-000000000001"]) [?u ...]] [?b :block/uuid ?u]]`));
+  report(':in [?u ...] with a string collection', await dq(`[:find ${pullUuid} :in $ [?u ...] :where [?b :block/uuid ?u]]`, JSON.stringify([uuidText])));
+  report('(uuid ?s) function', await dq(`[:find ${pullUuid} :where [(ground ${JSON.stringify(uuidText)}) ?s] [(uuid ?s) ?u] [?b :block/uuid ?u]]`));
+  report(':in [?n ...] page names + or-join head [?e ?n]', await dq(`[:find (pull ?e [:db/id]) :in $ [?n ...] :where (or-join [?e ?n] [?e :block/name ?n] (and [?pg :block/name ?n] [?e :block/parent ?pg]))]`, JSON.stringify([name])));
+
   console.log('\n== API quirks');
   report('unknown method', await raw(client, 'logseq.Editor.noSuchMethod', []));
   report('Editor.getEditingBlockSelection', await raw(client, 'logseq.Editor.getEditingBlockSelection', []));
