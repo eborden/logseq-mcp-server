@@ -44,7 +44,15 @@ import { compactQueryContext, compactTopicContext } from './utils/compact.js';
 import { renderNetwork, renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 import { parseArgs, toInputSchema } from './utils/parse-args.js';
-import { FORMAT_DESCRIPTION, RESOLVE_REFS_DESCRIPTION, getBacklinksArgs, getBlockArgs, getPageArgs } from './tool-args.js';
+import {
+  FORMAT_DESCRIPTION,
+  RESOLVE_REFS_DESCRIPTION,
+  getBacklinksArgs,
+  getBlockArgs,
+  getPageArgs,
+  queryByPropertyArgs,
+  searchBlocksArgs,
+} from './tool-args.js';
 
 /**
  * Hints shared by every tool. This server only reads from LogSeq, so each tool
@@ -116,54 +124,13 @@ const TOOLS = [
     name: 'logseq_search_blocks',
     description: TOOL_DESCRIPTIONS.logseq_search_blocks,
     annotations: readOnlyAnnotations('Search Blocks'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Text to search for in block content',
-        },
-        limit: {
-          type: 'number',
-          description: 'Maximum number of results to return (optional)',
-        },
-        include_context: {
-          type: 'boolean',
-          description: 'Include semantic context (page, references, tags)',
-          default: false,
-        },
-        slim_results: {
-          type: 'boolean',
-          description: 'Slim blocks (default). false returns full entities',
-          default: true,
-        },
-      },
-      required: ['query'],
-    },
+    inputSchema: toInputSchema(searchBlocksArgs),
   },
   {
     name: 'logseq_query_by_property',
     description: TOOL_DESCRIPTIONS.logseq_query_by_property,
     annotations: readOnlyAnnotations('Query by Property'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        property_key: {
-          type: 'string',
-          description: 'Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)',
-        },
-        property_value: {
-          type: 'string',
-          description: 'Value to match for the property. For multi-value properties, matches if any one value equals it',
-        },
-        slim_results: {
-          type: 'boolean',
-          description: 'Slim blocks (default). false returns full entities',
-          default: true,
-        },
-      },
-      required: ['property_key', 'property_value'],
-    },
+    inputSchema: toInputSchema(queryByPropertyArgs),
   },
   {
     name: 'logseq_get_concept_network',
@@ -528,10 +495,8 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_search_blocks': {
-          const query = args?.query as string;
-          const limit = args?.limit as number | undefined;
-          const includeContext = (args?.include_context as boolean) ?? false;
-          const slimResults = wantsSlim(args?.slim_results);
+          const { query, limit, include_context: includeContext, slim_results: slimResults } =
+            parseArgs(searchBlocksArgs, args);
           const { results: result, meta } = await searchBlocksWithMeta(client, query, limit, includeContext, slimResults);
 
           return {
@@ -546,9 +511,8 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_query_by_property': {
-          const propertyKey = args?.property_key as string;
-          const propertyValue = args?.property_value as string;
-          const slimResults = wantsSlim(args?.slim_results);
+          const { property_key: propertyKey, property_value: propertyValue, slim_results: slimResults } =
+            parseArgs(queryByPropertyArgs, args);
           const result = await queryByProperty(client, propertyKey, propertyValue, slimResults);
           return {
             content: [

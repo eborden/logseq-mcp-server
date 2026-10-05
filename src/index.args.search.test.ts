@@ -173,3 +173,89 @@ describe('defaults reach the tools', () => {
     expect(JSON.parse(result.content[0].text).entries).toHaveLength(1);
   });
 });
+
+/** The error text of a rejected call, after checking it made no call to LogSeq. */
+async function rejection(name: string, args: Record<string, unknown>): Promise<string> {
+  const { result, apiCalls, queries } = await call(name, args);
+  expect(result.isError).toBe(true);
+  expect(apiCalls).toEqual([]);
+  expect(queries).toEqual([]);
+  return JSON.parse(result.content[0].text).error;
+}
+
+/** Each required string parameter, with the arguments of a valid call. */
+const REQUIRED: ReadonlyArray<readonly [string, string, Record<string, unknown>]> = [
+  ['logseq_search_blocks', 'query', { query: 'alice' }],
+  ['logseq_query_by_property', 'property_key', { property_key: 'status', property_value: 'active' }],
+  ['logseq_query_by_property', 'property_value', { property_key: 'status', property_value: 'active' }],
+];
+
+describe.each(REQUIRED)('%s rejects a bad %s before calling LogSeq', (tool, required, valid) => {
+  it('reports it missing, also when sent as null', async () => {
+    const { [required]: _dropped, ...rest } = valid;
+    for (const args of [rest, { ...rest, [required]: null }]) {
+      const error = await rejection(tool, args);
+      expect(error).toContain(`Invalid parameter '${required}': missing`);
+      expect(error).toContain('a string (required)');
+      expect(error).toContain(`Example: ${required}: "..."`);
+    }
+  });
+
+  it.each([
+    [['alice'], 'an array'],
+    [true, 'a boolean'],
+    [5, 'a number'],
+    [-1, 'a number'],
+    [NaN, 'NaN'],
+    [Infinity, 'Infinity'],
+    [{ text: 'alice' }, 'an object'],
+  ])('rejects %j', async (value, kind) => {
+    expect(await rejection(tool, { ...valid, [required]: value })).toMatch(
+      new RegExp(`'${required}'.*a string, not ${kind}`, 's')
+    );
+  });
+});
+
+/** Optional parameters of the wrong type: [tool, valid arguments, parameter, value, expected error]. */
+const SEARCH = { query: 'alice' };
+const PROPERTY = { property_key: 'status', property_value: 'active' };
+const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, string, unknown, RegExp]> = [
+  ['logseq_search_blocks', SEARCH, 'limit', '5', /'limit': "5".*a number, not a string/s],
+  ['logseq_search_blocks', SEARCH, 'limit', NaN, /'limit': NaN.*a number, not NaN/s],
+  ['logseq_search_blocks', SEARCH, 'limit', Infinity, /'limit': Infinity.*a number, not Infinity/s],
+  ['logseq_search_blocks', SEARCH, 'limit', -Infinity, /'limit': -Infinity.*a number, not -Infinity/s],
+  ['logseq_search_blocks', SEARCH, 'include_context', 'yes', /'include_context': "yes".*true or false, not a string/s],
+  ['logseq_search_blocks', SEARCH, 'include_context', 1, /'include_context': 1.*true or false, not a number/s],
+  ['logseq_search_blocks', SEARCH, 'slim_results', 'false', /'slim_results': "false".*true or false, not a string/s],
+  ['logseq_search_blocks', SEARCH, 'slim_results', 0, /'slim_results': 0.*true or false, not a number/s],
+  ['logseq_query_by_property', PROPERTY, 'slim_results', 'no', /'slim_results': "no".*true or false, not a string/s],
+  ['logseq_query_by_property', PROPERTY, 'slim_results', NaN, /'slim_results': NaN/],
+];
+
+describe('wrong-typed options are rejected before calling LogSeq', () => {
+  it.each(BAD_OPTIONS)('%s %j: %s = %j', async (tool, valid, param, value, message) => {
+    expect(await rejection(tool, { ...valid, [param]: value })).toMatch(message);
+  });
+});
+
+describe('null now reads as absent where it used to be a value (#60)', () => {
+  it('search_blocks limit: null uses the default limit (it used to return no blocks)', async () => {
+    await expectSame('logseq_search_blocks', { ...SEARCH, limit: null }, SEARCH);
+    const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: null });
+    expect(JSON.parse(result.content[0].text)).toHaveLength(3);
+  });
+});
+
+describe('numbers that pass the parser keep their old meaning', () => {
+  it('search_blocks: a negative limit returns no blocks and reports the matches', async () => {
+    const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: -1 });
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0].text)).toEqual([]);
+    expect(JSON.parse(result.content[1].text).meta).toMatchObject({ hasMore: true, totals: { matches: 3 } });
+  });
+
+  it('search_blocks: a fractional limit is cut down to a whole number of blocks', async () => {
+    const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: 2.5 });
+    expect(JSON.parse(result.content[0].text)).toHaveLength(2);
+  });
+});
