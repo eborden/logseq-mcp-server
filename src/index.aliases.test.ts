@@ -19,7 +19,11 @@ vi.mock('./tools/get-page-outline.js', () => ({ getPageOutline: mocks.getPageOut
 vi.mock('./tools/get-backlinks.js', () => ({ getBacklinksWithMeta: mocks.getBacklinks }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
 vi.mock('./tools/build-context.js', () => ({ buildContextForTopic: mocks.buildContextForTopic }));
-vi.mock('./tools/get-concept-network.js', () => ({ getConceptNetwork: mocks.getConceptNetwork }));
+// Keep the module's constants: the argument schemas take their defaults from them (#60)
+vi.mock('./tools/get-concept-network.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getConceptNetwork: mocks.getConceptNetwork,
+}));
 vi.mock('./tools/get-concept-evolution.js', () => ({ getConceptEvolution: mocks.getConceptEvolution }));
 
 /** The tool function each aliased MCP tool calls, and which argument index holds the aliased value. */

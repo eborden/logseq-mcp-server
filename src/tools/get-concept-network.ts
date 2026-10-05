@@ -61,6 +61,7 @@ export interface ConceptNetworkOptions {
   expandJournals?: boolean;
 }
 
+export const DEFAULT_MAX_DEPTH = 2;
 export const DEFAULT_MAX_NODES = 50;
 export const DEFAULT_MAX_FANOUT = 15;
 
@@ -107,7 +108,7 @@ const linkKey = (from: number, to: number) => `${from}>${to}`;
 export async function getConceptNetwork(
   client: LogseqClient,
   conceptName: string,
-  maxDepth: number = 2,
+  maxDepth: number = DEFAULT_MAX_DEPTH,
   options: ConceptNetworkOptions = {}
 ): Promise<ConceptNetworkResult> {
   const maxNodes = normalizeCap(options.maxNodes, DEFAULT_MAX_NODES);

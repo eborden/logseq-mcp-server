@@ -82,6 +82,17 @@ describe('logseq_get_concept_network hand-off', () => {
     expect(options).toMatchObject({ expandJournals: false });
   });
 
+  it('defaults come from the schema: the same 50 nodes and 15 per page the tool applies (#60)', async () => {
+    const [, , options] = await network({});
+    expect(options).toEqual({ maxNodes: 50, maxFanout: 15, expandJournals: false });
+  });
+
+  it('reads null caps as absent (#60): they used to reach the tool as 0, a network of one page', async () => {
+    const [, depth, options] = await network({ max_depth: null, max_nodes: null, max_fanout: null });
+    expect(depth).toBe(2);
+    expect(options).toEqual({ maxNodes: 50, maxFanout: 15, expandJournals: false });
+  });
+
   it.each([
     [3, 3],
     [4, 3],

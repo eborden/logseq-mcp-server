@@ -1,6 +1,8 @@
 import { z } from 'zod/v4';
 import type { OutputFormat } from './utils/output-format.js';
 import { DEFAULT_SLIM_RESULTS } from './utils/slim-entities.js';
+import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tools/get-concept-network.js';
+import { DEFAULT_MAX_DISTANCE, RELATIONSHIP_TYPES } from './tools/search-by-relationship.js';
 
 /**
  * Argument schemas of the tools whose arguments are parsed with zod (#60).
@@ -74,4 +76,46 @@ export const queryByPropertyArgs = z.object({
     .string()
     .describe('Value to match for the property. For multi-value properties, matches if any one value equals it'),
   slim_results: slimResultsArg,
+});
+
+/**
+ * Numbers are plain `z.number()`: NaN and ±Infinity are rejected, but negative and
+ * fractional values pass to the handler, which clamps them as it always did
+ * (`max_depth` <= 3, `max_nodes` <= 500, `max_fanout` <= 100; the tool floors
+ * `max_nodes` and `max_fanout` at 1). `.int()` or `.min()` would also change the
+ * advertised schema (`integer`, `minimum`).
+ */
+export const getConceptNetworkArgs = z.object({
+  concept_name: z.string().describe('Root concept (page name, alias or ISO date)'),
+  max_depth: z.number().default(DEFAULT_MAX_DEPTH).describe('Maximum depth to traverse (default: 2, max: 3)'),
+  max_nodes: z
+    .number()
+    .default(DEFAULT_MAX_NODES)
+    .describe('Maximum pages in the network, root included (default: 50, max: 500)'),
+  max_fanout: z
+    .number()
+    .default(DEFAULT_MAX_FANOUT)
+    .describe('Maximum new pages any one page may add (default: 15, max: 100)'),
+  expand_journals: z
+    .boolean()
+    .default(false)
+    .describe(
+      'Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.'
+    ),
+  format: formatArg,
+});
+
+export const searchByRelationshipArgs = z.object({
+  topic_a: z.string().describe('Primary topic to search for (page name, alias or ISO date)'),
+  topic_b: z.string().describe('Related topic that defines the relationship (page name, alias or ISO date)'),
+  relationship_type: z
+    .enum(RELATIONSHIP_TYPES)
+    .describe(
+      'Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)'
+    ),
+  // No clamp: a negative distance walks no hops, as it always did
+  max_distance: z
+    .number()
+    .default(DEFAULT_MAX_DISTANCE)
+    .describe('Maximum graph distance for connected-within (default: 2)'),
 });

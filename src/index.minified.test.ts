@@ -47,8 +47,15 @@ vi.mock('./tools/get-backlinks.js', () => ({ getBacklinksWithMeta: mocks.getBack
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
 vi.mock('./tools/search-blocks.js', () => ({ searchBlocksWithMeta: mocks.searchBlocksWithMeta }));
 vi.mock('./tools/query-by-property.js', () => ({ queryByProperty: mocks.queryByProperty }));
-vi.mock('./tools/get-concept-network.js', () => ({ getConceptNetwork: mocks.getConceptNetwork }));
-vi.mock('./tools/search-by-relationship.js', () => ({ searchByRelationship: mocks.searchByRelationship }));
+// Keep the modules' constants: the argument schemas take their defaults from them (#60)
+vi.mock('./tools/get-concept-network.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getConceptNetwork: mocks.getConceptNetwork,
+}));
+vi.mock('./tools/search-by-relationship.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  searchByRelationship: mocks.searchByRelationship,
+}));
 vi.mock('./tools/build-context.js', () => ({ buildContextForTopic: mocks.buildContextForTopic }));
 vi.mock('./tools/get-context-for-query.js', () => ({ getContextForQuery: mocks.getContextForQuery }));
 vi.mock('./tools/query-by-date-range.js', () => ({ queryJournals: mocks.queryJournals }));
