@@ -25,6 +25,11 @@ export interface QueryWarning extends ResultWarning {
  */
 export type TopicQueryContext = Omit<TopicContext, 'hasMore' | 'warnings' | 'totals'>;
 
+/** Topics the query's `[[refs]]` and `#tags` are cut to when `maxTopics` is absent. */
+export const DEFAULT_MAX_TOPICS = 5;
+/** Keyword hits kept when `maxSearchResults` is absent. */
+export const DEFAULT_MAX_SEARCH_RESULTS = 20;
+
 export interface QueryContext {
   query: string;
   extractedTopics: string[];
@@ -84,7 +89,7 @@ export async function getContextForQuery(
     hitPages?: boolean;
   } = {}
 ): Promise<QueryContext> {
-  const { maxTopics = 5, maxSearchResults = 20, hitPages = false } = options;
+  const { maxTopics = DEFAULT_MAX_TOPICS, maxSearchResults = DEFAULT_MAX_SEARCH_RESULTS, hitPages = false } = options;
 
   // Extract topics from query
   const extractedTopics = extractTopicsFromQuery(query);

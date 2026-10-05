@@ -212,6 +212,11 @@ describe('logseq_get_context_for_query hand-off', () => {
     expect(options).toMatchObject(expected);
   });
 
+  it('defaults come from the schema: the same 5 topics and 20 hits the tool applies (#60)', async () => {
+    const [, options] = await context({});
+    expect(options).toEqual({ maxTopics: 5, maxSearchResults: 20, hitPages: false });
+  });
+
   it('asks for hit pages only for Markdown', async () => {
     const [, json] = await context({});
     expect(json).toMatchObject({ hitPages: false });
@@ -227,6 +232,11 @@ describe('logseq_query_by_date_range hand-off', () => {
   it('defaults: slim, with content, no ref resolution', async () => {
     const [options] = await range({ last_n: 7 });
     expect(options).toMatchObject({ lastN: 7, slimResults: true, includeContent: true, resolveRefs: false });
+  });
+
+  it('defaults come from the schema: the same 10 top concepts the tool applies (#60)', async () => {
+    const [options] = await range({ last_n: 7 });
+    expect(options).toMatchObject({ topConceptsLimit: 10 });
   });
 
   it('passes each selection and option on unchanged', async () => {

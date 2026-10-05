@@ -52,6 +52,7 @@ describe('resolve_refs through MCP', () => {
   it.each([
     ['logseq_get_page', { page_name: 'p' }, () => mocks.getPage, (c: any[]) => c[3]],
     ['logseq_get_block', { block_uuid: 'u' }, () => mocks.getBlock, (c: any[]) => c[3]],
+    ['logseq_query_by_date_range', { last_n: 1 }, () => mocks.queryJournals, (c: any[]) => c[1]],
   ])('%s passes resolve_refs on, off by default, and rejects a non-boolean', async (name, args, getMock, pick) => {
     const rejected = await withClient(async mcp => {
       await mcp.callTool({ name, arguments: args });
@@ -68,7 +69,6 @@ describe('resolve_refs through MCP', () => {
 
   it.each([
     ['logseq_build_context', { topic_name: 't' }, () => mocks.buildContextForTopic, (c: any[]) => c[2]],
-    ['logseq_query_by_date_range', { last_n: 1 }, () => mocks.queryJournals, (c: any[]) => c[1]],
   ])('%s passes resolve_refs on, and off by default', async (name, args, getMock, pick) => {
     await withClient(async mcp => {
       await mcp.callTool({ name, arguments: args });
