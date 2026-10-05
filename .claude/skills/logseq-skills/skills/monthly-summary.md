@@ -10,10 +10,12 @@ Generate a monthly summary by compressing the month's weekly summaries into mont
 |---|---|
 | Source | The month's `Weekly *` pages — a summary of summaries |
 | Period | Calendar month |
-| Output | `~/Documents/Logs/pages/Monthly YYYY-MM.md` |
+| Output | `<graph>/pages/Monthly YYYY-MM.md` |
 | Tags | `[[Monthly Summary]]` plus one `[[Weekly YYYY-MM-DD]]` link per constituent week |
 | Gist label | `- **Month**: ...` |
 | Lookback | Previous 1-2 `Monthly *` pages |
+
+`<graph>` is the graph root; get it from `logseq_get_graph_info`. Never hardcode it.
 
 ## What Makes Monthly Different
 
@@ -36,7 +38,7 @@ Confirm the current date and year first.
 
 ```bash
 date "+%Y-%m-%d %A"
-ls ~/Documents/Logs/pages/ | grep -E "Weekly YYYY-MM"
+ls <graph>/pages/ | grep -E "Weekly YYYY-MM"
 ```
 
 Calendar months do not align to work weeks. Handle the boundaries explicitly:
@@ -47,7 +49,7 @@ Calendar months do not align to work weeks. Handle the boundaries explicitly:
 ### Step 2: Check for an Existing Summary
 
 ```bash
-ls ~/Documents/Logs/pages/ | grep "Monthly YYYY-MM"
+ls <graph>/pages/ | grep "Monthly YYYY-MM"
 ```
 
 Update in place when one exists, the same as the weekly workflow.
@@ -83,7 +85,7 @@ The `(N words)` note is a teaching aid. Do not write it into a real summary.
 ### Step 5: Verify Open Items Across the Whole Month
 
 ```bash
-grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " ~/Documents/Logs/journals/YYYY_MM_*.md
+grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <graph>/journals/YYYY_MM_*.md
 ```
 
 Carry forward only genuinely open items. Apply the expired-text check from the reference with extra care at this altitude — a TODO carrying a deadline in its own words has usually come due within a month.
@@ -93,7 +95,7 @@ Carry forward only genuinely open items. Apply the expired-text check from the r
 Apply the shared output structure, then run the mandatory gate:
 
 ```bash
-~/.claude/skills/logseq-skills/scripts/check-terseness.sh "$HOME/Documents/Logs/pages/Monthly YYYY-MM.md"
+<skill-dir>/scripts/check-terseness.sh "<graph>/pages/Monthly YYYY-MM.md"
 ```
 
 It detects the monthly granularity from the filename and applies the monthly budget (12-18 words per signal, 200 words total, 10 items target / 12 max, zero em-dashes). A non-zero exit means rewrite and re-run.

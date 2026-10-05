@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Validate a LogSeq summary against the terseness budget.
-# Usage: check-terseness.sh "$HOME/Documents/Logs/pages/Weekly YYYY-MM-DD.md"
-#        check-terseness.sh "$HOME/Documents/Logs/pages/Monthly YYYY-MM.md"
+# Usage: check-terseness.sh "<graph>/pages/Weekly YYYY-MM-DD.md"
+#        check-terseness.sh "<graph>/pages/Monthly YYYY-MM.md"
 #        check-terseness.sh --monthly <path>     # force granularity
 #
 # Budget (see references/summary-compression.md):

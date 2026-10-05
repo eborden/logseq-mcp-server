@@ -10,10 +10,12 @@ Generate a weekly summary from journal entries, compressed to salient signals an
 |---|---|
 | Source | Journal entries (raw) |
 | Period | Monday through Friday |
-| Output | `~/Documents/Logs/pages/Weekly YYYY-MM-DD.md` (the Monday date) |
+| Output | `<graph>/pages/Weekly YYYY-MM-DD.md` (the Monday date) |
 | Tags | `[[Weekly Summary]]` plus one link per journal day with content |
 | Gist label | `- **Week**: ...` |
 | Lookback | Previous 2-3 `Weekly *` pages |
+
+`<graph>` is the graph root; get it from `logseq_get_graph_info`. Never hardcode it.
 
 ## Workflow
 
@@ -34,7 +36,7 @@ When the week is incomplete, note the boundary in the gist per the partial-perio
 ### Step 2: Check for an Existing Summary
 
 ```bash
-ls ~/Documents/Logs/pages/ | grep "Weekly YYYY-MM"
+ls <graph>/pages/ | grep "Weekly YYYY-MM"
 ```
 
 A file for the target Monday often already exists, because mid-week runs produce partial summaries. **Update it rather than starting fresh.** Read the existing file to preserve signals already captured from earlier days, and drop the partial caveat once the week is complete.
@@ -62,7 +64,7 @@ Always pass `slim_results=true`; it cuts 40-50% of tokens. This single call retu
 Confirm which TODOs remain genuinely open, and check for expired item text, per the Unresolved Items section of the reference:
 
 ```bash
-grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " ~/Documents/Logs/journals/YYYY_MM_*.md
+grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <graph>/journals/YYYY_MM_*.md
 ```
 
 ### Step 6: Write and Verify the Page

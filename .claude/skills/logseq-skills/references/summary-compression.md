@@ -111,7 +111,7 @@ Also check whether an item's own text has expired. A TODO reading "token expires
 Do not report a summary complete until the gate passes:
 
 ```bash
-~/.claude/skills/logseq-skills/scripts/check-terseness.sh <summary path>
+<skill-dir>/scripts/check-terseness.sh <summary path>
 ```
 
 The granularity is detected from the filename (`Weekly *` or `Monthly *`) and the matching budget above is applied. The script reports per-signal word counts, the Signals total, item count, em-dashes, and two-sentence bullets, and exits non-zero on a budget violation.
