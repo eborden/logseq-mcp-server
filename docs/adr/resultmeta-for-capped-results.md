@@ -4,7 +4,7 @@
 
 Several tools cap their output: `build_context` (blocks, references, related pages), `search_blocks` (`limit`), `get_concept_network` (nodes and fanout), and the `connected-within` search. They used to cut results off silently with a `.slice` or a `break`. A model reading a capped list cannot tell "these are all the matches" from "these are the first 50 of 400", and so it reasons from an incomplete picture as if it were complete. Two tools had already invented their own signals (`warnings` in `get_context_for_query`, `truncated` in `get_concept_network`).
 
-Issue #40 (part of #13) asked for one convention. The alternatives were per-tool flags, which is what existed, or offset and cursor paging. Paging was rejected because the tools already fetch everything, so raising the cap is deterministic and needs no extra state.
+Issue #40 (part of #13) asked for one convention that aligns with those two existing signals (`warnings` from #10, `truncated` from #3), with real totals where they are cheap, and said: "Never report `has_more` without a way to continue: give an offset or limit hint." It also asked for the change to be additive. The implementation (commit 809dae0) took the limit hint: `howToFetchAll` names the parameter to raise and a value. No source records paging being weighed or rejected. The foundations doc (PR #38, section 4.5) leaves room for it: "If a tool needs paging, use explicit `limit` and `offset` parameters rather than a server-side cursor."
 
 ## Decision
 
