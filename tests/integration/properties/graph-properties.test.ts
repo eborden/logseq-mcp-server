@@ -161,6 +161,32 @@ describe('Property: Graph Traversal Invariants', () => {
     });
   });
 
+  describe('Edge and Cap Properties', () => {
+    it('should emit one edge per unordered pair, no self-loops, and respect the caps', async () => {
+      const pages = await discoverPagesWithLinks(client, 1, 10);
+
+      // REQUIRE pages with links - fail if empty
+      expect(pages.length).toBeGreaterThan(0);
+
+      for (const page of pages) {
+        const result = await getConceptNetwork(client, page.name, 2);
+
+        // Property: at most one edge per unordered page pair, never a self-loop
+        const pairs = result.edges.map(e => [Math.min(e.from, e.to), Math.max(e.from, e.to)].join('-'));
+        expect(new Set(pairs).size).toBe(pairs.length);
+        for (const edge of result.edges) {
+          expect(edge.from).not.toBe(edge.to);
+          expect(edge.count).toBe(edge.outbound + edge.inbound);
+          expect(edge.count).toBeGreaterThan(0);
+        }
+
+        // Property: default node cap holds, and truncated is always a boolean
+        expect(result.nodes.length).toBeLessThanOrEqual(50);
+        expect(typeof result.truncated).toBe('boolean');
+      }
+    });
+  });
+
   describe('Metamorphic Properties', () => {
     it('should never lose nodes when increasing depth', async () => {
       const pages = await discoverPagesWithLinks(client, 1, 5);
