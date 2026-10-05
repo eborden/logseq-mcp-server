@@ -9,7 +9,7 @@ Complete documentation for all 13 LogSeq MCP tools organized by category.
 | Basic Tools | 6 tools | Core search, retrieval, and property queries |
 | Graph Traversal | 1 tool | Network visualization and relationship discovery |
 | Semantic Search | 1 tool | Topic-based relationship queries |
-| Context Building | 2 tools | Comprehensive multi-source context aggregation |
+| Context Building | 3 tools | Comprehensive multi-source context aggregation, and what the user is looking at |
 | Temporal Query | 2 tools | Time-based analysis and journal queries |
 
 ## Basic Tools (6 tools)
@@ -216,7 +216,7 @@ logseq_search_by_relationship("React", "Testing", "references")
 
 ---
 
-## Context Building Tools (2 tools)
+## Context Building Tools (3 tools)
 
 ### logseq_build_context
 
@@ -275,6 +275,25 @@ Parse natural language query and build context automatically.
 ```
 logseq_get_context_for_query("What did I write about [[Project X]] in [[Team Meeting]]?")
 logseq_get_context_for_query("Show me notes on #react and #typescript")
+```
+
+---
+
+### logseq_get_current_context
+
+Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.
+
+**Parameters:** none
+
+**Use when:**
+- The user says "this page", "this block" or "what I'm looking at" without naming it
+- Before `build_context` or `get_page`, to resolve which page "this" means
+
+**Returns:** `{ page, focusedBlock?, selectedBlocks? }`. When no page is open, `page` is `null` with a message. The result reflects live UI state, so calling it twice can give different answers.
+
+**Example:**
+```
+logseq_get_current_context()  # → then logseq_build_context(page.originalName)
 ```
 
 ---
@@ -467,12 +486,12 @@ All temporal queries use **YYYYMMDD format:**
 
 ## Summary
 
-13 MCP tools organized into 5 categories:
+14 MCP tools. The 13 below are organized into 5 categories; `logseq_get_graph_info` (graph name and path) is the 14th:
 
 1. **Basic Tools (6)** - Core search, retrieval, property queries
 2. **Graph Traversal (1)** - Network visualization
 3. **Semantic Search (1)** - Relationship-based queries
-4. **Context Building (2)** - Comprehensive aggregation
+4. **Context Building (3)** - Comprehensive aggregation and current UI context
 5. **Temporal Query (2)** - Time-based analysis
 
 **Key principle:** Start with high-level tools (`build_context`, `get_context_for_query`) and drill down with specific tools only when needed.
