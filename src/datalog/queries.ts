@@ -101,6 +101,56 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * Generate Datalog query for journal pages whose date falls in a range
+   * @param startDate - First journal day, inclusive (YYYYMMDD integer)
+   * @param endDate - Last journal day, inclusive (YYYYMMDD integer)
+   * @returns Query and inputs (`[startDate, endDate]`)
+   * @throws Error if either bound is not an integer
+   */
+  static getJournalPagesInRange(startDate: number, endDate: number): DatalogQuery {
+    DatalogQueryBuilder.assertJournalBounds(startDate, endDate);
+    return {
+      query: `[:find (pull ?page [*])
+             :in $ ?start ?end
+             :where
+             [?page :block/journal-day ?day]
+             [(>= ?day ?start)]
+             [(<= ?day ?end)]]`,
+      inputs: [startDate, endDate]
+    };
+  }
+
+  /**
+   * Generate Datalog query for every block on the journal pages in a range
+   * (flat; callers rebuild the tree from `:block/parent` and `:block/left`)
+   * @param startDate - First journal day, inclusive (YYYYMMDD integer)
+   * @param endDate - Last journal day, inclusive (YYYYMMDD integer)
+   * @returns Query and inputs (`[startDate, endDate]`)
+   * @throws Error if either bound is not an integer
+   */
+  static getJournalBlocksInRange(startDate: number, endDate: number): DatalogQuery {
+    DatalogQueryBuilder.assertJournalBounds(startDate, endDate);
+    return {
+      query: `[:find (pull ?block [*])
+             :in $ ?start ?end
+             :where
+             [?page :block/journal-day ?day]
+             [(>= ?day ?start)]
+             [(<= ?day ?end)]
+             [?block :block/page ?page]]`,
+      inputs: [startDate, endDate]
+    };
+  }
+
+  private static assertJournalBounds(startDate: number, endDate: number): void {
+    for (const [label, value] of [['start', startDate], ['end', endDate]] as const) {
+      if (!Number.isInteger(value)) {
+        throw new Error(`Invalid journal ${label} date: ${String(value)} (expected an integer)`);
+      }
+    }
+  }
+
+  /**
    * Generate Datalog query to get blocks for a page
    * @param pageName - The page name (any casing)
    * @returns Query and inputs (`[lowercased pageName]`)
