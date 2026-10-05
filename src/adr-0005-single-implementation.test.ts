@@ -9,8 +9,13 @@ import { loadConfig } from './config.js';
 // ADR-0005 (datalog-only-no-feature-flags, #96): one implementation per tool and
 // no rollout flags. The removed dual setup kept `<tool>-http.ts` and
 // `<tool>-datalog.ts` side by side behind a router that read `features.useDatalog`
-// from the config file. These tests fail if either comes back. Reversing that
-// needs an ADR that supersedes ADR-0005, which would update or remove this test.
+// from the config file. These tests fail if either comes back.
+//
+// Adding a config key that is not a rollout flag (an output toggle such as `tips`
+// is fine, ADR-0005 says so) means adding it to the expected key lists below and
+// to the `test:` line in ADR-0005's Mechanical enforcement. That is an enforcement
+// edit, which needs maintainer approval like any ADR change. Only a rollout flag
+// or a second implementation of a tool needs an ADR that supersedes ADR-0005.
 
 const TOOLS_DIR = fileURLToPath(new URL('./tools/', import.meta.url));
 
@@ -71,7 +76,10 @@ describe('ADR-0005: the config has no feature-flag section', () => {
 
   it('returns exactly apiUrl, authToken, timeoutMs and tips when all are set', async () => {
     const config = await load({ apiUrl: 'http://localhost:12315', authToken: 'test-token', timeoutMs: 5000, tips: false });
-    expect(Object.keys(config).sort()).toEqual(['apiUrl', 'authToken', 'timeoutMs', 'tips']);
+    expect(
+      Object.keys(config).sort(),
+      'loadConfig gained a key. A non-flag key goes in this list and in ADR-0005\'s test: line (see the comment at the top); a rollout flag needs an ADR that supersedes ADR-0005',
+    ).toEqual(['apiUrl', 'authToken', 'timeoutMs', 'tips']);
   });
 
   it('drops a features section and any other unknown key', async () => {
