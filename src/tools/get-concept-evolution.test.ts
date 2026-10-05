@@ -182,4 +182,18 @@ describe('getConceptEvolution', () => {
     expect(journalEntry).toBeDefined();
     expect(journalEntry?.blocks).toHaveLength(1);
   });
+
+  it('should pass the lowercased concept name to Datalog as an input', async () => {
+    const mockClient = {
+      callAPI: vi.fn().mockResolvedValue([]),
+      executeDatalogQuery: vi.fn().mockResolvedValue([])
+    } as unknown as LogseqClient;
+
+    await getConceptEvolution(mockClient, 'My "Concept"\nB');
+
+    expect(mockClient.executeDatalogQuery).toHaveBeenCalledWith(
+      expect.stringContaining(':in $ ?page-name'),
+      'my "concept"\nb'
+    );
+  });
 });

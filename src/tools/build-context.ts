@@ -60,8 +60,8 @@ export async function buildContextForTopic(
   } = options;
 
   // Query 1: Get the main page (case-insensitive)
-  const pageQuery = DatalogQueryBuilder.getPage(topicName);
-  const pageResults = await client.executeDatalogQuery<Array<[any]>>(pageQuery);
+  const page = DatalogQueryBuilder.getPage(topicName);
+  const pageResults = await client.executeDatalogQuery<Array<[any]>>(page.query, ...page.inputs);
 
   // If no results, page doesn't exist - provide fuzzy match suggestions
   if (!pageResults || pageResults.length === 0) {
@@ -89,8 +89,8 @@ export async function buildContextForTopic(
   const mainPage = pageResults[0][0];
 
   // Query 2: Get blocks for the page (may be empty)
-  const blocksQuery = DatalogQueryBuilder.getPageBlocks(topicName);
-  const blockResults = await client.executeDatalogQuery<Array<[any]>>(blocksQuery);
+  const blocks = DatalogQueryBuilder.getPageBlocks(topicName);
+  const blockResults = await client.executeDatalogQuery<Array<[any]>>(blocks.query, ...blocks.inputs);
 
   // Extract blocks (empty array if no blocks exist)
   const directBlocks = (blockResults || [])

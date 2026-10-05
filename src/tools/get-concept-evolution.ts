@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity, PageEntity } from '../types.js';
+import { DatalogQueryBuilder } from '../datalog/queries.js';
 
 export type GroupByPeriod = 'day' | 'week' | 'month';
 
@@ -73,8 +74,6 @@ export async function getConceptEvolution(
 ): Promise<ConceptEvolutionResult> {
   const { startDate, endDate, groupBy } = options;
 
-  const conceptNameLower = conceptName.toLowerCase();
-
   // Search for blocks mentioning the concept
   const blocks = await client.callAPI<BlockEntity[]>(
     'logseq.Editor.getPageBlocksTree',
@@ -95,13 +94,9 @@ export async function getConceptEvolution(
   }
 
   // Also search for inline mentions using Datalog
-  // Use nested pull pattern {:block/page [*]} to get full page data including journalDay
-  const inlineMentionsQuery = `[:find (pull ?block [:db/id :block/uuid :block/content :block/marker :block/properties :block/format {:block/page [*]}])
-                                 :where
-                                 [?page :block/name "${conceptNameLower}"]
-                                 [?block :block/refs ?page]]`;
-
-  const searchResults = await client.executeDatalogQuery(inlineMentionsQuery);
+  const { query: mentionsQuery, inputs: mentionsInputs } =
+    DatalogQueryBuilder.getBlocksReferencingPage(conceptName);
+  const searchResults = await client.executeDatalogQuery(mentionsQuery, ...mentionsInputs);
   const searchBlocks = (searchResults || []).map((r: any[]) => r[0] as BlockEntity);
 
   // Combine and deduplicate
