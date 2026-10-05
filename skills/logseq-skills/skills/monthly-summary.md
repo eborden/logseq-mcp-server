@@ -68,6 +68,8 @@ Read every `Weekly *` page in the month, plus the 1-2 most recent `Monthly *` pa
 logseq_query_by_date_range(start_date=..., end_date=..., slim_results=true)
 ```
 
+For the month's overall shape, `query_by_date_range` with `include_content=false` and `top_concepts_limit=20` returns `summary.topConcepts` (`[{ name, count, days }]`) without the blocks. A concept with a high `days` ran through the month, which makes it a candidate for a trajectory in Step 4. Check any candidate against the weeklies, because the roll-up counts links and knows nothing about salience. Skip this when the field is absent.
+
 ### Step 4: Diff Against Prior Months
 
 For each candidate signal, determine its trajectory and state the delta in the signal text itself:
