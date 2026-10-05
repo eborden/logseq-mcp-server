@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getContextForQuery } from './get-context-for-query.js';
 import { LogseqClient } from '../client.js';
+import { LogSeqNotRunningError, LogSeqTimeoutError, LogSeqAuthError } from '../errors.js';
 
 // Helper to create mock client with standard Datalog responses
 function createMockClient() {
@@ -230,5 +231,115 @@ describe('getContextForQuery', () => {
     expect(result.extractedTopics).toEqual(['Exists', 'DoesNotExist']);
     expect(result.contexts).toHaveLength(1);
     expect(result.contexts[0].topic).toBe('Exists');
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ code: 'topic_not_found', topic: 'DoesNotExist' })
+    ]);
+  });
+
+  describe('error handling', () => {
+    const infraErrors: Array<[string, () => Error]> = [
+      ['LogSeqNotRunningError', () => new LogSeqNotRunningError('http://test')],
+      ['LogSeqTimeoutError', () => new LogSeqTimeoutError('http://test', 1000)],
+      ['LogSeqAuthError', () => new LogSeqAuthError('http://test')]
+    ];
+    const allErrors: Array<[string, () => Error]> = [
+      ...infraErrors,
+      ['an unexpected Error', () => new Error('boom')]
+    ];
+
+    function newClient() {
+      return {
+        config: { apiUrl: 'http://test', authToken: 'test' },
+        callAPI: vi.fn(),
+        executeDatalogQuery: vi.fn()
+      } as unknown as LogseqClient;
+    }
+
+    it('returns an empty warnings array when nothing was skipped', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce([]);
+      (client.callAPI as any).mockResolvedValue([]);
+
+      const result = await getContextForQuery(client, 'About [[Alpha]]');
+
+      expect(result.warnings).toEqual([]);
+      expect(result.contexts).toHaveLength(1);
+    });
+
+    it('returns a page with no backlinks as a context, without warnings', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce([]);
+      (client.callAPI as any).mockResolvedValue(null);
+
+      const result = await getContextForQuery(client, 'About [[Alpha]]');
+
+      expect(result.contexts).toHaveLength(1);
+      expect(result.contexts[0].references).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('warns about a missing topic and still returns the others', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([])                                           // first topic: page missing
+        .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])  // second topic: page
+        .mockResolvedValueOnce([[{ id: 20, content: 'A block' }]]);          // second topic: blocks
+      (client.callAPI as any).mockResolvedValue([]);
+
+      const result = await getContextForQuery(client, 'Compare [[Missing Topic]] and [[Beta]]');
+
+      expect(result.contexts.map(c => c.topic)).toEqual(['Beta']);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toMatchObject({ code: 'topic_not_found', topic: 'Missing Topic' });
+      expect(result.summary.totalTopics).toBe(1);
+    });
+
+    it.each(allErrors)('propagates %s from the per-topic context build', async (_name, makeError) => {
+      const client = newClient();
+      const error = makeError();
+      (client.executeDatalogQuery as any).mockRejectedValue(error);
+
+      await expect(getContextForQuery(client, 'About [[Alpha]]')).rejects.toBe(error);
+    });
+
+    it.each(allErrors)('propagates %s raised by the backlinks call for a later topic', async (_name, makeError) => {
+      const client = newClient();
+      const error = makeError();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])
+        .mockResolvedValueOnce([]);
+      (client.callAPI as any)
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(error);
+
+      await expect(getContextForQuery(client, 'See [[Alpha]] and [[Beta]]')).rejects.toBe(error);
+    });
+
+    it.each(allErrors)('propagates %s from the keyword search', async (_name, makeError) => {
+      const client = newClient();
+      const error = makeError();
+      (client.executeDatalogQuery as any).mockRejectedValue(error);
+      (client.callAPI as any).mockRejectedValue(error);
+
+      await expect(
+        getContextForQuery(client, 'How do databases work?')
+      ).rejects.toBe(error);
+    });
+
+    it('treats a null search response as no matches', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any).mockResolvedValue(null);
+
+      const result = await getContextForQuery(client, 'How do databases work?');
+
+      expect(result.searchResults).toEqual([]);
+      expect(result.warnings).toEqual([]);
+    });
   });
 });

@@ -1,12 +1,26 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity } from '../types.js';
 import { buildContextForTopic, TopicContext } from './build-context.js';
+import { PageNotFoundError } from '../errors.js';
+
+/**
+ * A non-fatal problem that made the result partial. Connection, timeout, auth
+ * and unexpected errors are never warnings: they propagate.
+ */
+export interface QueryWarning {
+  code: 'topic_not_found';
+  /** The extracted topic the warning is about */
+  topic: string;
+  message: string;
+}
 
 export interface QueryContext {
   query: string;
   extractedTopics: string[];
   contexts: TopicContext[];
   searchResults?: BlockEntity[];
+  /** Always present; empty when nothing was skipped */
+  warnings: QueryWarning[];
   summary: {
     totalTopics: number;
     totalBlocks: number;
@@ -59,6 +73,7 @@ export async function getContextForQuery(
 
   // Build context for each extracted topic
   const contexts: TopicContext[] = [];
+  const warnings: QueryWarning[] = [];
 
   for (const topic of extractedTopics.slice(0, maxTopics)) {
     try {
@@ -69,8 +84,17 @@ export async function getContextForQuery(
       });
       contexts.push(context);
     } catch (error) {
-      // Topic page doesn't exist, skip
-      console.error(`Failed to build context for ${topic}:`, error);
+      // A missing topic page is an expected partial result: skip it and say so.
+      // Everything else (connection, timeout, auth, unexpected) propagates.
+      if (error instanceof PageNotFoundError) {
+        warnings.push({
+          code: 'topic_not_found',
+          topic,
+          message: `No page found for topic "${topic}"; it was skipped.`
+        });
+        continue;
+      }
+      throw error;
     }
   }
 
@@ -96,27 +120,21 @@ export async function getContextForQuery(
     // Search for blocks containing keywords using searchBlocks
     // Note: logseq.DB.q doesn't work via HTTP API, need to use HTTP methods
     if (keywords.length > 0) {
-      try {
-        // Import searchBlocks dynamically to search for keywords
-        const { searchBlocks } = await import('./search-blocks.js');
+      // Import searchBlocks dynamically to search for keywords
+      const { searchBlocks } = await import('./search-blocks.js');
 
-        // Search for first keyword and filter results manually
-        // Note: slimResults=false returns SearchBlocksResult[]
-        const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, false, false);
+      // Search for first keyword and filter results manually.
+      // The search is the only data source on this path, so any failure
+      // propagates: an empty result must mean "nothing matched".
+      // Note: slimResults=false returns SearchBlocksResult[]
+      const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, false, false);
 
-        if (blocks) {
-          // Filter to blocks that contain all keywords
-          searchResults = blocks.filter(block => {
-            const contentLower = block.content.toLowerCase();
-            return keywords.every(k => contentLower.includes(k));
-          }).slice(0, maxSearchResults) as import('./search-blocks.js').SearchBlocksResult[];
-        } else {
-          searchResults = [];
-        }
-      } catch (error) {
-        // Search failed, continue without results
-        searchResults = [];
-      }
+      // A null response is a genuine "no matches"
+      searchResults = (blocks || []).filter(block => {
+        // Filter to blocks that contain all keywords
+        const contentLower = block.content.toLowerCase();
+        return keywords.every(k => contentLower.includes(k));
+      }).slice(0, maxSearchResults) as import('./search-blocks.js').SearchBlocksResult[];
     }
   }
 
@@ -138,6 +156,7 @@ export async function getContextForQuery(
     extractedTopics,
     contexts,
     searchResults,
+    warnings,
     summary: {
       totalTopics: contexts.length,
       totalBlocks,
