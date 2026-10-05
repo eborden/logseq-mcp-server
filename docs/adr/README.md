@@ -101,4 +101,4 @@ The CI guard in #78 parses these files. These rules are exact.
 2. Open a PR that adds `docs/adr/<slug>.md` and its row in the Index above, starting at status `proposed`. Before merge, edit the status to `accepted` in that same PR. To reverse an ADR, the same PR also changes the old ADR's status to `superseded by <slug>`.
 3. Reviewers check each PR against the accepted ADRs and business rules. A PR that contradicts one must cite the change that allows it.
 
-**Approval gate.** Any PR that adds, changes, supersedes or retires an ADR or business-rule file needs the maintainer's explicit approval before merge. The approval is recorded on the PR.
+**Approval gate.** Any PR that adds, changes, supersedes or retires an ADR or business-rule file needs the maintainer's explicit approval before merge. Record the approval like this. Before merging, a PR comment records the maintainer's approval: either the maintainer writes it, or Claude posts it, quoting the maintainer's approval message verbatim with its date. The Changelog row's Issue/PR column cites that PR. If the maintainer merges the PR themselves, the merge is the record.
