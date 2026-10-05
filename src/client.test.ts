@@ -160,5 +160,48 @@ describe('LogseqClient', () => {
 
       expect(result).toEqual(mockResponse);
     });
+
+    describe('inputs', () => {
+      const query = '[:find ?p :in $ ?name :where [?p :block/name ?name]]';
+
+      async function sentArgs(...inputs: unknown[]): Promise<unknown[]> {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => []
+        }) as any;
+        await client.executeDatalogQuery(query, ...inputs);
+        const [, init] = (global.fetch as any).mock.calls[0];
+        return JSON.parse(init.body).args;
+      }
+
+      it('sends no extra args when there are no inputs', async () => {
+        expect(await sentArgs()).toEqual([query]);
+      });
+
+      it('EDN-quotes a string input so LogSeq reads a string, not a symbol', async () => {
+        // The input travels as the JSON text of a string: "\"my page\""
+        expect(await sentArgs('my page')).toEqual([query, '"my page"']);
+      });
+
+      it('escapes double quotes', async () => {
+        expect(await sentArgs('foo "bar')).toEqual([query, '"foo \\"bar"']);
+      });
+
+      it('escapes backslashes', async () => {
+        expect(await sentArgs('a\\b')).toEqual([query, '"a\\\\b"']);
+      });
+
+      it('escapes newlines', async () => {
+        expect(await sentArgs('line1\nline2')).toEqual([query, '"line1\\nline2"']);
+      });
+
+      it('sends inputs in order', async () => {
+        expect(await sentArgs('a', 'b')).toEqual([query, '"a"', '"b"']);
+      });
+
+      it('encodes numbers as EDN numbers', async () => {
+        expect(await sentArgs(42)).toEqual([query, '42']);
+      });
+    });
   });
 });
