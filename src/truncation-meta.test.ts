@@ -50,7 +50,8 @@ describe('logseq_search_blocks meta block', () => {
     expect(JSON.parse(result.content[1].text).meta).toEqual({
       hasMore: false,
       warnings: [],
-      totals: { matches: 1 }
+      totals: { matches: 1 },
+      tips: [expect.stringContaining('logseq_build_context {"topic_name":"A"}')]
     });
   });
 

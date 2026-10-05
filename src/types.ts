@@ -72,6 +72,8 @@ export interface LogseqMCPConfig {
   authToken: string;
   /** Per-request timeout in milliseconds. Defaults to 30000 when omitted. */
   timeoutMs?: number;
+  /** Next-step tips in results (#44). On unless set to `false`; `LOGSEQ_MCP_TIPS=off` also turns them off. */
+  tips?: boolean;
 }
 
 // Graph info structure
@@ -186,6 +188,12 @@ export interface ResultMeta {
   hasMore: boolean;
   warnings: ResultWarning[];
   totals?: Record<string, number>;
+  /**
+   * Suggested next calls (#44), e.g. `logseq_get_backlinks {"page_name":"Alice"}`.
+   * Added by the server handler after the tool returns, only when tips are on,
+   * and never by the tools themselves. Advice, not data.
+   */
+  tips?: string[];
 }
 
 /**

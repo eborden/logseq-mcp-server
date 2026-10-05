@@ -9,7 +9,7 @@ import { resolve } from 'path';
 import { homedir } from 'os';
 import { realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { loadConfig } from './config.js';
+import { loadConfig, resolveTipsEnabled } from './config.js';
 import { LogseqClient } from './client.js';
 import { getPage } from './tools/get-page.js';
 import { getBacklinks } from './tools/get-backlinks.js';
@@ -28,6 +28,7 @@ import { listPages } from './tools/list-pages.js';
 import { getCurrentContext } from './tools/get-current-context.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 import { metaContent } from './utils/result-meta.js';
+import { buildTips } from './utils/tips.js';
 import { resolveParamAliases } from './utils/param-aliases.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
 
@@ -418,7 +419,9 @@ const TOOLS = [
 /**
  * Create and configure the MCP server
  */
-export function createServer(client: LogseqClient): Server {
+export function createServer(client: LogseqClient, options: { tips?: boolean } = {}): Server {
+  const tipsEnabled = options.tips !== false;
+
   const server = new Server(
     {
       name: 'logseq-mcp-server',
@@ -447,6 +450,8 @@ export function createServer(client: LogseqClient): Server {
     try {
       // Fold unadvertised aliases (`name`, `page`, ...) into their canonical parameter (#44)
       const args = resolveParamAliases(name, rawArgs);
+      // Next-step tips ride in the trailing meta block (#44); none when disabled
+      const tipsFor = (result: unknown) => (tipsEnabled ? buildTips(name, args, result) : []);
       switch (name) {
         case 'logseq_get_page': {
           const pageName = args?.page_name as string;
@@ -460,6 +465,7 @@ export function createServer(client: LogseqClient): Server {
                 type: 'text',
                 text: JSON.stringify(result),
               },
+              ...metaContent(null, tipsFor(result)),
             ],
           };
         }
@@ -473,6 +479,7 @@ export function createServer(client: LogseqClient): Server {
                 type: 'text',
                 text: JSON.stringify(result),
               },
+              ...metaContent(null, tipsFor(result)),
             ],
           };
         }
@@ -506,7 +513,7 @@ export function createServer(client: LogseqClient): Server {
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(meta),
+              ...metaContent(meta, tipsFor(result)),
             ],
           };
         }
@@ -522,6 +529,7 @@ export function createServer(client: LogseqClient): Server {
                 type: 'text',
                 text: JSON.stringify(result),
               },
+              ...metaContent(null, tipsFor(result)),
             ],
           };
         }
@@ -623,6 +631,7 @@ export function createServer(client: LogseqClient): Server {
                 type: 'text',
                 text: JSON.stringify(result),
               },
+              ...metaContent(null, tipsFor(result)),
             ],
           };
         }
@@ -679,6 +688,7 @@ export function createServer(client: LogseqClient): Server {
                 type: 'text',
                 text: JSON.stringify(result),
               },
+              ...metaContent(null, tipsFor(result)),
             ],
           };
         }
@@ -716,7 +726,7 @@ async function main() {
     const client = new LogseqClient(config);
 
     // Create and configure server with client
-    const server = createServer(client);
+    const server = createServer(client, { tips: resolveTipsEnabled(config) });
 
     // Create transport and connect
     const transport = new StdioServerTransport();
