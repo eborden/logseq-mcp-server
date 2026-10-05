@@ -1,0 +1,257 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createServer } from './index.js';
+import { LogseqClient } from './client.js';
+
+/**
+ * What the search and relationship handlers hand their tool function (#60): the
+ * defaults, every clamp at and above its limit, and the values that pass through
+ * unclamped (negative and fractional numbers). The tool functions are mocked, so
+ * these pin the handler alone. The clamps are safeguards: `max_depth` <= 3,
+ * `max_nodes` <= 500, `max_fanout` <= 100.
+ */
+
+const mocks = vi.hoisted(() => ({
+  searchBlocksWithMeta: vi.fn(async () => ({ results: [], meta: null })),
+  queryByProperty: vi.fn(async () => []),
+  getConceptNetwork: vi.fn(async () => ({ nodes: [], edges: [], truncated: false })),
+  searchByRelationship: vi.fn(async () => ({ results: [] })),
+  getContextForQuery: vi.fn(async () => ({
+    query: 'q',
+    extractedTopics: [],
+    contexts: [],
+    warnings: [],
+    hasMore: false,
+    summary: { totalTopics: 0, totalBlocks: 0, totalPages: 0 },
+  })),
+  queryJournals: vi.fn(async () => ({ entries: [] })),
+}));
+
+vi.mock('./tools/search-blocks.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  searchBlocksWithMeta: mocks.searchBlocksWithMeta,
+}));
+vi.mock('./tools/query-by-property.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  queryByProperty: mocks.queryByProperty,
+}));
+vi.mock('./tools/get-concept-network.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getConceptNetwork: mocks.getConceptNetwork,
+}));
+vi.mock('./tools/search-by-relationship.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  searchByRelationship: mocks.searchByRelationship,
+}));
+vi.mock('./tools/get-context-for-query.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getContextForQuery: mocks.getContextForQuery,
+}));
+vi.mock('./tools/query-by-date-range.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  queryJournals: mocks.queryJournals,
+}));
+
+beforeEach(() => vi.clearAllMocks());
+
+/** The arguments (after the client) the handler passed to its tool function. */
+async function handedOff(name: string, args: Record<string, unknown>, mock: { mock: { calls: unknown[][] } }) {
+  const server = createServer(new LogseqClient({ apiUrl: 'http://localhost:12315', authToken: 'test-token-123' }), { tips: false });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const mcp = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
+  await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+  try {
+    const result = (await mcp.callTool({ name, arguments: args })) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError, result.content[0]?.text).toBeUndefined();
+  } finally {
+    await mcp.close();
+  }
+  expect(mock.mock.calls).toHaveLength(1);
+  return mock.mock.calls[0].slice(1);
+}
+
+describe('logseq_get_concept_network hand-off', () => {
+  const network = (args: Record<string, unknown>) =>
+    handedOff('logseq_get_concept_network', { concept_name: 'Alice', ...args }, mocks.getConceptNetwork);
+
+  it('defaults: depth 2, journals as leaves', async () => {
+    const [name, depth, options] = await network({});
+    expect(name).toBe('Alice');
+    expect(depth).toBe(2);
+    expect(options).toMatchObject({ expandJournals: false });
+  });
+
+  it.each([
+    [3, 3],
+    [4, 3],
+    [100, 3],
+    [0, 0],
+    [-1, -1],
+    [1.5, 1.5],
+  ])('max_depth %j reaches the tool as %j (clamped to 3, not raised)', async (value, expected) => {
+    const [, depth] = await network({ max_depth: value });
+    expect(depth).toBe(expected);
+  });
+
+  it.each([
+    [500, 500],
+    [501, 500],
+    [10_000, 500],
+    [1, 1],
+    [0, 0],
+    [-5, -5],
+    [2.5, 2.5],
+  ])('max_nodes %j reaches the tool as %j (clamped to 500; the tool floors it at 1)', async (value, expected) => {
+    const [, , options] = await network({ max_nodes: value });
+    expect((options as { maxNodes: unknown }).maxNodes).toBe(expected);
+  });
+
+  it.each([
+    [100, 100],
+    [101, 100],
+    [1, 1],
+    [-1, -1],
+    [2.5, 2.5],
+  ])('max_fanout %j reaches the tool as %j (clamped to 100; the tool floors it at 1)', async (value, expected) => {
+    const [, , options] = await network({ max_fanout: value });
+    expect((options as { maxFanout: unknown }).maxFanout).toBe(expected);
+  });
+
+  it('expand_journals: true is passed on', async () => {
+    const [, , options] = await network({ expand_journals: true });
+    expect(options).toMatchObject({ expandJournals: true });
+  });
+});
+
+describe('logseq_search_by_relationship hand-off', () => {
+  const relationship = (args: Record<string, unknown>) =>
+    handedOff(
+      'logseq_search_by_relationship',
+      { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within', ...args },
+      mocks.searchByRelationship
+    );
+
+  it('defaults: max_distance 2', async () => {
+    expect(await relationship({})).toEqual(['Alice', 'Bob', 'connected-within', 2]);
+  });
+
+  it.each([0, -1, 1.5, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {
+    const [, , , distance] = await relationship({ max_distance: value });
+    expect(distance).toBe(value);
+  });
+
+  it.each(['references', 'referenced-by', 'in-pages-linking-to', 'connected-within'])(
+    'relationship_type %j passes through',
+    async type => {
+      const [, , passed] = await relationship({ relationship_type: type });
+      expect(passed).toBe(type);
+    }
+  );
+});
+
+describe('logseq_search_blocks hand-off', () => {
+  const search = (args: Record<string, unknown>) =>
+    handedOff('logseq_search_blocks', { query: 'alice', ...args }, mocks.searchBlocksWithMeta);
+
+  it('defaults: no limit (the tool uses 100), no context, slim', async () => {
+    expect(await search({})).toEqual(['alice', undefined, false, true]);
+  });
+
+  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (it has no clamp)', async value => {
+    const [, limit] = await search({ limit: value });
+    expect(limit).toBe(value);
+  });
+
+  it('include_context and slim_results are passed on', async () => {
+    expect(await search({ include_context: true, slim_results: false })).toEqual(['alice', undefined, true, false]);
+  });
+});
+
+describe('logseq_query_by_property hand-off', () => {
+  it('defaults: slim', async () => {
+    expect(
+      await handedOff('logseq_query_by_property', { property_key: 'status', property_value: 'active' }, mocks.queryByProperty)
+    ).toEqual(['status', 'active', true]);
+  });
+
+  it('slim_results: false is passed on', async () => {
+    expect(
+      await handedOff(
+        'logseq_query_by_property',
+        { property_key: 'status', property_value: 'active', slim_results: false },
+        mocks.queryByProperty
+      )
+    ).toEqual(['status', 'active', false]);
+  });
+});
+
+describe('logseq_get_context_for_query hand-off', () => {
+  const context = (args: Record<string, unknown>) =>
+    handedOff('logseq_get_context_for_query', { query: 'about [[Alice]]', ...args }, mocks.getContextForQuery);
+
+  it.each([
+    [{ max_topics: 3 }, { maxTopics: 3 }],
+    [{ max_topics: -1 }, { maxTopics: -1 }],
+    [{ max_topics: 2.5 }, { maxTopics: 2.5 }],
+    [{ max_search_results: 50 }, { maxSearchResults: 50 }],
+    [{ max_search_results: -1 }, { maxSearchResults: -1 }],
+  ])('%j passes through as %j (no clamp)', async (args, expected) => {
+    const [, options] = await context(args);
+    expect(options).toMatchObject(expected);
+  });
+
+  it('asks for hit pages only for Markdown', async () => {
+    const [, json] = await context({});
+    expect(json).toMatchObject({ hitPages: false });
+    vi.clearAllMocks();
+    const [, markdown] = await context({ format: 'markdown' });
+    expect(markdown).toMatchObject({ hitPages: true });
+  });
+});
+
+describe('logseq_query_by_date_range hand-off', () => {
+  const range = (args: Record<string, unknown>) => handedOff('logseq_query_by_date_range', args, mocks.queryJournals);
+
+  it('defaults: slim, with content, no ref resolution', async () => {
+    const [options] = await range({ last_n: 7 });
+    expect(options).toMatchObject({ lastN: 7, slimResults: true, includeContent: true, resolveRefs: false });
+  });
+
+  it('passes each selection and option on unchanged', async () => {
+    const [options] = await range({
+      start_date: 20250101,
+      end_date: 20250107,
+      search_term: 'alice',
+      slim_results: false,
+      include_content: false,
+      top_concepts_limit: 0,
+      resolve_refs: true,
+    });
+    expect(options).toEqual({
+      startDate: 20250101,
+      endDate: 20250107,
+      lastN: undefined,
+      preset: undefined,
+      searchTerm: 'alice',
+      slimResults: false,
+      includeContent: false,
+      topConceptsLimit: 0,
+      resolveRefs: true,
+    });
+  });
+
+  it('passes a preset on', async () => {
+    const [options] = await range({ preset: 'last_week' });
+    expect(options).toMatchObject({ preset: 'last_week' });
+  });
+
+  it.each([
+    [{ last_n: -1 }, { lastN: -1 }],
+    [{ last_n: 2.5 }, { lastN: 2.5 }],
+    [{ top_concepts_limit: -1, last_n: 1 }, { topConceptsLimit: -1 }],
+  ])('%j reaches the tool as %j, which owns the range checks', async (args, expected) => {
+    const [options] = await range(args);
+    expect(options).toMatchObject(expected);
+  });
+});
