@@ -45,6 +45,16 @@ Why the rule exists: the failure it prevents, and the issue, PR or ADR it came f
 
 ## Mechanical enforcement
 
+How we make sure this holds without relying on an agent remembering it, and what stops drift. Name the strongest mechanism that applies, in this order of preference:
+
+1. Type or schema (illegal state unrepresentable) [tier `type`]
+2. Test or snapshot, named by file [tier `test`]
+3. CI check, lint or hook, named by file or workflow [tier `ci`]
+4. Reviewer checklist item (weakest; human/agent judgment) [tier `reviewer`]
+5. None yet: must link an open issue that adds a mechanism [tier `none-yet`]
+
+Replace this guidance with the line below. The guard reads only `<tier>: <reference>` lines (see Format rules).
+
 <tier>: <reference>
 
 ## Changelog
@@ -67,7 +77,7 @@ The CI guard in #78 parses these files. These rules are exact.
    - `reviewer`: the checklist item, as plain text.
    - `none-yet`: an issue link, `#N` or a full URL. It should be open when written, since the issue is meant to add the mechanism. The guard accepts open or closed.
 
-   The tiers are listed strongest first. Prefer the strongest that applies. This section answers how we make sure the rule holds without relying on an agent remembering it, and what stops drift.
+   The numbered list in the template maps to tiers 1 `type`, 2 `test`, 3 `ci`, 4 `reviewer`, 5 `none-yet`, strongest first. Prefer the strongest that applies.
 
 ## Change process
 
