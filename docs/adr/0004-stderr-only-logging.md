@@ -27,6 +27,6 @@ Date: 2026-10-05
 
 - reviewer: No console.log, console.info, console.debug or process.stdout write in src outside tests.
 - reviewer: No log line includes block content, page names or other graph data.
-- none-yet: #82 (stdout guard)
+- test: `src/no-stdout.test.ts` (no stdout write in src outside tests; the scan is textual, so the reviewer line above covers what it can't see)
 
 Not mechanised yet, and no issue is open for it: a check on what log lines contain. That stays reviewer-only.
