@@ -3,6 +3,9 @@ import type { OutputFormat } from './utils/output-format.js';
 import { DEFAULT_SLIM_RESULTS } from './utils/slim-entities.js';
 import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tools/get-concept-network.js';
 import { DEFAULT_MAX_DISTANCE, RELATIONSHIP_TYPES } from './tools/search-by-relationship.js';
+import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_MAX_TOPICS } from './tools/get-context-for-query.js';
+import { DATE_PRESETS } from './utils/date-presets.js';
+import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
 
 /**
  * Argument schemas of the tools whose arguments are parsed with zod (#60).
@@ -28,6 +31,12 @@ const OUTPUT_FORMAT_VALUES = ['json', 'markdown'] as const satisfies readonly Ou
 
 /** `format` (#43): absent means json, as `parseFormat` reads it. No advertised default. */
 const formatArg = z.enum(OUTPUT_FORMAT_VALUES).optional().describe(FORMAT_DESCRIPTION);
+
+/** Description of the `compact` parameter (#43), shared with the tools not yet converted. */
+export const COMPACT_DESCRIPTION = 'Block snippets and uuids, no bodies. Read one with logseq_get_block';
+
+/** `compact` (#43): default false, as `parseCompact` reads it. */
+const compactArg = z.boolean().default(false).describe(COMPACT_DESCRIPTION);
 
 /** `resolve_refs` (#18): opt-in, default false. */
 const resolveRefsArg = z.boolean().default(false).describe(RESOLVE_REFS_DESCRIPTION);
@@ -118,4 +127,43 @@ export const searchByRelationshipArgs = z.object({
     .number()
     .default(DEFAULT_MAX_DISTANCE)
     .describe('Maximum graph distance for connected-within (default: 2)'),
+});
+
+export const getContextForQueryArgs = z.object({
+  query: z.string().describe('Natural language query (can include [[page references]] and #tags)'),
+  // No clamp on either: the tool slices with them as it always did
+  max_topics: z
+    .number()
+    .default(DEFAULT_MAX_TOPICS)
+    .describe('Maximum number of topics to extract context for (default: 5)'),
+  max_search_results: z
+    .number()
+    .default(DEFAULT_MAX_SEARCH_RESULTS)
+    .describe('Maximum number of search results for queries without explicit topics (default: 20)'),
+  format: formatArg,
+  compact: compactArg,
+});
+
+/**
+ * Only the types are checked here. Which selection was given (exactly one of
+ * start_date + end_date, last_n or preset), the YYYYMMDD format, last_n >= 1 and
+ * a whole top_concepts_limit >= 0 are still checked by `queryJournals`, the one
+ * validation path for direct callers too.
+ */
+export const queryByDateRangeArgs = z.object({
+  start_date: z.number().optional().describe('Start date in YYYYMMDD format (e.g., 20251115). Needs end_date'),
+  end_date: z.number().optional().describe('End date in YYYYMMDD format (e.g., 20251120). Needs start_date'),
+  last_n: z.number().optional().describe('The N most recent journals that exist (whole number, 1+), newest first'),
+  preset: z.enum(DATE_PRESETS).optional().describe('Named period in local time; weeks run Monday to Sunday'),
+  search_term: z.string().optional().describe('Optional search term to filter blocks'),
+  slim_results: slimResultsArg,
+  include_content: z
+    .boolean()
+    .default(true)
+    .describe('false returns only per-day block counts and top-level snippets'),
+  top_concepts_limit: z
+    .number()
+    .default(DEFAULT_TOP_CONCEPTS_LIMIT)
+    .describe('Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it'),
+  resolve_refs: resolveRefsArg,
 });

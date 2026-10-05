@@ -22,7 +22,6 @@ import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
 import { getContextForQuery } from './tools/get-context-for-query.js';
 import { queryJournals } from './tools/query-by-date-range.js';
-import { DATE_PRESETS } from './utils/date-presets.js';
 import { getConceptEvolution } from './tools/get-concept-evolution.js';
 import { getGraphInfo } from './tools/get-graph-info.js';
 import { listPages } from './tools/list-pages.js';
@@ -38,19 +37,21 @@ import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
-import { wantsSlim } from './utils/slim-entities.js';
 import { parseCompact, parseFormat } from './utils/output-format.js';
 import { compactQueryContext, compactTopicContext } from './utils/compact.js';
 import { renderNetwork, renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 import { parseArgs, toInputSchema } from './utils/parse-args.js';
 import {
+  COMPACT_DESCRIPTION,
   FORMAT_DESCRIPTION,
   RESOLVE_REFS_DESCRIPTION,
   getBacklinksArgs,
   getBlockArgs,
   getConceptNetworkArgs,
+  getContextForQueryArgs,
   getPageArgs,
+  queryByDateRangeArgs,
   queryByPropertyArgs,
   searchBlocksArgs,
   searchByRelationshipArgs,
@@ -83,7 +84,7 @@ const FORMAT_PARAM = {
 /** `compact` parameter shared by the tools whose blocks can shrink to snippets (#43). */
 const COMPACT_PARAM = {
   type: 'boolean',
-  description: 'Block snippets and uuids, no bodies. Read one with logseq_get_block',
+  description: COMPACT_DESCRIPTION,
   default: false,
 } as const;
 
@@ -192,79 +193,13 @@ const TOOLS = [
     name: 'logseq_get_context_for_query',
     description: TOOL_DESCRIPTIONS.logseq_get_context_for_query,
     annotations: readOnlyAnnotations('Get Context for Query'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Natural language query (can include [[page references]] and #tags)',
-        },
-        max_topics: {
-          type: 'number',
-          description: 'Maximum number of topics to extract context for (default: 5)',
-          default: 5,
-        },
-        max_search_results: {
-          type: 'number',
-          description: 'Maximum number of search results for queries without explicit topics (default: 20)',
-          default: 20,
-        },
-        format: FORMAT_PARAM,
-        compact: COMPACT_PARAM,
-      },
-      required: ['query'],
-    },
+    inputSchema: toInputSchema(getContextForQueryArgs),
   },
   {
     name: 'logseq_query_by_date_range',
     description: TOOL_DESCRIPTIONS.logseq_query_by_date_range,
     annotations: readOnlyAnnotations('Query by Date Range'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        start_date: {
-          type: 'number',
-          description: 'Start date in YYYYMMDD format (e.g., 20251115). Needs end_date',
-        },
-        end_date: {
-          type: 'number',
-          description: 'End date in YYYYMMDD format (e.g., 20251120). Needs start_date',
-        },
-        last_n: {
-          type: 'number',
-          description: 'The N most recent journals that exist (whole number, 1+), newest first',
-        },
-        preset: {
-          type: 'string',
-          enum: [...DATE_PRESETS],
-          description: 'Named period in local time; weeks run Monday to Sunday',
-        },
-        search_term: {
-          type: 'string',
-          description: 'Optional search term to filter blocks',
-        },
-        slim_results: {
-          type: 'boolean',
-          description: 'Slim blocks (default). false returns full entities',
-          default: true,
-        },
-        include_content: {
-          type: 'boolean',
-          description: 'false returns only per-day block counts and top-level snippets',
-          default: true,
-        },
-        top_concepts_limit: {
-          type: 'number',
-          description: 'Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it',
-          default: 10,
-        },
-        resolve_refs: {
-          type: 'boolean',
-          description: RESOLVE_REFS_DESCRIPTION,
-          default: false,
-        },
-      },
-    },
+    inputSchema: toInputSchema(queryByDateRangeArgs),
   },
   {
     name: 'logseq_get_concept_evolution',
@@ -560,12 +495,16 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_context_for_query': {
-          const query = args?.query as string;
-          const format = parseFormat(args?.format);
-          const compact = parseCompact(args?.compact);
+          const {
+            query,
+            max_topics: maxTopics,
+            max_search_results: maxSearchResults,
+            format,
+            compact,
+          } = parseArgs(getContextForQueryArgs, args);
           const options = {
-            maxTopics: args?.max_topics as number | undefined,
-            maxSearchResults: args?.max_search_results as number | undefined,
+            maxTopics,
+            maxSearchResults,
             // Markdown names the page of each keyword hit; JSON hits keep their shape
             hitPages: format === 'markdown'
           };
@@ -582,16 +521,17 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_query_by_date_range': {
+          const parsed = parseArgs(queryByDateRangeArgs, args);
           const result = await queryJournals(client, {
-            startDate: args?.start_date as number | undefined,
-            endDate: args?.end_date as number | undefined,
-            lastN: args?.last_n as number | undefined,
-            preset: args?.preset as string | undefined,
-            searchTerm: args?.search_term as string | undefined,
-            slimResults: wantsSlim(args?.slim_results),
-            includeContent: (args?.include_content as boolean) ?? true,
-            topConceptsLimit: args?.top_concepts_limit as number | undefined,
-            resolveRefs: args?.resolve_refs === true,
+            startDate: parsed.start_date,
+            endDate: parsed.end_date,
+            lastN: parsed.last_n,
+            preset: parsed.preset,
+            searchTerm: parsed.search_term,
+            slimResults: parsed.slim_results,
+            includeContent: parsed.include_content,
+            topConceptsLimit: parsed.top_concepts_limit,
+            resolveRefs: parsed.resolve_refs,
           });
           return {
             content: [

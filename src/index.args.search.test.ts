@@ -189,6 +189,7 @@ const REQUIRED: ReadonlyArray<readonly [string, string, Record<string, unknown>]
   ['logseq_query_by_property', 'property_key', { property_key: 'status', property_value: 'active' }],
   ['logseq_query_by_property', 'property_value', { property_key: 'status', property_value: 'active' }],
   ['logseq_get_concept_network', 'concept_name', { concept_name: 'Alice' }],
+  ['logseq_get_context_for_query', 'query', { query: 'about [[Alice]]' }],
   ['logseq_search_by_relationship', 'topic_a', { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references' }],
   ['logseq_search_by_relationship', 'topic_b', { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references' }],
 ];
@@ -224,6 +225,8 @@ const SEARCH = { query: 'alice' };
 const PROPERTY = { property_key: 'status', property_value: 'active' };
 const NETWORK = { concept_name: 'Alice' };
 const RELATIONSHIP = { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within' };
+const CONTEXT = { query: 'about [[Alice]] and [[Bob]]' };
+const RANGE = { last_n: 1 };
 const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, string, unknown, RegExp]> = [
   ['logseq_search_blocks', SEARCH, 'limit', '5', /'limit': "5".*a number, not a string/s],
   ['logseq_search_blocks', SEARCH, 'limit', NaN, /'limit': NaN.*a number, not NaN/s],
@@ -256,6 +259,30 @@ const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, stri
   ['logseq_search_by_relationship', RELATIONSHIP, 'max_distance', NaN, /'max_distance': NaN.*a number, not NaN/s],
   ['logseq_search_by_relationship', RELATIONSHIP, 'max_distance', Infinity, /'max_distance': Infinity/],
   ['logseq_search_by_relationship', RELATIONSHIP, 'max_distance', -Infinity, /'max_distance': -Infinity/],
+  ['logseq_get_context_for_query', CONTEXT, 'max_topics', '5', /'max_topics': "5".*a number, not a string/s],
+  ['logseq_get_context_for_query', CONTEXT, 'max_topics', NaN, /'max_topics': NaN.*a number, not NaN/s],
+  ['logseq_get_context_for_query', CONTEXT, 'max_topics', Infinity, /'max_topics': Infinity/],
+  ['logseq_get_context_for_query', CONTEXT, 'max_search_results', '20', /'max_search_results': "20".*a number, not a string/s],
+  ['logseq_get_context_for_query', CONTEXT, 'max_search_results', NaN, /'max_search_results': NaN.*a number, not NaN/s],
+  ['logseq_get_context_for_query', CONTEXT, 'max_search_results', -Infinity, /'max_search_results': -Infinity/],
+  ['logseq_get_context_for_query', CONTEXT, 'format', 'html', /'format': "html".*one of "json", "markdown"/s],
+  ['logseq_get_context_for_query', CONTEXT, 'compact', 'yes', /'compact': "yes".*true or false, not a string.*Example: compact: true/s],
+  ['logseq_get_context_for_query', CONTEXT, 'compact', 1, /'compact': 1.*true or false, not a number/s],
+  ['logseq_query_by_date_range', { end_date: 20250107 }, 'start_date', '20250101', /'start_date': "20250101".*a number, not a string/s],
+  ['logseq_query_by_date_range', { end_date: 20250107 }, 'start_date', NaN, /'start_date': NaN.*a number, not NaN/s],
+  ['logseq_query_by_date_range', { start_date: 20250101 }, 'end_date', Infinity, /'end_date': Infinity/],
+  ['logseq_query_by_date_range', {}, 'last_n', '7', /'last_n': "7".*a number, not a string/s],
+  ['logseq_query_by_date_range', {}, 'last_n', NaN, /'last_n': NaN.*a number, not NaN/s],
+  ['logseq_query_by_date_range', {}, 'preset', 'tomorrow', /'preset': "tomorrow".*one of "today", "yesterday"/s],
+  ['logseq_query_by_date_range', {}, 'preset', 5, /'preset': 5.*one of/s],
+  ['logseq_query_by_date_range', RANGE, 'search_term', 5, /'search_term': 5.*a string, not a number/s],
+  ['logseq_query_by_date_range', RANGE, 'search_term', ['alice'], /'search_term'.*a string, not an array/s],
+  ['logseq_query_by_date_range', RANGE, 'slim_results', 'true', /'slim_results': "true".*true or false, not a string/s],
+  ['logseq_query_by_date_range', RANGE, 'include_content', 'no', /'include_content': "no".*true or false, not a string/s],
+  ['logseq_query_by_date_range', RANGE, 'include_content', 0, /'include_content': 0.*true or false, not a number/s],
+  ['logseq_query_by_date_range', RANGE, 'top_concepts_limit', '10', /'top_concepts_limit': "10".*a number, not a string/s],
+  ['logseq_query_by_date_range', RANGE, 'top_concepts_limit', NaN, /'top_concepts_limit': NaN.*a number, not NaN/s],
+  ['logseq_query_by_date_range', RANGE, 'resolve_refs', 'yes', /'resolve_refs': "yes".*true or false, not a string/s],
 ];
 
 describe('logseq_search_by_relationship relationship_type is required', () => {
@@ -286,6 +313,29 @@ describe('wrong-typed options are rejected before calling LogSeq', () => {
 });
 
 describe('null now reads as absent where it used to be a value (#60)', () => {
+  it('get_context_for_query max_topics: null uses the default 5 topics (it used to use none)', async () => {
+    await expectSame('logseq_get_context_for_query', { ...CONTEXT, max_topics: null }, CONTEXT);
+    const { result } = await call('logseq_get_context_for_query', { ...CONTEXT, max_topics: null });
+    expect(JSON.parse(result.content[0].text).contexts).toHaveLength(2);
+  });
+
+  it('get_context_for_query max_search_results: null uses the default 20 (it used to return none)', async () => {
+    const keywords = { query: 'about widgets' };
+    await expectSame('logseq_get_context_for_query', { ...keywords, max_search_results: null }, keywords);
+    const { result } = await call('logseq_get_context_for_query', { ...keywords, max_search_results: null });
+    expect(JSON.parse(result.content[0].text).searchResults).toHaveLength(3);
+  });
+
+  it('query_by_date_range top_concepts_limit: null uses the default 10 (it used to be an error)', async () => {
+    await expectSame('logseq_query_by_date_range', { ...RANGE, top_concepts_limit: null }, RANGE);
+  });
+
+  it('query_by_date_range search_term: null is no search (summary.searchTerm used to echo null)', async () => {
+    await expectSame('logseq_query_by_date_range', { ...RANGE, search_term: null }, RANGE);
+    const { result } = await call('logseq_query_by_date_range', { ...RANGE, search_term: null });
+    expect(JSON.parse(result.content[0].text).summary).not.toHaveProperty('searchTerm');
+  });
+
   it('search_blocks limit: null uses the default limit (it used to return no blocks)', async () => {
     await expectSame('logseq_search_blocks', { ...SEARCH, limit: null }, SEARCH);
     const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: null });
@@ -315,6 +365,25 @@ describe('numbers that pass the parser keep their old meaning', () => {
     const body = JSON.parse(negative.result.content[0].text);
     expect(body.results).toEqual([]);
     expect(body.query.maxDistance).toBe(-1);
+  });
+
+  it('get_context_for_query: a negative max_topics still slices from the end (current, not endorsed)', async () => {
+    const { result } = await call('logseq_get_context_for_query', { ...CONTEXT, max_topics: -1 });
+    const body = JSON.parse(result.content[0].text);
+    expect(body.contexts).toHaveLength(1);
+    expect(body.warnings[0]).toMatchObject({ code: 'topics_truncated' });
+  });
+
+  it.each([
+    [{ last_n: -1 }, 'last_n'],
+    [{ last_n: 2.5 }, 'last_n'],
+    [{ last_n: 0 }, 'last_n'],
+    [{ start_date: 2025, end_date: 20250107 }, 'start_date'],
+    [{ ...RANGE, top_concepts_limit: -1 }, 'top_concepts_limit'],
+    [{ ...RANGE, top_concepts_limit: 2.5 }, 'top_concepts_limit'],
+    [{ last_n: 1, preset: 'today' }, 'date selection'],
+  ])('query_by_date_range: %j is still rejected by the tool, before any call', async (args, param) => {
+    expect(await rejection('logseq_query_by_date_range', args)).toContain(`Invalid parameter '${param}'`);
   });
 
   it('search_blocks: a fractional limit is cut down to a whole number of blocks', async () => {
