@@ -534,6 +534,30 @@ describe('Temporal Queries Integration Tests', () => {
       }
     });
 
+    it('should return an empty timeline for an existing page nothing mentions', async () => {
+      // A page that exists but has no file, no blocks, no references and no aliases (found at run time)
+      const rows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
+        `[:find ?n :where [?p :block/name ?n] (not [?p :block/file]) (not [?p :block/journal-day])
+          (not [?b :block/page ?p]) (not [?r :block/refs ?p])
+          (not [?x :block/alias ?p]) (not [?p :block/alias ?y])]`
+      ]);
+      expect(rows.length).toBeGreaterThan(0,
+        'No page without a file, blocks, references or aliases found. ' +
+        'See tests/integration/setup.md ("Page resolution data")'
+      );
+
+      const result = await getConceptEvolution(client, rows[0][0]);
+
+      // An existing page with no mentions is an empty result, not an error
+      expect(result.resolvedFrom).toBeUndefined();
+      expect(result.timeline).toHaveLength(0);
+      expect(result.summary.totalMentions).toBe(0);
+      expect(result.summary.journalMentions).toBe(0);
+      expect(result.summary.nonJournalMentions).toBe(0);
+      expect(result.summary.dateRange.earliest).toBeNull();
+      expect(result.summary.dateRange.latest).toBeNull();
+    });
+
     it('should throw guidance for a concept that is not a page', async () => {
       await expect(
         getConceptEvolution(client, 'NonExistentConceptForTesting12345')
