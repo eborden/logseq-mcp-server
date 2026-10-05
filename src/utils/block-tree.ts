@@ -1,0 +1,110 @@
+import { BlockEntity } from '../types.js';
+
+/**
+ * Convert the top-level kebab-case keys of a Datalog pull result to the
+ * camelCase keys the `logseq.Editor.*` API returns (`journal-day` becomes
+ * `journalDay`, `path-refs` becomes `pathRefs`). Keys without a dash, such as
+ * `journal?`, are left alone. Nested values (e.g. `properties`) are untouched.
+ * @param entity - A pulled page or block
+ * @returns A shallow copy with camelCase keys
+ */
+export function camelizeKeys<T = any>(entity: Record<string, any>): T {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(entity)) {
+    out[key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = value;
+  }
+  return out as T;
+}
+
+/**
+ * Order siblings by following the `:block/left` chain.
+ *
+ * The first sibling's `left` is the parent (or the page), which is not itself
+ * a sibling, so it is the head of the chain; each following sibling's `left`
+ * is the previous one. Blocks the chain can't reach (a corrupt graph) are
+ * appended in id order so nothing is dropped.
+ */
+function orderSiblings(siblings: BlockEntity[]): BlockEntity[] {
+  if (siblings.length < 2) return siblings;
+
+  const ids = new Set(siblings.map(s => s.id));
+  const byLeft = new Map<number, BlockEntity>();
+  const heads: BlockEntity[] = [];
+  for (const sibling of siblings) {
+    const leftId = sibling.left?.id;
+    if (leftId === undefined || !ids.has(leftId)) {
+      heads.push(sibling);
+    } else if (!byLeft.has(leftId)) {
+      byLeft.set(leftId, sibling);
+    }
+  }
+
+  const ordered: BlockEntity[] = [];
+  const seen = new Set<number>();
+  for (const head of heads.sort((a, b) => a.id - b.id)) {
+    let current: BlockEntity | undefined = head;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      ordered.push(current);
+      current = byLeft.get(current.id);
+    }
+  }
+  for (const sibling of [...siblings].sort((a, b) => a.id - b.id)) {
+    if (!seen.has(sibling.id)) ordered.push(sibling);
+  }
+  return ordered;
+}
+
+/**
+ * Rebuild `getPageBlocksTree`-shaped trees from flat Datalog blocks.
+ *
+ * Mirrors the Editor API output: camelCase keys, a `children` array on every
+ * block (empty for leaves), and a 1-based `level`. Siblings are ordered by the
+ * `:block/left` chain. A block whose parent is not in `blocks` and is not a
+ * page in `pageIds` is treated as a root so it is not lost.
+ *
+ * @param blocks - Flat blocks from one or more pages (pulled with `[*]`)
+ * @param pageIds - Entity ids of the pages the blocks belong to
+ * @returns Map of page id to that page's top-level blocks, in order
+ */
+export function buildBlockTrees(
+  blocks: Array<Record<string, any>>,
+  pageIds: Iterable<number>
+): Map<number, BlockEntity[]> {
+  const nodes = blocks.map(b => ({ ...camelizeKeys<BlockEntity>(b), children: [] as BlockEntity[] }));
+  const nodeIds = new Set(nodes.map(n => n.id));
+
+  const childrenOf = new Map<number, BlockEntity[]>();
+  const rootsOf = new Map<number, BlockEntity[]>();
+  for (const id of pageIds) rootsOf.set(id, []);
+
+  for (const node of nodes) {
+    const parentId = node.parent?.id;
+    if (parentId !== undefined && nodeIds.has(parentId) && parentId !== node.id) {
+      const list = childrenOf.get(parentId) ?? [];
+      list.push(node);
+      childrenOf.set(parentId, list);
+    } else {
+      const pageId = node.page?.id ?? parentId;
+      if (pageId === undefined) continue;
+      const list = rootsOf.get(pageId) ?? [];
+      list.push(node);
+      rootsOf.set(pageId, list);
+    }
+  }
+
+  const attach = (siblings: BlockEntity[], level: number): BlockEntity[] => {
+    const ordered = orderSiblings(siblings);
+    for (const node of ordered) {
+      node.level = level;
+      node.children = attach(childrenOf.get(node.id) ?? [], level + 1);
+    }
+    return ordered;
+  };
+
+  const trees = new Map<number, BlockEntity[]>();
+  for (const [pageId, roots] of rootsOf) {
+    trees.set(pageId, attach(roots, 1));
+  }
+  return trees;
+}
