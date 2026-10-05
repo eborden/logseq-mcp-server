@@ -48,7 +48,7 @@ describe('queryByDateRange', () => {
     expect(result.dateRange).toEqual({ start: 20250101, end: 20250105 });
     expect(result.entries).toHaveLength(2);
     expect(result.entries.map(e => e.date)).toEqual([20250101, 20250105]);
-    expect(result.summary).toEqual({ totalDays: 2, totalBlocks: 2, searchTerm: undefined });
+    expect(result.summary).toEqual({ totalDays: 2, totalBlocks: 2, searchTerm: undefined, topConcepts: [] });
   });
 
   it('should send the date bounds as :in inputs and use at most 2 calls', async () => {

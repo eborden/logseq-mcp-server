@@ -6,6 +6,27 @@ import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { buildBlockTrees, camelizeKeys } from '../utils/block-tree.js';
 import { formatLogseqDate } from '../utils/date-utils.js';
 import { DATE_PRESETS, isDatePreset, resolveDatePreset } from '../utils/date-presets.js';
+import {
+  ConceptRef,
+  DEFAULT_TOP_CONCEPTS_LIMIT,
+  TopConcept,
+  extractConceptRefs,
+  rollUpTopConcepts
+} from '../utils/top-concepts.js';
+
+export { TopConcept, BUILT_IN_CONCEPTS, DEFAULT_TOP_CONCEPTS_LIMIT } from '../utils/top-concepts.js';
+
+/**
+ * The `summary` of every result shape. `topConcepts` is the pages most referenced
+ * (`:block/refs`) by the returned blocks, nested ones included; it is left out when
+ * `topConceptsLimit` is 0.
+ */
+export interface DateRangeSummary {
+  totalDays: number;
+  totalBlocks: number;
+  searchTerm?: string;
+  topConcepts?: TopConcept[];
+}
 
 export interface DateRangeResult {
   dateRange: {
@@ -17,11 +38,7 @@ export interface DateRangeResult {
     page: PageEntity;
     blocks: BlockEntity[];
   }>;
-  summary: {
-    totalDays: number;
-    totalBlocks: number;
-    searchTerm?: string;
-  };
+  summary: DateRangeSummary;
 }
 
 export interface SlimDateRangeResult {
@@ -34,11 +51,7 @@ export interface SlimDateRangeResult {
     pageName: string;
     blocks: SlimBlock[];
   }>;
-  summary: {
-    totalDays: number;
-    totalBlocks: number;
-    searchTerm?: string;
-  };
+  summary: DateRangeSummary;
 }
 
 /**
@@ -57,11 +70,7 @@ export interface OutlineDateRangeResult {
     blockCount: number;
     snippets: string[];
   }>;
-  summary: {
-    totalDays: number;
-    totalBlocks: number;
-    searchTerm?: string;
-  };
+  summary: DateRangeSummary;
 }
 
 /**
@@ -84,6 +93,8 @@ export interface DateRangeOptions extends DateRangeSelection {
   slimResults?: boolean;
   /** `false` returns the outline shape (default true) */
   includeContent?: boolean;
+  /** Entries in `summary.topConcepts`, 0 to leave it out (default 10) */
+  topConceptsLimit?: number;
 }
 
 /** The validated, resolved form of a {@link DateRangeSelection}. */
@@ -265,7 +276,8 @@ export async function queryByDateRange(
  * Query journal entries for a range chosen one of three ways: explicit dates,
  * the `lastN` most recent journals, or a named `preset`.
  *
- * API calls: at most 2 whatever the range or N.
+ * API calls: at most 2 whatever the range or N (the concept roll-up in
+ * `summary.topConcepts` reads the refs pulled with the blocks, so it adds none).
  *  - explicit dates and presets: journal pages in range, then every block on them
  *  - `lastN`: journal pages up to today (sorted and sliced here), then every block
  *    on the pages that were kept
@@ -287,7 +299,20 @@ export async function queryJournals(
   options: DateRangeOptions,
   now: Date = new Date()
 ): Promise<DateRangeResult | SlimDateRangeResult | OutlineDateRangeResult> {
-  const { searchTerm, slimResults = false, includeContent = true } = options;
+  const {
+    searchTerm,
+    slimResults = false,
+    includeContent = true,
+    topConceptsLimit = DEFAULT_TOP_CONCEPTS_LIMIT
+  } = options;
+  if (!Number.isInteger(topConceptsLimit) || topConceptsLimit < 0) {
+    throw new InvalidParameterError(
+      'top_concepts_limit',
+      String(topConceptsLimit),
+      'A whole number, 0 or more (0 leaves topConcepts out)',
+      'top_concepts_limit: 10'
+    );
+  }
   const selection = resolveSelection(options, now);
 
   // Query 1: journal pages (may be empty), in the order entries are returned
@@ -315,6 +340,7 @@ export async function queryJournals(
   // Query 2: every block on those pages (may be empty), rebuilt into trees.
   // Skipped when there are no pages; a second query never scales with range length.
   let treesByPage = new Map<number, BlockEntity[]>();
+  const refsByBlock = new Map<number, ConceptRef[]>();
   if (journals.length > 0) {
     const blocksQuery = DatalogQueryBuilder.getJournalBlocksInRange(rangeStart, rangeEnd);
     const blockRows = await client.executeDatalogQuery<Array<[any]>>(
@@ -323,7 +349,18 @@ export async function queryJournals(
     );
     const flatBlocks = (blockRows || [])
       .map(row => row[0])
-      .filter(block => block != null);
+      .filter(block => block != null)
+      .map(block => {
+        // The query pulls each ref as a page map. Keep the concepts for the roll-up
+        // and hand the tree the bare `{id}` refs the Editor API returns.
+        if (!Array.isArray(block.refs)) return block;
+        const concepts = extractConceptRefs(block);
+        if (concepts.length > 0) refsByBlock.set(block.id, concepts);
+        return {
+          ...block,
+          refs: block.refs.map((ref: any) => ({ id: ref?.id ?? ref?.['db/id'] }))
+        };
+      });
     treesByPage = buildBlockTrees(flatBlocks, journals.map(page => page.id));
   }
 
@@ -353,7 +390,10 @@ export async function queryJournals(
   }
 
   const dateRange = { start: rangeStart, end: rangeEnd };
-  const summary = { totalDays: entries.length, totalBlocks, searchTerm };
+  const summary: DateRangeSummary = { totalDays: entries.length, totalBlocks, searchTerm };
+  if (topConceptsLimit > 0) {
+    summary.topConcepts = rollUpTopConcepts(entries, refsByBlock, topConceptsLimit);
+  }
 
   if (!includeContent) {
     return {
