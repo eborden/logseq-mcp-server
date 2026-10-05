@@ -15,6 +15,11 @@ One row per rule, sorted by number. See [Format rules](#format-rules) for what e
 
 | Rule | Summary |
 |---|---|
+| [0001-no-graph-data-in-repo](0001-no-graph-data-in-repo.md) | No personal graph data in committed files, commit messages, issues, PRs or logs. |
+| [0002-tools-read-only](0002-tools-read-only.md) | Every tool is read-only and re-runnable; none writes to the graph. |
+| [0003-infrastructure-errors-propagate](0003-infrastructure-errors-propagate.md) | Infrastructure and unexpected errors are re-thrown; an error never becomes an empty result. |
+| [0004-additive-tool-contracts](0004-additive-tool-contracts.md) | Tool names, parameters and result shapes change additively; a rename or removal needs an explicit decision. |
+| [0005-report-only-verified-success](0005-report-only-verified-success.md) | Report only success you have verified; outputs describe what actually happened. |
 
 ## Numbering and naming
 
