@@ -34,6 +34,15 @@ This directory contains integration tests that require a live LogSeq instance wi
    - A page with a property like `status:: testing`
    - Some blocks with searchable content
 
+### Page resolution data
+
+`page-resolution.test.ts` (#41) discovers its data in the running graph and asserts structure only. The graph needs:
+
+- a journal page with at least one block;
+- a page with `alias:: x` where no other page declares `x`;
+- an alias declared by two or more pages (e.g. two pages that both say `alias:: x`);
+- a namespace leaf used under two or more namespaces (`a/leaf`, `b/leaf`) with no page or alias named just `leaf`.
+
 ## Running Integration Tests
 
 ```bash
