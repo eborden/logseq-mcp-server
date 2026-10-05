@@ -43,6 +43,8 @@ import { parseCompact, parseFormat } from './utils/output-format.js';
 import { compactQueryContext, compactTopicContext } from './utils/compact.js';
 import { renderNetwork, renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
+import { parseArgs, toInputSchema } from './utils/parse-args.js';
+import { FORMAT_DESCRIPTION, RESOLVE_REFS_DESCRIPTION, getBacklinksArgs, getBlockArgs, getPageArgs } from './tool-args.js';
 
 /**
  * Hints shared by every tool. This server only reads from LogSeq, so each tool
@@ -65,7 +67,7 @@ function readOnlyAnnotations(title: string) {
 const FORMAT_PARAM = {
   type: 'string',
   enum: ['json', 'markdown'],
-  description: 'json (default), or markdown text. Markdown has block uuids only on search hits and with compact',
+  description: FORMAT_DESCRIPTION,
 } as const;
 
 /** `compact` parameter shared by the tools whose blocks can shrink to snippets (#43). */
@@ -81,27 +83,7 @@ const TOOLS = [
     name: 'logseq_get_page',
     description: TOOL_DESCRIPTIONS.logseq_get_page,
     annotations: readOnlyAnnotations('Get Page'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        page_name: {
-          type: 'string',
-          description: 'Page name, alias, or ISO date (2025-01-01) for a journal',
-        },
-        include_children: {
-          type: 'boolean',
-          description: 'Whether to include child blocks/pages',
-          default: false,
-        },
-        resolve_refs: {
-          type: 'boolean',
-          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
-          default: false,
-        },
-        format: FORMAT_PARAM,
-      },
-      required: ['page_name'],
-    },
+    inputSchema: toInputSchema(getPageArgs),
   },
   {
     name: 'logseq_get_page_outline',
@@ -122,42 +104,13 @@ const TOOLS = [
     name: 'logseq_get_backlinks',
     description: TOOL_DESCRIPTIONS.logseq_get_backlinks,
     annotations: readOnlyAnnotations('Get Backlinks'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        page_name: {
-          type: 'string',
-          description: 'Page to get backlinks for (name, alias or ISO date)',
-        },
-      },
-      required: ['page_name'],
-    },
+    inputSchema: toInputSchema(getBacklinksArgs),
   },
   {
     name: 'logseq_get_block',
     description: TOOL_DESCRIPTIONS.logseq_get_block,
     annotations: readOnlyAnnotations('Get Block'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        block_uuid: {
-          type: 'string',
-          description: 'UUID of the block to retrieve',
-        },
-        include_children: {
-          type: 'boolean',
-          description: 'Whether to include child blocks',
-          default: false,
-        },
-        resolve_refs: {
-          type: 'boolean',
-          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
-          default: false,
-        },
-        format: FORMAT_PARAM,
-      },
-      required: ['block_uuid'],
-    },
+    inputSchema: toInputSchema(getBlockArgs),
   },
   {
     name: 'logseq_search_blocks',
@@ -310,7 +263,7 @@ const TOOLS = [
         },
         resolve_refs: {
           type: 'boolean',
-          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
+          description: RESOLVE_REFS_DESCRIPTION,
           default: false,
         },
         format: FORMAT_PARAM,
@@ -391,7 +344,7 @@ const TOOLS = [
         },
         resolve_refs: {
           type: 'boolean',
-          description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
+          description: RESOLVE_REFS_DESCRIPTION,
           default: false,
         },
       },
@@ -513,12 +466,9 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
       const tipsFor = (result: unknown, meta?: ResultMeta | null) => (tipsEnabled ? buildTips(name, args, result, meta) : []);
       switch (name) {
         case 'logseq_get_page': {
-          const pageName = args?.page_name as string;
-          const format = parseFormat(args?.format);
-          const includeChildren = (args?.include_children as boolean) ?? false;
-          const result = await getPage(client, pageName, includeChildren, {
-            resolveRefs: args?.resolve_refs === true,
-          });
+          const { page_name: pageName, include_children: includeChildren, resolve_refs: resolveRefs, format } =
+            parseArgs(getPageArgs, args);
+          const result = await getPage(client, pageName, includeChildren, { resolveRefs });
           if (format === 'markdown') {
             const text = renderPage(result, { blocksFetched: includeChildren });
             return textResult(withFooter(text, { ...result, tips: tipsFor(result) }));
@@ -549,7 +499,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_backlinks': {
-          const pageName = args?.page_name as string;
+          const { page_name: pageName } = parseArgs(getBacklinksArgs, args);
           const { results: result, meta } = await getBacklinksWithMeta(client, pageName);
           return {
             content: [
@@ -563,12 +513,9 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_block': {
-          const blockUuid = args?.block_uuid as string;
-          const format = parseFormat(args?.format);
-          const includeChildren = (args?.include_children as boolean) ?? false;
-          const result = await getBlock(client, blockUuid, includeChildren, {
-            resolveRefs: args?.resolve_refs === true,
-          });
+          const { block_uuid: blockUuid, include_children: includeChildren, resolve_refs: resolveRefs, format } =
+            parseArgs(getBlockArgs, args);
+          const result = await getBlock(client, blockUuid, includeChildren, { resolveRefs });
           if (format === 'markdown') return textResult(withFooter(renderBlock(result), result));
           return {
             content: [
