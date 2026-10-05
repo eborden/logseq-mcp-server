@@ -1,6 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity } from '../types.js';
-import { PageNotFoundError } from '../errors.js';
+import { PageNotFoundError, isInfrastructureError } from '../errors.js';
 import Fuzzysort from 'fuzzysort';
 
 /**
@@ -37,10 +37,10 @@ export async function getPage(
         throw new PageNotFoundError(pageName, suggestions);
       }
     } catch (error) {
-      // If we can't get suggestions, just throw error without them
-      if (error instanceof PageNotFoundError) {
+      if (error instanceof PageNotFoundError || isInfrastructureError(error)) {
         throw error;
       }
+      // Suggestions are best-effort: fall through to a plain PageNotFoundError
     }
 
     throw new PageNotFoundError(pageName);
