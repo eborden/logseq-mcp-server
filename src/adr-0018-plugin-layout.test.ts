@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
 import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'fs';
-import { join, relative } from 'path';
+import { isAbsolute, join, relative } from 'path';
 import { fileURLToPath } from 'url';
 
 // ADR-0018 (ship-as-claude-code-plugin, #96): the repo is a Claude Code plugin and
@@ -46,7 +46,7 @@ describe('ADR-0018: skills layout', () => {
 
   it('.claude/skills/logseq-skills is a relative symlink to it', () => {
     expect(lstatSync(SKILL_LINK).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(SKILL_LINK)).toBe(join('..', '..', 'skills', 'logseq-skills'));
+    expect(isAbsolute(readlinkSync(SKILL_LINK)), 'the symlink target must be relative').toBe(false);
     expect(realpathSync(SKILL_LINK)).toBe(realpathSync(SKILL_DIR));
   });
 });
