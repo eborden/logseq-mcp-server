@@ -4,6 +4,14 @@ import { buildResultMeta, truncationWarning } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { fetchBacklinks } from './get-backlinks.js';
+import {
+  ResolvedAliases,
+  aliasIds,
+  aliasSetWarnings,
+  hasAliases,
+  resolveAliasSet,
+  resolvedAliases
+} from '../utils/alias-set.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 
 export interface ContextOptions {
@@ -19,7 +27,7 @@ export interface ContextOptions {
   resolveRefs?: boolean;
 }
 
-export interface TopicContext extends Omit<ResultMeta, 'totals'>, ResolvedFrom {
+export interface TopicContext extends Omit<ResultMeta, 'totals'>, ResolvedFrom, ResolvedAliases {
   topic: string;
   mainPage: PageEntity;
   directBlocks: BlockEntity[];
@@ -84,14 +92,28 @@ export async function buildContextForTopic(
   const mainPage = resolved.page;
   const lookupName = resolved.lookupName;
 
-  // Query 2: Get blocks for the page (may be empty)
-  const blocks = DatalogQueryBuilder.getPageBlocks(lookupName);
+  // The names this page goes by (#69): a page with no `alias::` costs no call here
+  const aliasSet = await resolveAliasSet(client, mainPage);
+  const aliased = hasAliases(aliasSet);
+
+  // Query 2: Get blocks for the page, or for every page of its alias group (may be empty)
+  const blocks = aliased
+    ? DatalogQueryBuilder.getBlocksOnPages(aliasIds(aliasSet))
+    : DatalogQueryBuilder.getPageBlocks(lookupName);
   const blockResults = await client.executeDatalogQuery<Array<[any]>>(blocks.query, ...blocks.inputs);
 
-  // Extract blocks (empty array if no blocks exist)
-  const allBlocks = (blockResults || [])
+  // Extract blocks (empty array if no blocks exist). For an alias group the
+  // page asked about comes first, so a cap keeps its own blocks before the aliases'.
+  const fetchedBlocks = (blockResults || [])
     .map(result => result[0])
     .filter(block => block != null);
+  const mainPageId = mainPage.id ?? mainPage['db/id'];
+  const allBlocks = aliased
+    ? [
+        ...fetchedBlocks.filter(block => block.page?.id === mainPageId),
+        ...fetchedBlocks.filter(block => block.page?.id !== mainPageId)
+      ]
+    : fetchedBlocks;
   let directBlocks = allBlocks.slice(0, maxBlocks);
 
   // Query 3: Get reference blocks and derive related pages
@@ -102,7 +124,7 @@ export async function buildContextForTopic(
 
   // null or [] means the page has no backlinks. A thrown error (connection,
   // timeout, auth, unexpected) must propagate rather than look like "none".
-  const backlinks = await fetchBacklinks(client, lookupName);
+  const backlinks = await fetchBacklinks(client, lookupName, aliasSet);
   if (backlinks && backlinks.length > 0) {
     // Each backlink is [sourcePage, blocks[]]
     // Note: sourcePage can be null for journal page entries
@@ -142,7 +164,7 @@ export async function buildContextForTopic(
     references: allReferences.length
   };
 
-  const warnings: ResultWarning[] = [];
+  const warnings: ResultWarning[] = [...aliasSetWarnings(aliasSet)];
   if (totals.blocks > directBlocks.length) {
     warnings.push(truncationWarning('blocks', directBlocks.length, totals.blocks, 'max_blocks', 'blocks_truncated'));
   }
@@ -190,6 +212,7 @@ export async function buildContextForTopic(
   return {
     topic: topicName,
     ...resolvedFrom(topicName, resolved),
+    ...resolvedAliases(aliasSet),
     mainPage,
     directBlocks,
     relatedPages,

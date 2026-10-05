@@ -696,6 +696,27 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * Generate Datalog query for every block on any of several pages (flat, like
+   * {@link getPageBlocks}). For an alias group, whose members each hold their
+   * own blocks.
+   * @param pageIds - Page entity ids (`:db/id`), each an integer
+   * @returns Query and no inputs (ids are embedded via `groundIds`)
+   * @throws Error if `pageIds` is empty or any id is not an integer
+   */
+  static getBlocksOnPages(pageIds: number[]): DatalogQuery {
+    if (pageIds.length === 0) {
+      throw new Error('getBlocksOnPages needs at least one page id');
+    }
+    return {
+      query: `[:find (pull ?block [*])
+             :where
+             ${DatalogQueryBuilder.groundIds(pageIds, '?page')}
+             [?block :block/page ?page]]`,
+      inputs: []
+    };
+  }
+
+  /**
    * Generate Datalog query for the linked references of a whole alias group,
    * the way `logseq.Editor.getPageLinkedReferences` counts them for one page:
    * blocks whose `:block/path-refs` hold any of the pages (so children of a
