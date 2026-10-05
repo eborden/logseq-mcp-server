@@ -696,6 +696,54 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * Like {@link connectedPages} for a frontier in which several pages stand
+   * for one: `groupOf` maps a page id to the id of the page it is folded into
+   * (an alias group is folded into its first page). Rows have the same shape
+   * with the group id as `sourceId`, and each count is the number of distinct
+   * blocks across the whole group, so a block that links two names of the
+   * group is counted once. Ids missing from `groupOf` stand for themselves.
+   * A group's own members come back as `connected` pages when the group
+   * links among itself (the stub that `alias::` creates is referenced from
+   * the declaring page); callers drop those.
+   * @param frontierIds - Entity ids (`:db/id`) of every page to expand, group members included
+   * @param groupOf - Group id per member id
+   * @returns Query and inputs (no inputs)
+   * @throws Error if `frontierIds` is empty or any id is not an integer
+   */
+  static connectedPagesGrouped(frontierIds: number[], groupOf: ReadonlyMap<number, number>): DatalogQuery {
+    if (frontierIds.length === 0) {
+      throw new Error('connectedPagesGrouped needs at least one frontier id');
+    }
+    const pairs = frontierIds.map(id => {
+      const group = groupOf.get(id) ?? id;
+      if (!Number.isInteger(id) || !Number.isInteger(group)) {
+        throw new Error(`Invalid entity id: ${String(Number.isInteger(id) ? group : id)} (expected an integer)`);
+      }
+      return `[${id} ${group}]`;
+    });
+    return {
+      query: `[:find ?group ?connected ?name ?original-name ?journal ?rel-type (count-distinct ?block)
+             :where
+             [(ground [${pairs.join(' ')}]) [[?source ?group] ...]]
+             [?source :block/name]
+             (or-join [?source ?connected ?block ?rel-type]
+               (and
+                 [?block :block/page ?source]
+                 [?block :block/refs ?connected]
+                 [(ground "outbound") ?rel-type])
+               (and
+                 [?block :block/refs ?source]
+                 [?block :block/page ?connected]
+                 [(ground "inbound") ?rel-type]))
+             [?connected :block/name ?name]
+             [(not= ?group ?connected)]
+             [(get-else $ ?connected :block/original-name "") ?original-name]
+             [(get-else $ ?connected :block/journal? false) ?journal]]`,
+      inputs: []
+    };
+  }
+
+  /**
    * Generate Datalog query for blocks that reference any page of an alias
    * group, plus (optionally) every block on some of its pages. Same pull as
    * {@link getBlocksReferencingPage}, so rows carry the full page entity.
