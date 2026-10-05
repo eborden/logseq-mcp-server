@@ -187,3 +187,10 @@ export interface ResultMeta {
   warnings: ResultWarning[];
   totals?: Record<string, number>;
 }
+
+/**
+ * Meta fields a tool adds to its result object when `resolve_refs` is on: the
+ * same `hasMore` / `warnings` as {@link ResultMeta}, without `totals`. Absent
+ * when `resolve_refs` is off, so default output is unchanged.
+ */
+export type ResolveRefsMeta = Partial<Pick<ResultMeta, 'hasMore' | 'warnings'>>;
