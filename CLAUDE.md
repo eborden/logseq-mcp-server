@@ -34,7 +34,7 @@ Read `docs/architecture-foundations.md` before writing or changing code. It sets
 Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.com/users/eborden/projects/1) project board.
 
 ### Plans live in issues
-- Write a plan as GitHub issues, not as a file in `docs/plans/` and not only in the conversation. (`docs/plans/` holds old plans for reference. Don't add to it.)
+- Write a plan as GitHub issues, not as a file in `docs/plans/` and not only in the conversation. (Plans aren't kept in `docs/`. Git history holds the old ones.)
 - Split anything multi-part into sub-issues linked to a parent. Record sequencing (waves, dependencies) in the parent or a comment on it. Close the parent when its sub-issues are done.
 - Sequence in waves so at most one open PR touches a given file area. Guardrails and conventions first, features next, output-wide changes last.
 - Add new issues to the board: *Backlog*, or *Ready* once the maintainer has approved the plan. When a plan changes, edit the issues (scope comments, new sub-issues, close obsolete ones).
