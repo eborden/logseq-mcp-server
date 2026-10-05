@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getPage } from './get-page.js';
 import { LogseqClient } from '../client.js';
 import { PageEntity } from '../types.js';
+import {
+  PageNotFoundError,
+  LogSeqNotRunningError,
+  LogSeqTimeoutError,
+  LogSeqAuthError
+} from '../errors.js';
 
 describe('getPage', () => {
   let mockClient: LogseqClient;
@@ -140,5 +146,64 @@ describe('getPage', () => {
     await expect(
       getPage(mockClient, 'test page', false)
     ).rejects.toThrow('Failed to connect to LogSeq API');
+  });
+
+  describe('error handling', () => {
+    const infrastructureErrors: Array<[string, () => Error]> = [
+      ['LogSeqNotRunningError', () => new LogSeqNotRunningError('http://test')],
+      ['LogSeqTimeoutError', () => new LogSeqTimeoutError('http://test', 1000)],
+      ['LogSeqAuthError', () => new LogSeqAuthError('http://test')]
+    ];
+
+    it.each(infrastructureErrors)('propagates %s from the initial getPage call', async (_name, makeError) => {
+      const error = makeError();
+      (mockClient.callAPI as any).mockRejectedValue(error);
+
+      await expect(getPage(mockClient, 'test page', false)).rejects.toBe(error);
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(infrastructureErrors)('propagates %s from the suggestion lookup instead of reporting page not found', async (_name, makeError) => {
+      const error = makeError();
+      (mockClient.callAPI as any).mockImplementation(async (method: string) => {
+        if (method === 'logseq.Editor.getPage') return null;
+        throw error;
+      });
+
+      await expect(getPage(mockClient, 'missing page', false)).rejects.toBe(error);
+    });
+
+    it('still throws PageNotFoundError when the suggestion lookup fails unexpectedly', async () => {
+      (mockClient.callAPI as any).mockImplementation(async (method: string) => {
+        if (method === 'logseq.Editor.getPage') return null;
+        throw new Error('boom');
+      });
+
+      await expect(getPage(mockClient, 'missing page', false)).rejects.toThrow(PageNotFoundError);
+    });
+
+    it('throws PageNotFoundError with fuzzy suggestions when the page is missing', async () => {
+      const allPages: PageEntity[] = [
+        { id: 1, uuid: 'u1', name: 'project atlas', originalName: 'Project Atlas' },
+        { id: 2, uuid: 'u2', name: 'project apollo', originalName: 'Project Apollo' },
+        { id: 3, uuid: 'u3', name: 'groceries', originalName: 'Groceries' }
+      ];
+      (mockClient.callAPI as any).mockImplementation(async (method: string) =>
+        method === 'logseq.Editor.getPage' ? null : allPages
+      );
+
+      const promise = getPage(mockClient, 'proj atlas', false);
+
+      await expect(promise).rejects.toThrow(PageNotFoundError);
+      await expect(promise).rejects.toThrow(/Did you mean one of these\?[\s\S]*Project Atlas/);
+    });
+
+    it('throws a plain PageNotFoundError when there are no pages to suggest', async () => {
+      (mockClient.callAPI as any).mockImplementation(async (method: string) =>
+        method === 'logseq.Editor.getPage' ? null : []
+      );
+
+      await expect(getPage(mockClient, 'missing page', false)).rejects.toThrow(/Tip: Use logseq_list_pages/);
+    });
   });
 });
