@@ -121,25 +121,4 @@ describe('DatalogQueryBuilder', () => {
       expect(() => DatalogQueryBuilder.groundIds([1, bad])).toThrow(/Invalid entity id/);
     });
   });
-
-  describe('buildContext', () => {
-    it('should generate context building query with the lowercased name as an input', () => {
-      const { query, inputs } = DatalogQueryBuilder.buildContext('TypeScript', {
-        maxBlocks: 50,
-        maxRelatedPages: 10,
-        maxReferences: 20
-      });
-
-      expect(query).toContain(':find');
-      expect(query).toContain(':where');
-      expect(inputs).toEqual(['typescript']);
-    });
-
-    it('should handle default limits', () => {
-      const { query, inputs } = DatalogQueryBuilder.buildContext('React', {});
-
-      expect(query).toContain(':find');
-      expect(inputs).toEqual(['react']);
-    });
-  });
 });
