@@ -10,7 +10,12 @@ import { fileURLToPath } from 'url';
 const SRC_DIR = fileURLToPath(new URL('.', import.meta.url));
 const REPO_DIR = join(SRC_DIR, '..');
 
-const FORBIDDEN = /\b(?:console\s*\.\s*(?:log|info|debug)|process\s*\.\s*stdout)\b/;
+// Every console method that writes to stdout, plus process.stdout. console.error,
+// console.warn and console.trace go to stderr and stay allowed. `?.` is matched too.
+// Not caught (the scan is textual): console['log'], destructuring or aliasing
+// (const { log } = console), and fs.writeSync(1, ...).
+const FORBIDDEN =
+  /\b(?:console\s*(?:\?\.|\.)\s*(?:log|info|debug|table|dir|dirxml|group|groupCollapsed|count|countReset|time|timeEnd|timeLog)|process\s*(?:\?\.|\.)\s*stdout)\b/;
 
 /**
  * Blank out comments and the contents of string literals, keeping every
@@ -18,15 +23,24 @@ const FORBIDDEN = /\b(?:console\s*\.\s*(?:log|info|debug)|process\s*\.\s*stdout)
  * console.log are therefore ignored.
  *
  * A small state machine, not a parser: a quote character inside a regex
- * literal can confuse it. Single and double quoted strings end at a newline,
- * which limits the damage. Template literals are blanked as plain text,
- * `${...}` expressions included.
+ * literal can confuse it. Template literals are blanked as plain text,
+ * `${...}` expressions included. If a block comment, template literal or
+ * string is still open at its end (a newline for ' and "), it throws with the
+ * line where it started, so a confused scan fails loudly instead of silently
+ * blanking the rest of a file.
  */
 export function stripCommentsAndStrings(source: string): string {
   let out = '';
   let i = 0;
   const n = source.length;
   const blank = (ch: string) => (ch === '\n' ? '\n' : ' ');
+  const lineAt = (pos: number) => source.slice(0, pos).split('\n').length;
+  const unterminated = (what: string, pos: number): never => {
+    throw new Error(
+      `Unterminated ${what} starting at line ${lineAt(pos)}; the stdout scan cannot tell where code resumes. ` +
+        'Simplify that construct (a quote inside a regex literal is the usual cause).'
+    );
+  };
 
   while (i < n) {
     const ch = source[i];
@@ -38,22 +52,23 @@ export function stripCommentsAndStrings(source: string): string {
         i++;
       }
     } else if (ch === '/' && next === '*') {
+      const start = i;
       out += '  ';
       i += 2;
       while (i < n && !(source[i] === '*' && source[i + 1] === '/')) {
         out += blank(source[i]);
         i++;
       }
-      if (i < n) {
-        out += '  ';
-        i += 2;
-      }
+      if (i >= n) unterminated('block comment', start);
+      out += '  ';
+      i += 2;
     } else if (ch === '"' || ch === "'" || ch === '`') {
       const quote = ch;
+      const start = i;
       out += quote;
       i++;
       while (i < n && source[i] !== quote) {
-        if (source[i] === '\n' && quote !== '`') break; // unterminated: recover at the line end
+        if (source[i] === '\n' && quote !== '`') break;
         if (source[i] === '\\' && i + 1 < n) {
           out += ' ' + blank(source[i + 1]);
           i += 2;
@@ -62,10 +77,11 @@ export function stripCommentsAndStrings(source: string): string {
           i++;
         }
       }
-      if (i < n && source[i] === quote) {
-        out += quote;
-        i++;
+      if (i >= n || source[i] !== quote) {
+        unterminated(quote === '`' ? 'template literal' : 'string', start);
       }
+      out += quote;
+      i++;
     } else {
       out += ch;
       i++;
@@ -101,11 +117,16 @@ describe('no stdout writes in src (#82)', () => {
   });
 
   it('uses no console.log, console.info, console.debug or process.stdout in non-test source', () => {
-    const violations = listSourceFiles(SRC_DIR).flatMap((file) =>
-      findStdoutWrites(readFileSync(file, 'utf-8')).map(
-        (hit) => `${relative(REPO_DIR, file)}: ${hit}`
-      )
-    );
+    const violations = listSourceFiles(SRC_DIR).flatMap((file) => {
+      const name = relative(REPO_DIR, file);
+      let hits: string[];
+      try {
+        hits = findStdoutWrites(readFileSync(file, 'utf-8'));
+      } catch (error) {
+        throw new Error(`${name}: ${(error as Error).message}`);
+      }
+      return hits.map((hit) => `${name}: ${hit}`);
+    });
     expect(
       violations,
       'stdout is the MCP protocol channel; use console.error (ADR-0004). Found:\n' + violations.join('\n')
@@ -121,6 +142,16 @@ describe('stdout scanner self-test', () => {
     ['process.stdout', 'process.stdout.write("x");'],
     ['spaced access', 'console . log(x);'],
     ['code after a block comment', '/* note */ console.log(x);'],
+    ['console.table', 'console.table(rows);'],
+    ['console.dir', 'console.dir(x);'],
+    ['console.group', 'console.group("g");'],
+    ['console.groupCollapsed', 'console.groupCollapsed("g");'],
+    ['console.count', 'console.count();'],
+    ['console.time', 'console.time("t");'],
+    ['console.timeEnd', 'console.timeEnd("t");'],
+    ['console.timeLog', 'console.timeLog("t");'],
+    ['optional chaining', 'console?.log(x);'],
+    ['optional chaining on process', 'process?.stdout.write("x");'],
     ['code after a URL string', 'const u = "http://a.b"; console.log(u);'],
   ])('flags %s', (_name, sample) => {
     expect(findStdoutWrites(sample)).toHaveLength(1);
@@ -139,6 +170,7 @@ describe('stdout scanner self-test', () => {
   it.each([
     ['console.error', 'console.error("x");'],
     ['console.warn', 'console.warn("x");'],
+    ['console.trace (stderr)', 'console.trace("x");'],
     ['a line comment', '// never call console.log here'],
     ['a trailing comment', 'const a = 1; // not process.stdout'],
     ['a block comment', '/* console.log(x)\n process.stdout */'],
@@ -149,5 +181,15 @@ describe('stdout scanner self-test', () => {
     ['a longer identifier', 'myconsole.logger(x); const stdoutLike = process.stdoutX;'],
   ])('ignores %s', (_name, sample) => {
     expect(findStdoutWrites(sample)).toEqual([]);
+  });
+});
+
+describe('scanner fails loudly when it loses track (#82)', () => {
+  it.each([
+    ['an unterminated block comment', 'const a = 1;\n/* never closed\nconsole.log(1);', 'block comment starting at line 2'],
+    ['an unterminated template literal', 'const a = `open\nconsole.log(1);', 'template literal starting at line 1'],
+    ['an unterminated string', "const a = 1;\nconst r = /'/;\nconsole.log(1);", 'string starting at line 2'],
+  ])('throws on %s', (_name, sample, message) => {
+    expect(() => findStdoutWrites(sample)).toThrow(message);
   });
 });
