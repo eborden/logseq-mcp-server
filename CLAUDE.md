@@ -84,18 +84,14 @@ Every constraint below marked **Verified** is reproduced by `npx tsx scripts/pro
 
 **Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted.
 
-**Current practice:** `LogseqClient.executeDatalogQuery` only sends `[query]`, so every builder embeds parameters in the query string:
+**Current practice:** string parameters go through `:in`. `LogseqClient.executeDatalogQuery(query, ...inputs)` sends each input as `JSON.stringify(value)` (a JSON string literal is also a valid EDN string literal), and every `DatalogQueryBuilder` method returns `{ query, inputs }`:
 ```typescript
-const pageNameLower = pageName.toLowerCase();
-const query = `[:find (pull ?page [*])
-                :where
-                [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
-await client.executeDatalogQuery(query);
+const { query, inputs } = DatalogQueryBuilder.getPage(pageName); // inputs: [pageName.toLowerCase()]
+await client.executeDatalogQuery(query, ...inputs);
+// query: [:find (pull ?page [*]) :in $ ?page-name :where [?page :block/name ?page-name]]
 ```
 
-**If you switch to `:in`:** extend `executeDatalogQuery` to take inputs and send them as `JSON.stringify(value)`. A JSON string literal is also a valid EDN string literal.
-
-**Embedded strings must be escaped.** See constraint 6.
+Pass raw values as inputs. The client does the EDN encoding, so never `JSON.stringify` an input yourself (it would be encoded twice). See constraint 6 for what is still embedded.
 
 ---
 
@@ -108,7 +104,7 @@ await client.executeDatalogQuery(query);
 | `clojure.string/includes?` | Works, including on `:block/content` |
 | `re-pattern` + `re-find`, e.g. `"(?i)foo"` | Works (case-insensitive matching) |
 
-**Verified.** Lowercase in TypeScript before embedding. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
+**Verified.** Lowercase in TypeScript before passing the name to the query. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
 
 **DON'T (lower-case doesn't work):**
 ```clojure
@@ -129,10 +125,12 @@ LogSeq API error: Unknown function 'clojure.string/lower-case in [(clojure.strin
 // Pre-process in TypeScript
 const pageNameLower = pageName.toLowerCase();
 
-// Use pre-processed value in query
+// Pass the pre-processed value as an :in input
 const query = `[:find (pull ?page [*])
+                :in $ ?page-name
                 :where
-                [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
+                [?page :block/name ?page-name]]`;
+await client.executeDatalogQuery(query, pageNameLower);
 ```
 
 **Why:** LogSeq's DataScript exposes only some of `clojure.string`. `lower-case` is missing, while `includes?`, `starts-with?`, `re-pattern` and `re-find` are present.
@@ -170,21 +168,16 @@ The pattern `(or-join [?x ?y] ... [(ground nil) ?y])` doesn't work as expected f
 **DO (split into separate queries):**
 ```typescript
 // Query 1: Get the page (always succeeds if page exists)
-const pageQuery = `[:find (pull ?page [*])
-                    :where
-                    [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
-const pageResults = await client.executeDatalogQuery(pageQuery);
+const page = DatalogQueryBuilder.getPage(pageName);
+const pageResults = await client.executeDatalogQuery(page.query, ...page.inputs);
 
 if (!pageResults || pageResults.length === 0) {
   throw new Error(`Page not found: ${pageName}`);
 }
 
 // Query 2: Get blocks (may be empty array)
-const blocksQuery = `[:find (pull ?block [*])
-                      :where
-                      [?page :block/name ${JSON.stringify(pageNameLower)}]
-                      [?block :block/page ?page]]`;
-const blockResults = await client.executeDatalogQuery(blocksQuery);
+const blocksQuery = DatalogQueryBuilder.getPageBlocks(pageName);
+const blockResults = await client.executeDatalogQuery(blocksQuery.query, ...blocksQuery.inputs);
 
 // Handle empty results gracefully
 const blocks = (blockResults || []).map(r => r[0]);
@@ -240,12 +233,16 @@ Page entity:
 ```typescript
 // Accept any casing from user
 function getPage(pageName: string) {
-  // Lowercase before embedding in query
+  // Lowercase before passing it as an :in input
   const pageNameLower = pageName.toLowerCase();
 
-  return `[:find (pull ?page [*])
-           :where
-           [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
+  return {
+    query: `[:find (pull ?page [*])
+             :in $ ?page-name
+             :where
+             [?page :block/name ?page-name]]`,
+    inputs: [pageNameLower]
+  };
 }
 
 // All these work correctly:
@@ -262,9 +259,9 @@ getPage('ALICE')  // ✅ Finds "alice"
 
 ---
 
-### 6. Escape Every String You Embed
+### 6. Don't Embed Strings; Escape Anything You Must
 
-Embedding a string that contains `"` produces a malformed query:
+Embedding a string that contains `"` in the query text produces a malformed query:
 
 ```
 [?p :block/name "foo "bar"]   →  LogSeq API error: Unexpected EOF reading string starting ""]].
@@ -272,13 +269,10 @@ Embedding a string that contains `"` produces a malformed query:
 
 **Verified.** `JSON.stringify(value)` produces a valid EDN string literal for quotes, backslashes and newlines, and the escaped form runs correctly.
 
-**DO:**
-```typescript
-const query = `[:find (pull ?p [*]) :where [?p :block/name ${JSON.stringify(nameLower)}]]`;
-```
+**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. All of `src/datalog/queries.ts` works this way, except the dead `searchByRelationship` (#11).
 
-- Check numeric IDs with `Number.isInteger` before embedding them in `ground` vectors.
-- `src/datalog/queries.ts` currently embeds names unescaped (#6).
+- Numeric IDs are still embedded, in `ground` vectors, because collection `:in` inputs are unprobed. Build them with `DatalogQueryBuilder.groundIds(ids)`, which throws unless every id passes `Number.isInteger`. Bind the ids straight to the entity variable (`groundIds(ids, '?p')` followed by a pattern on `?p`). `[?p :db/id ?id]` matches nothing, and a query whose only clause is the `ground` binding errors.
+- If you ever must embed a string literal, use `JSON.stringify(value)`. A string used inside `re-pattern` also needs regex metacharacters escaped first (#4).
 
 ---
 
@@ -291,18 +285,18 @@ When related data might not exist (e.g., pages without blocks, pages without con
 **Implementation:**
 ```typescript
 // Step 1: Get the main entity
-const mainEntityQuery = DatalogQueryBuilder.getPage(pageName);
-const mainResults = await client.executeDatalogQuery(mainEntityQuery);
+const mainEntity = DatalogQueryBuilder.getPage(pageName);
+const mainResults = await client.executeDatalogQuery(mainEntity.query, ...mainEntity.inputs);
 
 if (!mainResults || mainResults.length === 0) {
   throw new Error(`Entity not found`);
 }
 
-const mainEntity = mainResults[0][0];
+const entity = mainResults[0][0];
 
 // Step 2: Get related data (may be empty)
-const relatedQuery = DatalogQueryBuilder.getRelatedData(pageName);
-const relatedResults = await client.executeDatalogQuery(relatedQuery);
+const related = DatalogQueryBuilder.getRelatedData(pageName);
+const relatedResults = await client.executeDatalogQuery(related.query, ...related.inputs);
 
 // Handle empty results
 const relatedData = (relatedResults || []).map(r => r[0]);
@@ -378,20 +372,24 @@ static getConnectedPages(pageIds: number[]): string {
 
 ### Pattern 3: Case-Insensitive Lookup
 
-Always lowercase page names before embedding in queries to match LogSeq's normalization.
+Always lowercase page names before passing them to queries to match LogSeq's normalization.
 
 **Standard Pattern:**
 ```typescript
-export function buildQuery(pageName: string) {
+export function buildQuery(pageName: string): DatalogQuery {
   const pageNameLower = pageName.toLowerCase();
 
-  return `[:find (pull ?page [*])
-           :where
-           [?page :block/name ${JSON.stringify(pageNameLower)}]]`;
+  return {
+    query: `[:find (pull ?page [*])
+             :in $ ?page-name
+             :where
+             [?page :block/name ?page-name]]`,
+    inputs: [pageNameLower]
+  };
 }
 ```
 
-**Used in:** `conceptNetwork()`, `getPage()` and `getPageBlocks()` in `src/datalog/queries.ts`.
+**Used in:** `conceptNetwork()`, `getPage()`, `getPageBlocks()` and `getBlocksReferencingPage()` in `src/datalog/queries.ts`.
 
 **Not yet followed by:** `src/tools/search-by-relationship.ts`, which matches `[[topic]]` with a case-sensitive substring check (#7).
 
@@ -476,9 +474,9 @@ Use one Datalog query, filtering in the query with `includes?` / `re-find`, or b
 Quick reference checklist for future work:
 
 **Queries**
-- [ ] Pre-lowercase page names before embedding in queries
-- [ ] Escape every embedded string with `JSON.stringify`, and check numeric IDs with `Number.isInteger`
-- [ ] If you use `:in`, send inputs EDN-encoded (`JSON.stringify(value)`), never bare strings
+- [ ] Pre-lowercase page names before passing them to queries
+- [ ] Pass strings as `:in` inputs, never embedded in the query text. Pass raw values: `executeDatalogQuery` EDN-encodes them (a bare string would be read as a symbol).
+- [ ] Embed numeric IDs only through `DatalogQueryBuilder.groundIds`, which checks `Number.isInteger`
 - [ ] Don't use `clojure.string/lower-case`. `includes?`, `starts-with?`, `re-pattern` and `re-find` work.
 - [ ] Split queries when data might be empty (don't rely on or-join with ground nil)
 - [ ] Send Datalog to `logseq.DB.datascriptQuery`. `logseq.DB.q` takes the simple query DSL and returns `null` for Datalog.
@@ -683,7 +681,7 @@ Checklist for new Datalog-based tools:
 
 1. **Query Builder** - Add static method to `DatalogQueryBuilder`
    - Pre-lowercase any page name parameters
-   - Embed parameters with `JSON.stringify` (or pass EDN-encoded `:in` inputs)
+   - Return `{ query, inputs }` and bind strings with `:in`; don't embed them in the query text
    - Don't use `clojure.string/lower-case`
    - No `getAllPages` + per-page crawls
 
@@ -720,7 +718,7 @@ Checklist for new Datalog-based tools:
 
 Datalog is how this project gets its performance gains, but only some tools use it so far (see "Current Implementation Status"), and LogSeq's Datalog needs careful handling. The key is to:
 
-1. **Embed escaped parameters** (`JSON.stringify`), or pass EDN-encoded `:in` inputs
+1. **Bind strings with `:in`** (`executeDatalogQuery` EDN-encodes the inputs); never embed them in the query text
 2. **Lowercase in TypeScript** (`clojure.string/lower-case` is unavailable; `includes?` / `re-find` work)
 3. **Split queries** for optional data (no or-join with ground nil)
 4. **Always lowercase** page names before queries
