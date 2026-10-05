@@ -127,6 +127,36 @@ describe('MCP resources (#46)', () => {
       }
     });
 
+    it('loses nothing the resource printed before the shared renderer: a pre-block with refs, hyphenated keys, numbers (#80)', async () => {
+      // Synthetic, in the shapes LogSeq documents: the Editor API camelCases the map's keys
+      // and returns multi-value refs as arrays, while the pre-block text is as stored.
+      const preBlock = ['project-status:: active', 'related-to:: [[Bob]], [[Carol]]', 'rating:: 3', 'archived:: false'];
+      const tree = [
+        { content: preBlock.join('\n'), 'pre-block?': true },
+        { content: 'a block', children: [{ content: 'a child' }] },
+      ];
+      const properties = { projectStatus: 'active', relatedTo: ['Bob', 'Carol'], rating: 3, archived: false };
+      // What main printed (#46): every block, the pre-block included, as a bullet
+      const before = ['# Alice', '', ...preBlock.map((line, i) => (i === 0 ? `- ${line}` : `  ${line}`)), '- a block', '\t- a child', ''].join('\n');
+
+      const { mcp } = await connect(method => {
+        if (method === 'logseq.Editor.getPage') return { ...aliceEntity, properties };
+        if (method === 'logseq.Editor.getPageBlocksTree') return tree;
+        return null;
+      });
+      try {
+        const after = textOf(await mcp.readResource({ uri: 'logseq://page/Alice' }));
+        // Same text; the properties are now lines above the outline instead of a first bullet
+        expect(after).toBe(['# Alice', '', ...preBlock, '', '- a block', '\t- a child', ''].join('\n'));
+        // Every property line main showed is still there, verbatim
+        for (const line of before.split('\n').map(l => l.replace(/^(- |  )/, ''))) {
+          expect(after).toContain(line);
+        }
+      } finally {
+        await mcp.close();
+      }
+    });
+
     it('renders page properties before the blocks, through the shared renderer (#43)', async () => {
       const tree = [{ content: 'type:: person', 'pre-block?': true }, { content: 'a block' }];
       const { mcp } = await connect(method => {

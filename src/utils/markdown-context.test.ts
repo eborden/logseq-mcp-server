@@ -117,6 +117,23 @@ describe('renderTopicContext', () => {
     expect(renderTopicContext(context({ directBlocks: blocks as any }))).not.toContain('- type:: project');
   });
 
+  it('prints the pre-block text as the properties, not a rewrite of the properties map (#80)', () => {
+    const preBlock = 'related-to:: [[Alice]], [[Bob]]\nproject-status:: active';
+    const blocks = [
+      { id: 11, uuid: U(11), content: preBlock, 'pre-block?': true, parent: { id: 1 }, left: { id: 1 }, page: { id: 1 } },
+      { id: 12, uuid: U(12), content: 'real', parent: { id: 1 }, left: { id: 11 }, page: { id: 1 } },
+    ];
+    const page = { ...mainPage, properties: { 'related-to': ['Alice', 'Bob'], 'project-status': 'active' } };
+    const text = renderTopicContext(context({ mainPage: page as any, directBlocks: blocks as any }));
+    expect(text).toContain(`# Project Atlas\n\n${preBlock}\n\n## Blocks`);
+    expect(text).not.toContain('- related-to::');
+  });
+
+  it('writes the properties map with refs and kebab-case keys when the pre-block was not fetched', () => {
+    const page = { ...mainPage, properties: { 'related-to': ['Alice', 'Bob'], rating: 3 } };
+    expect(renderTopicContext(context({ mainPage: page as any }))).toContain('related-to:: [[Alice]], [[Bob]]\nrating:: 3');
+  });
+
   it('goes one heading level down when nested', () => {
     const text = renderTopicContext(context(), { headingLevel: 2 });
     expect(text.startsWith('## Project Atlas\n')).toBe(true);

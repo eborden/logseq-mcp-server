@@ -103,7 +103,26 @@ describe('renderProperties', () => {
   it('writes key:: value lines, joining lists and skipping empty values', () => {
     expect(
       renderProperties({ type: 'project', tags: ['a', 'b'], empty: '', none: null, count: 3, flag: false })
-    ).toEqual(['type:: project', 'tags:: a, b', 'count:: 3', 'flag:: false']);
+    ).toEqual(['type:: project', 'tags:: [[a]], [[b]]', 'count:: 3', 'flag:: false']);
+  });
+
+  it('shows keys kebab-case, as LogSeq stores them, not as the Editor API camelCases them', () => {
+    expect(renderProperties({ projectStatus: 'active', 'due-date': '2025-01-01', 'logseq.orderListType': 'number' })).toEqual([
+      'project-status:: active',
+      'due-date:: 2025-01-01',
+      'logseq.order-list-type:: number',
+    ]);
+  });
+
+  it('keeps page refs as [[Name]]: a multi-value set or array, and a value already written with brackets', () => {
+    expect(
+      renderProperties({
+        related: new Set(['Alice', 'Bob']),
+        'see-also': ['[[Project Atlas]]', 'Carol'],
+        owner: '[[Alice]]',
+        ratings: [1, 2],
+      })
+    ).toEqual(['related:: [[Alice]], [[Bob]]', 'see-also:: [[Project Atlas]], [[Carol]]', 'owner:: [[Alice]]', 'ratings:: 1, 2']);
   });
 
   it('returns nothing for a missing or non-object value', () => {
@@ -136,9 +155,30 @@ describe('renderPage', () => {
     expect(renderPage(page, { blocksFetched: true })).toBe('# Alice\n\ntype:: person\n\n- real\n');
   });
 
-  it('keeps a pre-block when no properties were rendered', () => {
+  it('shows the pre-block text as the properties, even when the properties map is missing', () => {
     const page = { ...alice, children: [{ content: 'alias:: x', 'pre-block?': true }] };
-    expect(renderPage(page, { blocksFetched: true })).toContain('- alias:: x');
+    expect(renderPage(page, { blocksFetched: true })).toBe('# Alice\n\nalias:: x\n\n(this page has no blocks)\n');
+  });
+
+  it('prints the pre-block verbatim: hyphenated keys, page-ref lists and numbers are not rewritten (#80)', () => {
+    const preBlock = 'project-status:: active\nrelated-to:: [[Alice]], [[Bob]]\nrating:: 3\narchived:: false';
+    const page = {
+      ...alice,
+      // The map the Editor API would hand back: camelCased keys, refs without brackets
+      properties: { projectStatus: 'active', relatedTo: ['Alice', 'Bob'], rating: 3, archived: false },
+      children: [{ content: preBlock, 'pre-block?': true }, { content: 'real' }],
+    };
+    expect(renderPage(page, { blocksFetched: true })).toBe(`# Alice\n\n${preBlock}\n\n- real\n`);
+  });
+
+  it('reads the Editor API spelling of the pre-block flag', () => {
+    const page = { ...alice, children: [{ content: 'type:: person', 'preBlock?': true }, { content: 'real' }] };
+    expect(renderPage(page, { blocksFetched: true })).toBe('# Alice\n\ntype:: person\n\n- real\n');
+  });
+
+  it('falls back to the properties map when the tree has no pre-block', () => {
+    const page = { ...alice, properties: { projectStatus: 'active', related: ['Alice'] }, children: [{ content: 'real' }] };
+    expect(renderPage(page, { blocksFetched: true })).toBe('# Alice\n\nproject-status:: active\nrelated:: [[Alice]]\n\n- real\n');
   });
 
   it('says so when a fetched page has no blocks', () => {

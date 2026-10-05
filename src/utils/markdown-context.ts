@@ -8,7 +8,7 @@ import {
   pageLink,
   pageTitle,
   renderOutline,
-  renderProperties,
+  propertyLines,
   resolvedFromLine,
 } from './markdown.js';
 
@@ -75,19 +75,21 @@ export function renderTopicContext(
   if (context.temporalContext?.isJournal && context.temporalContext.date !== undefined) {
     lines.push(`Journal: ${context.temporalContext.date}`, '');
   }
-  const props = renderProperties(main.properties);
-  if (props.length > 0) lines.push(...props, '');
+  const blocks = context.directBlocks as Obj[];
+  const pageId = main.id ?? main['db/id'] ?? 0;
+  const tree = blocks.length > 0 ? blockTree(blocks, pageId) : [];
+  // The pre-block's own text when it was fetched, so keys and values are shown as stored
+  const props = propertyLines(main.properties, tree);
+  if (props.lines.length > 0) lines.push(...props.lines, '');
 
   const section = headingLevel + 1;
 
   // Blocks
-  const blocks = context.directBlocks as Obj[];
   if (blocks.length === 0) {
     lines.push('(this page has no blocks)', '');
   } else {
-    const pageId = main.id ?? main['db/id'] ?? 0;
     // Properties are rendered above, so the block that holds them is not repeated
-    const outline = renderOutline(blockTree(blocks, pageId), { compact, skipPreBlocks: props.length > 0 });
+    const outline = renderOutline(tree, { compact, skipPreBlocks: props.fromPreBlock });
     lines.push(heading(section, `Blocks (${count(blocks.length, context.totals?.blocks)})`), '', ...outline.lines, '');
   }
 
