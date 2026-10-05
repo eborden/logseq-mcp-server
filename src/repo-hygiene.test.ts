@@ -19,7 +19,7 @@ function git(args: string[], input?: string, cwd = repoRoot()): string {
   } catch (error) {
     // `git check-ignore` exits 1 when no path is ignored; that is an answer, not a failure.
     const e = error as { status?: number; stdout?: string };
-    if (args[0] === 'check-ignore' && e.status === 1) return e.stdout ?? '';
+    if (args.includes('check-ignore') && e.status === 1) return e.stdout ?? '';
     throw new Error(
       `git ${args.join(' ')} failed. The repo hygiene test needs git and a checkout with .git: ${String(error)}`,
     );
@@ -35,23 +35,32 @@ function repoRoot(): string {
 
 const lines = (text: string) => text.split('\n').filter(line => line.length > 0);
 
-/** A kind of raw-output file, matched on the basename, with sample paths .gitignore must ignore. */
+/**
+ * A kind of raw-output file, matched on the lowercased basename, with sample paths .gitignore must
+ * ignore. Case: the tracked-file check is case-insensitive (`Debug.LOG` fails it), but .gitignore is
+ * case-sensitive on Linux and only lists the lowercase patterns, so it won't hide an upper-case dump
+ * from `git add`. The tracked-file check is the stricter side and catches that case in CI. Samples
+ * are lowercase for that reason.
+ */
 interface RawOutputRule {
   name: string;
-  matches: (basename: string) => boolean;
+  matches: (lowerBasename: string) => boolean;
   samples: string[];
 }
+
+// Extensions a redirected or saved dump of a probe/measure script is likely to have.
+const DUMP_EXTENSIONS = ['txt', 'json', 'md', 'csv', 'tsv'];
 
 const RAW_OUTPUT_RULES: RawOutputRule[] = [
   {
     name: '*.log',
-    matches: b => b.toLowerCase().endsWith('.log'),
+    matches: b => b.endsWith('.log'),
     samples: ['vitest.log', 'scripts/run.log', 'tests/integration/debug.log'],
   },
   {
-    name: '*-output.txt',
-    matches: b => b.toLowerCase().endsWith('-output.txt'),
-    samples: ['test-output.txt', 'scripts/probe-output.txt', 'tests/integration/run-output.txt'],
+    name: 'output.txt, *-output.txt',
+    matches: b => b === 'output.txt' || b.endsWith('-output.txt'),
+    samples: ['output.txt', 'scripts/output.txt', 'test-output.txt', 'scripts/probe-output.txt', 'tests/integration/run-output.txt'],
   },
   {
     name: 'integration-test-output*',
@@ -60,14 +69,20 @@ const RAW_OUTPUT_RULES: RawOutputRule[] = [
   },
   {
     name: '*.out',
-    matches: b => b.toLowerCase().endsWith('.out'),
+    matches: b => b.endsWith('.out'),
     samples: ['probe.out', 'scripts/measure.out'],
   },
   {
-    // Redirected dumps of scripts/probe-*.ts and scripts/measure-*.ts, named after the script.
-    name: 'probe-*.txt, measure-*.txt',
-    matches: b => /^(probe|measure)-.*\.txt$/i.test(b),
-    samples: ['probe-constraints.txt', 'measure-api-calls.txt', 'scripts/measure-output-size.txt'],
+    // Redirected or saved dumps of scripts/probe-*.ts and scripts/measure-*.ts, named after the script.
+    name: `probe-*, measure-* (.${DUMP_EXTENSIONS.join(', .')})`,
+    matches: b => new RegExp(`^(probe|measure)-.*\\.(${DUMP_EXTENSIONS.join('|')})$`).test(b),
+    samples: [
+      'probe-constraints.txt',
+      'measure-api-calls.txt',
+      'scripts/measure-output-size.txt',
+      ...DUMP_EXTENSIONS.map(ext => `probe-results.${ext}`),
+      ...DUMP_EXTENSIONS.map(ext => `scripts/measure-results.${ext}`),
+    ],
   },
 ];
 
@@ -76,14 +91,22 @@ const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 /** Paths that look like raw test, probe or measure output, with the rule each one breaks. */
 function findRawOutputFiles(paths: string[]): { path: string; rule: string }[] {
   return paths.flatMap(path => {
-    const rule = RAW_OUTPUT_RULES.find(r => r.matches(basename(path)));
+    const name = basename(path).toLowerCase();
+    const rule = RAW_OUTPUT_RULES.find(r => r.matches(name));
     return rule ? [{ path, rule: rule.name }] : [];
   });
 }
 
-/** The subset of `paths` that .gitignore ignores, whether or not they exist or are tracked. */
+/**
+ * The subset of `paths` that the repo's .gitignore files ignore, whether or not they exist or are
+ * tracked. `core.excludesFile=/dev/null` turns off the developer's global ignore file (including the
+ * default ~/.config/git/ignore), so a pattern dropped from .gitignore fails locally as it does in CI.
+ * A clone's own .git/info/exclude still applies; CI's fresh checkout has none.
+ */
 function ignoredByGitignore(paths: string[]): Set<string> {
-  return new Set(lines(git(['check-ignore', '--no-index', '--stdin'], paths.join('\n') + '\n')));
+  return new Set(
+    lines(git(['-c', 'core.excludesFile=/dev/null', 'check-ignore', '--no-index', '--stdin'], paths.join('\n') + '\n')),
+  );
 }
 
 describe('findRawOutputFiles (synthetic paths)', () => {
@@ -107,6 +130,11 @@ describe('findRawOutputFiles (synthetic paths)', () => {
     expect(flagged[0].rule).toBe('*.log');
   });
 
+  it('matches names case-insensitively, including a bare output.txt and json/md probe dumps', () => {
+    const paths = ['Debug.LOG', 'OUTPUT.txt', 'Integration-Test-Output.txt', 'Probe-Results.JSON', 'scripts/measure-run.md'];
+    expect(findRawOutputFiles(paths).map(f => f.path)).toEqual(paths);
+  });
+
   it('leaves source, docs and fixtures alone', () => {
     expect(
       findRawOutputFiles([
@@ -124,7 +152,7 @@ describe('findRawOutputFiles (synthetic paths)', () => {
 
   it('every rule matches its own samples', () => {
     for (const rule of RAW_OUTPUT_RULES) {
-      expect(rule.samples.filter(s => !rule.matches(basename(s))), rule.name).toEqual([]);
+      expect(rule.samples.filter(s => !rule.matches(basename(s).toLowerCase())), rule.name).toEqual([]);
     }
   });
 });
