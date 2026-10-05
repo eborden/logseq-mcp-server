@@ -51,22 +51,74 @@ export function pageNameOf(entity: unknown): string | undefined {
   );
 }
 
-/** The page named by most blocks, first seen wins a tie. */
-function mostCommonPage(blocks: unknown[]): string | undefined {
+/** The most frequent value; the first one seen wins a tie. */
+function mostCommon(values: Iterable<string>): string | undefined {
   const counts = new Map<string, number>();
-  for (const block of blocks) {
-    const name = pageNameOf(block);
-    if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
-  }
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
   let best: string | undefined;
   let bestCount = 0;
-  for (const [name, count] of counts) {
+  for (const [value, count] of counts) {
     if (count > bestCount) {
-      best = name;
+      best = value;
       bestCount = count;
     }
   }
   return best;
+}
+
+/**
+ * Whether the page behind a block is a journal date page: true or false when the
+ * block carries a page entity with a name (search `context.page`, property results),
+ * undefined when only a name (slim block) or a bare id is known.
+ */
+function journalStatus(block: unknown): boolean | undefined {
+  const b = asObject(block);
+  const page = [asObject(asObject(b?.context)?.page), asObject(b?.page)].find(
+    p => p && pageNameOf({ page: p }) !== undefined
+  );
+  if (!page) return undefined;
+  return (
+    page.isJournal === true ||
+    page.journalDate != null ||
+    page['journal?'] === true ||
+    page.journal === true ||
+    page.journalDay != null ||
+    page['journal-day'] != null
+  );
+}
+
+/** Topic names a block mentions: its #tags and [[page refs]] (slim blocks), and `context.tags`. */
+function topicsOf(block: unknown): string[] {
+  const b = asObject(block);
+  const lists = [b?.tags, b?.pageRefs, asObject(b?.context)?.tags];
+  return lists.flatMap(list => (Array.isArray(list) ? list.filter((t): t is string => nonEmptyString(t) !== undefined) : []));
+}
+
+/**
+ * The topic worth a `build_context` call for a set of hit blocks. Most hits sit on
+ * journal date pages, which make the least informative next step, so in order:
+ * 1. the page most hits are on, among pages known not to be journals;
+ * 2. the #tag or [[ref]] most hits mention (slim hits carry no journal flag);
+ * 3. the most common page whose kind is unknown (its journal flag isn't in the hit);
+ * 4. a journal page, only when nothing else is available.
+ */
+function suggestTopic(blocks: unknown[]): { name: string; kind: 'page' | 'topic' } | undefined {
+  const named = blocks.flatMap(block => {
+    const name = pageNameOf(block);
+    return name ? [{ name, journal: journalStatus(block) }] : [];
+  });
+
+  const nonJournal = mostCommon(named.filter(n => n.journal === false).map(n => n.name));
+  if (nonJournal) return { name: nonJournal, kind: 'page' };
+
+  const topic = mostCommon(blocks.flatMap(topicsOf));
+  if (topic) return { name: topic, kind: 'topic' };
+
+  const unknown = mostCommon(named.filter(n => n.journal === undefined).map(n => n.name));
+  if (unknown) return { name: unknown, kind: 'page' };
+
+  const journal = mostCommon(named.map(n => n.name));
+  return journal ? { name: journal, kind: 'page' } : undefined;
 }
 
 /**
@@ -98,10 +150,10 @@ export function buildTips(
         );
         break;
       }
-      const page = mostCommonPage(result);
+      const pick = suggestTopic(result);
       tips.push(
-        page
-          ? `To read the page most results are on: ${suggestCall('logseq_build_context', { topic_name: page })}.`
+        pick
+          ? `To read the ${pick.kind === 'topic' ? 'topic most results mention' : 'page most results are on'}: ${suggestCall('logseq_build_context', { topic_name: pick.name })}.`
           : 'Results carry page ids only. Repeat with slim_results: true to get page names, then logseq_build_context on one.'
       );
       break;
@@ -126,8 +178,12 @@ export function buildTips(
 
     case 'logseq_query_by_property': {
       if (!Array.isArray(result) || result.length === 0) break;
-      const page = mostCommonPage(result);
-      if (page) tips.push(`To read the page most matches are on: ${suggestCall('logseq_build_context', { topic_name: page })}.`);
+      const pick = suggestTopic(result);
+      if (pick) {
+        tips.push(
+          `To read the ${pick.kind === 'topic' ? 'topic most matches mention' : 'page most matches are on'}: ${suggestCall('logseq_build_context', { topic_name: pick.name })}.`
+        );
+      }
       break;
     }
 

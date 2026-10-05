@@ -41,6 +41,58 @@ describe('buildTips', () => {
       expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'Alice' });
     });
 
+    describe('prefers non-journal pages', () => {
+      const journal = { originalName: 'Oct 5th, 2026', isJournal: true, journalDate: 20261005 };
+      const topic = { originalName: 'Project Atlas' };
+
+      it('picks the topic page over a journal page that leads (include_context)', () => {
+        const result = [
+          { context: { page: journal } },
+          { context: { page: journal } },
+          { context: { page: topic } },
+        ];
+        const tips = buildTips('logseq_search_blocks', { query: 'x' }, result);
+        expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'Project Atlas' });
+      });
+
+      it('recognises raw page entities flagged with journal?', () => {
+        const result = [
+          { page: { originalName: 'Oct 5th, 2026', 'journal?': true } },
+          { page: { originalName: 'Project Atlas', 'journal?': false } },
+        ];
+        const tips = buildTips('logseq_search_blocks', { query: 'x' }, result);
+        expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'Project Atlas' });
+      });
+
+      it('ranks tags and page refs when slim hits carry no journal flag', () => {
+        const result = [
+          { pageName: 'Oct 5th, 2026', tags: ['atlas'], pageRefs: ['Alice'] },
+          { pageName: 'Oct 5th, 2026', pageRefs: ['Alice'] },
+          { pageName: 'Oct 4th, 2026', tags: ['atlas'], pageRefs: ['Alice'] },
+        ];
+        const tips = buildTips('logseq_search_blocks', { query: 'x' }, result);
+        expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'Alice' });
+      });
+
+      it('uses the most common page when there is no flag and no tags or refs', () => {
+        const result = [{ pageName: 'Bob' }, { pageName: 'Alice' }, { pageName: 'Alice' }];
+        const tips = buildTips('logseq_search_blocks', { query: 'x' }, result);
+        expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'Alice' });
+      });
+
+      it('falls back to a journal page only when it is all there is', () => {
+        const tips = buildTips('logseq_search_blocks', { query: 'x' }, [{ context: { page: journal } }]);
+        expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'Oct 5th, 2026' });
+      });
+
+      it('applies to query_by_property too', () => {
+        const result = [{ page: { ...journal } }, { page: { ...journal } }, { page: { ...topic } }];
+        expect(argsOf(buildTips('logseq_query_by_property', {}, result), 'logseq_build_context')).toEqual({
+          topic_name: 'Project Atlas',
+        });
+      });
+    });
+
     it('breaks a tie by first appearance', () => {
       const tips = buildTips('logseq_search_blocks', { query: 'x' }, [{ pageName: 'Bob' }, { pageName: 'Alice' }]);
       expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'Bob' });
