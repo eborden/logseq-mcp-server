@@ -183,6 +183,106 @@ describe('buildContextForTopic', () => {
     expect(result.relatedPages[0].relationshipType).toBe('inbound');
   });
 
+  describe('truncation warnings (#40)', () => {
+    const mkClient = (blockCount: number, backlinks: any[]) => {
+      const client = {
+        config: {},
+        executeDatalogQuery: vi.fn(),
+        callAPI: vi.fn()
+      } as unknown as LogseqClient;
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'Topic', properties: {} }]])
+        .mockResolvedValueOnce(
+          Array.from({ length: blockCount }, (_, i) => [{ id: 100 + i, content: `Block ${i}` }])
+        );
+      (client.callAPI as any).mockResolvedValueOnce(backlinks);
+      return client;
+    };
+
+    // 4 source pages with 2 blocks each: 8 references, 4 related pages
+    const backlinks = [1, 2, 3, 4].map(p => [
+      { id: 10 + p, name: `Source ${p}` },
+      [{ id: 200 + p * 2, content: 'a' }, { id: 201 + p * 2, content: 'b' }]
+    ]);
+
+    it('reports no warning and hasMore false when under every cap', async () => {
+      const result = await buildContextForTopic(mkClient(3, backlinks), 'Topic', {});
+
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings).toEqual([]);
+      expect(result.totals).toEqual({ blocks: 3, relatedPages: 4, references: 8 });
+    });
+
+    it('reports no warning when exactly at a cap', async () => {
+      const result = await buildContextForTopic(mkClient(3, backlinks), 'Topic', {
+        maxBlocks: 3,
+        maxReferences: 8,
+        maxRelatedPages: 4
+      });
+
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('warns when maxBlocks cuts blocks, with the real total and how to fetch all', async () => {
+      const result = await buildContextForTopic(mkClient(7, backlinks), 'Topic', { maxBlocks: 5 });
+
+      expect(result.directBlocks).toHaveLength(5);
+      expect(result.hasMore).toBe(true);
+      expect(result.totals.blocks).toBe(7);
+      expect(result.warnings).toEqual([
+        {
+          code: 'blocks_truncated',
+          message: 'Showing 5 of 7 blocks.',
+          howToFetchAll: 'Set max_blocks to 7 (or higher) to get all 7.'
+        }
+      ]);
+      // The summary still counts what is returned
+      expect(result.summary.totalBlocks).toBe(5);
+    });
+
+    it('warns when maxReferences cuts references', async () => {
+      const result = await buildContextForTopic(mkClient(0, backlinks), 'Topic', { maxReferences: 3 });
+
+      expect(result.references).toHaveLength(3);
+      expect(result.totals.references).toBe(8);
+      expect(result.warnings.map(w => w.code)).toEqual(['references_truncated']);
+      expect(result.warnings[0].howToFetchAll).toContain('max_references to 8');
+    });
+
+    it('warns when maxRelatedPages cuts related pages', async () => {
+      const result = await buildContextForTopic(mkClient(0, backlinks), 'Topic', { maxRelatedPages: 2 });
+
+      expect(result.relatedPages).toHaveLength(2);
+      expect(result.totals.relatedPages).toBe(4);
+      expect(result.warnings.map(w => w.code)).toEqual(['related_pages_truncated']);
+      expect(result.warnings[0].howToFetchAll).toContain('max_related_pages to 4');
+    });
+
+    it('emits one warning per cap that bites', async () => {
+      const result = await buildContextForTopic(mkClient(7, backlinks), 'Topic', {
+        maxBlocks: 1,
+        maxReferences: 1,
+        maxRelatedPages: 1
+      });
+
+      expect(result.warnings.map(w => w.code)).toEqual([
+        'blocks_truncated',
+        'references_truncated',
+        'related_pages_truncated'
+      ]);
+    });
+
+    it('keeps the call count (totals come from data already fetched)', async () => {
+      const client = mkClient(2, backlinks);
+      await buildContextForTopic(client, 'Topic', { maxBlocks: 1 });
+
+      // Totals come from data already fetched: 2 Datalog queries + 1 backlinks call
+      expect(client.executeDatalogQuery).toHaveBeenCalledTimes(2);
+      expect(client.callAPI).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('error handling (backlinks)', () => {
     function clientWithBacklinks(backlinks: () => Promise<unknown>) {
       const mockClient = {
