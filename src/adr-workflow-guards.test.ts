@@ -7,11 +7,11 @@ import { readFileSync, readdirSync } from 'fs';
 // it, so this reads the workflows with a minimal block-YAML reader. It handles
 // what the workflows use: `key: value` maps nested by indentation, block lists
 // (`- item`), inline lists (`[a, b]`), quoted scalars, comments and block scalars
-// (`run: |`). Anything it can't read throws, so a workflow rewritten in a form it
+// (`run: |`, kept as their dedented text). Anything it can't read throws, so a workflow rewritten in a form it
 // doesn't know fails the test loudly instead of passing it by accident.
 
 interface YamlNode {
-  /** The scalar after `key:` or `- `, unquoted. Empty when the value is a nested block. */
+  /** The scalar after `key:` or `- `, unquoted, or a block scalar's dedented text. Empty when the value is a nested block. */
   value: string;
   /** Child keys in order. Duplicates throw. */
   map: Map<string, YamlNode>;
@@ -62,19 +62,30 @@ function parseWorkflowYaml(source: string): YamlNode {
       ? indent < block.opener || (indent === block.opener && !(isItem && block.listAtOpener))
       : indent < block.indent || (indent === block.opener && !isItem); // a list at its key's indent ends at the next key
   const lines = source.split('\n');
-  let blockScalarIndent: number | null = null;
+  // An open `|` or `>` scalar: the indent of its key and the node that receives its lines.
+  let blockScalar: { indent: number; node: YamlNode; lines: string[] } | null = null;
+  const closeBlockScalar = () => {
+    if (!blockScalar) return;
+    const body = blockScalar.lines;
+    while (body.length > 0 && body[body.length - 1].trim() === '') body.pop();
+    const pad = Math.min(...body.filter(l => l.trim() !== '').map(l => l.length - l.trimStart().length));
+    blockScalar.node.value = body.map(l => l.slice(Number.isFinite(pad) ? pad : 0)).join('\n');
+    blockScalar = null;
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
     const lineNo = i + 1;
-    if (raw.trim() === '') continue;
     const indent = raw.length - raw.trimStart().length;
-    if (raw.slice(0, indent).includes('\t')) throw new Error(`Tab indentation on line ${lineNo}`);
-
-    if (blockScalarIndent !== null) {
-      if (indent > blockScalarIndent) continue; // text of a `|` or `>` scalar
-      blockScalarIndent = null;
+    if (blockScalar) {
+      if (raw.trim() === '' || indent > blockScalar.indent) {
+        blockScalar.lines.push(raw); // text of a `|` or `>` scalar
+        continue;
+      }
+      closeBlockScalar();
     }
+    if (raw.trim() === '') continue;
+    if (raw.slice(0, indent).includes('\t')) throw new Error(`Tab indentation on line ${lineNo}`);
     if (raw.trimStart().startsWith('#')) continue;
 
     const isItem = /^-(?:\s|$)/.test(raw.trimStart());
@@ -117,11 +128,12 @@ function parseWorkflowYaml(source: string): YamlNode {
     if (kv.value === '') {
       stack.push({ node: child, indent: -1, opener: entryIndent, listAtOpener: true });
     } else if (/^[|>][+-]?\d*$/.test(kv.value)) {
-      blockScalarIndent = entryIndent;
+      blockScalar = { indent: entryIndent, node: child, lines: [] };
     } else {
       child.value = unquote(kv.value);
     }
   }
+  closeBlockScalar();
   return root;
 }
 
@@ -206,6 +218,7 @@ describe('workflow YAML reader', () => {
     const steps = at(doc, 'jobs', 'a', 'steps').items;
     expect(steps).toHaveLength(2);
     expect(at(steps[0], 'with', 'k').value).toBe('v');
+    expect(at(steps[1], 'run').value).toBe('echo "a: b"\n- not a list item');
     expect(listOf(at(doc, 'flat'))).toEqual(['one', 'two']);
     expect(at(doc, 'empty').map.size).toBe(0);
     expect(at(doc, 'after').value).toBe('x');
@@ -239,6 +252,21 @@ describe('ADR-0017: publish.yml is manual, main-only and dry-run by default', ()
     const dryRun = at(publish, 'on', 'workflow_dispatch', 'inputs', 'dry_run');
     expect(at(dryRun, 'type').value).toBe('boolean');
     expect(at(dryRun, 'default').value).toBe('true');
+  });
+
+  it('the step that publishes reads dry_run and runs npm publish --dry-run when it is set', () => {
+    const steps = [...at(publish, 'jobs').map.values()].flatMap(job => job.map.get('steps')?.items ?? []);
+    const publishing = steps.filter(step => /\bnpm\s+publish\b/.test(step.map.get('run')?.value ?? ''));
+    expect(publishing).toHaveLength(1);
+    const [step] = publishing;
+    expect(at(step, 'env', 'DRY_RUN').value).toMatch(/^\$\{\{\s*inputs\.dry_run\s*\}\}$/);
+    // The first npm publish in the script is the dry run, inside the DRY_RUN = true branch.
+    const script = at(step, 'run').value.split('\n').map(line => line.trim());
+    const check = script.findIndex(line => /^if \[ "\$DRY_RUN" = "true" \]; then$/.test(line));
+    const firstPublish = script.findIndex(line => /\bnpm\s+publish\b/.test(line));
+    expect(check, 'the publish script must branch on $DRY_RUN').toBeGreaterThanOrEqual(0);
+    expect(firstPublish).toBe(check + 1);
+    expect(script[firstPublish]).toMatch(/\s--dry-run(?:\s|$)/);
   });
 
   it('gates every job to refs/heads/main', () => {
