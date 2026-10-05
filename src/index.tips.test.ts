@@ -51,6 +51,17 @@ describe('next-step tips through MCP (#44)', () => {
     expect(meta.tips).toHaveLength(1);
   });
 
+  it('gives no "No match" tip for limit: 0, which returns [] although blocks matched', async () => {
+    mocks.searchBlocksWithMeta.mockResolvedValue({
+      results: [],
+      meta: { hasMore: true, warnings: [], totals: { matches: 3 } },
+    });
+    const result = await call('logseq_search_blocks', { query: 'hit', limit: 0 });
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta.totals.matches).toBe(3);
+    expect(meta).not.toHaveProperty('tips');
+  });
+
   it('builds the suggested call with JSON.stringify, so a name with quotes survives', async () => {
     const result = await call('logseq_search_blocks', { query: 'hit' });
     const [tip] = JSON.parse(result.content[1].text).meta.tips as string[];
