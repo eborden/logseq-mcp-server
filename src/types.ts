@@ -48,6 +48,8 @@ export interface PageEntity {
   'journal?'?: boolean; // Logseq uses this property name
   journalDay?: number;
   namespace?: IEntityID;
+  /** Set when the page is backed by a file; absent on stub pages that only exist as link targets */
+  file?: IEntityID;
   children?: (PageEntity | BlockEntity)[];
   updatedAt?: number;
 }

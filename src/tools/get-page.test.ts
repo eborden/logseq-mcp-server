@@ -33,6 +33,15 @@ describe('getPage', () => {
     });
   }
 
+  /** No page answers to the name; the Editor API's page list (or its failure) is what the suggestions come from. */
+  function onlyPageList(allPages: PageEntity[] | Error) {
+    (mockClient.callAPI as any).mockImplementation(async (method: string) => {
+      if (method !== 'logseq.Editor.getAllPages') return null;
+      if (allPages instanceof Error) throw allPages;
+      return allPages;
+    });
+  }
+
   beforeEach(() => {
     datalog = vi.fn();
     mockClient = { callAPI: vi.fn(), executeDatalogQuery: datalog } as any;
@@ -51,16 +60,84 @@ describe('getPage', () => {
     expect(result.resolvedFrom).toBeUndefined();
   });
 
-  it('costs one resolver query on top of the page fetch for an exact match', async () => {
-    setup([[pulled('test page', 'Test Page'), 'name']], { id: 1, uuid: 'u', name: 'test page', originalName: 'Test Page' });
+  describe('exact-name fast path', () => {
+    const realPage: PageEntity = { id: 1, uuid: 'u', name: 'test page', originalName: 'Test Page', file: { id: 99 } };
 
-    await getPage(mockClient, 'Test Page', false);
+    it('is one API call for a page with a file: no resolver query', async () => {
+      setup([], realPage);
 
-    expect(datalog).toHaveBeenCalledTimes(1);
-    expect(datalog.mock.calls[0][0]).toContain(':in $ ?n');
-    expect(datalog.mock.calls[0].slice(1)).toEqual(['test page']);
-    expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
+      const result = await getPage(mockClient, 'Test Page', false);
+
+      expect(datalog).not.toHaveBeenCalled();
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
+      expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', ['Test Page']);
+      expect(result).toEqual(realPage);
+      expect(result.resolvedFrom).toBeUndefined();
+    });
+
+    it('is two calls with children', async () => {
+      setup([], realPage, [{ id: 10, uuid: 'b', content: 'x' }]);
+
+      const result = await getPage(mockClient, 'Test Page', true);
+
+      expect(datalog).not.toHaveBeenCalled();
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(2);
+      expect(result.children).toHaveLength(1);
+    });
+
+    it('trims the name before the lookup', async () => {
+      setup([], realPage);
+
+      await getPage(mockClient, '  Test Page ', false);
+
+      expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', ['Test Page']);
+    });
+
+    it('resolves a file-less stub, and reuses the fetched page when nothing else claims the name', async () => {
+      const stubEntity: PageEntity = { id: 1, uuid: 'u', name: 'test page', originalName: 'Test Page' };
+      setup([[pulled('test page', 'Test Page', { file: undefined }), 'name']], stubEntity);
+
+      const result = await getPage(mockClient, 'Test Page', false);
+
+      expect(datalog).toHaveBeenCalledTimes(1);
+      expect(datalog.mock.calls[0][0]).toContain(':in $ ?n');
+      expect(datalog.mock.calls[0].slice(1)).toEqual(['test page']);
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1); // no second getPage for the same page
+      expect(result).toEqual(stubEntity);
+    });
+
+    it('lets a stub that is an alias target resolve to the declaring page', async () => {
+      const stubEntity: PageEntity = { id: 9, uuid: 'u9', name: 'atlas', originalName: 'Atlas' };
+      const declaring: PageEntity = { id: 7, uuid: 'u7', name: 'project atlas', originalName: 'Project Atlas', file: { id: 5 } };
+      datalog.mockResolvedValue([
+        [pulled('project atlas', 'Project Atlas', { id: 7 }), 'alias'],
+        [pulled('atlas', 'Atlas', { id: 9, file: undefined }), 'name']
+      ]);
+      (mockClient.callAPI as any).mockImplementation(async (_m: string, args: string[]) =>
+        args[0] === 'project atlas' ? { ...declaring } : { ...stubEntity }
+      );
+
+      const result = await getPage(mockClient, 'Atlas', false);
+
+      expect(result.name).toBe('project atlas');
+      expect(result.resolvedFrom).toMatchObject({ matchedBy: 'alias' });
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(2); // stub, then the declaring page
+    });
+
+    it('falls back to the resolver when the first lookup finds nothing (alias, date, leaf)', async () => {
+      const declaring: PageEntity = { id: 7, uuid: 'u7', name: 'project atlas', originalName: 'Project Atlas', file: { id: 5 } };
+      datalog.mockResolvedValue([[pulled('project atlas', 'Project Atlas', { id: 7 }), 'alias']]);
+      (mockClient.callAPI as any).mockImplementation(async (_m: string, args: string[]) =>
+        args[0] === 'project atlas' ? { ...declaring } : null
+      );
+
+      const result = await getPage(mockClient, 'Atlas', false);
+
+      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' });
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(2);
+    });
   });
+
 
   it('fetches the blocks tree separately and sets it as children when includeChildren is true', async () => {
     const mockPage: PageEntity = { id: 1, uuid: 'page-uuid-123', name: 'test page', originalName: 'Test Page' };
@@ -139,8 +216,9 @@ describe('getPage', () => {
         ['project atlas', 'Project Atlas', 'alias']
       ]);
       expect(error.candidates[0].reason).toContain('alias');
-      // Nothing was fetched: no page was picked
-      expect(mockClient.callAPI).not.toHaveBeenCalled();
+      // No page was picked: only the first lookup by the raw name ran, and no blocks were fetched
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
+      expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', ['Atlas']);
     });
   });
 
@@ -175,7 +253,7 @@ describe('getPage', () => {
         { id: 3, uuid: 'u3', name: 'groceries', originalName: 'Groceries' }
       ];
       datalog.mockResolvedValue([]);
-      (mockClient.callAPI as any).mockResolvedValue(allPages);
+      onlyPageList(allPages);
 
       const promise = getPage(mockClient, 'proj atlas', false);
 
@@ -185,7 +263,7 @@ describe('getPage', () => {
 
     it('leaves out "Closest" when there is nothing to suggest', async () => {
       datalog.mockResolvedValue([]);
-      (mockClient.callAPI as any).mockResolvedValue([]);
+      onlyPageList([]);
 
       const error = await getPage(mockClient, 'missing page', false).catch(e => e);
 
@@ -199,12 +277,13 @@ describe('getPage', () => {
       datalog.mockResolvedValue([]);
 
       await expect(getPage(mockClient, '2025-01-01', false)).rejects.toThrow(PageNotFoundError);
-      expect(mockClient.callAPI).not.toHaveBeenCalled();
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1); // the first lookup only
+      expect(mockClient.callAPI).not.toHaveBeenCalledWith('logseq.Editor.getAllPages', expect.anything());
     });
 
     it('still throws PageNotFoundError when the suggestion lookup fails unexpectedly', async () => {
       datalog.mockResolvedValue([]);
-      (mockClient.callAPI as any).mockRejectedValue(new Error('boom'));
+      onlyPageList(new Error('boom'));
 
       await expect(getPage(mockClient, 'missing page', false)).rejects.toThrow(PageNotFoundError);
     });
@@ -228,7 +307,7 @@ describe('getPage', () => {
       datalog.mockRejectedValue(error);
 
       await expect(getPage(mockClient, 'test page', false)).rejects.toBe(error);
-      expect(mockClient.callAPI).not.toHaveBeenCalled();
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1); // the first lookup, which found no page with a file
     });
 
     it.each(infrastructureErrors)('propagates %s from the Editor.getPage call', async (_name, makeError) => {
@@ -242,7 +321,7 @@ describe('getPage', () => {
     it.each(infrastructureErrors)('propagates %s from the suggestion lookup instead of reporting page not found', async (_name, makeError) => {
       const error = makeError();
       datalog.mockResolvedValue([]);
-      (mockClient.callAPI as any).mockRejectedValue(error);
+      onlyPageList(error);
 
       await expect(getPage(mockClient, 'missing page', false)).rejects.toBe(error);
     });
