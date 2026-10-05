@@ -88,6 +88,56 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * Generate one Datalog query that finds every page connected to a whole
+   * BFS frontier, in both directions, with a per-direction reference count.
+   *
+   * Each result row is
+   * `[sourceId, connectedId, name, originalName, isJournal, relType, count]`:
+   * - `relType` is `"outbound"` when `count` blocks on the source page
+   *   reference the connected page, `"inbound"` when `count` blocks on the
+   *   connected page reference the source page.
+   * - `originalName` is `""` when the page has no `:block/original-name`.
+   * - Self-loops (a page referencing itself) are excluded.
+   * - Only entities with `:block/name` (pages) are returned.
+   *
+   * When two frontier pages link to each other, the same links are reported
+   * once from each side, so callers must de-duplicate by page pair.
+   * The ids are bound straight to `?source` (see `groundIds`).
+   *
+   * @param frontierIds - Entity ids (`:db/id`) of the pages to expand
+   * @returns Query and inputs (no inputs)
+   * @throws Error if `frontierIds` is empty or any id is not an integer
+   */
+  static connectedPages(frontierIds: number[]): DatalogQuery {
+    if (frontierIds.length === 0) {
+      throw new Error('connectedPages needs at least one frontier id');
+    }
+    return {
+      query: `[:find ?source ?connected ?name ?original-name ?journal ?rel-type (count ?block)
+             :where
+             ${DatalogQueryBuilder.groundIds(frontierIds, '?source')}
+             [?source :block/name]
+             (or-join [?source ?connected ?block ?rel-type]
+               ;; Outbound: blocks on the source page that reference other pages
+               (and
+                 [?block :block/page ?source]
+                 [?block :block/refs ?connected]
+                 [(ground "outbound") ?rel-type])
+
+               ;; Inbound: blocks on other pages that reference the source
+               (and
+                 [?block :block/refs ?source]
+                 [?block :block/page ?connected]
+                 [(ground "inbound") ?rel-type]))
+             [?connected :block/name ?name]
+             [(not= ?source ?connected)]
+             [(get-else $ ?connected :block/original-name "") ?original-name]
+             [(get-else $ ?connected :block/journal? false) ?journal]]`,
+      inputs: []
+    };
+  }
+
+  /**
    * Generate Datalog query to get a page by name
    * @param pageName - The page name (any casing)
    * @returns Query and inputs (`[lowercased pageName]`)
