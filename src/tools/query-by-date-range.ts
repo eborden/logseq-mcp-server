@@ -14,7 +14,8 @@ import {
   rollUpTopConcepts
 } from '../utils/top-concepts.js';
 
-export { TopConcept, BUILT_IN_CONCEPTS, DEFAULT_TOP_CONCEPTS_LIMIT } from '../utils/top-concepts.js';
+export type { TopConcept } from '../utils/top-concepts.js';
+export { BUILT_IN_CONCEPTS, DEFAULT_TOP_CONCEPTS_LIMIT } from '../utils/top-concepts.js';
 
 /**
  * The `summary` of every result shape. `topConcepts` is the pages most referenced
