@@ -24,11 +24,13 @@ import { LogseqClient } from './client.js';
  * still inside the budget, so the budget was not raised.
  * Adding the resolve_refs parameter to four tools (#18) added 568 characters (about 140 tokens),
  * bringing it to 17,651, also inside the budget.
+ * Rewriting every description to fit the cap and add a "Can't find" line (#44) brought it down to about 13,900,
+ * and the budget came down to 16,000 (about 15% headroom) so the saving isn't spent by accident.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.
  */
-const TOOL_LIST_BUDGET_CHARS = 18_500;
+const TOOL_LIST_BUDGET_CHARS = 16_000;
 
 /** Rough token estimate. English text and JSON average about 4 characters per token. */
 const CHARS_PER_TOKEN = 4;
@@ -38,27 +40,13 @@ const approxTokens = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
 const DESCRIPTION_CAP = 400;
 
 /**
- * Tools whose descriptions were already over the cap when the cap was added.
- * Each value is that tool's length at the time, and it is a ceiling, not a target:
- * these descriptions may shrink but must not grow. They were not rewritten in the
- * PR that added the cap.
- *
- * When you trim one of these below DESCRIPTION_CAP, delete its entry (a test below
- * fails on stale entries). New tools get no allowance, so they must fit in the cap.
+ * Tools whose descriptions are allowed to exceed the cap. Empty since #44 trimmed
+ * every description to fit. Each value would be that tool's length when listed, as a
+ * ceiling, not a target: it may shrink but must not grow. When you trim a listed tool
+ * below DESCRIPTION_CAP, delete its entry (a test below fails on stale entries).
+ * New tools get no allowance, so they must fit in the cap.
  */
-const DESCRIPTION_ALLOWANCES: Record<string, number> = {
-  logseq_get_page: 547,
-  logseq_get_backlinks: 619,
-  logseq_get_block: 431,
-  logseq_search_blocks: 589,
-  logseq_query_by_property: 856,
-  logseq_get_concept_network: 952,
-  logseq_search_by_relationship: 654,
-  logseq_build_context: 638,
-  logseq_get_context_for_query: 600,
-  logseq_get_concept_evolution: 636,
-  logseq_list_pages: 624,
-};
+const DESCRIPTION_ALLOWANCES: Record<string, number> = {};
 
 describe('tools/list guardrails', () => {
   let tools: Tool[];
@@ -85,6 +73,12 @@ describe('tools/list guardrails', () => {
         'If the growth is worth it, raise TOOL_LIST_BUDGET_CHARS in src/tool-list.test.ts ' +
         'and justify the increase in the PR description.'
     ).toBeLessThanOrEqual(TOOL_LIST_BUDGET_CHARS);
+  });
+
+  it("says what each tool can't find (#44)", () => {
+    for (const tool of tools) {
+      expect(tool.description, `${tool.name} needs a "Can't find" line`).toMatch(/Can't find/);
+    }
   });
 
   describe('description length', () => {
