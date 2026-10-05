@@ -169,6 +169,21 @@ const TOOLS = [
           description: 'Maximum depth to traverse (default: 2, max: 3)',
           default: 2,
         },
+        max_nodes: {
+          type: 'number',
+          description: 'Maximum pages in the network, root included (default: 50, max: 500)',
+          default: 50,
+        },
+        max_fanout: {
+          type: 'number',
+          description: 'Maximum new pages any one page may add (default: 15, max: 100)',
+          default: 15,
+        },
+        expand_journals: {
+          type: 'boolean',
+          description: 'Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.',
+          default: false,
+        },
       },
       required: ['concept_name'],
     },
@@ -451,7 +466,13 @@ export function createServer(client: LogseqClient): Server {
         case 'logseq_get_concept_network': {
           const conceptName = args?.concept_name as string;
           const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
-          const result = await getConceptNetwork(client, conceptName, maxDepth);
+          const maxNodes = args?.max_nodes as number | undefined;
+          const maxFanout = args?.max_fanout as number | undefined;
+          const result = await getConceptNetwork(client, conceptName, maxDepth, {
+            maxNodes: maxNodes === undefined ? undefined : Math.min(maxNodes, 500),
+            maxFanout: maxFanout === undefined ? undefined : Math.min(maxFanout, 100),
+            expandJournals: args?.expand_journals === true,
+          });
           return {
             content: [
               {
