@@ -259,7 +259,7 @@ describe('queryJournals: choosing the range', () => {
 
       expect(result.entries).toEqual([]);
       expect(result.dateRange).toEqual({ start: 0, end: 0 });
-      expect(result.summary).toEqual({ totalDays: 0, totalBlocks: 0, searchTerm: undefined });
+      expect(result.summary).toEqual({ totalDays: 0, totalBlocks: 0, searchTerm: undefined, topConcepts: [] });
       expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
     });
 
@@ -280,7 +280,7 @@ describe('queryJournals: choosing the range', () => {
       expect(pagesInputs).toEqual([20250115]); // today, so future-dated journals are not "recent"
 
       const [blocksQuery, ...blocksInputs] = executeDatalogQuery.mock.calls[1];
-      expect(blocksQuery).toContain('(pull ?block [*])');
+      expect(blocksQuery).toContain('(pull ?block [*');
       // The 7 newest of days 20241201..20241240 (ids ascend with the day)
       expect(blocksInputs).toEqual([20241234, 20241240]);
     });
@@ -342,7 +342,7 @@ describe('queryJournals: include_content', () => {
     expect(result.entries[1].snippets[0].endsWith('...')).toBe(true);
     expect(result.entries[0]).not.toHaveProperty('blocks');
     expect(result.entries[0]).not.toHaveProperty('page');
-    expect(result.summary).toEqual({ totalDays: 2, totalBlocks: 3, searchTerm: undefined });
+    expect(result.summary).toEqual({ totalDays: 2, totalBlocks: 3, searchTerm: undefined, topConcepts: [] });
   });
 
   it('makes the same 2 calls', async () => {
