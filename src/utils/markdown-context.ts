@@ -142,9 +142,10 @@ export function renderQueryContext(context: QueryContext, options: Pick<ContextR
 
   if (context.searchResults !== undefined) {
     const results = context.searchResults as Obj[];
+    // Each hit carries its ((uuid)) and page, or it could not be followed up (#80)
     const outline = renderOutline(
       results.map(block => ({ ...block, children: [] })),
-      { compact }
+      { compact, showUuid: true, showPage: true }
     );
     parts.push(
       [heading(2, `Search results (${results.length})`), '', ...(outline.lines.length > 0 ? outline.lines : ['(no matches)'])].join('\n')

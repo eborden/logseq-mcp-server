@@ -192,7 +192,23 @@ describe('renderQueryContext', () => {
         searchResults: [{ id: 1, uuid: U(1), content: 'a hit\nmore lines', page: { id: 1 } } as any],
       })
     );
-    expect(text).toBe('# Context for: what about [[Project Atlas]]?\n\n## Search results (1)\n\n- a hit\n  more lines\n');
+    expect(text).toBe(`# Context for: what about [[Project Atlas]]?\n\n## Search results (1)\n\n- a hit ((${U(1)}))\n  more lines\n`);
+  });
+
+  it('gives every search hit its ((uuid)) and its page, so it can be followed up (#80)', () => {
+    const hits = [
+      { id: 1, uuid: U(1), content: 'first hit\nmore lines', context: { page: { id: 7, 'original-name': 'Alice' } } },
+      { id: 2, uuid: U(2), content: 'second hit', page: { id: 8, originalName: 'Project Atlas' } },
+      { id: 3, uuid: U(3), content: 'no page name', page: { id: 9 } },
+    ];
+    const text = renderQueryContext(query({ extractedTopics: [], contexts: [], searchResults: hits as any }));
+    expect(text).toContain(`- first hit ((${U(1)})) (in [[Alice]])\n  more lines`);
+    expect(text).toContain(`- second hit ((${U(2)})) (in [[Project Atlas]])`);
+    expect(text).toContain(`- no page name ((${U(3)}))\n`);
+    // compact hits carry the same handle
+    const compact = renderQueryContext(query({ extractedTopics: [], contexts: [], searchResults: hits as any }), { compact: true });
+    expect(compact).toContain(`- first hit ((${U(1)})) (in [[Alice]])\n`);
+    expect(compact).not.toContain('more lines');
   });
 
   it('says when a keyword search found nothing, and when there was nothing to run', () => {
