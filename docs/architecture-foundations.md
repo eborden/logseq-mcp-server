@@ -39,7 +39,7 @@ These are not judgment calls for code you add or change. Existing code that does
 1. **Never remove or weaken a safeguard you don't understand.** Caps, guards, odd early returns, "don't touch" comments, timeouts and validation exist for a reason you may not see. Keep them, give them a clear name, and ask about them in your notes.
 2. **When refactoring, preserve behavior exactly.** Pin current behavior with tests before you restructure. If you believe existing behavior is a bug, keep it and flag it. Changing it is a separate, explicit decision.
 3. **Parse all external input at the boundary before doing work.** External input means MCP tool arguments, LogSeq API responses, the config file and anything read from disk. Invalid input fails early with a clear error.
-4. **Tools stay read-only.** Every tool is declared read-only and idempotent. Adding a tool that writes to the graph is a contract change that needs the maintainer's sign-off.
+4. **Tools stay read-only.** Every tool is declared read-only (`readOnlyHint: true`) and never writes to the graph. Keep each tool's other hints accurate. Most are idempotent, but `logseq_get_current_context` reads the live editor state and is declared `idempotentHint: false`. Adding a tool that writes to the graph is a contract change that needs the maintainer's sign-off.
 5. **Bound everything.** Every network call has a timeout. Every loop over graph data has a cap. Every tool result has a size limit, because the reader is an LLM with a finite context window. No unbounded `Promise.all` over input-sized collections.
 6. **No secrets in source, and no personal graph data in committed files or logs.** The graph this server runs against is personal data. `CLAUDE.md` lists what may never be committed or posted: page names, block content, people's names, journal dates and raw output from the probe scripts or integration tests. Use made-up examples.
 7. **No new dependency without verifying it exists, is maintained and is needed.** Check the standard library and existing dependencies first. Never install a package name from memory without confirming it in the registry.
@@ -109,7 +109,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 ### 4.5 Keep the server read-only and re-runnable
 
-**Rule.** Every tool call can be repeated and the result depends only on the graph. There is no hidden progress, no write and no cursor stored on the server.
+**Rule.** Every tool call can be repeated safely. The result depends only on LogSeq's state: the graph, or, for `logseq_get_current_context`, what is open in the editor. The server keeps no hidden progress and no cursor, and it never writes.
 
 **Why.** MCP clients retry, and LLMs call the same tool twice. A read-only tool makes that harmless.
 
