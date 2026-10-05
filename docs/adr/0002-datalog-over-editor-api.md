@@ -10,7 +10,7 @@ LogSeq also exposes `logseq.DB.datascriptQuery`, which runs a Datalog query over
 
 History. The decision was made for traversal and context building first, then extended:
 
-- 2025-11-21: the design in `docs/plans/2025-11-21-datalog-optimization-design.md` and commits df7503a and ff0c96d moved `get_concept_network` and `build_context` to batched Datalog. The same work found that `logseq.DB.q` returns `null` for Datalog and switched the client to `logseq.DB.datascriptQuery` (`docs/datalog-debugging-summary.md`, from df7503a).
+- 2025-11-21: the design in `df7503a:docs/plans/2025-11-21-datalog-optimization-design.md` and commits df7503a and ff0c96d moved `get_concept_network` and `build_context` to batched Datalog. The same work found that `logseq.DB.q` returns `null` for Datalog and switched the client to `logseq.DB.datascriptQuery` (`df7503a:docs/datalog-debugging-summary.md`, from df7503a).
 - 2025-11-24: commit 4cd7321 moved `get_concept_network`'s connection lookup back to one `getPageLinkedReferences` call per page, after an `or-join` query returned nothing for pages with no matches in one branch. That is the per-frontier crawl issue #3 later describes.
 - 2025-11-25: commit 5dd421c replaced the remaining `logseq.DB.q` calls in `get_concept_evolution` and `get_context_for_query`.
 - 2026-10-05: the crawling tools were converted: `get_concept_network` to batched BFS (issue #3, commit c77c99b), `search_blocks` (issue #4, commit 4dd713d), `query_by_date_range` (issue #5, commit ea75b75) and `query_by_property`, the last crawling tool (issue #33, commit e8c85bb).
