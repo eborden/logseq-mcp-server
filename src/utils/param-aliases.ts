@@ -22,6 +22,7 @@ const PAGE_ALIASES = ['name', 'page'];
 
 export const PARAM_ALIASES: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   logseq_get_page: { page_name: PAGE_ALIASES },
+  logseq_get_page_outline: { page_name: PAGE_ALIASES },
   logseq_get_backlinks: { page_name: PAGE_ALIASES },
   logseq_build_context: { topic_name: [...PAGE_ALIASES, 'page_name'] },
   logseq_get_concept_network: { concept_name: [...PAGE_ALIASES, 'page_name'] },

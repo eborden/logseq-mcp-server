@@ -32,7 +32,12 @@ export const TOOL_DESCRIPTIONS = {
 
 **Use when:** you know the page name.
 **Can't find:** pages by keyword (logseq_search_blocks, logseq_list_pages) or what links here (logseq_get_backlinks).
-**Alternatives:** logseq_build_context adds related pages and references.`,
+**Alternatives:** logseq_build_context adds related pages and references; logseq_get_page_outline for a long page.`,
+
+  logseq_get_page_outline: `List a page's top-level blocks: uuid, the first line (80 characters) and the number of children. Cheaper than logseq_get_page for a long page.
+
+**Use when:** you need a page's shape before reading parts of it. Read the blocks you pick with logseq_get_block.
+**Can't find:** nested blocks below the first level, or block text past the first line (logseq_get_block, logseq_get_page).`,
 
   logseq_get_block: `Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.
 

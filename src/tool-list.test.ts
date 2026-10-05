@@ -33,6 +33,9 @@ import { LogseqClient } from './client.js';
  * bringing it to about 14,030. The longest description is 391 characters, inside the cap.
  * Making slim_results default to true and shortening its description on three tools (#42) removed 39 characters,
  * bringing it to about 13,990.
+ * Adding `format` to five tools, `compact` to two, and logseq_get_page_outline (#43) took it from about 14,040 to about
+ * 15,670 across 15 tools: 5 x 99 for `format`, 2 x 118 for `compact`, and 741 for the new tool, all inside the budget,
+ * so the budget was not raised. The longest description is 394 characters.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.

@@ -11,6 +11,7 @@ Start with:
 - journals and "last week": logseq_query_by_date_range
 - unsure of a page name: logseq_list_pages
 - "this page": logseq_get_current_context
+- a long page: logseq_get_page_outline, then logseq_get_block on the uuids you pick
 
 Reading results:
 - Page names are case-insensitive. Block uuid is the stable id; numeric id is internal.

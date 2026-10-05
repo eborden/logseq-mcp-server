@@ -12,6 +12,8 @@ import { AmbiguousPageError } from './errors.js';
  *
  * If a handler needs pretty output for a person to read, give it an opt-in
  * parameter and exempt only that call here; the default stays minified.
+ * `format: "markdown"` (#43) is that opt-in: its result is plain text, covered by
+ * index.format.test.ts and index.format.context.test.ts.
  */
 
 // Nested, with a newline inside a string (which JSON escapes) to tell it from layout whitespace
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => {
   const withMeta = () => ({ results: [nested()], meta: { hasMore: false, warnings: [], totals: { n: 1 } } });
   return {
     getPage: vi.fn(async () => nested()),
+    getPageOutline: vi.fn(async () => nested()),
     getBacklinksWithMeta: vi.fn(async () => withMeta()),
     getBlock: vi.fn(async () => nested()),
     searchBlocksWithMeta: vi.fn(async () => withMeta()),
@@ -39,6 +42,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
+vi.mock('./tools/get-page-outline.js', () => ({ getPageOutline: mocks.getPageOutline }));
 vi.mock('./tools/get-backlinks.js', () => ({ getBacklinksWithMeta: mocks.getBacklinksWithMeta }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
 vi.mock('./tools/search-blocks.js', () => ({ searchBlocksWithMeta: mocks.searchBlocksWithMeta }));
@@ -56,6 +60,7 @@ vi.mock('./tools/list-pages.js', () => ({ listPages: mocks.listPages }));
 /** Minimal valid arguments for every tool. */
 const CALLS: Record<string, Record<string, unknown>> = {
   logseq_get_page: { page_name: 'x', include_children: true },
+  logseq_get_page_outline: { page_name: 'x' },
   logseq_get_backlinks: { page_name: 'x' },
   logseq_get_block: { block_uuid: '00000000-0000-4000-8000-000000000000' },
   logseq_search_blocks: { query: 'x' },
