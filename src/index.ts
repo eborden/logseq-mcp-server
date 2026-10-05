@@ -32,6 +32,8 @@ import { buildTips } from './utils/tips.js';
 import type { ResultMeta } from './types.js';
 import { resolveParamAliases } from './utils/param-aliases.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
+import { AmbiguousPageError } from './errors.js';
+import { ambiguousPageResult } from './utils/resolve-page.js';
 
 /**
  * Hints shared by every tool. This server only reads from LogSeq, so each tool
@@ -698,6 +700,13 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
           throw new Error(`Unknown tool: ${name}`);
       }
     } catch (error) {
+      // A name that matches several pages is a result, not a failure: the
+      // candidates tell the caller which exact name to repeat the call with.
+      if (error instanceof AmbiguousPageError) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify(ambiguousPageResult(error)) }],
+        };
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       return {
         content: [
