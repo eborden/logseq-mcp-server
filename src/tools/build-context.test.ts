@@ -95,7 +95,7 @@ describe('buildContextForTopic', () => {
       expect(callAPI).toHaveBeenCalledWith('logseq.Editor.getPageLinkedReferences', ['project atlas']);
       expect(result.mainPage.id).toBe(7);
       expect(result.topic).toBe('Atlas');
-      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'alias' });
+      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' });
     });
 
     it('resolves an ISO date to the journal page', async () => {
@@ -109,7 +109,7 @@ describe('buildContextForTopic', () => {
       expect(executeDatalogQuery.mock.calls[1].slice(1)).toEqual(['jan 1st, 2025']);
       expect(result.mainPage.id).toBe(5);
       expect(result.temporalContext).toEqual({ isJournal: false, date: undefined });
-      expect(result.resolvedFrom).toEqual({ name: '2025-01-01', matchedBy: 'journal-date' });
+      expect(result.resolvedFrom).toEqual({ name: '2025-01-01', matchedBy: 'journal-date', resolvedTo: 'Jan 1st, 2025' });
     });
 
     it('throws AmbiguousPageError with the candidates when a namespace leaf matches several pages', async () => {
@@ -135,7 +135,7 @@ describe('buildContextForTopic', () => {
       const result = await buildContextForTopic(client, 'Atlas');
 
       expect(result.mainPage.id).toBe(2);
-      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'namespace-leaf' });
+      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'namespace-leaf', resolvedTo: 'Work/Atlas' });
     });
 
     it('throws guidance with the closest names when nothing matches', async () => {

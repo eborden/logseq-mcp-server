@@ -181,6 +181,57 @@ describe('searchByRelationship', () => {
       expect(result.results.map(b => b.id).sort()).toEqual([10, 11, 12]);
     });
 
+    describe('resolvedFrom', () => {
+      /** Make "Atlas" an alias of "project atlas" and "Ally" an alias of "alice"; other names go through the fake. */
+      function aliasFor(client: LogseqClient) {
+        const original = (client.callAPI as any).getMockImplementation();
+        vi.spyOn(client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) => {
+          const query = String(args[0]);
+          if (query.includes(':in $ ?n') && args[1] === '"atlas"') {
+            return [[{ id: 1, name: 'project atlas', 'original-name': 'Project Atlas' }, 'alias']] as any;
+          }
+          if (query.includes(':in $ ?n') && args[1] === '"ally"') {
+            return [[{ id: 2, name: 'alice', 'original-name': 'Alice' }, 'alias']] as any;
+          }
+          return original(method, args);
+        });
+      }
+
+      it('is absent when both topics are exact names', async () => {
+        const result = await searchByRelationship(ctx.client, 'Project Atlas', 'Alice', 'references');
+
+        expect(result).not.toHaveProperty('resolvedFrom');
+      });
+
+      it('says which page topicA stood for when it was an alias', async () => {
+        aliasFor(ctx.client);
+
+        const result = await searchByRelationship(ctx.client, 'Atlas', 'Alice', 'references');
+
+        expect(result.resolvedFrom).toEqual({
+          topicA: { name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' }
+        });
+      });
+
+      it('says which page topicB stood for when it was an alias', async () => {
+        aliasFor(ctx.client);
+
+        const result = await searchByRelationship(ctx.client, 'Project Atlas', 'Ally', 'in-pages-linking-to');
+
+        expect(result.resolvedFrom).toEqual({
+          topicB: { name: 'Ally', matchedBy: 'alias', resolvedTo: 'Alice' }
+        });
+      });
+
+      it('reports both topics, and also for connected-within', async () => {
+        aliasFor(ctx.client);
+
+        const result = await searchByRelationship(ctx.client, 'Atlas', 'Ally', 'connected-within', 2);
+
+        expect(Object.keys(result.resolvedFrom ?? {}).sort()).toEqual(['topicA', 'topicB']);
+      });
+    });
+
     it('throws AmbiguousPageError when a topic matches several pages', async () => {
       const original = (ctx.client.callAPI as any).getMockImplementation();
       vi.spyOn(ctx.client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) =>

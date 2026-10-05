@@ -1,8 +1,8 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity, ResultMeta, ResultWarning } from '../types.js';
+import { BlockEntity, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { requirePage } from '../utils/resolve-page.js';
+import { requirePage, resolvedFromInfo } from '../utils/resolve-page.js';
 
 export type RelationshipType =
   | 'references' // Blocks about topicA that reference topicB
@@ -18,6 +18,12 @@ export interface SearchByRelationshipResult extends ResultMeta {
     maxDistance?: number;
   };
   relationshipType: RelationshipType;
+  /**
+   * Present when a topic was an alias, date or namespace leaf rather than an
+   * exact name: says which page that topic stood for. Keyed by the topic that
+   * was redirected; absent when both topics were exact names.
+   */
+  resolvedFrom?: { topicA?: PageResolvedFrom; topicB?: PageResolvedFrom };
   results: BlockEntity[];
 }
 
@@ -158,6 +164,9 @@ export async function searchByRelationship(
     }
   }
 
+  const fromA = resolvedFromInfo(topicA, resolvedA);
+  const fromB = resolvedFromInfo(topicB, resolvedB);
+
   return {
     query: {
       topicA,
@@ -166,6 +175,7 @@ export async function searchByRelationship(
       maxDistance: relationshipType === 'connected-within' ? maxDistance : undefined
     },
     relationshipType,
+    ...(fromA || fromB ? { resolvedFrom: { ...(fromA && { topicA: fromA }), ...(fromB && { topicB: fromB }) } } : {}),
     results,
     ...buildResultMeta(warnings)
   };

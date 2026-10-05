@@ -54,6 +54,45 @@ describe('page resolution through MCP', () => {
     expect(body.warnings[0].code).toBe('ambiguous_page');
   });
 
+  describe('resolvedFrom reaches the caller for a name that was not an exact match', () => {
+    const declaring = { id: 1, name: 'project atlas', 'original-name': 'Project Atlas', file: { id: 9 } };
+    const viaAlias = (query: string) => (query.includes(':in $ ?n') ? [[declaring, 'alias']] : []);
+    const resolvedFrom = { name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' };
+
+    it('get_backlinks puts it in the meta block, after the unchanged array', async () => {
+      const result = await call('logseq_get_backlinks', { page_name: 'Atlas' }, viaAlias);
+
+      expect(JSON.parse(result.content[0].text)).toEqual([]);
+      const meta = result.content.map((c: any) => JSON.parse(c.text)).find((b: any) => b.meta)?.meta;
+      expect(meta.resolvedFrom).toEqual(resolvedFrom);
+    });
+
+    it('get_backlinks adds no meta block for an exact name', async () => {
+      const result = await call('logseq_get_backlinks', { page_name: 'Atlas' }, query =>
+        query.includes(':in $ ?n') ? [[{ ...declaring, name: 'atlas' }, 'name']] : []
+      );
+
+      const metas = result.content.map((c: any) => JSON.parse(c.text)).filter((b: any) => b?.meta?.resolvedFrom);
+      expect(metas).toEqual([]);
+    });
+
+    it('get_concept_evolution puts it in the result', async () => {
+      const result = await call('logseq_get_concept_evolution', { concept_name: 'Atlas' }, viaAlias);
+
+      expect(JSON.parse(result.content[0].text).resolvedFrom).toEqual(resolvedFrom);
+    });
+
+    it('search_by_relationship puts it in the result, keyed by topic', async () => {
+      const result = await call(
+        'logseq_search_by_relationship',
+        { topic_a: 'Atlas', topic_b: 'Atlas', relationship_type: 'references' },
+        viaAlias
+      );
+
+      expect(JSON.parse(result.content[0].text).resolvedFrom).toEqual({ topicA: resolvedFrom, topicB: resolvedFrom });
+    });
+  });
+
   it('returns an error with guidance for a name that matches nothing', async () => {
     const result = await call('logseq_get_page', { page_name: 'Nope' }, () => []);
 

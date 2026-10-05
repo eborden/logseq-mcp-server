@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getBacklinks } from './get-backlinks.js';
+import { getBacklinks, getBacklinksWithMeta } from './get-backlinks.js';
 import { LogseqClient } from '../client.js';
 import { AmbiguousPageError, LogSeqTimeoutError, PageNotFoundError } from '../errors.js';
 
@@ -80,6 +80,45 @@ describe('getBacklinks', () => {
     await getBacklinks(mockClient, 'Atlas');
 
     expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPageLinkedReferences', ['project atlas']);
+  });
+
+  describe('getBacklinksWithMeta', () => {
+    it('has no meta for an exact name, so default output is unchanged', async () => {
+      (mockClient.callAPI as any).mockResolvedValue([]);
+
+      const { results, meta } = await getBacklinksWithMeta(mockClient, 'test page');
+
+      expect(results).toEqual([]);
+      expect(meta).toBeNull();
+    });
+
+    it('says which page the backlinks belong to when the name was an alias', async () => {
+      (mockClient.executeDatalogQuery as any).mockResolvedValue([
+        [{ id: 7, name: 'project atlas', 'original-name': 'Project Atlas' }, 'alias'],
+        [{ id: 8, name: 'atlas', 'original-name': 'Atlas' }, 'name']
+      ]);
+      (mockClient.callAPI as any).mockResolvedValue([]);
+
+      const { meta } = await getBacklinksWithMeta(mockClient, 'Atlas');
+
+      expect(meta).toEqual({
+        hasMore: false,
+        warnings: [],
+        resolvedFrom: { name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' }
+      });
+    });
+
+    it('says so when the name was a namespace leaf', async () => {
+      (mockClient.executeDatalogQuery as any)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([[{ id: 5, name: 'work/atlas', 'original-name': 'Work/Atlas' }]]);
+      (mockClient.callAPI as any).mockResolvedValue([]);
+
+      const { meta } = await getBacklinksWithMeta(mockClient, 'Atlas');
+
+      expect(meta?.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'namespace-leaf', resolvedTo: 'Work/Atlas' });
+      expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPageLinkedReferences', ['work/atlas']);
+    });
   });
 
   it('should throw PageNotFoundError guidance when no page matches', async () => {

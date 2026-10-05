@@ -359,7 +359,9 @@ describe('result helpers', () => {
   });
 
   it('resolvedFrom reports how another route matched', () => {
-    expect(resolvedFrom('x', { matchedBy: 'alias' } as any)).toEqual({ resolvedFrom: { name: 'x', matchedBy: 'alias' } });
+    expect(resolvedFrom('x', { matchedBy: 'alias', originalName: 'Y' } as any)).toEqual({
+      resolvedFrom: { name: 'x', matchedBy: 'alias', resolvedTo: 'Y' }
+    });
   });
 
   it('ambiguousPageResult is a structured result with an ambiguous_page warning and no hasMore', () => {

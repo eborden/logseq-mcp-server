@@ -117,7 +117,7 @@ describe('getPage', () => {
       expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', ['project atlas']);
       expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPageBlocksTree', ['project atlas']);
       expect(result.name).toBe('project atlas');
-      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'alias' });
+      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'alias', resolvedTo: 'Project Atlas' });
       expect(datalog).toHaveBeenCalledTimes(1);
     });
 
@@ -155,7 +155,7 @@ describe('getPage', () => {
       expect(datalog.mock.calls[0].slice(1)).toEqual(['2025-01-01', 20250101]);
       expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', ['jan 1st, 2025']);
       expect(result.journalDay).toBe(20250101);
-      expect(result.resolvedFrom).toEqual({ name: '2025-01-01', matchedBy: 'journal-date' });
+      expect(result.resolvedFrom).toEqual({ name: '2025-01-01', matchedBy: 'journal-date', resolvedTo: 'Jan 1st, 2025' });
     });
 
     it('treats an impossible date as an ordinary page name', async () => {
