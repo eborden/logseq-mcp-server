@@ -28,6 +28,7 @@ import { listPages } from './tools/list-pages.js';
 import { getCurrentContext } from './tools/get-current-context.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 import { metaContent } from './utils/result-meta.js';
+import { resolveParamAliases } from './utils/param-aliases.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
 
 /**
@@ -441,9 +442,11 @@ export function createServer(client: LogseqClient): Server {
   // Handler for calling tools
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
-    const { name, arguments: args } = request.params;
+    const { name, arguments: rawArgs } = request.params;
 
     try {
+      // Fold unadvertised aliases (`name`, `page`, ...) into their canonical parameter (#44)
+      const args = resolveParamAliases(name, rawArgs);
       switch (name) {
         case 'logseq_get_page': {
           const pageName = args?.page_name as string;
