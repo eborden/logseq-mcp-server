@@ -6,7 +6,9 @@
  * receives: every content block, minified JSON, tips and meta included.
  *
  * Prints labels and byte counts only. It never prints block content or page names,
- * so the output is safe to read, but quote it as approximate percentages and not verbatim.
+ * and failures print only the error class (and the tool name for an isError result),
+ * never the message text, so the output is safe to read. Quote it as approximate
+ * percentages and not verbatim.
  *
  * Usage: npx tsx scripts/measure-output-size.ts [pageName]
  * Requires LogSeq running with the HTTP API enabled. Read-only.
@@ -24,7 +26,8 @@ type Args = Record<string, unknown>;
 /** Bytes of everything a client would receive for one call. */
 async function sizeOf(mcp: Client, name: string, args: Args): Promise<number> {
   const result = (await mcp.callTool({ name, arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
-  if (result.isError) throw new Error(`${name} failed: ${result.content[0]?.text.slice(0, 80)}`);
+  // Never include the tool's error text: it can quote a page name from the graph
+  if (result.isError) throw new Error(`${name} returned isError`);
   return result.content.reduce((sum, block) => sum + Buffer.byteLength(block.text, 'utf8'), 0);
 }
 
@@ -90,7 +93,11 @@ async function main() {
   await mcp.close();
 }
 
-main().catch(e => {
-  console.error(e);
+main().catch((e: unknown) => {
+  // Error class and our own label only. Never print e.message, e.stack or the
+  // error object: they can carry page names or block content from the graph.
+  const kind = e instanceof Error ? e.name : typeof e;
+  const ours = e instanceof Error && /^logseq_\w+ returned isError$/.test(e.message) ? ` (${e.message})` : '';
+  console.error(`measure-output-size failed: ${kind}${ours}`);
   process.exit(1);
 });
