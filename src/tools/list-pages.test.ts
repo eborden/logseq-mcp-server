@@ -53,38 +53,72 @@ describe('listPages', () => {
     expect(result.pages).toEqual(['Experiment']);
   });
 
-  // CURRENT behavior, pinned by #64. NOT endorsed.
-  // When logseq.Editor.getAllPages returns null, listPages reports an empty
-  // list: no error, no warning. If null can mean "no graph open" or "mid
-  // re-index" rather than "empty graph", this reports a failure as "none"
-  // (foundations 2.10, 4.9). Whether to change that is the maintainer's call
-  // and would be a separate PR; update this test with that change.
-  describe('current behavior when getAllPages returns null (#64, not endorsed)', () => {
-    it('returns an empty list with no error or warning', async () => {
+  // #64: null is not an empty graph. The list stays empty (backward compatible)
+  // and a ResultMeta warning says LogSeq returned no page list.
+  describe('when getAllPages returns null (#64)', () => {
+    const warning = {
+      code: 'pages_unavailable',
+      message: expect.stringContaining('LogSeq returned no page list'),
+    };
+
+    it('returns an empty list plus a pages_unavailable warning', async () => {
       (mockClient.callAPI as any).mockResolvedValue(null);
 
       const result = await listPages(mockClient);
 
-      expect(result).toEqual({ pages: [], total: 0 });
+      expect(result).toEqual({ pages: [], total: 0, hasMore: false, warnings: [warning] });
       expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
       expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getAllPages');
     });
 
-    it('returns the same empty list when a name filter is given', async () => {
+    it('tells the caller the empty list may be wrong and how to check', async () => {
+      (mockClient.callAPI as any).mockResolvedValue(null);
+
+      const [w] = (await listPages(mockClient)).warnings!;
+
+      expect(w.message).toContain('may not mean the graph is empty');
+      expect(w.message).toContain('logseq_get_graph_info');
+      expect(w.message).toMatch(/retry/i);
+    });
+
+    it('keeps hasMore false: nothing can be fetched by raising a parameter', async () => {
+      (mockClient.callAPI as any).mockResolvedValue(null);
+
+      const result = await listPages(mockClient);
+
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings![0].howToFetchAll).toBeUndefined();
+    });
+
+    it('returns the same empty list and warning when a name filter is given', async () => {
       (mockClient.callAPI as any).mockResolvedValue(null);
 
       const result = await listPages(mockClient, { nameContains: 'anything' });
 
+      expect(result).toEqual({ pages: [], total: 0, hasMore: false, warnings: [warning] });
+    });
+  });
+
+  describe('when getAllPages returns an empty array (a genuinely empty graph)', () => {
+    it('returns an empty list with no warning and no meta fields', async () => {
+      (mockClient.callAPI as any).mockResolvedValue([]);
+
+      const result = await listPages(mockClient);
+
       expect(result).toEqual({ pages: [], total: 0 });
+      expect(result).not.toHaveProperty('warnings');
+      expect(result).not.toHaveProperty('hasMore');
     });
 
-    it('is indistinguishable from an empty array response', async () => {
-      (mockClient.callAPI as any).mockResolvedValueOnce(null).mockResolvedValueOnce([]);
+    it('adds no warning when every page is a journal or filtered out', async () => {
+      (mockClient.callAPI as any).mockResolvedValue([
+        { id: 1, uuid: 'u1', name: 'jan 1st, 2025', originalName: 'Jan 1st, 2025', content: '', 'journal?': true },
+        { id: 2, uuid: 'u2', name: 'alpha', originalName: 'Alpha', content: '' },
+      ]);
 
-      const fromNull = await listPages(mockClient);
-      const fromEmpty = await listPages(mockClient);
+      const result = await listPages(mockClient, { nameContains: 'zzz' });
 
-      expect(fromNull).toEqual(fromEmpty);
+      expect(result).toEqual({ pages: [], total: 0 });
     });
   });
 

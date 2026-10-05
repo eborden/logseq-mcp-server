@@ -1,7 +1,13 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity } from '../types.js';
+import { PageEntity, ResultMeta } from '../types.js';
+import { buildResultMeta } from '../utils/result-meta.js';
 
-export interface ListPagesResult {
+/**
+ * `hasMore` and `warnings` are present only when LogSeq returned no page list
+ * (`null`), see {@link listPages}. A normal result, including a genuinely empty
+ * graph, carries neither.
+ */
+export interface ListPagesResult extends Partial<Pick<ResultMeta, 'hasMore' | 'warnings'>> {
   pages: string[];
   total: number;
 }
@@ -16,8 +22,25 @@ export async function listPages(
     'logseq.Editor.getAllPages'
   );
 
+  // `null` is not `[]` (#64). An empty array is a graph with no pages. `null`
+  // can mean no graph is open or LogSeq is re-indexing, so the empty list is
+  // reported with a warning instead of passing for "none". `hasMore` stays
+  // false: no parameter fetches a page list that does not exist, so the
+  // warning has no `howToFetchAll` (the retry advice is in the message).
   if (!allPages) {
-    return { pages: [], total: 0 };
+    return {
+      pages: [],
+      total: 0,
+      ...buildResultMeta([
+        {
+          code: 'pages_unavailable',
+          message:
+            'LogSeq returned no page list (no graph open, or the graph is re-indexing), ' +
+            'so the empty list may not mean the graph is empty. ' +
+            'Retry in a moment, or call logseq_get_graph_info to check which graph is open.',
+        },
+      ]),
+    };
   }
 
   // Filter out journals

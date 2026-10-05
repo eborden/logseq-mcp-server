@@ -64,3 +64,26 @@ describe('logseq_search_blocks meta block', () => {
     expect(JSON.parse(result.content[0].text)).toBeNull();
   });
 });
+
+describe('logseq_list_pages pages_unavailable warning (#64)', () => {
+  it('delivers the warning in the result object when getAllPages returns null', async () => {
+    const callAPI = vi.fn().mockResolvedValueOnce(null);
+
+    const result = await callTool(callAPI, 'logseq_list_pages', {});
+
+    expect(result.isError).toBeUndefined();
+    const body = JSON.parse(result.content[0].text);
+    expect(body).toMatchObject({ pages: [], total: 0, hasMore: false });
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0].code).toBe('pages_unavailable');
+    expect(body.warnings[0].message).toContain('logseq_get_graph_info');
+  });
+
+  it('sends no warning when getAllPages returns an empty array', async () => {
+    const callAPI = vi.fn().mockResolvedValueOnce([]);
+
+    const result = await callTool(callAPI, 'logseq_list_pages', {});
+
+    expect(JSON.parse(result.content[0].text)).toEqual({ pages: [], total: 0 });
+  });
+});
