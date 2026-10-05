@@ -174,4 +174,75 @@ export class DatalogQueryBuilder {
       inputs: [pageName.toLowerCase()]
     };
   }
+
+  /**
+   * Generate Datalog query for blocks on one page that reference another
+   * page. Matching is on `:block/refs`, so `[[Topic]]`, `#topic`,
+   * `#[[multi word]]` and uuid-style refs all count, in any casing, and
+   * plain text that merely contains the name does not.
+   * @param pageName - The page whose blocks are searched (any casing)
+   * @param refName - The page the blocks must reference (any casing)
+   * @returns Query and inputs (`[lowercased pageName, lowercased refName]`)
+   */
+  static blocksOnPageReferencing(pageName: string, refName: string): DatalogQuery {
+    return {
+      query: `[:find (pull ?block [*])
+             :in $ ?page-name ?ref-name
+             :where
+             [?page :block/name ?page-name]
+             [?ref :block/name ?ref-name]
+             [?block :block/page ?page]
+             [?block :block/refs ?ref]]`,
+      inputs: [pageName.toLowerCase(), refName.toLowerCase()]
+    };
+  }
+
+  /**
+   * Generate Datalog query for blocks that reference `topicA`, restricted to
+   * pages that also contain a block referencing `topicB`. Both matches are on
+   * `:block/refs`, so casing and tag/link syntax do not matter.
+   * @param topicA - The page the returned blocks must reference (any casing)
+   * @param topicB - The page some other block on the same page must reference (any casing)
+   * @returns Query and inputs (`[lowercased topicA, lowercased topicB]`)
+   */
+  static blocksReferencingInPagesLinking(topicA: string, topicB: string): DatalogQuery {
+    return {
+      query: `[:find (pull ?block [*])
+             :in $ ?a-name ?b-name
+             :where
+             [?a :block/name ?a-name]
+             [?b :block/name ?b-name]
+             [?linker :block/refs ?b]
+             [?linker :block/page ?page]
+             [?block :block/page ?page]
+             [?block :block/refs ?a]]`,
+      inputs: [topicA.toLowerCase(), topicB.toLowerCase()]
+    };
+  }
+
+  /**
+   * Generate Datalog query for the pages one reference hop away from a set
+   * of pages, in both directions (pages they reference and pages that
+   * reference them). One query covers a whole BFS frontier.
+   * @param pageIds - Page entity ids (`:db/id`), each must be an integer
+   * @returns Query and no inputs (ids are embedded via `groundIds`)
+   * @throws Error if any id is not an integer
+   */
+  static neighborPages(pageIds: number[]): DatalogQuery {
+    return {
+      query: `[:find ?neighbor
+             :where
+             ${DatalogQueryBuilder.groundIds(pageIds, '?p')}
+             (or-join [?p ?neighbor]
+               (and
+                 [?block :block/page ?p]
+                 [?block :block/refs ?neighbor]
+                 [?neighbor :block/name])
+               (and
+                 [?block :block/refs ?p]
+                 [?block :block/page ?neighbor]
+                 [?neighbor :block/name]))]`,
+      inputs: []
+    };
+  }
 }
