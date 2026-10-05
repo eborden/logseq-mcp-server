@@ -36,16 +36,20 @@ const BLOCKS = [
   block(13, 52, 'Unrelated lunch plans')
 ];
 
-function fakeClient(opts: { aliasError?: Error; pages?: unknown[] } = {}) {
+// A short alias, for whole-word matching: "JO" is a name of the group, "Joined" is not
+const jo = { id: 3, name: 'jo', 'original-name': 'JO' };
+const SHORT_ALIAS_BLOCKS = [block(14, 52, 'Joined the call late'), block(15, 52, 'Notes from JO, then lunch')];
+
+function fakeClient(opts: { aliasError?: Error; pages?: unknown[]; shortAlias?: boolean } = {}) {
+  const group = opts.shortAlias ? [jordan, jordanRivera, jo] : [jordan, jordanRivera];
+  const blocks = opts.shortAlias ? [...BLOCKS, ...SHORT_ALIAS_BLOCKS] : BLOCKS;
   const executeDatalogQuery = vi.fn(async (query: string, ...inputs: unknown[]) => {
     if (query.includes('?alias-mid')) {
       if (opts.aliasError) throw opts.aliasError;
-      const name = inputs[0] as string;
-      if (name !== 'jordan' && name !== 'jordan rivera') return [];
-      const start = name === 'jordan' ? jordan : jordanRivera;
-      return [[start, jordan], [start, jordanRivera]];
+      const start = group.find(p => p.name === inputs[0]);
+      return start ? group.map(p => [start, p]) : [];
     }
-    if (query.includes(':block/page ?page')) return BLOCKS.map(b => [b]);
+    if (query.includes(':block/page ?page')) return blocks.map(b => [b]);
     return (opts.pages ?? PAGES).map(p => [p]);
   });
   return { client: { executeDatalogQuery } as unknown as LogseqClient, executeDatalogQuery };
@@ -62,6 +66,18 @@ describe('query_by_date_range search_term across an alias group (#69)', () => {
     const result = await queryJournals(client, { ...range, searchTerm: 'Jordan Rivera' });
 
     expect(ids(result)).toEqual([10, 11, 12]);
+  });
+
+  it('matches the other names as whole words only, so a short alias does not match inside a word', async () => {
+    const result = await queryJournals(fakeClient({ shortAlias: true }).client, { ...range, searchTerm: 'Jordan' });
+
+    expect(ids(result)).toEqual([10, 11, 12, 15]); // not 14, "Joined"
+  });
+
+  it('still matches the term itself inside a word, as without aliases', async () => {
+    const result = await queryJournals(fakeClient({ shortAlias: true }).client, { ...range, searchTerm: 'JO' });
+
+    expect(ids(result)).toEqual([10, 11, 12, 14, 15]);
   });
 
   it('gives the same blocks for the alias and the canonical name', async () => {

@@ -12,6 +12,7 @@ import {
   resolvedAliases
 } from '../utils/alias-set.js';
 import { InvalidParameterError } from '../errors.js';
+import { escapeRegex } from '../utils/escape-regex.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { buildBlockTrees, camelizeKeys } from '../utils/block-tree.js';
@@ -121,16 +122,23 @@ export interface DateRangeOptions extends DateRangeSelection {
  * Whether a top-level block matches `searchTerm` (case-insensitive, literal).
  *
  * When the term is the name of a page that has aliases (#69), a block also
- * matches if its text contains any of the group's names, or if it references any
- * page of the group (`#tag` and `[[link]]` forms included). A term that is not
- * a page name, or names a page without aliases, matches exactly as before.
+ * matches if it references any page of the group (`#tag` and `[[link]]` forms
+ * included), or if its text holds one of the group's other names as a whole
+ * word. Only the term itself matches inside a word: a short alias such as `AI`
+ * must not match "said". A term that is not a page name, or names a page
+ * without aliases, matches exactly as before.
  */
 function blockMatcher(searchTerm: string, aliasSet: AliasSet | null): (block: BlockEntity) => boolean {
-  const terms = [searchTerm.toLowerCase(), ...(aliasSet ? aliasNames(aliasSet) : [])];
+  const term = searchTerm.toLowerCase();
+  const otherNames = (aliasSet ? aliasNames(aliasSet) : []).filter(name => name !== term.trim());
+  const wholeWord =
+    otherNames.length > 0
+      ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${otherNames.map(escapeRegex).join('|')})(?![\\p{L}\\p{N}])`, 'iu')
+      : null;
   const pageIds = new Set(aliasSet ? aliasIds(aliasSet) : []);
   return block => {
     const content = (block.content ?? '').toLowerCase();
-    if (terms.some(term => content.includes(term))) return true;
+    if (content.includes(term) || wholeWord?.test(content)) return true;
     return pageIds.size > 0 && (block.refs ?? []).some(ref => pageIds.has(ref?.id));
   };
 }
@@ -322,7 +330,7 @@ export async function queryByDateRange(
  * The second call is skipped when no page matched.
  *
  * With a `searchTerm` that names a page with aliases (#69) the search also matches the
- * other names (text) and references to any of them, adds one query (the alias group),
+ * other names (as whole words) and references to any of them, adds one query (the alias group),
  * and says so in `resolvedAliases`. Any other term is matched literally as before and
  * costs the same one query, which finds no page.
  *
