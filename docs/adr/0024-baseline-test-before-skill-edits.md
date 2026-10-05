@@ -13,7 +13,7 @@ The practice of testing a skill before and after an edit came from these changes
 
 Inferred: the reason is the one [architecture-foundations.md §4.7](../architecture-foundations.md#47-changing-existing-code-safely) gives for code. Without a recorded baseline you can't tell a regression from an intended change.
 
-This ADR was backfilled in #77, from a practice in force since 2025-12-05, so it was added as `accepted` rather than going through `proposed`, like the backfilled ADRs 0001 to 0023.
+This ADR was backfilled in #77. The practice was adopted in the 2025-12 weekly-summary redesign (commit 1161061) and used in some later skill work (5a97c2c, a569202, 7c9618b), but not consistently: later skill commits, including at least one that changed behaviour, record no baseline (see Consequences). Like the backfilled ADRs 0001 to 0023, it records a decision already made, so it was added as `accepted` rather than going through `proposed`.
 
 ## Decision
 
@@ -26,7 +26,7 @@ We don't edit a skill without a baseline test first. Before changing a skill fil
 - Baselines often run against the personal graph, so their output stays local. Only approximate counts reach commits and PRs, and committed examples and fixtures are synthetic ([BR-0001 (no-graph-data-in-repo)](../business-rules/0001-no-graph-data-in-repo.md)).
 - Inferred: agent runs vary from run to run, so a baseline is a handful of runs, not a proof. Commit a569202 used 13.
 - No test runs a skill, so nothing mechanical stops an untested edit. The concept-linking fixture is run by hand.
-- Inferred: several 2026-10-05 commits only kept the skills in step with the server (tool names, parameter defaults, tool counts) and record no baseline. Whether edits like those are exempt isn't recorded.
+- The practice hasn't been followed on every edit. Several 2026-10-05 commits kept the skills in step with the server (tool names, parameter defaults, tool counts), and at least one changed behaviour: f9b7699 changed the trigger phrases and sibling routing in the skill descriptions. 174364a, which changed the summary workflow's first step, is borderline, since it follows a server feature (#17). None of them records a baseline. Whether in-step edits are exempt isn't recorded and is left open for the maintainer.
 
 ## Status
 
