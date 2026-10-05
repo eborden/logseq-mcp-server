@@ -107,6 +107,21 @@ describe('resolvePage', () => {
       expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
     });
 
+    it('ignores the other stubs of a group of three or more: only the page with a file declares the name (#69)', async () => {
+      // `alias:: bob, rob` on one page: stubs "bob" and "rob" point at each other as well as at the page
+      const { client } = fakeClient({
+        resolveRows: [
+          [stub(3, 'bob', 'Bob'), 'name'],
+          [page(1, 'robert smith', 'Robert Smith'), 'alias'],
+          [stub(4, 'rob', 'Rob'), 'alias']
+        ]
+      });
+
+      const result = await resolvePage(client, 'Bob');
+
+      expect(result).toMatchObject({ kind: 'found', name: 'robert smith', matchedBy: 'alias' });
+    });
+
     it('is ambiguous when several pages declare the alias, listing why each matched', async () => {
       const { client } = fakeClient({
         resolveRows: [
