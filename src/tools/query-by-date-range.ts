@@ -4,6 +4,8 @@ import { InvalidParameterError } from '../errors.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { buildBlockTrees, camelizeKeys } from '../utils/block-tree.js';
+import { formatLogseqDate } from '../utils/date-utils.js';
+import { DATE_PRESETS, isDatePreset, resolveDatePreset } from '../utils/date-presets.js';
 
 export interface DateRangeResult {
   dateRange: {
@@ -40,6 +42,58 @@ export interface SlimDateRangeResult {
 }
 
 /**
+ * `include_content: false` result: dates, block counts and top-level snippets only.
+ * `blockCount` counts every block under the matching top-level blocks, nested ones
+ * included; `snippets` has one entry per top-level block (its first line, shortened).
+ */
+export interface OutlineDateRangeResult {
+  dateRange: {
+    start: number;
+    end: number;
+  };
+  entries: Array<{
+    date: number;
+    pageName: string;
+    blockCount: number;
+    snippets: string[];
+  }>;
+  summary: {
+    totalDays: number;
+    totalBlocks: number;
+    searchTerm?: string;
+  };
+}
+
+/**
+ * How the caller chose the range. Exactly one of the three groups must be given.
+ * Field names mirror the tool's snake_case arguments in camelCase.
+ */
+export interface DateRangeSelection {
+  /** Explicit range: needs both `startDate` and `endDate` (YYYYMMDD) */
+  startDate?: number;
+  endDate?: number;
+  /** The N most recent journal pages that exist, newest first */
+  lastN?: number;
+  /** A named period such as `last_week` (see `utils/date-presets.ts`) */
+  preset?: string;
+}
+
+export interface DateRangeOptions extends DateRangeSelection {
+  searchTerm?: string;
+  /** Slim blocks (ignored when `includeContent` is false) */
+  slimResults?: boolean;
+  /** `false` returns the outline shape (default true) */
+  includeContent?: boolean;
+}
+
+/** The validated, resolved form of a {@link DateRangeSelection}. */
+type ResolvedSelection =
+  | { mode: 'range'; start: number; end: number }
+  | { mode: 'last_n'; count: number; latest: number };
+
+const SNIPPET_LENGTH = 80;
+
+/**
  * Validate date is in YYYYMMDD format
  * @param date - Date in YYYYMMDD format
  * @returns true if valid
@@ -60,8 +114,131 @@ function isValidDateFormat(date: number): boolean {
   return true;
 }
 
+const isGiven = (value: unknown): boolean => value !== undefined && value !== null;
+
 /**
- * Query journal entries by date range
+ * The one validation path for choosing a range. Exactly one of three groups must be
+ * given: explicit dates (`startDate` + `endDate`), `lastN`, or `preset`. Presets are
+ * resolved against `now` here, so everything after this sees plain dates.
+ * @throws InvalidParameterError for none, for more than one, and for bad values
+ */
+function resolveSelection(selection: DateRangeSelection, now: Date): ResolvedSelection {
+  const { startDate, endDate, lastN, preset } = selection;
+
+  const given: string[] = [];
+  if (isGiven(startDate) || isGiven(endDate)) given.push('start_date/end_date');
+  if (isGiven(lastN)) given.push('last_n');
+  if (isGiven(preset)) given.push('preset');
+
+  if (given.length === 0) {
+    throw new InvalidParameterError(
+      'date selection',
+      'none given',
+      'Exactly one of: start_date with end_date, last_n, or preset',
+      'last_n: 7, or preset: "last_week", or start_date: 20251115 with end_date: 20251120'
+    );
+  }
+  if (given.length > 1) {
+    throw new InvalidParameterError(
+      'date selection',
+      given.join(' and '),
+      'Exactly one of: start_date with end_date, last_n, or preset (not several together)',
+      'last_n: 7'
+    );
+  }
+
+  if (isGiven(lastN)) {
+    if (typeof lastN !== 'number' || !Number.isInteger(lastN) || lastN < 1) {
+      throw new InvalidParameterError(
+        'last_n',
+        String(lastN),
+        'A whole number of journal pages, 1 or more',
+        'last_n: 7'
+      );
+    }
+    return { mode: 'last_n', count: lastN, latest: formatLogseqDate(now) };
+  }
+
+  if (isGiven(preset)) {
+    if (!isDatePreset(preset)) {
+      throw new InvalidParameterError(
+        'preset',
+        String(preset),
+        `One of: ${DATE_PRESETS.join(', ')}`,
+        'preset: "last_week"'
+      );
+    }
+    return { mode: 'range', ...resolveDatePreset(preset, now) };
+  }
+
+  // Explicit dates
+  if (!isGiven(startDate) || !isGiven(endDate)) {
+    const missing = isGiven(startDate) ? 'end_date' : 'start_date';
+    throw new InvalidParameterError(
+      missing,
+      'missing',
+      'Both start_date and end_date when choosing an explicit range',
+      'start_date: 20251115, end_date: 20251120'
+    );
+  }
+  if (!isValidDateFormat(startDate as number)) {
+    throw new InvalidParameterError(
+      'start_date',
+      startDate,
+      'Date in YYYYMMDD format (8 digits, valid year/month/day)',
+      '20251115 for November 15, 2025'
+    );
+  }
+  if (!isValidDateFormat(endDate as number)) {
+    throw new InvalidParameterError(
+      'end_date',
+      endDate,
+      'Date in YYYYMMDD format (8 digits, valid year/month/day)',
+      '20251120 for November 20, 2025'
+    );
+  }
+  if ((startDate as number) > (endDate as number)) {
+    throw new InvalidParameterError(
+      'date_range',
+      `${startDate} to ${endDate}`,
+      'start_date must be before or equal to end_date',
+      'start_date: 20251115, end_date: 20251120'
+    );
+  }
+  return { mode: 'range', start: startDate as number, end: endDate as number };
+}
+
+const pageNameOf = (page: PageEntity): string =>
+  page.originalName || page['original-name'] || page.name;
+
+/** Number of blocks in these trees, nested ones included. */
+function countBlocks(blocks: BlockEntity[]): number {
+  return blocks.reduce((sum, block) => sum + 1 + countBlocks(block.children ?? []), 0);
+}
+
+/** First line of a block, trimmed and shortened. */
+function snippetOf(block: BlockEntity): string {
+  const firstLine = (block.content ?? '').split('\n')[0].trim();
+  return firstLine.length > SNIPPET_LENGTH
+    ? `${firstLine.slice(0, SNIPPET_LENGTH - 3)}...`
+    : firstLine;
+}
+
+async function fetchPages(
+  client: LogseqClient,
+  { query, inputs }: { query: string; inputs: unknown[] }
+): Promise<PageEntity[]> {
+  const rows = await client.executeDatalogQuery<Array<[any]>>(query, ...inputs);
+  return (rows || [])
+    .map(row => row[0])
+    .filter(page => page != null)
+    .map(page => camelizeKeys<PageEntity>(page));
+}
+
+/**
+ * Query journal entries by explicit date range.
+ * Kept for callers that already have two dates; it goes through the same
+ * validation and query path as {@link queryJournals}.
  * @param client - LogseqClient instance
  * @param startDate - Start date in YYYYMMDD format
  * @param endDate - End date in YYYYMMDD format
@@ -76,51 +253,70 @@ export async function queryByDateRange(
   searchTerm?: string,
   slimResults: boolean = false
 ): Promise<DateRangeResult | SlimDateRangeResult> {
-  // Validate dates
-  if (!isValidDateFormat(startDate)) {
-    throw new InvalidParameterError(
-      'start_date',
-      startDate,
-      'Date in YYYYMMDD format (8 digits, valid year/month/day)',
-      '20251115 for November 15, 2025'
-    );
-  }
-  if (!isValidDateFormat(endDate)) {
-    throw new InvalidParameterError(
-      'end_date',
-      endDate,
-      'Date in YYYYMMDD format (8 digits, valid year/month/day)',
-      '20251120 for November 20, 2025'
-    );
-  }
-  if (startDate > endDate) {
-    throw new InvalidParameterError(
-      'date_range',
-      `${startDate} to ${endDate}`,
-      'start_date must be before or equal to end_date',
-      'start_date: 20251115, end_date: 20251120'
-    );
-  }
+  return (await queryJournals(client, {
+    startDate,
+    endDate,
+    searchTerm,
+    slimResults
+  })) as DateRangeResult | SlimDateRangeResult;
+}
 
-  // Query 1: journal pages in range (may be empty)
-  const pagesQuery = DatalogQueryBuilder.getJournalPagesInRange(startDate, endDate);
-  const pageRows = await client.executeDatalogQuery<Array<[any]>>(
-    pagesQuery.query,
-    ...pagesQuery.inputs
-  );
-  const journalsInRange = (pageRows || [])
-    .map(row => row[0])
-    .filter(page => page != null)
-    .map(page => camelizeKeys<PageEntity>(page));
+/**
+ * Query journal entries for a range chosen one of three ways: explicit dates,
+ * the `lastN` most recent journals, or a named `preset`.
+ *
+ * API calls: at most 2 whatever the range or N.
+ *  - explicit dates and presets: journal pages in range, then every block on them
+ *  - `lastN`: journal pages up to today (sorted and sliced here), then every block
+ *    on the pages that were kept
+ * The second call is skipped when no page matched.
+ *
+ * Entries are oldest first, except `lastN`, which is newest first. For `lastN`,
+ * `dateRange` spans the oldest to the newest page returned (0 to 0 if none), and
+ * each full-result `page` holds only its identifying attributes (id, uuid, name,
+ * originalName, journalDay, journal?).
+ *
+ * @param client - LogseqClient instance
+ * @param options - Range selection plus search, slim and content options
+ * @param now - The current moment, for `lastN` and presets (injectable for tests)
+ * @returns Full, slim, or (with `includeContent: false`) outline results
+ * @throws InvalidParameterError if the selection is missing, ambiguous or invalid
+ */
+export async function queryJournals(
+  client: LogseqClient,
+  options: DateRangeOptions,
+  now: Date = new Date()
+): Promise<DateRangeResult | SlimDateRangeResult | OutlineDateRangeResult> {
+  const { searchTerm, slimResults = false, includeContent = true } = options;
+  const selection = resolveSelection(options, now);
 
-  // Sort by date
-  journalsInRange.sort((a, b) => (a.journalDay || 0) - (b.journalDay || 0));
+  // Query 1: journal pages (may be empty), in the order entries are returned
+  let journals: PageEntity[];
+  let rangeStart: number;
+  let rangeEnd: number;
+
+  if (selection.mode === 'range') {
+    rangeStart = selection.start;
+    rangeEnd = selection.end;
+    const pagesQuery = DatalogQueryBuilder.getJournalPagesInRange(rangeStart, rangeEnd);
+    journals = await fetchPages(client, pagesQuery);
+    journals.sort((a, b) => (a.journalDay || 0) - (b.journalDay || 0));
+  } else {
+    const pagesQuery = DatalogQueryBuilder.getJournalPagesUpTo(selection.latest);
+    const all = await fetchPages(client, pagesQuery);
+    all.sort((a, b) => (b.journalDay || 0) - (a.journalDay || 0));
+    journals = all.slice(0, selection.count);
+    // Journals are unique per day, so every page between the oldest and newest
+    // kept is one of the kept pages: the range query below fetches exactly them.
+    rangeEnd = journals.length > 0 ? journals[0].journalDay! : 0;
+    rangeStart = journals.length > 0 ? journals[journals.length - 1].journalDay! : 0;
+  }
 
   // Query 2: every block on those pages (may be empty), rebuilt into trees.
   // Skipped when there are no pages; a second query never scales with range length.
   let treesByPage = new Map<number, BlockEntity[]>();
-  if (journalsInRange.length > 0) {
-    const blocksQuery = DatalogQueryBuilder.getJournalBlocksInRange(startDate, endDate);
+  if (journals.length > 0) {
+    const blocksQuery = DatalogQueryBuilder.getJournalBlocksInRange(rangeStart, rangeEnd);
     const blockRows = await client.executeDatalogQuery<Array<[any]>>(
       blocksQuery.query,
       ...blocksQuery.inputs
@@ -128,13 +324,13 @@ export async function queryByDateRange(
     const flatBlocks = (blockRows || [])
       .map(row => row[0])
       .filter(block => block != null);
-    treesByPage = buildBlockTrees(flatBlocks, journalsInRange.map(page => page.id));
+    treesByPage = buildBlockTrees(flatBlocks, journals.map(page => page.id));
   }
 
   const entries: DateRangeResult['entries'] = [];
   let totalBlocks = 0;
 
-  for (const page of journalsInRange) {
+  for (const page of journals) {
     const blocks = treesByPage.get(page.id) || [];
 
     // Filter top-level blocks by search term if provided
@@ -156,41 +352,37 @@ export async function queryByDateRange(
     }
   }
 
-  // Return slim results if requested
-  if (slimResults) {
-    const slimEntries = entries.map(entry => ({
-      date: entry.date,
-      pageName: entry.page.originalName || entry.page['original-name'] || entry.page.name,
-      blocks: entry.blocks.map(block => {
-        const pageName = entry.page.originalName || entry.page['original-name'] || entry.page.name;
-        return toSlimBlock(block, pageName);
-      })
-    }));
+  const dateRange = { start: rangeStart, end: rangeEnd };
+  const summary = { totalDays: entries.length, totalBlocks, searchTerm };
 
+  if (!includeContent) {
     return {
-      dateRange: {
-        start: startDate,
-        end: endDate
-      },
-      entries: slimEntries,
-      summary: {
-        totalDays: entries.length,
-        totalBlocks,
-        searchTerm
-      }
+      dateRange,
+      entries: entries.map(entry => ({
+        date: entry.date,
+        pageName: pageNameOf(entry.page),
+        blockCount: countBlocks(entry.blocks),
+        snippets: entry.blocks.map(snippetOf)
+      })),
+      summary
     };
   }
 
-  return {
-    dateRange: {
-      start: startDate,
-      end: endDate
-    },
-    entries,
-    summary: {
-      totalDays: entries.length,
-      totalBlocks,
-      searchTerm
-    }
-  };
+  // Return slim results if requested
+  if (slimResults) {
+    return {
+      dateRange,
+      entries: entries.map(entry => {
+        const pageName = pageNameOf(entry.page);
+        return {
+          date: entry.date,
+          pageName,
+          blocks: entry.blocks.map(block => toSlimBlock(block, pageName))
+        };
+      }),
+      summary
+    };
+  }
+
+  return { dateRange, entries, summary };
 }
