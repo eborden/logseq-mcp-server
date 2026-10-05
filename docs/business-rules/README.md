@@ -20,6 +20,10 @@ One row per rule, sorted by number. See [Format rules](#format-rules) for what e
 | [0003-infrastructure-errors-propagate](0003-infrastructure-errors-propagate.md) | Infrastructure and unexpected errors are re-thrown; an error never becomes an empty result. |
 | [0004-additive-tool-contracts](0004-additive-tool-contracts.md) | Tool names, parameters and result shapes change additively; a rename or removal needs an explicit decision. |
 | [0005-report-only-verified-success](0005-report-only-verified-success.md) | Report only success you have verified; outputs describe what actually happened. |
+| [0006-no-silent-truncation](0006-no-silent-truncation.md) | Never cut results silently; every cap reports through `ResultMeta`. |
+| [0007-resolve-refs-non-lossy](0007-resolve-refs-non-lossy.md) | `resolve_refs` is opt-in and non-lossy; `content` never changes. |
+| [0008-param-aliases-best-effort](0008-param-aliases-best-effort.md) | Parameter aliases are handler-only and unadvertised; the canonical name stays required. |
+| [0009-tips-are-advisory](0009-tips-are-advisory.md) | Next-step tips live in `meta.tips` only; no result depends on them. |
 
 ## Numbering and naming
 
