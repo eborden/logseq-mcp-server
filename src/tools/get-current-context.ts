@@ -39,6 +39,27 @@ function isBlockEntity(entity: any): entity is BlockEntity {
 }
 
 /**
+ * Without `includeChildren`, the Editor API returns a block's `children` as
+ * unfetched `["uuid", "<id>"]` tuples rather than block entities. Keep only real
+ * block entities so slimming doesn't choke on them; fetch children with
+ * logseq_get_block when they are needed.
+ */
+function withFetchedChildren(block: BlockEntity): BlockEntity {
+  if (!Array.isArray(block.children)) {
+    return block;
+  }
+  const { children, ...rest } = block;
+  const fetched = (children as unknown[]).filter(
+    (child): child is BlockEntity =>
+      typeof child === 'object' && child !== null && !Array.isArray(child) &&
+      typeof (child as BlockEntity).content === 'string'
+  );
+  return fetched.length > 0
+    ? { ...rest, children: fetched.map(withFetchedChildren) }
+    : (rest as BlockEntity);
+}
+
+/**
  * Get the page, focused block and selected blocks the user currently has open.
  *
  * Makes three Editor calls (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`)
@@ -88,7 +109,7 @@ export async function getCurrentContext(client: LogseqClient): Promise<CurrentCo
 
   const slim = (block: BlockEntity): SlimBlock => {
     const id = pageIdOf(block);
-    return toSlimBlock(block, id !== undefined ? pageNames.get(id) ?? '' : '');
+    return toSlimBlock(withFetchedChildren(block), id !== undefined ? pageNames.get(id) ?? '' : '');
   };
 
   // Page: the open one, else the page of the block being looked at.
