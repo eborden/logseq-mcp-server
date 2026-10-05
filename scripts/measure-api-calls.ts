@@ -15,6 +15,7 @@ import { queryByDateRange } from '../src/tools/query-by-date-range.js';
 import { queryByProperty } from '../src/tools/query-by-property.js';
 import { buildContextForTopic } from '../src/tools/build-context.js';
 import { getContextForQuery } from '../src/tools/get-context-for-query.js';
+import { getCurrentContext } from '../src/tools/get-current-context.js';
 
 class CountingClient extends LogseqClient {
   calls = new Map<string, number>();
@@ -63,7 +64,8 @@ async function main() {
     ['get_context_for_query (1 topic)', () => getContextForQuery(client, `what about [[${subject}]]?`)],
     ['search_blocks', () => searchBlocks(client, subject.slice(0, 4), 10)],
     ['query_by_date_range (7 days)', () => queryByDateRange(client, ymd(start), ymd(end))],
-    ['query_by_property', () => queryByProperty(client, 'type', 'x')]
+    ['query_by_property', () => queryByProperty(client, 'type', 'x')],
+    ['get_current_context', () => getCurrentContext(client)]
   ];
 
   for (const [label, run] of cases) {

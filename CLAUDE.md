@@ -23,10 +23,10 @@ The LogSeq instance this server is developed against is the maintainer's **perso
 
 ## Overview
 
-This is an MCP (Model Context Protocol) server that provides Claude with 13 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
+This is an MCP (Model Context Protocol) server that provides Claude with 14 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
 
 **Key Stats:**
-- 13 MCP tools for graph operations, search, and temporal queries
+- 14 MCP tools for graph operations, search, and temporal queries
 - Unit tests (`npx vitest run src`) plus integration tests against a live graph (`npm run test:integration`). `npm test` runs both.
 - Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see "Current Implementation Status" below)
 
@@ -59,6 +59,7 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 | `query_by_date_range` (7 days) | 2 | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5) |
 | `search_by_relationship` | 1 | | `references` / `in-pages-linking-to`. `connected-within` is O(maxDistance) (#7) |
 | `query_by_property` | 1 | ~0.02s | One query over `:block/properties`, page name inline. Blocks are flat (no `children`). Was ~2k calls, ~10s (#33) |
+| `get_current_context` | 3-4 | ~0.01s | 3 Editor calls (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`) + 1 Datalog pull by `:db/id` only when a block's page isn't the open page (#15) |
 
 Re-run the script after changing any of these tools, and update this table.
 
@@ -437,7 +438,7 @@ Use one Datalog query, filtering in the query with `includes?` / `re-find` / `ge
 - **Commits:**
   - 9642558 "refactor: remove redundant get_entity_timeline tool"
   - 34a699a "refactor: remove incomplete get_related_pages tool"
-- Later work added tools back. There are 13 registered in `src/index.ts` today.
+- Later work added tools back. There are 14 registered in `src/index.ts` today.
 
 ### Phase 6: Comparison With Other PKM MCP Servers (Oct 2026)
 - Reviewed 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers
@@ -503,6 +504,7 @@ Quick reference checklist for future work:
 - [ ] A bad token returns HTTP 401. `client.ts` maps it to `LogSeqAuthError` (the message never contains the token).
 - [ ] A hung request is aborted after `timeoutMs` (config field, default 30000, applied per `callAPI` call) and surfaces as `LogSeqTimeoutError`.
 - [ ] `logseq.Editor.getEditingBlockSelection` doesn't exist. Use `getSelectedBlocks`, which returns `null` when nothing is selected.
+- [ ] Without `includeChildren`, Editor API blocks carry `children` as unfetched `["uuid", "<id>"]` tuples, not block entities. `getCurrentPage` can return `null` while `getCurrentBlock` returns a block, or return a block when zoomed in. `get_current_context` handles all three.
 
 **Tool behaviour**
 - [ ] Don't turn errors into empty results. A dropped connection must not look like "no data" (#10). Re-throw infrastructure errors (`isInfrastructureError`) and unexpected ones; only an empty result is "none", and expected partial results go in a `warnings` field.
