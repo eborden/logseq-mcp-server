@@ -22,8 +22,46 @@ Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts o
    Tips are on by default: six tools (`search_blocks`, `get_page`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `list_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
 
    Some tools also accept `name`, `page` (and `page_name` or `uuid` where it fits) in place of their canonical parameter (`page_name`, `topic_name`, `concept_name`, `block_uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
-4. Install: `npm install -g logseq-mcp-server`
-5. Add to Claude Desktop MCP settings
+4. Connect it to your MCP client (next section). Needs Node 18 or newer.
+
+## Install
+
+The package runs straight from npm with `npx`, so there is nothing to install globally. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+
+### Claude Code
+
+```bash
+claude mcp add logseq -- npx -y logseq-mcp-server
+```
+
+Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills.
+
+### Claude Desktop
+
+Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows: `%APPDATA%\Claude\claude_desktop_config.json`), then restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "logseq": {
+      "command": "npx",
+      "args": ["-y", "logseq-mcp-server"]
+    }
+  }
+}
+```
+
+### From a clone
+
+Build it as shown under [Install as a Claude Code plugin](#install-as-a-claude-code-plugin), then point the client at the built file:
+
+```bash
+claude mcp add logseq -- node /absolute/path/to/logseq-mcp-server/dist/index.js
+```
+
+In Claude Desktop, use `"command": "node"` with that path in `args`.
+
+The first npm release has not been published yet (see [Publishing](#publishing)), so until then use a clone.
 
 ## Install as a Claude Code plugin
 
@@ -85,6 +123,27 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 |------|---------|
 | `get_graph_info` | Get current LogSeq graph information including filesystem path |
 
+## Prompts
+
+Prompts are ready-made starting points that a host shows as slash commands or a menu. Each one sends the model a short message naming the tools to call and the limits to keep. They only read.
+
+| Prompt | Arguments | What it does |
+|--------|-----------|--------------|
+| `weekly_summary` | `week` (optional): `this` (default), `last`, or a date in the week | Summarize a Monday-to-Friday week of journals into a few short signals |
+| `monthly_summary` | `month` (optional): `this` (default), `last`, or `YYYY-MM` | Summarize a month from its weekly pages, with each thread's trajectory |
+| `continue_on` | `topic` (required) | Pick up where you left off: current state, latest activity, open tasks, next step |
+| `what_do_i_know` | `topic` (required) | Research a topic across the graph, with sources and gaps |
+| `prioritize_tasks` | `focus` (optional) | Find open TODO and DOING tasks, spot stale ones, suggest an order |
+
+The server cannot write to your graph. The summary prompts end by showing the summary in the chat. If you want it saved as a page, ask, and a host with file access can do it.
+
+## Resources
+
+| URI | Contents |
+|-----|----------|
+| `logseq://guide` | The reading guide: how to read results (case-insensitive names, `((uuid))` refs, `hasMore` and `warnings`), which tool to start with, and an index of tools and prompts |
+| `logseq://page/{name}` | One page as Markdown text. The name is URL-encoded and may be an alias or an ISO date (`logseq://page/2025-01-01`). Pages over 50,000 characters are cut with a notice |
+
 ## Skills
 
 Beyond individual tools, the `logseq-skills` provides structured workflows that combine multiple tools:
@@ -125,6 +184,17 @@ Gets: Timeline grouped by month showing pattern changes
 Use: query_by_date_range(20251114, 20251120)
 Gets: All journal entries in date range
 ```
+
+## Publishing
+
+For the maintainer. Nothing publishes automatically: `.github/workflows/publish.yml` runs only when started by hand from the Actions tab, and only on `main`.
+
+1. Add an npm access token that can publish `logseq-mcp-server` as the repository secret `NPM_TOKEN` (Settings, Secrets and variables, Actions).
+2. Set the version in `package.json` and `.claude-plugin/plugin.json` (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it.
+3. Run the workflow with **dry_run** ticked first. It type-checks, runs the unit tests, builds, lists the tarball and runs `npm publish --dry-run`.
+4. Run it again with **dry_run** cleared. It runs `npm publish --provenance --access public`, which signs a provenance statement linking the package to the commit.
+
+To check a build locally first, `npm pack --dry-run` lists the tarball, and `npm pack` followed by `npm install ./logseq-mcp-server-*.tgz` in a scratch directory installs it.
 
 ## Development
 
