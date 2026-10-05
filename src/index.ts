@@ -49,9 +49,11 @@ import {
   RESOLVE_REFS_DESCRIPTION,
   getBacklinksArgs,
   getBlockArgs,
+  getConceptNetworkArgs,
   getPageArgs,
   queryByPropertyArgs,
   searchBlocksArgs,
+  searchByRelationshipArgs,
 } from './tool-args.js';
 
 /**
@@ -136,66 +138,13 @@ const TOOLS = [
     name: 'logseq_get_concept_network',
     description: TOOL_DESCRIPTIONS.logseq_get_concept_network,
     annotations: readOnlyAnnotations('Get Concept Network'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        concept_name: {
-          type: 'string',
-          description: 'Root concept (page name, alias or ISO date)',
-        },
-        max_depth: {
-          type: 'number',
-          description: 'Maximum depth to traverse (default: 2, max: 3)',
-          default: 2,
-        },
-        max_nodes: {
-          type: 'number',
-          description: 'Maximum pages in the network, root included (default: 50, max: 500)',
-          default: 50,
-        },
-        max_fanout: {
-          type: 'number',
-          description: 'Maximum new pages any one page may add (default: 15, max: 100)',
-          default: 15,
-        },
-        expand_journals: {
-          type: 'boolean',
-          description: 'Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.',
-          default: false,
-        },
-        format: FORMAT_PARAM,
-      },
-      required: ['concept_name'],
-    },
+    inputSchema: toInputSchema(getConceptNetworkArgs),
   },
   {
     name: 'logseq_search_by_relationship',
     description: TOOL_DESCRIPTIONS.logseq_search_by_relationship,
     annotations: readOnlyAnnotations('Search by Relationship'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        topic_a: {
-          type: 'string',
-          description: 'Primary topic to search for (page name, alias or ISO date)',
-        },
-        topic_b: {
-          type: 'string',
-          description: 'Related topic that defines the relationship (page name, alias or ISO date)',
-        },
-        relationship_type: {
-          type: 'string',
-          enum: ['references', 'referenced-by', 'in-pages-linking-to', 'connected-within'],
-          description: 'Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)',
-        },
-        max_distance: {
-          type: 'number',
-          description: 'Maximum graph distance for connected-within (default: 2)',
-          default: 2,
-        },
-      },
-      required: ['topic_a', 'topic_b', 'relationship_type'],
-    },
+    inputSchema: toInputSchema(searchByRelationshipArgs),
   },
   {
     name: 'logseq_build_context',
@@ -526,15 +475,19 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_concept_network': {
-          const conceptName = args?.concept_name as string;
-          const format = parseFormat(args?.format);
-          const maxDepth = Math.min((args?.max_depth as number) ?? 2, 3);
-          const maxNodes = args?.max_nodes as number | undefined;
-          const maxFanout = args?.max_fanout as number | undefined;
-          const result = await getConceptNetwork(client, conceptName, maxDepth, {
-            maxNodes: maxNodes === undefined ? undefined : Math.min(maxNodes, 500),
-            maxFanout: maxFanout === undefined ? undefined : Math.min(maxFanout, 100),
-            expandJournals: args?.expand_journals === true,
+          const {
+            concept_name: conceptName,
+            max_depth: maxDepth,
+            max_nodes: maxNodes,
+            max_fanout: maxFanout,
+            expand_journals: expandJournals,
+            format,
+          } = parseArgs(getConceptNetworkArgs, args);
+          // Safeguards: caps on the walk, whatever the caller asks for
+          const result = await getConceptNetwork(client, conceptName, Math.min(maxDepth, 3), {
+            maxNodes: Math.min(maxNodes, 500),
+            maxFanout: Math.min(maxFanout, 100),
+            expandJournals,
           });
           if (format === 'markdown') return textResult(withFooter(renderNetwork(result), result));
           return {
@@ -548,10 +501,12 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_search_by_relationship': {
-          const topicA = args?.topic_a as string;
-          const topicB = args?.topic_b as string;
-          const relationshipType = args?.relationship_type as any;
-          const maxDistance = (args?.max_distance as number) ?? 2;
+          const {
+            topic_a: topicA,
+            topic_b: topicB,
+            relationship_type: relationshipType,
+            max_distance: maxDistance,
+          } = parseArgs(searchByRelationshipArgs, args);
           const result = await searchByRelationship(
             client,
             topicA,

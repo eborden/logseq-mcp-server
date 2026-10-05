@@ -188,6 +188,9 @@ const REQUIRED: ReadonlyArray<readonly [string, string, Record<string, unknown>]
   ['logseq_search_blocks', 'query', { query: 'alice' }],
   ['logseq_query_by_property', 'property_key', { property_key: 'status', property_value: 'active' }],
   ['logseq_query_by_property', 'property_value', { property_key: 'status', property_value: 'active' }],
+  ['logseq_get_concept_network', 'concept_name', { concept_name: 'Alice' }],
+  ['logseq_search_by_relationship', 'topic_a', { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references' }],
+  ['logseq_search_by_relationship', 'topic_b', { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references' }],
 ];
 
 describe.each(REQUIRED)('%s rejects a bad %s before calling LogSeq', (tool, required, valid) => {
@@ -219,6 +222,8 @@ describe.each(REQUIRED)('%s rejects a bad %s before calling LogSeq', (tool, requ
 /** Optional parameters of the wrong type: [tool, valid arguments, parameter, value, expected error]. */
 const SEARCH = { query: 'alice' };
 const PROPERTY = { property_key: 'status', property_value: 'active' };
+const NETWORK = { concept_name: 'Alice' };
+const RELATIONSHIP = { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within' };
 const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, string, unknown, RegExp]> = [
   ['logseq_search_blocks', SEARCH, 'limit', '5', /'limit': "5".*a number, not a string/s],
   ['logseq_search_blocks', SEARCH, 'limit', NaN, /'limit': NaN.*a number, not NaN/s],
@@ -230,7 +235,49 @@ const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, stri
   ['logseq_search_blocks', SEARCH, 'slim_results', 0, /'slim_results': 0.*true or false, not a number/s],
   ['logseq_query_by_property', PROPERTY, 'slim_results', 'no', /'slim_results': "no".*true or false, not a string/s],
   ['logseq_query_by_property', PROPERTY, 'slim_results', NaN, /'slim_results': NaN/],
+  ['logseq_get_concept_network', NETWORK, 'max_depth', '2', /'max_depth': "2".*a number, not a string/s],
+  ['logseq_get_concept_network', NETWORK, 'max_depth', NaN, /'max_depth': NaN.*a number, not NaN/s],
+  ['logseq_get_concept_network', NETWORK, 'max_depth', Infinity, /'max_depth': Infinity.*a number, not Infinity/s],
+  ['logseq_get_concept_network', NETWORK, 'max_depth', -Infinity, /'max_depth': -Infinity/],
+  ['logseq_get_concept_network', NETWORK, 'max_nodes', '50', /'max_nodes': "50".*a number, not a string/s],
+  ['logseq_get_concept_network', NETWORK, 'max_nodes', NaN, /'max_nodes': NaN.*a number, not NaN/s],
+  ['logseq_get_concept_network', NETWORK, 'max_nodes', Infinity, /'max_nodes': Infinity/],
+  ['logseq_get_concept_network', NETWORK, 'max_fanout', NaN, /'max_fanout': NaN.*a number, not NaN/s],
+  ['logseq_get_concept_network', NETWORK, 'max_fanout', true, /'max_fanout': true.*a number, not a boolean/s],
+  ['logseq_get_concept_network', NETWORK, 'max_fanout', -Infinity, /'max_fanout': -Infinity/],
+  ['logseq_get_concept_network', NETWORK, 'expand_journals', 'true', /'expand_journals': "true".*true or false, not a string/s],
+  ['logseq_get_concept_network', NETWORK, 'expand_journals', 1, /'expand_journals': 1.*true or false, not a number/s],
+  ['logseq_get_concept_network', NETWORK, 'format', 'html', /'format': "html".*one of "json", "markdown"/s],
+  ['logseq_get_concept_network', NETWORK, 'format', 0, /'format': 0/],
+  ['logseq_search_by_relationship', RELATIONSHIP, 'relationship_type', 'friends', /'relationship_type': "friends".*one of "references", "referenced-by", "in-pages-linking-to", "connected-within".*Example: relationship_type: "connected-within"/s],
+  ['logseq_search_by_relationship', RELATIONSHIP, 'relationship_type', 'References', /'relationship_type': "References".*one of/s],
+  ['logseq_search_by_relationship', RELATIONSHIP, 'relationship_type', 1, /'relationship_type': 1.*one of/s],
+  ['logseq_search_by_relationship', RELATIONSHIP, 'max_distance', '2', /'max_distance': "2".*a number, not a string/s],
+  ['logseq_search_by_relationship', RELATIONSHIP, 'max_distance', NaN, /'max_distance': NaN.*a number, not NaN/s],
+  ['logseq_search_by_relationship', RELATIONSHIP, 'max_distance', Infinity, /'max_distance': Infinity/],
+  ['logseq_search_by_relationship', RELATIONSHIP, 'max_distance', -Infinity, /'max_distance': -Infinity/],
 ];
+
+describe('logseq_search_by_relationship relationship_type is required', () => {
+  it('reports it missing, also when sent as null, with the values it takes', async () => {
+    const { relationship_type: _dropped, ...rest } = RELATIONSHIP;
+    for (const args of [rest, { ...rest, relationship_type: null }]) {
+      const error = await rejection('logseq_search_by_relationship', args);
+      expect(error).toContain("Invalid parameter 'relationship_type': missing");
+      expect(error).toContain('"connected-within"');
+    }
+  });
+});
+
+describe('logseq_get_concept_network still folds an alias in before parsing', () => {
+  it('name: reaches concept_name', async () => {
+    await expectSame('logseq_get_concept_network', { name: 'Alice' }, NETWORK);
+  });
+
+  it('a malformed alias value is rejected like the canonical one', async () => {
+    expect(await rejection('logseq_get_concept_network', { name: 5 })).toMatch(/'concept_name': 5.*a string, not a number/s);
+  });
+});
 
 describe('wrong-typed options are rejected before calling LogSeq', () => {
   it.each(BAD_OPTIONS)('%s %j: %s = %j', async (tool, valid, param, value, message) => {
@@ -252,6 +299,22 @@ describe('numbers that pass the parser keep their old meaning', () => {
     expect(result.isError).toBeUndefined();
     expect(JSON.parse(result.content[0].text)).toEqual([]);
     expect(JSON.parse(result.content[1].text).meta).toMatchObject({ hasMore: true, totals: { matches: 3 } });
+  });
+
+  it('get_concept_network: a negative max_depth walks no further than 0', async () => {
+    await expectSame('logseq_get_concept_network', { ...NETWORK, max_depth: -1 }, { ...NETWORK, max_depth: 0 });
+    const { queries } = await call('logseq_get_concept_network', { ...NETWORK, max_depth: -1 });
+    expect(queries).toHaveLength(1); // the root's resolver query only
+  });
+
+  it('search_by_relationship: a negative max_distance walks no hops, and is echoed as given', async () => {
+    const negative = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: -1 });
+    const zero = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: 0 });
+    expect(negative.queries).toEqual(zero.queries);
+    expect(negative.apiCalls).toEqual(zero.apiCalls);
+    const body = JSON.parse(negative.result.content[0].text);
+    expect(body.results).toEqual([]);
+    expect(body.query.maxDistance).toBe(-1);
   });
 
   it('search_blocks: a fractional limit is cut down to a whole number of blocks', async () => {

@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from './index.js';
 import { LogseqClient } from './client.js';
+import { DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tools/get-concept-network.js';
 
 const { getConceptNetworkMock } = vi.hoisted(() => ({
   getConceptNetworkMock: vi.fn(async (_client: unknown, concept: string) => ({
@@ -167,13 +168,14 @@ describe('MCP Server', () => {
       }
     });
 
-    it('passes no caps when none are given, so tool defaults apply', async () => {
+    it('passes the advertised defaults when no caps are given, the same as the tool defaults (#60)', async () => {
       await call({ concept_name: 'Alice' });
       expect(getConceptNetworkMock).toHaveBeenCalledWith(expect.anything(), 'Alice', 2, {
-        maxNodes: undefined,
-        maxFanout: undefined,
+        maxNodes: DEFAULT_MAX_NODES,
+        maxFanout: DEFAULT_MAX_FANOUT,
         expandJournals: false,
       });
+      expect([DEFAULT_MAX_NODES, DEFAULT_MAX_FANOUT]).toEqual([50, 15]);
     });
 
     it('passes caps and expand_journals through', async () => {

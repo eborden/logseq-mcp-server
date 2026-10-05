@@ -18,6 +18,17 @@ export type RelationshipType =
   | 'in-pages-linking-to' // Blocks about topicA in pages that link to topicB
   | 'connected-within'; // Topics connected within N hops
 
+/** Every {@link RelationshipType}, in the order `relationship_type` advertises them. */
+export const RELATIONSHIP_TYPES = [
+  'references',
+  'referenced-by',
+  'in-pages-linking-to',
+  'connected-within',
+] as const satisfies readonly RelationshipType[];
+
+/** Hops `connected-within` walks when `max_distance` is absent. */
+export const DEFAULT_MAX_DISTANCE = 2;
+
 export interface SearchByRelationshipResult extends ResultMeta {
   query: {
     topicA: string;
@@ -106,7 +117,7 @@ export async function searchByRelationship(
   topicA: string,
   topicB: string,
   relationshipType: RelationshipType,
-  maxDistance: number = 2,
+  maxDistance: number = DEFAULT_MAX_DISTANCE,
   options: SearchByRelationshipOptions = {}
 ): Promise<SearchByRelationshipResult> {
   const { maxFrontier = DEFAULT_MAX_FRONTIER } = options;
