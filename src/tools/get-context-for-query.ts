@@ -1,16 +1,19 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity, ResultWarning } from '../types.js';
 import { buildContextForTopic, TopicContext } from './build-context.js';
-import { PageNotFoundError } from '../errors.js';
+import { AmbiguousPageError, PageNotFoundError } from '../errors.js';
+import type { PageCandidate } from '../types.js';
 
 /**
  * A non-fatal problem that made the result partial. Connection, timeout, auth
  * and unexpected errors are never warnings: they propagate.
  */
 export interface QueryWarning extends ResultWarning {
-  code: 'topic_not_found' | 'topic_truncated' | 'topics_truncated';
+  code: 'topic_not_found' | 'topic_truncated' | 'topics_truncated' | 'ambiguous_page';
   /** The extracted topic the warning is about (absent when it concerns all topics) */
   topic?: string;
+  /** For `ambiguous_page`: the pages the topic could mean (the topic was skipped) */
+  candidates?: PageCandidate[];
 }
 
 /**
@@ -123,6 +126,17 @@ export async function getContextForQuery(
           code: 'topic_not_found',
           topic,
           message: `No page found for topic "${topic}"; it was skipped.`
+        });
+        continue;
+      }
+      // An ambiguous topic is skipped the same way, but its candidates are kept
+      // so the caller can retry logseq_build_context with the one it means.
+      if (error instanceof AmbiguousPageError) {
+        warnings.push({
+          code: 'ambiguous_page',
+          message: error.message,
+          topic,
+          candidates: error.candidates
         });
         continue;
       }

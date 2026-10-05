@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { buildContextForTopic } from './build-context.js';
 import { LogseqClient } from '../client.js';
 import {
+  AmbiguousPageError,
   LogSeqNotRunningError,
   LogSeqTimeoutError,
   LogSeqAuthError,
@@ -56,7 +57,96 @@ describe('buildContextForTopic', () => {
 
     await expect(
       buildContextForTopic(mockClient, 'NonExistent', {})
-    ).rejects.toThrow(/Page not found/);
+    ).rejects.toThrow(PageNotFoundError);
+  });
+
+  describe('page resolution (#41)', () => {
+    /** A client whose resolver answers `resolveRows`, then blocks and backlinks are empty. */
+    function resolvingClient(resolveRows: unknown[], leafRows: unknown[] = []) {
+      const executeDatalogQuery = vi.fn(async (query: string) => {
+        if (query.includes(':in $ ?n')) return resolveRows;
+        if (query.includes(':in $ ?suffix')) return leafRows;
+        return [];
+      });
+      const callAPI = vi.fn().mockResolvedValue([]);
+      return { client: { config: {}, executeDatalogQuery, callAPI } as unknown as LogseqClient, executeDatalogQuery, callAPI };
+    }
+
+    it('costs the same as before for an exact match: 2 Datalog queries and 1 API call', async () => {
+      const { client, executeDatalogQuery, callAPI } = resolvingClient([[{ id: 1, name: 'topic' }, 'name']]);
+
+      const result = await buildContextForTopic(client, 'Topic');
+
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+      expect(callAPI).toHaveBeenCalledTimes(1);
+      expect(result.resolvedFrom).toBeUndefined();
+    });
+
+    it('resolves an alias in the same query and uses the real page for the blocks and backlinks', async () => {
+      const { client, executeDatalogQuery, callAPI } = resolvingClient([
+        [{ id: 7, name: 'project atlas', 'original-name': 'Project Atlas' }, 'alias'],
+        [{ id: 9, name: 'atlas', 'original-name': 'Atlas' }, 'name']
+      ]);
+
+      const result = await buildContextForTopic(client, 'Atlas');
+
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+      expect(executeDatalogQuery.mock.calls[1].slice(1)).toEqual(['project atlas']);
+      expect(callAPI).toHaveBeenCalledWith('logseq.Editor.getPageLinkedReferences', ['project atlas']);
+      expect(result.mainPage.id).toBe(7);
+      expect(result.topic).toBe('Atlas');
+      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'alias' });
+    });
+
+    it('resolves an ISO date to the journal page', async () => {
+      const { client, executeDatalogQuery } = resolvingClient([
+        [{ id: 5, name: 'jan 1st, 2025', 'original-name': 'Jan 1st, 2025', 'journal?': true, 'journal-day': 20250101 }, 'journal-date']
+      ]);
+
+      const result = await buildContextForTopic(client, '2025-01-01');
+
+      expect(executeDatalogQuery.mock.calls[0].slice(1)).toEqual(['2025-01-01', 20250101]);
+      expect(executeDatalogQuery.mock.calls[1].slice(1)).toEqual(['jan 1st, 2025']);
+      expect(result.mainPage.id).toBe(5);
+      expect(result.temporalContext).toEqual({ isJournal: false, date: undefined });
+      expect(result.resolvedFrom).toEqual({ name: '2025-01-01', matchedBy: 'journal-date' });
+    });
+
+    it('throws AmbiguousPageError with the candidates when a namespace leaf matches several pages', async () => {
+      const { client, executeDatalogQuery, callAPI } = resolvingClient([], [
+        [{ id: 2, name: 'work/atlas', 'original-name': 'Work/Atlas' }],
+        [{ id: 3, name: 'home/atlas', 'original-name': 'Home/Atlas' }]
+      ]);
+
+      const error = await buildContextForTopic(client, 'Atlas').catch(e => e);
+
+      expect(error).toBeInstanceOf(AmbiguousPageError);
+      expect(error.candidates.map((c: any) => [c.name, c.matchedBy])).toEqual([
+        ['home/atlas', 'namespace-leaf'],
+        ['work/atlas', 'namespace-leaf']
+      ]);
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(2); // resolve + leaf; no blocks query
+      expect(callAPI).not.toHaveBeenCalled();
+    });
+
+    it('resolves a unique namespace leaf to that page', async () => {
+      const { client } = resolvingClient([], [[{ id: 2, name: 'work/atlas', 'original-name': 'Work/Atlas' }]]);
+
+      const result = await buildContextForTopic(client, 'Atlas');
+
+      expect(result.mainPage.id).toBe(2);
+      expect(result.resolvedFrom).toEqual({ name: 'Atlas', matchedBy: 'namespace-leaf' });
+    });
+
+    it('throws guidance with the closest names when nothing matches', async () => {
+      const { client, callAPI } = resolvingClient([]);
+      callAPI.mockResolvedValue([{ id: 1, name: 'project atlas', originalName: 'Project Atlas' }]);
+
+      const error = await buildContextForTopic(client, 'proj atlas').catch(e => e);
+
+      expect(error).toBeInstanceOf(PageNotFoundError);
+      expect(error.message).toMatch(/^No page "proj atlas"\. Closest: Project Atlas\./);
+    });
   });
 
   it('should respect limits from options', async () => {

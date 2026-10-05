@@ -285,7 +285,8 @@ describe('getContextForQuery', () => {
     it('warns about a missing topic and still returns the others', async () => {
       const client = newClient();
       (client.executeDatalogQuery as any)
-        .mockResolvedValueOnce([])                                           // first topic: page missing
+        .mockResolvedValueOnce([])                                           // first topic: no exact name or alias
+        .mockResolvedValueOnce([])                                           // first topic: no namespace leaf either
         .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])  // second topic: page
         .mockResolvedValueOnce([[{ id: 20, content: 'A block' }]]);          // second topic: blocks
       (client.callAPI as any).mockResolvedValue([]);
@@ -296,6 +297,26 @@ describe('getContextForQuery', () => {
       expect(result.warnings).toHaveLength(1);
       expect(result.warnings[0]).toMatchObject({ code: 'topic_not_found', topic: 'Missing Topic' });
       expect(result.summary.totalTopics).toBe(1);
+    });
+
+    it('skips an ambiguous topic with an ambiguous_page warning that lists the candidates', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([
+          [{ id: 1, name: 'project atlas', 'original-name': 'Project Atlas' }, 'alias'],
+          [{ id: 3, name: 'atlas cafe', 'original-name': 'Atlas Cafe' }, 'alias']
+        ])                                                                   // first topic: alias shared by two pages
+        .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])  // second topic: page
+        .mockResolvedValueOnce([[{ id: 20, content: 'A block' }]]);          // second topic: blocks
+      (client.callAPI as any).mockResolvedValue([]);
+
+      const result = await getContextForQuery(client, 'Compare [[Atlas]] and [[Beta]]');
+
+      expect(result.contexts.map(c => c.topic)).toEqual(['Beta']);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toMatchObject({ code: 'ambiguous_page', topic: 'Atlas' });
+      expect(result.warnings[0].candidates?.map(c => c.name)).toEqual(['atlas cafe', 'project atlas']);
+      expect(result.hasMore).toBe(false);
     });
 
     it.each(allErrors)('propagates %s from the per-topic context build', async (_name, makeError) => {
