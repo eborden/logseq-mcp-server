@@ -18,7 +18,15 @@ test: `src/utils/resolve-page.test.ts`
 test: `src/index.page-resolution.test.ts`
 reviewer: A new page-taking tool resolves its page name with `requirePage` (`src/utils/resolve-page.ts`), not `getPage`.
 
-Known gap: #69 tracks link-following tools that don't resolve aliases yet.
+Link-following tools are alias-aware too (#69, #92): references written under any name of a page's alias group count as references to that page. These tests pin it per tool:
+
+test: `src/tools/get-backlinks.aliases.test.ts`
+test: `src/tools/build-context.aliases.test.ts`
+test: `src/tools/get-concept-evolution.aliases.test.ts`
+test: `src/tools/get-concept-network.aliases.test.ts`
+test: `src/tools/get-context-for-query.aliases.test.ts`
+test: `src/tools/query-by-date-range.aliases.test.ts`
+test: `src/tools/search-by-relationship.aliases.test.ts`
 
 ## Changelog
 
