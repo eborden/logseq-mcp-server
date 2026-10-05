@@ -113,9 +113,22 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     find('boolean', v => typeof v === 'boolean', v => String(v));
     find('one-element set', v => Array.isArray(v) && v.length === 1, v => String(v[0]));
     find('multi-element set, one element', v => Array.isArray(v) && v.length > 1, v => String(v[0]));
-    find('camelCase key', v => v !== undefined, v => String(v));
-    const camel = cases.find(c => c.label === 'camelCase key');
-    if (camel && !/[A-Z]/.test(camel.key)) cases.splice(cases.indexOf(camel), 1);
+
+    // A dashed key (`created-by::`) comes back from the Editor API camelCased
+    // (`createdBy`). Scan every crawled block rather than stopping at the first
+    // key seen, and pick the smallest (key, value) pair, so the choice does not
+    // depend on page order (#83).
+    const camelCandidates: Case[] = [];
+    for (const block of withProps) {
+      for (const [key, v] of Object.entries<any>(block.properties!)) {
+        if (!queryable.test(key) || !/[A-Z]/.test(key)) continue;
+        const value = Array.isArray(v) ? v[0] : v;
+        if (!['string', 'number', 'boolean'].includes(typeof value) || String(value) === '') continue;
+        camelCandidates.push({ label: 'camelCase key', key, value: String(value) });
+      }
+    }
+    camelCandidates.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
+    if (camelCandidates.length > 0) cases.push(camelCandidates[0]);
   }, 180_000);
 
   it('discovers properties to test with', () => {
@@ -239,9 +252,14 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
 
   it('accepts the stored dashed key and the camelCase key the Editor API returns', async () => {
     const camel = cases.find(c => c.label === 'camelCase key');
-    expect(camel, 'No property with a dashed name found. Add one, for example created-by:: Alice').toBeDefined();
+    expect(
+      camel,
+      'No block in the graph has a property with a dashed name. Add one, for example created-by:: Alice. ' +
+        'See tests/integration/setup.md'
+    ).toBeDefined();
     const { key, value } = camel!;
     const dashed = key.replace(/([A-Z])/g, '-$1').toLowerCase();
+    expect(dashed).toContain('-');
 
     const a = (await queryByProperty(client, key, value)) as BlockEntity[];
     const b = (await queryByProperty(client, dashed, value)) as BlockEntity[];
