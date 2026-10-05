@@ -38,7 +38,15 @@ export function truncationWarning(
  * Extra MCP content blocks that carry `meta` for a tool whose result is a bare
  * array. The array stays the first block, unchanged; `{ "meta": ... }` follows
  * as a second block. Empty when there is no meta (e.g. a null API response).
+ *
+ * `tips` (#44) ride in the same block as `meta.tips`. Tools whose result is an
+ * object, or has no meta at all, get a block holding only `{ "meta": { "tips": [...] } }`.
+ * With neither meta nor tips there is no extra block.
  */
-export function metaContent(meta: ResultMeta | null): Array<{ type: 'text'; text: string }> {
-  return meta ? [{ type: 'text', text: JSON.stringify({ meta }) }] : [];
+export function metaContent(
+  meta: ResultMeta | Pick<ResultMeta, 'tips'> | null,
+  tips: readonly string[] = []
+): Array<{ type: 'text'; text: string }> {
+  const merged = tips.length > 0 ? { ...meta, tips: [...tips] } : meta;
+  return merged ? [{ type: 'text', text: JSON.stringify({ meta: merged }) }] : [];
 }

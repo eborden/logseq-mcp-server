@@ -42,10 +42,15 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
       throw new Error('Configuration validation failed: timeoutMs must be a positive finite number');
     }
 
+    if (config.tips !== undefined && typeof config.tips !== 'boolean') {
+      throw new Error('Configuration validation failed: tips must be a boolean');
+    }
+
     return {
       apiUrl,
       authToken: config.authToken,
-      ...(config.timeoutMs !== undefined && { timeoutMs: config.timeoutMs })
+      ...(config.timeoutMs !== undefined && { timeoutMs: config.timeoutMs }),
+      ...(config.tips !== undefined && { tips: config.tips })
     };
   } catch (error) {
     // Re-throw validation errors as-is
@@ -64,4 +69,20 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
     // Re-throw other errors
     throw error;
   }
+}
+
+/**
+ * Whether next-step tips (#44) are on. They are on by default; `"tips": false` in
+ * the config file or `LOGSEQ_MCP_TIPS` set to `0`, `false`, `off` or `no` turns
+ * them off. The environment variable wins, so a host can override the file.
+ */
+export function resolveTipsEnabled(
+  config: Pick<LogseqMCPConfig, 'tips'>,
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  const flag = env.LOGSEQ_MCP_TIPS?.trim().toLowerCase();
+  if (flag !== undefined && flag !== '') {
+    return !['0', 'false', 'off', 'no'].includes(flag);
+  }
+  return config.tips !== false;
 }

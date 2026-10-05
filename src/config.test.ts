@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { loadConfig } from './config.js';
+import { loadConfig, resolveTipsEnabled } from './config.js';
 import { mkdir, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -117,5 +117,46 @@ describe('loadConfig', () => {
 
       await expect(loadConfig(configPath)).rejects.toThrow(/timeoutMs must be a positive finite number/);
     });
+  });
+
+  describe('tips', () => {
+    const base = { authToken: 'test-token-123' };
+
+    it('leaves tips undefined when omitted, and accepts a boolean', async () => {
+      await writeFile(configPath, JSON.stringify(base));
+      expect((await loadConfig(configPath)).tips).toBeUndefined();
+
+      await writeFile(configPath, JSON.stringify({ ...base, tips: false }));
+      expect((await loadConfig(configPath)).tips).toBe(false);
+    });
+
+    it('rejects a tips value that is not a boolean', async () => {
+      await writeFile(configPath, JSON.stringify({ ...base, tips: 'off' }));
+      await expect(loadConfig(configPath)).rejects.toThrow(/tips must be a boolean/);
+    });
+  });
+});
+
+describe('resolveTipsEnabled', () => {
+  it('is on by default', () => {
+    expect(resolveTipsEnabled({}, {})).toBe(true);
+  });
+
+  it('turns off with tips: false in the config', () => {
+    expect(resolveTipsEnabled({ tips: false }, {})).toBe(false);
+    expect(resolveTipsEnabled({ tips: true }, {})).toBe(true);
+  });
+
+  it.each(['0', 'false', 'OFF', ' no '])('turns off with LOGSEQ_MCP_TIPS=%s', value => {
+    expect(resolveTipsEnabled({}, { LOGSEQ_MCP_TIPS: value })).toBe(false);
+  });
+
+  it('lets the environment override the config file in both directions', () => {
+    expect(resolveTipsEnabled({ tips: false }, { LOGSEQ_MCP_TIPS: '1' })).toBe(true);
+    expect(resolveTipsEnabled({ tips: true }, { LOGSEQ_MCP_TIPS: 'off' })).toBe(false);
+  });
+
+  it('ignores an empty variable', () => {
+    expect(resolveTipsEnabled({ tips: false }, { LOGSEQ_MCP_TIPS: '' })).toBe(false);
   });
 });
