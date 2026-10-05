@@ -10,6 +10,9 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 ### Added
 
+- **`format: "markdown"`** on `get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` (#43). The default stays `"json"`. Markdown is one plain text block: page properties, blocks as indented bullets with `((uuid))` refs kept, related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. About 45-85% fewer bytes than the JSON.
+- **`compact`** on `build_context` and `get_context_for_query` (#43): block snippets (first line, 80 characters) and uuids instead of block bodies, in JSON and in Markdown.
+- **`logseq_get_page_outline`** (#43): a page's top-level blocks as `{ uuid, snippet, childCount }`, in two Datalog calls. Read the blocks you pick with `get_block`. Resolves aliases, ISO dates and ambiguous names like the other page tools.
 - **npm package.** `npx -y logseq-mcp-server` works: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 22.12 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
 - **MCP prompts**: `weekly_summary`, `monthly_summary`, `continue_on`, `what_do_i_know` and `prioritize_tasks`. Each tells the model which tools to call and what limits to keep, and defers to the `logseq-skills` workflow when the host has it (#46).
 - **MCP resources**: `logseq://guide` (the reading guide) and the `logseq://page/{name}` template (a page as Markdown text). Both are read-only (#46).
@@ -38,7 +41,8 @@ Nothing has been published to npm yet, so there is no released version to compar
 - `get_concept_network` is a capped breadth-first search: journal pages are leaves unless `expand_journals` is set, and `truncated` is set whenever a cap bites.
 - Strings reach LogSeq as EDN-encoded `:in` inputs rather than being embedded in query text.
 - Tool descriptions were rewritten to fit a 400-character cap.
-- Tools are consolidated at 14 (an earlier redundant timeline tool and an incomplete related-pages tool were removed).
+- The `logseq://page/{name}` resource now renders through the shared Markdown renderer and starts with the page's properties (#43).
+- Tools are consolidated at 15 (an earlier redundant timeline tool and an incomplete related-pages tool were removed).
 
 ### Fixed
 

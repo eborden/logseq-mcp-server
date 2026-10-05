@@ -1,18 +1,18 @@
 # LogSeq MCP Tools Reference
 
-Complete documentation for all 13 LogSeq MCP tools organized by category.
+Complete documentation for the LogSeq MCP tools organized by category. The server has 15 tools; `logseq_get_graph_info` (graph name and path) is the one not covered below.
 
 ## Tool Categories Overview
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
-| Basic Tools | 6 tools | Core search, retrieval, and property queries |
+| Basic Tools | 7 tools | Core search, retrieval, and property queries |
 | Graph Traversal | 1 tool | Network visualization and relationship discovery |
 | Semantic Search | 1 tool | Topic-based relationship queries |
 | Context Building | 3 tools | Comprehensive multi-source context aggregation, and what the user is looking at |
 | Temporal Query | 2 tools | Time-based analysis and journal queries |
 
-## Basic Tools (6 tools)
+## Basic Tools (7 tools)
 
 ### logseq_search_blocks
 
@@ -46,16 +46,43 @@ Get complete page content with all properties and blocks.
 **Parameters:**
 - `page_name` (required): Name of the page (case-insensitive)
 - `include_children` (optional): Include nested child blocks (default: true)
+- `format` (optional): `json` (default) or `markdown`. Markdown is plain text: page properties as `key:: value` lines, then blocks as tab-indented `- ` bullets with `((uuid))` refs kept, then a short footer for warnings and tips. About 80% smaller than JSON on a long page.
 
 **Use when:**
 - Deep dive into specific page
 - Need full page structure
 - Following up after search
 
+**For a long page:** call `logseq_get_page_outline` first, then `logseq_get_block` on the blocks you pick.
+
 **Example:**
 ```
 logseq_get_page("React")
 logseq_get_page("Project Alpha", include_children=true)
+```
+
+---
+
+### logseq_get_page_outline
+
+List a page's top-level blocks without their bodies: the shape of the page, to choose from.
+
+**Parameters:**
+- `page_name` (required): Page name, alias, or ISO date (`2025-01-01`) for a journal
+
+**Returns:** `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`. `snippet` is the first line, cut to 80 characters. `childCount` counts direct children only. Capped at 200 top-level blocks; a longer page gets an `outline_truncated` warning that names `logseq_get_page` for the rest.
+
+**Cost:** 2 Datalog calls however long the page is. About 98% smaller than `get_page` with children on a long page.
+
+**Use when:**
+- A page is long and you need only parts of it
+- Deciding which blocks to read
+
+**Next:** `logseq_get_block(block_uuid, include_children=true)` on the blocks you picked.
+
+**Example:**
+```
+logseq_get_page_outline("Project Alpha")  # → logseq_get_block(blocks[2].uuid, include_children=true)
 ```
 
 ---
@@ -88,6 +115,7 @@ Get specific block by UUID with optional children.
 **Parameters:**
 - `block_uuid` (required): UUID of the block
 - `include_children` (optional): Include nested child blocks (default: true)
+- `format` (optional): `json` (default) or `markdown`, a `# Block ((uuid))` heading and the block with its children as bullets
 
 **Use when:**
 - Have UUID from search results
@@ -164,6 +192,7 @@ Build graph network with nodes (pages) and edges (connections).
 **Parameters:**
 - `concept_name` (required): Root page name
 - `max_depth` (optional): Maximum traversal depth (default: 2, max: 3)
+- `format` (optional): `json` (default) or `markdown`: pages grouped by depth, then one line per link (`A -> B (n)`, `A <- B (n)` or `A <-> B (out/in)`). About 45% smaller.
 
 **Returns:**
 - `nodes`: Array of pages with depth information
@@ -229,6 +258,8 @@ Gather comprehensive context for a topic in a single call. **This is often the o
 - `max_blocks` (optional): Maximum blocks to return (default: 50, **recommend: 20**)
 - `max_related_pages` (optional): Maximum related pages (default: 10)
 - `max_references` (optional): Maximum reference blocks (default: 20)
+- `format` (optional): `json` (default) or `markdown`. Markdown shows the blocks as a tree, related pages as links, and references grouped by source page, with truncation warnings in a footer. About 75% smaller.
+- `compact` (optional): Block snippets (first line, 80 characters) with their uuids instead of block bodies. In JSON each block becomes `{ uuid, snippet }`; `summary`, `totals`, `warnings` and `hasMore` are kept. Read the blocks you want with `logseq_get_block`. Worth it when blocks are long; for short blocks the uuids cost about as much as the text. Skips `resolve_refs`.
 
 **Context cost:** ~3-8k tokens depending on limits. Still cheaper than manual aggregation.
 
@@ -262,6 +293,8 @@ Parse natural language query and build context automatically.
 - `query` (required): Natural language question
 - `max_topics` (optional): Maximum topics to extract (default: 3)
 - `max_search_results` (optional): Maximum search results per topic (default: 10)
+- `format` (optional): `json` (default) or `markdown` (each topic as a section)
+- `compact` (optional): Block snippets and uuids instead of bodies, as for `build_context`
 
 **How it works:**
 1. Extracts topics from `[[page references]]` and `#tags`
@@ -490,9 +523,9 @@ All temporal queries use **YYYYMMDD format:**
 
 ## Summary
 
-14 MCP tools. The 13 below are organized into 5 categories; `logseq_get_graph_info` (graph name and path) is the 14th:
+15 MCP tools. The 14 below are organized into 5 categories; `logseq_get_graph_info` (graph name and path) is the 15th:
 
-1. **Basic Tools (6)** - Core search, retrieval, property queries
+1. **Basic Tools (7)** - Core search, retrieval, page outline, property queries
 2. **Graph Traversal (1)** - Network visualization
 3. **Semantic Search (1)** - Relationship-based queries
 4. **Context Building (3)** - Comprehensive aggregation and current UI context

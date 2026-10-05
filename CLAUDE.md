@@ -104,10 +104,10 @@ Done by whoever merges:
 
 ## Overview
 
-This is an MCP (Model Context Protocol) server that provides Claude with 14 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
+This is an MCP (Model Context Protocol) server that provides Claude with 15 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
 
 **Key Stats:**
-- 14 MCP tools for graph operations, search, and temporal queries
+- 15 MCP tools for graph operations, search, and temporal queries
 - Unit tests (`npx vitest run src`) plus integration tests against a live graph (`npm run test:integration`). `npm test` runs both.
 - Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see "Current Implementation Status" below)
 
@@ -139,11 +139,13 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 | `search_blocks` | 1 | ~0.1s | One case-insensitive regex query. Was ~130 calls, or ~2k for a search with no match (#4) |
 | `query_by_date_range` (7 days) | 2 | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5) |
 | `get_page` | 1 | ~0.01s | Exact name of a page with a file: `Editor.getPage` alone, no resolver query (2 with children). An alias, ISO date, namespace leaf, file-less stub or miss adds one resolver query: 3 for an alias or date, 4 for a miss (first lookup, resolve, leaf, `getAllPages`) (#41) |
+| `get_page_outline` | 2 | ~0.05s | 1 resolver query + 1 query for the page's top-level blocks and their direct children, so child counts need no call per block. An alias or ISO date costs the same 2; a namespace leaf adds 1, a miss adds the suggestion lookup. Capped at 200 blocks (#43) |
 | `get_backlinks` | 2 | ~0.2s | 1 resolver query + 1 linked-references call. Was 1 before page resolution (#41) |
 | `get_concept_evolution` | 4 | ~0.1s | 1 resolver query + page tree + page + 1 mentions query. Was 3 before page resolution (#41) |
 | `search_by_relationship` | 3 | ~0.05s | `references` / `in-pages-linking-to`: 2 resolver queries (run in parallel; 1 when both topics are the same name) + 1 query. Was 1 before page resolution (#41, #7). `connected-within` is O(maxDistance): 2 resolver queries, then 1 per hop, and the resolved ids seed the BFS |
 | `query_by_property` | 1 | ~0.02s | One query over `:block/properties`, page name inline. Blocks are flat (no `children`). Was ~2k calls, ~10s (#33) |
 | `resolve_refs: true` on `get_block`, `get_page` (with children), `build_context`, `query_by_date_range` | +0 to +2 | ~0.03-0.1s | Opt-in (#18). One batched query per nesting level, depth 2: +1 when the refs point at plain blocks, +2 when those hold refs of their own, +0 when nothing in the result has a ref. Same cost for 1 day or 30. Off: calls and output unchanged |
+| `format: "markdown"` on `get_page`, `get_block`, `build_context`, `get_context_for_query`, `get_concept_network` | +0 | | Rendering only, no extra call. About 45-85% fewer bytes than the JSON (a long page ~80%, `build_context` ~75-80%, a depth-2 network ~45%). `compact` on `build_context` and `get_context_for_query` also saves calls: it skips `resolve_refs` (#43) |
 | `get_current_context` | 3-4 | ~0.01s | 3 Editor calls (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`) + 1 Datalog pull by `:db/id` only when a block's page isn't the open page (#15) |
 
 Re-run the script after changing any of these tools, and update this table.
@@ -541,7 +543,7 @@ Use one Datalog query, filtering in the query with `includes?` / `re-find` / `ge
 - **Commits:**
   - 9642558 "refactor: remove redundant get_entity_timeline tool"
   - 34a699a "refactor: remove incomplete get_related_pages tool"
-- Later work added tools back. There are 14 registered in `src/index.ts` today.
+- Later work added tools back. There are 15 registered in `src/index.ts` today.
 
 ### Phase 6: Comparison With Other PKM MCP Servers (Oct 2026)
 - Reviewed 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers
@@ -621,7 +623,10 @@ Quick reference checklist for future work:
 - [ ] Prompts and resources (#46) live in `src/prompts.ts` and `src/resources.ts`; `index.ts` only declares the capabilities and calls `registerPrompts` and `registerResources`. Both are read-only. A prompt returns one short user message naming the tools to call, defers to the `logseq-skills` workflow rather than copying it, quotes any argument it embeds, and rejects unknown or malformed arguments as `InvalidParams`. Tests check that a prompt names only existing tools, so a tool rename fails them. `serverInfo.version` is read from `package.json` (`src/version.ts`), and a test keeps `.claude-plugin/plugin.json` on the same version.
 - [ ] Publishing (#46) is manual: `.github/workflows/publish.yml` runs only on `workflow_dispatch`, needs the `NPM_TOKEN` secret, and defaults to a dry run. Never publish, tag or release from a session.
 - [ ] Slim output is the default (#42). `search_blocks`, `query_by_property` and `query_by_date_range` take `slim_results`, default `true` (`wantsSlim`, `DEFAULT_SLIM_RESULTS` in `src/utils/slim-entities.ts`); only an explicit `false` returns full entities. The tool functions themselves still default to full, so internal callers (e.g. `get_context_for_query`'s keyword search) are unchanged. Slim blocks leave out empty fields: a blank `pageName`, properties with no value (`false` and `0` stay), empty `context.references` / `context.tags`. `uuid` and `content` always stay. Children never carry `pageName`, and neither do blocks inside a date-range entry (the entry has it). `hasMore`, `warnings` and `totals` in meta stay even when empty, because `hasMore: false` is the "nothing was cut" signal (#40). `get_page`, `get_block`, `build_context` and the rest have no slim mode.
-- [ ] Tool results are minified JSON (`JSON.stringify(result)` with no spacing argument). `src/index.minified.test.ts` fails if any handler adds layout whitespace. Pretty output would need an opt-in parameter and an exemption there.
+- [ ] Output format (#43). `get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` take `format: "json" | "markdown"` (default `json`, unchanged). Markdown is one plain text content block, not JSON-escaped, rendered by the one shared renderer in `src/utils/markdown.ts` (`markdown-context.ts` for the context and network tools). `logseq://page/{name}` renders through the same `renderPage`: never add a second renderer. Layout: page properties as `key:: value`, blocks as tab-indented `- ` bullets, `((uuid))` refs untouched, `resolvedContent` on a `[resolved]` line under its block, related pages as `[[links]]`, references grouped by source page, and a footer after `---` for `warnings`, `hasMore` and tips (tips ride in the footer, not a second content block). An ambiguous name stays a structured JSON result in both formats; errors stay JSON `{error}`. `format` and `compact` are parsed at the boundary (`parseFormat`, `parseCompact`) and reject bad values with `InvalidParameterError`. Markdown renders the full result, uncapped except the resource's `MAX_PAGE_CHARS`.
+- [ ] `compact` (#43) exists on `build_context` and `get_context_for_query` only: block bodies become a first-line snippet (`firstLineSnippet`, 80 characters) plus the block's `((uuid))`; in JSON a block is `{ uuid, snippet }` and pages are `{ id, name, originalName }` (`src/utils/compact.ts`). `summary`, `totals`, `warnings` and `hasMore` stay. It is off for `get_page` and `get_block` (the outline tool covers that), and for `get_concept_network`, which already carries no bodies. Compact skips `resolve_refs`. For blocks shorter than the uuid, compact can be larger than the full markdown; it pays off on long blocks.
+- [ ] `logseq_get_page_outline` (#43): top-level `{ uuid, snippet, childCount }` (direct children only), in two calls. The query (`DatalogQueryBuilder.pageOutlineBlocks`) binds the resolved page id and returns the top-level blocks plus their direct children in one `or-join`; the tool counts children per parent in TypeScript and orders siblings by the `:block/left` chain. Capped at `MAX_OUTLINE_BLOCKS` (200) with an `outline_truncated` warning and no `howToFetchAll` (an outline cannot be paged; `hasMore` stays false). It is the step before `get_block` in the server `instructions`.
+- [ ] Tool results are minified JSON (`JSON.stringify(result)` with no spacing argument). `src/index.minified.test.ts` fails if any handler adds layout whitespace. `format: "markdown"` is the opt-in plain text exception (#43). Pretty output would need an opt-in parameter and an exemption there.
 - [ ] Never write to stdout (`console.log`). It's the MCP stdio channel; log with `console.error`.
 
 ---
@@ -726,7 +731,7 @@ Measured numbers are in "Current Implementation Status" under "Why Datalog?". Re
 ```bash
 npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
 npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
-npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42); bytes only, no names
+npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42), markdown and compact vs json (#43); bytes only, no names
 ```
 
 The earlier figures here (3 calls for `get_concept_network` at depth 2, 7 for `get_context_for_query`) came from 5-10 page test graphs and don't reflect the current code.
@@ -742,9 +747,15 @@ src/
 │   └── queries.ts                 - DatalogQueryBuilder with all query templates
 ├── tools/
 │   ├── build-context.ts           - Two-query pattern (page + blocks)
+│   ├── get-page-outline.ts        - Top-level blocks, snippets and child counts
 │   ├── get-concept-network.ts     - Batched BFS with caps (Pattern 2)
 │   ├── search-by-relationship.ts  - Relationship search
 │   └── [10 other tools]
+├── utils/
+│   ├── markdown.ts                - The one Markdown renderer (pages, blocks, footer); used by the page resource too
+│   ├── markdown-context.ts        - Markdown for build_context, get_context_for_query, get_concept_network
+│   ├── compact.ts                 - compact JSON; snippet.ts has firstLineSnippet
+│   └── output-format.ts           - parseFormat / parseCompact
 └── types.ts                       - TypeScript interfaces
 
 tests/
@@ -755,7 +766,7 @@ tests/
 scripts/
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live graph
 ├── measure-api-calls.ts           - Counts API calls per tool against a live graph
-└── measure-output-size.ts         - Output bytes per tool, slim vs full, through the MCP server
+└── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
 
 skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
 .claude-plugin/                    - plugin.json + marketplace.json (server declared inline in plugin.json)
@@ -793,7 +804,7 @@ npx tsx scripts/probe-constraints.ts
 # Count API calls per tool against the live graph (read-only)
 npx tsx scripts/measure-api-calls.ts
 
-# Output size per tool, slim vs full (read-only; prints byte counts only)
+# Output size per tool: slim vs full, markdown and compact vs json (read-only; prints byte counts only)
 npx tsx scripts/measure-output-size.ts
 
 # Debug Datalog query
