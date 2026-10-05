@@ -9,7 +9,7 @@ The LogSeq instance this server is developed against is the maintainer's **perso
 - Block content, quotes or paraphrases of what the graph says
 - People's names (journals mention real colleagues, friends and family)
 - Dates of specific journal entries, or anything that reveals what happened on a given day
-- Raw output from `scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts` or integration-test runs. Their output includes real page names.
+- Raw output from `scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`, `scripts/measure-output-size.ts` or integration-test runs. Their output includes real page names.
 
 **Do instead:**
 - Use made-up examples: `"Alice"`, `"Bob"`, `"my page"`, `"project atlas"`, `"20250101"`.
@@ -619,6 +619,8 @@ Quick reference checklist for future work:
 - [ ] Guidance for the model (#44) lives outside the tools. Server `instructions` are in `src/instructions.ts`. Next-step tips are built by `buildTips` (`src/utils/tips.ts`) into `meta.tips`, never into a tool's result, with suggested args from `JSON.stringify`; `"tips": false` in the config file or `LOGSEQ_MCP_TIPS=off` disables them. Parameter aliases (`src/utils/param-aliases.ts`) are handler-only, unadvertised, and only for parameters that mean exactly the same; a conflicting alias and canonical value throws `InvalidParameterError`. Aliases are best-effort, not a contract: a client that validates against `inputSchema` rejects an alias-only call before it reaches the server, and the model never sees them. They are no substitute for canonical names; tips and docs always use the canonical name, and a test pins that it stays `required`. Every tool description needs a "Can't find" line.
 - [ ] Prompts and resources (#46) live in `src/prompts.ts` and `src/resources.ts`; `index.ts` only declares the capabilities and calls `registerPrompts` and `registerResources`. Both are read-only. A prompt returns one short user message naming the tools to call, defers to the `logseq-skills` workflow rather than copying it, quotes any argument it embeds, and rejects unknown or malformed arguments as `InvalidParams`. Tests check that a prompt names only existing tools, so a tool rename fails them. `serverInfo.version` is read from `package.json` (`src/version.ts`), and a test keeps `.claude-plugin/plugin.json` on the same version.
 - [ ] Publishing (#46) is manual: `.github/workflows/publish.yml` runs only on `workflow_dispatch`, needs the `NPM_TOKEN` secret, and defaults to a dry run. Never publish, tag or release from a session.
+- [ ] Slim output is the default (#42). `search_blocks`, `query_by_property` and `query_by_date_range` take `slim_results`, default `true` (`wantsSlim`, `DEFAULT_SLIM_RESULTS` in `src/utils/slim-entities.ts`); only an explicit `false` returns full entities. The tool functions themselves still default to full, so internal callers (e.g. `get_context_for_query`'s keyword search) are unchanged. Slim blocks leave out empty fields: a blank `pageName`, properties with no value (`false` and `0` stay), empty `context.references` / `context.tags`. `uuid` and `content` always stay. Children never carry `pageName`, and neither do blocks inside a date-range entry (the entry has it). `hasMore`, `warnings` and `totals` in meta stay even when empty, because `hasMore: false` is the "nothing was cut" signal (#40). `get_page`, `get_block`, `build_context` and the rest have no slim mode.
+- [ ] Tool results are minified JSON (`JSON.stringify(result)` with no spacing argument). `src/index.minified.test.ts` fails if any handler adds layout whitespace. Pretty output would need an opt-in parameter and an exemption there.
 - [ ] Never write to stdout (`console.log`). It's the MCP stdio channel; log with `console.error`.
 
 ---
@@ -723,6 +725,7 @@ Measured numbers are in "Current Implementation Status" under "Why Datalog?". Re
 ```bash
 npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
 npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
+npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42); bytes only, no names
 ```
 
 The earlier figures here (3 calls for `get_concept_network` at depth 2, 7 for `get_context_for_query`) came from 5-10 page test graphs and don't reflect the current code.
@@ -750,7 +753,8 @@ tests/
 
 scripts/
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live graph
-└── measure-api-calls.ts           - Counts API calls per tool against a live graph
+├── measure-api-calls.ts           - Counts API calls per tool against a live graph
+└── measure-output-size.ts         - Output bytes per tool, slim vs full, through the MCP server
 
 skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
 .claude-plugin/                    - plugin.json + marketplace.json (server declared inline in plugin.json)
@@ -787,6 +791,9 @@ npx tsx scripts/probe-constraints.ts
 
 # Count API calls per tool against the live graph (read-only)
 npx tsx scripts/measure-api-calls.ts
+
+# Output size per tool, slim vs full (read-only; prints byte counts only)
+npx tsx scripts/measure-output-size.ts
 
 # Debug Datalog query
 npx tsx scripts/test-datalog-query.ts
