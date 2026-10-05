@@ -1,0 +1,197 @@
+import { describe, it, expect, vi } from 'vitest';
+import {
+  MAX_ALIAS_SET_SIZE,
+  aliasIds,
+  aliasNames,
+  aliasSetWarnings,
+  hasAliasLinks,
+  hasAliases,
+  resolveAliasSet,
+  resolveAliasSetByName,
+  resolveAliasSets,
+  resolvedAliases,
+  singleAliasSet
+} from './alias-set.js';
+import { LogseqClient } from '../client.js';
+import { LogSeqTimeoutError } from '../errors.js';
+
+// Synthetic fixture modelled on the issue: "Jordan" declares `alias:: Jordan Rivera`
+const jordan = { id: 1, name: 'jordan', 'original-name': 'Jordan', alias: [{ id: 2 }] };
+const jordanRivera = { id: 2, name: 'jordan rivera', 'original-name': 'Jordan Rivera', alias: [{ id: 1 }] };
+const plainPage = { id: 9, name: 'alice', 'original-name': 'Alice' };
+
+const member = (page: { id: number; name: string; 'original-name': string }) => ({
+  id: page.id,
+  name: page.name,
+  'original-name': page['original-name']
+});
+
+function fakeClient(rows: unknown[] | (() => Promise<unknown[]>)) {
+  const executeDatalogQuery = vi.fn(async () => (typeof rows === 'function' ? rows() : rows));
+  return { client: { executeDatalogQuery } as unknown as LogseqClient, executeDatalogQuery };
+}
+
+describe('hasAliasLinks', () => {
+  it('is true only for a page that carries :block/alias', () => {
+    expect(hasAliasLinks(jordan)).toBe(true);
+    expect(hasAliasLinks(plainPage)).toBe(false);
+    expect(hasAliasLinks({ ...plainPage, alias: [] })).toBe(false);
+    expect(hasAliasLinks(null)).toBe(false);
+  });
+});
+
+describe('resolveAliasSets', () => {
+  it('makes no API call for a page without aliases', async () => {
+    const { client, executeDatalogQuery } = fakeClient([]);
+
+    const set = await resolveAliasSet(client, plainPage);
+
+    expect(executeDatalogQuery).not.toHaveBeenCalled();
+    expect(aliasIds(set)).toEqual([9]);
+    expect(hasAliases(set)).toBe(false);
+    expect(resolvedAliases(set)).toEqual({});
+  });
+
+  it('unions the page with its aliases in one query, the page asked about first', async () => {
+    const { client, executeDatalogQuery } = fakeClient([
+      [1, member(jordanRivera)],
+      [1, member(jordan)]
+    ]);
+
+    const set = await resolveAliasSet(client, jordan);
+
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+    expect(aliasIds(set)).toEqual([1, 2]);
+    expect(aliasNames(set)).toEqual(['jordan', 'jordan rivera']);
+    expect(resolvedAliases(set)).toEqual({ resolvedAliases: ['Jordan', 'Jordan Rivera'] });
+  });
+
+  it('gives the same members whichever name of the group is the start', async () => {
+    const fromJordan = await resolveAliasSet(
+      fakeClient([[1, member(jordan)], [1, member(jordanRivera)]]).client,
+      jordan
+    );
+    const fromRivera = await resolveAliasSet(
+      fakeClient([[2, member(jordan)], [2, member(jordanRivera)]]).client,
+      jordanRivera
+    );
+
+    expect(aliasIds(fromJordan).sort()).toEqual(aliasIds(fromRivera).sort());
+    expect(fromRivera.members[0].id).toBe(2);
+  });
+
+  it('orders the aliases by name and drops duplicate rows', async () => {
+    const zed = { id: 5, name: 'zed', 'original-name': 'Zed' };
+    const amy = { id: 4, name: 'amy', 'original-name': 'Amy' };
+    const { client } = fakeClient([
+      [1, member(zed)], [1, member(amy)], [1, member(zed)], [1, member(jordan)]
+    ]);
+
+    const set = await resolveAliasSet(client, jordan);
+
+    expect(aliasNames(set)).toEqual(['jordan', 'amy', 'zed']);
+  });
+
+  it('terminates on an alias cycle: the rows are a finite set and the start is not repeated', async () => {
+    // A -> B -> C -> A, reported from A with every page appearing once per path
+    const b = { id: 2, name: 'b', 'original-name': 'B' };
+    const c = { id: 3, name: 'c', 'original-name': 'C' };
+    const a = { id: 1, name: 'a', 'original-name': 'A', alias: [{ id: 2 }, { id: 3 }] };
+    const { client, executeDatalogQuery } = fakeClient([
+      [1, member(a)], [1, member(b)], [1, member(c)], [1, member(a)], [1, member(b)]
+    ]);
+
+    const set = await resolveAliasSet(client, a);
+
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+    expect(aliasIds(set)).toEqual([1, 2, 3]);
+  });
+
+  it('keeps the start page when the query reports no rows for a linked page', async () => {
+    const { client } = fakeClient([]);
+
+    const set = await resolveAliasSet(client, jordan);
+
+    expect(aliasIds(set)).toEqual([1]);
+    expect(hasAliases(set)).toBe(false);
+  });
+
+  it('answers several pages with one query and queries only the pages that have aliases', async () => {
+    const { client, executeDatalogQuery } = fakeClient([
+      [1, member(jordan)], [1, member(jordanRivera)]
+    ]);
+
+    const [a, b] = await resolveAliasSets(client, [jordan, plainPage]);
+
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+    const [query] = executeDatalogQuery.mock.calls[0] as unknown as [string];
+    expect(query).toContain('[(ground [1]) [?start ...]]');
+    expect(aliasIds(a)).toEqual([1, 2]);
+    expect(aliasIds(b)).toEqual([9]);
+  });
+
+  it('queries a page once when it is passed twice', async () => {
+    const { client, executeDatalogQuery } = fakeClient([[1, member(jordan)], [1, member(jordanRivera)]]);
+
+    await resolveAliasSets(client, [jordan, jordan]);
+
+    const [query] = executeDatalogQuery.mock.calls[0] as unknown as [string];
+    expect(query).toContain('[(ground [1]) [?start ...]]');
+  });
+
+  it('cuts a group above the maximum, keeps the start and says so', async () => {
+    const rows = Array.from({ length: MAX_ALIAS_SET_SIZE + 5 }, (_, i) => [
+      1,
+      { id: 100 + i, name: `n${String(i).padStart(3, '0')}`, 'original-name': `N${i}` }
+    ]);
+    const { client } = fakeClient(rows);
+
+    const set = await resolveAliasSet(client, jordan);
+
+    expect(set.members).toHaveLength(MAX_ALIAS_SET_SIZE);
+    expect(set.members[0].id).toBe(1);
+    expect(set.truncated).toBe(true);
+    const [warning] = aliasSetWarnings(set);
+    expect(warning.code).toBe('alias_set_truncated');
+    expect(warning.howToFetchAll).toBeUndefined();
+  });
+
+  it('reports no warning for a group within the maximum', async () => {
+    const set = await resolveAliasSet(fakeClient([[1, member(jordanRivera)]]).client, jordan);
+    expect(aliasSetWarnings(set)).toEqual([]);
+  });
+
+  it('propagates an infrastructure error instead of reporting "no aliases"', async () => {
+    const { client } = fakeClient(async () => {
+      throw new LogSeqTimeoutError('http://127.0.0.1:12315', 30000);
+    });
+
+    await expect(resolveAliasSet(client, jordan)).rejects.toBeInstanceOf(LogSeqTimeoutError);
+  });
+});
+
+describe('resolveAliasSetByName', () => {
+  it('returns the group of a page that has aliases, started from the named page', async () => {
+    const { client, executeDatalogQuery } = fakeClient([
+      [member(jordanRivera), member(jordan)],
+      [member(jordanRivera), member(jordanRivera)]
+    ]);
+
+    const set = await resolveAliasSetByName(client, 'Jordan Rivera');
+
+    expect(executeDatalogQuery).toHaveBeenCalledWith(expect.any(String), 'jordan rivera');
+    expect(set && aliasNames(set)).toEqual(['jordan rivera', 'jordan']);
+  });
+
+  it('returns null when the text names no page or a page without aliases', async () => {
+    expect(await resolveAliasSetByName(fakeClient([]).client, 'migration')).toBeNull();
+  });
+});
+
+describe('singleAliasSet', () => {
+  it('holds just the page, read from either key spelling', () => {
+    expect(singleAliasSet({ 'db/id': 3, name: 'Bob', originalName: 'Bob' }).members).toEqual([
+      { id: 3, name: 'bob', originalName: 'Bob' }
+    ]);
+  });
+});
