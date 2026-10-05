@@ -1,442 +1,256 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { queryByProperty } from './query-by-property.js';
 import { LogseqClient } from '../client.js';
-import { BlockEntity } from '../types.js';
+import { InvalidParameterError } from '../errors.js';
+
+/** A block as `datascriptQuery` returns it: kebab-case keys, page inlined. */
+function pulledBlock(overrides: Record<string, any> = {}) {
+  return {
+    id: 1,
+    uuid: 'block-uuid-1',
+    content: 'Block with property',
+    format: 'markdown',
+    page: { id: 10, name: 'project atlas', 'original-name': 'Project Atlas' },
+    parent: { id: 10 },
+    left: { id: 10 },
+    properties: { status: 'active' },
+    'properties-order': ['status'],
+    'path-refs': [{ id: 10 }],
+    ...overrides
+  };
+}
 
 describe('queryByProperty', () => {
   let mockClient: LogseqClient;
+  let executeDatalogQuery: ReturnType<typeof vi.fn>;
+  let callAPI: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    mockClient = {
-      callAPI: vi.fn()
-    } as any;
+    executeDatalogQuery = vi.fn();
+    callAPI = vi.fn();
+    mockClient = { executeDatalogQuery, callAPI } as any;
   });
 
-  it('should call logseq.Editor APIs to search for blocks with property', async () => {
-    const mockPages = [
-      { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-    ];
+  describe('query', () => {
+    it('runs one Datalog query with the key and value as inputs, and never crawls', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([]);
 
-    const mockBlocks = [
-      {
+      await queryByProperty(mockClient, 'status', 'active');
+
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+      const [query, ...inputs] = executeDatalogQuery.mock.calls[0];
+      expect(query).toContain(':in $ ?key ?value');
+      expect(inputs).toEqual(['status', 'active']);
+      expect(callAPI).not.toHaveBeenCalled();
+    });
+
+    it('makes at most 2 API calls, however many blocks match', async () => {
+      executeDatalogQuery.mockResolvedValueOnce(
+        Array.from({ length: 200 }, (_, i) => [pulledBlock({ id: i + 1, uuid: `uuid-${i}` })])
+      );
+
+      await queryByProperty(mockClient, 'status', 'active', true);
+
+      expect(executeDatalogQuery.mock.calls.length + callAPI.mock.calls.length).toBeLessThanOrEqual(2);
+    });
+
+    it('accepts the camelCase spelling the Editor API uses and queries the stored key', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([]);
+
+      await queryByProperty(mockClient, 'createdBy', 'Alice');
+
+      expect(executeDatalogQuery.mock.calls[0].slice(1)).toEqual(['created-by', 'Alice']);
+    });
+
+    it('passes a multi-value element as the value (sets match on any element)', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([]);
+
+      await queryByProperty(mockClient, 'type', 'project atlas');
+
+      expect(executeDatalogQuery.mock.calls[0][0]).toContain('[(contains? ?v ?value)]');
+      expect(executeDatalogQuery.mock.calls[0].slice(1)).toEqual(['type', 'project atlas']);
+    });
+
+    it('rejects an invalid property name without calling the API', async () => {
+      await expect(queryByProperty(mockClient, 'bad name', 'x')).rejects.toThrow(InvalidParameterError);
+      await expect(queryByProperty(mockClient, 'a"]', 'x')).rejects.toThrow(InvalidParameterError);
+
+      expect(executeDatalogQuery).not.toHaveBeenCalled();
+      expect(callAPI).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('results', () => {
+    it('returns the matching block', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([[pulledBlock()]]);
+
+      const result: any = await queryByProperty(mockClient, 'status', 'active');
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
         id: 1,
         uuid: 'block-uuid-1',
         content: 'Block with property',
-        page: { id: 10 },
-        parent: { id: 10 },
-        left: { id: 10 },
-        properties: { status: 'done' }
-      }
-    ];
-
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
-
-    const result = await queryByProperty(mockClient, 'status', 'done');
-
-    expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getAllPages');
-    expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getPageBlocksTree', ['test-page']);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toEqual(mockBlocks[0]);
-  });
-
-  it('should return array of blocks matching property value', async () => {
-    const mockPages = [
-      { id: 10, uuid: 'page-uuid-1', name: 'page-1', originalName: 'Page 1' },
-      { id: 20, uuid: 'page-uuid-2', name: 'page-2', originalName: 'Page 2' }
-    ];
-
-    const mockBlocks1 = [
-      {
-        id: 1,
-        uuid: 'block-uuid-1',
-        content: 'First block',
-        page: { id: 10 },
-        parent: { id: 10 },
-        left: { id: 10 },
-        properties: { priority: 'high' }
-      }
-    ];
-
-    const mockBlocks2 = [
-      {
-        id: 2,
-        uuid: 'block-uuid-2',
-        content: 'Second block',
-        page: { id: 20 },
-        parent: { id: 20 },
-        left: { id: 20 },
-        properties: { priority: 'high' }
-      }
-    ];
-
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks1) // getPageBlocksTree for page-1
-      .mockResolvedValueOnce(mockBlocks2); // getPageBlocksTree for page-2
-
-    const result = await queryByProperty(mockClient, 'priority', 'high');
-
-    expect(result).toHaveLength(2);
-    expect(result[0].properties).toHaveProperty('priority', 'high');
-    expect(result[1].properties).toHaveProperty('priority', 'high');
-  });
-
-  it('should return empty array when no matches found', async () => {
-    const mockPages = [
-      { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-    ];
-
-    const mockBlocks = [
-      {
-        id: 1,
-        uuid: 'block-uuid-1',
-        content: 'Block without matching property',
-        page: { id: 10 },
-        parent: { id: 10 },
-        left: { id: 10 },
-        properties: { status: 'different' }
-      }
-    ];
-
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
-
-    const result = await queryByProperty(mockClient, 'status', 'nonexistent');
-
-    expect(result).toEqual([]);
-  });
-
-  it('should include page context in results', async () => {
-    const mockPages = [
-      { id: 100, uuid: 'page-uuid-1', name: 'test page', originalName: 'Test Page' }
-    ];
-
-    const mockBlocks = [
-      {
-        id: 1,
-        uuid: 'block-uuid-1',
-        content: 'Block with page context',
-        page: {
-          id: 100,
-          uuid: 'page-uuid-1',
-          name: 'test page',
-          originalName: 'Test Page'
-        },
-        parent: { id: 100 },
-        left: { id: 100 },
-        properties: { category: 'work' }
-      }
-    ];
-
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
-
-    const result = await queryByProperty(mockClient, 'category', 'work');
-
-    expect(result[0].page).toHaveProperty('id', 100);
-    expect(result[0].page).toHaveProperty('uuid', 'page-uuid-1');
-    expect(result[0].page).toHaveProperty('name', 'test page');
-  });
-
-  it('should handle blocks with multiple properties', async () => {
-    const mockPages = [
-      { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-    ];
-
-    const mockBlocks = [
-      {
-        id: 1,
-        uuid: 'block-uuid-1',
-        content: 'Block with multiple properties',
-        page: { id: 10 },
-        parent: { id: 10 },
-        left: { id: 10 },
-        properties: {
-          status: 'done',
-          priority: 'high',
-          tags: ['important', 'urgent'],
-          customField: 'value'
-        },
-        level: 2
-      }
-    ];
-
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
-
-    const result = await queryByProperty(mockClient, 'status', 'done');
-
-    expect(result[0].properties).toEqual({
-      status: 'done',
-      priority: 'high',
-      tags: ['important', 'urgent'],
-      customField: 'value'
+        properties: { status: 'active' }
+      });
     });
-    expect(result[0].level).toBe(2);
-  });
 
-  it('should handle numeric property values', async () => {
-    const mockPages = [
-      { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-    ];
+    it('returns an empty array when nothing matches', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([]);
 
-    const mockBlocks = [
-      {
-        id: 1,
-        uuid: 'block-uuid-1',
-        content: 'Block with numeric property',
-        page: { id: 10 },
-        parent: { id: 10 },
-        left: { id: 10 },
-        properties: { count: 42 }
-      }
-    ];
+      expect(await queryByProperty(mockClient, 'status', 'nonexistent')).toEqual([]);
+    });
 
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
+    it('returns null when the API returns null', async () => {
+      executeDatalogQuery.mockResolvedValueOnce(null);
 
-    const result = await queryByProperty(mockClient, 'count', '42');
+      expect(await queryByProperty(mockClient, 'status', 'active')).toBeNull();
+    });
 
-    expect(result[0].properties).toHaveProperty('count', 42);
-  });
+    it('propagates errors from the API client', async () => {
+      executeDatalogQuery.mockRejectedValueOnce(new Error('Failed to connect to LogSeq API'));
 
-  it('should handle boolean property values', async () => {
-    const mockPages = [
-      { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-    ];
+      await expect(queryByProperty(mockClient, 'status', 'active')).rejects.toThrow(
+        'Failed to connect to LogSeq API'
+      );
+    });
 
-    const mockBlocks = [
-      {
-        id: 1,
-        uuid: 'block-uuid-1',
-        content: 'Block with boolean property',
-        page: { id: 10 },
-        parent: { id: 10 },
-        left: { id: 10 },
-        properties: { completed: true }
-      }
-    ];
-
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
-
-    const result = await queryByProperty(mockClient, 'completed', 'true');
-
-    expect(result[0].properties).toHaveProperty('completed', true);
-  });
-
-  it('should return null when getAllPages returns null', async () => {
-    (mockClient.callAPI as any).mockResolvedValueOnce(null); // getAllPages returns null
-
-    const result = await queryByProperty(mockClient, 'status', 'done');
-
-    expect(result).toBeNull();
-  });
-
-  it('should propagate errors from the API client', async () => {
-    (mockClient.callAPI as any).mockRejectedValue(
-      new Error('Failed to connect to LogSeq API')
-    );
-
-    await expect(
-      queryByProperty(mockClient, 'status', 'done')
-    ).rejects.toThrow('Failed to connect to LogSeq API');
-  });
-
-  it('should search nested blocks recursively', async () => {
-    const mockPages = [
-      { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-    ];
-
-    const mockBlocks = [
-      {
-        id: 1,
-        uuid: 'block-uuid-1',
-        content: 'Parent block',
-        page: { id: 10 },
-        parent: { id: 10 },
-        left: { id: 10 },
-        properties: { status: 'pending' },
-        children: [
-          {
-            id: 2,
-            uuid: 'block-uuid-2',
-            content: 'Nested block',
-            page: { id: 10 },
-            parent: { id: 1 },
-            left: { id: 1 },
-            properties: { status: 'done' },
-            children: [
-              {
-                id: 3,
-                uuid: 'block-uuid-3',
-                content: 'Deeply nested block',
-                page: { id: 10 },
-                parent: { id: 2 },
-                left: { id: 2 },
-                properties: { status: 'done' }
-              }
-            ]
-          }
+    it('uses camelCase keys like the Editor API, including inside properties', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [
+          pulledBlock({
+            properties: { status: 'active', 'created-by': 'Alice' },
+            'properties-order': ['status', 'created-by'],
+            'pre-block?': true
+          })
         ]
-      }
-    ];
+      ]);
 
-    (mockClient.callAPI as any)
-      .mockResolvedValueOnce(mockPages) // getAllPages
-      .mockResolvedValueOnce(mockBlocks); // getPageBlocksTree
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active');
 
-    const result = await queryByProperty(mockClient, 'status', 'done');
+      expect(block.properties).toEqual({ status: 'active', createdBy: 'Alice' });
+      expect(block.propertiesOrder).toEqual(['status', 'createdBy']);
+      expect(block.pathRefs).toEqual([{ id: 10 }]);
+      expect(block['preBlock?']).toBe(true);
+      expect(block).not.toHaveProperty('path-refs');
+      expect(block).not.toHaveProperty('properties-order');
+    });
 
-    expect(result).toHaveLength(2);
-    expect(result[0].uuid).toBe('block-uuid-2');
-    expect(result[1].uuid).toBe('block-uuid-3');
+    it('includes the page id, name and originalName', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([[pulledBlock()]]);
+
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active');
+
+      expect(block.page).toEqual({ id: 10, name: 'project atlas', originalName: 'Project Atlas' });
+    });
+
+    it('returns flat blocks: no children and no level', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([[pulledBlock()]]);
+
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active');
+
+      expect(block).not.toHaveProperty('children');
+      expect(block).not.toHaveProperty('level');
+    });
+
+    it('keeps number and boolean property values as they are', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [pulledBlock({ properties: { count: 42, completed: true } })]
+      ]);
+
+      const [block]: any = await queryByProperty(mockClient, 'count', '42');
+
+      expect(block.properties).toEqual({ count: 42, completed: true });
+    });
+
+    it('keeps a multi-value property as the array LogSeq returns', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [pulledBlock({ properties: { type: ['project atlas', 'project borealis'] } })]
+      ]);
+
+      const [block]: any = await queryByProperty(mockClient, 'type', 'project atlas');
+
+      expect(block.properties.type).toEqual(['project atlas', 'project borealis']);
+    });
+
+    it('orders blocks by page id, then block id', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [pulledBlock({ id: 5, uuid: 'e', page: { id: 20 } })],
+        [pulledBlock({ id: 9, uuid: 'b', page: { id: 10 } })],
+        [pulledBlock({ id: 2, uuid: 'c', page: { id: 20 } })],
+        [pulledBlock({ id: 3, uuid: 'a', page: { id: 10 } })]
+      ]);
+
+      const result: any = await queryByProperty(mockClient, 'status', 'active');
+
+      expect(result.map((b: any) => b.uuid)).toEqual(['a', 'b', 'c', 'e']);
+    });
   });
 
-  // Slim results tests
   describe('slim results mode', () => {
-    it('should return slim results when slimResults=true', async () => {
-      const mockPages = [
-        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-      ];
+    it('returns slim blocks with the original page name', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [
+          pulledBlock({
+            content: 'Block with #tag and [[Link]]',
+            properties: { status: 'active', priority: 'high' }
+          })
+        ]
+      ]);
 
-      const mockBlocks = [
-        {
-          id: 1,
-          uuid: 'block-uuid-1',
-          content: 'Block with #tag and [[Link]]',
-          page: { id: 10 },
-          parent: { id: 10 },
-          left: { id: 10 },
-          properties: { status: 'done', priority: 'high' }
-        }
-      ];
-
-      (mockClient.callAPI as any)
-        .mockResolvedValueOnce(mockPages)
-        .mockResolvedValueOnce(mockBlocks);
-
-      const result = await queryByProperty(mockClient, 'status', 'done', true);
+      const result: any = await queryByProperty(mockClient, 'status', 'active', true);
 
       expect(result).toHaveLength(1);
-      const block = result[0];
-      expect(block).toHaveProperty('content', 'Block with #tag and [[Link]]');
-      expect(block).toHaveProperty('pageName', 'Test Page');
-      expect(block).toHaveProperty('properties', { status: 'done', priority: 'high' });
-      expect(block).toHaveProperty('tags', ['tag']);
-      expect(block).toHaveProperty('pageRefs', ['Link']);
-      expect(block).toHaveProperty('uuid', 'block-uuid-1');
+      expect(result[0]).toEqual({
+        uuid: 'block-uuid-1',
+        content: 'Block with #tag and [[Link]]',
+        pageName: 'Project Atlas',
+        properties: { status: 'active', priority: 'high' },
+        tags: ['tag'],
+        pageRefs: ['Link']
+      });
+    });
+
+    it('drops ids and page, and omits empty fields', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([[pulledBlock()]]);
+
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active', true);
+
       expect(block).not.toHaveProperty('id');
       expect(block).not.toHaveProperty('page');
-    });
-
-    it('should preserve nested children in slim results', async () => {
-      const mockPages = [
-        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-      ];
-
-      const mockBlocks = [
-        {
-          id: 1,
-          uuid: 'parent-uuid',
-          content: 'Parent block',
-          page: { id: 10 },
-          parent: { id: 10 },
-          left: { id: 10 },
-          properties: { status: 'done' },
-          children: [
-            {
-              id: 2,
-              uuid: 'child-uuid',
-              content: 'Child block',
-              page: { id: 10 },
-              parent: { id: 1 },
-              left: { id: 1 }
-            }
-          ]
-        }
-      ];
-
-      (mockClient.callAPI as any)
-        .mockResolvedValueOnce(mockPages)
-        .mockResolvedValueOnce(mockBlocks);
-
-      const result = await queryByProperty(mockClient, 'status', 'done', true);
-
-      expect(result).toHaveLength(1);
-      const block = result[0];
-      expect(block.children).toHaveLength(1);
-      expect(block.children![0].content).toBe('Child block');
-      expect(block.children![0].uuid).toBe('child-uuid');
-      expect(block.children![0]).not.toHaveProperty('id');
-    });
-
-    it('should return full results when slimResults=false (default)', async () => {
-      const mockPages = [
-        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-      ];
-
-      const mockBlocks = [
-        {
-          id: 1,
-          uuid: 'block-uuid-1',
-          content: 'Test block',
-          page: { id: 10 },
-          parent: { id: 10 },
-          left: { id: 10 },
-          properties: { status: 'done' }
-        }
-      ];
-
-      (mockClient.callAPI as any)
-        .mockResolvedValueOnce(mockPages)
-        .mockResolvedValueOnce(mockBlocks);
-
-      const result = await queryByProperty(mockClient, 'status', 'done', false);
-
-      expect(result).toHaveLength(1);
-      const block = result[0];
-      expect(block).toHaveProperty('id', 1);
-      expect(block).toHaveProperty('uuid', 'block-uuid-1');
-      expect(block).toHaveProperty('page');
-    });
-
-    it('should omit empty fields in slim results', async () => {
-      const mockPages = [
-        { id: 10, uuid: 'page-uuid-1', name: 'test-page', originalName: 'Test Page' }
-      ];
-
-      const mockBlocks = [
-        {
-          id: 1,
-          uuid: 'block-uuid-1',
-          content: 'Simple block',
-          page: { id: 10 },
-          parent: { id: 10 },
-          left: { id: 10 },
-          properties: { type: 'note' }
-        }
-      ];
-
-      (mockClient.callAPI as any)
-        .mockResolvedValueOnce(mockPages)
-        .mockResolvedValueOnce(mockBlocks);
-
-      const result = await queryByProperty(mockClient, 'type', 'note', true);
-
-      const block = result[0];
-      expect(block).toHaveProperty('properties', { type: 'note' });
       expect(block).not.toHaveProperty('marker');
       expect(block).not.toHaveProperty('tags');
       expect(block).not.toHaveProperty('pageRefs');
       expect(block).not.toHaveProperty('children');
+    });
+
+    it('camelizes property keys in slim results too', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [pulledBlock({ properties: { 'created-by': 'Alice' } })]
+      ]);
+
+      const [block]: any = await queryByProperty(mockClient, 'createdBy', 'Alice', true);
+
+      expect(block.properties).toEqual({ createdBy: 'Alice' });
+    });
+
+    it('falls back to the lowercase name when original-name is missing', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [pulledBlock({ page: { id: 10, name: 'project atlas' } })]
+      ]);
+
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active', true);
+
+      expect(block.pageName).toBe('project atlas');
+    });
+
+    it('returns full results when slimResults=false (default)', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([[pulledBlock()]]);
+
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active', false);
+
+      expect(block).toHaveProperty('id', 1);
+      expect(block).toHaveProperty('page');
     });
   });
 });

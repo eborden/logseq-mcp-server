@@ -138,11 +138,11 @@ const TOOLS = [
       properties: {
         property_key: {
           type: 'string',
-          description: 'Name of the property to query',
+          description: 'Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)',
         },
         property_value: {
           type: 'string',
-          description: 'Value to match for the property',
+          description: 'Value to match for the property. For multi-value properties, matches if any one value equals it',
         },
         slim_results: {
           type: 'boolean',

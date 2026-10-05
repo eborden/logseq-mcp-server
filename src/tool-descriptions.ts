@@ -93,6 +93,12 @@ export const TOOL_DESCRIPTIONS = {
 - When the user references custom properties in their query
 - For precise property-based filtering
 
+**Matching:**
+- The property name can be written as stored (created-at) or camelCase (createdAt)
+- Values are compared as exact strings (numbers and booleans as "42" / "true")
+- For multi-value properties (e.g. type:: [[a]], [[b]]), a block matches if any one value equals the one you give
+- Results are a flat list of blocks (no children); the page name is included
+
 **Alternatives:**
 - Use logseq_search_blocks for full-text content search (not property-based)
 - Use logseq_query_by_date_range for temporal queries on journal entries`,
