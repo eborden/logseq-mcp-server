@@ -1,5 +1,8 @@
 import { LogseqMCPConfig, LogseqAPIRequest, LogseqAPIResponse } from './types.js';
-import { LogSeqNotRunningError } from './errors.js';
+import { LogSeqNotRunningError, LogSeqTimeoutError } from './errors.js';
+
+/** Default per-call timeout when `timeoutMs` is not set in the config */
+export const DEFAULT_TIMEOUT_MS = 30000;
 
 /**
  * HTTP client for LogSeq API
@@ -17,10 +20,12 @@ export class LogseqClient {
    * @param method - The API method to call (e.g., 'logseq.Editor.getBlock')
    * @param args - Optional array of arguments for the method
    * @returns The response data from the API
+   * @throws LogSeqTimeoutError if the call exceeds `timeoutMs`
    * @throws Error if the API call fails or returns an error
    */
   async callAPI<T = any>(method: string, args: any[] = []): Promise<T> {
     const url = `${this.config.apiUrl}/api`;
+    const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
     const request: LogseqAPIRequest = {
       method,
@@ -34,7 +39,10 @@ export class LogseqClient {
           'Authorization': `Bearer ${this.config.authToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(request)
+        body: JSON.stringify(request),
+        // A fresh signal per call: the timeout bounds each request, not a whole
+        // tool run, so tools that make many calls are not cut short.
+        signal: AbortSignal.timeout(timeoutMs)
       });
 
       // Handle HTTP errors
@@ -55,6 +63,12 @@ export class LogseqClient {
     } catch (error) {
       // Handle connection errors (ECONNREFUSED, ETIMEDOUT, etc.)
       if (error instanceof Error) {
+        // AbortSignal.timeout() rejects with a TimeoutError DOMException. Check
+        // it first so it is never mistaken for a connection failure below.
+        if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+          throw new LogSeqTimeoutError(this.config.apiUrl, timeoutMs);
+        }
+
         // Check for network/connection errors
         const errorCode = (error as any).code;
         if (errorCode === 'ECONNREFUSED' ||

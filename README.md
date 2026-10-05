@@ -17,6 +17,7 @@ Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts o
      "authToken": "your-token-here"
    }
    ```
+   `apiUrl` defaults to `http://127.0.0.1:12315`. Optionally add `"timeoutMs"` (a positive number, default `30000`) to change how long each LogSeq API call may take before it fails with a timeout error. The limit applies per call, not per tool run.
 4. Install: `npm install -g logseq-mcp-server`
 5. Add to Claude Desktop MCP settings
 

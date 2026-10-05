@@ -67,6 +67,8 @@ export interface LogseqAPIResponse<T = any> {
 export interface LogseqMCPConfig {
   apiUrl: string;
   authToken: string;
+  /** Per-request timeout in milliseconds. Defaults to 30000 when omitted. */
+  timeoutMs?: number;
 }
 
 // Graph info structure

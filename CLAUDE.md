@@ -496,6 +496,7 @@ Quick reference checklist for future work:
 **HTTP API behaviour** (verified)
 - [ ] An unknown method returns **HTTP 200** with body `{"error": "MethodNotExist: ..."}`. Always check the body; `client.ts` does.
 - [ ] A bad token returns HTTP 401.
+- [ ] A hung request is aborted after `timeoutMs` (config field, default 30000, applied per `callAPI` call) and surfaces as `LogSeqTimeoutError`.
 - [ ] `logseq.Editor.getEditingBlockSelection` doesn't exist. Use `getSelectedBlocks`, which returns `null` when nothing is selected.
 
 **Tool behaviour**

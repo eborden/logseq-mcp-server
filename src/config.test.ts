@@ -85,4 +85,37 @@ describe('loadConfig', () => {
 
     await expect(loadConfig(configPath)).rejects.toThrow();
   });
+
+  describe('timeoutMs', () => {
+    const base = { authToken: 'test-token-123' };
+
+    it('should leave timeoutMs undefined when omitted', async () => {
+      await writeFile(configPath, JSON.stringify(base));
+
+      const result = await loadConfig(configPath);
+
+      expect(result.timeoutMs).toBeUndefined();
+    });
+
+    it('should accept a positive timeoutMs', async () => {
+      await writeFile(configPath, JSON.stringify({ ...base, timeoutMs: 5000 }));
+
+      const result = await loadConfig(configPath);
+
+      expect(result.timeoutMs).toBe(5000);
+    });
+
+    it.each([
+      ['zero', '0'],
+      ['negative', '-1'],
+      ['a string', '"5000"'],
+      ['null (what JSON.stringify makes of NaN)', 'null'],
+      ['infinite (1e999 parses to Infinity)', '1e999'],
+      ['a boolean', 'true']
+    ])('should reject timeoutMs that is %s', async (_label, rawValue) => {
+      await writeFile(configPath, `{"authToken": "test-token-123", "timeoutMs": ${rawValue}}`);
+
+      await expect(loadConfig(configPath)).rejects.toThrow(/timeoutMs must be a positive finite number/);
+    });
+  });
 });
