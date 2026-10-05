@@ -2,6 +2,15 @@ import { LogseqClient } from '../client.js';
 import { PageEntity, BlockEntity, SlimBlock, ResolveRefsMeta } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { buildResultMeta } from '../utils/result-meta.js';
+import {
+  AliasSet,
+  ResolvedAliases,
+  aliasIds,
+  aliasNames,
+  aliasSetWarnings,
+  resolveAliasSetByName,
+  resolvedAliases
+} from '../utils/alias-set.js';
 import { InvalidParameterError } from '../errors.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
@@ -32,7 +41,7 @@ export interface DateRangeSummary {
 }
 
 /** `hasMore` / `warnings` are present only when `resolve_refs` is on. */
-export interface DateRangeResult extends ResolveRefsMeta {
+export interface DateRangeResult extends ResolveRefsMeta, ResolvedAliases {
   dateRange: {
     start: number;
     end: number;
@@ -45,7 +54,7 @@ export interface DateRangeResult extends ResolveRefsMeta {
   summary: DateRangeSummary;
 }
 
-export interface SlimDateRangeResult extends ResolveRefsMeta {
+export interface SlimDateRangeResult extends ResolveRefsMeta, ResolvedAliases {
   dateRange: {
     start: number;
     end: number;
@@ -63,7 +72,7 @@ export interface SlimDateRangeResult extends ResolveRefsMeta {
  * `blockCount` counts every block under the matching top-level blocks, nested ones
  * included; `snippets` has one entry per top-level block (its first line, shortened).
  */
-export interface OutlineDateRangeResult {
+export interface OutlineDateRangeResult extends ResolveRefsMeta, ResolvedAliases {
   dateRange: {
     start: number;
     end: number;
@@ -106,6 +115,24 @@ export interface DateRangeOptions extends DateRangeSelection {
    * Ignored when `includeContent` is false. Default false.
    */
   resolveRefs?: boolean;
+}
+
+/**
+ * Whether a top-level block matches `searchTerm` (case-insensitive, literal).
+ *
+ * When the term is the name of a page that has aliases (#69), a block also
+ * matches if its text contains any of the group's names, or if it references any
+ * page of the group (`#tag` and `[[link]]` forms included). A term that is not
+ * a page name, or names a page without aliases, matches exactly as before.
+ */
+function blockMatcher(searchTerm: string, aliasSet: AliasSet | null): (block: BlockEntity) => boolean {
+  const terms = [searchTerm.toLowerCase(), ...(aliasSet ? aliasNames(aliasSet) : [])];
+  const pageIds = new Set(aliasSet ? aliasIds(aliasSet) : []);
+  return block => {
+    const content = (block.content ?? '').toLowerCase();
+    if (terms.some(term => content.includes(term))) return true;
+    return pageIds.size > 0 && (block.refs ?? []).some(ref => pageIds.has(ref?.id));
+  };
 }
 
 /** The validated, resolved form of a {@link DateRangeSelection}. */
@@ -294,6 +321,11 @@ export async function queryByDateRange(
  *    on the pages that were kept
  * The second call is skipped when no page matched.
  *
+ * With a `searchTerm` that names a page with aliases (#69) the search also matches the
+ * other names (text) and references to any of them, adds one query (the alias group),
+ * and says so in `resolvedAliases`. Any other term is matched literally as before and
+ * costs the same one query, which finds no page.
+ *
  * Entries are oldest first, except `lastN`, which is newest first. For `lastN`,
  * `dateRange` spans the oldest to the newest page returned (0 to 0 if none), and
  * each full-result `page` holds only its identifying attributes (id, uuid, name,
@@ -376,6 +408,12 @@ export async function queryJournals(
     treesByPage = buildBlockTrees(flatBlocks, journals.map(page => page.id));
   }
 
+  // A search term that names a page with aliases also finds blocks written under the
+  // other names (#69). One query, only when there is something to search; null for any
+  // text that is not such a page. After the journal queries, so it never delays them.
+  const aliasSet =
+    searchTerm && journals.length > 0 ? await resolveAliasSetByName(client, searchTerm) : null;
+  const matchesSearch = blockMatcher(searchTerm ?? '', aliasSet);
   const entries: DateRangeResult['entries'] = [];
   let totalBlocks = 0;
 
@@ -385,9 +423,7 @@ export async function queryJournals(
     // Filter top-level blocks by search term if provided
     let filteredBlocks = blocks;
     if (searchTerm) {
-      filteredBlocks = filteredBlocks.filter(block =>
-        block.content.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      filteredBlocks = filteredBlocks.filter(matchesSearch);
     }
 
     if (filteredBlocks.length > 0 || !searchTerm) {
@@ -407,6 +443,11 @@ export async function queryJournals(
     summary.topConcepts = rollUpTopConcepts(entries, refsByBlock, topConceptsLimit);
   }
 
+  // Which names the search covered (#69); absent unless the term named a page with aliases
+  const aliasCoverage: ResolvedAliases = aliasSet ? resolvedAliases(aliasSet) : {};
+  const aliasWarnings = aliasSet ? aliasSetWarnings(aliasSet) : [];
+  const aliasMeta: ResolveRefsMeta = aliasWarnings.length > 0 ? buildResultMeta(aliasWarnings) : {};
+
   if (!includeContent) {
     return {
       dateRange,
@@ -416,12 +457,14 @@ export async function queryJournals(
         blockCount: countBlocks(entry.blocks),
         snippets: entry.blocks.map(snippetOf)
       })),
-      summary
+      summary,
+      ...aliasCoverage,
+      ...aliasMeta
     };
   }
 
   // Opt-in (#18): resolve once over every returned block, whatever the number of days
-  let resolveMeta: ResolveRefsMeta = {};
+  let resolveMeta: ResolveRefsMeta = aliasMeta;
   if (resolveRefs) {
     const resolved = await resolveBlockRefs(client, entries.flatMap(entry => entry.blocks));
     let offset = 0;
@@ -429,7 +472,7 @@ export async function queryJournals(
       entry.blocks = resolved.blocks.slice(offset, offset + entry.blocks.length);
       offset += entry.blocks.length;
     }
-    const { hasMore, warnings } = buildResultMeta(resolved.warnings);
+    const { hasMore, warnings } = buildResultMeta([...aliasWarnings, ...resolved.warnings]);
     resolveMeta = { hasMore, warnings };
   }
 
@@ -446,9 +489,10 @@ export async function queryJournals(
         };
       }),
       summary,
+      ...aliasCoverage,
       ...resolveMeta
     };
   }
 
-  return { dateRange, entries, summary, ...resolveMeta };
+  return { dateRange, entries, summary, ...aliasCoverage, ...resolveMeta };
 }

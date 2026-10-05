@@ -74,11 +74,14 @@ export const hasAliases = (set: AliasSet): boolean => set.members.length > 1;
 
 /**
  * `resolvedAliases` for a result: the original-case names the tool covered,
- * the page asked about first. Absent when the page has no aliases, so default
- * output is unchanged.
+ * sorted so asking by either name of the group reports the same list (a
+ * result's `resolvedFrom` says which name was asked). Absent when the page
+ * has no aliases, so default output is unchanged.
  */
 export function resolvedAliases(set: AliasSet): ResolvedAliases {
-  return hasAliases(set) ? { resolvedAliases: set.members.map(member => member.originalName) } : {};
+  if (!hasAliases(set)) return {};
+  const names = set.members.map(member => member.originalName);
+  return { resolvedAliases: names.sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }) || a.localeCompare(b)) };
 }
 
 /** The `alias_set_truncated` warning for each set that was cut, empty otherwise. */
