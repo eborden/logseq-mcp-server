@@ -342,4 +342,79 @@ describe('getContextForQuery', () => {
       expect(result.warnings).toEqual([]);
     });
   });
+
+  describe('truncation warnings (#40)', () => {
+    function newClient() {
+      return {
+        config: { apiUrl: 'http://test', authToken: 'test' },
+        callAPI: vi.fn(),
+        executeDatalogQuery: vi.fn()
+      } as unknown as LogseqClient;
+    }
+
+    it('has no truncation warning and hasMore false when nothing is cut', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce([[{ id: 10, content: 'one' }]]);
+      (client.callAPI as any).mockResolvedValue([]);
+
+      const result = await getContextForQuery(client, 'About [[Alpha]]');
+
+      expect(result.warnings).toEqual([]);
+      expect(result.hasMore).toBe(false);
+      expect(result.contexts[0]).not.toHaveProperty('warnings');
+      expect(result.contexts[0]).not.toHaveProperty('totals');
+    });
+
+    it('rolls a topic that hit a cap up into a warning with a build_context call', async () => {
+      const client = newClient();
+      const blocks = Array.from({ length: 14 }, (_, i) => [{ id: 100 + i, content: `b${i}` }]);
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce(blocks);
+      (client.callAPI as any).mockResolvedValue([]);
+
+      const result = await getContextForQuery(client, 'About [[Alpha "x"]]');
+
+      expect(result.contexts[0].directBlocks).toHaveLength(10);
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toMatchObject({ code: 'topic_truncated', topic: 'Alpha "x"' });
+      expect(result.warnings[0].message).toContain('10/14 blocks');
+      expect(result.warnings[0].howToFetchAll).toContain('logseq_build_context');
+      expect(result.warnings[0].howToFetchAll).toContain('topic_name "Alpha \\"x\\""');
+      expect(result.warnings[0].howToFetchAll).toContain('max_blocks (14)');
+    });
+
+    it('warns when maxTopics drops extracted topics', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce([]);
+      (client.callAPI as any).mockResolvedValue([]);
+
+      const result = await getContextForQuery(client, 'See [[Alpha]], [[Beta]] and [[Gamma]]', { maxTopics: 1 });
+
+      expect(result.contexts).toHaveLength(1);
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings).toEqual([
+        {
+          code: 'topics_truncated',
+          message: 'Found 3 topics; only the first 1 were used.',
+          howToFetchAll: 'Set max_topics to 3 (or higher) to use all of them.'
+        }
+      ]);
+    });
+
+    it('does not set hasMore for a skipped topic that has no way to continue', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
+      const result = await getContextForQuery(client, 'About [[Missing]]');
+
+      expect(result.warnings.map(w => w.code)).toEqual(['topic_not_found']);
+      expect(result.hasMore).toBe(false);
+    });
+  });
 });
