@@ -10,19 +10,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Build Context",
     },
-    "description": "Build comprehensive context for a topic including related pages, blocks, and references.
+    "description": "Everything on one topic in a call: the page's blocks, related pages, and linked references.
 
-**When to use:**
-- Deep dive on a specific topic with full context
-- When you need both the page content AND related pages
-- To understand a concept holistically (direct content + connections)
-- Before answering complex questions about a topic
-- When the user asks to "research" or "explain" a topic
-
-**Alternatives:**
-- Use logseq_get_page for just the page content (no related pages)
-- Use logseq_get_concept_network for visual network structure (less detailed content)
-- Use logseq_get_context_for_query for natural language query interpretation",
+**Use when:** researching or explaining a topic that has a page.
+**Can't find:** topics with no page (use logseq_search_blocks), or anything past the caps (see hasMore and warnings).
+**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
     "inputSchema": {
       "properties": {
         "include_temporal_context": {
@@ -71,18 +63,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Get Backlinks",
     },
-    "description": "Get all pages and blocks that link to a specific page.
+    "description": "List the pages and blocks that link to a page with [[page]] or #tag.
 
-**When to use:**
-- To find what content references a particular page
-- To understand how a concept is used across the knowledge graph
-- To discover related topics that explicitly mention the target page
-- When the user asks "what links to this page?" or "where is this mentioned?"
-
-**Alternatives:**
-- Use logseq_get_concept_network for a visual network of relationships (both inbound and outbound)
-- Use logseq_search_blocks to find content mentioning keywords (not just page links)
-- Use logseq_build_context for comprehensive related pages (not just backlinks)",
+**Use when:** "what links to X?" or "where is X used?"
+**Can't find:** plain-text mentions with no link (logseq_search_blocks) or outbound links (logseq_get_concept_network).
+**Alternatives:** logseq_build_context for the page plus related pages.",
     "inputSchema": {
       "properties": {
         "page_name": {
@@ -106,16 +91,9 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Get Block",
     },
-    "description": "Get a specific LogSeq block by UUID with optional child blocks.
+    "description": "Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.
 
-**When to use:**
-- When you have a block UUID from a previous query result
-- To retrieve a specific block and its nested children
-- When working with block-level granularity (not page-level)
-
-**Alternatives:**
-- Use logseq_get_page to retrieve an entire page instead of a single block
-- Use logseq_search_blocks to find blocks by content when you don't have the UUID",
+**Can't find:** blocks by text (logseq_search_blocks) or by numeric id. For a whole page use logseq_get_page.",
     "inputSchema": {
       "properties": {
         "block_uuid": {
@@ -149,18 +127,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Get Concept Evolution",
     },
-    "description": "Track how a concept evolves over time through journal entries with temporal analysis.
+    "description": "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.
 
-**When to use:**
-- Understanding how a concept changed over time (trend analysis)
-- When the user asks "how has X evolved?" or "what's the history of Y?"
-- Temporal analysis with grouping by day/week/month
-- Discovering patterns in how concepts are discussed over time
-
-**Alternatives:**
-- Use logseq_query_by_date_range for simple date-based journal queries (no evolution analysis)
-- Use logseq_build_context with includeTemporalContext for journal page context (no evolution tracking)
-- Use logseq_search_blocks if you don't need temporal grouping",
+**Use when:** "how has X evolved?" or "what's the history of Y?"
+**Can't find:** plain-text mentions with no link (logseq_search_blocks), or topics with no page.
+**Alternatives:** logseq_query_by_date_range for plain journal queries.",
     "inputSchema": {
       "properties": {
         "concept_name": {
@@ -201,22 +172,10 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Get Concept Network",
     },
-    "description": "Get network of pages related to a concept with nodes and edges for visualization.
+    "description": "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.
 
-**When to use:**
-- To visualize how pages are connected in the knowledge graph
-- Understanding the relationship structure around a concept
-- Finding connected pages up to N hops away
-- When the user asks "show me how X relates to other topics"
-
-**Output:**
-- Follows links in both directions. One edge per page pair, with a reference count (outbound/inbound)
-- Capped at 50 pages (15 new pages per page); journal pages are shown but not expanded. If \`truncated\` is true, the strongest connections were kept and the rest were dropped. Raise \`max_nodes\` / \`max_fanout\` or set \`expand_journals\` for a wider network
-
-**Alternatives:**
-- Use logseq_build_context for detailed content with related pages (less structural)
-- Use logseq_get_backlinks for simpler inbound link queries (no network structure)
-- Use logseq_search_by_relationship for specific relationship patterns",
+**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.
+**Can't find:** unlinked pages, or what pages say (logseq_build_context).",
     "inputSchema": {
       "properties": {
         "concept_name": {
@@ -260,18 +219,10 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Get Context for Query",
     },
-    "description": "Get comprehensive context for a natural language query by extracting topics and gathering related information.
+    "description": "Context for a natural-language question. Takes [[page]] and #tag topics from the query, or falls back to keyword search, and builds context for each.
 
-**When to use:**
-- When the user asks a complex, multi-topic question
-- To automatically identify relevant topics from natural language
-- When queries include [[page references]] and #tags
-- As a smart wrapper around multiple build_context calls
-
-**Alternatives:**
-- Use logseq_build_context if you already know the specific topic to explore
-- Use logseq_search_blocks for simple keyword search without topic extraction
-- Use logseq_list_pages + logseq_get_page for manual topic selection",
+**Can't find:** meaning. Topics come from explicit links, tags or literal words, so put page names in [[brackets]].
+**Alternatives:** logseq_build_context for one known topic.",
     "inputSchema": {
       "properties": {
         "max_search_results": {
@@ -307,11 +258,9 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
     },
     "description": "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.
 
-**When to use:**
-- The user says "this page", "this block" or "what I'm looking at" without naming it
-- Resolve the page, then pass its name to logseq_build_context or logseq_get_page
+**Use when:** the user says "this page", "this block" or "what I'm looking at" without naming it. Then pass the page name to logseq_build_context or logseq_get_page.
 
-Returns page: null with a message when no page is open. Reflects live UI state.",
+**Can't find:** anything not open right now. Returns page: null with a message when no page is open.",
     "inputSchema": {
       "properties": {},
       "required": [],
@@ -328,16 +277,10 @@ Returns page: null with a message when no page is open. Reflects live UI state."
       "readOnlyHint": true,
       "title": "Get Graph Info",
     },
-    "description": "Get information about the current LogSeq graph including filesystem path and name.
+    "description": "Get the connected graph's name and filesystem path.
 
-**When to use:**
-- To understand the graph's location on disk
-- When debugging path-related issues
-- To provide context about which knowledge base is being accessed
-
-**Alternatives:**
-- Use logseq_list_pages to see what content exists in the graph
-- Use logseq_build_context for comprehensive topic exploration",
+**Use when:** confirming which graph is attached or debugging paths.
+**Can't find:** anything about content. See logseq_list_pages and logseq_build_context.",
     "inputSchema": {
       "properties": {},
       "required": [],
@@ -354,18 +297,11 @@ Returns page: null with a message when no page is open. Reflects live UI state."
       "readOnlyHint": true,
       "title": "Get Page",
     },
-    "description": "Get a specific LogSeq page by name with optional child blocks.
+    "description": "Get a page by name (case-insensitive). With include_children, also its blocks.
 
-**When to use:**
-- When you know the exact page name and want its full content
-- To retrieve a page and its immediate child blocks/pages
-- After discovering page names via logseq_list_pages
-- When the user references a specific page by name
-
-**Alternatives:**
-- Use logseq_search_blocks if you only know keywords, not the exact page name
-- Use logseq_build_context for comprehensive topic exploration with related pages
-- Use logseq_list_pages first if you're unsure what pages exist",
+**Use when:** you know the page name.
+**Can't find:** pages by keyword (logseq_search_blocks, logseq_list_pages) or what links here (logseq_get_backlinks).
+**Alternatives:** logseq_build_context adds related pages and references.",
     "inputSchema": {
       "properties": {
         "include_children": {
@@ -399,18 +335,11 @@ Returns page: null with a message when no page is open. Reflects live UI state."
       "readOnlyHint": true,
       "title": "List Pages",
     },
-    "description": "List all pages in the LogSeq graph to discover available topics and vocabulary.
+    "description": "List non-journal page names, optionally filtered by name_contains, to learn the graph's vocabulary.
 
-**When to use:**
-- At the start of a conversation to understand what concepts exist in the user's knowledge graph
-- Before searching for content when you're unsure what pages are available
-- To discover the naming conventions and vocabulary used in the graph
-- When the user asks "what do you have information about?"
-
-**Alternatives:**
-- Use logseq_get_graph_info to get high-level graph metadata (path, name)
-- Use logseq_search_blocks if you know specific keywords to search for
-- Use logseq_get_page if you already know the exact page name",
+**Use when:** you're unsure which pages exist or what the user calls something.
+**Can't find:** journal pages (logseq_query_by_date_range) or block text (logseq_search_blocks). The filter is a substring, not fuzzy.
+**Next:** logseq_get_page.",
     "inputSchema": {
       "properties": {
         "name_contains": {
@@ -434,13 +363,9 @@ Returns page: null with a message when no page is open. Reflects live UI state."
     },
     "description": "Query journal entries by date range, last N journals, or named period, with optional search. Give exactly one of: start_date + end_date, last_n, preset.
 
-**When to use:**
-- "What did I do last week?" or "catch me up on recent days"
-- What a period was about (summary.topConcepts)
-
-**Alternatives:**
-- logseq_get_concept_evolution: change over time
-- logseq_search_blocks: non-temporal search",
+**Use when:** "what did I do last week?" or catching up. summary.topConcepts shows what a period was about.
+**Can't find:** non-journal pages, or days with no journal.
+**Alternatives:** logseq_get_concept_evolution, logseq_search_blocks.",
     "inputSchema": {
       "properties": {
         "end_date": {
@@ -507,23 +432,10 @@ Returns page: null with a message when no page is open. Reflects live UI state."
       "readOnlyHint": true,
       "title": "Query by Property",
     },
-    "description": "Query blocks by a specific property name and value.
+    "description": "Find blocks whose property equals a value (e.g. status::done).
 
-**When to use:**
-- When searching for structured metadata (custom properties)
-- To find blocks tagged with specific property values (e.g., status::done, type::project)
-- When the user references custom properties in their query
-- For precise property-based filtering
-
-**Matching:**
-- The property name can be written as stored (created-at) or camelCase (createdAt)
-- Values are compared as exact strings (numbers and booleans as "42" / "true")
-- For multi-value properties (e.g. type:: [[a]], [[b]]), a block matches if any one value equals the one you give
-- Results are a flat list of blocks (no children); the page name is included
-
-**Alternatives:**
-- Use logseq_search_blocks for full-text content search (not property-based)
-- Use logseq_query_by_date_range for temporal queries on journal entries",
+**Matching:** the key as stored (created-at) or camelCase; values are exact strings ("42", "true"); a multi-value property matches if any one value equals it. Returns a flat list with the page name, no children.
+**Can't find:** partial values or ranges. For text use logseq_search_blocks.",
     "inputSchema": {
       "properties": {
         "property_key": {
@@ -557,19 +469,10 @@ Returns page: null with a message when no page is open. Reflects live UI state."
       "readOnlyHint": true,
       "title": "Search Blocks",
     },
-    "description": "Search for blocks containing specific text across your LogSeq graph.
+    "description": "Case-insensitive literal substring search over block content, newest first, capped by limit. Check hasMore and warnings.
 
-**When to use:**
-- Finding content by keyword when you don't know which page it's on
-- Discovering all mentions of a topic across pages
-- Exploratory search before using more specific tools
-- When the user asks "find all blocks about X"
-
-**Alternatives:**
-- Use logseq_list_pages first to discover what pages exist
-- Use logseq_get_page if you know the exact page name
-- Use logseq_build_context for comprehensive topic exploration with relationships
-- Use logseq_query_by_property for structured property-based queries",
+**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), or link structure (logseq_search_by_relationship).
+**Next:** logseq_build_context on a result's page.",
     "inputSchema": {
       "properties": {
         "include_context": {
@@ -607,18 +510,10 @@ Returns page: null with a message when no page is open. Reflects live UI state."
       "readOnlyHint": true,
       "title": "Search by Relationship",
     },
-    "description": "Search for blocks based on specific relationship patterns between topics.
+    "description": "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages.
 
-**When to use:**
-- Finding blocks about topic A that reference topic B (complex relationships)
-- When you need precise control over relationship types (references, referenced-by, etc.)
-- For advanced graph queries with specific relationship semantics
-- When simpler tools like search_blocks are too broad
-
-**Alternatives:**
-- Use logseq_search_blocks for simple keyword search without relationship constraints
-- Use logseq_get_concept_network for general relationship exploration (less precise)
-- Use logseq_build_context for comprehensive topic context (automatic relationships)",
+**Can't find:** relationships that exist only as plain text. Matching is on [[links]] and #tags, not words.
+**Alternatives:** logseq_search_blocks (keywords), logseq_get_concept_network (overview).",
     "inputSchema": {
       "properties": {
         "max_distance": {
