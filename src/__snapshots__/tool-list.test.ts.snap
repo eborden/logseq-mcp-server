@@ -17,6 +17,19 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
 **Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
     "inputSchema": {
       "properties": {
+        "compact": {
+          "default": false,
+          "description": "Block snippets and uuids, no bodies. Read one with logseq_get_block",
+          "type": "boolean",
+        },
+        "format": {
+          "description": "json (default), or markdown for plain text",
+          "enum": [
+            "json",
+            "markdown",
+          ],
+          "type": "string",
+        },
         "include_temporal_context": {
           "default": true,
           "description": "Include temporal context for journal pages (default: true)",
