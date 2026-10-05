@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity, PageEntity } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
+import { requirePage } from '../utils/resolve-page.js';
 
 export type GroupByPeriod = 'day' | 'week' | 'month';
 
@@ -63,7 +64,8 @@ function getMonthIdentifier(date: number): string {
 /**
  * Track how a concept evolves over time
  * @param client - LogseqClient instance
- * @param conceptName - Name of the concept to track
+ * @param conceptName - Page name, alias, or ISO date (`2025-01-01`) of the concept; throws
+ *   PageNotFoundError if none matches and AmbiguousPageError if several do
  * @param options - Options for evolution tracking
  * @returns ConceptEvolutionResult with timeline of mentions
  */
@@ -74,16 +76,20 @@ export async function getConceptEvolution(
 ): Promise<ConceptEvolutionResult> {
   const { startDate, endDate, groupBy } = options;
 
+  // Resolve the name first (exact name, alias or ISO date, in one query).
+  // Throws PageNotFoundError (with suggestions) or AmbiguousPageError (with candidates).
+  const { lookupName } = await requirePage(client, conceptName);
+
   // Search for blocks mentioning the concept
   const blocks = await client.callAPI<BlockEntity[]>(
     'logseq.Editor.getPageBlocksTree',
-    [conceptName]
+    [lookupName]
   );
 
   // Get full page data for the concept page to enrich blocks from getPageBlocksTree
   const conceptPage = await client.callAPI<PageEntity>(
     'logseq.Editor.getPage',
-    [conceptName]
+    [lookupName]
   );
 
   // Enrich blocks from getPageBlocksTree with full page data
@@ -95,7 +101,7 @@ export async function getConceptEvolution(
 
   // Also search for inline mentions using Datalog
   const { query: mentionsQuery, inputs: mentionsInputs } =
-    DatalogQueryBuilder.getBlocksReferencingPage(conceptName);
+    DatalogQueryBuilder.getBlocksReferencingPage(lookupName);
   const searchResults = await client.executeDatalogQuery(mentionsQuery, ...mentionsInputs);
   const searchBlocks = (searchResults || []).map((r: any[]) => r[0] as BlockEntity);
 
