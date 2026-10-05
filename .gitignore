@@ -7,13 +7,23 @@ coverage/
 .claude/worktrees/
 
 # Raw test/probe output can contain real graph data; never commit it
+output.txt
 *-output.txt
 integration-test-output*
 *.out
-# Redirected dumps of scripts/probe-*.ts and scripts/measure-*.ts
+# Redirected or saved dumps of scripts/probe-*.ts and scripts/measure-*.ts
 probe-*.txt
+probe-*.json
+probe-*.md
+probe-*.csv
+probe-*.tsv
 measure-*.txt
-# src/repo-hygiene.test.ts fails if a file matching these is tracked or a pattern is dropped
+measure-*.json
+measure-*.md
+measure-*.csv
+measure-*.tsv
+# src/repo-hygiene.test.ts fails if a file matching these is tracked or a pattern is dropped.
+# These patterns are case-sensitive; the test's tracked-file check is not.
 
 # Personal Claude Code settings (permissions); never commit
 .claude/settings.local.json
