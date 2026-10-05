@@ -62,9 +62,13 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 
 **Lifecycle.** An ADR is `proposed` while the PR that adds it is open. It becomes `accepted` when that PR merges: the author edits the status to `accepted` in the same PR, before merge.
 
-An accepted ADR is **immutable except for its status and a pointer** to its replacement. Don't reword the Context, Decision or Consequences. **A reversal is a new ADR**: write it, then mark the old one `superseded by <NNNN-new-slug>` in the same PR.
+An accepted ADR is **immutable**, with three exceptions:
 
-When a file that an accepted ADR cites is deleted, the citation may be rewritten in place as a pinned `<commit>:<path>` reference to the file's last version (for example `` `df7503a:docs/datalog-debugging-summary.md` ``, readable with `git show`), with no other rewording.
+1. Its **status and a pointer** to its replacement.
+2. A citation of a file that has since been deleted. The citation may be rewritten in place as a pinned `<commit>:<path>` reference to the file's last version (for example `` `df7503a:docs/datalog-debugging-summary.md` ``, readable with `git show`), with no other rewording.
+3. The **Mechanical enforcement** section, which may be updated in place, for example when a `none-yet` issue lands its guard and the line becomes `test:` or `ci:`. That section records how the decision is currently enforced, not the decision itself. Such an update still needs the maintainer's approval, like any ADR change (see Change process).
+
+Don't reword the Context, Decision or Consequences. **A reversal is a new ADR**: write it, then mark the old one `superseded by <NNNN-new-slug>` in the same PR.
 
 ## Template
 
