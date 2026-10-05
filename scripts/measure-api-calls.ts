@@ -19,6 +19,9 @@ import { getCurrentContext } from '../src/tools/get-current-context.js';
 import { getBlock } from '../src/tools/get-block.js';
 import { getPage } from '../src/tools/get-page.js';
 import { queryJournals } from '../src/tools/query-by-date-range.js';
+import { getBacklinks } from '../src/tools/get-backlinks.js';
+import { getConceptEvolution } from '../src/tools/get-concept-evolution.js';
+import { searchByRelationship } from '../src/tools/search-by-relationship.js';
 
 class CountingClient extends LogseqClient {
   calls = new Map<string, number>();
@@ -67,6 +70,19 @@ async function main() {
   const refBlock = refRows?.[0]?.[0]?.uuid as string | undefined;
   const refPage = refRows?.[0]?.[1]?.['original-name'] as string | undefined;
 
+  // Page-name resolution (#41): an alias with one source page, an alias shared by
+  // several pages, and a journal day. The names stay in memory; only labels are printed.
+  const aliasRows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
+    `[:find ?n (count ?p) :where [?p :block/alias ?a] [?a :block/name ?n] (not [?a :block/file])]`
+  ]);
+  const uniqueAlias = aliasRows?.find(([, count]) => count === 1)?.[0] as string | undefined;
+  const sharedAlias = aliasRows?.find(([, count]) => count > 1)?.[0] as string | undefined;
+  const journalDays = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
+    `[:find ?d :where [?p :block/name] [?p :block/journal-day ?d] [?b :block/page ?p]]`
+  ]);
+  const someDay = journalDays?.[journalDays.length >> 1]?.[0] as number | undefined;
+  const isoDay = someDay ? `${String(someDay).slice(0, 4)}-${String(someDay).slice(4, 6)}-${String(someDay).slice(6, 8)}` : undefined;
+
   const end = new Date();
   const start = new Date(end.getTime() - 6 * 86400000);
 
@@ -82,6 +98,29 @@ async function main() {
     ['build_context resolve_refs', () => buildContextForTopic(client, subject, { resolveRefs: true })],
     ['query_by_date_range 7d resolve_refs', () =>
       queryJournals(client, { startDate: ymd(start), endDate: ymd(end), resolveRefs: true })],
+    ['get_page', () => getPage(client, subject, false)],
+    ['get_backlinks', () => getBacklinks(client, subject)],
+    ['get_concept_evolution', () => getConceptEvolution(client, subject)],
+    ['search_by_relationship references', () => searchByRelationship(client, subject, subject, 'references')],
+    ['search_by_relationship connected-within', () => searchByRelationship(client, subject, subject, 'connected-within', 1)],
+    ['get_page (not found)', () => getPage(client, 'no such page 41 probe', false).catch(e => e.name)],
+    ...(uniqueAlias
+      ? ([
+          ['build_context (alias)', () => buildContextForTopic(client, uniqueAlias)],
+          ['get_page (alias)', () => getPage(client, uniqueAlias, false)]
+        ] as Array<[string, () => Promise<unknown>]>)
+      : []),
+    ...(sharedAlias
+      ? ([['get_page (shared alias)', () => getPage(client, sharedAlias, false).catch(e => e.name)]] as Array<
+          [string, () => Promise<unknown>]
+        >)
+      : []),
+    ...(isoDay
+      ? ([
+          ['get_page (ISO date)', () => getPage(client, isoDay, false)],
+          ['build_context (ISO date)', () => buildContextForTopic(client, isoDay)]
+        ] as Array<[string, () => Promise<unknown>]>)
+      : []),
     ...(refBlock && refPage
       ? ([
           ['get_block (ref block)', () => getBlock(client, refBlock, false)],
