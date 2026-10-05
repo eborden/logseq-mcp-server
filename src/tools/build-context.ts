@@ -2,7 +2,7 @@ import { LogseqClient } from '../client.js';
 import { PageEntity, BlockEntity } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { getBacklinks } from './get-backlinks.js';
-import { PageNotFoundError } from '../errors.js';
+import { PageNotFoundError, isInfrastructureError } from '../errors.js';
 import Fuzzysort from 'fuzzysort';
 
 export interface ContextOptions {
@@ -78,9 +78,10 @@ export async function buildContextForTopic(
         throw new PageNotFoundError(topicName, suggestions);
       }
     } catch (error) {
-      if (error instanceof PageNotFoundError) {
+      if (error instanceof PageNotFoundError || isInfrastructureError(error)) {
         throw error;
       }
+      // Suggestions are best-effort: fall through to a plain PageNotFoundError
     }
 
     throw new PageNotFoundError(topicName);
@@ -104,44 +105,42 @@ export async function buildContextForTopic(
   const relatedPages: TopicContext['relatedPages'] = [];
   const seenPageIds = new Set<number>();
 
-  try {
-    const backlinks = await getBacklinks(client, topicName);
-    if (backlinks && backlinks.length > 0) {
-      // Each backlink is [sourcePage, blocks[]]
-      // Note: sourcePage can be null for journal page entries
-      for (const [sourcePage, blocks] of backlinks) {
-        // For each block, extract the actual source page
-        for (const block of blocks) {
-          if (references.length >= maxReferences && relatedPages.length >= maxRelatedPages) break;
-
-          // Source page is either the tuple's first element or block.page
-          const actualSourcePage = sourcePage || block.page;
-          if (!actualSourcePage) continue;
-
-          const sourcePageId = actualSourcePage.id || actualSourcePage['db/id'];
-
-          // Add source page to related pages (inbound connection)
-          if (sourcePageId && !seenPageIds.has(sourcePageId) && relatedPages.length < maxRelatedPages) {
-            seenPageIds.add(sourcePageId);
-            relatedPages.push({
-              page: actualSourcePage,
-              relationshipType: 'inbound'
-            });
-          }
-
-          // Add block to references
-          if (references.length < maxReferences) {
-            references.push({
-              block,
-              sourcePage: actualSourcePage
-            });
-          }
-        }
+  // null or [] means the page has no backlinks. A thrown error (connection,
+  // timeout, auth, unexpected) must propagate rather than look like "none".
+  const backlinks = await getBacklinks(client, topicName);
+  if (backlinks && backlinks.length > 0) {
+    // Each backlink is [sourcePage, blocks[]]
+    // Note: sourcePage can be null for journal page entries
+    for (const [sourcePage, blocks] of backlinks) {
+      // For each block, extract the actual source page
+      for (const block of blocks) {
         if (references.length >= maxReferences && relatedPages.length >= maxRelatedPages) break;
+
+        // Source page is either the tuple's first element or block.page
+        const actualSourcePage = sourcePage || block.page;
+        if (!actualSourcePage) continue;
+
+        const sourcePageId = actualSourcePage.id || actualSourcePage['db/id'];
+
+        // Add source page to related pages (inbound connection)
+        if (sourcePageId && !seenPageIds.has(sourcePageId) && relatedPages.length < maxRelatedPages) {
+          seenPageIds.add(sourcePageId);
+          relatedPages.push({
+            page: actualSourcePage,
+            relationshipType: 'inbound'
+          });
+        }
+
+        // Add block to references
+        if (references.length < maxReferences) {
+          references.push({
+            block,
+            sourcePage: actualSourcePage
+          });
+        }
       }
+      if (references.length >= maxReferences && relatedPages.length >= maxRelatedPages) break;
     }
-  } catch (error) {
-    // No backlinks found, continue with empty references and related pages
   }
 
   // Build temporal context if requested

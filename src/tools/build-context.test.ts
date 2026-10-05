@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildContextForTopic } from './build-context.js';
 import { LogseqClient } from '../client.js';
+import {
+  LogSeqNotRunningError,
+  LogSeqTimeoutError,
+  LogSeqAuthError,
+  PageNotFoundError
+} from '../errors.js';
 
 describe('buildContextForTopic', () => {
   it('should execute Datalog queries and transform results to context', async () => {
@@ -175,5 +181,66 @@ describe('buildContextForTopic', () => {
     expect(result.relatedPages.length).toBe(1);
     expect(result.relatedPages[0].page.name).toBe('Core');
     expect(result.relatedPages[0].relationshipType).toBe('inbound');
+  });
+
+  describe('error handling (backlinks)', () => {
+    function clientWithBacklinks(backlinks: () => Promise<unknown>) {
+      const mockClient = {
+        config: { apiUrl: 'http://test' },
+        executeDatalogQuery: vi.fn(),
+        callAPI: vi.fn()
+      } as unknown as LogseqClient;
+      (mockClient.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'topic', properties: {} }]])
+        .mockResolvedValueOnce([[{ id: 10, content: 'A block' }]]);
+      (mockClient.callAPI as any).mockImplementation(backlinks);
+      return mockClient;
+    }
+
+    it.each([
+      ['LogSeqNotRunningError', () => new LogSeqNotRunningError('http://test')],
+      ['LogSeqTimeoutError', () => new LogSeqTimeoutError('http://test', 1000)],
+      ['LogSeqAuthError', () => new LogSeqAuthError('http://test')],
+      ['an unexpected Error', () => new Error('boom')]
+    ])('propagates %s from the backlinks call', async (_name, makeError) => {
+      const error = makeError();
+      const client = clientWithBacklinks(async () => { throw error; });
+
+      await expect(buildContextForTopic(client, 'Topic')).rejects.toBe(error);
+    });
+
+    it.each([
+      ['null', null],
+      ['an empty array', []]
+    ])('returns an empty context when backlinks are %s', async (_name, value) => {
+      const client = clientWithBacklinks(async () => value);
+
+      const result = await buildContextForTopic(client, 'Topic');
+
+      expect(result.directBlocks).toHaveLength(1);
+      expect(result.references).toEqual([]);
+      expect(result.relatedPages).toEqual([]);
+      expect(result.summary.totalReferences).toBe(0);
+    });
+
+    it('propagates an infrastructure error raised while looking up suggestions for a missing page', async () => {
+      const mockClient = {
+        config: { apiUrl: 'http://test' },
+        executeDatalogQuery: vi.fn().mockResolvedValue([]),
+        callAPI: vi.fn().mockRejectedValue(new LogSeqTimeoutError('http://test', 1000))
+      } as unknown as LogseqClient;
+
+      await expect(buildContextForTopic(mockClient, 'Missing')).rejects.toThrow(LogSeqTimeoutError);
+    });
+
+    it('still throws PageNotFoundError when the suggestion lookup fails unexpectedly', async () => {
+      const mockClient = {
+        config: { apiUrl: 'http://test' },
+        executeDatalogQuery: vi.fn().mockResolvedValue([]),
+        callAPI: vi.fn().mockRejectedValue(new Error('boom'))
+      } as unknown as LogseqClient;
+
+      await expect(buildContextForTopic(mockClient, 'Missing')).rejects.toThrow(PageNotFoundError);
+    });
   });
 });
