@@ -139,6 +139,8 @@ describe('slim_results default (#42)', () => {
       expect(entry).not.toHaveProperty('page');
       expect(entry.blocks[0]).toMatchObject({ uuid: 'block-uuid-30', content: 'Met [[Alice]] today' });
       expect(entry.blocks[0]).not.toHaveProperty('id');
+      // The entry names the page, so its blocks don't (#42)
+      expect(entry.blocks[0]).not.toHaveProperty('pageName');
     });
 
     it('returns full entries with slim_results: false', async () => {

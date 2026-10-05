@@ -438,11 +438,11 @@ export async function queryJournals(
     return {
       dateRange,
       entries: entries.map(entry => {
-        const pageName = pageNameOf(entry.page);
         return {
           date: entry.date,
-          pageName,
-          blocks: entry.blocks.map(block => toSlimBlock(block, pageName))
+          pageName: pageNameOf(entry.page),
+          // The entry names the page, so its blocks don't repeat it (#42)
+          blocks: entry.blocks.map(block => toSlimBlock(block, ''))
         };
       }),
       summary,

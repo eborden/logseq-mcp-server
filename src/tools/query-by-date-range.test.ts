@@ -313,7 +313,8 @@ describe('queryByDateRange', () => {
 
       const slim = result.entries[0].blocks[0];
       expect(slim).toHaveProperty('content', 'Meeting with #team about [[Project]]');
-      expect(slim).toHaveProperty('pageName', 'Day One');
+      // The entry names the page; its blocks don't repeat it (#42)
+      expect(slim).not.toHaveProperty('pageName');
       expect(slim).toHaveProperty('tags', ['team']);
       expect(slim).toHaveProperty('pageRefs', ['Project']);
       expect(slim).toHaveProperty('uuid', 'block-uuid-10');

@@ -106,7 +106,8 @@ export interface PaginatedResult<T> {
  * Removes: id, page object, parent, left, level, pathRefs, refs objects, meta, format
  * Keeps: uuid, content, properties, marker, children (recursively slimmed)
  * Adds: pageName (denormalized), tags/pageRefs (extracted strings)
- * Leaves out empty fields (#42), such as a blank `pageName`.
+ * Leaves out empty fields (#42). `pageName` is also omitted on children and
+ * where the surrounding entry names the page.
  */
 export interface SlimBlock {
   uuid: string;

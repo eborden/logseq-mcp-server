@@ -365,15 +365,17 @@ describe('toSlimBlock', () => {
     expect(slim.children![0]).toEqual({
       uuid: 'child-uuid-1',
       content: 'Child 1 [[Reference]]',
-      pageName: 'Project Plan',
       pageRefs: ['Reference']
     });
     expect(slim.children![1]).toEqual({
       uuid: 'child-uuid-2',
       content: 'Child 2',
-      pageName: 'Project Plan',
       marker: 'DONE'
     });
+
+    // A child sits on its parent's page, which the parent names (#42)
+    expect(slim).toHaveProperty('pageName', 'Project Plan');
+    expect(slim.children![0]).not.toHaveProperty('pageName');
 
     // Verify children don't have verbose metadata
     expect(slim.children![0]).not.toHaveProperty('id');
