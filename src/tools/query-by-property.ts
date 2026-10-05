@@ -1,14 +1,37 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity, SlimBlock } from '../types.js';
-import { toSlimBlock, buildPageNameMap, getPageNameFromBlock } from '../utils/slim-entities.js';
+import { DatalogQueryBuilder } from '../datalog/queries.js';
+import { BlockEntity, SlimBlock } from '../types.js';
+import { toSlimBlock } from '../utils/slim-entities.js';
+import { camelizeBlock, camelizeKeys } from '../utils/block-tree.js';
+
+/** Page name used for slim output: original casing when known. */
+function displayName(page: any): string {
+  return page?.originalName || page?.name || '';
+}
 
 /**
- * Query blocks by a specific property name and value using Editor API
+ * Query blocks by a specific property name and value using one Datalog query
+ *
+ * Matching is done inside LogSeq against `:block/properties`:
+ * - The property name may be written as stored (`created-at`) or as the Editor
+ *   API returns it (`createdAt`); matching is on the normalized key.
+ * - Scalars (string, number, boolean) match when `String(value) === propertyValue`.
+ * - Multi-value properties (sets) match when any element equals `propertyValue`.
+ *   Previously only the comma-joined string matched (`"a,b"`).
+ *
+ * Blocks come back flat, without `children` or `level` (the old crawl returned
+ * tree nodes). Results are sorted by page id, then block id. Keys are
+ * camelCase like the Editor API, and `page` carries `id`, `name` and
+ * `originalName`.
+ *
+ * API calls: 1.
+ *
  * @param client - LogseqClient instance
  * @param propertyName - Name of the property to query
  * @param propertyValue - Value to match for the property
  * @param slimResults - Return slim results (40-50% fewer tokens, essential data only)
- * @returns Array of BlockEntity or SlimBlock objects with matching property, or null if query fails
+ * @returns Array of BlockEntity or SlimBlock objects with matching property (empty if none), or null if the API returns a null response
+ * @throws InvalidParameterError if the property name has characters other than letters, digits, "-" and "_"
  */
 export async function queryByProperty(
   client: LogseqClient,
@@ -16,62 +39,28 @@ export async function queryByProperty(
   propertyValue: string,
   slimResults: boolean = false
 ): Promise<BlockEntity[] | SlimBlock[] | null> {
-  try {
-    // Get all pages
-    const pages = await client.callAPI<PageEntity[] | null>(
-      'logseq.Editor.getAllPages'
-    );
+  const { query, inputs } = DatalogQueryBuilder.blocksByProperty(propertyName, propertyValue);
+  const rows = await client.executeDatalogQuery<BlockEntity[][] | null>(query, ...inputs);
 
-    if (!pages) {
-      return null;
-    }
-
-    const matches: BlockEntity[] = [];
-
-    // Helper function to recursively search blocks for property matches
-    function searchBlocksRecursive(blocks: BlockEntity[]): void {
-      for (const block of blocks) {
-        // Check if block has properties and the property key exists
-        if (block.properties && propertyName in block.properties) {
-          // Exact match comparison (convert both to strings for comparison)
-          const blockValue = block.properties[propertyName];
-          if (String(blockValue) === propertyValue) {
-            matches.push(block);
-          }
-        }
-
-        // Recursively search children
-        if (block.children && block.children.length > 0) {
-          searchBlocksRecursive(block.children);
-        }
-      }
-    }
-
-    // Search blocks in each page
-    for (const page of pages) {
-      // Get page blocks tree
-      const blocks = await client.callAPI<BlockEntity[] | null>(
-        'logseq.Editor.getPageBlocksTree',
-        [page.name]
-      );
-
-      if (blocks && blocks.length > 0) {
-        searchBlocksRecursive(blocks);
-      }
-    }
-
-    // Return slim results if requested
-    if (slimResults) {
-      const pageNameMap = buildPageNameMap(pages);
-      const slimMatches = matches.map(block => {
-        const pageName = getPageNameFromBlock(block, pageNameMap);
-        return toSlimBlock(block, pageName);
-      });
-      return slimMatches;
-    }
-
-    return matches;
-  } catch (error) {
-    throw error;
+  if (!rows) {
+    return null;
   }
+
+  const matches: BlockEntity[] = rows
+    .map(row => row[0])
+    .filter(Boolean)
+    .map(pulled => {
+      const block = camelizeBlock(pulled);
+      if (block.page && typeof block.page === 'object') {
+        block.page = camelizeKeys(block.page);
+      }
+      return block;
+    })
+    .sort((a, b) => (a.page?.id ?? 0) - (b.page?.id ?? 0) || a.id - b.id);
+
+  if (slimResults) {
+    return matches.map(block => toSlimBlock(block, displayName(block.page)));
+  }
+
+  return matches;
 }
