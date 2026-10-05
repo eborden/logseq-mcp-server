@@ -28,7 +28,5 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-No test pins the packaging decision itself: skills could move back under .claude/, a root .mcp.json could appear, or plugin.json could lose its inline server, and nothing would fail. The test below covers only the version-equality consequence.
-
+- test: `src/adr-0018-plugin-layout.test.ts` (skills/logseq-skills/SKILL.md is the real skill and .claude/skills/logseq-skills a relative symlink to it, plugin.json declares mcpServers inline, no root .mcp.json is tracked, and no skill hard-codes an mcp__ prefix outside the line that explains host prefixes)
 - test: `src/version.test.ts` (the plugin manifest and the marketplace entry carry the package.json version)
-- none-yet: #96

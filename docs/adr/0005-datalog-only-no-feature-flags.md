@@ -29,7 +29,7 @@ Date: 2025-11-24
 
 ## Mechanical enforcement
 
-The config type and loader have no `features` section, so a flag cannot be read without adding one. Nothing blocks adding one, so review is the backstop until a test pins it.
+The config type and loader have no `features` section, so a flag cannot be read without adding one. The test fails if the loader's key set grows or a dual implementation file comes back. A flag read from somewhere else still rests on review.
 
+- test: `src/adr-0005-single-implementation.test.ts` (no `*-http.ts` or `*-datalog.ts` in src/tools/; loadConfig returns exactly apiUrl and authToken, plus timeoutMs and tips when set)
 - reviewer: Reject a PR that adds an implementation or rollout flag, or a second implementation of a tool, unless it cites an ADR that supersedes ADR-0005. Config toggles for output, such as tips, are not rollout flags.
-- none-yet: #96
