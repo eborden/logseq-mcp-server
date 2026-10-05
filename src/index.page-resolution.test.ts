@@ -54,6 +54,23 @@ describe('page resolution through MCP', () => {
     expect(body.warnings[0].code).toBe('ambiguous_page');
   });
 
+  it('warns that the candidate list was cut, and how to narrow the search', async () => {
+    const many = Array.from({ length: 13 }, (_, i) => [
+      { id: 100 + i, name: `team ${i}/atlas`, 'original-name': `Team ${i}/Atlas`, file: { id: 1 } },
+      'alias'
+    ]);
+
+    const result = await call('logseq_get_page', { page_name: 'Atlas' }, () => many);
+
+    expect(result.isError).toBeUndefined();
+    const body = JSON.parse(result.content[0].text);
+    expect(body).toMatchObject({ ambiguous: true, totalCandidates: 13, hasMore: false, totals: { candidates: 13 } });
+    expect(body.candidates).toHaveLength(10);
+    expect(body.warnings.map((w: any) => w.code)).toEqual(['ambiguous_page', 'candidates_truncated']);
+    expect(body.warnings[1].message).toContain("can't be fetched in one call");
+    expect(body.warnings[1].message).toContain('logseq_list_pages');
+  });
+
   describe('resolvedFrom reaches the caller for a name that was not an exact match', () => {
     const declaring = { id: 1, name: 'project atlas', 'original-name': 'Project Atlas', file: { id: 9 } };
     const viaAlias = (query: string) => (query.includes(':in $ ?n') ? [[declaring, 'alias']] : []);

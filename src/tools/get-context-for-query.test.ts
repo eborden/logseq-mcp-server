@@ -319,6 +319,26 @@ describe('getContextForQuery', () => {
       expect(result.hasMore).toBe(false);
     });
 
+    it('tells the model how to narrow an ambiguous topic whose candidate list was cut', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any).mockResolvedValueOnce(
+        Array.from({ length: 12 }, (_, i) => [
+          { id: 100 + i, name: `team ${i}/atlas`, 'original-name': `Team ${i}/Atlas`, file: { id: 1 } },
+          'alias'
+        ])
+      );
+      (client.callAPI as any).mockResolvedValue([]);
+
+      const result = await getContextForQuery(client, 'About [[Atlas]]');
+
+      expect(result.warnings[0]).toMatchObject({ code: 'ambiguous_page', topic: 'Atlas', totalCandidates: 12 });
+      expect(result.warnings[0].candidates).toHaveLength(10);
+      expect(result.warnings[1]).toMatchObject({ code: 'candidates_truncated', topic: 'Atlas' });
+      expect(result.warnings[1].message).toContain('logseq_list_pages');
+      // No parameter fetches the rest, so hasMore stays false; the warning is the signal
+      expect(result.hasMore).toBe(false);
+    });
+
     it.each(allErrors)('propagates %s from the per-topic context build', async (_name, makeError) => {
       const client = newClient();
       const error = makeError();
