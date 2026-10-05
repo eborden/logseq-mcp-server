@@ -197,9 +197,115 @@ async function main() {
   ]);
   const got = await client.callAPI<any>('logseq.Editor.getBlock', [blk[0][0]]);
   console.log(`${'getBlock page / parent shape'.padEnd(58)} page=${JSON.stringify(got?.page)} parent=${JSON.stringify(got?.parent)}`);
+
+  await probeListPagesNull(client, dq);
 }
 
 main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
+// ---------------------------------------------------------------------------
+// list_pages and a null getAllPages (#64, part of #58)
+//
+// `list_pages` returns `{ pages: [], total: 0 }` when `logseq.Editor.getAllPages`
+// returns null (src/tools/list-pages.ts, pinned by a unit test). If null can
+// mean "no graph open" or "mid re-index" instead of "empty graph", that reports
+// a failure as "none". These probes record what the live, healthy graph returns
+// and whether any related call could tell the two cases apart.
+//
+// Read-only. Prints types, counts and key counts only, never page names, graph
+// names or paths. They can't make getAllPages return null: that needs a state
+// change, so see the manual probes below.
+//
+// MANUAL PROBES (the maintainer runs these; this script never changes LogSeq
+// state). Use a throwaway graph, not the personal one. Record shapes only
+// (null, array(n), error text) and never paste page names or paths anywhere.
+//
+//   Helper, run from the repo root before and during each step. It prints the
+//   shape of each call and nothing else:
+//     npx tsx -e "
+//       import {homedir} from 'os'; import {join} from 'path';
+//       import {loadConfig} from './src/config.js'; import {LogseqClient} from './src/client.js';
+//       const c = new LogseqClient(await loadConfig(join(homedir(), '.logseq-mcp', 'config.json')));
+//       for (const m of ['logseq.Editor.getAllPages', 'logseq.App.getCurrentGraph']) {
+//         try { const r = await c.callAPI(m, []);
+//           console.log(m, r === null ? 'null' : Array.isArray(r) ? 'array(' + r.length + ')' : typeof r);
+//         } catch (e) { console.log(m, 'ERROR', String(e.message).slice(0, 120)); } }"
+//
+//   M1. Empty graph: in LogSeq create a new, empty graph and open it. Run the
+//       helper. Is getAllPages an empty array, an array of built-in pages, or
+//       null? This answers whether null is ever "empty graph".
+//   M2. No graph open: in LogSeq open the graph switcher (left sidebar), choose
+//       "All graphs", and remove/unlink the throwaway graph so LogSeq sits on
+//       the graph chooser (or start LogSeq and don't open a graph). Run the
+//       helper. Record whether the HTTP server still answers, and the shape of
+//       getAllPages and getCurrentGraph (null, error, or an object).
+//   M3. During a re-index: open the throwaway graph, choose "Re-index" from
+//       the graph menu, and run the helper repeatedly (once a second) until the
+//       re-index finishes. Record the shapes seen and each transition (error,
+//       null, array(0), array(n)).
+//   M4. Switching graphs: switch from graph A to graph B and run the helper
+//       immediately, then again a few seconds later. Record whether the first
+//       call is null, an error, or the previous graph's pages.
+//
+//   Question to answer from M1 to M4: is there a state where getAllPages is
+//   null while getCurrentGraph is non-null, or the reverse? If getCurrentGraph
+//   is null exactly when getAllPages is null, the tool could throw a guidance
+//   error. If null is indistinguishable from an empty graph, only a warning
+//   is honest.
+// ---------------------------------------------------------------------------
+async function probeListPagesNull(
+  client: LogseqClient,
+  dq: (q: string, ...inputs: unknown[]) => Promise<Outcome>
+) {
+  console.log('\n== list_pages and a null getAllPages (#64)');
+
+  const describeCall = async (method: string, args: unknown[] = []) => {
+    try {
+      const r = await client.callAPI<unknown>(method, args as any[]);
+      if (r === null || r === undefined) return { shape: String(r), value: r };
+      if (Array.isArray(r)) {
+        return { shape: `array(${r.length})<${[...new Set(r.map(shapeOf))].join('|')}>`, value: r };
+      }
+      if (typeof r === 'object') return { shape: `object(${Object.keys(r).length} keys)`, value: r };
+      return { shape: typeof r, value: r };
+    } catch (e: any) {
+      return { shape: `ERROR ${String(e?.message ?? e).slice(0, 120)}`, value: undefined };
+    }
+  };
+
+  const all = await describeCall('logseq.Editor.getAllPages');
+  console.log(`${'getAllPages result shape'.padEnd(58)} ${all.shape}`);
+  const pages = Array.isArray(all.value) ? (all.value as any[]) : [];
+  const count = (f: (p: any) => boolean) => pages.filter(f).length;
+  console.log(
+    `${'getAllPages: journal / non-journal / without name'.padEnd(58)} ` +
+      `${count(p => p?.journal || p?.['journal?'])} / ${count(p => !(p?.journal || p?.['journal?']))} / ` +
+      `${count(p => typeof p?.name !== 'string')}`
+  );
+  console.log(
+    `${'getAllPages: distinct entity keys'.padEnd(58)} ` +
+      `${new Set(pages.flatMap(p => Object.keys(p ?? {}))).size}`
+  );
+
+  // Does a healthy graph agree with the Datalog page count? If it does, a null
+  // getAllPages next to a non-zero Datalog count would be detectable.
+  report('Datalog pages total (compare with getAllPages count)', await dq(`[:find (count ?p) . :where [?p :block/name]]`));
+
+  const graph = await describeCall('logseq.App.getCurrentGraph');
+  console.log(`${'getCurrentGraph result shape'.padEnd(58)} ${graph.shape}`);
+  if (graph.value && typeof graph.value === 'object') {
+    // Key -> value type only. The values are the graph's name and path.
+    const types = Object.fromEntries(Object.entries(graph.value).map(([k, v]) => [k, shapeOf(v)]));
+    console.log(`${'getCurrentGraph: key -> value type (no values)'.padEnd(58)} ${JSON.stringify(types)}`);
+  }
+
+  // Other cheap, read-only calls that might signal "a graph is open and loaded".
+  console.log(`${'getUserConfigs result shape'.padEnd(58)} ${(await describeCall('logseq.App.getUserConfigs')).shape}`);
+  console.log(`${'getCurrentPage result shape'.padEnd(58)} ${(await describeCall('logseq.Editor.getCurrentPage')).shape}`);
+
+  console.log(`${'getAllPages null on this (healthy) graph?'.padEnd(58)} ${all.value === null || all.value === undefined}`);
+  console.log('(the null cases need a state change: run manual probes M1 to M4, see the comment above)');
+}
