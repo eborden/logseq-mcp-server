@@ -38,7 +38,9 @@ import { registerResources } from './resources.js';
 import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
 import { wantsSlim } from './utils/slim-entities.js';
-import { parseFormat } from './utils/output-format.js';
+import { parseCompact, parseFormat } from './utils/output-format.js';
+import { compactTopicContext } from './utils/compact.js';
+import { renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 
 /**
@@ -63,6 +65,13 @@ const FORMAT_PARAM = {
   type: 'string',
   enum: ['json', 'markdown'],
   description: 'json (default), or markdown for plain text',
+} as const;
+
+/** `compact` parameter shared by the tools whose blocks can shrink to snippets (#43). */
+const COMPACT_PARAM = {
+  type: 'boolean',
+  description: 'Block snippets and uuids, no bodies. Read one with logseq_get_block',
+  default: false,
 } as const;
 
 // Define MCP tool schemas for all 14 tools
@@ -287,6 +296,8 @@ const TOOLS = [
           description: 'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)',
           default: false,
         },
+        format: FORMAT_PARAM,
+        compact: COMPACT_PARAM,
       },
       required: ['topic_name'],
     },
@@ -614,19 +625,23 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_build_context': {
           const topicName = args?.topic_name as string;
+          const format = parseFormat(args?.format);
+          const compact = parseCompact(args?.compact);
           const options = {
             maxBlocks: args?.max_blocks as number | undefined,
             maxRelatedPages: args?.max_related_pages as number | undefined,
             maxReferences: args?.max_references as number | undefined,
             includeTemporalContext: args?.include_temporal_context as boolean | undefined,
-            resolveRefs: args?.resolve_refs === true
+            // Compact output drops the bodies, so there is nothing to resolve refs in
+            resolveRefs: args?.resolve_refs === true && !compact
           };
           const result = await buildContextForTopic(client, topicName, options);
+          if (format === 'markdown') return textResult(withFooter(renderTopicContext(result, { compact }), result));
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result),
+                text: JSON.stringify(compact ? compactTopicContext(result) : result),
               },
             ],
           };
