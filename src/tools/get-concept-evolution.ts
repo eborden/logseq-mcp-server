@@ -2,6 +2,16 @@ import { LogseqClient } from '../client.js';
 import { BlockEntity, PageEntity } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
+import {
+  ResolvedAliases,
+  aliasIds,
+  aliasSetWarnings,
+  hasAliases,
+  resolveAliasSet,
+  resolvedAliases
+} from '../utils/alias-set.js';
+import { buildResultMeta } from '../utils/result-meta.js';
+import type { ResolveRefsMeta } from '../types.js';
 
 export type GroupByPeriod = 'day' | 'week' | 'month';
 
@@ -11,7 +21,11 @@ export interface ConceptEvolutionOptions {
   groupBy?: GroupByPeriod;
 }
 
-export interface ConceptEvolutionResult extends ResolvedFrom {
+/**
+ * `hasMore` / `warnings` are present only when a warning applies (an alias group
+ * cut at its maximum), so default output is unchanged.
+ */
+export interface ConceptEvolutionResult extends ResolvedFrom, ResolvedAliases, ResolveRefsMeta {
   concept: string;
   timeline: Array<{
     date: number | null;
@@ -69,6 +83,8 @@ function getMonthIdentifier(date: number): string {
  * @param options - Options for evolution tracking
  * @returns ConceptEvolutionResult with timeline of mentions. When the name was an alias,
  *   date or namespace leaf rather than an exact name, `resolvedFrom` says which page was used.
+ *   Mentions under any alias of the page are included (blocks that link one name, and the
+ *   blocks of the alias pages themselves); `resolvedAliases` lists the names covered.
  */
 export async function getConceptEvolution(
   client: LogseqClient,
@@ -81,6 +97,9 @@ export async function getConceptEvolution(
   // Throws PageNotFoundError (with suggestions) or AmbiguousPageError (with candidates).
   const resolved = await requirePage(client, conceptName);
   const lookupName = resolved.lookupName;
+
+  // The names this page goes by (#69): a page with no `alias::` costs no call here
+  const aliasSet = await resolveAliasSet(client, resolved.page);
 
   // Search for blocks mentioning the concept
   const blocks = await client.callAPI<BlockEntity[]>(
@@ -102,8 +121,15 @@ export async function getConceptEvolution(
   }
 
   // Also search for inline mentions using Datalog
-  const { query: mentionsQuery, inputs: mentionsInputs } =
-    DatalogQueryBuilder.getBlocksReferencingPage(lookupName);
+  // For an alias group, one query matches references to any of its names and
+  // adds the blocks of the alias pages (the page's own come from the tree above).
+  const mainPageId = resolved.page?.id ?? resolved.page?.['db/id'];
+  const { query: mentionsQuery, inputs: mentionsInputs } = hasAliases(aliasSet)
+    ? DatalogQueryBuilder.getBlocksReferencingPages(
+        aliasIds(aliasSet),
+        aliasIds(aliasSet).filter(id => id !== mainPageId)
+      )
+    : DatalogQueryBuilder.getBlocksReferencingPage(lookupName);
   const searchResults = await client.executeDatalogQuery(mentionsQuery, ...mentionsInputs);
   const searchBlocks = (searchResults || []).map((r: any[]) => r[0] as BlockEntity);
 
@@ -207,9 +233,14 @@ export async function getConceptEvolution(
     nonJournalMentions: filteredBlocks.length - dates.length
   };
 
+  const aliasWarnings = aliasSetWarnings(aliasSet);
+  const aliasMeta: ResolveRefsMeta = aliasWarnings.length > 0 ? buildResultMeta(aliasWarnings) : {};
+
   return {
     concept: conceptName,
     ...resolvedFrom(conceptName, resolved),
+    ...resolvedAliases(aliasSet),
+    ...aliasMeta,
     timeline,
     groupedTimeline: groupedTimeline ? Object.fromEntries(groupedTimeline) : undefined,
     summary
