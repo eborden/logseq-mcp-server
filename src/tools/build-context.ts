@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, BlockEntity } from '../types.js';
+import { PageEntity, BlockEntity, ResultMeta, ResultWarning } from '../types.js';
+import { buildResultMeta, truncationWarning } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { getBacklinks } from './get-backlinks.js';
 import { PageNotFoundError, isInfrastructureError } from '../errors.js';
@@ -12,7 +13,7 @@ export interface ContextOptions {
   includeTemporalContext?: boolean;
 }
 
-export interface TopicContext {
+export interface TopicContext extends Omit<ResultMeta, 'totals'> {
   topic: string;
   mainPage: PageEntity;
   directBlocks: BlockEntity[];
@@ -37,6 +38,15 @@ export interface TopicContext {
     totalRelatedPages: number;
     totalReferences: number;
     pageProperties: Record<string, any>;
+  };
+  /**
+   * Real counts before `maxBlocks` / `maxReferences` / `maxRelatedPages` were
+   * applied (the `summary` totals count what is returned).
+   */
+  totals: {
+    blocks: number;
+    relatedPages: number;
+    references: number;
   };
 }
 
@@ -94,15 +104,15 @@ export async function buildContextForTopic(
   const blockResults = await client.executeDatalogQuery<Array<[any]>>(blocks.query, ...blocks.inputs);
 
   // Extract blocks (empty array if no blocks exist)
-  const directBlocks = (blockResults || [])
+  const allBlocks = (blockResults || [])
     .map(result => result[0])
-    .filter(block => block != null)
-    .slice(0, maxBlocks);
+    .filter(block => block != null);
+  const directBlocks = allBlocks.slice(0, maxBlocks);
 
   // Query 3: Get reference blocks and derive related pages
   // Use HTTP API (getBacklinks) which correctly handles LogSeq's reference structure
-  const references: TopicContext['references'] = [];
-  const relatedPages: TopicContext['relatedPages'] = [];
+  const allReferences: TopicContext['references'] = [];
+  const allRelatedPages: TopicContext['relatedPages'] = [];
   const seenPageIds = new Set<number>();
 
   // null or [] means the page has no backlinks. A thrown error (connection,
@@ -114,8 +124,6 @@ export async function buildContextForTopic(
     for (const [sourcePage, blocks] of backlinks) {
       // For each block, extract the actual source page
       for (const block of blocks) {
-        if (references.length >= maxReferences && relatedPages.length >= maxRelatedPages) break;
-
         // Source page is either the tuple's first element or block.page
         const actualSourcePage = sourcePage || block.page;
         if (!actualSourcePage) continue;
@@ -123,24 +131,41 @@ export async function buildContextForTopic(
         const sourcePageId = actualSourcePage.id || actualSourcePage['db/id'];
 
         // Add source page to related pages (inbound connection)
-        if (sourcePageId && !seenPageIds.has(sourcePageId) && relatedPages.length < maxRelatedPages) {
+        if (sourcePageId && !seenPageIds.has(sourcePageId)) {
           seenPageIds.add(sourcePageId);
-          relatedPages.push({
+          allRelatedPages.push({
             page: actualSourcePage,
             relationshipType: 'inbound'
           });
         }
 
-        // Add block to references
-        if (references.length < maxReferences) {
-          references.push({
-            block,
-            sourcePage: actualSourcePage
-          });
-        }
+        allReferences.push({
+          block,
+          sourcePage: actualSourcePage
+        });
       }
-      if (references.length >= maxReferences && relatedPages.length >= maxRelatedPages) break;
     }
+  }
+
+  // Everything is already in memory, so the totals cost no extra API call.
+  const references = allReferences.slice(0, maxReferences);
+  const relatedPages = allRelatedPages.slice(0, maxRelatedPages);
+
+  const totals = {
+    blocks: allBlocks.length,
+    relatedPages: allRelatedPages.length,
+    references: allReferences.length
+  };
+
+  const warnings: ResultWarning[] = [];
+  if (totals.blocks > directBlocks.length) {
+    warnings.push(truncationWarning('blocks', directBlocks.length, totals.blocks, 'max_blocks', 'blocks_truncated'));
+  }
+  if (totals.references > references.length) {
+    warnings.push(truncationWarning('references', references.length, totals.references, 'max_references', 'references_truncated'));
+  }
+  if (totals.relatedPages > relatedPages.length) {
+    warnings.push(truncationWarning('related pages', relatedPages.length, totals.relatedPages, 'max_related_pages', 'related_pages_truncated'));
   }
 
   // Build temporal context if requested
@@ -171,6 +196,8 @@ export async function buildContextForTopic(
     relatedPages,
     references,
     temporalContext,
-    summary
+    summary,
+    ...buildResultMeta(warnings),
+    totals
   };
 }
