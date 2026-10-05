@@ -229,7 +229,11 @@ export function splitRow(text: string): string[] {
   return row.split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'));
 }
 
-/** The first table in `lines`: a `|` header row, a delimiter row, then `|` rows. */
+/**
+ * The first table in `lines`: a `|` header row, a delimiter row, then `|` rows.
+ * GFM tables without leading pipes aren't recognised; every current file uses them,
+ * and the error messages say rows must start with `|`.
+ */
 export function firstTable(lines: Line[]): Table | null {
   for (let i = 0; i + 1 < lines.length; i++) {
     const header = lines[i];
@@ -434,7 +438,7 @@ function checkChangelog(f: DocFile, secs: ReturnType<typeof sections>, add: Add)
   if (!section) return; // reported as a missing heading
   const table = firstTable(section.body);
   if (!table) {
-    add(f.path, 'changelog', '"## Changelog" has no table', section.heading.n);
+    add(f.path, 'changelog', '"## Changelog" has no table; table rows must start with `|`', section.heading.n);
     return;
   }
   if (table.header.join('|') !== CHANGELOG_COLUMNS.join('|')) {
@@ -599,7 +603,7 @@ function checkIndex(
 ): void {
   const table = firstTable(lines);
   if (!table) {
-    add(readmePath, 'index', 'no markdown table found; the first table is the index');
+    add(readmePath, 'index', 'no markdown table found (table rows must start with `|`); the first table is the index');
     return;
   }
   const titleCol = table.header.indexOf('Title');

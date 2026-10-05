@@ -407,9 +407,30 @@ describe('docs format guard: each violation fails', () => {
       name: 'a business rule with no Changelog table',
       rule: 'changelog',
       file: 'docs/business-rules/0001-no-bad-thing.md',
-      message: /has no table/,
+      message: /has no table; table rows must start with `\|`/,
       mutate: f => {
         f['docs/business-rules/0001-no-bad-thing.md'] = rule({ title: 'Never do the bad thing', changelog: 'Introduced in #2.' });
+      },
+    },
+    {
+      name: 'a Changelog table without leading pipes',
+      rule: 'changelog',
+      file: 'docs/business-rules/0001-no-bad-thing.md',
+      message: /has no table; table rows must start with `\|`/,
+      mutate: f => {
+        f['docs/business-rules/0001-no-bad-thing.md'] = rule({
+          title: 'Never do the bad thing',
+          changelog: 'Date | Change | Issue/PR\n---|---|---\n2026-01-01 | Introduced. | #2',
+        });
+      },
+    },
+    {
+      name: 'a README with no index table',
+      rule: 'index',
+      file: 'docs/business-rules/README.md',
+      message: /no markdown table found \(table rows must start with `\|`\)/,
+      mutate: f => {
+        f['docs/business-rules/README.md'] = '# Business Rules\n\nNo index yet.\n';
       },
     },
     {
