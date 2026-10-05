@@ -1,20 +1,54 @@
+import type { PageCandidate } from './types.js';
+
 /**
  * Custom error classes with helpful guidance for error recovery.
  * Following MCP best practices: errors should guide users toward corrections.
  */
 
 /**
- * Thrown when a page is not found in the LogSeq graph.
- * Includes fuzzy match suggestions to help correct typos.
+ * Thrown when a name resolves to no page (no exact name, alias, journal date or
+ * namespace leaf). The message is guidance: the closest names, then the tools
+ * to find the page with.
  */
 export class PageNotFoundError extends Error {
-  constructor(pageName: string, suggestions: string[] = []) {
-    const guidance = suggestions.length > 0
-      ? `\n\nDid you mean one of these?\n${suggestions.map(s => `  - ${s}`).join('\n')}`
-      : `\n\nTip: Use logseq_list_pages to discover available pages.`;
+  readonly pageName: string;
+  readonly suggestions: string[];
 
-    super(`Page not found: "${pageName}"${guidance}`);
+  constructor(pageName: string, suggestions: string[] = []) {
+    const closest = suggestions.length > 0 ? ` Closest: ${suggestions.join(', ')}.` : '';
+    super(
+      `No page ${JSON.stringify(pageName)}.${closest} ` +
+      `Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.`
+    );
     this.name = 'PageNotFoundError';
+    this.pageName = pageName;
+    this.suggestions = suggestions;
+  }
+}
+
+/**
+ * Thrown when a name matches several pages (an alias shared by pages, or a
+ * namespace leaf name used under several namespaces) and none of them is an
+ * exact name match. Nothing is picked: the candidates say how to choose.
+ * The MCP layer returns this as a structured result, not an error.
+ */
+export class AmbiguousPageError extends Error {
+  readonly pageName: string;
+  readonly candidates: PageCandidate[];
+  /** Matching pages in total; more than `candidates.length` when the list was capped */
+  readonly totalCandidates: number;
+
+  constructor(pageName: string, candidates: PageCandidate[], totalCandidates = candidates.length) {
+    const listed = candidates.map(c => `${JSON.stringify(c.originalName)} (${c.reason})`).join('; ');
+    const more = totalCandidates > candidates.length ? ` and ${totalCandidates - candidates.length} more` : '';
+    super(
+      `${JSON.stringify(pageName)} matches ${totalCandidates} pages: ${listed}${more}. ` +
+      `Repeat the call with the exact name of one of them.`
+    );
+    this.name = 'AmbiguousPageError';
+    this.pageName = pageName;
+    this.candidates = candidates;
+    this.totalCandidates = totalCandidates;
   }
 }
 

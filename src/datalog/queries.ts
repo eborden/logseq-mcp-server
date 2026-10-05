@@ -242,6 +242,66 @@ export class DatalogQueryBuilder {
   }
 
   /**
+   * Generate ONE Datalog query that resolves a page name by every route at once.
+   * Rows are `[page, via]`, `page` a full pull and `via` how it matched:
+   * - `"name"`: `:block/name` equals the lowercased name;
+   * - `"alias"`: a page whose `:block/alias` points at the page named so (the
+   *   page named so is the alias *target*; LogSeq creates it as a bare stub);
+   * - `"journal-date"` (only when `journalDay` is given): the journal page whose
+   *   `:block/journal-day` is that day. `[?page :block/name]` is required, or
+   *   blocks with a scheduled/deadline date match as pages.
+   * Rows can come from several routes, so the caller decides which one wins.
+   * @param pageName - The page name or alias (any casing)
+   * @param journalDay - YYYYMMDD integer when the name was an ISO date
+   * @returns Query and inputs (`[lowercased pageName]`, plus `journalDay` when set)
+   * @throws Error if `journalDay` is not an integer
+   */
+  static resolvePage(pageName: string, journalDay?: number): DatalogQuery {
+    if (journalDay === undefined) {
+      return {
+        query: `[:find (pull ?page [*]) ?via
+               :in $ ?n
+               :where
+               (or-join [?n ?page ?via]
+                 (and [?page :block/name ?n] [(ground "name") ?via])
+                 (and [?stub :block/name ?n] [?page :block/alias ?stub] [(ground "alias") ?via]))]`,
+        inputs: [pageName.toLowerCase()]
+      };
+    }
+    if (!Number.isInteger(journalDay)) {
+      throw new Error(`Invalid journal day: ${String(journalDay)} (expected an integer)`);
+    }
+    return {
+      query: `[:find (pull ?page [*]) ?via
+             :in $ ?n ?day
+             :where
+             (or-join [?n ?day ?page ?via]
+               (and [?page :block/name ?n] [(ground "name") ?via])
+               (and [?stub :block/name ?n] [?page :block/alias ?stub] [(ground "alias") ?via])
+               (and [?page :block/name] [?page :block/journal-day ?day] [(ground "journal-date") ?via]))]`,
+      inputs: [pageName.toLowerCase(), journalDay]
+    };
+  }
+
+  /**
+   * Generate a Datalog query for namespace pages whose last segment is `leafName`
+   * (`projects/atlas` for `atlas`). `ends-with?` works in LogSeq's Datalog.
+   * @param leafName - The leaf name (any casing)
+   * @returns Query and inputs (`["/" + lowercased leafName]`)
+   */
+  static namespaceLeafPages(leafName: string): DatalogQuery {
+    return {
+      query: `[:find (pull ?page [*])
+             :in $ ?suffix
+             :where
+             [?page :block/name ?n]
+             [?page :block/namespace]
+             [(clojure.string/ends-with? ?n ?suffix)]]`,
+      inputs: [`/${leafName.toLowerCase()}`]
+    };
+  }
+
+  /**
    * Generate Datalog query for journal pages whose date falls in a range.
    * `[?page :block/name]` is required: blocks with a scheduled/deadline date
    * also carry `:block/journal-day`, and without it they match as pages.

@@ -202,3 +202,18 @@ export interface ResultMeta {
  * when `resolve_refs` is off, so default output is unchanged.
  */
 export type ResolveRefsMeta = Partial<Pick<ResultMeta, 'hasMore' | 'warnings'>>;
+
+// Page resolution (#41)
+
+/** How a page name was matched to a page. `name` is the exact, case-insensitive match. */
+export type PageMatchReason = 'name' | 'alias' | 'journal-date' | 'namespace-leaf';
+
+/** One page a name could refer to, when it is ambiguous. */
+export interface PageCandidate {
+  /** Lowercased `:block/name`, safe to pass back to any page-taking tool */
+  name: string;
+  originalName: string;
+  matchedBy: PageMatchReason;
+  /** Why this page matched, in words */
+  reason: string;
+}
