@@ -15,7 +15,7 @@ Issue #41 (part of #13) asked for ambiguity candidates, guidance-style not-found
 
 All page-taking tools resolve names through one helper, `requirePage` in `src/utils/resolve-page.ts`, rather than each doing its own lookup. The resolver handles exact names, aliases, ISO dates and namespace leaves, returns candidates for an ambiguous name rather than guessing, turns a missing page into guidance, and never redirects silently.
 
-The resolver order, the error classes and the `resolvedFrom` shape are what callers rely on. They live in the business rule `page-names-resolved-via-resolver` in `docs/business-rules/` (PR #84) and in PR #57's design section, not here.
+The resolver order, the error classes and the `resolvedFrom` shape are what callers rely on. They live in the business rule [BR-0010 (page-names-resolved-via-resolver)](../business-rules/0010-page-names-resolved-via-resolver.md) (PR #84) and in PR #57's design section, not here.
 
 ## Consequences
 

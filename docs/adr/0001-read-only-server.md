@@ -14,7 +14,7 @@ Under the MCP spec, a tool with no annotations defaults to possibly destructive 
 
 We keep the server read-only. No tool writes to the graph, and every tool declares it through MCP annotations (PR #28). Prompts and resources are read-only too.
 
-The invariants that keep this true (which hints each tool declares, the one non-idempotent tool, and the sign-off needed for a tool that writes) live in the business rule `tools-read-only` in `docs/business-rules/` (PR #84) and in foundations hard rule 4. Reversing this decision needs a new ADR that supersedes this one.
+The invariants that keep this true (which hints each tool declares, the one non-idempotent tool, and the sign-off needed for a tool that writes) live in the business rule [BR-0002 (tools-read-only)](../business-rules/0002-tools-read-only.md) (PR #84) and in foundations hard rule 4. Reversing this decision needs a new ADR that supersedes this one.
 
 ## Consequences
 

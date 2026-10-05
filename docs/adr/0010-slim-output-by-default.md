@@ -12,7 +12,7 @@ Measured through the real MCP server on a ~2k-page graph (`scripts/measure-outpu
 
 `slim_results` defaults to `true` on the three tools that have it: `search_blocks`, `query_by_property` and `query_by_date_range`. An explicit `false` returns the full entities, byte for byte as before. The MCP handlers apply the default through `wantsSlim`. The underlying tool functions still default to full output, so internal callers are unchanged.
 
-What slim output leaves out, and which result-meta fields it keeps, are promises to the caller. They live in the business rules `slim-output-default` and `no-silent-truncation` in `docs/business-rules/` (PR #84), not here.
+What slim output leaves out, and which result-meta fields it keeps, are promises to the caller. They live in the business rules [BR-0012 (slim-output-default)](../business-rules/0012-slim-output-default.md) and [BR-0006 (no-silent-truncation)](../business-rules/0006-no-silent-truncation.md) (PR #84), not here.
 
 ## Consequences
 

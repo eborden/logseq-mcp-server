@@ -10,7 +10,7 @@ Early on the surface moved freely. Two tools were deleted ([ADR-0008 (remove-red
 
 We change tool contracts additively: new optional parameters, new tools and new optional result fields (foundations, hard rule 8 and section 4.3). A rename or removal needs an explicit decision and a migration note.
 
-The exact promise to callers, including how parameter aliases fit (issue #44), lives in the business rules `additive-tool-contracts` and `param-aliases-best-effort` in `docs/business-rules/` (PR #84). This ADR records why contracts moved from free-form to additive.
+The exact promise to callers, including how parameter aliases fit (issue #44), lives in the business rules [BR-0004 (additive-tool-contracts)](../business-rules/0004-additive-tool-contracts.md) and [BR-0008 (param-aliases-best-effort)](../business-rules/0008-param-aliases-best-effort.md) (PR #84). This ADR records why contracts moved from free-form to additive.
 
 ## Consequences
 
