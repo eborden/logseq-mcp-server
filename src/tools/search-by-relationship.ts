@@ -2,7 +2,8 @@ import { LogseqClient } from '../client.js';
 import { BlockEntity, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { requirePage, resolvedFromInfo } from '../utils/resolve-page.js';
+import { requirePage, resolvedFromInfo, ResolvedPage } from '../utils/resolve-page.js';
+import { isInfrastructureError } from '../errors.js';
 
 export type RelationshipType =
   | 'references' // Blocks about topicA that reference topicB
@@ -45,6 +46,32 @@ function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
 }
 
 /**
+ * Resolve both topics at once. The same name (ignoring case and surrounding
+ * whitespace) is resolved once. When both fail, the error is deterministic:
+ * a connection, timeout or auth error first, then topicA's, then topicB's,
+ * whichever request happened to finish first.
+ */
+async function resolveTopics(
+  client: LogseqClient,
+  topicA: string,
+  topicB: string
+): Promise<[ResolvedPage, ResolvedPage]> {
+  const sameName = topicA.trim().toLowerCase() === topicB.trim().toLowerCase();
+  const [a, b] = await Promise.allSettled([
+    requirePage(client, topicA),
+    sameName ? Promise.resolve(undefined) : requirePage(client, topicB)
+  ]);
+
+  const failures = [a, b].filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  const infrastructure = failures.find(r => isInfrastructureError(r.reason));
+  if (infrastructure) throw infrastructure.reason;
+  if (failures.length > 0) throw failures[0].reason;
+
+  const resolvedA = (a as PromiseFulfilledResult<ResolvedPage>).value;
+  return [resolvedA, sameName ? resolvedA : (b as PromiseFulfilledResult<ResolvedPage>).value];
+}
+
+/**
  * Search for blocks based on relationship between topics
  * @param client - LogseqClient instance
  * @param topicA - Primary topic to search for (page name, alias or ISO date)
@@ -71,11 +98,11 @@ export async function searchByRelationship(
   let results: BlockEntity[] = [];
   const warnings: ResultWarning[] = [];
 
-  // Resolve both topics first (exact name, alias or ISO date: one query each).
-  // A topic that matches no page or several pages throws PageNotFoundError or
-  // AmbiguousPageError instead of quietly returning nothing.
-  const resolvedA = await requirePage(client, topicA);
-  const resolvedB = await requirePage(client, topicB);
+  // Resolve both topics first (exact name, alias or ISO date: one query each), in
+  // parallel and, when both topics are the same name, once. A topic that matches no
+  // page or several pages throws PageNotFoundError or AmbiguousPageError instead of
+  // quietly returning nothing.
+  const [resolvedA, resolvedB] = await resolveTopics(client, topicA, topicB);
   const nameA = resolvedA.lookupName;
   const nameB = resolvedB.lookupName;
 

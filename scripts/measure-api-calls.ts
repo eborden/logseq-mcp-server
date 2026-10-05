@@ -48,16 +48,16 @@ async function main() {
   const pages = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
     '[:find (count ?p) . :where [?p :block/name]]'
   ]);
-  let subject = process.argv[2];
-  if (!subject) {
-    // Most-referenced non-journal page: a realistic hub.
-    const rows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
-      `[:find ?n ?b :where [?b :block/refs ?p] [?p :block/name ?n] [?p :block/file]]`
-    ]);
-    const counts = new Map<string, number>();
-    for (const [n] of rows) counts.set(n, (counts.get(n) ?? 0) + 1);
-    subject = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-  }
+  // Most-referenced non-journal pages: realistic hubs.
+  const refRowsByName = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
+    `[:find ?n ?b :where [?b :block/refs ?p] [?p :block/name ?n] [?p :block/file]]`
+  ]);
+  const counts = new Map<string, number>();
+  for (const [n] of refRowsByName) counts.set(n, (counts.get(n) ?? 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+  const subject = process.argv[2] ?? ranked[0];
+  // A second page for the two-topic tool, so the "same topic" shortcut doesn't hide its cost
+  const otherSubject = ranked.find(n => n !== subject.toLowerCase()) ?? subject;
   console.log(`graph pages: ${pages}   subject: ${JSON.stringify(subject)}\n`);
 
   // A block that holds a ((uuid)) ref, for the resolve_refs cases (skipped if none)
@@ -101,8 +101,9 @@ async function main() {
     ['get_page', () => getPage(client, subject, false)],
     ['get_backlinks', () => getBacklinks(client, subject)],
     ['get_concept_evolution', () => getConceptEvolution(client, subject)],
-    ['search_by_relationship references', () => searchByRelationship(client, subject, subject, 'references')],
-    ['search_by_relationship connected-within', () => searchByRelationship(client, subject, subject, 'connected-within', 1)],
+    ['search_by_relationship references', () => searchByRelationship(client, subject, otherSubject, 'references')],
+    ['search_by_relationship references (same topic twice)', () => searchByRelationship(client, subject, subject, 'references')],
+    ['search_by_relationship connected-within', () => searchByRelationship(client, subject, otherSubject, 'connected-within', 1)],
     ['get_page (not found)', () => getPage(client, 'no such page 41 probe', false).catch(e => e.name)],
     ...(uniqueAlias
       ? ([

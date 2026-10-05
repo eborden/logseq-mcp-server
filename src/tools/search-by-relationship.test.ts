@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { searchByRelationship } from './search-by-relationship.js';
 import { LogseqClient } from '../client.js';
-import { AmbiguousPageError, PageNotFoundError } from '../errors.js';
+import { AmbiguousPageError, LogSeqTimeoutError, PageNotFoundError } from '../errors.js';
 
 /**
  * A tiny stand-in for LogSeq's HTTP API. Pages and blocks are plain
@@ -179,6 +179,60 @@ describe('searchByRelationship', () => {
 
       expect(aliasOf).toHaveBeenCalledWith(['"project atlas"', '"alice"']);
       expect(result.results.map(b => b.id).sort()).toEqual([10, 11, 12]);
+    });
+
+    describe('topic resolution', () => {
+      const resolveCalls = () =>
+        (ctx.client.callAPI as any).mock.calls.filter(([, args]: any[]) => String(args[0]).includes(':in $ ?n'));
+
+      it('starts both resolve queries before either has answered', async () => {
+        const original = (ctx.client.callAPI as any).getMockImplementation();
+        const release: Array<() => void> = [];
+        vi.spyOn(ctx.client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) => {
+          if (String(args[0]).includes(':in $ ?n')) await new Promise<void>(resolve => release.push(resolve));
+          return original(method, args);
+        });
+
+        const pending = searchByRelationship(ctx.client, 'Project Atlas', 'Alice', 'references');
+        await vi.waitFor(() => expect(release).toHaveLength(2)); // both are in flight at once
+        release.forEach(fn => fn());
+
+        expect((await pending).results.length).toBeGreaterThan(0);
+      });
+
+      it('resolves a name that is both topics once', async () => {
+        await searchByRelationship(ctx.client, 'Project Atlas', ' project ATLAS ', 'references');
+
+        expect(resolveCalls()).toHaveLength(1);
+      });
+
+      it('reports topicA first when both topics are missing, whichever answers first', async () => {
+        const original = (ctx.client.callAPI as any).getMockImplementation();
+        vi.spyOn(ctx.client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) => {
+          // topicA's lookup is the slow one
+          if (String(args[0]).includes(':in $ ?n') && args[1] === '"nope a"') await new Promise(r => setTimeout(r, 20));
+          return original(method, args);
+        });
+
+        await expect(searchByRelationship(ctx.client, 'nope a', 'nope b', 'references')).rejects.toThrow(/No page "nope a"/);
+      });
+
+      it('reports topicB when only topicB is missing', async () => {
+        await expect(searchByRelationship(ctx.client, 'project atlas', 'nope b', 'references')).rejects.toThrow(
+          /No page "nope b"/
+        );
+      });
+
+      it('lets a connection error win over a missing page', async () => {
+        const error = new LogSeqTimeoutError('http://test', 1000);
+        const original = (ctx.client.callAPI as any).getMockImplementation();
+        vi.spyOn(ctx.client, 'callAPI').mockImplementation(async (method: string, args: any[] = []) => {
+          if (String(args[0]).includes(':in $ ?n') && args[1] === '"alice"') throw error;
+          return original(method, args);
+        });
+
+        await expect(searchByRelationship(ctx.client, 'nope a', 'alice', 'references')).rejects.toBe(error);
+      });
     });
 
     describe('resolvedFrom', () => {
