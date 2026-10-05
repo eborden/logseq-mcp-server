@@ -242,4 +242,55 @@ describe('searchByRelationship', () => {
       expect(ctx.hopCalls()).toHaveLength(0);
     });
   });
+
+  describe('truncation warnings (#40)', () => {
+    it('has hasMore false and no warnings for the single-query types', async () => {
+      const result = await searchByRelationship(ctx.client, 'Project Atlas', 'Alice', 'references');
+
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('has no warning when the frontier is under the cap', async () => {
+      const result = await searchByRelationship(ctx.client, 'alice', 'dave', 'connected-within', 3);
+
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('has no warning when the frontier is exactly at the cap', async () => {
+      // hop 2 frontier is {atlas, bob}: 2 pages
+      const result = await searchByRelationship(ctx.client, 'alice', 'dave', 'connected-within', 2, { maxFrontier: 2 });
+
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('cuts an oversized frontier, lowest ids first, and warns when topicB is not found', async () => {
+      const result = await searchByRelationship(ctx.client, 'alice', 'dave', 'connected-within', 2, { maxFrontier: 1 });
+
+      const frontiers = ctx.hopCalls().map(c => String(c.args[0]).match(/ground \[([\d ]+)\]/)![1]);
+      expect(frontiers).toEqual(['2', '1']);
+      expect(result.results).toEqual([]);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toMatchObject({ code: 'frontier_truncated' });
+      expect(result.warnings[0].message).toContain('Hop 2 reached 2 pages; only 1 were expanded');
+      expect(result.warnings[0].message).toContain('max_distance');
+      // No parameter raises the cap, so it must not claim there is more to fetch
+      expect(result.warnings[0].howToFetchAll).toBeUndefined();
+      expect(result.hasMore).toBe(false);
+    });
+
+    it('does not warn when a connection is found despite the cut', async () => {
+      const result = await searchByRelationship(ctx.client, 'alice', 'dave', 'connected-within', 3, { maxFrontier: 1 });
+
+      expect(ctx.treeCalls()).toHaveLength(2); // connection found, so both pages were fetched
+      expect(result.warnings).toEqual([]);
+    });
+
+    it('keeps the call count: the cap changes the ids per query, not the number of queries', async () => {
+      await searchByRelationship(ctx.client, 'alice', 'dave', 'connected-within', 2, { maxFrontier: 1 });
+
+      expect(ctx.hopCalls()).toHaveLength(2);
+    });
+  });
 });
