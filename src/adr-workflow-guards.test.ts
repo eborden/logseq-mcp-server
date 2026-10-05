@@ -253,3 +253,84 @@ describe('ADR-0017: publish.yml is manual, main-only and dry-run by default', ()
     }
   });
 });
+
+// ADR-0022 (minimum-node-22-12): engines.node is the dev toolchain's floor, and CI
+// tests the oldest major that satisfies it and the newest (24).
+describe('ADR-0022: CI covers the engines.node floor', () => {
+  const readJson = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf-8'));
+  const pkg = readJson('../package.json');
+  const lock = readJson('../package-lock.json');
+  const NEWEST_MAJOR = '24';
+
+  type Version = [number, number, number];
+  const parseVersion = (text: string): Version => {
+    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(text.trim());
+    if (!m) throw new Error(`Not a plain x.y.z version: "${text}"`);
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+  };
+  const floorOf = (range: string): Version => {
+    const m = /^>=\s*(\S+)$/.exec(range.trim());
+    if (!m) throw new Error(`engines.node should be a single ">=x.y.z" floor, got "${range}"`);
+    return parseVersion(m[1]);
+  };
+  /** Lowest version a `^x.y.z || >=x.y.z` range allows at or above `major`.0.0. Other syntax throws. */
+  const lowestFrom = (range: string, major: number): Version | undefined => {
+    const candidates = range.split('||').flatMap((part): Version[] => {
+      const m = /^(\^|>=)\s*(\S+)$/.exec(part.trim());
+      if (!m) throw new Error(`Can't read engines range part "${part.trim()}"`);
+      const v = parseVersion(m[2]);
+      if (m[1] === '^') return v[0] >= major ? [v] : [];
+      return v[0] >= major ? [v] : [[major, 0, 0]];
+    });
+    return candidates.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2])[0];
+  };
+
+  const floor = floorOf(pkg.engines.node);
+  const floorMajor = String(floor[0]);
+
+  /** Jobs in ci.yml that run the unit tests, with their Node matrix. */
+  const unitTestJobs = () => {
+    const ci = parseWorkflowYaml(readWorkflow('ci.yml'));
+    return [...at(ci, 'jobs').map.entries()]
+      .filter(([, job]) => (job.map.get('steps')?.items ?? []).some(step => step.map.get('run')?.value === 'npx vitest run src'))
+      .map(([name, job]) => ({ name, job, nodes: listOf(at(job, 'strategy', 'matrix', 'node')) }));
+  };
+
+  it('ci.yml has a unit-test job with a Node matrix', () => {
+    expect(unitTestJobs().length).toBeGreaterThan(0);
+  });
+
+  it(`each unit-test job runs on the floor's major and on Node ${NEWEST_MAJOR}, and nothing below the floor`, () => {
+    for (const { name, nodes } of unitTestJobs()) {
+      expect(nodes, `job "${name}"`).toContain(floorMajor);
+      expect(nodes, `job "${name}"`).toContain(NEWEST_MAJOR);
+      for (const node of nodes) expect(Number(node), `job "${name}" runs Node ${node}`).toBeGreaterThanOrEqual(floor[0]);
+    }
+  });
+
+  it('each unit-test job sets up the Node version from its matrix', () => {
+    for (const { name, job } of unitTestJobs()) {
+      const setup = at(job, 'steps').items.find(step => step.map.get('uses')?.value.startsWith('actions/setup-node@'));
+      expect(setup, `job "${name}" has no actions/setup-node step`).toBeDefined();
+      expect(at(setup!, 'with', 'node-version').value).toMatch(/^\$\{\{\s*matrix\.node\s*\}\}$/);
+    }
+  });
+
+  it('the lockfile root carries the same engines.node as package.json', () => {
+    expect(lock.packages[''].engines.node).toBe(pkg.engines.node);
+  });
+
+  it("the floor is the dev toolchain's (vite) lowest supported version in the floor's major or later", () => {
+    const viteEngines = lock.packages['node_modules/vite']?.engines?.node;
+    expect(viteEngines, 'vite is no longer in the lockfile; update ADR-0022 and this test').toBeDefined();
+    expect(lowestFrom(viteEngines, floor[0])?.join('.')).toBe(floor.join('.'));
+  });
+
+  it('reads engines ranges', () => {
+    expect(lowestFrom('^20.19.0 || >=22.12.0', 22)).toEqual([22, 12, 0]);
+    expect(lowestFrom('^20.19.0 || >=22.12.0', 24)).toEqual([24, 0, 0]);
+    expect(lowestFrom('>=18.0.0', 22)).toEqual([22, 0, 0]);
+    expect(() => lowestFrom('22.x', 22)).toThrow(/Can't read/);
+    expect(() => floorOf('^22.12.0')).toThrow(/single/);
+  });
+});
