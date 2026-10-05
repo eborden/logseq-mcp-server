@@ -2,7 +2,7 @@
 
 ## Context
 
-The server connects an LLM to a personal knowledge graph through LogSeq's HTTP API, which can also write: it exposes `logseq.Editor.*` methods that insert, update and remove blocks. The server has never called one. It has been read-only since the first commit (2025-11-20), so there is no dated moment when the choice was made, and no early source records why.
+The server connects an LLM to a personal knowledge graph through LogSeq's HTTP API, which can also write: it exposes `logseq.Editor.*` methods that insert, update and remove blocks. The server has never called one. It has been read-only since the first commit (48284ae, 2025-11-20), so there is no dated moment when the choice was made, and no early source records why.
 
 The recorded rationale came later, in the foundations doc (PR #38). Section 4.5: "MCP clients retry, and LLMs call the same tool twice. A read-only tool makes that harmless." It adds that a tool that writes would need "idempotent design, explicit confirmation semantics and its own review", and hard rule 4 makes adding one a contract change that needs the maintainer's sign-off.
 

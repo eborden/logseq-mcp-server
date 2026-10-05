@@ -14,7 +14,7 @@ We fetch required and optional data in separate queries. The first query gets th
 
 - Pages with no blocks, no connections or no references return a valid result with empty lists, instead of looking like a missing page.
 - Each tool spends at least one more call than a single query would. The cost is small and fixed: `build_context` is 3 calls in total.
-- Each tool must handle empty arrays explicitly and keep "entity not found" distinct from "entity has nothing attached". PR #57 later made that distinction uniform across page-taking tools: a missing page throws `PageNotFoundError`, while an existing page with no mentions returns an empty result (see `resolve-page-names-via-shared-resolver`).
+- Each tool must handle empty arrays explicitly and keep "entity not found" distinct from "entity has nothing attached". PR #57 later made that distinction uniform across page-taking tools: a missing page throws `PageNotFoundError`, while an existing page with no mentions returns an empty result (see [ADR-0014 (resolve-page-names-via-shared-resolver)](0014-resolve-page-names-via-shared-resolver.md)).
 - Queries stay simple to read and to test one at a time.
 
 ## Status

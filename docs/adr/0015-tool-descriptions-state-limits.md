@@ -2,7 +2,7 @@
 
 ## Context
 
-Tool descriptions are what the model reads to choose a tool. Issue #13 (section 4) and issue #44 asked to "make tool descriptions say what each tool can't find (search is lexical; traversal only reaches linked pages)". Commit a460d5c (PR #56) added a "Can't find" line to every description, trimmed each one under the 400-character cap (see `tool-list-size-guardrails`), and added a test that requires the line.
+Tool descriptions are what the model reads to choose a tool. Issue #13 (section 4) and issue #44 asked to "make tool descriptions say what each tool can't find (search is lexical; traversal only reaches linked pages)". Commit a460d5c (PR #56) added a "Can't find" line to every description, trimmed each one under the 400-character cap (see [ADR-0016 (tool-list-size-guardrails)](0016-tool-list-size-guardrails.md)), and added a test that requires the line.
 
 The foundations doc (PR #38, section 4.11) states the surrounding rule: descriptions live in `src/tool-descriptions.ts`, are kept accurate when behavior changes, and each needs a "Can't find" line. Model guidance lives in three places: tool descriptions, server instructions in `src/instructions.ts`, and next-step tips from `src/utils/tips.ts`.
 

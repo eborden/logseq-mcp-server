@@ -2,7 +2,7 @@
 
 ## Context
 
-`embed-strings-in-datalog-queries` put page names inside the query text. That broke on any name containing a double quote (`Unexpected EOF reading string`), and a crafted name could rewrite the query (issue #6). It rested on the belief that LogSeq's HTTP API cannot take `:in` parameters.
+[ADR-0006 (embed-strings-in-datalog-queries)](0006-embed-strings-in-datalog-queries.md) put page names inside the query text. That broke on any name containing a double quote (`Unexpected EOF reading string`), and a crafted name could rewrite the query (issue #6). It rested on the belief that LogSeq's HTTP API cannot take `:in` parameters.
 
 Probing a live graph (`scripts/probe-constraints.ts`, issue #12, PR #19) showed that belief was wrong. `:in` works, but LogSeq reads every input after the query string as EDN. A bare string such as `my page` is read as a symbol and matches nothing, which is the "0 rows" the first attempt saw. A JSON string literal such as `"my page"` is also a valid EDN string literal, so `JSON.stringify(value)` produces an input LogSeq reads as a string, including for quotes, backslashes and newlines.
 

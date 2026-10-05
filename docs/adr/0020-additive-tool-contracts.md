@@ -4,7 +4,7 @@
 
 Clients, skills and prompts call tools by name with named parameters, and they read named fields in the results. A model-driven client has no compile step that would flag a rename: it just fails at call time, or silently reads a field that no longer exists. The skills ship in the same repository as the server (`skills/logseq-skills/`) and name tools directly.
 
-Early on the surface moved freely. Two tools were deleted (`remove-redundant-tools`), `slim_results` was added and later made the default, and tools gained parameters. The architectural foundations doc (PR #38) then wrote the principle down as hard rule 8, "Tool contracts change additively", with the reason in section 4.3: "An MCP client, a skill, or a prompt that names `logseq_search_blocks` and its parameters is a consumer you can't see." Inferred, not recorded: the timing followed the Claude Code plugin and the npm package being prepared (`ship-as-claude-code-plugin`, `manual-npm-publish`), which would put the tools in front of callers the maintainer can't reach, where before there was one user and no release.
+Early on the surface moved freely. Two tools were deleted ([ADR-0008 (remove-redundant-tools)](0008-remove-redundant-tools.md)), `slim_results` was added and later made the default, and tools gained parameters. The architectural foundations doc (PR #38) then wrote the principle down as hard rule 8, "Tool contracts change additively", with the reason in section 4.3: "An MCP client, a skill, or a prompt that names `logseq_search_blocks` and its parameters is a consumer you can't see." Inferred, not recorded: the timing followed the Claude Code plugin and the npm package being prepared ([ADR-0018 (ship-as-claude-code-plugin)](0018-ship-as-claude-code-plugin.md), [ADR-0017 (manual-npm-publish)](0017-manual-npm-publish.md)), which would put the tools in front of callers the maintainer can't reach, where before there was one user and no release.
 
 ## Decision
 
@@ -16,7 +16,7 @@ The exact promise to callers, including how parameter aliases fit (issue #44), l
 
 - Callers and skills keep working across versions. New capability reaches them as new optional input and new fields.
 - The schema only grows. Old parameters stay, even when a better name exists, and clutter accumulates until a deliberate break.
-- The tool list is part of the context every session pays for, so growth competes with the budget (see `tool-list-size-guardrails`).
+- The tool list is part of the context every session pays for, so growth competes with the budget (see [ADR-0016 (tool-list-size-guardrails)](0016-tool-list-size-guardrails.md)).
 - Output changes that look harmless, such as dropping a field, count as contract changes: foundations section 4.3 names "the shape of results" as part of the contract.
 
 ## Status

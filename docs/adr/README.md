@@ -13,40 +13,41 @@ An ADR's [Mechanical enforcement](#template) section often points at a business 
 
 ## Index
 
-One row per slug, sorted by slug. See [Format rules](#format-rules) for what each cell must hold.
+One row per ADR, sorted by number. See [Format rules](#format-rules) for what each cell must hold.
 
-| Slug | Title | Status |
+| ADR | Title | Status |
 |---|---|---|
-| [additive-tool-contracts](additive-tool-contracts.md) | Change tool contracts additively | accepted |
-| [bounded-calls-and-results](bounded-calls-and-results.md) | Bound every call, loop and result | accepted |
-| [datalog-only-no-feature-flags](datalog-only-no-feature-flags.md) | Ship one Datalog implementation per tool, with no feature flags | accepted |
-| [datalog-over-editor-api](datalog-over-editor-api.md) | Query the graph with batched Datalog, not per-entity Editor API calls | accepted |
-| [embed-strings-in-datalog-queries](embed-strings-in-datalog-queries.md) | Embed string parameters directly in Datalog query text | superseded by strings-bound-via-in-inputs |
-| [manual-npm-publish](manual-npm-publish.md) | Publish to npm only from a manual workflow run by the maintainer | accepted |
-| [minified-json-output](minified-json-output.md) | Write tool results as minified JSON | accepted |
-| [minimum-node-22-12](minimum-node-22-12.md) | Require Node 22.12 or newer | accepted |
-| [mit-license](mit-license.md) | License the project under MIT | accepted |
-| [no-secrets-in-source](no-secrets-in-source.md) | Keep secrets out of source, logs and error messages | accepted |
-| [parse-input-at-boundary](parse-input-at-boundary.md) | Parse external input at the boundary | accepted |
-| [read-only-server](read-only-server.md) | Keep the server read-only | accepted |
-| [rebase-merge-to-main](rebase-merge-to-main.md) | Merge pull requests by rebase to keep atomic commits on main | accepted |
-| [remove-redundant-tools](remove-redundant-tools.md) | Remove tools that duplicate or only partly implement another tool | accepted |
-| [resolve-page-names-via-shared-resolver](resolve-page-names-via-shared-resolver.md) | Resolve page names in every page-taking tool through one shared resolver | accepted |
-| [resultmeta-for-capped-results](resultmeta-for-capped-results.md) | Mark capped results with one shared ResultMeta convention | accepted |
-| [ship-as-claude-code-plugin](ship-as-claude-code-plugin.md) | Ship the server and skills as a Claude Code plugin with skills at the repo root | accepted |
-| [slim-output-by-default](slim-output-by-default.md) | Return slim results by default and keep full output as an opt-out | accepted |
-| [stderr-only-logging](stderr-only-logging.md) | Log to stderr only, never to stdout | accepted |
-| [strings-bound-via-in-inputs](strings-bound-via-in-inputs.md) | Bind Datalog string parameters with :in inputs | accepted |
-| [tool-descriptions-state-limits](tool-descriptions-state-limits.md) | Make every tool description say what the tool can't find | accepted |
-| [tool-list-size-guardrails](tool-list-size-guardrails.md) | Budget and snapshot the tool list that every session loads | accepted |
-| [two-query-pattern-for-optional-data](two-query-pattern-for-optional-data.md) | Split queries when related data may be empty | accepted |
+| [0001-read-only-server](0001-read-only-server.md) | Keep the server read-only | accepted |
+| [0002-datalog-over-editor-api](0002-datalog-over-editor-api.md) | Query the graph with batched Datalog, not per-entity Editor API calls | accepted |
+| [0003-no-secrets-in-source](0003-no-secrets-in-source.md) | Keep secrets out of source, logs and error messages | accepted |
+| [0004-stderr-only-logging](0004-stderr-only-logging.md) | Log to stderr only, never to stdout | accepted |
+| [0005-datalog-only-no-feature-flags](0005-datalog-only-no-feature-flags.md) | Ship one Datalog implementation per tool, with no feature flags | accepted |
+| [0006-embed-strings-in-datalog-queries](0006-embed-strings-in-datalog-queries.md) | Embed string parameters directly in Datalog query text | superseded by 0013-strings-bound-via-in-inputs |
+| [0007-two-query-pattern-for-optional-data](0007-two-query-pattern-for-optional-data.md) | Split queries when related data may be empty | accepted |
+| [0008-remove-redundant-tools](0008-remove-redundant-tools.md) | Remove tools that duplicate or only partly implement another tool | accepted |
+| [0009-minified-json-output](0009-minified-json-output.md) | Write tool results as minified JSON | accepted |
+| [0010-slim-output-by-default](0010-slim-output-by-default.md) | Return slim results by default and keep full output as an opt-out | accepted |
+| [0011-bounded-calls-and-results](0011-bounded-calls-and-results.md) | Bound every call, loop and result | accepted |
+| [0012-resultmeta-for-capped-results](0012-resultmeta-for-capped-results.md) | Mark capped results with one shared ResultMeta convention | accepted |
+| [0013-strings-bound-via-in-inputs](0013-strings-bound-via-in-inputs.md) | Bind Datalog string parameters with :in inputs | accepted |
+| [0014-resolve-page-names-via-shared-resolver](0014-resolve-page-names-via-shared-resolver.md) | Resolve page names in every page-taking tool through one shared resolver | accepted |
+| [0015-tool-descriptions-state-limits](0015-tool-descriptions-state-limits.md) | Make every tool description say what the tool can't find | accepted |
+| [0016-tool-list-size-guardrails](0016-tool-list-size-guardrails.md) | Budget and snapshot the tool list that every session loads | accepted |
+| [0017-manual-npm-publish](0017-manual-npm-publish.md) | Publish to npm only from a manual workflow run by the maintainer | accepted |
+| [0018-ship-as-claude-code-plugin](0018-ship-as-claude-code-plugin.md) | Ship the server and skills as a Claude Code plugin with skills at the repo root | accepted |
+| [0019-parse-input-at-boundary](0019-parse-input-at-boundary.md) | Parse external input at the boundary | accepted |
+| [0020-additive-tool-contracts](0020-additive-tool-contracts.md) | Change tool contracts additively | accepted |
+| [0021-rebase-merge-to-main](0021-rebase-merge-to-main.md) | Merge pull requests by rebase to keep atomic commits on main | accepted |
+| [0022-minimum-node-22-12](0022-minimum-node-22-12.md) | Require Node 22.12 or newer | accepted |
+| [0023-mit-license](0023-mit-license.md) | License the project under MIT | accepted |
 
-## Slug naming rule
+## File naming rule
 
-- Short, kebab-case, lowercase: `[a-z0-9]+(-[a-z0-9]+)*`.
-- Unique. The filename is the ID: `docs/adr/<slug>.md`.
-- Never reused. ADR files are never deleted, even once superseded or deprecated, so a slug always names the same ADR. Cite an ADR by slug.
-- No number or date prefixes. The optional `Date:` line in the Status section carries the date.
+- The filename is `docs/adr/NNNN-<slug>.md`. `NNNN` is a four-digit, zero-padded sequence starting at `0001`. `<slug>` is short, kebab-case and lowercase. The stem (the filename without `.md`) matches `^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*$`.
+- **The number is the ID.** It is unique in this directory and is never changed or reused. ADR files are never deleted, even once superseded or deprecated, so a number always names the same ADR.
+- **Citation.** Cite an ADR as `ADR-0007`. The slug may follow for readability: `ADR-0007 (datalog-over-editor-api)`. A `superseded by` status uses the full stem: `superseded by 0012-new-slug`.
+- **Assigning numbers.** A new ADR takes the highest existing number + 1 in its PR. If another PR merges that number first, renumber on rebase before merge.
+- The optional `Date:` line in the Status section carries the date. Filenames have no date.
 
 ## Status vocabulary
 
@@ -54,16 +55,16 @@ One row per slug, sorted by slug. See [Format rules](#format-rules) for what eac
 |---|---|
 | `proposed` | Under discussion. May be edited freely. |
 | `accepted` | In force. |
-| `superseded by <slug>` | Replaced by another ADR, which must exist in this directory. |
+| `superseded by <NNNN-slug>` | Replaced by another ADR, named by its full stem, which must exist in this directory. |
 | `deprecated` | No longer applies, with no replacement. |
 
 **Lifecycle.** An ADR is `proposed` while the PR that adds it is open. It becomes `accepted` when that PR merges: the author edits the status to `accepted` in the same PR, before merge.
 
-An accepted ADR is **immutable except for its status and a pointer** to its replacement. Don't reword the Context, Decision or Consequences. **A reversal is a new ADR**: write it, then mark the old one `superseded by <new-slug>` in the same PR.
+An accepted ADR is **immutable except for its status and a pointer** to its replacement. Don't reword the Context, Decision or Consequences. **A reversal is a new ADR**: write it, then mark the old one `superseded by <NNNN-new-slug>` in the same PR.
 
 ## Template
 
-Copy this into `docs/adr/<slug>.md`.
+Copy this into `docs/adr/NNNN-<slug>.md`.
 
 ````markdown
 # <Title: the decision, in a few words>
@@ -107,10 +108,10 @@ Usually this is a guard test, or a business rule in `docs/business-rules/` that 
 
 The CI guard in #78 parses these files. These rules are exact.
 
-1. **Slug set.** Every `*.md` file directly in this directory except `README.md`. Subdirectories and other files (such as `.gitkeep`) are ignored. The slug is the filename without `.md` and must match the slug naming rule, so an `.md` file with an uppercase name fails.
-2. **Index.** The first markdown table in this README. Its first column holds `[<slug>](<slug>.md)` for each slug (plain link text, no backticks) and covers the slug set exactly, with no extra rows. The Title cell equals the text of the file's `#` heading. The Status cell is plain text (no backticks, no link) equal to the file's status line. Sorting by slug is a convention the guard doesn't check.
+1. **Stem set.** Every `*.md` file directly in this directory except `README.md`. Subdirectories and other files (such as `.gitkeep`) are ignored. The stem is the filename without `.md` and must match `^[0-9]{4}-[a-z0-9]+(-[a-z0-9]+)*$`, so an `.md` file with an uppercase name or no number fails. No two stems share a number.
+2. **Index.** The first markdown table in this README. Its first column holds `[<NNNN-slug>](<NNNN-slug>.md)` for each stem (plain link text, no backticks) and covers the stem set exactly, with no extra rows. The Title cell equals the text of the file's `#` heading. The Status cell is plain text (no backticks, no link) equal to the file's status line. Sorting by number is a convention the guard doesn't check.
 3. **Headings.** Each required heading is an exact, case-sensitive `## <Name>` line with no trailing whitespace, and appears exactly once: `## Context`, `## Decision`, `## Consequences`, `## Status`, `## Mechanical enforcement`. Order isn't enforced and extra headings are allowed. Lines inside fenced code blocks are ignored. The title is the file's single `#` heading.
-4. **Status line.** The first non-empty line under `## Status` is exactly one of `proposed`, `accepted`, `deprecated` or `superseded by <slug>`, where `<slug>` is in the slug set. An optional `Date: YYYY-MM-DD` line may follow as the next non-empty line. It dates the last status change. Omit it if the date isn't known.
+4. **Status line.** The first non-empty line under `## Status` is exactly one of `proposed`, `accepted`, `deprecated` or `superseded by <NNNN-slug>`, where `<NNNN-slug>` is in the stem set. An optional `Date: YYYY-MM-DD` line may follow as the next non-empty line. It dates the last status change. Omit it if the date isn't known.
 5. **Mechanical enforcement body.** At least one line or list item of the form `<tier>: <reference>`, where `<tier>` is one of `type`, `test`, `ci`, `reviewer` or `none-yet`. Other lines are ignored. Replace the template's placeholder line. The reference is:
    - `type`, `test`, `ci`: a backticked repo-relative file path or workflow, which must exist (for example ``test: `src/index.test.ts` ``).
    - `reviewer`: the checklist item, as plain text.
@@ -121,7 +122,7 @@ The CI guard in #78 parses these files. These rules are exact.
 ## Change process
 
 1. Open or find a GitHub issue for the decision.
-2. Open a PR that adds `docs/adr/<slug>.md` and its row in the Index above, starting at status `proposed`. Before merge, edit the status to `accepted` in that same PR. To reverse an ADR, the same PR also changes the old ADR's status to `superseded by <slug>`.
+2. Open a PR that adds `docs/adr/NNNN-<slug>.md` (see [Assigning numbers](#file-naming-rule)) and its row in the Index above, starting at status `proposed`. Before merge, edit the status to `accepted` in that same PR. To reverse an ADR, the same PR also changes the old ADR's status to `superseded by <NNNN-slug>`.
 3. Reviewers check each PR against the accepted ADRs and business rules. A PR that contradicts one must cite the change that allows it.
 
 **Approval gate.** Any PR that adds, changes, supersedes or retires an ADR or business-rule file needs the maintainer's explicit approval before merge. Record the approval like this. Before merging, a PR comment records the maintainer's approval: either the maintainer writes it, or Claude posts it, quoting the maintainer's approval message verbatim with its date. The Changelog row's Issue/PR column cites that PR. If the maintainer merges the PR themselves, the merge is the record.
