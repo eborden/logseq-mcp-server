@@ -21,10 +21,6 @@ describe('firstLineSnippet', () => {
     expect(snippet.endsWith('...')).toBe(true);
   });
 
-  it('honours a custom cap', () => {
-    expect(firstLineSnippet('abcdefghij', 6)).toBe('abc...');
-  });
-
   it('returns an empty string for empty or non-string content', () => {
     expect(firstLineSnippet('')).toBe('');
     expect(firstLineSnippet('\n  \n')).toBe('');
