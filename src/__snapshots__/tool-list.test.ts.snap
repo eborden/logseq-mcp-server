@@ -673,7 +673,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "properties": {
         "limit": {
           "default": 50,
-          "description": "Max results to return (default: 50, max: 500)",
+          "description": "Max results (default: 50, max: 500). connected-within counts top-level blocks, topic A's first; kept blocks keep all their children",
           "type": "number",
         },
         "max_distance": {
