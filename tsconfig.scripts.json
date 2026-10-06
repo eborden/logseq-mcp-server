@@ -1,13 +1,14 @@
-// Type-checks scripts/ and every unit test, which tsconfig.json leaves out
-// (rootDir: src, and *.test.ts excluded). Run in CI: npx tsc -p tsconfig.scripts.json
+// Type-checks scripts/, every unit test and the integration tests (#114), which tsconfig.json
+// leaves out (rootDir: src, and *.test.ts excluded). Run in CI: npx tsc -p tsconfig.scripts.json
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["scripts/**/*", "src/**/*.test.ts"],
-  // Temporary (#104): these two still have type errors and are being changed
+  "include": ["scripts/**/*", "src/**/*.test.ts", "tests/integration/**/*.ts"],
+  // Temporary (#104): the two src tests still have type errors and are being changed
   // by #60. Fix them and delete both entries once that work has merged.
-  "exclude": ["node_modules", "dist", "src/index.test.ts", "src/index.args.search.test.ts"]
+  // .logseq-instance holds a copy of the fixture graph and the instance's profile, never code.
+  "exclude": ["node_modules", "dist", "**/.logseq-instance/**", "src/index.test.ts", "src/index.args.search.test.ts"]
 }
