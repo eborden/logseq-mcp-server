@@ -125,7 +125,9 @@ export async function getConceptNetwork(
   // `max_nodes` leaves out what the node budget can't hold.
   let droppedByFanout = 0;
   let droppedByBudget = 0;
-  // A journal page was admitted with the walk still to go and was expanded (#132)
+  // The first level that dropped a page: lowering max_depth below it is what narrows the walk (#132)
+  let firstDropDepth: number | undefined;
+  // A journal page was admitted and expanded before any page was dropped (#132)
   let expandedJournal = false;
 
   const nodeMap = new Map<number, ConceptNetworkNode>();
@@ -197,6 +199,7 @@ export async function getConceptNetwork(
     const admitted = selection.admitted;
     if (admitted.length < candidates.size) {
       truncated = true;
+      firstDropDepth ??= depth;
       dropped += candidates.size - admitted.length;
       droppedByFanout += selection.droppedByFanout;
       droppedByBudget += selection.droppedByBudget;
@@ -207,7 +210,7 @@ export async function getConceptNetwork(
       nodeMap.set(candidate.id, { id: candidate.id, name: candidate.name, depth });
       if (expandJournals || !candidate.isJournal) {
         nextFrontier.push(candidate.id);
-        if (candidate.isJournal && depth < maxDepth) expandedJournal = true;
+        if (candidate.isJournal && depth < maxDepth && !truncated) expandedJournal = true;
       }
     }
     frontier = nextFrontier;
@@ -220,14 +223,14 @@ export async function getConceptNetwork(
   const warnings: ResultWarning[] = aliasSetWarnings(aliasSet);
   if (truncated) {
     warnings.push(
-      truncationWarning({
+      networkTruncatedWarning({
         kept: nodes.length,
         dropped,
         droppedByFanout,
         droppedByBudget,
         maxNodes,
         maxFanout,
-        maxDepth,
+        firstDropDepth: firstDropDepth!,
         expandJournals,
         expandedJournal
       })
@@ -253,9 +256,10 @@ interface TruncationFacts {
   droppedByBudget: number;
   maxNodes: number;
   maxFanout: number;
-  maxDepth: number;
+  /** The first depth at which a page was dropped. */
+  firstDropDepth: number;
   expandJournals: boolean;
-  /** A journal page was expanded with a level still to walk. */
+  /** A journal page was expanded at a depth before the first drop. */
   expandedJournal: boolean;
 }
 
@@ -269,7 +273,7 @@ interface TruncationFacts {
  * walk only if it would. `cappedTruncationWarning` doesn't fit: it takes one
  * parameter and an exact total, and this walk has two caps and a lower bound.
  */
-function truncationWarning(f: TruncationFacts): ResultWarning {
+function networkTruncatedWarning(f: TruncationFacts): ResultWarning {
   const base = `Kept ${f.kept} pages; at least ${f.dropped} more connected pages were dropped.`;
   const suggestedNodes = f.kept + f.dropped;
 
@@ -317,12 +321,14 @@ function truncationWarning(f: TruncationFacts): ResultWarning {
   }
 
   const narrow: string[] = [];
-  if (f.maxDepth >= 2) narrow.push('lower max_depth');
+  // Lowering max_depth changes nothing when the first drop is at depth 1
+  if (f.firstDropDepth >= 2) narrow.push('lower max_depth');
   if (f.expandJournals && f.expandedJournal) narrow.push('set expand_journals to false so journal pages stay leaves');
   const narrowText = narrow.length > 0 ? ` To narrow the walk instead, ${narrow.join(' or ')}.` : '';
   return {
     code: 'network_truncated',
-    message: `${base} ${reachedClause ? `${reachedClause}, so` : 'So'} the rest can't be fetched in one call.${narrowText}`
+    // A cut with nothing to raise has a cap at its maximum, so `reachedClause` is never empty here
+    message: `${base} ${reachedClause}, so the rest can't be fetched in one call.${narrowText}`
   };
 }
 
