@@ -36,14 +36,23 @@ describe('through a real client: an answer that does not parse is an error, neve
     await expect(getPage(client, 'alice', false)).rejects.toBeInstanceOf(LogSeqResponseError);
   });
 
-  it('get_page fails on a block tree that holds a block with no content', async () => {
-    const { client } = clientAnswering(page, [{ id: 5, uuid: block.uuid }]);
+  it('get_page fails on a block tree that holds a block with no uuid', async () => {
+    const { client } = clientAnswering(page, [{ id: 5, content: 'x' }]);
 
     const error = await getPage(client, 'alice', true).catch(e => e);
 
     expect(error).toBeInstanceOf(LogSeqResponseError);
     expect(error.method).toBe('logseq.Editor.getPageBlocksTree');
-    expect(error.path).toBe('[0].content');
+    expect(error.path).toBe('[0].uuid');
+  });
+
+  it('get_page still returns a block that has no content, and list_pages a page that has no originalName', async () => {
+    const noContent = { id: 5, uuid: block.uuid };
+    const withBlock = await getPage(clientAnswering(page, [noContent]).client, 'alice', true);
+    expect(withBlock.children).toEqual([noContent]);
+
+    const listed = await listPages(clientAnswering([{ id: 1, name: 'a whiteboard' }, page]).client);
+    expect(listed.pages.map(p => p.name)).toEqual(['a whiteboard', 'Alice']); // the page with no original name shows its name
   });
 
   it('get_block fails on an answer that is not a block, and still says "not found" for null', async () => {

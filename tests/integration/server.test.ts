@@ -79,7 +79,7 @@ describe('LogSeq MCP Server Integration Tests', () => {
 
       // The 11 blocks that say "importer": 7 in journals, 4 on pages
       expect(result).toHaveLength(11);
-      expect(result.every(b => b.content.toLowerCase().includes('importer'))).toBe(true);
+      expect(result.every(b => b.content!.toLowerCase().includes('importer'))).toBe(true);
       expect(result.every(b => typeof b.uuid === 'string')).toBe(true);
     });
 

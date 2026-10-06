@@ -13,7 +13,7 @@ const tree = () => [
 ];
 
 const labels = (blocks: BlockEntity[]): string[] =>
-  blocks.flatMap(block => [block.content, ...labels(block.children ?? [])]);
+  blocks.flatMap(block => [block.content!, ...labels(block.children ?? [])]);
 
 describe('countBlocks', () => {
   it('counts nested blocks too', () => {

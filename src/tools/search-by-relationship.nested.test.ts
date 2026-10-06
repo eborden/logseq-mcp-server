@@ -26,11 +26,11 @@ const leaves = (prefix: string, n: number): BlockEntity[] =>
 
 /** Every label in document order: a block, its children, then its next sibling. */
 const labels = (blocks: BlockEntity[]): string[] =>
-  blocks.flatMap(b => [b.content, ...labels(b.children ?? [])]);
+  blocks.flatMap(b => [b.content!, ...labels(b.children ?? [])]);
 
 /** Labels of the blocks that carry `childrenTruncated` */
 const marked = (blocks: BlockEntity[]): string[] =>
-  blocks.flatMap(b => [...(b.childrenTruncated ? [b.content] : []), ...marked(b.children ?? [])]);
+  blocks.flatMap(b => [...(b.childrenTruncated ? [b.content!] : []), ...marked(b.children ?? [])]);
 
 /**
  * A client whose resolver answers Alice and Bob, whose one hop finds Bob, and whose page

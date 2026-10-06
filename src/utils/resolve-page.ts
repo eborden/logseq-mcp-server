@@ -231,8 +231,10 @@ export async function suggestPages(client: LogseqClient, input: string): Promise
   if (isoDateToJournalDay(input) !== null) return []; // fuzzy-matching a date finds nothing useful
   try {
     const allPages = await callParsed(client, responses.pageNames, 'logseq.Editor.getAllPages', []);
-    if (!allPages || allPages.length === 0) return [];
-    return Fuzzysort.go(input, allPages, {
+    // A page with no original name has nothing to match against
+    const named = (allPages ?? []).filter((page): page is { originalName: string } => typeof page.originalName === 'string');
+    if (named.length === 0) return [];
+    return Fuzzysort.go(input, named, {
       key: 'originalName',
       limit: MAX_SUGGESTIONS,
       threshold: -10000 // Be lenient with matching

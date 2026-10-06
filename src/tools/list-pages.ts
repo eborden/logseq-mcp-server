@@ -99,6 +99,7 @@ function nestAliases(pages: PageEntity[]): Entry[] {
   };
   for (const page of pages) {
     for (const target of page.alias ?? []) {
+      if (target.id === undefined) continue; // a link with no id points at nothing
       link(page.id, target.id);
       link(target.id, page.id);
     }

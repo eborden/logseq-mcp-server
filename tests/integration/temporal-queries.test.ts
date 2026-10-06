@@ -54,7 +54,7 @@ describe('Temporal Queries Integration Tests', () => {
       expect(result.summary.searchTerm).toBe('test');
       // Only "NOW Write the test plan for the importer" in January
       expect(result.entries.map(e => [e.date, e.blocks.length])).toEqual([[20250108, 1]]);
-      expect(result.entries[0].blocks[0].content.toLowerCase().includes('test')).toBe(true);
+      expect(result.entries[0].blocks[0].content!.toLowerCase().includes('test')).toBe(true);
     });
 
     it('should return entries sorted by date', async () => {
