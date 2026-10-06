@@ -30,8 +30,11 @@ describe('package.json publish fields (#46)', () => {
 
 describe('zod pin (#60)', () => {
   const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf-8'));
-  const zodCopies = Object.entries(lock.packages as Record<string, { version: string }>).filter(
-    ([path]) => path === 'node_modules/zod' || path.endsWith('/node_modules/zod')
+  // Copies the server ships and loads. A devDependency may bring its own, and does: Stryker's
+  // mutation-server-protocol takes zod 4 and npm nests it (#204). It is dev-only (`dev: true`
+  // in the lockfile), never installed for a consumer and never loaded by the server.
+  const zodCopies = Object.entries(lock.packages as Record<string, { version: string; dev?: boolean }>).filter(
+    ([path, entry]) => (path === 'node_modules/zod' || path.endsWith('/node_modules/zod')) && !entry.dev
   );
 
   it('installs one copy of zod, shared with the MCP SDK, at the pinned version', () => {
