@@ -1,4 +1,6 @@
 import { readFile } from 'fs/promises';
+import { homedir } from 'os';
+import { isAbsolute, join } from 'path';
 // zod 4's API, shipped inside the zod 3.25 package, as in src/utils/parse-args.ts.
 import { z } from 'zod/v4';
 import { LogseqMCPConfig } from './types.js';
@@ -157,6 +159,34 @@ function jsonErrorDetail(parseError: unknown): string {
   if (!(parseError instanceof Error)) return 'Unknown error';
   if (parseError.message.includes('"')) return REDACTED_JSON_DETAIL;
   return parseError.message;
+}
+
+/** Environment variable naming another config file (#118), e.g. a per-worktree test instance's. */
+export const CONFIG_PATH_ENV = 'LOGSEQ_MCP_CONFIG';
+
+/** `~/.logseq-mcp/config.json`, the config file unless `LOGSEQ_MCP_CONFIG` names another. */
+export function defaultConfigPath(home: string = homedir()): string {
+  return join(home, '.logseq-mcp', 'config.json');
+}
+
+/**
+ * The config file to load. `LOGSEQ_MCP_CONFIG` overrides the default path, as `LOGSEQ_MCP_TIPS`
+ * overrides the file's `tips`; `scripts/logseq-instance.ts` prints the value that points at its
+ * instance. It must be an absolute path: the MCP server's working directory is whatever the
+ * client chose, so a relative one would not name the same file everywhere. An empty or blank
+ * variable is ignored. The ConfigValidationError message echoes the value, a path with no secret.
+ */
+export function resolveConfigPath(
+  env: Record<string, string | undefined> = process.env,
+  home: string = homedir()
+): string {
+  const raw = env[CONFIG_PATH_ENV];
+  const path = raw?.trim();
+  if (path === undefined || path === '') return defaultConfigPath(home);
+  if (!isAbsolute(path)) {
+    throw new ConfigValidationError(CONFIG_PATH_ENV, `must be an absolute path (got "${raw}")`);
+  }
+  return path;
 }
 
 const TIPS_OFF_VALUES = ['0', 'false', 'off', 'no'];

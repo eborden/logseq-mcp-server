@@ -5,11 +5,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { resolve } from 'path';
-import { homedir } from 'os';
 import { realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { loadConfig, resolveTipsEnabled } from './config.js';
+import { loadConfig, resolveConfigPath, resolveTipsEnabled } from './config.js';
 import { LogseqClient } from './client.js';
 import { getPage } from './tools/get-page.js';
 import { getBacklinksWithMeta } from './tools/get-backlinks.js';
@@ -556,8 +554,8 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
  */
 async function main() {
   try {
-    // Load config from ~/.logseq-mcp/config.json
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    // ~/.logseq-mcp/config.json, or the file LOGSEQ_MCP_CONFIG names
+    const configPath = resolveConfigPath();
     const config = await loadConfig(configPath);
 
     // Create LogSeq client
