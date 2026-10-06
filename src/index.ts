@@ -14,7 +14,7 @@ import { getBacklinksWithMeta } from './tools/get-backlinks.js';
 import { getBlock } from './tools/get-block.js';
 import { getPageOutline } from './tools/get-page-outline.js';
 import { searchBlocksWithMeta } from './tools/search-blocks.js';
-import { queryByProperty } from './tools/query-by-property.js';
+import { queryByPropertyWithMeta } from './tools/query-by-property.js';
 import { getConceptNetwork, MAX_FANOUT_LIMIT, MAX_NODES_LIMIT } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
@@ -319,15 +319,15 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_query_by_property': {
           const parsed = parseArgs(queryByPropertyArgs, args);
-          const { property_key: propertyKey, property_value: propertyValue, slim_results: slimResults } = parsed;
-          const result = await queryByProperty(client, propertyKey, propertyValue, slimResults);
+          const { property_key: propertyKey, property_value: propertyValue, limit, slim_results: slimResults } = parsed;
+          const { results: result, meta } = await queryByPropertyWithMeta(client, propertyKey, propertyValue, slimResults, limit);
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(null, tipsFor(parsed, result)),
+              ...metaContent(meta, tipsFor(parsed, result, meta)),
             ],
           };
         }

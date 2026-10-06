@@ -15,7 +15,7 @@ import { DEFAULT_LIST_PAGES_LIMIT, DEFAULT_LIST_PAGES_OFFSET } from './tools/lis
 
 const mocks = vi.hoisted(() => ({
   searchBlocksWithMeta: vi.fn(async () => ({ results: [], meta: null })),
-  queryByProperty: vi.fn(async () => []),
+  queryByPropertyWithMeta: vi.fn(async () => ({ results: [], meta: null })),
   getConceptNetwork: vi.fn(async () => ({ nodes: [], edges: [], truncated: false })),
   searchByRelationship: vi.fn(async () => ({ results: [] })),
   getContextForQuery: vi.fn(async () => ({
@@ -50,7 +50,7 @@ vi.mock('./tools/search-blocks.js', async importOriginal => ({
 }));
 vi.mock('./tools/query-by-property.js', async importOriginal => ({
   ...(await importOriginal<object>()),
-  queryByProperty: mocks.queryByProperty,
+  queryByPropertyWithMeta: mocks.queryByPropertyWithMeta,
 }));
 vi.mock('./tools/get-concept-network.js', async importOriginal => ({
   ...(await importOriginal<object>()),
@@ -219,8 +219,8 @@ describe('logseq_search_blocks hand-off', () => {
 describe('logseq_query_by_property hand-off', () => {
   it('defaults: slim', async () => {
     expect(
-      await handedOff('logseq_query_by_property', { property_key: 'status', property_value: 'active' }, mocks.queryByProperty)
-    ).toEqual(['status', 'active', true]);
+      await handedOff('logseq_query_by_property', { property_key: 'status', property_value: 'active' }, mocks.queryByPropertyWithMeta)
+    ).toEqual(['status', 'active', true, 100]);
   });
 
   it('slim_results: false is passed on', async () => {
@@ -228,9 +228,18 @@ describe('logseq_query_by_property hand-off', () => {
       await handedOff(
         'logseq_query_by_property',
         { property_key: 'status', property_value: 'active', slim_results: false },
-        mocks.queryByProperty
+        mocks.queryByPropertyWithMeta
       )
-    ).toEqual(['status', 'active', false]);
+    ).toEqual(['status', 'active', false, 100]);
+  });
+
+  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (the tool clamps it)', async value => {
+    const [, , , limit] = await handedOff(
+      'logseq_query_by_property',
+      { property_key: 'status', property_value: 'active', limit: value },
+      mocks.queryByPropertyWithMeta
+    );
+    expect(limit).toBe(value);
   });
 });
 
