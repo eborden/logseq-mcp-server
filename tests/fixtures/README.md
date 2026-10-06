@@ -36,6 +36,7 @@ The skeleton (#87) and its content:
 
 - #88: edge cases (aliases, namespaces, block refs and embeds, properties), journals, tags and tasks (done, see "Edge cases, journals, tags and tasks" below)
 - #89: a hub page with 100+ neighbours (done, see "The hub" below)
+- #61: a topic with a page of 12 linking blocks, for the per-page cap of `get_backlinks` (see "The crowded topic" below)
 - #90: `npm run test:integration` runs against this graph only, with exact assertions (done; see `tests/integration/setup.md`)
 
 | Page | Exists to test |
@@ -194,7 +195,7 @@ Expected results, measured against a live instance (#118) with the code at the t
 | `get_concept_network` on `journal-topic-01`, depth 2, defaults | 2 nodes: itself and the journal (a leaf) |
 | same, `expand_journals` true | 17 nodes (the journal, then 15 of its other pages: `max_fanout` 15 bites), `truncated` true. Add `max_fanout` 100 for 32 nodes (the journal, 29 other topics, `hub central`), `truncated` false |
 | `build_context` on the hub | 50 of 71 blocks, 20 of 66 references, 10 of 61 related pages; totals `blocks` 71, `references` 66, `relatedPages` 61; `hasMore` true with `blocks_truncated`, `references_truncated` and `related_pages_truncated` |
-| `get_backlinks` on the hub | 61 source pages, 66 blocks. It has no cap yet, so no `meta` |
+| `get_backlinks` on the hub | defaults: 20 of 61 source pages (a prefix of the full list), `pages_truncated`, `totals` `{ pages: 61, blocks: 66 }`, `hasMore` true. `max_pages` 61 or more (100 is the most): all 61 pages, 66 blocks, no `meta`. No page has more than 2 blocks, so `max_blocks_per_page` never bites here (see "The crowded topic") |
 | `get_page` on the hub, with children | 71 children |
 
 What is fixed and what is not. `selectCandidates` ranks non-journal pages first, then by references, then by
@@ -211,12 +212,32 @@ lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count
 - **Also depends on id order, outside the hub.** `get_context_for_query` on `[[Bob]]` and `[[Alice]]` keeps 5
   related pages per topic, picked among ties, so how many the two share (and so `summary.totalPages`) changed
   between two instance starts. Assert 5 per topic and count the distinct pages from the result.
-- **Not covered: `get_backlinks` `max_blocks_per_page` (#61).** The hub exceeds a `max_pages` cap (61 source pages),
-  but no page has more than 2 blocks that link the hub. A test for the per-page cap needs a neighbour with 11 or more
-  linking blocks, and this README to change with it. That page would also change the depth-1 ranking above.
+- **Not covered by the hub: `get_backlinks` `max_blocks_per_page` (#61).** No hub neighbour has more than 2 blocks that
+  link it, and giving one 11 would change the depth-1 ranking above. The crowded topic below covers it.
 
 Pages the hub fixture adds to the graph: 1 hub, 120 neighbours, 40 fringe, 30 topics and 1 journal,
 192 in all. They come on top of the sentinel page, the built-in pages and today's journal (see below).
+
+## The crowded topic (#61)
+
+`popular topic` has **14 linking blocks on 2 source pages**, for `get_backlinks` `max_blocks_per_page`. It is separate
+from the hub so the hub's depth-1 ranking stays as documented. Both source pages hold nothing but linking blocks,
+written `Row N on [[popular topic]]`, and the target has no file.
+
+| Page | File | Holds |
+|---|---|---|
+| `popular topic` | none (link target only) | the target |
+| `busy source` | `pages/busy source.md` | 12 blocks that link the target, more than the default of 10 per page, fewer than the maximum of 50 |
+| `light source` | `pages/light source.md` | 2 blocks that link the target, under every cap |
+
+`get_backlinks` on `popular topic`: 2 source pages, 14 blocks. At the defaults `busy source` keeps its first 10 blocks and
+`light source` keeps both, with one `page_blocks_truncated` warning, `totals` `{ pages: 2, blocks: 14 }`, `hasMore` true and
+`Set max_blocks_per_page to 12`. At `max_blocks_per_page` 12 or more the result is whole and there is no `meta`. Which of the
+two pages comes first is up to LogSeq, so assert on counts and on the blocks of each page in order, not on the page order.
+
+The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e`, which matches all but
+two of the fixture's blocks (478 of 480 before this fixture), and expects fewer than `search_blocks`' maximum of 500.
+Blocks with an `e` would put it at 492. Keep new fixture blocks without the letter, or change that test.
 
 ## Files LogSeq writes when it opens the folder
 
@@ -242,16 +263,16 @@ the file, and its date changes every day. Exact assertions on page, journal or `
 counts must exclude it, and date-range tests must use fixed windows that end before 2026.
 
 Measured total (#139, LogSeq 0.10.15 on a per-worktree instance, after the README moved out): the graph
-holds **264 pages** in `:block/name`, built-in pages and today's journal included. They are:
+holds **267 pages** in `:block/name`, built-in pages and today's journal included. They are:
 
 | Part | Count |
 |---|---|
-| Pages with a file (`pages/` and `journals/`; 10 of them are journals) | 146 |
+| Pages with a file (`pages/` and `journals/`; 10 of them are journals) | 148 |
 | Built-in pages, none with a file (the 16 listed above) | 16 |
 | Today's journal | 1 |
-| Pages with no file: link targets, property keys, block-embed uuids, alias stubs, namespace parents | 101 |
+| Pages with no file: link targets, property keys, block-embed uuids, alias stubs, namespace parents | 102 |
 
-Without today's journal that is 263, and without the built-ins too, 247. There is no `readme` page and no
-`#NN` tag page, and no README among the 147 indexed files (146 pages plus `config.edn`). The number moves
+Without today's journal that is 266, and without the built-ins too, 250. There is no `readme` page and no
+`#NN` tag page, and no README among the 149 indexed files (148 pages plus `config.edn`). The number moves
 whenever a page, a property key or a block embed is added to the fixture, and nothing in the tests pins it,
 so the tests compute what they need rather than copy it (#90).
