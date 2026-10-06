@@ -106,7 +106,7 @@ export function nonEmptyProperties(properties: Record<string, unknown> | undefin
 export function toSlimBlock(block: BlockEntity, pageName: string): SlimBlock {
   const slim: SlimBlock = {
     uuid: block.uuid,
-    content: block.content
+    content: block.content ?? ''
   };
 
   if (!isEmptyValue(pageName)) {
@@ -124,13 +124,13 @@ export function toSlimBlock(block: BlockEntity, pageName: string): SlimBlock {
   }
 
   // Extract and include tags if present
-  const tags = extractTags(block.content);
+  const tags = extractTags(block.content ?? '');
   if (tags.length > 0) {
     slim.tags = tags;
   }
 
   // Extract and include page refs if present
-  const pageRefs = extractPageRefs(block.content);
+  const pageRefs = extractPageRefs(block.content ?? '');
   if (pageRefs.length > 0) {
     slim.pageRefs = pageRefs;
   }

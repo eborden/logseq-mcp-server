@@ -223,7 +223,7 @@ export async function getContextForQuery(
 
       // A null response is a genuine "no matches"
       const hits = (blocks || []).filter(block => {
-        const contentLower = block.content.toLowerCase();
+        const contentLower = (block.content ?? '').toLowerCase();
         return keywords.every(k => contentLower.includes(k));
       });
 

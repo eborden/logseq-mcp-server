@@ -19,10 +19,10 @@ describe('getGraphInfo - Integration', () => {
     const result = await getGraphInfo(client);
 
     expect(result.name).toBe('graph');
-    expect(result.path.startsWith('/'), 'the path is absolute').toBe(true);
+    expect(result.path!.startsWith('/'), 'the path is absolute').toBe(true);
     // The instance opens its copy, .logseq-instance/graph (#151); your own LogSeq opens tests/fixtures/graph
     expect(
-      result.path.endsWith('/.logseq-instance/graph') || result.path.endsWith('/tests/fixtures/graph'),
+      result.path!.endsWith('/.logseq-instance/graph') || result.path!.endsWith('/tests/fixtures/graph'),
       'the path is the instance\'s copy or a tests/fixtures/graph folder'
     ).toBe(true);
     expect(result.url === `logseq_local_${result.path}`, 'the url is the local url of that path').toBe(true);

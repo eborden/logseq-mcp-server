@@ -31,8 +31,11 @@ import { z } from 'zod/v4';
  * way it is spelled.
  */
 
-/** `{ id }`: a bare reference to a page or a block. */
-export const entityRefSchema = z.object({ id: z.number() });
+/**
+ * `{ id }`: a bare reference to a page or a block. Both spellings of the id are accepted and
+ * neither is required: the code reads a reference with `?.id` and skips one that has none.
+ */
+export const entityRefSchema = z.object({ id: z.number().optional(), 'db/id': z.number().optional() });
 
 /**
  * A property map. The keys are the user's property names and the values anything, so all that is
@@ -63,7 +66,7 @@ const pageShared = {
 
 // The Editor API's camelCase spelling of the fields that differ
 const pageEditorKeys = {
-  originalName: z.string(),
+  originalName: z.string().optional(),
   journalDay: z.number().optional(),
   createdAt: z.number().optional(),
   updatedAt: z.number().optional(),
@@ -82,7 +85,9 @@ const pagePulledKeys = {
 
 /**
  * A page from the Editor API (`getPage`, `getAllPages`, `getCurrentPage`): camelCase keys.
- * The `id`, `name` and `originalName` of every page are always set. The timestamps are not.
+ * `id` and `name` are what `list_pages` reads with no fallback, and every page entity has both (`:block/name`
+ * is what makes it a page). `originalName` is read with a fallback to `name` (`pageDisplayName`), so a page
+ * that lacks it is fine. The timestamps are optional.
  */
 export const editorPageSchema = z.object({
   id: z.number(),
@@ -92,17 +97,16 @@ export const editorPageSchema = z.object({
 });
 
 /**
- * A page from a Datalog pull: LogSeq's own kebab-case keys. A pull can take only some attributes,
- * so `name` and `original-name` may be absent; the id may not (`id`, or `db/id` from an older LogSeq).
+ * A page from a Datalog pull: LogSeq's own kebab-case keys. A pull can take only some attributes, so
+ * every field is optional, the id too (`id`, or `db/id` from an older LogSeq): the resolver keys a page
+ * by its name when it has no id, and the alias sets and the current-context lookup skip one.
  */
-export const pulledPageSchema = z
-  .object({
-    id: z.number().optional(),
-    name: z.string().optional(),
-    ...pageShared,
-    ...pagePulledKeys,
-  })
-  .refine(page => page.id !== undefined || page['db/id'] !== undefined, { error: 'a page needs an id' });
+export const pulledPageSchema = z.object({
+  id: z.number().optional(),
+  name: z.string().optional(),
+  ...pageShared,
+  ...pagePulledKeys,
+});
 
 /**
  * A page of either dialect, with every field optional: the page nested in a block (a bare
@@ -112,7 +116,7 @@ export const pageLikeSchema = z.object({
   id: z.number().optional(),
   name: z.string().optional(),
   ...pageShared,
-  originalName: pageEditorKeys.originalName.optional(),
+  originalName: pageEditorKeys.originalName,
   journalDay: pageEditorKeys.journalDay,
   createdAt: pageEditorKeys.createdAt,
   updatedAt: pageEditorKeys.updatedAt,
@@ -153,7 +157,9 @@ export const nestedPageSchema = z.object({
 export const blockSchema = z.object({
   id: z.number(),
   uuid: z.string(),
-  content: z.string(),
+  // Read with a fallback to '' (date range, search term) or skipped when not text (current context),
+  // and a block with no `:block/content` omits the key, so it is optional
+  content: z.string().optional(),
   page: nestedPageSchema.optional(),
   parent: entityRefSchema.optional(),
   left: entityRefSchema.optional(),
@@ -164,9 +170,9 @@ export const blockSchema = z.object({
 
 /** The graph `logseq.App.getCurrentGraph` says is open. */
 export const graphInfoSchema = z.object({
-  url: z.string(),
-  name: z.string(),
-  path: z.string(),
+  url: z.string().optional(),
+  name: z.string().optional(),
+  path: z.string().optional(),
 });
 
 /**
@@ -179,7 +185,7 @@ export const outlineBlockSchema = z
     id: z.number().optional(),
     'db/id': z.number().optional(),
     uuid: z.string(),
-    content: z.string(),
+    content: z.string().optional(), // the snippet is '' for a block with none
     left: entityRefSchema.optional(),
     parent: z.union([entityRefSchema, z.number()]).optional(),
   })
@@ -201,8 +207,8 @@ export const refTargetSchema = z.object({
   left: entityRefSchema.optional(),
   parent: entityRefSchema.optional(),
   page: z
-    .object({ id: z.number(), name: z.string().optional(), 'original-name': z.string().optional() })
-    .optional(),
+    .object({ id: z.number().optional(), name: z.string().optional(), 'original-name': z.string().optional() })
+    .optional(), // a placeholder row has no page (`isPlaceholder` reads `page?.id`)
 });
 
 /** What `connectedPages` answers per row: `[sourceId, connectedId, name, originalName, isJournal, relType, count]`. */
@@ -219,6 +225,25 @@ const rows = <T extends readonly [z.ZodType, ...z.ZodType[]]>(...columns: T) =>
   z.array(z.tuple(columns)).nullable();
 
 /**
+ * What `getCurrentPage` answers: a page, or the block the user zoomed into. It has the page's `name` or
+ * it hasn't (the test the tool itself applies), and the answer is checked as the one it is, so a mismatch
+ * reports its own path (`originalName`, `content`) instead of "Invalid input" for a whole union.
+ */
+const pageOrBlockSchema = z
+  .custom<z.infer<typeof editorPageSchema> | z.infer<typeof blockSchema>>(
+    value => typeof value === 'object' && value !== null && !Array.isArray(value),
+    { error: 'expected an object' }
+  )
+  .superRefine((value, ctx) => {
+    const chosen = 'name' in value && value.name !== undefined ? editorPageSchema : blockSchema;
+    const result = chosen.safeParse(value);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      ctx.addIssue({ code: 'custom', path: issue.path, message: issue.message });
+    }
+  });
+
+/**
  * What each LogSeq call the tools make answers, by the shape the tool reads. `.nullable()` is
  * what LogSeq may answer instead of the value, and a tool treats it as its own case (BR-0011),
  * never as `[]`. A pull cell is nullable where the tool already skips a null cell.
@@ -230,7 +255,7 @@ export const responses = {
   /** `getAllPages` */
   editorPages: z.array(editorPageSchema).nullable(),
   /** `getAllPages`, read for the names of pages only (the closest-name suggestions) */
-  pageNames: z.array(z.object({ originalName: z.string() })).nullable(),
+  pageNames: z.array(z.object({ originalName: z.string().optional() })).nullable(),
   /** `getBlock`, `getCurrentBlock` */
   block: blockSchema.nullable(),
   /** `getPageBlocksTree`, `getSelectedBlocks` */
@@ -242,7 +267,7 @@ export const responses = {
    */
   linkedReferences: z.array(z.tuple([pageLikeSchema.nullable(), z.array(blockSchema)])).nullable(),
   /** `getCurrentPage`: a page, or the block the user zoomed into */
-  pageOrBlock: z.union([editorPageSchema, blockSchema]).nullable(),
+  pageOrBlock: pageOrBlockSchema.nullable(),
   /** `getCurrentGraph` */
   graphInfo: graphInfoSchema.nullable(),
 
@@ -266,7 +291,7 @@ export const responses = {
   /** `[page, via]`: the resolver's first query. `via` is `name` (or absent), `alias` or `journal-date` */
   resolverRows: rows(pulledPageSchema, z.string().optional()),
   /** `[page, via, name]`: link targets, one row per name and route */
-  linkTargetRows: rows(pulledPageSchema.nullable(), z.string(), z.string()),
+  linkTargetRows: rows(pulledPageSchema.nullable(), z.string(), z.unknown()), // a row whose name isn't text is skipped
   /** `[startId, member]`: the alias group of each start page */
   aliasSetRows: rows(z.number(), pulledPageSchema),
   /** `[start, member]`: the alias group of a page found by name */

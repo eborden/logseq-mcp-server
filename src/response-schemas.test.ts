@@ -79,8 +79,13 @@ describe('page schemas', () => {
     expect(accepts(pulledPageSchema, pulledPage)).toBe(true);
   });
 
-  it('does not take a pulled page for an Editor page: originalName is what the Editor reads', () => {
-    expect(accepts(editorPageSchema, pulledPage)).toBe(false);
+  it('reads an Editor page that has no originalName (it is read with a fallback to name), but wants id and name', () => {
+    const { originalName: _gone, ...withoutOriginalName } = editorPage;
+
+    expect(accepts(editorPageSchema, withoutOriginalName)).toBe(true);
+    expect(accepts(editorPageSchema, { id: 1, name: 'a whiteboard' })).toBe(true);
+    expect(accepts(editorPageSchema, { name: 'a whiteboard' })).toBe(false);
+    expect(accepts(editorPageSchema, { id: 1 })).toBe(false);
   });
 
   it('reads a page of either spelling, or a bare reference, as a PageLike', () => {
@@ -101,8 +106,10 @@ describe('page schemas', () => {
     expect(accepts(pulledPageSchema, { 'db/id': 5, name: 'bob', 'original-name': 'Bob' })).toBe(true);
   });
 
-  it('wants an id on a pulled page, in one spelling or the other', () => {
-    expect(accepts(pulledPageSchema, { name: 'bob', 'original-name': 'Bob' })).toBe(false);
+  it('does not want an id on a pulled page (the resolver keys one by name), but a given id is a number', () => {
+    expect(accepts(pulledPageSchema, { name: 'bob', 'original-name': 'Bob' })).toBe(true);
+    expect(accepts(pulledPageSchema, {})).toBe(true);
+    expect(accepts(pulledPageSchema, { id: 'five' })).toBe(false);
   });
 
   it('reads a partial pull: only the attributes that were asked for', () => {
@@ -174,11 +181,22 @@ describe('block schema', () => {
     expect(accepts(blockSchema, { ...editorBlock, children: [['uuid', '123']] })).toBe(true);
   });
 
-  it('wants id, uuid and content', () => {
-    for (const key of ['id', 'uuid', 'content'] as const) {
+  it('wants id and uuid, which the code reads with no fallback', () => {
+    for (const key of ['id', 'uuid'] as const) {
       const { [key]: _gone, ...without } = pulledBlock;
       expect(accepts(blockSchema, without), key).toBe(false);
     }
+  });
+
+  it('reads a block with no content: a pull omits the key, and the tools read it with a fallback', () => {
+    const { content: _gone, ...without } = pulledBlock;
+
+    expect(accepts(blockSchema, without)).toBe(true);
+  });
+
+  it('reads a reference with no id, or with only db/id, as the code does with ?.id', () => {
+    expect(accepts(blockSchema, { ...pulledBlock, parent: {}, left: { 'db/id': 3 } })).toBe(true);
+    expect(accepts(blockSchema, { ...pulledBlock, parent: { id: 'x' } })).toBe(false);
   });
 
   it('rejects a block with content that is not text', () => {
@@ -254,9 +272,21 @@ describe('responses', () => {
     expect(accepts(responses.pageOrBlock, 'a string')).toBe(false);
   });
 
+  it('says where a getCurrentPage answer is wrong, for a page and for a block, never what the value was', () => {
+    const secret = 'a-private-page-name';
+    const badPage = catchError(() => parseResponse(responses.pageOrBlock, { ...editorPage, id: secret }, 'logseq.Editor.getCurrentPage'));
+    const badBlock = catchError(() => parseResponse(responses.pageOrBlock, { ...editorBlock, uuid: 7, content: secret }, 'logseq.Editor.getCurrentPage'));
+
+    expect(badPage.path).toBe('id');
+    expect(badBlock.path).toBe('uuid');
+    expect(badPage.message + badBlock.message).not.toContain(secret);
+    expect(catchError(() => parseResponse(responses.pageOrBlock, 'text', 'logseq.Editor.getCurrentPage')).path).toBe('(response)');
+  });
+
   it('reads getCurrentGraph', () => {
     expect(accepts(responses.graphInfo, { url: 'logseq_local_/tmp/my-graph', name: 'my-graph', path: '/tmp/my-graph' })).toBe(true);
-    expect(accepts(responses.graphInfo, { name: 'my-graph' })).toBe(false);
+    expect(accepts(responses.graphInfo, { name: 'my-graph' })).toBe(true); // nothing reads the graph's fields
+    expect(accepts(responses.graphInfo, { name: 7 })).toBe(false);
   });
 
   it('reads the resolver rows: [page, via], with via absent for an exact name', () => {
@@ -274,7 +304,8 @@ describe('responses', () => {
 
   it('reads the names only, for suggestions, from a page list that carries more', () => {
     expect(accepts(responses.pageNames, [editorPage, { originalName: 'Bob' }])).toBe(true);
-    expect(accepts(responses.pageNames, [{ name: 'bob' }])).toBe(false);
+    expect(accepts(responses.pageNames, [{ name: 'bob' }])).toBe(true); // no original name: nothing to match
+    expect(accepts(responses.pageNames, [{ originalName: 7 }])).toBe(false);
   });
 });
 

@@ -105,8 +105,8 @@ export async function withPageContext(client: LogseqClient, blocks: BlockEntity[
     if (page) {
       result.context = {
         page,
-        references: Array.from(block.content.matchAll(/\[\[([^\]]+)\]\]/g), m => m[1]),
-        tags: Array.from(block.content.matchAll(/#([^\s#]+)/g), m => m[1])
+        references: Array.from((block.content ?? '').matchAll(/\[\[([^\]]+)\]\]/g), m => m[1]),
+        tags: Array.from((block.content ?? '').matchAll(/#([^\s#]+)/g), m => m[1])
       };
     }
 
