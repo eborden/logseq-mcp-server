@@ -150,6 +150,7 @@ logseq_get_backlinks(topic)
 ```
 - Find pages that reference the topic
 - Complements concept_network with detailed backlink context
+- Keep the defaults (20 source pages, 10 linking blocks each): they cover "what connects to this". They are not a ranking, and a longer list comes back with `pages_truncated` or `page_blocks_truncated` in the second content block, with `totals` giving the real counts. Say the list is partial. Raise `max_pages` or `max_blocks_per_page` to the numbers the warnings name only when the question needs every referrer (a blocker hunt, "everything that links"), both in one call when `totals.blocks` is a few hundred or fewer. At 100 pages of 50 blocks the result is too big to be shown, so step up less
 
 ### Phase 3: Present Insights
 - **Core connections**: Pages at distance 1
