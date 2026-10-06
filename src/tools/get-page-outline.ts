@@ -3,6 +3,7 @@ import { DatalogQueryBuilder } from '../datalog/queries.js';
 import type { BlockEntity, ResultMeta, ResultWarning } from '../types.js';
 import { orderSiblings } from '../utils/block-tree.js';
 import { buildResultMeta } from '../utils/result-meta.js';
+import { entityId, pageDisplayName } from '../utils/entity-fields.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 import { firstLineSnippet } from '../utils/snippet.js';
 
@@ -29,7 +30,6 @@ export interface PageOutline extends ResultMeta, ResolvedFrom {
 /** A pulled block row; `id` and `uuid` as the resolver's pulls return them. */
 type PulledBlock = BlockEntity & { 'db/id'?: number };
 
-const idOf = (block: PulledBlock): number | undefined => block.id ?? block['db/id'];
 const parentIdOf = (block: PulledBlock): number | undefined => {
   const parent = block.parent as unknown as { id?: number } | number | undefined;
   return typeof parent === 'number' ? parent : parent?.id;
@@ -55,7 +55,8 @@ const parentIdOf = (block: PulledBlock): number | undefined => {
 export async function getPageOutline(client: LogseqClient, pageName: string): Promise<PageOutline> {
   const resolved = await requirePage(client, pageName);
   const page = resolved.page;
-  const pageId: number = page.id ?? page['db/id'];
+  // The resolver pulls the page by :db/id, so it always has one (a mock without it fails in groundIds, as before)
+  const pageId = entityId(page) as number;
 
   const { query, inputs } = DatalogQueryBuilder.pageOutlineBlocks(pageId);
   const rows = (await client.executeDatalogQuery<Array<[PulledBlock]>>(query, ...inputs)) || [];
@@ -67,7 +68,7 @@ export async function getPageOutline(client: LogseqClient, pageName: string): Pr
     if (block == null) continue;
     const parentId = parentIdOf(block);
     if (parentId === pageId) {
-      top.push({ ...block, id: idOf(block) as number });
+      top.push({ ...block, id: entityId(block) as number });
     } else if (parentId !== undefined) {
       childCount.set(parentId, (childCount.get(parentId) ?? 0) + 1);
     }
@@ -87,7 +88,7 @@ export async function getPageOutline(client: LogseqClient, pageName: string): Pr
   }
 
   return {
-    page: page['original-name'] ?? page.originalName ?? page.name,
+    page: pageDisplayName(page),
     ...resolvedFrom(pageName, resolved),
     blocks: shown.map(block => ({
       uuid: block.uuid,
