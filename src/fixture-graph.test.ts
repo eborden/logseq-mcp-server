@@ -101,12 +101,15 @@ describe('fixture graph files (tests/fixtures/graph)', () => {
   it('keeps the README out of the graph folder, where LogSeq would index it as a page (#139)', () => {
     expect(existsSync(join(graphDir, '..', 'README.md'))).toBe(true);
     // LogSeq 0.10.15 applies :hidden on only one load path, so config.edn is no defence.
-    expect(readFileSync(join(graphDir, 'logseq/config.edn'), 'utf-8')).not.toMatch(/^\s*:hidden\b/m);
+    const config = readFileSync(join(graphDir, 'logseq/config.edn'), 'utf-8');
+    const withoutComments = config.split('\n').filter(line => !line.trimStart().startsWith(';')).join('\n');
+    expect(withoutComments).not.toMatch(/:hidden\b/);
     // Only the graph itself may sit here. Everything else LogSeq finds becomes a page.
-    const osFiles = new Set(['.DS_Store']);
-    expect(readdirSync(graphDir).filter(name => !osFiles.has(name)).sort()).toEqual(['journals', 'logseq', 'pages']);
+    // Dotfiles (.DS_Store, a .git from git auto-commit) are not pages; LogSeq skips them.
+    const visible = (name: string) => !name.startsWith('.');
+    expect(readdirSync(graphDir).filter(visible).sort()).toEqual(['journals', 'logseq', 'pages']);
     for (const dir of ['pages', 'journals']) {
-      const strays = readdirSync(join(graphDir, dir)).filter(name => !name.endsWith('.md') && !osFiles.has(name));
+      const strays = readdirSync(join(graphDir, dir)).filter(name => visible(name) && !name.endsWith('.md'));
       expect(strays, dir).toEqual([]);
     }
   });
