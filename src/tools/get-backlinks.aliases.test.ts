@@ -70,7 +70,7 @@ describe('get_backlinks across an alias group (#69)', () => {
   it('shapes the tuples like the Editor API: [page, blocks] with camelCase keys', async () => {
     const { results } = await getBacklinksWithMeta(fakeClient().client, 'Jordan');
 
-    const [page, blocks] = results!.find(([p]) => p.id === 50)!;
+    const [page, blocks] = results!.find(([p]) => p?.id === 50)!;
     expect(blocks[0].pathRefs).toEqual([{ id: 1 }]);
     expect(blocks[0].page).toEqual(page);
   });
@@ -86,8 +86,8 @@ describe('get_backlinks across an alias group (#69)', () => {
 
     expect(results).toHaveLength(2);
     for (const [page, blocks] of results!) {
-      expect(page).toStrictEqual(editorShaped[page.id]);
-      for (const block of blocks) expect(block.page).toStrictEqual(editorShaped[page.id]);
+      expect(page).toStrictEqual(editorShaped[page!.id!]);
+      for (const block of blocks) expect(block.page).toStrictEqual(editorShaped[page!.id!]);
     }
   });
 

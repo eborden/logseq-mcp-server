@@ -14,6 +14,8 @@ import {
   resolvedAliases
 } from '../utils/alias-set.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
+import { queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /** Defaults of {@link ContextOptions}, also advertised by `logseq_build_context` (#60). */
 export const DEFAULT_MAX_BLOCKS = 50;
@@ -107,7 +109,7 @@ export async function buildContextForTopic(
   const blocks = aliased
     ? DatalogQueryBuilder.getBlocksOnPages(aliasIds(aliasSet))
     : DatalogQueryBuilder.getPageBlocks(lookupName);
-  const blockResults = await client.executeDatalogQuery<Array<[BlockEntity]> | null>(blocks.query, ...blocks.inputs);
+  const blockResults = await queryParsed(client, responses.nullableBlockRows, blocks.query, ...blocks.inputs);
 
   // Extract blocks (empty array if no blocks exist). For an alias group the
   // page asked about comes first, so a cap keeps its own blocks before the aliases'.

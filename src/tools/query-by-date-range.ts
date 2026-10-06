@@ -1,5 +1,5 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, PageLike, BlockEntity, SlimBlock, ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
+import { PageEntity, BlockEntity, SlimBlock, ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { buildResultMeta, LARGE_RESULT_NOTE } from '../utils/result-meta.js';
 import {
@@ -27,6 +27,8 @@ import {
   extractConceptRefs,
   rollUpTopConcepts
 } from '../utils/top-concepts.js';
+import { queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 export type { TopConcept } from '../utils/top-concepts.js';
 export { BUILT_IN_CONCEPTS, DEFAULT_TOP_CONCEPTS_LIMIT } from '../utils/top-concepts.js';
@@ -172,12 +174,9 @@ function blockMatcher(searchTerm: string, aliasSet: AliasSet | null): (block: Bl
   return block => {
     const content = (block.content ?? '').toLowerCase();
     if (content.includes(term) || wholeWord?.test(content)) return true;
-    return pageIds.size > 0 && (block.refs ?? []).some(ref => pageIds.has(ref?.id));
+    return pageIds.size > 0 && (block.refs ?? []).some(ref => ref?.id !== undefined && pageIds.has(ref.id));
   };
 }
-
-/** A block as the journal query pulls it: `refs` are nested page maps, not the bare `{ id }` refs of the Editor API. */
-type PulledJournalBlock = Omit<BlockEntity, 'refs'> & { refs?: PageLike[] };
 
 /** The validated, resolved form of a {@link DateRangeSelection}. */
 type ResolvedSelection =
@@ -487,7 +486,7 @@ async function fetchPages(
   client: LogseqClient,
   { query, inputs }: { query: string; inputs: unknown[] }
 ): Promise<PageEntity[]> {
-  const rows = await client.executeDatalogQuery<Array<[any]>>(query, ...inputs);
+  const rows = await queryParsed(client, responses.nullablePageRows, query, ...inputs);
   return (rows || [])
     .map(row => row[0])
     .filter(page => page != null)
@@ -598,10 +597,7 @@ export async function queryJournals(
   const refsByBlock = new Map<number, ConceptRef[]>();
   if (journals.length > 0) {
     const blocksQuery = DatalogQueryBuilder.getJournalBlocksInRange(rangeStart, rangeEnd);
-    const blockRows = await client.executeDatalogQuery<Array<[PulledJournalBlock | null]> | null>(
-      blocksQuery.query,
-      ...blocksQuery.inputs
-    );
+    const blockRows = await queryParsed(client, responses.nullableBlockRows, blocksQuery.query, ...blocksQuery.inputs);
     const flatBlocks = (blockRows || [])
       .map(row => row[0])
       .filter(block => block != null)

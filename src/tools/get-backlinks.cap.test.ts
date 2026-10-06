@@ -102,11 +102,11 @@ const paths: Array<[string, (list: Source[] | null) => Harness]> = [
   ['the alias group Datalog path (#69)', aliasGroupPath]
 ];
 
-type Tuple = [{ id: number; originalName?: string }, Array<{ id: number }>];
-const pageIds = (results: Tuple[] | null) => (results ?? []).map(([page]) => page.id);
+type Tuple = [{ id?: number; originalName?: string } | null, Array<{ id: number }>];
+const pageIds = (results: Tuple[] | null) => (results ?? []).map(([page]) => page?.id);
 const blockCounts = (results: Tuple[] | null) => (results ?? []).map(([, blocks]) => blocks.length);
 /** Each page id with its block ids, to compare two results whole */
-const idsOf = (results: Tuple[] | null) => (results ?? []).map(([page, blocks]) => [page.id, blocks.map(b => b.id)]);
+const idsOf = (results: Tuple[] | null) => (results ?? []).map(([page, blocks]) => [page?.id, blocks.map(b => b.id)]);
 const totalBlocks = (results: Tuple[] | null) => blockCounts(results).reduce((a, b) => a + b, 0);
 
 /** Every `Set <param> to N` in a result's warnings. */

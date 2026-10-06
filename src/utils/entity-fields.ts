@@ -1,4 +1,4 @@
-import type { PageLike } from '../types.js';
+import type { PageLike } from '../response-schemas.js';
 
 /**
  * The one place that knows LogSeq spells an entity two ways (#62).
@@ -8,9 +8,12 @@ import type { PageLike } from '../types.js';
  * both. A pull can also say `db/id` for the id (Datascript's own spelling; LogSeq 0.10.15 renames
  * it to `id` in query results, but older callers and test doubles still send it).
  * The tools get both kinds of entity, sometimes in one result, and their output has
- * always carried each entity as it came. So the entities are not rewritten. These
- * readers pick the field whichever way it is spelled, and every tool reads through
- * them instead of carrying its own `a ?? b ?? c`.
+ * always carried each entity as it came: a full (non-slim) result shows `original-name`
+ * for a page that was pulled and `originalName` for one the Editor API sent. So the
+ * entities are not rewritten into one shape, and BR-0004 forbids renaming those keys.
+ * `src/response-schemas.ts` checks each response and says which spelling it has
+ * (`editorPageSchema`, `pulledPageSchema`); these readers pick the field whichever way it
+ * is spelled, and every tool reads through them instead of carrying its own `a ?? b ?? c`.
  *
  * Only the spelling is decided here. What an empty or absent value means stays with the
  * caller, except for {@link pageDisplayName}, which is the one display-name policy.

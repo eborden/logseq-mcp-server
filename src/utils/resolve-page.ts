@@ -1,10 +1,12 @@
 import Fuzzysort from 'fuzzysort';
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { AmbiguousPageError, PageNotFoundError, isInfrastructureError } from '../errors.js';
-import type { PageCandidate, PageEntity, PageLike, PageMatchReason, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
+import { AmbiguousPageError, LogSeqResponseError, PageNotFoundError, isInfrastructureError } from '../errors.js';
+import type { PageCandidate, PageLike, PageMatchReason, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
 import { entityId, pageDisplayName, pageName as nameOf } from './entity-fields.js';
 import { buildResultMeta } from './result-meta.js';
+import { callParsed, queryParsed } from './parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /** Most candidates listed for an ambiguous name; the rest are only counted. */
 export const MAX_CANDIDATES = 10;
@@ -50,7 +52,7 @@ export type PageResolution =
   | { kind: 'ambiguous'; candidates: PageCandidate[]; totalCandidates: number }
   | { kind: 'not_found' };
 
-type Row = [PageLike, string | undefined];
+type Row = [PageLike, string?];
 
 /** Pages from rows, one per entity, ordered by name so output never depends on row order. */
 function distinctPages(pages: PageLike[]): PageLike[] {
@@ -123,7 +125,7 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
     journalDay === null
       ? DatalogQueryBuilder.resolvePage(name)
       : DatalogQueryBuilder.resolvePage(name, journalDay);
-  const rows = (await client.executeDatalogQuery<Row[] | null>(query, ...inputs)) || [];
+  const rows = (await queryParsed(client, responses.resolverRows, query, ...inputs)) || [];
 
   const resolution = resolveFromRows(name, rows);
   if (resolution) return resolution;
@@ -131,7 +133,7 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
   // Last resort, and only for names that are not dates
   if (journalDay === null) {
     const leaf = DatalogQueryBuilder.namespaceLeafPages(name);
-    const leafRows = (await client.executeDatalogQuery<Array<[PageLike]> | null>(leaf.query, ...leaf.inputs)) || [];
+    const leafRows = (await queryParsed(client, responses.pageRows, leaf.query, ...leaf.inputs)) || [];
     const leaves = distinctPages(leafRows.map(([page]) => page));
     if (leaves.length > 0) return pick(leaves, 'namespace-leaf', `namespace page ending in ${JSON.stringify(`/${name}`)}`);
   }
@@ -206,7 +208,7 @@ export async function resolveLinkTargets(
   if (keys.length === 0) return { resolutions, unavailable: false };
 
   const { query, inputs } = DatalogQueryBuilder.linkTargets(keys);
-  const rows = await client.executeDatalogQuery<Array<[PageLike | null, string, string]> | null>(query, ...inputs);
+  const rows = await queryParsed(client, responses.linkTargetRows, query, ...inputs);
   const byName = new Map<string, Row[]>();
   for (const [page, via, n] of rows ?? []) {
     if (page == null || typeof n !== 'string') continue;
@@ -228,7 +230,7 @@ export async function resolveLinkTargets(
 export async function suggestPages(client: LogseqClient, input: string): Promise<string[]> {
   if (isoDateToJournalDay(input) !== null) return []; // fuzzy-matching a date finds nothing useful
   try {
-    const allPages = await client.callAPI<PageEntity[] | null>('logseq.Editor.getAllPages', []);
+    const allPages = await callParsed(client, responses.pageNames, 'logseq.Editor.getAllPages', []);
     if (!allPages || allPages.length === 0) return [];
     return Fuzzysort.go(input, allPages, {
       key: 'originalName',
@@ -236,7 +238,8 @@ export async function suggestPages(client: LogseqClient, input: string): Promise
       threshold: -10000 // Be lenient with matching
     }).map(match => match.obj.originalName);
   } catch (error) {
-    if (isInfrastructureError(error)) throw error;
+    // An answer this server can't read is a failure, not "no suggestions" (#202)
+    if (isInfrastructureError(error) || error instanceof LogSeqResponseError) throw error;
     return [];
   }
 }

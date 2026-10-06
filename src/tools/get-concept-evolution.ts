@@ -1,5 +1,5 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity } from '../types.js';
+import { BlockEntity } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 import {
@@ -13,6 +13,8 @@ import {
 import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS } from '../utils/result-meta.js';
 import { entityId, journalDayOf } from '../utils/entity-fields.js';
 import type { ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
+import { callParsed, queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /** Every grouping period, in the order `group_by` advertises them (#60). */
 export const GROUP_BY_PERIODS = ['day', 'week', 'month'] as const;
@@ -169,16 +171,10 @@ export async function getConceptEvolution(
   const aliasSet = await resolveAliasSet(client, resolved.page);
 
   // Search for blocks mentioning the concept
-  const blocks = await client.callAPI<BlockEntity[]>(
-    'logseq.Editor.getPageBlocksTree',
-    [lookupName]
-  );
+  const blocks = await callParsed(client, responses.blocks, 'logseq.Editor.getPageBlocksTree', [lookupName]);
 
   // Get full page data for the concept page to enrich blocks from getPageBlocksTree
-  const conceptPage = await client.callAPI<PageEntity>(
-    'logseq.Editor.getPage',
-    [lookupName]
-  );
+  const conceptPage = await callParsed(client, responses.editorPage, 'logseq.Editor.getPage', [lookupName]);
 
   // Enrich blocks from getPageBlocksTree with full page data
   if (blocks && conceptPage) {
@@ -197,7 +193,7 @@ export async function getConceptEvolution(
         aliasIds(aliasSet).filter(id => id !== mainPageId)
       )
     : DatalogQueryBuilder.getBlocksReferencingPage(lookupName);
-  const searchResults = await client.executeDatalogQuery<Array<[BlockEntity]> | null>(mentionsQuery, ...mentionsInputs);
+  const searchResults = await queryParsed(client, responses.blockRows, mentionsQuery, ...mentionsInputs);
   const searchBlocks = (searchResults || []).map(r => r[0]);
 
   // Combine and deduplicate

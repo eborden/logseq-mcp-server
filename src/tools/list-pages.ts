@@ -2,6 +2,8 @@ import { LogseqClient } from '../client.js';
 import { PageEntity, ResultMeta, ResultWarning } from '../types.js';
 import { journalFlag } from '../utils/entity-fields.js';
 import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS } from '../utils/result-meta.js';
+import { callParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /** Pages returned when `limit` is absent (#61). */
 export const DEFAULT_LIST_PAGES_LIMIT = 200;
@@ -135,9 +137,7 @@ export async function listPages(
   const limit = Math.min(Math.max(0, requested), MAX_LIST_PAGES_LIMIT);
   const offset = Math.max(0, Math.floor(options.offset ?? DEFAULT_LIST_PAGES_OFFSET));
 
-  const allPages = await client.callAPI<PageEntity[] | null>(
-    'logseq.Editor.getAllPages'
-  );
+  const allPages = await callParsed(client, responses.editorPages, 'logseq.Editor.getAllPages');
 
   // `null` is not `[]` (#64). An empty array is a graph with no pages. `null`
   // may mean no graph is open or LogSeq is re-indexing (unconfirmed until the

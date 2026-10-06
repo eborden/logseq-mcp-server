@@ -1,5 +1,5 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity, ResultMeta, ResultWarning } from '../types.js';
+import { BlockEntity, PageEntity, PageLike, ResultMeta, ResultWarning } from '../types.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import {
   AliasSet,
@@ -13,6 +13,8 @@ import {
 import { camelizeBlock, camelizeKeys } from '../utils/block-tree.js';
 import { requirePage, resolvedFromInfo, ResolvedFrom } from '../utils/resolve-page.js';
 import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS, largeResultNote } from '../utils/result-meta.js';
+import { callParsed, queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /** Source pages kept when `maxPages` is absent. */
 export const DEFAULT_MAX_PAGES = 20;
@@ -44,7 +46,8 @@ export interface BacklinkCaps {
 
 const clampCap = (value: number, max: number) => Math.min(Math.max(0, Math.floor(value)), max);
 
-type Backlink = [PageEntity, BlockEntity[]];
+/** `[sourcePage, linking blocks]`. The page can be `null`: the blocks then name it (`block.page`). */
+export type Backlink = [PageLike | null, BlockEntity[]];
 
 const blockCount = ([, blocks]: Backlink) => `${blocks.length} linking ${blocks.length === 1 ? 'block' : 'blocks'}`;
 
@@ -191,7 +194,7 @@ function pageBlocksTruncated(affected: Backlink[], cap: number, requested: numbe
  * @param pageName - Page name, alias, or ISO date (`2025-01-01`) of a journal
  * @param caps - Source pages and blocks per page kept (#61), defaults 20 and 10; see {@link capBacklinks}
  * Source pages are ranked by their number of linking blocks, most first (#178).
- * @returns Array of tuples [PageEntity, BlockEntity[]]
+ * @returns Array of tuples [PageLike | null, BlockEntity[]]
  * Note: LogSeq API returns [page, [block1, block2, ...]] per source page
  * @throws PageNotFoundError if no page matches (guidance with the closest names)
  * @throws AmbiguousPageError if several pages match (with the candidates)
@@ -200,7 +203,7 @@ export async function getBacklinks(
   client: LogseqClient,
   pageName: string,
   caps: BacklinkCaps = {}
-): Promise<[PageEntity, BlockEntity[]][] | null> {
+): Promise<Backlink[] | null> {
   return (await getBacklinksWithMeta(client, pageName, caps)).results;
 }
 
@@ -222,7 +225,7 @@ export async function getBacklinksWithMeta(
   pageName: string,
   caps: BacklinkCaps = {}
 ): Promise<{
-  results: [PageEntity, BlockEntity[]][] | null;
+  results: Backlink[] | null;
   meta: (ResultMeta & ResolvedFrom & ResolvedAliases) | null;
 }> {
   const resolved = await requirePage(client, pageName);
@@ -259,12 +262,9 @@ export async function fetchBacklinks(
   client: LogseqClient,
   resolvedName: string,
   aliasSet?: AliasSet
-): Promise<[PageEntity, BlockEntity[]][] | null> {
+): Promise<Backlink[] | null> {
   if (!aliasSet || !hasAliases(aliasSet)) {
-    return client.callAPI<[PageEntity, BlockEntity[]][] | null>(
-      'logseq.Editor.getPageLinkedReferences',
-      [resolvedName]
-    );
+    return callParsed(client, responses.linkedReferences, 'logseq.Editor.getPageLinkedReferences', [resolvedName]);
   }
   return fetchAliasedBacklinks(client, aliasSet);
 }
@@ -275,7 +275,7 @@ async function fetchAliasedBacklinks(
   aliasSet: AliasSet
 ): Promise<[PageEntity, BlockEntity[]][]> {
   const { query, inputs } = DatalogQueryBuilder.linkedReferencesOfPages(aliasIds(aliasSet));
-  const rows = (await client.executeDatalogQuery<Array<[object | null]> | null>(query, ...inputs)) || [];
+  const rows = (await queryParsed(client, responses.nullableBlockRows, query, ...inputs)) || [];
 
   const byPage = new Map<number, { page: PageEntity; blocks: Map<number, BlockEntity> }>();
   for (const [row] of rows) {

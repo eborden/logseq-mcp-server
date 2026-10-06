@@ -1,8 +1,10 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { BlockEntity, PageEntity, PageLike, SlimBlock, SlimPage } from '../types.js';
+import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
 import { blockPageId, entityId, pageDisplayName } from '../utils/entity-fields.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
+import { callParsed, queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /**
  * What the user is looking at in LogSeq right now.
@@ -67,9 +69,9 @@ function withFetchedChildren(block: BlockEntity): BlockEntity {
  */
 export async function getCurrentContext(client: LogseqClient): Promise<CurrentContext> {
   const [currentPage, currentBlock, selected] = await Promise.all([
-    client.callAPI<PageEntity | BlockEntity | null>('logseq.Editor.getCurrentPage', []),
-    client.callAPI<BlockEntity | null>('logseq.Editor.getCurrentBlock', []),
-    client.callAPI<BlockEntity[] | null>('logseq.Editor.getSelectedBlocks', [])
+    callParsed(client, responses.pageOrBlock, 'logseq.Editor.getCurrentPage', []),
+    callParsed(client, responses.block, 'logseq.Editor.getCurrentBlock', []),
+    callParsed(client, responses.blocks, 'logseq.Editor.getSelectedBlocks', [])
   ]);
 
   const zoomedBlock = isBlockEntity(currentPage) ? currentPage : null;
@@ -93,7 +95,7 @@ export async function getCurrentContext(client: LogseqClient): Promise<CurrentCo
 
   if (missingIds.length > 0) {
     const { query, inputs } = DatalogQueryBuilder.getPagesByIds(missingIds);
-    const rows = await client.executeDatalogQuery<Array<[PageLike | null]> | null>(query, ...inputs);
+    const rows = await queryParsed(client, responses.nullablePageRows, query, ...inputs);
     for (const row of rows || []) {
       const pulled = row[0];
       const id = entityId(pulled);

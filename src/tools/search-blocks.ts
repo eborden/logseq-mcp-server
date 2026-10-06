@@ -1,9 +1,11 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { BlockEntity, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
+import { BlockEntity, PageEntity, PulledPage, ResultMeta, SlimBlock, SlimPage } from '../types.js';
 import { blockPageId, pageDisplayName } from '../utils/entity-fields.js';
 import { blocksInlineMax, buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
+import { DATALOG_METHOD, parseResponse, queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /** Results returned when `limit` is absent. */
 export const DEFAULT_SEARCH_LIMIT = 100;
@@ -50,7 +52,7 @@ function compareBlocks(a: BlockEntity, b: BlockEntity): number {
  * Convert a page pulled with `[*]` (kebab-case keys) into the camelCase
  * PageEntity shape that `getAllPages` returns and `toSlimPage` reads.
  */
-function pulledPageToEntity(pulled: Record<string, unknown>): PageEntity {
+function pulledPageToEntity(pulled: PulledPage): PageEntity {
   const {
     'original-name': originalName,
     'journal-day': journalDay,
@@ -69,7 +71,7 @@ function pulledPageToEntity(pulled: Record<string, unknown>): PageEntity {
   if (createdAt !== undefined) page.createdAt = createdAt;
   if (updatedAt !== undefined) page.updatedAt = updatedAt;
   if (propertiesTextValues !== undefined) page.propertiesTextValues = propertiesTextValues;
-  // The pull is `[*]` on a page, so these are the PageEntity fields; #62 types the response itself
+  // What it builds is the pull's keys plus the Editor API's: a PageEntity that also carries `original-name`
   return page as unknown as PageEntity;
 }
 
@@ -87,7 +89,7 @@ export async function withPageContext(client: LogseqClient, blocks: BlockEntity[
 
   if (pageIds.length > 0) {
     const { query: pagesQuery, inputs: pagesInputs } = DatalogQueryBuilder.getPagesByIds(pageIds);
-    const pageRows = await client.executeDatalogQuery<Array<[Record<string, unknown>]> | null>(pagesQuery, ...pagesInputs);
+    const pageRows = await queryParsed(client, responses.pageRows, pagesQuery, ...pagesInputs);
     for (const row of pageRows || []) {
       const page = pulledPageToEntity(row[0]);
       pageById.set(page.id, page);
@@ -207,16 +209,18 @@ export async function searchBlocksWithMeta(
   maxLimit: number = MAX_SEARCH_LIMIT
 ): Promise<SearchBlocksOutcome<SearchBlocksResult> | SearchBlocksOutcome<SlimSearchBlocksResult>> {
   const { query: datalog, inputs } = DatalogQueryBuilder.searchBlocks(query);
-  const rows = await client.executeDatalogQuery<Array<[BlockEntity]> | null>(datalog, ...inputs);
+  const rows = await queryParsed(client, responses.searchRows, datalog, ...inputs);
 
   if (!rows) {
     return { results: null, meta: null };
   }
 
-  const matches: BlockEntity[] = rows
+  // A row that has no string content to search is skipped, as it always was (`searchRows` doesn't
+  // check it); the blocks kept are then checked whole
+  const searchable = rows
     .map(row => row[0])
-    .filter(block => block && typeof block.content === 'string')
-    .sort(compareBlocks);
+    .filter((block): block is NonNullable<typeof block> => block != null && typeof block.content === 'string');
+  const matches: BlockEntity[] = parseResponse(responses.blockList, searchable, DATALOG_METHOD).sort(compareBlocks);
 
   const results: SearchBlocksResult[] = matches.slice(0, Math.min(Math.max(0, limit), maxLimit));
 

@@ -12,6 +12,8 @@ import {
   resolveAliasSets,
   resolvedAliases
 } from '../utils/alias-set.js';
+import { callParsed, queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 export type RelationshipType =
   | 'references' // Blocks about topicA that reference topicB
@@ -127,7 +129,7 @@ const connectedWithinEntries = ({ keptA, keptB, totalA, totalB, partialBlock }: 
   ')';
 
 /** Unwrap `[[block], ...]` Datalog rows; a null result means no rows. */
-function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
+function extractBlocks(rows: ReadonlyArray<readonly [BlockEntity | null, ...unknown[]]> | null): BlockEntity[] {
   return (rows || []).map(row => row[0]).filter(block => block != null);
 }
 
@@ -217,7 +219,7 @@ export async function searchByRelationship(
         hasAliases(setA) || hasAliases(setB)
           ? DatalogQueryBuilder.blocksOnPagesReferencingIds(aliasIds(setA), aliasIds(setB))
           : DatalogQueryBuilder.blocksOnPageReferencing(nameA, nameB);
-      results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
+      results = extractBlocks(await queryParsed(client, responses.nullableBlockRows, query, ...inputs));
       break;
     }
 
@@ -231,7 +233,7 @@ export async function searchByRelationship(
         hasAliases(setA) || hasAliases(setB)
           ? DatalogQueryBuilder.blocksReferencingInPagesLinkingIds(aliasIds(setA), aliasIds(setB))
           : DatalogQueryBuilder.blocksReferencingInPagesLinking(nameA, nameB);
-      results = extractBlocks(await client.executeDatalogQuery<Array<[BlockEntity]>>(query, ...inputs));
+      results = extractBlocks(await queryParsed(client, responses.nullableBlockRows, query, ...inputs));
       break;
     }
 
@@ -273,7 +275,7 @@ export async function searchByRelationship(
             frontier = [...frontier].sort((a, b) => a - b).slice(0, maxFrontier);
           }
           const { query, inputs } = DatalogQueryBuilder.neighborPages(frontier);
-          const rows = await client.executeDatalogQuery<Array<[number]>>(query, ...inputs);
+          const rows = await queryParsed(client, responses.idRows, query, ...inputs);
           const neighborIds = (rows || []).map(row => row[0]);
 
           if (neighborIds.some(id => targetIds.has(id))) {
@@ -301,14 +303,8 @@ export async function searchByRelationship(
 
         // If connected, return blocks from both topics
         if (found) {
-          const blocksA = await client.callAPI<BlockEntity[]>(
-            'logseq.Editor.getPageBlocksTree',
-            [nameA]
-          );
-          const blocksB = await client.callAPI<BlockEntity[]>(
-            'logseq.Editor.getPageBlocksTree',
-            [nameB]
-          );
+          const blocksA = await callParsed(client, responses.blocks, 'logseq.Editor.getPageBlocksTree', [nameA]);
+          const blocksB = await callParsed(client, responses.blocks, 'logseq.Editor.getPageBlocksTree', [nameB]);
 
           trees = { a: blocksA || [], b: blocksB || [] };
           results = [...trees.a, ...trees.b];

@@ -2,6 +2,8 @@ import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import type { PageLike, ResultWarning } from '../types.js';
 import { entityId, pageDisplayName, pageName as nameOf } from './entity-fields.js';
+import { queryParsed } from './parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /**
  * Most pages one alias group may hold here. Groups are written by hand
@@ -120,7 +122,7 @@ export async function resolveAliasSets(client: LogseqClient, pages: PageLike[]):
   if (withLinks.length === 0) return starts;
 
   const { query, inputs } = DatalogQueryBuilder.aliasSets([...new Set(withLinks.map(entry => entry.id))]);
-  const rows = (await client.executeDatalogQuery<Array<[number, PageLike]> | null>(query, ...inputs)) || [];
+  const rows = (await queryParsed(client, responses.aliasSetRows, query, ...inputs)) || [];
 
   const byStart = new Map<number, AliasMember[]>();
   for (const [startId, page] of rows) {
@@ -149,7 +151,7 @@ export async function resolveAliasSetByName(
   name: string
 ): Promise<AliasSet | null> {
   const { query, inputs } = DatalogQueryBuilder.aliasSetByName(name);
-  const rows = (await client.executeDatalogQuery<Array<[PageLike, PageLike]> | null>(query, ...inputs)) || [];
+  const rows = (await queryParsed(client, responses.aliasSetByNameRows, query, ...inputs)) || [];
   const first = rows.map(([start]) => memberOf(start)).find(member => member !== null);
   if (!first) return null;
   const found = rows.map(([, member]) => memberOf(member)).filter((m): m is AliasMember => m !== null);

@@ -79,10 +79,10 @@ describe('alias-aware link following against the fixture graph', () => {
       for (const [page] of tuples) if (page?.id !== undefined) editorKeys.set(page.id, keysOf(page));
     }
 
-    const shared = (results ?? []).filter(([page]) => editorKeys.has(page.id));
+    const shared = (results ?? []).filter(([page]) => editorKeys.has(page!.id!));
     expect(shared).toHaveLength(14);
     const mismatched = shared.filter(([page, blocks]) =>
-      keysOf(page) !== editorKeys.get(page.id) || blocks.some(b => keysOf(b.page as object) !== keysOf(page))
+      keysOf(page!) !== editorKeys.get(page!.id!) || blocks.some(b => keysOf(b.page as object) !== keysOf(page!))
     ).length;
     expect(mismatched).toBe(0);
   });

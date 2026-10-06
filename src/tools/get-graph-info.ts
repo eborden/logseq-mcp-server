@@ -1,5 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { GraphInfo } from '../types.js';
+import { callParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /**
  * Get information about the current LogSeq graph
@@ -11,10 +13,7 @@ export async function getGraphInfo(
   client: LogseqClient
 ): Promise<GraphInfo> {
   // Call the LogSeq API to get current graph
-  const result = await client.callAPI<GraphInfo | null>(
-    'logseq.App.getCurrentGraph',
-    []
-  );
+  const result = await callParsed(client, responses.graphInfo, 'logseq.App.getCurrentGraph', []);
 
   // Check if graph info was retrieved
   if (result === null) {

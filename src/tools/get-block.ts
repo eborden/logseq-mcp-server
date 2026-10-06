@@ -3,6 +3,8 @@ import { BlockEntity, ResolveRefsMeta } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { BlockNotFoundError } from '../errors.js';
+import { callParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /**
  * Get a LogSeq block by UUID
@@ -31,10 +33,7 @@ export async function getBlock(
   }
 
   // Call the LogSeq API
-  const result = await client.callAPI<BlockEntity | null>(
-    'logseq.Editor.getBlock',
-    args
-  );
+  const result = await callParsed(client, responses.block, 'logseq.Editor.getBlock', args);
 
   // Check if block was found
   if (result === null) {
