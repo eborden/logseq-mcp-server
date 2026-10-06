@@ -68,7 +68,7 @@ Expected results, measured against a live instance (#118) with the code at the t
 
 | Call | Result |
 |---|---|
-| `get_concept_network` depth 1, defaults | 16 nodes (root + 15), all 10 `neighbour-both-*` among them (they have the most references, 2 each), `truncated` and `hasMore` true, one `network_truncated` warning |
+| `get_concept_network` depth 1, defaults | 16 nodes (root + 15), exactly `neighbour-both-01..10` and `neighbour-in-01..05` (the only pages with 2 references, 15 of them, equal to `max_fanout`), `truncated` and `hasMore` true, one `network_truncated` warning |
 | `get_concept_network` depth 2, defaults | 50 nodes (1 + 15 + 34 `fringe-*`), `truncated` true. The `max_nodes` cap bites, the 15 kept pages reach all 40 fringe pages |
 | depth 1, `max_nodes` 500, `max_fanout` 100 (the most an MCP client can ask for) | 101 nodes (the fanout cap keeps 100 of 121 candidates), `truncated` true. The journal ranks last, so it is dropped |
 | depth 1, `maxNodes` 500, `maxFanout` `Infinity` (library call only) | 122 nodes (the hub, 120 neighbours, the journal), `truncated` false. The journal is a depth-1 node |
@@ -80,8 +80,20 @@ Expected results, measured against a live instance (#118) with the code at the t
 | `get_backlinks` on the hub | 61 source pages, 66 blocks. It has no cap yet, so no `meta` |
 | `get_page` on the hub, with children | 71 children |
 
-The hub's ranking at depth 1 depends on the order LogSeq assigns ids in beyond the 10 two-way pages, so
-tests should assert counts and the two-way pages, not which 5 of the one-way pages are kept.
+What is fixed and what is not. `selectCandidates` ranks non-journal pages first, then by references, then by
+lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count are not stable names):
+
+- **Fixed by name.** The depth-1 default keeps exactly `neighbour-both-01..10` (1 block on the hub + 1 back) and
+  `neighbour-in-01..05` (2 blocks that link the hub). Those are the only 15 pages with 2 references and every
+  other neighbour has 1, so there is no tie at the cap. Tests may assert these names.
+- **Depends on id order.** Which 34 of the 40 `fringe-*` pages depth 2 admits; which 85 of the 105 one-reference
+  pages the `max_fanout` 100 case keeps; which 15 pages the `journal-topic-01` / `expand_journals` case keeps, and
+  whether `hub central` is among them. For these, assert only the node count, `truncated` and the
+  `network_truncated` warning (#90). A test that needs a particular fringe or topic page present must use a case
+  where the cap does not bite (the `Infinity` rows).
+- **Not covered: `get_backlinks` `max_blocks_per_page` (#61).** The hub exceeds a `max_pages` cap (61 source pages),
+  but no page has more than 2 blocks that link the hub. A test for the per-page cap needs a neighbour with 11 or more
+  linking blocks, and this README to change with it. That page would also change the depth-1 ranking above.
 
 Pages the hub fixture adds to the graph: 1 hub, 120 neighbours, 40 fringe, 30 topics and 1 journal,
 192 in all. They come on top of the sentinel page, the built-in pages and today's journal (see below).
