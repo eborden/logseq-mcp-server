@@ -243,11 +243,11 @@ export const listPagesArgs = z.object({
   limit: z
     .number()
     .default(DEFAULT_LIST_PAGES_LIMIT)
-    .describe(`Maximum pages to return (default: ${DEFAULT_LIST_PAGES_LIMIT}, max: ${MAX_LIST_PAGES_LIMIT})`),
+    .describe(`Max pages (default: ${DEFAULT_LIST_PAGES_LIMIT}, max: ${MAX_LIST_PAGES_LIMIT})`),
   offset: z
     .number()
     .default(DEFAULT_LIST_PAGES_OFFSET)
-    .describe('Matching pages to skip, in name order, to fetch the next page. Shifts if pages change between calls (default: 0)'),
+    .describe('Pages to skip, in name order; shifts if the graph changes'),
 });
 
 /**

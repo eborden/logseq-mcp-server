@@ -445,16 +445,16 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "List Pages",
     },
-    "description": "List non-journal page names A-Z, optionally filtered by name_contains (substring, not fuzzy).
+    "description": "List non-journal page names, filtered by name_contains (substring, not fuzzy).
 
 **Use when:** unsure which pages exist or what the user calls something.
-**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or over 200 names per call (limit, max 1000; then offset). Warning pages_unavailable: list unknown, not empty.
+**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 names (use offset). Warning pages_unavailable: list unknown, not empty.
 **Next:** logseq_get_page.",
     "inputSchema": {
       "properties": {
         "limit": {
           "default": 200,
-          "description": "Maximum pages to return (default: 200, max: 1000)",
+          "description": "Max pages (default: 200, max: 1000)",
           "type": "number",
         },
         "name_contains": {
@@ -463,7 +463,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         },
         "offset": {
           "default": 0,
-          "description": "Matching pages to skip, in name order, to fetch the next page. Shifts if pages change between calls (default: 0)",
+          "description": "Pages to skip, in name order; shifts if the graph changes",
           "type": "number",
         },
       },
