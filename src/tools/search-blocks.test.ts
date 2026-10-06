@@ -481,6 +481,25 @@ describe('searchBlocks', () => {
       expect(result![0].content).toBe('x');
     });
 
+    it('gives no context to a block with no page, and looks pages up once for the rest', async () => {
+      callAPI
+        .mockResolvedValueOnce([
+          block(1, 'x', 10, 'a', 'A'),
+          block(2, 'x', 0, '', '', { page: undefined })
+        ])
+        .mockResolvedValueOnce([fullPage(10, 'a', 'A')]);
+
+      const result = (await searchBlocks(client, 'x', 10, true))!;
+
+      // Newest first: the page-less block 2 comes before block 1
+      expect(result.map(r => r.id)).toEqual([2, 1]);
+      expect(result[0]).not.toHaveProperty('context');
+      expect(result[1].context?.page.id).toBe(10);
+      // One search, one batched page lookup, and it asks only for the page that exists
+      expect(callAPI).toHaveBeenCalledTimes(2);
+      expect(callAPI.mock.calls[1][1][0]).toContain('[(ground [10]) [?p ...]]');
+    });
+
     it('only looks up pages for blocks inside the limit', async () => {
       callAPI
         .mockResolvedValueOnce([
