@@ -222,7 +222,7 @@ describe('getPageOutline', () => {
     setup([[page, 'name']], []);
     datalog.mockImplementation(async (query: string) => {
       if (query.includes(':in $ ?n')) return [[page, 'name']];
-      throw new LogSeqNotRunningError();
+      throw new LogSeqNotRunningError('http://test');
     });
 
     await expect(getPageOutline(client, 'Project Atlas')).rejects.toBeInstanceOf(LogSeqNotRunningError);
