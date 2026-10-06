@@ -100,13 +100,17 @@ describe('scripts/probe-constraints.ts', () => {
 
   it('has a manual-probe helper that loads the same guarded config', () => {
     const start = source.indexOf('npx tsx --input-type=module');
-    const end = source.indexOf('Every step uses a THROWAWAY graph');
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
+    expect(start, 'the helper snippet (npx tsx --input-type=module) moved or was reworded').toBeGreaterThan(-1);
+    const end = source.indexOf('} }"', start);
+    expect(end, "the helper's closing `} }\"` is missing after its start").toBeGreaterThan(start);
     const helper = source.slice(start, end);
-    expect(helper).toMatch(/loadConfig\(resolveFixtureConfigPath\(\)\)/);
-    expect(helper).toMatch(/assertNotPersonalLogseq\(config\.apiUrl\)/);
-    expect(helper).not.toMatch(/\bhomedir\b|\.logseq-mcp\b|\bresolveConfigPath\b/);
+    const load = helper.indexOf('loadConfig(resolveFixtureConfigPath())');
+    const refuse = helper.indexOf('assertNotPersonalLogseq(config.apiUrl)');
+    const client = helper.indexOf('new LogseqClient(');
+    expect(load, 'helper must load its config with resolveFixtureConfigPath').toBeGreaterThan(-1);
+    expect(refuse, 'helper must call assertNotPersonalLogseq(config.apiUrl) after loading').toBeGreaterThan(load);
+    expect(client, 'helper must build its client after the personal-LogSeq check').toBeGreaterThan(refuse);
+    expect(helper, 'helper must not load the default config path').not.toMatch(/\bhomedir\b|\.logseq-mcp\b|\bresolveConfigPath\b/);
   });
 });
 
