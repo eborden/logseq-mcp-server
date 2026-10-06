@@ -456,6 +456,15 @@ async function exited(pid: number, ms: number, deps: InstanceDeps): Promise<bool
 }
 
 /**
+ * Remove the record and config.json once no instance runs. Left behind, config.json would point
+ * LOGSEQ_MCP_CONFIG at a port that another worktree's instance may take next.
+ */
+async function forget(paths: InstancePaths, deps: InstanceDeps): Promise<void> {
+  await deps.remove(paths.record);
+  await deps.remove(paths.config);
+}
+
+/**
  * Stop the recorded instance: SIGTERM, then SIGKILL if it is still running after STOP_GRACE_MS.
  * Only the recorded pid is signalled, and only while its command line names this worktree's
  * profile; otherwise the record is stale (the process is gone) or refused.
@@ -463,12 +472,15 @@ async function exited(pid: number, ms: number, deps: InstanceDeps): Promise<bool
 export async function stopInstance(worktree: string, deps: InstanceDeps): Promise<StopResult> {
   const paths = instancePaths(worktree);
   const record = await readRecord(paths, deps);
-  if (!record) return { state: 'none' };
+  if (!record) {
+    await forget(paths, deps);
+    return { state: 'none' };
+  }
   if (record.profileDir !== paths.profile) {
     throw new InstanceError(`${paths.record} names another profile (${record.profileDir}); not stopping pid ${record.pid}.`);
   }
   if (!deps.isAlive(record.pid)) {
-    await deps.remove(paths.record);
+    await forget(paths, deps);
     return { state: 'stale', pid: record.pid };
   }
   if (!isInstanceProcess(deps.commandLine(record.pid), record.profileDir)) {
@@ -485,7 +497,7 @@ export async function stopInstance(worktree: string, deps: InstanceDeps): Promis
       throw new InstanceError(`pid ${record.pid} is still running after SIGKILL.`);
     }
   }
-  await deps.remove(paths.record);
+  await forget(paths, deps);
   return { state: 'stopped', pid: record.pid };
 }
 
