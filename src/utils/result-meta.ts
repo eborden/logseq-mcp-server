@@ -35,6 +35,46 @@ export function truncationWarning(
 }
 
 /**
+ * Warning for a list cut at `shown` of `total` items, where `param` can't go
+ * above `max` (#61). The suggested value never points past the maximum:
+ *
+ * - `total <= max`: the same warning as `truncationWarning` (raise `param` to `total`).
+ * - `shown < max < total`: raise `param` to `max` for more. `hasMore` stays true,
+ *   and the message says the rest needs a narrower request.
+ * - `shown >= max`: the maximum was reached and no parameter fetches the rest,
+ *   so there is no `howToFetchAll` and `hasMore` is false. The warning is the signal.
+ *
+ * `narrower` is the tool-specific way to reach the rest, e.g. "Narrow the query to see them."
+ * `requested` is the caller's value, named in the message when it was above `max`.
+ */
+export function cappedTruncationWarning(
+  what: string,
+  shown: number,
+  total: number,
+  param: string,
+  max: number,
+  narrower: string,
+  requested?: number,
+  code = 'results_truncated'
+): ResultWarning {
+  if (total <= max) return truncationWarning(what, shown, total, param, code);
+  if (shown < max) {
+    return {
+      code,
+      message: `Showing ${shown} of ${total} ${what}.`,
+      howToFetchAll: `Set ${param} to ${max} (the maximum) to get ${max} of ${total}. ${narrower}`
+    };
+  }
+  const clamped = requested !== undefined && requested > max ? ` (${requested} was asked for)` : '';
+  return {
+    code,
+    message:
+      `Showing ${shown} of ${total} ${what}: ${param} is capped at its maximum of ${max}${clamped}, ` +
+      `so the rest can't be fetched in one call. ${narrower}`
+  };
+}
+
+/**
  * Extra MCP content blocks that carry `meta` for a tool whose result is a bare
  * array. The array stays the first block, unchanged; `{ "meta": ... }` follows
  * as a second block. Empty when there is no meta (e.g. a null API response).
