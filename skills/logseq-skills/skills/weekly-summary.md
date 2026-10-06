@@ -55,13 +55,19 @@ Read the 2-3 most recent `Weekly *` pages to pick up ongoing situations, trend t
 logseq_query_by_date_range(
   start_date=<Monday YYYYMMDD>,
   end_date=<Friday YYYYMMDD>,
-  max_blocks=1000
+  max_blocks=200
 )
 ```
 
-Results are slim by default, which cuts 40-50% of tokens; don't pass `slim_results=false`. Slim blocks keep `uuid`, `content`, `marker` and `properties`, which is all this skill reads. This single call returns the week's blocks including their markers, so a separate TODO search against the graph is redundant.
+Results are slim by default, which cuts 40-50% of tokens; don't pass `slim_results=false`. Slim blocks keep `uuid`, `content`, `marker` and `properties`, which is all this skill reads. This call returns the week's blocks including their markers, so a separate TODO search against the graph is redundant.
 
-**Always pass `max_blocks=1000`.** The default of 200 counts nested blocks and keeps the oldest days first, so a busy work week comes back without its last days, which are the ones that decide what the week ended on. 1000 is the maximum. If the result still has a `blocks_truncated` warning, the week held more than that. Follow the warning's own advice: it gives the `start_date` to continue from, which is the first day not shown, or the day the cut fell inside (that day repeats its kept blocks, so read it from the start). If you can't reach the end of the week, say so in the gist rather than summarizing as if you had. A kept block with `childrenTruncated: true` shows only some of its children; fetch it with `get_block` and `include_children` if they matter. `totals` (`{ blocks, days }`) is range-wide: what the whole range held before the cut, not what one block lost.
+**Keep `max_blocks` at 200 and read the week in pages.** The host may not show a large result: Claude Code saves a tool result of about 50,000 characters or more to a file and shows only its first 2 KB, which leaves out the `summary` and `warnings` at the end. At 1000 blocks a dense week passes that limit (see `references/context-efficiency.md`), so the cap stays at 200, which stays under the limit for blocks up to about 250 characters. A busy week holds more, and the cap keeps the oldest days first, so continue until you reach Friday:
+
+1. If the result has a `blocks_truncated` warning, call again with the same `end_date` and `max_blocks`, and the `start_date` the warning gives. That is the first day not shown, or the day the cut fell inside, which repeats its kept blocks, so read it from the start. Repeat until a result has no warning. A week takes at most a handful of calls.
+2. If the warning says the first day alone fills the cap, that day holds more than 200 blocks. Query it by itself with `max_blocks=300`. If it still says the day fills the cap, or comes back saved, don't go higher: the warning's advice to raise `max_blocks` doesn't know the host's limit, and a bigger cap can pass it. Read that day in pieces with a `search_term`, one call per thing you are after, such as a name from `summary.topConcepts`, a person, or `TODO`. Say in the gist that part of that day went unread.
+3. If a result comes back saved to a file instead of shown (the host says the output is too large and names a file), don't open the file. Repeat the call with `max_blocks=100`, or one day per call. If a day still comes back saved, read it with a `search_term` as in step 2.
+
+Say in the gist when you could not read some part of the week, rather than summarizing as if you had. A kept block with `childrenTruncated: true` shows only some of its children; fetch it with `get_block` and `include_children` if they matter. `totals` (`{ blocks, days }`) is range-wide: what the whole range held before the cut, not what one block lost. `summary` covers every block in the range on every page.
 
 When the result has `summary.topConcepts` (`[{ name, count, days }]`, the pages linked most that week), start there. A concept with a high `days` came up all week and a high `count` with `days` of 1 was one busy day. Use it to pick which threads to read closely in the blocks; it is a starting point, not the salience filter. Pass `top_concepts_limit` to change the default of 10. Skip it when the field is absent.
 
