@@ -476,9 +476,17 @@ async function launch(
     const fixtureVersion = await waitUntilReady(record, token, expectedFiles, options.readyTimeoutMs ?? READY_TIMEOUT_MS, deps);
     return { ...record, fixtureVersion };
   } catch (error) {
-    await stopInstance(options.worktree, deps).catch(stopError =>
-      deps.log(`Could not stop pid ${pid} after the failed start: ${(stopError as Error).message}`),
-    );
+    try {
+      await stopInstance(options.worktree, deps);
+    } catch (stopError) {
+      // Not a PortTakenError, so start does not retry: a second launch would orphan this one.
+      const why = error instanceof Error ? error.message : String(error);
+      throw new InstanceError(
+        `start failed (${why}), and LogSeq pid ${pid} on profile ${paths.profile} could not be stopped ` +
+          `(${stopError instanceof Error ? stopError.message : String(stopError)}). It may still be running; ` +
+          'stop it before starting again.',
+      );
+    }
     throw error;
   }
 }

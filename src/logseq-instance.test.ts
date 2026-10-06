@@ -446,6 +446,25 @@ describe('startInstance', () => {
     expect(world.logs).toContain(`Another LogSeq took port ${first}; trying the next free port.`);
   });
 
+  it('does not retry after a lost port race when its own instance will not stop', async () => {
+    world.readiness = [
+      async () => {
+        throw new LogSeqAuthError('http://127.0.0.1:1');
+      },
+    ];
+    const signals: Array<[number, string]> = [];
+    const deps = world.deps({ kill: (pid, signal) => void signals.push([pid, signal]) }); // the process survives both
+
+    await expect(start(world, deps)).rejects.toThrow(
+      `LogSeq pid 4242 on profile ${PATHS.profile} could not be stopped (pid 4242 is still running after SIGKILL.)`,
+    );
+
+    expect(world.spawned).toHaveLength(1);
+    expect(signals).toEqual([[4242, 'SIGTERM'], [4242, 'SIGKILL']]);
+    expect(world.processes.has(4242)).toBe(true);
+    expect(world.files.has(PATHS.record)).toBe(true);
+  });
+
   it('does not retry other failures', async () => {
     world.indexed = [];
     await expect(start(world)).rejects.toThrow(/not ready after/);
