@@ -687,6 +687,8 @@ npx tsx scripts/test-datalog-query.ts
 # This worktree's own LogSeq on the fixture graph (macOS; own profile, port and random API token)
 npx tsx scripts/logseq-instance.ts start
 LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration
+# Fixture-only suites (tests/integration/fixture-only/), left out of test:integration until #90
+LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration:fixture
 npx tsx scripts/logseq-instance.ts stop
 ```
 
