@@ -477,8 +477,9 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
             start_date: startDate,
             end_date: endDate,
             group_by: groupBy,
+            max_entries: maxEntries,
           } = parseArgs(getConceptEvolutionArgs, args);
-          const options = { startDate, endDate, groupBy };
+          const options = { startDate, endDate, groupBy, maxEntries };
           const result = await getConceptEvolution(client, conceptName, options);
           return {
             content: [

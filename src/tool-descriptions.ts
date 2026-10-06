@@ -93,7 +93,7 @@ export const TOOL_DESCRIPTIONS = {
   logseq_get_concept_evolution: `Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.
 
 **Use when:** "how has X evolved?" or "what's the history of Y?"
-**Can't find:** plain-text mentions with no link (logseq_search_blocks), or topics with no page.
+**Can't find:** plain-text mentions with no link (logseq_search_blocks), topics with no page, or mentions past 500 (narrow dates).
 **Alternatives:** logseq_query_by_date_range for plain journal queries.`,
 
   // Editing gates (check a change before it is reported done)

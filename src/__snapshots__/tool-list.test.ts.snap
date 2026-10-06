@@ -184,7 +184,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
     "description": "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.
 
 **Use when:** "how has X evolved?" or "what's the history of Y?"
-**Can't find:** plain-text mentions with no link (logseq_search_blocks), or topics with no page.
+**Can't find:** plain-text mentions with no link (logseq_search_blocks), topics with no page, or mentions past 500 (narrow dates).
 **Alternatives:** logseq_query_by_date_range for plain journal queries.",
     "inputSchema": {
       "properties": {
@@ -204,6 +204,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
             "month",
           ],
           "type": "string",
+        },
+        "max_entries": {
+          "default": 100,
+          "description": "Max mentions, oldest first (default: 100, max: 500)",
+          "type": "number",
         },
         "start_date": {
           "description": "Optional start date in YYYYMMDD format",
