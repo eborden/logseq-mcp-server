@@ -45,6 +45,6 @@ Expected:
 ## Acceptance for the fix
 <!-- A known bug is pinned by a plain `it` that asserts the current wrong value and names this
 issue, flipped when fixed. Not `it.fails`. -->
-- [ ] A test reproduces the bug on the fixture and fails before the fix
+- [ ] A plain `it` pins the current wrong value on the fixture and names this issue; the fix flips the assertion
 - [ ] The fix changes only what this bug needs; any behavior change is flagged in the PR
 - [ ] <!-- anything else that must hold afterwards -->
