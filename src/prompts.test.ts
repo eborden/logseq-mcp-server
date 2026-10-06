@@ -146,7 +146,8 @@ describe('MCP prompts (#46)', () => {
     it('defaults to this week, Monday through today while the week is under way', () => {
       const text = textOf(getPrompt('weekly_summary', {}, WED) as any);
       expect(text).toContain('Monday 2026-09-28');
-      expect(text).toContain('start_date 20260928, end_date 20260930');
+      expect(text).toContain('start_date 20260928, end_date 20260930 and max_blocks 1000');
+      expect(text).toContain('blocks_truncated');
       // slim output is the server default (#42), so the prompt does not pass it
       expect(text).not.toContain('slim_results');
       expect(text).toContain('not over');
@@ -209,6 +210,8 @@ describe('MCP prompts (#46)', () => {
       const text = textOf(getPrompt('monthly_summary', { month: '2026-08' }, WED) as any);
       expect(text).toContain('"Weekly 2026-08"');
       expect(text).toContain('start_date 20260801, end_date 20260831');
+      // the default of 200 blocks (#61) would cut a month's outline short
+      expect(text).toContain('include_content false, top_concepts_limit 20 and max_blocks 1000');
       expect(text).toContain('"Monthly 2026-08"');
     });
 
