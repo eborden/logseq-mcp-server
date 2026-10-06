@@ -57,6 +57,14 @@ describe('server instructions (#44)', () => {
     }
   });
 
+  it('makes the warning the cut signal, not hasMore (BR-0006, #61)', () => {
+    // A cut at a hard maximum has hasMore: false; the model must not read that as complete
+    expect(SERVER_INSTRUCTIONS).toMatch(/A warning means the result was cut/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/hasMore: true means a parameter can fetch more/);
+    expect(SERVER_INSTRUCTIONS).toMatch(/with hasMore: false the warning says why not/);
+    expect(SERVER_INSTRUCTIONS).not.toMatch(/hasMore: true means the result was cut/);
+  });
+
   it('stays short: it is paid for in every session', () => {
     expect(SERVER_INSTRUCTIONS.length).toBeLessThanOrEqual(1300);
   });

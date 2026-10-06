@@ -16,6 +16,6 @@ Start with:
 Reading results:
 - Page names are case-insensitive. Block uuid is the stable id; numeric id is internal.
 - ((uuid)) in content is a block ref. Fetch it with logseq_get_block, or pass resolve_refs (get_page, get_block, build_context, query_by_date_range) to get resolvedRefs.
-- hasMore: true means the result was cut. The warnings name the parameter to raise. Check them before saying something doesn't exist.
+- A warning means the result was cut or partial. hasMore: true means a parameter can fetch more (howToFetchAll says which); with hasMore: false the warning says why not (narrow the request). Check warnings before saying something doesn't exist.
 - Search is literal (no synonyms) and traversal only follows [[links]] and #tags.
 - A trailing meta block may carry tips for a next call. Ignore them if unhelpful.`;
