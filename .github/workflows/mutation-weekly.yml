@@ -1,0 +1,70 @@
+name: Mutation testing (full run)
+
+# A full cold mutation run of the unit suite (ADR-0026, #204), weekly and on demand. It never
+# blocks a PR and it is the only job besides a push to main that saves Stryker's incremental
+# file, which resets any drift in the cache the PR job restores.
+#
+# By hand (Actions tab, "Run workflow") it runs against any commit: put a SHA in "ref". The
+# baseline work needs three runs on one main SHA, so a repeat run on the same ref is fine
+# (its cache save then finds the key taken and skips). A run never restores a cache, so each
+# one starts cold.
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit SHA, branch or tag to run on. Empty means the branch the run is started from.
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    name: Full mutation run
+    runs-on: ubuntu-latest
+    # A cold run of the whole scope took about 30 to 40 minutes locally (ADR-0026).
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Resolve the commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # No incremental file exists in a fresh checkout, so Stryker mutates the whole scope.
+      - name: Full cold run
+        run: npx stryker run
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "Commit \`${{ steps.commit.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          node scripts/mutation-ci.ts summary >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report-${{ steps.commit.outputs.sha }}
+          path: reports/mutation/mutation.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Save the incremental file
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: reports/mutation/stryker-incremental.json
+          key: mutation-incremental-${{ steps.commit.outputs.sha }}
