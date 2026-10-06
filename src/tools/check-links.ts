@@ -13,7 +13,9 @@ import { resolveLinkTargets } from '../utils/resolve-page.js';
  * 2. **Brackets balanced:** as many `[[` as `]]`, and no `[[` opened inside another
  *    on the same line.
  * 3. **Refs resolve:** every `[[term]]` in `after` names a page or an alias, file-less
- *    pages included, through the shared resolver in one Datalog query.
+ *    pages included, through the shared resolver in one Datalog query. Unlike the
+ *    script, a term is trimmed before it is matched, as LogSeq trims ref names
+ *    (`[[ Alice ]]` reaches `Alice`), and an alias several pages declare fails.
  * 4. **Refs preserved:** every `[[term]]` in `before` is still a ref in `after`, as
  *    many times. Check 1 strips brackets from both sides, so un-bracketing an
  *    existing ref passes it; this one catches that.
@@ -138,6 +140,12 @@ function linkCounts(text: string): Map<string, number> {
   return counts;
 }
 
+/**
+ * The page name a term links to: trimmed and lowercased, as LogSeq trims ref
+ * names and stores `:block/name` lowercase. This is one place where the tool
+ * departs from the script, which lowercases without trimming: `[[ Alice ]]`
+ * resolves to `Alice` here, where the script with a page list calls it unresolved.
+ */
 const keyOf = (term: string) => term.trim().toLowerCase();
 
 /** Refs per page name (`keyOf` of each term), however each copy is spelled. */
