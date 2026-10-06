@@ -97,6 +97,23 @@ describe('check', () => {
     expect(result.checked).toBe(2);
   });
 
+  it('notices a baseline that can be raised only by a whole point, which is what --update rounds to', () => {
+    const result = check({
+      report: report({ 'src/a.ts': { killed: 905, survived: 95 }, 'src/b.ts': { killed: 4, survived: 1, disabled: ['x'] } }),
+      baseline: baseline({ 'src/a.ts': [90, 0], 'src/b.ts': [80, 1] }),
+      expected: null,
+      exists: present,
+    });
+    expect(result.raisable).toEqual([]);
+    const higher = check({
+      report: report({ 'src/a.ts': { killed: 911, survived: 89 }, 'src/b.ts': { killed: 4, survived: 1, disabled: ['x'] } }),
+      baseline: baseline({ 'src/a.ts': [90, 0], 'src/b.ts': [80, 1] }),
+      expected: null,
+      exists: present,
+    });
+    expect(higher.raisable).toEqual([{ file: 'src/a.ts', score: 91.1, baseline: 90 }]);
+  });
+
   it('fails a file below its baseline', () => {
     const result = check({
       report: report({ 'src/a.ts': { killed: 89, survived: 11 }, 'src/b.ts': { killed: 4, survived: 1, disabled: ['x'] } }),
