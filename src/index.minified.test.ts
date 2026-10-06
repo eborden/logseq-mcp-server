@@ -69,7 +69,10 @@ vi.mock('./tools/get-context-for-query.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   getContextForQuery: mocks.getContextForQuery,
 }));
-vi.mock('./tools/query-by-date-range.js', () => ({ queryJournals: mocks.queryJournals }));
+vi.mock('./tools/query-by-date-range.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  queryJournals: mocks.queryJournals,
+}));
 vi.mock('./tools/get-concept-evolution.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   getConceptEvolution: mocks.getConceptEvolution,

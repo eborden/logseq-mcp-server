@@ -17,7 +17,10 @@ vi.mock('./tools/build-context.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   buildContextForTopic: mocks.buildContextForTopic,
 }));
-vi.mock('./tools/query-by-date-range.js', () => ({ queryJournals: mocks.queryJournals }));
+vi.mock('./tools/query-by-date-range.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  queryJournals: mocks.queryJournals,
+}));
 
 const WITH_RESOLVE_REFS = [
   'logseq_get_page',

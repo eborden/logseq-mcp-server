@@ -271,6 +271,20 @@ describe('logseq_query_by_date_range hand-off', () => {
     expect(options).toMatchObject({ topConceptsLimit: 10 });
   });
 
+  it('defaults to 200 blocks (#61)', async () => {
+    const [options] = await range({ last_n: 7 });
+    expect(options).toMatchObject({ maxBlocks: 200 });
+  });
+
+  it.each([
+    [{ max_blocks: 7 }, 7],
+    [{ max_blocks: 0 }, 0],
+    [{ max_blocks: 5000 }, 5000],
+  ])('%j passes max_blocks %j to the tool, which clamps it (#61)', async (args, maxBlocks) => {
+    const [options] = await range({ last_n: 7, ...args });
+    expect(options).toMatchObject({ maxBlocks });
+  });
+
   it('passes each selection and option on unchanged', async () => {
     const [options] = await range({
       start_date: 20250101,
@@ -280,6 +294,7 @@ describe('logseq_query_by_date_range hand-off', () => {
       include_content: false,
       top_concepts_limit: 0,
       resolve_refs: true,
+      max_blocks: 30,
     });
     expect(options).toEqual({
       startDate: 20250101,
@@ -291,6 +306,7 @@ describe('logseq_query_by_date_range hand-off', () => {
       includeContent: false,
       topConceptsLimit: 0,
       resolveRefs: true,
+      maxBlocks: 30,
     });
   });
 
