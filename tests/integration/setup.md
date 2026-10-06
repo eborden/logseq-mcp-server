@@ -1,6 +1,8 @@
 # Integration Test Setup
 
-The integration tests (`tests/integration/`) run against a live LogSeq with the HTTP API enabled, and only against the **fixture graph**: `tests/fixtures/graph/`, a small, made-up graph committed to the repo (#86, #90). Every suite calls `connectFixture` (`helpers/fixture-client.ts`), which loads the config and calls `requireFixtureGraph` (`helpers/fixture-graph.ts`), and the run's global setup (`global-setup.ts`) does the same once before any suite. Against any other graph, a stopped LogSeq or a missing config, the run fails loud with a pointer here. No test reads your own graph.
+The integration tests (`tests/integration/`) run against a live LogSeq with the HTTP API enabled, and only against the **fixture graph**: `tests/fixtures/graph/`, a small, made-up graph committed to the repo (#86, #90). Every suite calls `connectFixture` (`helpers/fixture-client.ts`), and the run's global setup (`global-setup.ts`) does the same once before any suite. It takes the config from `LOGSEQ_MCP_CONFIG` or this worktree's `.logseq-instance/config.json` and nowhere else, refuses a config on port 12315 (a personal LogSeq), and then calls `requireFixtureGraph` (`helpers/fixture-graph.ts`). Against any other graph, a stopped LogSeq or no config, the run fails loud with a pointer here.
+
+**The tests never contact your own LogSeq.** They never read `~/.logseq-mcp/config.json`: with no instance running and `LOGSEQ_MCP_CONFIG` unset, the run stops before any network call. `src/integration-guard.test.ts` checks that every suite connects through `connectFixture` and loads no config of its own.
 
 Because the data is known, the tests assert exact values: names, counts, aliases, `resolvedFrom`, truncation and caps. `tests/fixtures/README.md` describes every page and the results it was built to produce.
 
@@ -14,7 +16,7 @@ npm run test:integration                   # finds .logseq-instance/config.json 
 npx tsx scripts/logseq-instance.ts stop
 ```
 
-While an instance is running, `vitest.integration.config.ts` sets `LOGSEQ_MCP_CONFIG` to its `.logseq-instance/config.json` unless the variable is already set, so a run never falls back to `~/.logseq-mcp/config.json` (your own LogSeq) while the instance is up. `stop` deletes that file. To name a config explicitly:
+While an instance is running, `vitest.integration.config.ts` sets `LOGSEQ_MCP_CONFIG` to its `.logseq-instance/config.json` unless the variable is already set. `stop` deletes that file, so after `stop` a run fails at once instead of finding a stale port. To name a config explicitly:
 
 ```bash
 LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration
@@ -29,17 +31,18 @@ npm run test:integration -- --reporter=verbose
 
 **The run does not start LogSeq for you.** Launching a desktop app from a test command is slow (the instance waits up to 90 seconds for indexing), macOS-only, and would restart LogSeq on every run, while an instance started by hand serves any number of runs. If nothing serves the fixture, the global setup stops the run with the three commands above.
 
-**After a run, `git status` should show nothing under `tests/fixtures/graph/`.** LogSeq writes to the graph it opens (it rewrites `logseq/config.edn` and adds `logseq/bak/`), which is why the instance opens a copy (#151) and the committed fixture is only read. A change there means something opened the fixture itself, such as your own LogSeq (below). Never commit a change LogSeq made to the fixture.
+**After a run, `git status` should show nothing under `tests/fixtures/graph/`.** LogSeq writes to the graph it opens (it rewrites `logseq/config.edn` and adds `logseq/bak/`), which is why the instance opens a copy (#151) and the committed fixture is only read. A change there means something opened the fixture itself, such as a LogSeq of your own (below). Never commit a change LogSeq made to the fixture.
 
-### The other way: open the fixture in your own LogSeq
+### Without the instance (not recommended)
 
-Without the instance (or off macOS), make the fixture the current graph of your own LogSeq:
+**Use the instance script when you can.** The fallback below writes to the committed fixture and needs a LogSeq whose API is not on port 12315, because the tests refuse that port: it is LogSeq's default, so it is taken to be your personal LogSeq. It is for machines where the instance script cannot run (it is macOS-only). On such a machine, use a separate LogSeq install or profile, not the one with your own graph:
 
 1. **Open the folder as its own graph.** In LogSeq desktop, open the graph menu (top of the left sidebar), choose **Add new graph** (or **Open a local directory**), and pick `tests/fixtures/graph` inside your checkout. LogSeq names the graph after the folder (`graph`). Your own graph stays where it is.
 2. **Make it the current graph in the window that runs the HTTP API server**, and keep a single LogSeq window open while testing. Graph switching can't be scripted: the plugin API cannot list or switch graphs, and the `logseq://graph/<name>` deep link opens the graph in a *new window* while the API keeps serving the window that started the server. A second window looks right on screen but is not what the API serves; the guard catches that.
-3. **Enable the HTTP API** and put its token in `~/.logseq-mcp/config.json` (see "Server configuration" below). The API server and its tokens belong to the app, not the graph, so a token you already use keeps working after you switch.
+3. **Enable the HTTP API on a port other than 12315** (Settings → Features → API, then the server's host and port), and write a config file for it somewhere other than `~/.logseq-mcp/` (see "Server configuration" below).
 4. **Check it.** Search for the page `logseq-mcp-fixture-sentinel`. It should exist and show `fixture-version: 1`. If it is missing, re-index the graph (graph menu → **Re-index**).
-5. Run `npm run test:integration` with no instance running and `LOGSEQ_MCP_CONFIG` unset, then switch back to your own graph.
+5. **Run** `LOGSEQ_MCP_CONFIG=/absolute/path/to/that/config.json npm run test:integration`.
+6. **Restore the fixture.** That LogSeq rewrites the committed `logseq/config.edn` and adds `logseq/bak/`: run `git checkout -- tests/fixtures/graph`, delete `tests/fixtures/graph/logseq/bak/`, and check that `git status` shows nothing under `tests/fixtures/graph/`.
 
 Opening the folder makes LogSeq write a few files of its own (`logseq/custom.css`, `logseq/bak/`, `pages/contents.md`, today's journal and the like). The repo `.gitignore` ignores most of them, and `tests/fixtures/README.md` lists them. Fixture journals are dated 2025 or earlier so that today's journal is never committed by mistake.
 
@@ -49,7 +52,9 @@ Opening the folder makes LogSeq write a few files of its own (`logseq/custom.css
 - **`FixtureGraphError` "no integer fixture-version"**: the sentinel page lost its property, or LogSeq is still indexing. Re-index the graph.
 - **`FixtureGraphError` "the tests expect version N"**: LogSeq has an older or newer copy of the fixture open, probably from another checkout. Open this checkout's `tests/fixtures/graph`.
 - **"Cannot query the fixture graph at http://127.0.0.1:…"**: nothing answers on that port (the instance stopped, or a stale `LOGSEQ_MCP_CONFIG`), the token is wrong, or LogSeq timed out. Run `npx tsx scripts/logseq-instance.ts status`.
-- **"Config file not found"**: no instance is running and `~/.logseq-mcp/config.json` does not exist. Start the instance.
+- **`FixtureConfigError` "No fixture instance is running"**: no `.logseq-instance/config.json` and no `LOGSEQ_MCP_CONFIG`. Start the instance. No network call was made.
+- **`FixtureConfigError` "points at port 12315"**: `LOGSEQ_MCP_CONFIG` names a config for a personal LogSeq. Unset it and start the instance. No network call was made.
+- **`FixtureConfigError` "Config file not found"**: `LOGSEQ_MCP_CONFIG` names a file that does not exist.
 
 ## Per-worktree instance (macOS)
 
@@ -75,21 +80,21 @@ How it opens the graph without the UI: a new LogSeq profile opens the demo graph
 - **Compute what drifts; hard-code what doesn't.** LogSeq creates today's journal (one empty block) when the graph opens, and its date moves every day; `laterJournalDays(client)` returns it, and anything counted back from today (`last_n`, the `today` and `year_to_date` presets) adds it. Use fixed windows that end before 2026 for everything else (`FIXTURE_JOURNAL_DAYS` lists the fixture's days). Page counts include 16 built-in pages and a page per property key; compute them from the graph rather than copying the README's total.
 - **Caps that pick by `:db/id` order** (ties at the same reference count) are not stable by name. The hub section of `tests/fixtures/README.md` lists which cases may assert names and which only counts, `truncated` and warnings.
 - **Invariants still have a place.** `properties/graph-properties.test.ts` checks properties that hold for every page over a fixed list of fixture pages.
-- **Fail loud.** No `it.skip`/`it.skipIf`, no `console.warn` (CLAUDE.md, "Integration Test Requirements"). A known bug is an `it.fails` case that names its issue, so the fix has to flip it.
+- **Fail loud.** No `it.skip`/`it.skipIf`, no `console.warn` (CLAUDE.md, "Integration Test Requirements"). A known bug is a plain `it` that asserts the current wrong value and names its issue, so the fix has to flip it. Not `it.fails`, which also passes when the body throws for any other reason.
 - **PRs that add integration cases** (such as the `list_pages` cap) must add them as fixture-based cases with `connectFixture`, in `tests/integration/`. `fixture-only/` is not for new files.
 
 `fixture-only/resolve-refs-missing.test.ts` predates the move (#138) and runs with the rest. It stays at that path because BR-0007 cites it.
 
 ## Probe and measure scripts
 
-All three read `LOGSEQ_MCP_CONFIG`, else `~/.logseq-mcp/config.json`, and are read-only.
+All three are read-only.
 
-- **`scripts/probe-constraints.ts`**: run it against the fixture instance (`LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npx tsx scripts/probe-constraints.ts`). The constraints are properties of LogSeq's Datalog engine and HTTP API, not of a graph's content, and the fixture reproduces every one. Re-run it after LogSeq upgrades.
-- **`scripts/measure-api-calls.ts` and `scripts/measure-output-size.ts`**: the numbers in CLAUDE.md ("Current Implementation Status") are measured on a real ~2k-page graph, because time and output size depend on scale, so those runs keep the default config. Against the fixture instance they give reproducible call counts (the subject page is `hub central`) that match the table for most tools; use that run to check a change's call count, and the real graph to update the table. Their real-graph output contains real page names: never paste it anywhere (CLAUDE.md, "Privacy").
+- **`scripts/probe-constraints.ts`** resolves its config like the integration tests: `LOGSEQ_MCP_CONFIG`, else the instance's `.logseq-instance/config.json`, never `~/.logseq-mcp/config.json`. So `npx tsx scripts/probe-constraints.ts` with the instance running probes the fixture, and with neither it stops before any network call. The constraints are properties of LogSeq's Datalog engine and HTTP API, not of a graph's content, and the fixture reproduces every one; row counts (such as constraint 4's) differ from the real-graph numbers in CLAUDE.md. Re-run it after LogSeq upgrades.
+- **`scripts/measure-api-calls.ts` and `scripts/measure-output-size.ts`** read `LOGSEQ_MCP_CONFIG`, else `~/.logseq-mcp/config.json`: **they read the real graph on purpose.** The numbers in CLAUDE.md ("Current Implementation Status") are measured on a real ~2k-page graph, because time and output size depend on scale, so those runs keep the default config. Against the fixture instance they give reproducible call counts (the subject page is `hub central`) that match the table for most tools; use that run to check a change's call count, and the real graph to update the table. Their real-graph output contains real page names: never paste it anywhere (CLAUDE.md, "Privacy").
 
 ## Server configuration
 
-What the MCP server and the "other way" above need from LogSeq:
+What the MCP server, and a LogSeq used without the instance, need:
 
 1. **LogSeq desktop**, with a graph open.
 2. **The HTTP API**: Settings → Features → API, enable "HTTP APIs server". Note the server URL (default `http://127.0.0.1:12315`).
