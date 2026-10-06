@@ -23,7 +23,6 @@ Full-text search across all blocks with optional semantic context.
 - `query` (required): Search term or phrase
 - `limit` (optional): Maximum results to return (default: 10, **recommend: 5**)
 - `include_context` (optional): Include parent/child blocks for context (default: false, **keep false unless needed**)
-- `include_content` (optional): `false` returns only per-day block counts and top-level snippets, without the blocks (default `true`)
 - `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
 
 **Context cost:** ~200-500 tokens per result. With `include_context=true`: ~500-1000 per result.
@@ -351,6 +350,7 @@ Query journal entries within a date range. **Preferred tool for time-bounded que
 - `end_date` (required): End date in YYYYMMDD format (e.g., 20251130)
 - `search_term` (optional): Filter blocks containing this term
 - `top_concepts_limit` (optional): Size of `summary.topConcepts`, the pages linked most in the range as `{ name, count, days }` (default 10, 0 omits it)
+- `include_content` (optional): `false` returns only per-day block counts and top-level snippets, without the blocks (default `true`)
 - `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities. Entries carry `pageName`, so their blocks don't repeat it
 - `max_blocks` (optional): Most blocks returned across all days (default 200, max 1000; a larger value is clamped). Nested blocks count, except with `include_content=false`, where only the top-level blocks (the snippets) count. The oldest days are kept first, and `last_n` keeps the newest first. Pass `1000` for a work week or a month of journals
 
