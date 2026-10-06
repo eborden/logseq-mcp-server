@@ -15,6 +15,7 @@ import {
   MAX_PAGES,
 } from '../../src/tools/get-backlinks.js';
 import { DEFAULT_PROPERTY_LIMIT, MAX_PROPERTY_LIMIT } from '../../src/tools/query-by-property.js';
+import { DEFAULT_RELATIONSHIP_LIMIT, MAX_RELATIONSHIP_LIMIT } from '../../src/tools/search-by-relationship.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.js';
 
 /**
@@ -45,6 +46,9 @@ import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.j
  * query_by_property's default of 100 and maximum of 500 are out of reach too: no property value sits
  * on more than a few fixture blocks. Through MCP small limits stand in for the default, and the unit
  * tests feed the tool 600 matches for the cut at the maximum.
+ * search_by_relationship's default of 50 and maximum of 500 are out of reach as well: no pair of fixture
+ * topics returns more than a dozen results. Small limits stand in for the default through MCP, and the
+ * unit tests feed the tool 600 results for the cut at the maximum.
  */
 
 interface Meta {
@@ -655,5 +659,94 @@ describe('result caps (#61)', () => {
         expect(body.meta!.warnings![0].message, label).toContain('the first ones listed, not ranked');
       }
     });
+  });
+
+  describe('logseq_search_by_relationship limit (default 50, max 500)', () => {
+    // No pair of fixture topics returns more than a dozen results, so the default of 50 and the
+    // maximum of 500 are out of reach. Through MCP small limits see the same code with a smaller
+    // bound, and the clamp shows above the maximum; the cut at 500 is covered by the unit tests,
+    // which feed the tool 600 results. The pairs below are the fixture's: see tests/fixtures/README.md
+    // for the crowded topic, and the alias-sets and semantic-search suites for the others.
+    const CASES: Array<{ label: string; args: Record<string, unknown>; aliased?: boolean }> = [
+      { label: 'references', args: { topic_a: 'busy source', topic_b: 'popular topic', relationship_type: 'references' } },
+      { label: 'referenced-by', args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'referenced-by' } },
+      { label: 'in-pages-linking-to', args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'in-pages-linking-to' } },
+      {
+        label: 'connected-within',
+        args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'connected-within', max_distance: 1 },
+      },
+      {
+        label: 'in-pages-linking-to, topic A with an alias (#69)',
+        args: { topic_a: 'project atlas', topic_b: 'bob', relationship_type: 'in-pages-linking-to' },
+        aliased: true,
+      },
+      {
+        label: 'in-pages-linking-to, topic B with an alias (#69)',
+        args: { topic_a: 'alice', topic_b: 'atlas', relationship_type: 'in-pages-linking-to' },
+        aliased: true,
+      },
+      {
+        label: 'connected-within, topic A with an alias (#69)',
+        args: { topic_a: 'project atlas', topic_b: 'bob', relationship_type: 'connected-within', max_distance: 1 },
+        aliased: true,
+      },
+    ];
+
+    interface RelationshipBody extends Meta {
+      text: string;
+      results: Array<{ id: number }>;
+      resolvedAliases?: { topicA?: string[]; topicB?: string[] };
+    }
+
+    async function relationship(args: Record<string, unknown>, limit?: number): Promise<RelationshipBody> {
+      const result = await call('logseq_search_by_relationship', { ...args, ...(limit === undefined ? {} : { limit }) });
+      return { text: result.content[0].text, ...(JSON.parse(result.content[0].text) as Omit<RelationshipBody, 'text'>) };
+    }
+
+    const resultIds = (body: RelationshipBody) => body.results.map(block => block.id);
+    const capWarnings = (body: RelationshipBody) => body.warnings.filter(w => w.code === 'results_truncated');
+
+    it.each(CASES)(
+      'never returns more results than limit, keeps the same first results, and reports every cut: $label',
+      async ({ label, args, aliased }) => {
+        const full = await relationship(args, MAX_RELATIONSHIP_LIMIT);
+        const total = full.results.length;
+        expect(total, `${label} needs at least 3 results to see a cut. See tests/fixtures/README.md`).toBeGreaterThanOrEqual(3);
+        expect(total, `${label} must stay under the default cap for the default to return every result`).toBeLessThanOrEqual(
+          DEFAULT_RELATIONSHIP_LIMIT
+        );
+        // Nothing is cut, so the maximum sends no cap warning and no totals
+        expect(capWarnings(full)).toEqual([]);
+        expect(full.totals).toBeUndefined();
+        expect(full.hasMore).toBe(false);
+        if (aliased) expect(full.resolvedAliases, `${label} needs a topic with aliases`).toBeDefined();
+
+        // The default and a value above the maximum are the full result, byte for byte
+        expect((await relationship(args)).text).toBe(full.text);
+        expect((await relationship(args, 5000)).text).toBe(full.text);
+
+        for (const limit of [0, 1, 2, total - 1, total, total + 1, DEFAULT_RELATIONSHIP_LIMIT]) {
+          const body = await relationship(args, limit);
+          const at = `${label}, limit ${limit}`;
+          expect(body.results.length, at).toBeLessThanOrEqual(MAX_RELATIONSHIP_LIMIT);
+          expect(body.results.length, at).toBe(Math.min(limit, total));
+          // The first results of the full list, in its order
+          expect(resultIds(body), at).toEqual(resultIds(full).slice(0, limit));
+          // The alias group is still reported when the result is cut
+          expect(body.resolvedAliases, at).toEqual(full.resolvedAliases);
+
+          if (limit >= total) {
+            expect(body.text, `${at}: nothing is cut, so the result is the full one`).toBe(full.text);
+            continue;
+          }
+          expect(capWarnings(body).length, at).toBe(1);
+          expect(body.totals, at).toEqual({ blocks: total });
+          // Below the maximum the warning says which value gets the rest, and it is within the maximum
+          expect(body.hasMore, at).toBe(true);
+          expect(capWarnings(body)[0].howToFetchAll, at).toBe(`Set limit to ${total} (or higher) to get all ${total}.`);
+          expectNoSuggestionPast(body, 'limit', MAX_RELATIONSHIP_LIMIT);
+        }
+      }
+    );
   });
 });
