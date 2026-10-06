@@ -3,13 +3,20 @@ import { BlockEntity, ResultWarning } from '../types.js';
 import { buildContextForTopic, TopicContext } from './build-context.js';
 import { AmbiguousPageError, PageNotFoundError } from '../errors.js';
 import type { PageCandidate } from '../types.js';
+import { cappedTruncationWarning } from '../utils/result-meta.js';
 
 /**
  * A non-fatal problem that made the result partial. Connection, timeout, auth
  * and unexpected errors are never warnings: they propagate.
  */
 export interface QueryWarning extends ResultWarning {
-  code: 'topic_not_found' | 'topic_truncated' | 'topics_truncated' | 'ambiguous_page' | 'candidates_truncated';
+  code:
+    | 'topic_not_found'
+    | 'topic_truncated'
+    | 'topics_truncated'
+    | 'ambiguous_page'
+    | 'candidates_truncated'
+    | 'search_results_truncated';
   /** The extracted topic the warning is about (absent when it concerns all topics) */
   topic?: string;
   /** For `ambiguous_page`: the pages the topic could mean (the topic was skipped) */
@@ -29,6 +36,16 @@ export type TopicQueryContext = Omit<TopicContext, 'hasMore' | 'warnings' | 'tot
 export const DEFAULT_MAX_TOPICS = 5;
 /** Keyword hits kept when `maxSearchResults` is absent. */
 export const DEFAULT_MAX_SEARCH_RESULTS = 20;
+
+/**
+ * Most keyword hits one call returns (#61). A larger `maxSearchResults` is
+ * clamped to it, like `limit` on logseq_search_blocks, and a cut at the maximum
+ * is reported by a `search_results_truncated` warning with no `howToFetchAll`.
+ */
+export const MAX_SEARCH_RESULTS = 100;
+
+/** How to reach hits past the maximum: no parameter fetches them. */
+const NARROWER = 'Use more specific words in the query to see the rest.';
 
 export interface QueryContext {
   query: string;
@@ -81,6 +98,11 @@ export async function getContextForQuery(
   query: string,
   options: {
     maxTopics?: number;
+    /**
+     * Keyword hits kept (default 20), clamped to `MAX_SEARCH_RESULTS` (100). A cut
+     * adds a `search_results_truncated` warning; one at the maximum has no
+     * `howToFetchAll`, so it doesn't set `hasMore` (BR-0006).
+     */
     maxSearchResults?: number;
     /**
      * Add each keyword hit's page (`context.page`) in one extra batched query. For
@@ -184,20 +206,43 @@ export async function getContextForQuery(
     // Note: logseq.DB.q doesn't work via HTTP API, need to use HTTP methods
     if (keywords.length > 0) {
       // Import searchBlocks dynamically to search for keywords
-      const { searchBlocks } = await import('./search-blocks.js');
+      const { searchBlocks, withPageContext } = await import('./search-blocks.js');
 
-      // Search for first keyword and filter results manually.
+      // Search for the first keyword and keep the blocks holding every keyword.
+      // The one query returns every match, so nothing is cut before the filter
+      // (no extra call) and the count of hits below is the real total (#61).
       // The search is the only data source on this path, so any failure
       // propagates: an empty result must mean "nothing matched".
       // Note: slimResults=false returns SearchBlocksResult[]
-      const blocks = await searchBlocks(client, keywords[0], maxSearchResults * 3, hitPages, false);
+      const blocks = (await searchBlocks(client, keywords[0], Infinity, false, false)) as
+        | import('./search-blocks.js').SearchBlocksResult[]
+        | null;
 
       // A null response is a genuine "no matches"
-      searchResults = (blocks || []).filter(block => {
-        // Filter to blocks that contain all keywords
+      const hits = (blocks || []).filter(block => {
         const contentLower = block.content.toLowerCase();
         return keywords.every(k => contentLower.includes(k));
-      }).slice(0, maxSearchResults) as import('./search-blocks.js').SearchBlocksResult[];
+      });
+
+      // Clamped to the maximum (#61); a negative value keeps none, as it always did
+      const kept = hits.slice(0, Math.min(Math.max(0, maxSearchResults), MAX_SEARCH_RESULTS));
+      if (hits.length > kept.length) {
+        warnings.push(
+          cappedTruncationWarning({
+            what: 'keyword hits',
+            shown: kept.length,
+            total: hits.length,
+            param: 'max_search_results',
+            max: MAX_SEARCH_RESULTS,
+            narrower: NARROWER,
+            requested: maxSearchResults,
+            code: 'search_results_truncated'
+          }) as QueryWarning
+        );
+      }
+
+      // Pages only for the hits kept: one batched lookup, as before
+      searchResults = hitPages ? await withPageContext(client, kept) : kept;
     }
   }
 
