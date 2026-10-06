@@ -34,29 +34,55 @@ export function truncationWarning(
   };
 }
 
+/** Arguments of `cappedTruncationWarning`. */
+export interface CappedTruncation {
+  /** What the list holds, plural: "matching blocks" */
+  what: string;
+  /** Items returned */
+  shown: number;
+  /** Items there were before the cap */
+  total: number;
+  /** The MCP tool parameter (snake_case) that sets the cap, e.g. `limit` */
+  param: string;
+  /** The parameter's hard maximum */
+  max: number;
+  /** How to reach items past the maximum without paging, e.g. "Narrow the query to see the rest." */
+  narrower: string;
+  /** The caller's value, named in the message when it was above `max` */
+  requested?: number;
+  /** Defaults to `results_truncated` */
+  code?: string;
+  /**
+   * Paging hook, for a tool that also takes an offset (e.g. `list_pages`): how to
+   * fetch the next page once the maximum is reached, such as
+   * "Set offset to 1000 for the next page." It becomes `howToFetchAll`, so
+   * `hasMore` stays true at the maximum. Leave it out for an unpaged cap.
+   */
+  next?: string;
+}
+
 /**
  * Warning for a list cut at `shown` of `total` items, where `param` can't go
  * above `max` (#61). The suggested value never points past the maximum:
  *
  * - `total <= max`: the same warning as `truncationWarning` (raise `param` to `total`).
  * - `shown < max < total`: raise `param` to `max` for more. `hasMore` stays true,
- *   and the message says the rest needs a narrower request.
- * - `shown >= max`: the maximum was reached and no parameter fetches the rest,
- *   so there is no `howToFetchAll` and `hasMore` is false. The warning is the signal.
- *
- * `narrower` is the tool-specific way to reach the rest, e.g. "Narrow the query to see them."
- * `requested` is the caller's value, named in the message when it was above `max`.
+ *   and the message adds `narrower` for the rest.
+ * - `shown >= max`: the maximum was reached. Without `next`, no parameter fetches
+ *   the rest, so there is no `howToFetchAll` and `hasMore` is false; the warning is
+ *   the signal (BR-0006). With `next` (a paged tool), `next` is the `howToFetchAll`.
  */
-export function cappedTruncationWarning(
-  what: string,
-  shown: number,
-  total: number,
-  param: string,
-  max: number,
-  narrower: string,
-  requested?: number,
-  code = 'results_truncated'
-): ResultWarning {
+export function cappedTruncationWarning({
+  what,
+  shown,
+  total,
+  param,
+  max,
+  narrower,
+  requested,
+  code = 'results_truncated',
+  next
+}: CappedTruncation): ResultWarning {
   if (total <= max) return truncationWarning(what, shown, total, param, code);
   if (shown < max) {
     return {
@@ -66,12 +92,9 @@ export function cappedTruncationWarning(
     };
   }
   const clamped = requested !== undefined && requested > max ? ` (${requested} was asked for)` : '';
-  return {
-    code,
-    message:
-      `Showing ${shown} of ${total} ${what}: ${param} is capped at its maximum of ${max}${clamped}, ` +
-      `so the rest can't be fetched in one call. ${narrower}`
-  };
+  const capped = `Showing ${shown} of ${total} ${what}: ${param} is capped at its maximum of ${max}${clamped}`;
+  if (next !== undefined) return { code, message: `${capped}.`, howToFetchAll: next };
+  return { code, message: `${capped}, so the rest can't be fetched in one call. ${narrower}` };
 }
 
 /**
