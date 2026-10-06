@@ -379,7 +379,7 @@ describe('logseq_query_by_date_range max_blocks (#61)', () => {
         message: 'Showing 200 of 210 blocks (nested ones counted; oldest day first; the entries end at 20250103).',
         howToFetchAll:
           'Call again with start_date 20250103, the same end_date (20250103) and the same max_blocks ' +
-          'to read the later days (day 20250103 repeats its kept blocks), or add a search_term.',
+          'to read the rest of day 20250103 (it repeats its kept blocks), or add a search_term.',
       },
     ]);
   });

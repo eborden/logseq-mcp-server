@@ -390,9 +390,12 @@ const LARGE_RESULT_NOTE = "A result this large may be saved to a file by the hos
  * The advice always moves the reader forward, and every branch is literally true:
  *  - cut between days: page from the first day dropped
  *  - cut inside a day after earlier days: page from that day, which repeats its kept blocks
- *  - the first day alone filling the cap: a query from it at this cap returns the same blocks,
- *    so the way forward is that day alone at a higher cap (within the maximum), then paging;
- *    a day over the maximum can't be fetched whole, so page past it
+ *    (if it is the last day, that reads the rest of it). A day bigger than the cap is
+ *    handled like the first day below: it alone fills a call from it
+ *  - a day alone filling the cap (the first day, or a split day bigger than the cap): a query
+ *    from it at this cap reads only its first blocks, so the way forward is that day alone at a
+ *    higher cap (within the maximum), then paging; a day over the maximum can't be fetched
+ *    whole, so page past it (or, with no later day, offer a search_term and no howToFetchAll)
  *  - nothing kept (a cap of 0): there is no day to page from, so raise the cap
  * A raise of `max_blocks` is suggested only there and says a result that large may not be
  * shown by the host. `newestFirst` is the `last_n` order, which continues with older days.
@@ -424,27 +427,35 @@ function blocksTruncated(
       ` ${LARGE_RESULT_NOTE}`;
   } else if (!splitDay) {
     howToFetchAll = `${callAgain(nextDay ?? endsAt)} to read the ${direction} days, or add a search_term.`;
-  } else if (keptBefore > 0) {
-    howToFetchAll = `${callAgain(endsAt)} to read the ${direction} days (day ${endsAt} repeats its kept blocks), or add a search_term.`;
-    if (lastDayTotal > max) {
-      facts.push(`A day is the narrowest date range, so day ${endsAt}, with ${lastDayTotal} blocks, can't be fetched whole.`);
-    }
+  } else if (lastDayTotal <= shown) {
+    // Cut inside a day that fits the cap (so earlier days were kept): a call from it reads that day whole
+    howToFetchAll =
+      nextDay !== null
+        ? `${callAgain(endsAt)} to read the ${direction} days (day ${endsAt} repeats its kept blocks), or add a search_term.`
+        : `${callAgain(endsAt)} to read the rest of day ${endsAt} (it repeats its kept blocks), or add a search_term.`;
   } else if (lastDayTotal > max) {
-    // The first day alone filled the cap and holds more than any call returns
-    facts.push(`Day ${endsAt} holds ${lastDayTotal} blocks, more than the maximum of ${max}, so no call can return it whole.`);
+    // The day holds more than any call returns, so no call reads it whole
+    facts.push(
+      keptBefore > 0
+        ? `A day is the narrowest date range, so day ${endsAt}, with ${lastDayTotal} blocks, can't be fetched whole.`
+        : `Day ${endsAt} holds ${lastDayTotal} blocks, more than the maximum of ${max}, so no call can return it whole.`
+    );
     if (nextDay !== null) {
       howToFetchAll = `${callAgain(nextDay)} for the rest of the range, or add a search_term to read day ${endsAt} in pieces.`;
     } else if (!atMax) {
       howToFetchAll =
-        `Set max_blocks to ${max} (the maximum) to read ${max} of day ${endsAt}'s ${lastDayTotal} blocks, ` +
-        `or add a search_term to read it in pieces. ${LARGE_RESULT_NOTE}`;
+        `Set max_blocks to ${max} (the maximum) with start_date ${endsAt} and end_date ${endsAt} to read ${max} of its ` +
+        `${lastDayTotal} blocks, or add a search_term to read it in pieces. ${LARGE_RESULT_NOTE}`;
     } else {
+      // Nothing is left to fetch: no howToFetchAll, so hasMore is false
       facts.push('Add a search_term to narrow it.');
     }
   } else {
-    // The first day alone filled the cap but fits the maximum: a query from it at this cap returns the same blocks
+    // The day alone fills the cap but fits the maximum: a call from it at this cap reads only its first `shown` blocks
     facts.push(
-      `Day ${endsAt} alone holds ${lastDayTotal} blocks, more than ${shown}, so a query from it returns the same blocks at this max_blocks.`
+      keptBefore > 0
+        ? `Day ${endsAt} holds ${lastDayTotal} blocks, more than ${shown}, so a query from it at this max_blocks reads only its first ${shown}.`
+        : `Day ${endsAt} alone holds ${lastDayTotal} blocks, more than ${shown}, so a query from it returns the same blocks at this max_blocks.`
     );
     howToFetchAll =
       `To read it whole, call again with start_date ${endsAt}, end_date ${endsAt} and max_blocks ${lastDayTotal}. ` +
