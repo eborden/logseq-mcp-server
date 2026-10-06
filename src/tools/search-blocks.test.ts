@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchBlocks, searchBlocksWithMeta } from './search-blocks.js';
+import { searchBlocks, searchBlocksWithMeta, SearchBlocksResult, SlimSearchBlocksResult } from './search-blocks.js';
 import { LogseqClient } from '../client.js';
 
 // Rows as logseq.DB.datascriptQuery returns them for (pull ?b [* {:block/page [...]}]):
@@ -15,6 +15,12 @@ function block(id: number, content: string, pageId: number, pageName: string, or
     left: { id: pageId },
     ...extra
   }];
+}
+
+// searchBlocks returns full blocks unless slimResults is true, but its return type
+// is the union of both. Narrow it for the tests that don't pass slimResults.
+function full(results: SearchBlocksResult[] | SlimSearchBlocksResult[] | null): SearchBlocksResult[] | null {
+  return results as SearchBlocksResult[] | null;
 }
 
 // Full page as pulled with [*]
@@ -90,7 +96,7 @@ describe('searchBlocks', () => {
     it('returns the matching blocks with page info inline', async () => {
       callAPI.mockResolvedValueOnce([block(1, 'Test search term', 100, 'test page', 'Test Page')]);
 
-      const result = await searchBlocks(client, 'search term');
+      const result = full(await searchBlocks(client, 'search term'));
 
       expect(result).toHaveLength(1);
       expect(result![0].content).toBe('Test search term');
@@ -103,7 +109,7 @@ describe('searchBlocks', () => {
         block(1, 'Block with properties', 10, 'p', 'P', { properties: { status: 'done' }, marker: 'DONE', level: 2 })
       ]);
 
-      const result = await searchBlocks(client, 'properties');
+      const result = full(await searchBlocks(client, 'properties'));
 
       expect(result![0].properties).toEqual({ status: 'done' });
       expect(result![0].marker).toBe('DONE');
@@ -146,7 +152,7 @@ describe('searchBlocks', () => {
         block(2, 'real block', 1, 'p', 'P')
       ]);
 
-      const result = await searchBlocks(client, 'real');
+      const result = full(await searchBlocks(client, 'real'));
 
       expect(result!.map(b => b.id)).toEqual([2]);
     });
@@ -162,7 +168,7 @@ describe('searchBlocks', () => {
         block(20, 'k', 2, 'mid', 'Mid')
       ]);
 
-      const result = await searchBlocks(client, 'k');
+      const result = full(await searchBlocks(client, 'k'));
 
       expect(result!.map(b => b.id)).toEqual([31, 30, 20, 12, 11]);
     });
@@ -175,8 +181,8 @@ describe('searchBlocks', () => {
       ];
       callAPI.mockResolvedValueOnce([...rows]).mockResolvedValueOnce([...rows].reverse());
 
-      const first = await searchBlocks(client, 'k');
-      const second = await searchBlocks(client, 'k');
+      const first = full(await searchBlocks(client, 'k'));
+      const second = full(await searchBlocks(client, 'k'));
 
       expect(first!.map(b => b.id)).toEqual(second!.map(b => b.id));
     });
@@ -189,7 +195,7 @@ describe('searchBlocks', () => {
         block(5, 'k', 3, 'gamma', 'Gamma')
       ]);
 
-      const result = await searchBlocks(client, 'k', 2);
+      const result = full(await searchBlocks(client, 'k', 2));
 
       expect(result!.map(b => b.id)).toEqual([5, 4]);
     });
@@ -320,7 +326,7 @@ describe('searchBlocks', () => {
         ])
         .mockResolvedValueOnce([fullPage(10, 'page a', 'Page A'), fullPage(20, 'page b', 'Page B')]);
 
-      const result = await searchBlocks(client, 'o', 10, true);
+      const result = full(await searchBlocks(client, 'o', 10, true));
 
       // 1 search + 1 batched page lookup, not one per block
       expect(callAPI).toHaveBeenCalledTimes(2);
