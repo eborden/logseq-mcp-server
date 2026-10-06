@@ -1,42 +1,33 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { resolve } from 'path';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getBlock } from '../../src/tools/get-block.js';
 import { getPage } from '../../src/tools/get-page.js';
 import { resolveBlockRefs } from '../../src/utils/resolve-refs.js';
 import { BlockEntity, ResolvedRef } from '../../src/types.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for resolve_refs (#18).
+ * Integration tests for resolve_refs (#18), against the fixture graph.
  *
- * Read-only. Discovers a block holding a `((uuid))` ref in whatever graph is
- * running, then checks structure only: statuses, shapes, call counts. It never
- * asserts on or prints content, page names or uuids from the graph; every
- * assertion is on a boolean so a failure cannot echo graph data.
- *
- * Requires LogSeq running with the HTTP API enabled, ~/.logseq-mcp/config.json,
- * and at least one block whose content holds a `((uuid))` block reference to a
- * block that still exists. See tests/integration/setup.md.
+ * Read-only. The page `block refs` (tests/fixtures/graph/pages/block refs.md) pins a uuid on
+ * every target: `...02` is a plain block, `...03` a ref to it, `...04` a ref to `...03`, and so
+ * on (tests/fixtures/README.md, "Block refs and embeds"). Refs and embeds of blocks that do not
+ * exist are in fixture-only/resolve-refs-missing.test.ts.
  */
 
-const SETUP_HINT = 'See tests/integration/setup.md';
 const STATUSES = ['ok', 'missing', 'depth_limit', 'cycle'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SYNTHETIC_MISSING = '00000000-0000-4000-8000-000000000001';
-
-/** Blocks whose content holds a strict `((uuid))` ref (a few, to find one whose target exists). */
-const REF_BLOCKS_QUERY = `[:find (pull ?b [:db/id :block/uuid :block/content])
-  :where
-  [?b :block/content ?c]
-  [(re-pattern "\\\\(\\\\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\\\)\\\\)") ?re]
-  [(re-find ?re ?c)]]`;
+const PAGE = 'block refs';
+const uuid = (nn: string) => `0088f1a0-0000-4000-8000-0000000000${nn}`;
+/** A plain ref to `...02` */
+const PLAIN_REF = uuid('03');
+const TARGET = uuid('02');
 
 const isRef = (r: unknown): r is ResolvedRef =>
   typeof r === 'object' && r !== null && STATUSES.includes((r as ResolvedRef).status);
 
-describe('resolve_refs against a live graph', () => {
+describe('resolve_refs against the fixture graph', () => {
   let client: LogseqClient;
   /** A block holding a ref that resolves, as returned by getBlock with resolve_refs */
   let resolved: BlockEntity;
@@ -44,38 +35,10 @@ describe('resolve_refs against a live graph', () => {
   let okRef: ResolvedRef;
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(`Config file not found at ~/.logseq-mcp/config.json. ${SETUP_HINT}`);
-    }
-    client = new LogseqClient(await loadConfig(configPath));
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n${SETUP_HINT}`
-      );
-    }
-
-    const rows = (await client.executeDatalogQuery<Array<[{ uuid: string }]>>(REF_BLOCKS_QUERY)) ?? [];
-    for (const [candidate] of rows.slice(0, 25)) {
-      const block = await getBlock(client, candidate.uuid, false, { resolveRefs: true });
-      const ok = (block.resolvedRefs ?? []).find(r => r.status === 'ok');
-      if (ok) {
-        resolved = block;
-        resolvedUuid = candidate.uuid;
-        okRef = ok;
-        break;
-      }
-    }
-    if (!resolved) {
-      throw new Error(
-        'No block with a ((uuid)) ref to an existing block was found in the graph. ' +
-          `Add one to run these tests. ${SETUP_HINT}`
-      );
-    }
+    ({ client } = await connectFixture());
+    resolvedUuid = PLAIN_REF;
+    resolved = await getBlock(client, resolvedUuid, false, { resolveRefs: true });
+    okRef = resolved.resolvedRefs![0];
   });
 
   it('getBlock: keeps content, adds resolvedContent and well-formed resolvedRefs', async () => {
@@ -86,11 +49,14 @@ describe('resolve_refs against a live graph', () => {
     expect(Array.isArray(resolved.resolvedRefs) && resolved.resolvedRefs.length > 0).toBe(true);
     expect(resolved.resolvedRefs!.every(isRef)).toBe(true);
     expect(resolved.resolvedRefs!.every(r => r.embed !== undefined || UUID_RE.test(r.uuid ?? ''))).toBe(true);
-    expect(UUID_RE.test(okRef.uuid ?? '')).toBe(true);
-    expect(typeof okRef.content).toBe('string');
-    expect(okRef.page === null || typeof okRef.page === 'string').toBe(true);
-    expect(Array.isArray(resolved.warnings)).toBe(true);
-    expect(typeof resolved.hasMore).toBe('boolean');
+    expect(resolved.resolvedRefs).toEqual([
+      { uuid: TARGET, content: 'A block that other blocks point at: the importer reads one sheet per floor.', page: PAGE, status: 'ok' },
+    ]);
+    expect(resolved.resolvedContent!.split('\n')[0]).toBe(
+      'A plain ref to it: A block that other blocks point at: the importer reads one sheet per floor.'
+    );
+    expect(resolved.warnings).toEqual([]);
+    expect(resolved.hasMore).toBe(false);
   });
 
   it('getBlock: off by default, the output has none of the new fields', async () => {
@@ -103,8 +69,8 @@ describe('resolve_refs against a live graph', () => {
     const spy = vi.spyOn(client, 'callAPI');
     try {
       await getBlock(client, resolvedUuid, false, { resolveRefs: true });
-      const total = spy.mock.calls.length;
-      expect(total >= 2 && total <= 1 + 2).toBe(true);
+      // The fetch, then one query for `...02`, which holds no refs of its own
+      expect(spy.mock.calls.length).toBe(2);
     } finally {
       spy.mockRestore();
     }
@@ -121,11 +87,7 @@ describe('resolve_refs against a live graph', () => {
   });
 
   it('getPage with children: annotates the same block inside its page tree', async () => {
-    const block = await client.callAPI<any>('logseq.Editor.getBlock', [resolvedUuid]);
-    const pageEntity = await client.callAPI<any>('logseq.Editor.getPage', [block.page.id]);
-    const pageName: string = pageEntity.originalName ?? pageEntity.name;
-
-    const page = await getPage(client, pageName, true, { resolveRefs: true });
+    const page = await getPage(client, PAGE, true, { resolveRefs: true });
     const find = (blocks: any[]): any | undefined => {
       for (const b of blocks) {
         if (b.uuid === resolvedUuid) return b;
@@ -137,8 +99,10 @@ describe('resolve_refs against a live graph', () => {
     const found = find(page.children ?? []);
     expect(found !== undefined).toBe(true);
     expect(typeof found.resolvedContent).toBe('string');
-    expect(found.resolvedRefs.every(isRef)).toBe(true);
-    expect(Array.isArray(page.warnings)).toBe(true);
+    expect(found.resolvedRefs).toEqual(resolved.resolvedRefs);
+    // The ref three levels deep stops at the default depth of 2
+    expect(page.warnings!.map(w => w.code)).toEqual(['refs_depth_limit']);
+    expect(page.hasMore).toBe(true);
   });
 
   it('a uuid that does not exist comes back missing, in place, without erroring', async () => {
@@ -149,10 +113,8 @@ describe('resolve_refs against a live graph', () => {
   });
 
   it('block and page embeds of real targets resolve in one batched query', async () => {
-    const block = await client.callAPI<any>('logseq.Editor.getBlock', [okRef.uuid]);
-    const pageEntity = await client.callAPI<any>('logseq.Editor.getPage', [block.page.id]);
-    const pageName: string = pageEntity.originalName ?? pageEntity.name;
-
+    // A page embed resolves to the page's blocks; Bob's hold no refs, so nothing nests further
+    const pageName = 'Bob';
     const spy = vi.spyOn(client, 'callAPI');
     try {
       const { blocks, warnings } = await resolveBlockRefs(
@@ -163,10 +125,34 @@ describe('resolve_refs against a live graph', () => {
       expect(spy.mock.calls.length).toBe(1);
       const refs: ResolvedRef[] = (blocks[0] as any).resolvedRefs;
       expect(refs.map(r => r.embed).sort()).toEqual(['block', 'page']);
-      expect(refs.every(r => r.status === 'ok' || r.status === 'depth_limit')).toBe(true);
-      expect(Array.isArray(warnings) && warnings.every(w => typeof w.howToFetchAll === 'string')).toBe(true);
+      expect(refs.map(r => [r.embed, r.status, r.page])).toEqual([['block', 'ok', PAGE], ['page', 'ok', 'Bob']]);
+      expect(warnings).toEqual([]);
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('resolves every case on the page as tests/fixtures/README.md lists it', async () => {
+    const page = await getPage(client, PAGE, true, { resolveRefs: true });
+    const flat = (blocks: any[]): any[] => blocks.flatMap(b => [b, ...flat(b.children ?? [])]);
+    const byStart = (start: string) => {
+      const found = flat(page.children ?? []).filter(b => b.content.startsWith(start));
+      expect(found, start).toHaveLength(1);
+      return (found[0].resolvedRefs ?? []).map((r: ResolvedRef) => [r.embed ?? r.uuid, r.status]);
+    };
+
+    expect(byStart('A block that other blocks point at')).toEqual([]);
+    expect(byStart('A ref to a block on another page')).toEqual([[uuid('01'), 'ok']]);
+    expect(byStart('A ref to a ref, two levels')).toEqual([[uuid('03'), 'ok'], [uuid('02'), 'ok']]);
+    expect(byStart('A ref three levels deep')).toEqual([
+      [uuid('04'), 'ok'], [uuid('03'), 'ok'], [uuid('02'), 'depth_limit'],
+    ]);
+    // Siblings that share a target both resolve: seen is tracked per path
+    expect(byStart('First sibling')).toEqual([[TARGET, 'ok']]);
+    expect(byStart('Second sibling')).toEqual([[TARGET, 'ok']]);
+    expect(byStart('A block embed')).toEqual([['block', 'ok']]);
+    expect(byStart('A page embed')).toEqual([['page', 'ok']]);
+    expect(byStart('Ref cycle, first half')).toEqual([[uuid('11'), 'ok'], [uuid('10'), 'cycle']]);
+    expect(byStart('Embed cycle, first half')).toEqual([['block', 'ok'], ['block', 'cycle']]);
   });
 });
