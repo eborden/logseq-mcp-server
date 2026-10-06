@@ -678,6 +678,9 @@ npx vitest run src
 # Run specific test file
 npx vitest run src/tools/build-context.test.ts
 
+# Mutation testing on the unit suite (informational, ADR-0026; slow cold, `-- --mutate src/x.ts` for one file; touches no LogSeq)
+npm run mutation
+
 # Build the project
 npm run build
 
