@@ -87,10 +87,12 @@ describe('result caps (#61)', () => {
       for (const limit of LIMITS) {
         const args = limit === undefined ? { query: QUERY } : { query: QUERY, limit };
         const result = await call('logseq_search_blocks', args);
+        const label = `limit ${limit ?? 'default'}`;
+        // A null API response sends no meta block; say so instead of a bare JSON.parse error
+        expect(result.content, `${label}: results block plus meta block`).toHaveLength(2);
         firstBlock.set(limit, result.content[0].text);
         const results = JSON.parse(result.content[0].text);
         const { meta } = JSON.parse(result.content[1].text) as { meta: Meta };
-        const label = `limit ${limit ?? 'default'}`;
         const effective = Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
         const matches = meta.totals!.matches;
 
