@@ -15,7 +15,7 @@ import { GROUP_BY_PERIODS } from './tools/get-concept-evolution.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
 
 /**
- * Argument schemas of the tools whose arguments are parsed with zod (#60).
+ * Argument schemas of every tool, parsed with zod (#60).
  *
  * Each schema is both the parser (`parseArgs` in `src/utils/parse-args.ts`) and
  * the source of the tool's advertised `inputSchema` (`toInputSchema`), so the two
