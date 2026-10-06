@@ -82,9 +82,30 @@ describe('cappedTruncationWarning (#61)', () => {
     expect(buildResultMeta([w]).hasMore).toBe(true);
   });
 
-  it('ignores next below the maximum', () => {
-    expect(cut(100, 2000, { next: 'Set offset to 100.' })).toEqual(cut(100, 2000));
-    expect(cut(5, 9, { next: 'Set offset to 5.' })).toEqual(cut(5, 9));
+  it('appends next below the maximum, after the plain truncation advice', () => {
+    expect(cut(5, 9, { next: 'Set offset to 5 for the next page.' })).toEqual({
+      code: 'results_truncated',
+      message: 'Showing 5 of 9 blocks.',
+      howToFetchAll: 'Set limit to 9 (or higher) to get all 9. Set offset to 5 for the next page.'
+    });
+  });
+
+  it('puts next in place of narrower when the total is above the maximum', () => {
+    const w = cut(100, 2000, { next: 'Set offset to 100 for the next page.' });
+    expect(w).toEqual({
+      code: 'results_truncated',
+      message: 'Showing 100 of 2000 blocks.',
+      howToFetchAll: 'Set limit to 500 (the maximum) to get 500 of 2000. Set offset to 100 for the next page.'
+    });
+    expect(w.howToFetchAll).not.toContain(narrower);
+  });
+
+  it('is unchanged without next in every branch (unpaged callers)', () => {
+    expect(cut(5, 9).howToFetchAll).toBe('Set limit to 9 (or higher) to get all 9.');
+    expect(cut(100, 2000).howToFetchAll).toBe(
+      'Set limit to 500 (the maximum) to get 500 of 2000. Narrow the query to see them.'
+    );
+    expect(cut(500, 2000).howToFetchAll).toBeUndefined();
   });
 });
 

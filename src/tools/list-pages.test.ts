@@ -198,7 +198,7 @@ describe('listPages', () => {
           {
             code: 'pages_truncated',
             message: 'Showing 200 of 500 pages.',
-            howToFetchAll: 'Set limit to 500 (or higher) to get all 500. Or set offset to 200 for the next page.',
+            howToFetchAll: 'Set limit to 500 (or higher) to get all 500. Set offset to 200 for the next page.',
           },
         ],
       });
@@ -236,7 +236,7 @@ describe('listPages', () => {
       expect(w).toEqual({
         code: 'pages_truncated',
         message: 'Showing 50 of 400 pages from offset 100.',
-        howToFetchAll: 'Set limit to 400 (or higher) to get all 400. Or set offset to 150 for the next page.',
+        howToFetchAll: 'Set limit to 400 (or higher) to get all 400. Set offset to 150 for the next page.',
       });
     });
 
@@ -254,7 +254,7 @@ describe('listPages', () => {
         {
           code: 'pages_truncated',
           message: 'Showing 200 of 1500 pages.',
-          howToFetchAll: 'Set limit to 1000 (the maximum) to get 1000 of 1500. Or set offset to 200 for the next page.',
+          howToFetchAll: 'Set limit to 1000 (the maximum) to get 1000 of 1500. Set offset to 200 for the next page.',
         },
       ]);
     });
@@ -349,7 +349,7 @@ describe('listPages', () => {
         },
       ]);
       expect((await list(1500, { limit: 0 })).warnings![0].howToFetchAll).toBe(
-        'Set limit to 1000 (the maximum) to get 1000 of 1500. Or page through them with offset.'
+        'Set limit to 1000 (the maximum) to get 1000 of 1500. Narrow name_contains to see the rest.'
       );
     });
 
