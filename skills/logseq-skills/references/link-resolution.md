@@ -91,7 +91,7 @@ Hold `Kofi` and `Wren` side by side, because together they say what neither says
 | Already bracketed | **Leave alone.** Never double-bracket |
 | No candidate page at all | **Skip.** Report if it recurs |
 
-A bare first name is a partial name even when the page is titled with exactly that name. A first name can belong to several people, so a page named `Devon` shows that a Devon exists in the graph, not that this mention is that Devon. The page's own title is not corroboration of itself. Link it when a roster, property or backlink ties it to the other people in the block, and ask when nothing does.
+A bare first name, meaning a one-word title that could be someone's given name, is a partial name even when the page is titled with exactly that name. A first name can belong to several people, so a page named `Devon` shows that a Devon exists in the graph, not that this mention is that Devon. The page's own title is not corroboration of itself. Link it when a roster, property or backlink ties it to the other people in the block, and ask when nothing does.
 
 Note the two candidate-count rows. **A lone candidate is not evidence.** That exactly one page happens to share a first name says nothing about whether this mention is that person. Candidate count measures the graph's vocabulary, not the identity of the mention, so one candidate and five candidates get the same treatment: ask.
 
