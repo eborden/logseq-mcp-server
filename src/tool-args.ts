@@ -3,7 +3,7 @@ import type { OutputFormat } from './utils/output-format.js';
 import { DEFAULT_SLIM_RESULTS } from './utils/slim-entities.js';
 import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tools/get-concept-network.js';
 import { DEFAULT_MAX_DISTANCE, RELATIONSHIP_TYPES } from './tools/search-by-relationship.js';
-import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_MAX_TOPICS } from './tools/get-context-for-query.js';
+import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_MAX_TOPICS, MAX_SEARCH_RESULTS } from './tools/get-context-for-query.js';
 import { DATE_PRESETS } from './utils/date-presets.js';
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from './tools/search-blocks.js';
 import {
@@ -149,7 +149,9 @@ export const searchByRelationshipArgs = z.object({
 
 export const getContextForQueryArgs = z.object({
   query: z.string().describe('Natural language query (can include [[page references]] and #tags)'),
-  // No clamp on either: the tool slices with them as it always did
+  // No clamp here on either. The tool slices with max_topics as it always did, and
+  // clamps max_search_results to 100, reporting a cut there (#61); no schema `maximum`,
+  // so a larger value is clamped, not rejected.
   max_topics: z
     .number()
     .default(DEFAULT_MAX_TOPICS)
@@ -157,7 +159,9 @@ export const getContextForQueryArgs = z.object({
   max_search_results: z
     .number()
     .default(DEFAULT_MAX_SEARCH_RESULTS)
-    .describe('Maximum number of search results for queries without explicit topics (default: 20)'),
+    .describe(
+      `Maximum number of search results for queries without explicit topics (default: ${DEFAULT_MAX_SEARCH_RESULTS}, max: ${MAX_SEARCH_RESULTS})`
+    ),
   format: formatArg,
   compact: compactArg,
 });
