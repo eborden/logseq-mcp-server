@@ -155,7 +155,7 @@ const TOOLS = [
     nullable: ['start_date', 'end_date', 'group_by'],
   },
   { tool: 'logseq_get_page_outline', valid: { page_name: 'Alice' }, defaults: {}, nullable: [] },
-  { tool: 'logseq_list_pages', valid: {}, defaults: {}, nullable: ['name_contains'] },
+  { tool: 'logseq_list_pages', valid: {}, defaults: { limit: 200, offset: 0 }, nullable: ['name_contains'] },
   { tool: 'logseq_get_graph_info', valid: {}, defaults: {}, nullable: [] },
   { tool: 'logseq_get_current_context', valid: {}, defaults: {}, nullable: [] },
 ] as const;
@@ -222,6 +222,13 @@ describe('the stub graph tells the defaults apart from neighbouring values', () 
   it('list_pages: no filter by default; name_contains filters', async () => {
     expect((await body('logseq_list_pages', {})).pages).toEqual(['Alice', 'Bob']);
     expect((await body('logseq_list_pages', { name_contains: 'BO' })).pages).toEqual(['Bob']);
+  });
+
+  it('list_pages: limit and offset page through the list, and total counts both pages (#61)', async () => {
+    const first = await body('logseq_list_pages', { limit: 1 });
+    expect(first).toMatchObject({ pages: ['Alice'], total: 2, hasMore: true });
+    expect(first.warnings[0].howToFetchAll).toBe('Set limit to 2 (or higher) to get all 2. Or set offset to 1 for the next page.');
+    expect(await body('logseq_list_pages', { limit: 1, offset: 1 })).toEqual({ pages: ['Bob'], total: 2 });
   });
 });
 
