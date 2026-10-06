@@ -246,7 +246,8 @@ export function check(input: CheckInput): CheckResult {
             message: `${file} scores ${fmt(s.score)}, below its baseline ${fmt(entry.score)}. Add or strengthen tests for the survivors in the report.`,
           });
         }
-      } else if (s.score > entry.score) {
+      } else if (Math.floor(s.score) > entry.score) {
+        // A whole point more: what `--update` would raise it to (it rounds down to a whole point).
         raisable.push({ file, score: s.score, baseline: entry.score });
       }
     }
