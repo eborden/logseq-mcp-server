@@ -214,7 +214,7 @@ describe('result caps (#61)', () => {
 
   describe('logseq_list_pages limit and offset (default 200, max 1000)', () => {
     interface ListBody extends Partial<Meta> {
-      pages: string[];
+      pages: Array<{ name: string; aliases?: string[] }>;
       total: number;
     }
 
@@ -223,7 +223,7 @@ describe('result caps (#61)', () => {
     }
 
     /** Same names in the same order. Compared as a boolean so a failure prints no page names. */
-    const same = (a: string[], b: string[]) => JSON.stringify(a) === JSON.stringify(b);
+    const same = (a: ListBody['pages'], b: ListBody['pages']) => JSON.stringify(a) === JSON.stringify(b);
 
     it('cuts at the default, clamps to the maximum, and pages through every page with offset', { timeout: 120_000 }, async () => {
       const first = await list({});
@@ -267,7 +267,7 @@ describe('result caps (#61)', () => {
       for (let calls = 0; calls < 50; calls++) {
         const body = await list({ limit: MAX_LIST_PAGES_LIMIT, offset });
         expect(body.total, `offset ${offset}: total counts every page`).toBe(first.total);
-        seen.push(...body.pages);
+        seen.push(...body.pages.map(page => page.name));
         if (!body.hasMore) {
           expect(body.warnings, `offset ${offset}: the last page has no warning`).toBeUndefined();
           break;
