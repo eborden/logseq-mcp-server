@@ -77,7 +77,8 @@ Hold `Kofi` and `Wren` side by side, because together they say what neither says
 
 | Prose relative to candidate page | Action |
 |---|---|
-| Identical ignoring case | **Link.** Bracket the text exactly as written |
+| Identical ignoring case, and not a bare first name | **Link.** Bracket the text exactly as written |
+| Identical ignoring case, a bare first name | **Corroborate, then link.** Treat it as a partial name: link only if corroborated, else **Ask** |
 | Matches an `alias::` value | **Link** the full alias string |
 | Page title is a substring, remainder is an inflection (possessive, plural, hyphenated suffix) | **Link** the substring only |
 | Page title is a substring, remainder is the rest of the same proper noun (a surname) | **Ask.** See The leftover decides: offer a full-name `alias::` rather than fragmenting the name |
@@ -90,9 +91,11 @@ Hold `Kofi` and `Wren` side by side, because together they say what neither says
 | Already bracketed | **Leave alone.** Never double-bracket |
 | No candidate page at all | **Skip.** Report if it recurs |
 
+A bare first name is a partial name even when the page is titled with exactly that name. A first name can belong to several people, so a page named `Devon` shows that a Devon exists in the graph, not that this mention is that Devon. The page's own title is not corroboration of itself. Link it when a roster, property or backlink ties it to the other people in the block, and ask when nothing does.
+
 Note the two candidate-count rows. **A lone candidate is not evidence.** That exactly one page happens to share a first name says nothing about whether this mention is that person. Candidate count measures the graph's vocabulary, not the identity of the mention, so one candidate and five candidates get the same treatment: ask.
 
-Note also that the surname row and the prose-inside-title row land on the same remedy from opposite mechanics. Four of the twelve rows send a name to a question rather than to a link, and that proportion is the table working rather than the table being timid: names are where this goes wrong, and a question is cheaper than an edge recorded against the wrong person or against half of a right one.
+Note also that the surname row and the prose-inside-title row land on the same remedy from opposite mechanics. Four of the thirteen rows send a name to a question rather than to a link, and a fifth does when corroboration is missing. That proportion is the table working rather than the table being timid: names are where this goes wrong, and a question is cheaper than an edge recorded against the wrong person or against half of a right one.
 
 ## Asking Is Part of the Job
 
@@ -105,7 +108,7 @@ Ask well:
 - **Batch.** Corroborate first, then put everything corroboration could not settle into one question with one row per term. Six separate questions about six names is an interrogation; one question with six rows is a checklist.
 - **Offer the real options.** Name the candidate pages as they exist in the graph, and include a "leave it unlinked" choice, because that is frequently the right answer.
 - **State the cost when there is one.** If honouring a link means changing the prose, say which words change. Someone choosing a link target has not thereby agreed to have their note reworded, and conflating those two is how a note ends up claiming something the meeting never said.
-- **Do not ask what the graph already answers.** A term with no candidate page has nothing to choose between, and an exact title match needs no permission. Spend the question budget on genuine ambiguity.
+- **Do not ask what the graph already answers.** A term with no candidate page has nothing to choose between, and an exact title match on a name that identifies one thing by itself needs no permission. A bare first name isn't one of those: it needs corroboration first. Spend the question budget on genuine ambiguity.
 
 ## What Counts as Corroboration
 
@@ -116,7 +119,7 @@ Corroboration is independent evidence, elsewhere in the graph, that this short f
 - **Backlinks** showing the short form already used for that page in comparable blocks.
 - An **`alias::`** covering the exact string, which is corroboration and resolution at once.
 
-What does not count: the name being the only match, the name being plausible in context, or the surname appearing nowhere else in the graph.
+What does not count: the name being the only match, the name being plausible in context, the surname appearing nowhere else in the graph, or a page titled with exactly the bare first name.
 
 Each corroboration check costs one or two tool calls, so only run them on partial names you would otherwise link, and batch the lookups. A block naming six people rarely needs six checks; fetching the one team page that covers most of them usually settles several at once.
 
