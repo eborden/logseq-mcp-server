@@ -21,7 +21,7 @@ import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.j
  * maximum, whatever the caller asks for, and a cut is reported in meta. One
  * describe block per capped tool; later cap PRs add theirs here.
  *
- * Against the fixture graph. Read-only. Its ~480 blocks are fewer than
+ * Against the fixture graph. Read-only. Its ~494 blocks (478 of them with the letter e) are fewer than
  * search_blocks' maximum of 500, so through MCP only the cut below the maximum
  * and the clamp can be seen; the cut at the maximum runs through
  * searchBlocksWithMeta with a lower maxLimit, the same code with a smaller
@@ -84,7 +84,8 @@ describe('result caps (#61)', () => {
   }
 
   describe('logseq_search_blocks limit (max 500)', () => {
-    // "e" is in all but two of the fixture's blocks
+    // "e" is in all but 16 of the fixture's blocks (478 of ~494). The crowded topic's blocks avoid it on
+    // purpose to keep this margin: see "The crowded topic" in tests/fixtures/README.md
     const QUERY = 'e';
     let matches: number;
 
@@ -103,9 +104,13 @@ describe('result caps (#61)', () => {
     beforeAll(async () => {
       const { meta } = await searchBlocksWithMeta(client, QUERY, 0);
       matches = meta!.totals!.matches;
-      // Every block bar two (the fixture holds ~480): computed, so a new fixture block does not break it
-      expect(matches).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
-      expect(matches).toBeLessThan(MAX_SEARCH_LIMIT);
+      // Every block bar 16 (the fixture holds ~494): computed, so a new fixture block does not break it
+      expect(matches, 'too few fixture blocks hold the letter e to see the default cut').toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+      expect(
+        matches,
+        `${matches} blocks hold the letter e, and this test needs fewer than ${MAX_SEARCH_LIMIT}. ` +
+          'New fixture blocks must avoid the letter e: see "The crowded topic" in tests/fixtures/README.md'
+      ).toBeLessThan(MAX_SEARCH_LIMIT);
     });
 
     it('the default cuts below the maximum and says which limit gets the rest', async () => {
