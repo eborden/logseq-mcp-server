@@ -8,7 +8,7 @@ which is what allows it to live in a public repository.
 
 ```
 pages/       13 pages, each engineered for one rule
-pages.txt    the page names, as logseq_list_pages would return them (the unit tests build their fake graph from it)
+pages.txt    the page names, as the `name` of each `logseq_list_pages` entry (the unit tests build their fake graph from it). `Priya Raghavan` is not listed: it is an alias, so the tool returns it as `{ name: "Priya", aliases: ["Priya Raghavan"] }` (#171)
 journals/    2024_03_11.md  the unlinked input
 expected/    2024_03_11.md  the only correct result
 negative/    deliberate defects the gate must reject

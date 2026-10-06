@@ -67,14 +67,13 @@ function fakeGraph(pages: FakePage[]) {
 const fixture = (path: string) =>
   readFileSync(fileURLToPath(new URL(`../../tests/fixtures/graph-linking/${path}`, import.meta.url)), 'utf8');
 
-/** `pages.txt` plus the one alias the fixture's pages declare (`Priya` has `alias:: Priya Raghavan`). */
+/**
+ * `pages.txt` lists the pages as `logseq_list_pages` names them (#171), so an alias is not a line of its own;
+ * the one alias the fixture's pages declare is added here (`Priya` has `alias:: Priya Raghavan`).
+ */
 function fixtureGraph() {
   const titles = fixture('pages.txt').split('\n').map(t => t.trim()).filter(Boolean);
-  return fakeGraph(
-    titles
-      .filter(t => t !== 'Priya Raghavan')
-      .map(name => (name === 'Priya' ? { name, aliases: ['Priya Raghavan'] } : { name }))
-  );
+  return fakeGraph(titles.map(name => (name === 'Priya' ? { name, aliases: ['Priya Raghavan'] } : { name })));
 }
 
 const baseline = fixture('journals/2024_03_11.md');
