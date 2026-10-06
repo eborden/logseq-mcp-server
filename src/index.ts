@@ -364,13 +364,15 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
             topic_b: topicB,
             relationship_type: relationshipType,
             max_distance: maxDistance,
+            limit,
           } = parseArgs(searchByRelationshipArgs, args);
           const result = await searchByRelationship(
             client,
             topicA,
             topicB,
             relationshipType,
-            maxDistance
+            maxDistance,
+            { limit }
           );
           return {
             content: [

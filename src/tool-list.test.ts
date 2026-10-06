@@ -51,6 +51,8 @@ import { LogseqClient } from './client.js';
  * search_by_relationship, about 600 characters in all, which leaves about 1,960 characters of headroom after them.
  * `limit` on logseq_query_by_property (#61) added about 160 characters net (the parameter and a clause in two
  * description lines, less a trimmed "Matching" line), bringing it to 17,754 across 16 tools; the budget was not raised.
+ * `limit` on logseq_search_by_relationship (#61), the last row, added 201 characters (the parameter and a clause in two
+ * description lines), bringing it to 17,955 across 16 tools; the budget was not raised (1,745 characters of headroom).
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.

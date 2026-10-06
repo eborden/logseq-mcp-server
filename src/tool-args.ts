@@ -2,7 +2,12 @@ import { z } from 'zod/v4';
 import type { OutputFormat } from './utils/output-format.js';
 import { DEFAULT_SLIM_RESULTS } from './utils/slim-entities.js';
 import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tools/get-concept-network.js';
-import { DEFAULT_MAX_DISTANCE, RELATIONSHIP_TYPES } from './tools/search-by-relationship.js';
+import {
+  DEFAULT_MAX_DISTANCE,
+  DEFAULT_RELATIONSHIP_LIMIT,
+  MAX_RELATIONSHIP_LIMIT,
+  RELATIONSHIP_TYPES,
+} from './tools/search-by-relationship.js';
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_MAX_TOPICS, MAX_SEARCH_RESULTS } from './tools/get-context-for-query.js';
 import { DATE_PRESETS } from './utils/date-presets.js';
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from './tools/search-blocks.js';
@@ -174,6 +179,12 @@ export const searchByRelationshipArgs = z.object({
     .number()
     .default(DEFAULT_MAX_DISTANCE)
     .describe('Maximum graph distance for connected-within (default: 2)'),
+  // Plain `z.number()`: the tool floors it and clamps it to 0..500, so a larger value is
+  // clamped (and reported), not rejected (#61)
+  limit: z
+    .number()
+    .default(DEFAULT_RELATIONSHIP_LIMIT)
+    .describe(`Max results to return (default: ${DEFAULT_RELATIONSHIP_LIMIT}, max: ${MAX_RELATIONSHIP_LIMIT})`),
 });
 
 export const getContextForQueryArgs = z.object({
