@@ -64,6 +64,10 @@ function probe(client: LogseqClient): InstanceProbe {
   };
 }
 
+function lsappinfo(args: string[]): string {
+  return execFileSync('lsappinfo', args, { encoding: 'utf-8' }).trim();
+}
+
 const deps: InstanceDeps = {
   platform: process.platform,
   env: process.env,
@@ -136,6 +140,25 @@ const deps: InstanceDeps = {
     } catch (error) {
       // EPERM: the pid exists but belongs to someone else. The command-line check then refuses it.
       return errorCode(error) === 'EPERM';
+    }
+  },
+  async frontmostApp() {
+    try {
+      const asn = lsappinfo(['front']);
+      const info = lsappinfo(['info', '-only', 'pid', '-only', 'bundleid', asn]);
+      const pid = /"pid"=(\d+)/.exec(info)?.[1];
+      const bundleId = /"CFBundleIdentifier"="([^"]+)"/.exec(info)?.[1];
+      return pid && bundleId ? { pid: Number(pid), bundleId } : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  async activateApp(bundleId) {
+    try {
+      // Activates the running app without Automation permission (unlike System Events).
+      execFileSync('open', ['-b', bundleId], { stdio: 'ignore' });
+    } catch {
+      // best effort
     }
   },
   commandLine(pid) {

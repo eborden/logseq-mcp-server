@@ -72,6 +72,8 @@ class World {
   written: string[] = [];
   /** Symlinked folders: another spelling of a path, and the canonical prefix it stands for. */
   aliases = new Map<string, string>();
+  front: { pid: number; bundleId: string } | undefined = { pid: 1111, bundleId: 'com.example.editor' };
+  activated: string[] = [];
 
   constructor() {
     for (const dir of [WORKTREE, GRAPH, join(GRAPH, 'pages'), join(GRAPH, 'journals'), join(GRAPH, 'logseq')]) this.dirs.add(dir);
@@ -143,6 +145,11 @@ class World {
         return pid;
       },
       isAlive: pid => this.processes.has(pid),
+      frontmostApp: async () => this.front,
+      activateApp: async bundleId => {
+        this.activated.push(bundleId);
+        this.front = { pid: 1111, bundleId };
+      },
       commandLine: pid => this.processes.get(pid)?.commandLine,
       kill: (pid, signal) => {
         this.signals.push([pid, signal]);
@@ -512,6 +519,52 @@ describe('startInstance', () => {
 
     expect(world.files.has(join(PATHS.profile, 'Local Storage', 'leveldb', '000099.ldb'))).toBe(false);
     expect(world.files.has(join(PATHS.home, '.logseq', 'graphs', 'old.transit'))).toBe(false);
+  });
+
+  it('hands focus back to the app that was in front when the instance takes it', async () => {
+    world.readiness = [
+      async () => {
+        world.front = { pid: 4242, bundleId: 'org.logseq.instance' };
+      },
+      async () => {},
+    ];
+    await start(world);
+
+    expect(world.activated).toEqual(['com.example.editor']);
+  });
+
+  it('leaves focus alone when the instance never takes it, or the user has moved on', async () => {
+    await start(world);
+    expect(world.activated).toEqual([]);
+
+    world = new World();
+    world.readiness = [
+      async () => {
+        world.front = { pid: 9999, bundleId: 'com.example.other' };
+      },
+      async () => {},
+    ];
+    await start(world);
+    expect(world.activated).toEqual([]);
+  });
+
+  it('does not fail start when focus cannot be read or restored', async () => {
+    world.readiness = [
+      async () => {
+        world.front = { pid: 4242, bundleId: 'org.logseq.instance' };
+      },
+      async () => {},
+    ];
+    const deps = world.deps({
+      frontmostApp: async () => {
+        throw new Error('lsappinfo missing');
+      },
+      activateApp: async () => {
+        throw new Error('open failed');
+      },
+    });
+
+    await expect(start(world, deps)).resolves.toMatchObject({ pid: 4242 });
   });
 
   it('waits through a refused connection, an unfinished index and a missing sentinel', async () => {
