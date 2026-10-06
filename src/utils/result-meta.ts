@@ -17,20 +17,61 @@ export function buildResultMeta(
 }
 
 /**
+ * Said wherever a warning suggests a call whose result may be large. The server can't know
+ * the host's inline limit (Claude Code saves a tool result of about 50,000 characters or
+ * more to a file and shows only its first 2 KB; `context-efficiency.md` section 7), so it
+ * says the risk exists and doesn't name a size (#187, #196).
+ */
+export const LARGE_RESULT_NOTE =
+  "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
+
+/**
+ * Rough counts of items that still come back inline, for the `inlineMax` of a warning
+ * (#196). They are estimates, not limits: sized so the result is about 30,000-45,000
+ * characters for typical items, from made-up journals with about 100 characters per
+ * block (a slim block with its page name is about 210 characters, a backlink reference
+ * about 260, a related page about 80, a network node with its edge about 125; a listed
+ * page is a name of about 35 characters, so even 1000 fit and `list_pages` needs no entry). Longer blocks come back larger, which is why the note says "may".
+ * 200 blocks is the cap `context-efficiency.md` section 7 recommends for a date range.
+ */
+export const INLINE_ITEMS = {
+  /** Blocks (search hits, property matches, mentions, relationship blocks, a page's blocks) */
+  blocks: 200,
+  /** Backlink references: a block plus the page it sits on */
+  references: 150,
+  /** Related pages: a page and its direction */
+  relatedPages: 500,
+  /** Concept network nodes, each with its edges */
+  networkNodes: 200
+} as const;
+
+/**
+ * ` <LARGE_RESULT_NOTE>` when a call that returns `items` items goes past `inlineMax`
+ * (the most that plausibly come back inline), else an empty string. Undefined
+ * `inlineMax` means the caller makes no claim, so no note.
+ */
+export function largeResultNote(items: number, inlineMax?: number): string {
+  return inlineMax !== undefined && items > inlineMax ? ` ${LARGE_RESULT_NOTE}` : '';
+}
+
+/**
  * Warning for a list cut at `cap` out of `total` items.
  * `param` is the MCP tool parameter (snake_case) that raises the cap.
+ * `inlineMax` (#196): the most items that plausibly come back inline. A `total` above it
+ * adds the note that the host may save such a result to a file.
  */
 export function truncationWarning(
   what: string,
   shown: number,
   total: number,
   param: string,
-  code = 'results_truncated'
+  code = 'results_truncated',
+  inlineMax?: number
 ): ResultWarning {
   return {
     code,
     message: `Showing ${shown} of ${total} ${what}.`,
-    howToFetchAll: `Set ${param} to ${total} (or higher) to get all ${total}.`
+    howToFetchAll: `Set ${param} to ${total} (or higher) to get all ${total}.${largeResultNote(total, inlineMax)}`
   };
 }
 
@@ -56,27 +97,37 @@ export interface CappedTruncation {
   /** Defaults to `results_truncated` */
   code?: string;
   /**
-   * Paging hook, for a tool that also takes an offset (e.g. `list_pages`): how to
-   * fetch the next page, such as "Set offset to 1000 for the next page." Every
-   * branch with a cut offers it in `howToFetchAll`: after the advice to raise
-   * `param` below the maximum (in place of `narrower`), and on its own at the
-   * maximum, so `hasMore` stays true there (BR-0006). Leave it out for an
-   * unpaged cap, or when the next page would not move (a cap of 0).
+   * The most items of this list that plausibly come back inline (#196), an
+   * `INLINE_ITEMS` value. A raise this warning suggests that returns more than that adds
+   * `LARGE_RESULT_NOTE`. Leave it out when the maximum is small enough to always fit.
    */
-  next?: string;
+  inlineMax?: number;
+  /**
+   * Paging, for a tool that also takes an offset (e.g. `list_pages`): `param` is the
+   * paging parameter (`offset`) and `next` says how to fetch the next page, such as "Set
+   * offset to 1000 for the next page." Paging leads `howToFetchAll` in every branch with
+   * a cut (the raise of the cap follows it, in place of `narrower`) and is the whole of it
+   * at the maximum, so `hasMore` stays true there (BR-0006). The message says the rest
+   * can be paged through. Leave it out for an unpaged cap, or when the next page would
+   * not move (a cap of 0).
+   */
+  paging?: { param: string; next: string };
 }
 
 /**
  * Warning for a list cut at `shown` of `total` items, where `param` can't go
  * above `max` (#61). The suggested value never points past the maximum:
  *
- * - `total <= max`: the same warning as `truncationWarning` (raise `param` to `total`),
- *   followed by `next` when given.
- * - `shown < max < total`: raise `param` to `max` for more. `hasMore` stays true,
- *   and `howToFetchAll` adds `next` when given, else `narrower` for the rest.
- * - `shown >= max`: the maximum was reached. Without `next`, no parameter fetches
+ * - `total <= max`: raise `param` to `total`, as `truncationWarning` does. With `paging`,
+ *   the next page comes first and the raise is the alternative.
+ * - `shown < max < total`: raise `param` to `max` for more. `hasMore` stays true, and
+ *   `howToFetchAll` adds `narrower` for the rest. With `paging` it leads with the next page.
+ * - `shown >= max`: the maximum was reached. Without `paging`, no parameter fetches
  *   the rest, so there is no `howToFetchAll` and `hasMore` is false; the warning is
- *   the signal (BR-0006). With `next` (a paged tool), `next` is the `howToFetchAll`.
+ *   the signal (BR-0006). With `paging` (a paged tool), the next page is the `howToFetchAll`.
+ *
+ * A raise that `inlineMax` says may not come back inline adds `LARGE_RESULT_NOTE` (#196).
+ * The raise stays in `howToFetchAll`: it is still the call that gets those items.
  */
 export function cappedTruncationWarning({
   what,
@@ -87,22 +138,33 @@ export function cappedTruncationWarning({
   narrower,
   requested,
   code = 'results_truncated',
-  next
+  inlineMax,
+  paging
 }: CappedTruncation): ResultWarning {
+  const pagedHint = paging ? ` Page through the rest with ${paging.param}.` : '';
   if (total <= max) {
-    const warning = truncationWarning(what, shown, total, param, code);
-    return next === undefined ? warning : { ...warning, howToFetchAll: `${warning.howToFetchAll} ${next}` };
-  }
-  if (shown < max) {
+    if (paging === undefined) return truncationWarning(what, shown, total, param, code, inlineMax);
     return {
       code,
-      message: `Showing ${shown} of ${total} ${what}.`,
-      howToFetchAll: `Set ${param} to ${max} (the maximum) to get ${max} of ${total}. ${next ?? narrower}`
+      message: `Showing ${shown} of ${total} ${what}.${pagedHint}`,
+      howToFetchAll:
+        `${paging.next} Or set ${param} to ${total} (or higher) to get all ${total} in one call.` +
+        largeResultNote(total, inlineMax)
+    };
+  }
+  if (shown < max) {
+    const note = largeResultNote(max, inlineMax);
+    return {
+      code,
+      message: `Showing ${shown} of ${total} ${what}.${pagedHint}`,
+      howToFetchAll: paging
+        ? `${paging.next} Or set ${param} to ${max} (the maximum) to get ${max} of ${total} in one call.${note}`
+        : `Set ${param} to ${max} (the maximum) to get ${max} of ${total}.${note} ${narrower}`
     };
   }
   const clamped = requested !== undefined && requested > max ? ` (${requested} was asked for)` : '';
   const capped = `Showing ${shown} of ${total} ${what}: ${param} is capped at its maximum of ${max}${clamped}`;
-  if (next !== undefined) return { code, message: `${capped}.`, howToFetchAll: next };
+  if (paging !== undefined) return { code, message: `${capped}.${pagedHint}`, howToFetchAll: paging.next };
   return { code, message: `${capped}, so the rest can't be fetched in one call. ${narrower}` };
 }
 

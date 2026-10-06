@@ -227,7 +227,7 @@ describe('the stub graph tells the defaults apart from neighbouring values', () 
   it('list_pages: limit and offset page through the list, and total counts both pages (#61)', async () => {
     const first = await body('logseq_list_pages', { limit: 1 });
     expect(first).toMatchObject({ pages: [{ name: 'Alice' }], total: 2, hasMore: true });
-    expect(first.warnings[0].howToFetchAll).toBe('Set limit to 2 (or higher) to get all 2. Set offset to 1 for the next page.');
+    expect(first.warnings[0].howToFetchAll).toBe('Set offset to 1 for the next page. Or set limit to 2 (or higher) to get all 2 in one call.');
     expect(await body('logseq_list_pages', { limit: 1, offset: 1 })).toEqual({ pages: [{ name: 'Bob' }], total: 2 });
   });
 });

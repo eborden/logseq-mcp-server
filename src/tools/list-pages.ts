@@ -193,10 +193,11 @@ export async function listPages(
 
 /**
  * The `pages_truncated` warning for `shown` pages from `offset` of `total`.
- * Counted from `offset`, so "get all N" means the N pages from there on. The
- * helper offers the next offset (`next`) whenever there is one; with limit 0
- * there is none, because the offset would not move, so only raising limit is
- * suggested.
+ * Counted from `offset`, so "get all N" means the N pages from there on. Paging
+ * leads (#196): `howToFetchAll` starts with the next offset whenever there is one,
+ * and raising `limit` is the alternative. No large-result note: a listed page is a
+ * name, so even 1000 of them (about 35 characters each) plausibly come back inline. With limit 0 there is no next offset, because it would not move, so
+ * only raising limit is suggested.
  */
 function pagesTruncated(shown: number, total: number, offset: number, requested: number): ResultWarning {
   return cappedTruncationWarning({
@@ -208,6 +209,6 @@ function pagesTruncated(shown: number, total: number, offset: number, requested:
     narrower: 'Narrow name_contains to see the rest.',
     requested,
     code: 'pages_truncated',
-    next: shown > 0 ? `Set offset to ${offset + shown} for the next page.` : undefined,
+    paging: shown > 0 ? { param: 'offset', next: `Set offset to ${offset + shown} for the next page.` } : undefined,
   });
 }
