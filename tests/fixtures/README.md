@@ -236,7 +236,16 @@ the file, and its date changes every day. Exact assertions on page, journal or `
 counts must exclude it, and date-range tests must use fixed windows that end before 2026.
 
 Measured total (#139, LogSeq 0.10.15 on a per-worktree instance, after the README moved out): the graph
-holds **263 pages** in `:block/name`, today's journal included, so 262 without it. There is no `readme`
-page and no `#NN` tag page, and the 146 indexed files are all under `pages/` and `journals/`. The number
-moves whenever a page, a property key or a block embed is added to the fixture, so tests should compute what
-they need rather than copy it (#90).
+holds **263 pages** in `:block/name`, built-in pages and today's journal included. They are:
+
+| Part | Count |
+|---|---|
+| Pages with a file (`pages/` and `journals/`; 10 of them are journals) | 145 |
+| Built-in pages, none with a file (the 16 listed above) | 16 |
+| Today's journal | 1 |
+| Pages with no file: link targets, property keys, block-embed uuids, alias stubs, namespace parents | 101 |
+
+Without today's journal that is 262, and without the built-ins too, 246. There is no `readme` page and no
+`#NN` tag page, and no README among the 146 indexed files (145 pages plus `config.edn`). The number moves
+whenever a page, a property key or a block embed is added to the fixture, and nothing in the tests pins it,
+so #90 should compute what it needs rather than copy it.
