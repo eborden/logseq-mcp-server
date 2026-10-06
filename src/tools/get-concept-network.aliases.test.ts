@@ -75,6 +75,23 @@ describe('get_concept_network across an alias group (#69)', () => {
     expect(result.edges.map(e => [e.from, e.to])).toEqual([[1, 3]]);
   });
 
+  it('relabels a neighbour the fanout cap dropped at depth 1 when the root is an alias group (#155)', async () => {
+    const { client, executeDatalogQuery } = fakeClient([
+      // Grouped depth-1 query: both names are one source (id 1). Page 4 is dropped by maxFanout 1.
+      [row(1, 3, 'inbound', 5, 'Team Atlas'), row(1, 4, 'inbound', 1, 'Design Review')],
+      // Depth 2 from page 3: back to the other name (dropped) and on to page 4
+      [row(3, 2, 'outbound', 1, 'Jordan Rivera'), row(3, 4, 'outbound', 1, 'Design Review')]
+    ]);
+
+    const result = await getConceptNetwork(client, 'Jordan', 2, { maxFanout: 1 });
+
+    expect(result.nodes.map(n => [n.id, n.depth])).toEqual([[1, 0], [3, 1], [4, 1]]);
+    expect(result.edges.map(e => [e.from, e.to])).toEqual([[1, 3], [1, 4], [3, 4]]);
+    expect(result.truncated).toBe(true);
+    // resolver, alias set, grouped depth 1, depth 2: the relabel adds no call
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(4);
+  });
+
   it('gives the same network for the alias and the canonical name', async () => {
     const level = [[row(1, 3, 'inbound', 2, 'Team Atlas')]];
     const byName = await getConceptNetwork(fakeClient(level).client, 'Jordan', 1);
