@@ -24,7 +24,7 @@ async function testFormats() {
   console.log('\n2. Query with :inputs object format:');
   const queryObj = {
     query: '[:find (pull ?p [*]) :in $ ?page-name :where [?p :block/name ?page-name]]',
-    inputs: ['alex bramer']
+    inputs: ['alice']
   };
   try {
     const result2 = await client.callAPI<unknown[]>('logseq.DB.datascriptQuery', [queryObj]);
@@ -37,7 +37,7 @@ async function testFormats() {
   console.log('\n3. Query string with separate inputs parameter:');
   const query3 = '[:find (pull ?p [*]) :in $ ?page-name :where [?p :block/name ?page-name]]';
   try {
-    const result3 = await client.callAPI<unknown[]>('logseq.DB.datascriptQuery', [query3, 'alex bramer']);
+    const result3 = await client.callAPI<unknown[]>('logseq.DB.datascriptQuery', [query3, 'alice']);
     console.log(`   Result:`, result3);
     console.log(`   Length:`, result3 ? result3.length : 0);
   } catch (error) {
