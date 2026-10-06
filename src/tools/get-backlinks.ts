@@ -46,26 +46,53 @@ const clampCap = (value: number, max: number) => Math.min(Math.max(0, Math.floor
 
 type Backlink = [PageEntity, BlockEntity[]];
 
+const blockCount = ([, blocks]: Backlink) => `${blocks.length} linking ${blocks.length === 1 ? 'block' : 'blocks'}`;
+
 const sourceName = (page: PageEntity) => String(page.originalName ?? page.name ?? page.id);
 
+/** Plain character order, so the tie-break doesn't change with the machine's locale. */
+const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** The name a source page ties on: `name` is lowercase, so case never decides. */
+const blockPage = (blocks: BlockEntity[]) => blocks[0]?.page as { id?: number; name?: string } | undefined;
+const rankName = ([page, blocks]: Backlink) => String(page?.name ?? blockPage(blocks)?.name ?? '');
+const rankId = ([page, blocks]: Backlink) => Number(page?.id ?? blockPage(blocks)?.id ?? 0);
+
 /**
- * Cut `results` to `maxPages` source pages and `maxBlocksPerPage` blocks each (#61),
- * keeping the first of each in the order given, so the same rule holds for the Editor
- * call's order and for the alias group's (name, then id; blocks by id). Pure: it makes
- * no call, so the cut costs nothing, and it never reorders, so a result that fits both
- * caps comes back as it is, with no warning and no totals.
+ * Source pages ranked by how many blocks link the target, most first (#178). Ties break by
+ * page name (lowercase, plain character order), then by page id, so the order is the same
+ * on every run and on both paths: the Editor call's order is LogSeq's own and the alias
+ * group's is by name, and neither says which pages link most. The blocks of each page keep
+ * the order they came in (the fetch's), since every one of them links the target once and
+ * there is no signal to rank them by. Pure and never mutates `results`; it uses counts
+ * already in hand, so it costs no API call.
+ */
+export function rankBacklinks(results: Backlink[]): Backlink[] {
+  return [...results].sort(
+    (a, b) => b[1].length - a[1].length || compareText(rankName(a), rankName(b)) || rankId(a) - rankId(b)
+  );
+}
+
+/**
+ * Rank `results` with {@link rankBacklinks}, then cut to `maxPages` source pages and
+ * `maxBlocksPerPage` blocks each (#61), keeping the first of each in that order. The
+ * ranking applies whether or not a cap bites, so the order is the same at every cap value
+ * and a smaller cap is always a prefix of a larger one. Pure: it makes no call, so neither
+ * the ranking nor the cut costs anything. A result that fits both caps comes back ranked,
+ * with no warning and no totals.
  *
  * `totals` (every source page, every linking block, both before any cap) comes with a
  * cut only. `target` is the page's name, for the search advice in the pages warning.
  */
 export function capBacklinks(
-  results: Backlink[],
+  fetched: Backlink[],
   target: string,
   { maxPages = DEFAULT_MAX_PAGES, maxBlocksPerPage = DEFAULT_MAX_BLOCKS_PER_PAGE }: BacklinkCaps = {}
 ): { results: Backlink[]; warnings: ResultWarning[]; totals?: Record<string, number> } {
   const pageCap = clampCap(maxPages, MAX_PAGES);
   const blockCap = clampCap(maxBlocksPerPage, MAX_BLOCKS_PER_PAGE);
 
+  const results = rankBacklinks(fetched);
   const kept = results.slice(0, pageCap);
   const affected = kept.filter(([, blocks]) => blocks.length > blockCap);
   if (kept.length === results.length && affected.length === 0) return { results, warnings: [] };
@@ -73,9 +100,7 @@ export function capBacklinks(
   const warnings: ResultWarning[] = [];
   if (kept.length < results.length) {
     const warning = cappedTruncationWarning({
-      // The order is LogSeq's own on the Editor path and by name on the alias path: neither
-      // is a ranking, so the dropped pages can't be told from the last one kept
-      what: 'source pages (the first ones listed, not ranked)',
+      what: 'source pages, ranked by linking blocks (most first, ties by page name)',
       shown: kept.length,
       total: results.length,
       param: 'max_pages',
@@ -84,8 +109,10 @@ export function capBacklinks(
       requested: maxPages,
       code: 'pages_truncated'
     });
+    // The counts are in hand, so say where the cut fell: the dropped pages link the target no more than this
+    const edge = kept.length === 0 ? '' : ` The last page kept has ${blockCount(kept[kept.length - 1])}, the first dropped page has ${results[kept.length][1].length}.`;
     // Raising max_pages shows pages whose blocks may then be cut by the per-page cap
-    warnings.push({ ...warning, message: `${warning.message} Blocks per page are capped separately by max_blocks_per_page.` });
+    warnings.push({ ...warning, message: `${warning.message}${edge} Blocks per page are capped separately by max_blocks_per_page.` });
   }
   if (affected.length > 0) warnings.push(pageBlocksTruncated(affected, blockCap, maxBlocksPerPage));
 
@@ -138,6 +165,7 @@ function pageBlocksTruncated(affected: Backlink[], cap: number, requested: numbe
  * @param client - LogseqClient instance
  * @param pageName - Page name, alias, or ISO date (`2025-01-01`) of a journal
  * @param caps - Source pages and blocks per page kept (#61), defaults 20 and 10; see {@link capBacklinks}
+ * Source pages are ranked by their number of linking blocks, most first (#178).
  * @returns Array of tuples [PageEntity, BlockEntity[]]
  * Note: LogSeq API returns [page, [block1, block2, ...]] per source page
  * @throws PageNotFoundError if no page matches (guidance with the closest names)
@@ -153,6 +181,7 @@ export async function getBacklinks(
 
 /**
  * Same as {@link getBacklinks}, plus a meta for the second MCP content block.
+ * Source pages come most-linking first (see {@link rankBacklinks}), before and after any cut.
  * The result is a bare array with no room for a field, so the meta carries:
  * - `resolvedFrom` when the name was an alias, date or namespace leaf rather
  *   than an exact name (which page the backlinks belong to);
