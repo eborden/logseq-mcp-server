@@ -32,3 +32,7 @@ describe('firstLineSnippet', () => {
     expect(firstLineSnippet(42)).toBe('');
   });
 });
+
+it('is a throwaway test', () => {
+  expect(firstLineSnippet('a')).toBe('a');
+});
