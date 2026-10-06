@@ -24,6 +24,7 @@ import { getConceptEvolution } from './tools/get-concept-evolution.js';
 import { getGraphInfo } from './tools/get-graph-info.js';
 import { listPages } from './tools/list-pages.js';
 import { getCurrentContext } from './tools/get-current-context.js';
+import { checkLinks } from './tools/check-links.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 import { metaContent } from './utils/result-meta.js';
 import { buildTips } from './utils/tips.js';
@@ -41,6 +42,7 @@ import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 import { parseArgs, toInputSchema, type ToolInputSchema } from './utils/parse-args.js';
 import {
   buildContextArgs,
+  checkLinksArgs,
   getBacklinksArgs,
   getBlockArgs,
   getConceptEvolutionArgs,
@@ -82,7 +84,7 @@ function withEmptyRequired(schema: ToolInputSchema): ToolInputSchema {
   return { required: [], ...schema };
 }
 
-// Define MCP tool schemas for all 15 tools
+// Define MCP tool schemas for all 16 tools
 const TOOLS = [
   {
     name: 'logseq_get_page',
@@ -175,6 +177,12 @@ const TOOLS = [
     description: TOOL_DESCRIPTIONS.logseq_list_pages,
     annotations: readOnlyAnnotations('List Pages'),
     inputSchema: withEmptyRequired(toInputSchema(listPagesArgs)),
+  },
+  {
+    name: 'logseq_check_links',
+    description: TOOL_DESCRIPTIONS.logseq_check_links,
+    annotations: readOnlyAnnotations('Check Links'),
+    inputSchema: toInputSchema(checkLinksArgs),
   },
 ];
 
@@ -518,6 +526,19 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
                 text: JSON.stringify(result),
               },
               ...metaContent(null, tipsFor(parsed, result)),
+            ],
+          };
+        }
+
+        case 'logseq_check_links': {
+          const parsed = parseArgs(checkLinksArgs, args);
+          const result = await checkLinks(client, parsed.before, parsed.after);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result),
+              },
             ],
           };
         }

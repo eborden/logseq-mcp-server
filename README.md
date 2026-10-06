@@ -4,7 +4,7 @@ Turn your LogSeq knowledge graph into an AI-accessible database.
 
 ## What This Does
 
-Provides 15 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
 
 ## Quick Start
 
@@ -87,7 +87,7 @@ claude --plugin-dir .
 
 Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The skills refer to them by bare name, so either form works.
 
-## 15 Tools at a Glance
+## 16 Tools at a Glance
 
 ### Basic Operations (7)
 | Tool | Purpose |
@@ -127,6 +127,11 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 | Tool | Purpose |
 |------|---------|
 | `get_graph_info` | Get current LogSeq graph information including filesystem path |
+
+### Linking Gate (1)
+| Tool | Purpose |
+|------|---------|
+| `check_links` | Check a `[[link]]` pass on a note: prose unchanged, brackets balanced, no ref dropped, every ref names a page or alias |
 
 ### Markdown output and compact results
 

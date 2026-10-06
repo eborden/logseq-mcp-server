@@ -117,9 +117,9 @@ describe('every advertised parameter is parsed before any LogSeq call (#60)', ()
           checked++;
         }
       }
-      // A floor, so an empty tools/list can't pass: 15 tools with 54 parameters today
-      expect(tools.length).toBeGreaterThanOrEqual(15);
-      expect(checked).toBeGreaterThanOrEqual(54);
+      // A floor, so an empty tools/list can't pass: 16 tools with 56 parameters today
+      expect(tools.length).toBeGreaterThanOrEqual(16);
+      expect(checked).toBeGreaterThanOrEqual(56);
     });
   });
 });
@@ -137,7 +137,7 @@ describe('src/index.ts reads no raw arguments (#60)', () => {
     // Everything else (args.x, args['x'], { x } = args, a cast) is a raw read
     const rest = source.replace(declaration, '').replace(/\bparseArgs\(\w+Args, args\)/g, '');
     expect(rest.match(/(?<![\w-])args(?![\w-])/g) ?? []).toEqual([]);
-    expect(parseCalls).toHaveLength(15);
+    expect(parseCalls).toHaveLength(16);
     expect(parseCalls).toHaveLength(uses('args').length - 1);
   });
 
