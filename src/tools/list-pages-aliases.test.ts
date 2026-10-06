@@ -347,8 +347,8 @@ describe('listPages with aliases (#171)', () => {
       expect(result.warnings).toEqual([
         {
           code: 'pages_truncated',
-          message: 'Showing 3 of 8 pages from offset 2.',
-          howToFetchAll: 'Set limit to 8 (or higher) to get all 8. Set offset to 5 for the next page.',
+          message: 'Showing 3 of 8 pages from offset 2. Page through the rest with offset.',
+          howToFetchAll: 'Set offset to 5 for the next page. Or set limit to 8 (or higher) to get all 8 in one call.',
         },
       ]);
     });

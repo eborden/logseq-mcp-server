@@ -176,8 +176,8 @@ describe('logseq_list_pages limit and offset (#61)', () => {
     expect(body.warnings).toEqual([
       {
         code: 'pages_truncated',
-        message: 'Showing 200 of 250 pages.',
-        howToFetchAll: 'Set limit to 250 (or higher) to get all 250. Set offset to 200 for the next page.',
+        message: 'Showing 200 of 250 pages. Page through the rest with offset.',
+        howToFetchAll: 'Set offset to 200 for the next page. Or set limit to 250 (or higher) to get all 250 in one call.',
       },
     ]);
   });

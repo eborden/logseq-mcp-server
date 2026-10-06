@@ -198,8 +198,8 @@ describe('listPages', () => {
         warnings: [
           {
             code: 'pages_truncated',
-            message: 'Showing 200 of 500 pages.',
-            howToFetchAll: 'Set limit to 500 (or higher) to get all 500. Set offset to 200 for the next page.',
+            message: 'Showing 200 of 500 pages. Page through the rest with offset.',
+            howToFetchAll: 'Set offset to 200 for the next page. Or set limit to 500 (or higher) to get all 500 in one call.',
           },
         ],
       });
@@ -223,7 +223,7 @@ describe('listPages', () => {
 
       expect(result.total).toBe(300);
       expect(result.pages).toEqual(names(0, 50));
-      expect(result.warnings![0].message).toBe('Showing 50 of 300 pages.');
+      expect(result.warnings![0].message).toBe('Showing 50 of 300 pages. Page through the rest with offset.');
     });
 
     it('returns the page at offset, and no warning once nothing is left after it', async () => {
@@ -236,14 +236,27 @@ describe('listPages', () => {
 
       expect(w).toEqual({
         code: 'pages_truncated',
-        message: 'Showing 50 of 400 pages from offset 100.',
-        howToFetchAll: 'Set limit to 400 (or higher) to get all 400. Set offset to 150 for the next page.',
+        message: 'Showing 50 of 400 pages from offset 100. Page through the rest with offset.',
+        howToFetchAll: 'Set offset to 150 for the next page. Or set limit to 400 (or higher) to get all 400 in one call.',
       });
     });
 
     it('returns no pages and no warning for an offset past the end, with the real total', async () => {
       expect(await list(30, { offset: 30 })).toEqual({ pages: [], total: 30 });
       expect(await list(30, { offset: 5000 })).toEqual({ pages: [], total: 30 });
+    });
+
+    it('leads with the next offset in every cut, and adds no large-result note (#196)', async () => {
+      // A listed page is a name, about 35 characters, so even 1000 of them plausibly come back inline
+      for (const [total, offset, limit] of [[500, 0, 200], [700, 0, 200], [1500, 0, 200], [1500, 0, 1000], [2500, 500, 1000]]) {
+        const result = await list(total, { offset, limit });
+        const [w] = result.warnings!;
+        const label = `${total} pages, offset ${offset}, limit ${limit}`;
+        expect(result.hasMore, label).toBe(true);
+        expect(w.howToFetchAll, label).toMatch(/^Set offset to \d+ for the next page\./);
+        expect(w.message, label).toContain('Page through the rest with offset.');
+        expect(w.howToFetchAll, label).not.toContain('saved to a file');
+      }
     });
 
     it('suggests the maximum, never a value past it, when more than 1000 remain', async () => {
@@ -254,8 +267,8 @@ describe('listPages', () => {
       expect(result.warnings).toEqual([
         {
           code: 'pages_truncated',
-          message: 'Showing 200 of 1500 pages.',
-          howToFetchAll: 'Set limit to 1000 (the maximum) to get 1000 of 1500. Set offset to 200 for the next page.',
+          message: 'Showing 200 of 1500 pages. Page through the rest with offset.',
+          howToFetchAll: 'Set offset to 200 for the next page. Or set limit to 1000 (the maximum) to get 1000 of 1500 in one call.',
         },
       ]);
     });
@@ -268,7 +281,7 @@ describe('listPages', () => {
       expect(result.warnings).toEqual([
         {
           code: 'pages_truncated',
-          message: 'Showing 1000 of 1500 pages: limit is capped at its maximum of 1000.',
+          message: 'Showing 1000 of 1500 pages: limit is capped at its maximum of 1000. Page through the rest with offset.',
           howToFetchAll: 'Set offset to 1000 for the next page.',
         },
       ]);
@@ -282,7 +295,7 @@ describe('listPages', () => {
       expect(result.warnings).toEqual([
         {
           code: 'pages_truncated',
-          message: 'Showing 1000 of 1500 pages from offset 1000: limit is capped at its maximum of 1000 (5000 was asked for).',
+          message: 'Showing 1000 of 1500 pages from offset 1000: limit is capped at its maximum of 1000 (5000 was asked for). Page through the rest with offset.',
           howToFetchAll: 'Set offset to 2000 for the next page.',
         },
       ]);
@@ -366,7 +379,7 @@ describe('listPages', () => {
         },
       ]);
       expect((await list(1500, { limit: 0 })).warnings![0].howToFetchAll).toBe(
-        'Set limit to 1000 (the maximum) to get 1000 of 1500. Narrow name_contains to see the rest.'
+        "Set limit to 1000 (the maximum) to get 1000 of 1500. Narrow name_contains to see the rest."
       );
     });
 

@@ -75,7 +75,7 @@ describe('logseq_list_pages through MCP (#171)', () => {
       pages: [{ name: 'Alex', aliases: ['Alex Rivera', 'Lexi'] }],
       total: 3,
       hasMore: true,
-      warnings: [{ code: 'pages_truncated', message: 'Showing 1 of 3 pages.' }],
+      warnings: [{ code: 'pages_truncated', message: 'Showing 1 of 3 pages. Page through the rest with offset.' }],
     });
   });
 

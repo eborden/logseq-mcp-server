@@ -1,7 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity, PageLike, BlockEntity, SlimBlock, ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
-import { buildResultMeta } from '../utils/result-meta.js';
+import { buildResultMeta, LARGE_RESULT_NOTE } from '../utils/result-meta.js';
 import {
   AliasSet,
   ResolvedAliases,
@@ -374,13 +374,6 @@ function capEntries(entries: Entry[], cap: number, nested: boolean): BlockCut | 
     partialBlock: budget.partial
   };
 }
-
-/**
- * Said wherever the warning suggests a call whose result may be large. The server can't
- * know the host's inline limit (Claude Code saves a tool result of about 50,000 characters
- * or more to a file), so it says the risk exists and doesn't name a size.
- */
-const LARGE_RESULT_NOTE = "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
 
 /**
  * The `blocks_truncated` warning (#187). The message says what was kept and where the
