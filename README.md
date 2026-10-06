@@ -226,3 +226,5 @@ npm test                  # both
 - **LogSeq HTTP API** client for graph queries
 - **Vitest** for unit and integration testing
 - **TDD approach** - all tools have comprehensive test coverage
+
+<!-- throwaway 204 -->
