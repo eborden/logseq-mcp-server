@@ -148,6 +148,59 @@ describe('logseq_list_pages pages_unavailable warning (#64)', () => {
   });
 });
 
+describe('logseq_list_pages limit and offset (#61)', () => {
+  const pages = (n: number) =>
+    Array.from({ length: n }, (_, i) => {
+      const name = `p${String(i).padStart(4, '0')}`;
+      return { id: i + 1, uuid: `u${i}`, name, originalName: name };
+    });
+  const list = (n: number, args: Record<string, unknown> = {}) =>
+    callTool(vi.fn().mockResolvedValue(pages(n)), 'logseq_list_pages', args);
+
+  it('returns the same object as before at 200 or fewer pages, whatever the limit', async () => {
+    const atDefault = await list(200);
+    expect(JSON.parse(atDefault.content[0].text)).toEqual({
+      pages: pages(200).map(p => p.originalName),
+      total: 200,
+    });
+    for (const limit of [200, 1000, 5000]) {
+      expect((await list(200, { limit })).content[0].text, `limit ${limit}`).toBe(atDefault.content[0].text);
+    }
+  });
+
+  it('cuts at the default 200 and reports it in the result object', async () => {
+    const body = JSON.parse((await list(250)).content[0].text);
+
+    expect(body.pages).toHaveLength(200);
+    expect(body).toMatchObject({ total: 250, hasMore: true });
+    expect(body.warnings).toEqual([
+      {
+        code: 'pages_truncated',
+        message: 'Showing 200 of 250 pages.',
+        howToFetchAll: 'Set limit to 250 (or higher) to get all 250. Or set offset to 200 for the next page.',
+      },
+    ]);
+  });
+
+  it('clamps a limit above 1000 and keeps hasMore true with the next offset', async () => {
+    const at1000 = await list(1500, { limit: 1000 });
+    const at5000 = await list(1500, { limit: 5000 });
+    const body = JSON.parse(at5000.content[0].text);
+
+    expect(body.pages).toHaveLength(1000);
+    expect(body.pages).toEqual(JSON.parse(at1000.content[0].text).pages);
+    expect(body.hasMore).toBe(true);
+    expect(body.warnings[0].message).toContain('maximum of 1000 (5000 was asked for)');
+    expect(body.warnings[0].howToFetchAll).toBe('Set offset to 1000 for the next page.');
+  });
+
+  it('returns the last page with no warning, and total still counts every page', async () => {
+    const body = JSON.parse((await list(1500, { limit: 1000, offset: 1000 })).content[0].text);
+
+    expect(body).toEqual({ pages: pages(1500).slice(1000).map(p => p.originalName), total: 1500 });
+  });
+});
+
 describe('logseq_get_context_for_query keyword-hit maximum (#61)', () => {
   // The query names no topic, so the keyword search ("widgets") is the only call
   const hitRow = (id: number) => [{ id, uuid: `u${id}`, content: `widgets ${id}`, page: { id: 1 } }];
