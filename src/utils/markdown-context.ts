@@ -2,6 +2,7 @@ import type { ConceptNetworkResult } from '../tools/get-concept-network.js';
 import type { QueryContext, TopicQueryContext } from '../tools/get-context-for-query.js';
 import type { TopicContext } from '../tools/build-context.js';
 import { buildBlockTrees } from './block-tree.js';
+import { entityId } from './entity-fields.js';
 import {
   isObj,
   Obj,
@@ -50,7 +51,7 @@ function groupBySource(references: Obj[]): Array<{ page: Obj; blocks: Obj[] }> {
   const groups = new Map<string, { page: Obj; blocks: Obj[] }>();
   for (const ref of references) {
     const page = isObj(ref.sourcePage) ? ref.sourcePage : {};
-    const key = String(page.id ?? page['db/id'] ?? pageTitle(page));
+    const key = String(entityId(page) ?? pageTitle(page));
     const group = groups.get(key) ?? { page, blocks: [] };
     group.blocks.push(ref.block);
     groups.set(key, group);
@@ -76,7 +77,7 @@ export function renderTopicContext(
     lines.push(`Journal: ${context.temporalContext.date}`, '');
   }
   const blocks = context.directBlocks as Obj[];
-  const pageId = main.id ?? main['db/id'] ?? 0;
+  const pageId = entityId(main) ?? 0;
   const tree = blocks.length > 0 ? blockTree(blocks, pageId) : [];
   // The pre-block's own text when it was fetched, so keys and values are shown as stored
   const props = propertyLines(main.properties, tree);

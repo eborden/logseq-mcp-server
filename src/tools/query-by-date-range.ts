@@ -16,7 +16,7 @@ import { escapeRegex } from '../utils/escape-regex.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { buildBlockTrees, camelizeKeys } from '../utils/block-tree.js';
-import { entityId } from '../utils/entity-fields.js';
+import { entityId, pageDisplayName } from '../utils/entity-fields.js';
 import { Budget, countBlocks, takeBlocks } from '../utils/block-budget.js';
 import { formatLogseqDate } from '../utils/date-utils.js';
 import { DATE_PRESETS, isDatePreset, resolveDatePreset } from '../utils/date-presets.js';
@@ -301,8 +301,7 @@ function resolveSelection(selection: DateRangeSelection, now: Date): ResolvedSel
   return { mode: 'range', start: startDate as number, end: endDate as number };
 }
 
-const pageNameOf = (page: PageEntity): string =>
-  page.originalName || page['original-name'] || page.name;
+const pageNameOf = (page: PageEntity): string => pageDisplayName(page);
 
 type Entry = DateRangeResult['entries'][number];
 
