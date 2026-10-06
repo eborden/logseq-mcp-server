@@ -377,6 +377,7 @@ describe('startInstance', () => {
 
     expect(world.signals).toEqual([[4242, 'SIGTERM']]);
     expect(world.files.has(PATHS.record)).toBe(false);
+    expect(world.files.has(PATHS.config)).toBe(false);
   });
 
   it('stops the instance and fails when the port rejects the token', async () => {
@@ -454,7 +455,7 @@ describe('stopInstance', () => {
     world = new World();
   });
 
-  it('sends SIGTERM to the recorded pid only, then removes the record', async () => {
+  it('sends SIGTERM to the recorded pid only, then removes the record and config.json', async () => {
     const pid = runningInstance(world);
     world.processes.set(9001, { commandLine: APP }); // someone else's LogSeq
 
@@ -463,6 +464,7 @@ describe('stopInstance', () => {
     expect(world.signals).toEqual([[pid, 'SIGTERM']]);
     expect(world.processes.has(9001)).toBe(true);
     expect(world.files.has(PATHS.record)).toBe(false);
+    expect(world.files.has(PATHS.config)).toBe(false);
   });
 
   it('escalates to SIGKILL when the process ignores SIGTERM', async () => {
@@ -479,6 +481,7 @@ describe('stopInstance', () => {
     await expect(stopInstance(WORKTREE, world.deps())).rejects.toThrow(`pid ${pid} is running but is not this worktree's LogSeq`);
     expect(world.signals).toEqual([]);
     expect(world.files.has(PATHS.record)).toBe(true);
+    expect(world.files.has(PATHS.config)).toBe(true);
   });
 
   it('refuses a LogSeq running on another profile', async () => {
@@ -496,18 +499,21 @@ describe('stopInstance', () => {
     expect(world.signals).toEqual([]);
   });
 
-  it('clears a stale record without signalling anything', async () => {
+  it('clears a stale record and its config.json without signalling anything', async () => {
     const pid = runningInstance(world);
     world.processes.delete(pid);
 
     await expect(stopInstance(WORKTREE, world.deps())).resolves.toEqual({ state: 'stale', pid });
     expect(world.signals).toEqual([]);
     expect(world.files.has(PATHS.record)).toBe(false);
+    expect(world.files.has(PATHS.config)).toBe(false);
   });
 
-  it('does nothing when no instance is recorded', async () => {
+  it('signals nothing when no instance is recorded, and drops a leftover config.json', async () => {
+    world.files.set(PATHS.config, '{}');
     await expect(stopInstance(WORKTREE, world.deps())).resolves.toEqual({ state: 'none' });
     expect(world.signals).toEqual([]);
+    expect(world.files.has(PATHS.config)).toBe(false);
   });
 });
 
