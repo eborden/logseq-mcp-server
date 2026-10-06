@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../../src/client.js';
-import { getConceptNetwork } from '../../../src/tools/get-concept-network.js';
+import { getConceptNetwork, ConceptNetworkResult } from '../../../src/tools/get-concept-network.js';
 import { connectFixture } from '../helpers/fixture-client.js';
 import {
   assertNoNodeDuplicates,
@@ -32,6 +32,21 @@ const ISOLATED = ['archive', 'empty page'];
 
 describe('Property: Graph Traversal Invariants', () => {
   let client: LogseqClient;
+  // Each (page, depth) network is fetched once per run and shared by every test that needs it (#193).
+  // LogSeq answers one request at a time, so when several agents' suites share a machine, every
+  // call queues behind theirs; the file used to make ~200 network calls for ~50 distinct ones.
+  // The tool is stateless and the tests only read a result, so sharing one is safe. The idempotence
+  // test is the one that must ask again, and does.
+  const networks = new Map<string, Promise<ConceptNetworkResult>>();
+  const network = (page: string, depth: number): Promise<ConceptNetworkResult> => {
+    const key = `${depth}:${page}`;
+    let cached = networks.get(key);
+    if (!cached) {
+      cached = getConceptNetwork(client, page, depth);
+      networks.set(key, cached);
+    }
+    return cached;
+  };
 
   beforeAll(async () => {
     ({ client } = await connectFixture());
@@ -43,7 +58,7 @@ describe('Property: Graph Traversal Invariants', () => {
 
       for (const page of pages) {
         for (const depth of [0, 1, 2]) {
-          const result = await getConceptNetwork(client, page, depth);
+          const result = await network(page, depth);
 
           // Property: No duplicate node IDs
           assertNoNodeDuplicates(result.nodes);
@@ -55,7 +70,7 @@ describe('Property: Graph Traversal Invariants', () => {
       const pages = LINKED;
 
       for (const page of pages) {
-        const result = await getConceptNetwork(client, page, 2);
+        const result = await network(page, 2);
 
         // Property: All edges reference valid nodes
         assertReferentialIntegrity(result.nodes, result.edges);
@@ -67,7 +82,7 @@ describe('Property: Graph Traversal Invariants', () => {
 
       for (const page of pages) {
         for (const maxDepth of [0, 1, 2, 3]) {
-          const result = await getConceptNetwork(client, page, maxDepth);
+          const result = await network(page, maxDepth);
 
           // Property: All nodes have depth <= maxDepth
           for (const node of result.nodes) {
@@ -81,7 +96,7 @@ describe('Property: Graph Traversal Invariants', () => {
       const pages = [...PAGES, ...ISOLATED];
 
       for (const page of pages) {
-        const result = await getConceptNetwork(client, page, 2);
+        const result = await network(page, 2);
 
         // Property: Exactly one node at depth 0
         const rootNodes = result.nodes.filter(n => n.depth === 0);
@@ -97,7 +112,7 @@ describe('Property: Graph Traversal Invariants', () => {
       let capped = 0;
 
       for (const page of pages) {
-        const result = await getConceptNetwork(client, page, 2);
+        const result = await network(page, 2);
 
         expect(result.edges.length, page).toBeGreaterThan(0);
         if (result.truncated) capped++;
@@ -116,7 +131,7 @@ describe('Property: Graph Traversal Invariants', () => {
       const pages = LINKED;
 
       for (const page of pages) {
-        const result = await getConceptNetwork(client, page, 2);
+        const result = await network(page, 2);
 
         expect(result.nodes.length, page).toBeGreaterThan(1);
         const rootNode = result.nodes.find(n => n.depth === 0)!;
@@ -132,7 +147,7 @@ describe('Property: Graph Traversal Invariants', () => {
       const pages = LINKED;
 
       for (const page of pages) {
-        const result = await getConceptNetwork(client, page, 2);
+        const result = await network(page, 2);
 
         // Property: at most one edge per unordered page pair, never a self-loop
         const pairs = result.edges.map(e => [Math.min(e.from, e.to), Math.max(e.from, e.to)].join('-'));
@@ -155,9 +170,9 @@ describe('Property: Graph Traversal Invariants', () => {
       const pages = LINKED;
 
       for (const page of pages) {
-        const depth0 = await getConceptNetwork(client, page, 0);
-        const depth1 = await getConceptNetwork(client, page, 1);
-        const depth2 = await getConceptNetwork(client, page, 2);
+        const depth0 = await network(page, 0);
+        const depth1 = await network(page, 1);
+        const depth2 = await network(page, 2);
 
         // Property: depth0 ⊆ depth1 ⊆ depth2
         const nodes0 = new Set(depth0.nodes.map(n => n.id));
@@ -173,12 +188,21 @@ describe('Property: Graph Traversal Invariants', () => {
       const pages = [...PAGES, ...ISOLATED];
 
       for (const page of pages) {
-        const result1 = await getConceptNetwork(client, page, 2);
+        // result1 may be the run's shared copy, fetched by an earlier test, so this also checks the
+        // network doesn't change between calls made minutes apart. result2 is always a new call.
+        const result1 = await network(page, 2);
         const result2 = await getConceptNetwork(client, page, 2);
 
-        // Property: Results are deterministic
-        expect(result1.nodes.map(n => n.id).sort()).toEqual(result2.nodes.map(n => n.id).sort());
-        expect(result1.edges.length).toBe(result2.edges.length);
+        // Property: the same nodes (with names and depths) and the same edges (with counts).
+        // Compared as sets: the order of nodes and edges isn't part of the contract. It was
+        // identical in every one of ~500 repeated calls on the fixture (#193), but that is
+        // not promised, so a failure here is a real change in what is returned.
+        const nodeKey = (r: ConceptNetworkResult) => r.nodes.map(n => `${n.id}:${n.name}:${n.depth}`).sort();
+        const edgeKey = (r: ConceptNetworkResult) =>
+          r.edges.map(e => `${e.from}>${e.to}:${e.type}:${e.outbound}/${e.inbound}`).sort();
+        expect(nodeKey(result1), page).toEqual(nodeKey(result2));
+        expect(edgeKey(result1), page).toEqual(edgeKey(result2));
+        expect(result1.truncated, page).toBe(result2.truncated);
       }
     });
   });
@@ -188,7 +212,7 @@ describe('Property: Graph Traversal Invariants', () => {
       const pages = [...PAGES, ...ISOLATED];
 
       for (const page of pages) {
-        const result = await getConceptNetwork(client, page, 0);
+        const result = await network(page, 0);
 
         // Property: depth=0 means single root node, no edges
         expect(result.nodes.length).toBe(1);
