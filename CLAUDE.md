@@ -40,9 +40,10 @@ Two kinds of record live in `docs/`. Their READMEs hold the full process. Read t
 **IDs.** Files are named `NNNN-<slug>.md`, numbered per directory. The number is the ID, never changed or reused, and files are never deleted. Cite them as `ADR-0007` or `BR-0003`, optionally followed by the slug: `ADR-0007 (two-query-pattern-for-optional-data)`. A new entry takes the highest number + 1. If another PR takes that number first, renumber on rebase.
 
 **Changing one.**
-- An accepted ADR's Context, Decision and Consequences never change. A reversal is a new ADR, and the same PR marks the old one `superseded by <NNNN-slug>`.
-- An ADR's Mechanical enforcement lines may be updated in place, for example `none-yet` becoming `test:` once a guard lands (decision on #73).
-- When a file an accepted ADR cites is deleted, the citation becomes a pinned `<commit>:<path>` reference to its last version, with no other rewording.
+- An accepted ADR is immutable, with three exceptions. Don't reword its Context, Decision or Consequences.
+  - Its status and a pointer to its replacement. A reversal is a new ADR, and the same PR marks the old one `superseded by <NNNN-slug>`.
+  - A citation of a file that has since been deleted may be rewritten in place as a pinned `<commit>:<path>` reference to its last version, with no other rewording.
+  - Its Mechanical enforcement section may be updated in place, for example `none-yet` becoming `test:` once a guard lands.
 - A business rule is edited in place, with a new Changelog row. To retire one, follow the README; don't delete the file.
 
 Every one of these changes needs the maintainer's OK before merge (see Merge policy).
