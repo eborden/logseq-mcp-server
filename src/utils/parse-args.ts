@@ -13,7 +13,7 @@ import { InvalidParameterError } from '../errors.js';
  * Rules:
  * - Tolerant reader: unknown fields are ignored (zod's default strip), never rejected.
  * - No coercion: `"5"` is not `5`, `"true"` is not `true`, NaN is not a number.
- * - `null` means absent, as `resolveParamAliases` and `parseFormat` already treat it.
+ * - `null` means absent, as `resolveParamAliases` already treats it.
  *   A required field sent as `null` is reported as missing.
  * - Defaults are the ones the handlers always applied. A schema-level `.default()`
  *   is also advertised as `default` in the JSON Schema.
