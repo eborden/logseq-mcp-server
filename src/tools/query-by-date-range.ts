@@ -1,7 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity, BlockEntity, SlimBlock, ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
-import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta } from '../utils/result-meta.js';
 import {
   AliasSet,
   ResolvedAliases,
@@ -35,9 +35,9 @@ export const DEFAULT_DATE_RANGE_MAX_BLOCKS = 200;
 
 /**
  * Most blocks one call returns (#61). A larger `maxBlocks` is clamped to it, and a cut
- * at the maximum is reported by a `blocks_truncated` warning with no `howToFetchAll`.
- * Dates narrow a result to whole days, so a day holding more blocks than this can't
- * be fetched whole by any call.
+ * at the maximum is reported by a `blocks_truncated` warning whose `howToFetchAll` pages
+ * on from the day the entries end at (#187). Dates narrow a result to whole days, so a day
+ * holding more blocks than this can't be fetched whole by any call.
  */
 export const MAX_DATE_RANGE_BLOCKS = 1000;
 
@@ -373,12 +373,29 @@ function capEntries(entries: Entry[], cap: number, nested: boolean): BlockCut | 
 }
 
 /**
- * The `blocks_truncated` warning. Names where the entries end and how to continue from
- * there, and says what dates can reach: whole days after the cut, never part of one day.
- * The advice always moves the reader forward: a query from a day that alone filled the cap
- * would return the same blocks again, so then it says to raise `max_blocks` or, past the
- * maximum, that the day can't be fetched whole. `newestFirst` is the `last_n` order, which
- * continues with older days.
+ * Said wherever the warning suggests a call whose result may be large. The server can't
+ * know the host's inline limit (Claude Code saves a tool result of about 50,000 characters
+ * or more to a file), so it says the risk exists and doesn't name a size.
+ */
+const LARGE_RESULT_NOTE = "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
+
+/**
+ * The `blocks_truncated` warning (#187). The message says what was kept and where the
+ * entries end, plus any fact about a day that no date range can fix. `howToFetchAll` leads
+ * with paging: a call from the day where the entries stop, with the same end of the range
+ * and the same `max_blocks`, which reaches whole days after the cut and never part of one.
+ * That is a real fetch-the-rest parameter, so `hasMore` stays true at the maximum too
+ * (BR-0006, paged-cap amendment) whenever such a call exists.
+ *
+ * The advice always moves the reader forward, and every branch is literally true:
+ *  - cut between days: page from the first day dropped
+ *  - cut inside a day after earlier days: page from that day, which repeats its kept blocks
+ *  - the first day alone filling the cap: a query from it at this cap returns the same blocks,
+ *    so the way forward is that day alone at a higher cap (within the maximum), then paging;
+ *    a day over the maximum can't be fetched whole, so page past it
+ *  - nothing kept (a cap of 0): there is no day to page from, so raise the cap
+ * A raise of `max_blocks` is suggested only there and says a result that large may not be
+ * shown by the host. `newestFirst` is the `last_n` order, which continues with older days.
  */
 function blocksTruncated(
   cut: BlockCut,
@@ -386,48 +403,69 @@ function blocksTruncated(
   options: { nested: boolean; newestFirst: boolean; start: number; end: number; requested: number }
 ): ResultWarning {
   const { nested, newestFirst, start, end, requested } = options;
-  const { endsAt, nextDay, splitDay } = cut;
-  const query = (day: number) =>
-    newestFirst ? `start_date ${start} with end_date ${day}` : `start_date ${day} with end_date ${end}`;
+  const { endsAt, nextDay, splitDay, keptBefore, lastDayTotal, total } = cut;
+  const max = MAX_DATE_RANGE_BLOCKS;
+  const atMax = shown >= max;
   const direction = newestFirst ? 'older' : 'later';
-  let narrower: string;
+  /** The dates that read on from `day`: the same end of the range, or for `last_n` (newest first) the same start */
+  const from = (day: number) =>
+    newestFirst ? `start_date ${start}, end_date ${day}` : `start_date ${day}, the same end_date (${end})`;
+  const callAgain = (day: number) => `Call again with ${from(day)} and the same max_blocks`;
+
+  // Facts go in the message. The way forward goes in howToFetchAll, or in the message when
+  // nothing can be fetched (no howToFetchAll, so hasMore is false).
+  const facts: string[] = [];
+  let howToFetchAll: string | undefined;
   if (endsAt === null) {
-    narrower = 'Narrow the dates or last_n, or add a search_term.';
+    howToFetchAll =
+      (total <= max
+        ? `Set max_blocks to ${total} (or higher) to get all ${total}.`
+        : `Set max_blocks to ${max} (the maximum) to get ${max} of ${total}. Narrow the dates or last_n, or add a search_term.`) +
+      ` ${LARGE_RESULT_NOTE}`;
   } else if (!splitDay) {
-    narrower = `Query ${query(nextDay ?? endsAt)} for the ${direction} days, or add a search_term.`;
-  } else if (cut.keptBefore > 0) {
-    narrower =
-      `Query ${query(endsAt)} for the ${direction} days (that day repeats its kept blocks), or add a search_term.` +
-      (cut.lastDayTotal > MAX_DATE_RANGE_BLOCKS
-        ? ` A day is the narrowest date range, so day ${endsAt}, with ${cut.lastDayTotal} blocks, can't be fetched whole.`
-        : '');
+    howToFetchAll = `${callAgain(nextDay ?? endsAt)} to read the ${direction} days, or add a search_term.`;
+  } else if (keptBefore > 0) {
+    howToFetchAll = `${callAgain(endsAt)} to read the ${direction} days (day ${endsAt} repeats its kept blocks), or add a search_term.`;
+    if (lastDayTotal > max) {
+      facts.push(`A day is the narrowest date range, so day ${endsAt}, with ${lastDayTotal} blocks, can't be fetched whole.`);
+    }
+  } else if (lastDayTotal > max) {
+    // The first day alone filled the cap and holds more than any call returns
+    facts.push(`Day ${endsAt} holds ${lastDayTotal} blocks, more than the maximum of ${max}, so no call can return it whole.`);
+    if (nextDay !== null) {
+      howToFetchAll = `${callAgain(nextDay)} for the rest of the range, or add a search_term to read day ${endsAt} in pieces.`;
+    } else if (!atMax) {
+      howToFetchAll =
+        `Set max_blocks to ${max} (the maximum) to read ${max} of day ${endsAt}'s ${lastDayTotal} blocks, ` +
+        `or add a search_term to read it in pieces. ${LARGE_RESULT_NOTE}`;
+    } else {
+      facts.push('Add a search_term to narrow it.');
+    }
   } else {
-    // The first day alone filled the cap: a query from it at this cap returns the same blocks
-    const day =
-      cut.lastDayTotal > MAX_DATE_RANGE_BLOCKS
-        ? `Day ${endsAt} holds ${cut.lastDayTotal} blocks, more than the maximum of ${MAX_DATE_RANGE_BLOCKS}, ` +
-          "so it comes back the same however it is queried and can't be fetched whole."
-        : `Day ${endsAt} alone holds ${cut.lastDayTotal} blocks, more than ${shown}, so a query from it returns the ` +
-          `same blocks at this max_blocks. Raise max_blocks to ${cut.lastDayTotal} or more to read it whole.`;
-    narrower =
-      nextDay === null
-        ? `${day} Add a search_term to narrow it.`
-        : `${day} Query ${query(nextDay)} for the rest of the range, or add a search_term.`;
+    // The first day alone filled the cap but fits the maximum: a query from it at this cap returns the same blocks
+    facts.push(
+      `Day ${endsAt} alone holds ${lastDayTotal} blocks, more than ${shown}, so a query from it returns the same blocks at this max_blocks.`
+    );
+    howToFetchAll =
+      `To read it whole, call again with start_date ${endsAt}, end_date ${endsAt} and max_blocks ${lastDayTotal}. ` +
+      `${LARGE_RESULT_NOTE} If it comes back saved, read the day in pieces with a search_term.` +
+      (nextDay !== null ? ` Then continue with ${from(nextDay)} and max_blocks ${shown}.` : '');
   }
+
   const unit = nested ? 'nested ones counted' : 'top-level only';
   const order = `${newestFirst ? 'newest' : 'oldest'} day first`;
   const ends = endsAt !== null ? `; the entries end at ${endsAt}` : '';
   const partial = cut.partialBlock ? '; a kept block shows fewer children than it has (childrenTruncated)' : '';
-  return cappedTruncationWarning({
-    what: `blocks (${unit}; ${order}${ends}${partial})`,
-    shown,
-    total: cut.total,
-    param: 'max_blocks',
-    max: MAX_DATE_RANGE_BLOCKS,
-    narrower,
-    requested,
-    code: 'blocks_truncated'
-  });
+  const base = `Showing ${shown} of ${total} blocks (${unit}; ${order}${ends}${partial})`;
+  const clamped = requested > max ? ` (${requested} was asked for)` : '';
+  const head = atMax
+    ? `${base}: max_blocks is capped at its maximum of ${max}${clamped}, so the rest can't be fetched in one call.`
+    : `${base}.`;
+  return {
+    code: 'blocks_truncated',
+    message: [head, ...facts].join(' '),
+    ...(howToFetchAll === undefined ? {} : { howToFetchAll })
+  };
 }
 
 /** First line of a block, trimmed and shortened. */
