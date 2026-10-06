@@ -502,9 +502,9 @@ describe('result caps (#61)', () => {
         expect(body.meta!.hasMore, label).toBe(true);
         expect(body.meta!.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_pages to ${total}\\b`));
         expectNoSuggestionPast(body.meta as Meta, 'max_pages', MAX_PAGES);
-        // The message names the page the list stops at
-        const last = body.results[body.results.length - 1];
-        if (last) expect(body.meta!.warnings![0].message, label).toMatch(/the last one shown is ".+"\)/);
+        // The order is not a ranking, and the per-page cap is a separate one
+        expect(body.meta!.warnings![0].message, label).toContain('the first ones listed, not ranked');
+        expect(body.meta!.warnings![0].message, label).toContain('Blocks per page are capped separately by max_blocks_per_page.');
       }
     });
 

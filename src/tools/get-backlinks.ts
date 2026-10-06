@@ -72,19 +72,20 @@ export function capBacklinks(
 
   const warnings: ResultWarning[] = [];
   if (kept.length < results.length) {
-    const last = kept.length > 0 ? `; the last one shown is "${sourceName(kept[kept.length - 1][0])}"` : '';
-    warnings.push(
-      cappedTruncationWarning({
-        what: `source pages (the first ones listed${last})`,
-        shown: kept.length,
-        total: results.length,
-        param: 'max_pages',
-        max: MAX_PAGES,
-        narrower: `logseq_search_blocks with query "[[${target}]]" lists the blocks that write the link that way, on every page (not #tags or alias spellings).`,
-        requested: maxPages,
-        code: 'pages_truncated'
-      })
-    );
+    const warning = cappedTruncationWarning({
+      // The order is LogSeq's own on the Editor path and by name on the alias path: neither
+      // is a ranking, so the dropped pages can't be told from the last one kept
+      what: 'source pages (the first ones listed, not ranked)',
+      shown: kept.length,
+      total: results.length,
+      param: 'max_pages',
+      max: MAX_PAGES,
+      narrower: `logseq_search_blocks with query "[[${target}]]" lists the blocks that write the link that way, on every page (not #tags or alias spellings).`,
+      requested: maxPages,
+      code: 'pages_truncated'
+    });
+    // Raising max_pages shows pages whose blocks may then be cut by the per-page cap
+    warnings.push({ ...warning, message: `${warning.message} Blocks per page are capped separately by max_blocks_per_page.` });
   }
   if (affected.length > 0) warnings.push(pageBlocksTruncated(affected, blockCap, maxBlocksPerPage));
 
