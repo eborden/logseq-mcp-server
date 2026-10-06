@@ -1,74 +1,151 @@
 import { readFile } from 'fs/promises';
+// zod 4's API, shipped inside the zod 3.25 package, as in src/utils/parse-args.ts.
+import { z } from 'zod/v4';
 import { LogseqMCPConfig } from './types.js';
+
+/**
+ * The config file failed to load. Each subclass is one way it fails, so callers
+ * and tests can tell them apart by class instead of by message text. No message
+ * ever includes the authToken (ADR-0003).
+ */
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
+/** The config file does not exist. */
+export class ConfigFileNotFoundError extends ConfigError {
+  constructor(readonly configPath: string) {
+    super(`Configuration file not found: ${configPath}`);
+    this.name = 'ConfigFileNotFoundError';
+  }
+}
+
+/** The config file is not valid JSON. */
+export class ConfigInvalidJsonError extends ConfigError {
+  constructor(detail: string) {
+    super(`Invalid JSON in config file: ${detail}`);
+    this.name = 'ConfigInvalidJsonError';
+  }
+}
+
+/**
+ * A config field (or `LOGSEQ_MCP_TIPS`) has a missing or wrong value. `field`
+ * names it; the message says what it must be and never shows the value.
+ */
+export class ConfigValidationError extends ConfigError {
+  constructor(readonly field: string, problem: string) {
+    super(`Configuration validation failed: ${field} ${problem}`);
+    this.name = 'ConfigValidationError';
+  }
+}
+
+const DEFAULT_API_URL = 'http://127.0.0.1:12315';
+
+/**
+ * What each field must be, as the `<field> <problem>` tail of the
+ * ConfigValidationError message. Every issue a field's schema raises carries
+ * one of these, so the parse result maps straight to the error.
+ */
+const PROBLEMS = {
+  authTokenRequired: 'is required',
+  notAString: 'must be a string',
+  timeoutMs: 'must be a positive finite number',
+  tips: 'must be a boolean',
+} as const;
+
+/**
+ * The config file's schema, in two stages so the first issue zod reports is the
+ * error the hand-written checks reported before (#63):
+ *
+ * 1. The file holds an object with a truthy `authToken`. Anything else (no
+ *    `authToken`, `""`, `null`, a top-level array or number) is "authToken is
+ *    required". This outranks every other problem.
+ * 2. Each field in turn: `apiUrl` (falsy means the default), then `authToken`'s
+ *    type, then `timeoutMs`, then `tips`. zod reports object issues in shape
+ *    order, and `loadConfig` reports the first.
+ *
+ * Unknown keys are dropped (zod's default strip), so the result holds only these
+ * four keys and the optional two only when set (ADR-0005's guard test pins that).
+ * Nothing is coerced: `"5000"` is not a timeout and `"false"` is not a boolean.
+ */
+const configSchema = z
+  .custom<Record<string, unknown>>(
+    value =>
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      Boolean((value as Record<string, unknown>).authToken),
+    { error: PROBLEMS.authTokenRequired, path: ['authToken'] }
+  )
+  .pipe(
+    z.object({
+      apiUrl: z
+        .unknown()
+        .transform(value => value || DEFAULT_API_URL)
+        .pipe(z.string({ error: PROBLEMS.notAString })),
+      authToken: z.string({ error: PROBLEMS.notAString }),
+      // z.number() rejects Infinity (what 1e999 parses to) and NaN.
+      timeoutMs: z.number({ error: PROBLEMS.timeoutMs }).positive({ error: PROBLEMS.timeoutMs }).optional(),
+      tips: z.boolean({ error: PROBLEMS.tips }).optional(),
+    })
+  );
+
+// Fails tsc if the schema's output and LogseqMCPConfig drift apart in either direction.
+type ParsedConfig = z.output<typeof configSchema>;
+const _schemaMatchesType: [ParsedConfig, LogseqMCPConfig] extends [LogseqMCPConfig, ParsedConfig] ? true : never = true;
+void _schemaMatchesType;
 
 /**
  * Load and validate configuration from a JSON file
  * @param configPath - Path to the configuration file
  * @returns Validated configuration object
- * @throws Error if config file doesn't exist, is invalid JSON, or missing required fields
+ * @throws ConfigFileNotFoundError if the file doesn't exist, ConfigInvalidJsonError
+ *   if it isn't JSON, ConfigValidationError if a field is missing or wrong. Other
+ *   read errors (permissions, a directory) are re-thrown as they are.
  */
 export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
+  let configData: string;
   try {
-    // Read the config file
-    const configData = await readFile(configPath, 'utf-8');
-
-    // Parse JSON
-    let config: any;
-    try {
-      config = JSON.parse(configData);
-    } catch (parseError) {
-      throw new Error(`Invalid JSON in config file: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
-    }
-
-    // Validate required fields
-    if (!config.authToken) {
-      throw new Error('Configuration validation failed: authToken is required');
-    }
-
-    // Apply default for apiUrl if not provided
-    const apiUrl = config.apiUrl || 'http://127.0.0.1:12315';
-
-    // Validate types
-    if (typeof apiUrl !== 'string') {
-      throw new Error('Configuration validation failed: apiUrl must be a string');
-    }
-
-    if (typeof config.authToken !== 'string') {
-      throw new Error('Configuration validation failed: authToken must be a string');
-    }
-
-    if (config.timeoutMs !== undefined &&
-        (typeof config.timeoutMs !== 'number' || !Number.isFinite(config.timeoutMs) || config.timeoutMs <= 0)) {
-      throw new Error('Configuration validation failed: timeoutMs must be a positive finite number');
-    }
-
-    if (config.tips !== undefined && typeof config.tips !== 'boolean') {
-      throw new Error('Configuration validation failed: tips must be a boolean');
-    }
-
-    return {
-      apiUrl,
-      authToken: config.authToken,
-      ...(config.timeoutMs !== undefined && { timeoutMs: config.timeoutMs }),
-      ...(config.tips !== undefined && { tips: config.tips })
-    };
+    configData = await readFile(configPath, 'utf-8');
   } catch (error) {
-    // Re-throw validation errors as-is
-    if (error instanceof Error && error.message.includes('Configuration validation')) {
-      throw error;
-    }
-    if (error instanceof Error && error.message.includes('Invalid JSON')) {
-      throw error;
-    }
-
-    // Handle file not found and other errors
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      throw new Error(`Configuration file not found: ${configPath}`);
+      throw new ConfigFileNotFoundError(configPath);
     }
-
-    // Re-throw other errors
     throw error;
   }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(configData);
+  } catch (parseError) {
+    throw new ConfigInvalidJsonError(jsonErrorDetail(parseError));
+  }
+
+  const result = configSchema.safeParse(raw);
+  if (!result.success) {
+    const issue = result.error.issues[0];
+    throw new ConfigValidationError(String(issue.path[0] ?? 'authToken'), issue.message);
+  }
+  return result.data;
+}
+
+/**
+ * The parser's reason, for the ConfigInvalidJsonError message. V8 quotes a
+ * stretch of the file in some messages (`Unexpected token 'a', ..."thToken":
+ * abc123"... is not valid JSON`), and that stretch can be the authToken. A
+ * message with a double quote in it is quoting the file, so it is replaced;
+ * the rest (`Unterminated string in JSON at position 18 (line 1 column 19)`)
+ * are kept word for word.
+ */
+function jsonErrorDetail(parseError: unknown): string {
+  if (!(parseError instanceof Error)) return 'Unknown error';
+  if (parseError.message.includes('"')) {
+    return 'Unexpected token (the text around it is not shown, as it may hold the authToken)';
+  }
+  return parseError.message;
 }
 
 const TIPS_OFF_VALUES = ['0', 'false', 'off', 'no'];
@@ -79,7 +156,8 @@ const TIPS_ON_VALUES = ['1', 'true', 'on', 'yes'];
  * the config file turns them off. `LOGSEQ_MCP_TIPS` overrides the file: `off`,
  * `false`, `0` or `no` turn tips off, `on`, `true`, `1` or `yes` turn them on
  * (case-insensitive, surrounding spaces ignored). An empty variable is ignored.
- * Any other value throws, so a typo such as `disabled` can't leave tips on silently.
+ * Any other value throws ConfigValidationError, so a typo such as `disabled`
+ * can't leave tips on silently.
  */
 export function resolveTipsEnabled(
   config: Pick<LogseqMCPConfig, 'tips'>,
@@ -90,8 +168,9 @@ export function resolveTipsEnabled(
   if (flag !== undefined && flag !== '') {
     if (TIPS_OFF_VALUES.includes(flag)) return false;
     if (TIPS_ON_VALUES.includes(flag)) return true;
-    throw new Error(
-      `Configuration validation failed: LOGSEQ_MCP_TIPS must be one of ${[...TIPS_ON_VALUES, ...TIPS_OFF_VALUES].join(', ')} (got "${raw}")`
+    throw new ConfigValidationError(
+      'LOGSEQ_MCP_TIPS',
+      `must be one of ${[...TIPS_ON_VALUES, ...TIPS_OFF_VALUES].join(', ')} (got "${raw}")`
     );
   }
   return config.tips !== false;
