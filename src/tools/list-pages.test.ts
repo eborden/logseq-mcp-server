@@ -14,8 +14,8 @@ describe('listPages', () => {
 
   it('should return pages as string array', async () => {
     const mockPages: PageEntity[] = [
-      { id: 1, uuid: 'u1', name: 'alpha', originalName: 'Alpha', content: '' },
-      { id: 2, uuid: 'u2', name: 'beta', originalName: 'Beta', content: '' },
+      { id: 1, uuid: 'u1', name: 'alpha', originalName: 'Alpha' },
+      { id: 2, uuid: 'u2', name: 'beta', originalName: 'Beta' },
     ];
     (mockClient.callAPI as any).mockResolvedValue(mockPages);
 
@@ -28,10 +28,10 @@ describe('listPages', () => {
 
   it('should exclude journal pages', async () => {
     const mockPages: PageEntity[] = [
-      { id: 1, uuid: 'u1', name: 'project', originalName: 'Project', content: '' },
-      { id: 2, uuid: 'u2', name: 'nov 15th, 2025', originalName: 'Nov 15th, 2025', content: '', 'journal?': true },
-      { id: 3, uuid: 'u3', name: 'dec 1st, 2025', originalName: 'Dec 1st, 2025', content: '', journal: true },
-    ] as any;
+      { id: 1, uuid: 'u1', name: 'project', originalName: 'Project' },
+      { id: 2, uuid: 'u2', name: 'nov 15th, 2025', originalName: 'Nov 15th, 2025', 'journal?': true },
+      { id: 3, uuid: 'u3', name: 'dec 1st, 2025', originalName: 'Dec 1st, 2025', journal: true },
+    ];
     (mockClient.callAPI as any).mockResolvedValue(mockPages);
 
     const result = await listPages(mockClient);
@@ -42,9 +42,9 @@ describe('listPages', () => {
 
   it('should filter by name case-insensitively', async () => {
     const mockPages: PageEntity[] = [
-      { id: 1, uuid: 'u1', name: 'engineering', originalName: 'Engineering', content: '' },
-      { id: 2, uuid: 'u2', name: 'experiment', originalName: 'Experiment', content: '' },
-      { id: 3, uuid: 'u3', name: 'project', originalName: 'Project', content: '' },
+      { id: 1, uuid: 'u1', name: 'engineering', originalName: 'Engineering' },
+      { id: 2, uuid: 'u2', name: 'experiment', originalName: 'Experiment' },
+      { id: 3, uuid: 'u3', name: 'project', originalName: 'Project' },
     ];
     (mockClient.callAPI as any).mockResolvedValue(mockPages);
 
@@ -112,8 +112,8 @@ describe('listPages', () => {
 
     it('adds no warning when every page is a journal or filtered out', async () => {
       (mockClient.callAPI as any).mockResolvedValue([
-        { id: 1, uuid: 'u1', name: 'jan 1st, 2025', originalName: 'Jan 1st, 2025', content: '', 'journal?': true },
-        { id: 2, uuid: 'u2', name: 'alpha', originalName: 'Alpha', content: '' },
+        { id: 1, uuid: 'u1', name: 'jan 1st, 2025', originalName: 'Jan 1st, 2025', 'journal?': true },
+        { id: 2, uuid: 'u2', name: 'alpha', originalName: 'Alpha' },
       ]);
 
       const result = await listPages(mockClient, { nameContains: 'zzz' });
@@ -130,8 +130,8 @@ describe('listPages', () => {
 
   it('should return pages sorted alphabetically', async () => {
     const mockPages: PageEntity[] = [
-      { id: 1, uuid: 'u1', name: 'zebra', originalName: 'Zebra', content: '' },
-      { id: 2, uuid: 'u2', name: 'alpha', originalName: 'Alpha', content: '' },
+      { id: 1, uuid: 'u1', name: 'zebra', originalName: 'Zebra' },
+      { id: 2, uuid: 'u2', name: 'alpha', originalName: 'Alpha' },
     ];
     (mockClient.callAPI as any).mockResolvedValue(mockPages);
 
@@ -142,9 +142,9 @@ describe('listPages', () => {
 
   it('should sort by lowercase name but return original casing', async () => {
     const mockPages: PageEntity[] = [
-      { id: 1, uuid: 'u1', name: 'api', originalName: 'API', content: '' },
-      { id: 2, uuid: 'u2', name: 'apple', originalName: 'Apple', content: '' },
-      { id: 3, uuid: 'u3', name: 'aaa', originalName: 'AAA', content: '' },
+      { id: 1, uuid: 'u1', name: 'api', originalName: 'API' },
+      { id: 2, uuid: 'u2', name: 'apple', originalName: 'Apple' },
+      { id: 3, uuid: 'u3', name: 'aaa', originalName: 'AAA' },
     ];
     (mockClient.callAPI as any).mockResolvedValue(mockPages);
 
