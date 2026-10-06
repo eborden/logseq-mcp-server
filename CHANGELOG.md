@@ -37,6 +37,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 ### Changed
 
+- `search_by_relationship` with `connected-within` now counts `limit` in blocks of the two pages' trees, nested ones included, in document order (topic A's page first), instead of top-level blocks only (#183). A page whose blocks have many children used to return all of them past the cap; now the result holds at most `limit` blocks (default 50, at most 500) and cuts subtrees at the limit. A kept block that lost children carries `childrenTruncated: true` (additive: the field appears only on a cut), and `totals.blocks` and the `results_truncated` warning count in the same unit. A result at or below the cap is unchanged. The other relationship types still count one per matching block.
 - Minimum Node is now 22.12 (`engines.node` is `>=22.12.0`). Node 18 and 20 are past end of life, and 22.12 is the floor of the dev toolchain (vite 7). CI tests on Node 22 and 24.
 - `serverInfo.version` in `initialize` is now read from `package.json`. It was a hard-coded `1.0.0` (#46).
 - Graph traversal, search and date-range tools run as batched Datalog queries instead of one API call per page. `get_concept_network` at depth 2 went from over a hundred calls to three, `search_blocks` to one, and `query_by_date_range` to two regardless of range length.
