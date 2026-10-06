@@ -12,13 +12,14 @@
 #   em-dashes           0                 0
 # Two-sentence bullets are flagged for review, not auto-failed.
 #
-# Source line (read-only, no graph access): the page must carry a `source::` property that records the
-# roll-up of the period query it was built from, as
-#   source:: query_by_date_range 20250106-20250110; days 5; blocks 250; top Name 12/4, Name 9/2
-# (days and blocks from summary.totalDays and summary.totalBlocks, top from the first five of
-# summary.topConcepts as "name count/days", or "top none" when the field is absent). A page with no such
-# line was not built from the query, and fails. `source:: files; <error>` is the fallback after a tool call
-# failed; it fails too unless --allow-files is given.
+# Source line (read-only, no graph access): the page must carry a `summary-source::` property that records
+# the roll-up of the period query it was built from, as
+#   summary-source:: query_by_date_range 20250106-20250110; days 5; blocks 250; top Name 12/4 | Name 9/2
+# (days and blocks from summary.totalDays and summary.totalBlocks; top from the first five of
+# summary.topConcepts as "name count/days" separated by " | ", or "top none" when the query returned no
+# topConcepts). A page with no such line was not built from the query, and fails. The range must lie inside
+# the page's week (Monday to Sunday) or month. `summary-source:: files; <error>` is the fallback after a tool
+# call failed; it needs a reason and fails too unless --allow-files is given.
 #
 # Usage: check-terseness.sh [--weekly|--monthly] [--allow-files] <path to summary .md>
 
@@ -125,15 +126,30 @@ for sect in Signals Unresolved Personal; do
 done
 
 # The page must record the roll-up of the period query it came from.
-source_line=$(grep -m1 -E '^source::' "$FILE" || true)
-source_re='^source:: query_by_date_range ([0-9]{8})-([0-9]{8}); days ([0-9]+); blocks ([0-9]+); top (.+)$'
-top_re='^(none|[^,/]+ [0-9]+/[0-9]+(, [^,/]+ [0-9]+/[0-9]+)*)$'
-src_hint="Run logseq_query_by_date_range for the period and record its summary on a source:: line under the tags line (Step 6 of the sub-skill)."
+# Day number of a YYYYMMDD date (days since 1970-01-01), for week arithmetic without `date`; -1 if not a date.
+day_number() {
+  local y=$((10#${1:0:4})) m=$((10#${1:4:2})) d=$((10#${1:6:2}))
+  (( m >= 1 && m <= 12 && d >= 1 && d <= 31 )) || { echo -1; return; }
+  (( m <= 2 )) && y=$((y - 1))
+  local era=$(( y / 400 )) yoe doy doe
+  yoe=$(( y - era * 400 ))
+  doy=$(( (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1 ))
+  doe=$(( yoe * 365 + yoe / 4 - yoe / 100 + doy ))
+  echo $(( era * 146097 + doe - 719468 ))
+}
+
+source_line=$(grep -m1 -E '^summary-source::' "$FILE" || true)
+source_re='^summary-source:: query_by_date_range ([0-9]{8})-([0-9]{8}); days ([0-9]{1,4}); blocks ([0-9]{1,7}); top (.+)$'
+top_entry_re='^[^|]+ [0-9]+/[0-9]+$'
+src_hint="Run logseq_query_by_date_range for the period and record its summary on a summary-source:: line under the tags line (Step 6 of the sub-skill)."
 if [[ -z "$source_line" ]]; then
-  echo "FAIL: no 'source::' line, so the page was not built from logseq_query_by_date_range. $src_hint"
+  echo "FAIL: no 'summary-source::' line, so the page was not built from logseq_query_by_date_range. $src_hint"
   fail=1
-elif [[ "$source_line" =~ ^source::\ files(\;|$) ]]; then
-  if (( ALLOW_FILES )); then
+elif [[ "$source_line" =~ ^summary-source::\ files(\;|$) ]]; then
+  if [[ ! "$source_line" =~ ^summary-source::\ files\;\ +[^\ ] ]]; then
+    echo "FAIL: 'summary-source:: files' needs the reason, as 'summary-source:: files; <the error the tool call returned>'"
+    fail=1
+  elif (( ALLOW_FILES )); then
     echo "WARN: source is journal files, not the query (--allow-files). That is valid only after a tool call failed, and the gist must say so."
     warn=1
   else
@@ -142,15 +158,34 @@ elif [[ "$source_line" =~ ^source::\ files(\;|$) ]]; then
   fi
 elif [[ "$source_line" =~ $source_re ]]; then
   src_start=${BASH_REMATCH[1]}; src_end=${BASH_REMATCH[2]}
-  src_days=${BASH_REMATCH[3]}; src_blocks=${BASH_REMATCH[4]}; src_top=${BASH_REMATCH[5]}
+  src_days=$((10#${BASH_REMATCH[3]})); src_blocks=$((10#${BASH_REMATCH[4]})); src_top=${BASH_REMATCH[5]}
   printf 'source: query_by_date_range %s-%s, %s days, %s blocks\n' "$src_start" "$src_end" "$src_days" "$src_blocks"
   (( src_days >= 1 && src_blocks >= 1 )) || { echo "FAIL: the source line records no days or no blocks; there is nothing to summarize"; fail=1; }
-  (( 10#$src_end >= 10#$src_start )) || { echo "FAIL: source range ends ($src_end) before it starts ($src_start)"; fail=1; }
-  [[ "$src_top" =~ $top_re ]] || { echo "FAIL: source 'top' must be 'none' or 'name count/days' entries separated by ', '"; fail=1; }
+  start_n=$(day_number "$src_start"); end_n=$(day_number "$src_end")
+  if (( start_n < 0 || end_n < 0 )); then
+    echo "FAIL: source range $src_start-$src_end holds a date that is not a real YYYYMMDD"; fail=1
+  elif (( end_n < start_n )); then
+    echo "FAIL: source range ends ($src_end) before it starts ($src_start)"; fail=1
+  fi
+  # top: 'none', or entries 'name count/days' separated by ' | '. A name may hold '/' and ','; it may not hold brackets, '#' or ' | '.
+  top_ok=1
+  if [[ "$src_top" != none ]]; then
+    if [[ "$src_top" == *'[['* || "$src_top" == *']]'* || "$src_top" == *'#'* ]]; then
+      top_ok=0
+    else
+      while IFS= read -r entry; do
+        [[ "$entry" =~ $top_entry_re ]] || top_ok=0
+      done <<< "${src_top// | /$'\n'}"
+    fi
+  fi
+  (( top_ok )) || { echo "FAIL: source 'top' must be 'none' or 'name count/days' entries separated by ' | ', with no [[ ]] or # in a name"; fail=1; }
   base=$(basename "$FILE" .md)
   if [[ "$base" =~ ^Weekly\ ([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
     want="${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
-    [[ "$src_start" == "$want" ]] || { echo "FAIL: source range starts $src_start but the page is for the week of $want"; fail=1; }
+    want_n=$(day_number "$want")
+    if (( start_n >= 0 && end_n >= 0 )) && (( start_n < want_n || start_n > want_n + 6 || end_n > want_n + 6 )); then
+      echo "FAIL: source range $src_start-$src_end is not inside the week of $want (that Monday through Sunday)"; fail=1
+    fi
     day_links=$(grep -m1 -E '^tags::' "$FILE" | grep -Eo '\[\[[A-Z][a-z]{2} [0-9]{1,2}(st|nd|rd|th), [0-9]{4}\]\]' | wc -l | tr -d ' ')
     if [[ "$day_links" != "$src_days" ]]; then
       echo "WARN: the tags line links $day_links journal days but the source line says $src_days"
@@ -161,7 +196,7 @@ elif [[ "$source_line" =~ $source_re ]]; then
     [[ "${src_start:0:6}" == "$want" && "${src_end:0:6}" == "$want" ]] || { echo "FAIL: source range $src_start-$src_end is not inside the month $want"; fail=1; }
   fi
 else
-  echo "FAIL: malformed source line. Expected 'source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top none' or 'top Name 12/4, Name 9/2'. $src_hint"
+  echo "FAIL: malformed summary-source line. Expected 'summary-source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top none' or 'top Name 12/4 | Name 9/2'. $src_hint"
   fail=1
 fi
 
