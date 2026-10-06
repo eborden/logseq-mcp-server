@@ -10,25 +10,47 @@ import {
   resolveAliasSet,
   resolvedAliases
 } from '../utils/alias-set.js';
-import { buildResultMeta } from '../utils/result-meta.js';
-import type { ResolveRefsMeta } from '../types.js';
+import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import type { ResolveRefsMeta, ResultMeta } from '../types.js';
 
 /** Every grouping period, in the order `group_by` advertises them (#60). */
 export const GROUP_BY_PERIODS = ['day', 'week', 'month'] as const;
 
 export type GroupByPeriod = (typeof GROUP_BY_PERIODS)[number];
 
+/** Mentions (blocks in the timeline) kept when `maxEntries` is absent. */
+export const DEFAULT_MAX_ENTRIES = 100;
+
+/**
+ * Most mentions one call returns (#61). A larger `maxEntries` is clamped to it,
+ * and a cut at the maximum is reported by an `entries_truncated` warning with no
+ * `howToFetchAll`: only `start_date` and `end_date` reach the rest.
+ */
+export const MAX_ENTRIES = 500;
+
+/** How to reach mentions past the maximum: no parameter fetches them. */
+const NARROWER = 'Narrow start_date and end_date to see the rest.';
+
 export interface ConceptEvolutionOptions {
   startDate?: number;
   endDate?: number;
   groupBy?: GroupByPeriod;
+  /**
+   * Mentions kept (default 100), clamped to 0..`MAX_ENTRIES` (500) and floored.
+   * The timeline's order decides which: oldest first, mentions with no date last.
+   */
+  maxEntries?: number;
 }
 
 /**
  * `hasMore` / `warnings` are present only when a warning applies (an alias group
- * cut at its maximum), so default output is unchanged.
+ * cut at its maximum, or mentions cut at `maxEntries`), so default output is
+ * unchanged. `totals.mentions` accompanies a cut: how many mentions there were.
+ * `summary` always describes every mention found, so its counts can exceed what
+ * `timeline` holds when a cut is reported.
  */
 export interface ConceptEvolutionResult extends ResolvedFrom, ResolvedAliases, ResolveRefsMeta {
+  totals?: ResultMeta['totals'];
   concept: string;
   timeline: Array<{
     date: number | null;
@@ -94,7 +116,7 @@ export async function getConceptEvolution(
   conceptName: string,
   options: ConceptEvolutionOptions = {}
 ): Promise<ConceptEvolutionResult> {
-  const { startDate, endDate, groupBy } = options;
+  const { startDate, endDate, groupBy, maxEntries = DEFAULT_MAX_ENTRIES } = options;
 
   // Resolve the name first (exact name, alias or ISO date, in one query).
   // Throws PageNotFoundError (with suggestions) or AmbiguousPageError (with candidates).
@@ -158,6 +180,9 @@ export async function getConceptEvolution(
     });
   }
 
+  // Mentions there are before the cap (#61): the summary and the warning count them all
+  const total = filteredBlocks.length;
+
   // Build timeline
   const timelineMap = new Map<number | null, BlockEntity[]>();
 
@@ -175,7 +200,7 @@ export async function getConceptEvolution(
   }
 
   // Sort by date
-  const timeline = Array.from(timelineMap.entries())
+  const fullTimeline = Array.from(timelineMap.entries())
     .map(([date, blocks]) => ({ date, blocks }))
     .sort((a, b) => {
       if (a.date === null && b.date === null) return 0;
@@ -184,13 +209,32 @@ export async function getConceptEvolution(
       return a.date - b.date;
     });
 
+  // Cap the mentions (#61) in timeline order: oldest first, undated last. The
+  // timeline and the grouping keep the first `cap` of them. At or below the cap
+  // nothing changes.
+  const cap = Math.min(Math.max(0, Math.floor(maxEntries)), MAX_ENTRIES);
+  let timeline = fullTimeline;
+  let shownBlocks = filteredBlocks;
+  if (total > cap) {
+    let room = cap;
+    timeline = [];
+    for (const { date, blocks } of fullTimeline) {
+      if (room === 0) break;
+      const taken = blocks.slice(0, room);
+      timeline.push({ date, blocks: taken });
+      room -= taken.length;
+    }
+    const kept = new Set(timeline.flatMap(entry => entry.blocks));
+    shownBlocks = filteredBlocks.filter(block => kept.has(block));
+  }
+
   // Group by period if requested
   let groupedTimeline: Map<string, BlockEntity[]> | undefined;
 
   if (groupBy) {
     groupedTimeline = new Map();
 
-    for (const block of filteredBlocks) {
+    for (const block of shownBlocks) {
       // Handle both camelCase (HTTP API) and kebab-case (Datalog)
       const page = block.page as any;
       const date = page?.journalDay || page?.['journal-day'];
@@ -236,14 +280,32 @@ export async function getConceptEvolution(
     nonJournalMentions: filteredBlocks.length - dates.length
   };
 
-  const aliasWarnings = aliasSetWarnings(aliasSet);
-  const aliasMeta: ResolveRefsMeta = aliasWarnings.length > 0 ? buildResultMeta(aliasWarnings) : {};
+  const warnings = aliasSetWarnings(aliasSet);
+  if (total > shownBlocks.length) {
+    warnings.push(
+      cappedTruncationWarning({
+        what: 'mentions (oldest first, undated last)',
+        shown: shownBlocks.length,
+        total,
+        param: 'max_entries',
+        max: MAX_ENTRIES,
+        narrower: NARROWER,
+        requested: maxEntries,
+        code: 'entries_truncated'
+      })
+    );
+  }
+  // The total comes only with a cut, so output below the cap is unchanged
+  const meta: ResolveRefsMeta & Pick<ConceptEvolutionResult, 'totals'> =
+    warnings.length > 0
+      ? buildResultMeta(warnings, total > shownBlocks.length ? { mentions: total } : undefined)
+      : {};
 
   return {
     concept: conceptName,
     ...resolvedFrom(conceptName, resolved),
     ...resolvedAliases(aliasSet),
-    ...aliasMeta,
+    ...meta,
     timeline,
     groupedTimeline: groupedTimeline ? Object.fromEntries(groupedTimeline) : undefined,
     summary
