@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { LogseqClient } from './client.js';
-import { LogSeqNotRunningError } from './errors.js';
+import { LogSeqAuthError, LogSeqNotRunningError, LogSeqTimeoutError, isInfrastructureError } from './errors.js';
 import {
   FIXTURE_SENTINEL_PAGE,
   FIXTURE_VERSION,
@@ -74,10 +74,14 @@ describe('requireFixtureGraph', () => {
     await expect(run).rejects.toThrow(`expect version ${FIXTURE_VERSION}`);
   });
 
-  it('lets connection errors through unchanged', async () => {
-    const error = new LogSeqNotRunningError('http://127.0.0.1:12315');
-    const client = { executeDatalogQuery: vi.fn().mockRejectedValue(error) } as unknown as LogseqClient;
-    await expect(requireFixtureGraph(client)).rejects.toBe(error);
+  it('lets connection, timeout and auth errors through unchanged', async () => {
+    const apiUrl = 'http://127.0.0.1:12315';
+    const errors = [new LogSeqNotRunningError(apiUrl), new LogSeqTimeoutError(apiUrl, 30000), new LogSeqAuthError(apiUrl)];
+    for (const error of errors) {
+      expect(isInfrastructureError(error), error.name).toBe(true);
+      const client = { executeDatalogQuery: vi.fn().mockRejectedValue(error) } as unknown as LogseqClient;
+      await expect(requireFixtureGraph(client), error.name).rejects.toBe(error);
+    }
   });
 });
 
