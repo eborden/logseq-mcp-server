@@ -13,7 +13,7 @@ Use made-up examples instead (`"Alice"`, `"Bob"`, `"my page"`, `"project atlas"`
 
 ## Rationale
 
-The repo and its GitHub project are public, and integration tests, probes and scripts read real data from the personal graph. Introduced in #20; also a hard rule in the foundations doc (#38).
+The repo and its GitHub project are public, and some paths still reach real data from the personal graph. The integration tests and `scripts/probe-constraints.ts` run against the fixture instance by default, and both refuse a config on port 12315 (#90). The paths that remain: the `scripts/measure-*.ts` scripts, which read the real graph by explicit choice as the documented baseline; `scripts/probe-constraints.ts`, only when `LOGSEQ_MCP_CONFIG` points it at a personal instance on another port; and normal sessions that use the MCP tools on the real graph. Introduced in #20; also a hard rule in the foundations doc (#38).
 
 ## Mechanical enforcement
 
@@ -31,3 +31,4 @@ Real names can't be listed in a repo check without publishing them. A local hook
 | 2026-10-05 | Introduced. | #20 |
 | 2026-10-05 | Restated as a hard rule in the foundations doc. | #38 |
 | 2026-10-05 | Enforcement: the tracked raw-output test replaces `none-yet: #95`, the reviewer step stays as the fallback, and the local hook is tracked as `none-yet: #98`. | #99, #103 |
+| 2026-10-06 | Rationale only: the integration tests and the probe no longer read the personal graph, so it names the paths that still can. Statement unchanged. | #157 |
