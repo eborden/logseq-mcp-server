@@ -29,5 +29,7 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/index.slim-default.test.ts` (omitted means slim, false means full, every tool that advertises slim_results defaults to slim, the schema advertises default: true; the default is the `slim_results` schema default in `src/tool-args.ts`)
+- test: `src/index.slim-default.test.ts` (omitted means slim, false means full, every tool that advertises slim_results defaults to slim, the schema advertises default: true)
 - test: `src/utils/slim-entities.test.ts`
+
+The default itself is the `slim_results` schema default in `src/tool-args.ts`.
