@@ -6,6 +6,7 @@ import {
   assertNoNodeDuplicates,
   assertReferentialIntegrity,
   assertDepthMonotonic,
+  assertDepthIsDistance,
   assertConnectedGraph,
   assertSubset
 } from '../helpers/invariants.js';
@@ -104,6 +105,8 @@ describe('Property: Graph Traversal Invariants', () => {
         // Property: Depth increases by at most 1 along edges. Holds under a cap too: depth is
         // the node's distance from the root over the returned edges (#155).
         assertDepthMonotonic(result.nodes, result.edges);
+        // Exact, so a label that is too low fails too, not only one that is too high
+        assertDepthIsDistance(result.nodes, result.edges, page);
       }
       // The capped networks are the ones that used to break the invariant
       expect(capped, 'no fixture network was capped').toBeGreaterThanOrEqual(1);
