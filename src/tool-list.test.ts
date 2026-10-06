@@ -53,6 +53,8 @@ import { LogseqClient } from './client.js';
  * description lines, less a trimmed "Matching" line), bringing it to 17,754 across 16 tools; the budget was not raised.
  * `limit` on logseq_search_by_relationship (#61), the last row, added 201 characters (the parameter and a clause in two
  * description lines), bringing it to 17,955 across 16 tools; the budget was not raised (1,745 characters of headroom).
+ * Saying in `limit`'s parameter text that connected-within counts top-level blocks (review of #182) added 86 more, bringing it to
+ * 18,041 across 16 tools; the budget was not raised (1,659 characters of headroom).
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.

@@ -184,7 +184,9 @@ export const searchByRelationshipArgs = z.object({
   limit: z
     .number()
     .default(DEFAULT_RELATIONSHIP_LIMIT)
-    .describe(`Max results to return (default: ${DEFAULT_RELATIONSHIP_LIMIT}, max: ${MAX_RELATIONSHIP_LIMIT})`),
+    .describe(
+      `Max results (default: ${DEFAULT_RELATIONSHIP_LIMIT}, max: ${MAX_RELATIONSHIP_LIMIT}). connected-within counts top-level blocks, topic A's first; kept blocks keep all their children`
+    ),
 });
 
 export const getContextForQueryArgs = z.object({
