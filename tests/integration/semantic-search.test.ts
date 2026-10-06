@@ -104,36 +104,37 @@ describe('Semantic Search Integration Tests', () => {
     ];
 
     it('should return blocks without context when includeContext is false', async () => {
-      const results = await searchBlocks(client, 'test', 5, false);
+      const results = (await searchBlocks(client, 'test', 5, false))!;
 
       expect(results).toHaveLength(5);
       expect(results.every(b => !('context' in b))).toBe(true);
     });
 
     it('should include context when includeContext is true', async () => {
-      const results = await searchBlocks(client, 'test', 10, true);
+      const results = (await searchBlocks(client, 'test', 10, true))!;
 
       expect(results.map(b => b.context!.page.name).sort()).toEqual(TEST_PAGES);
       for (const block of results) {
         expect(Array.isArray(block.context!.references)).toBe(true);
         expect(Array.isArray(block.context!.tags)).toBe(true);
-        expect(typeof block.context!.page.id).toBe('number');
+        expect(typeof (block.context!.page as { id?: number }).id).toBe('number');
       }
     });
 
     it('should extract references from block content', async () => {
-      const results = await searchBlocks(client, 'test', 10, true);
+      const results = (await searchBlocks(client, 'test', 10, true))!;
       const references = results.flatMap(b => b.context!.references).sort();
 
       // `category:: [[test data]]` and `[[project atlas]]: ... test plan started`
       expect(references).toEqual(['project atlas', 'test data']);
       for (const block of results) {
-        expect(block.context!.references.every(ref => block.content.includes(`[[${ref}]]`))).toBe(true);
+        const content = String(block.content);
+        expect((block.context!.references ?? []).every(ref => content.includes(`[[${ref}]]`))).toBe(true);
       }
     });
 
     it('should extract tags from block content', async () => {
-      const results = await searchBlocks(client, '#meeting', 100, true);
+      const results = (await searchBlocks(client, '#meeting', 100, true))!;
 
       expect(results.map(b => b.context!.page.name).sort()).toEqual([
         'jan 15th, 2025', 'jan 6th, 2025', 'project atlas/meetings', 'project atlas/meetings',

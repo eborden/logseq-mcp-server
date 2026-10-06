@@ -75,7 +75,7 @@ describe('LogSeq MCP Server Integration Tests', () => {
 
   describe('logseq_search_blocks', () => {
     it('should search for blocks by content', async () => {
-      const result = await searchBlocks(client, 'importer');
+      const result = (await searchBlocks(client, 'importer'))!;
 
       // The 11 blocks that say "importer": 7 in journals, 4 on pages
       expect(result).toHaveLength(11);
@@ -84,14 +84,14 @@ describe('LogSeq MCP Server Integration Tests', () => {
     });
 
     it('should return empty array for non-matching search', async () => {
-      const result = await searchBlocks(client, 'xyzzyqwertyneverexists12345');
+      const result = (await searchBlocks(client, 'xyzzyqwertyneverexists12345'))!;
       expect(result).toEqual([]);
     });
   });
 
   describe('logseq_query_by_property', () => {
     it('should query blocks by property', async () => {
-      const result = await queryByProperty(client, 'status', 'testing');
+      const result = (await queryByProperty(client, 'status', 'testing')) as Array<{ content: string; properties?: unknown }>;
 
       expect(result).toHaveLength(1);
       expect(result[0].content).toBe('A text value\nstatus:: testing');

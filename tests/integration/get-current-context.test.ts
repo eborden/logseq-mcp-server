@@ -18,7 +18,8 @@ describe('getCurrentContext - Integration', () => {
     ({ client } = await connectFixture());
   });
 
-  async function pageExists(name: string): Promise<boolean> {
+  async function pageExists(name: string | undefined): Promise<boolean> {
+    if (name === undefined) return false;
     const { query, inputs } = DatalogQueryBuilder.getPage(name);
     return ((await client.executeDatalogQuery<unknown[]>(query, ...inputs)) ?? []).length === 1;
   }

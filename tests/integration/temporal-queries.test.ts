@@ -35,8 +35,8 @@ describe('Temporal Queries Integration Tests', () => {
       expect(result.dateRange).toEqual({ start: 20250101, end: 20250131 });
       expect(result.entries.map(e => [e.date, e.blocks.length])).toEqual(JANUARY);
       expect(result.summary).toMatchObject({ totalDays: 7, totalBlocks: 20 });
-      for (const entry of result.entries) {
-        expect(entry.page['journal-day'] ?? (entry.page as PageEntity).journalDay).toBe(entry.date);
+      for (const entry of result.entries as Array<{ date: number; page: any }>) {
+        expect(entry.page['journal-day'] ?? entry.page.journalDay).toBe(entry.date);
         expect(typeof entry.page.name).toBe('string');
       }
     });
