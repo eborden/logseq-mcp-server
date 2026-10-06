@@ -45,7 +45,8 @@ export const DEFAULT_MAX_SEARCH_RESULTS = 20;
 export const MAX_SEARCH_RESULTS = 100;
 
 /** How to reach hits past the maximum: no parameter fetches them. */
-const NARROWER = 'Use more specific words in the query to see the rest.';
+const NARROWER =
+  'Put the most specific words first: only the first three words longer than three letters, other than stop words, are searched.';
 
 export interface QueryContext {
   query: string;

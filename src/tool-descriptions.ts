@@ -73,9 +73,9 @@ export const TOOL_DESCRIPTIONS = {
 **Can't find:** topics with no page (use logseq_search_blocks), or anything past the caps (see hasMore and warnings).
 **Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).`,
 
-  logseq_get_context_for_query: `Context for a natural-language question. Takes [[page]] and #tag topics from the query, or falls back to keyword search (max 100 hits), and builds context for each.
+  logseq_get_context_for_query: `Context for a natural-language question. Takes [[page]] and #tag topics from the query, else searches its first 3 words over 3 letters (max 100 hits), and builds context for each.
 
-**Can't find:** meaning, or over 100 keyword hits (use specific words). Topics come from explicit links, tags or literal words, so put page names in [[brackets]].
+**Can't find:** meaning, or over 100 keyword hits (put specific words first). Topics come from links, tags or literal words, so put page names in [[brackets]].
 **Alternatives:** logseq_build_context for one known topic.`,
 
   logseq_get_concept_network: `Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.
