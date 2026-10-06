@@ -315,6 +315,11 @@ export interface InstanceDeps {
 }
 
 export interface StartOptions {
+  /**
+   * The worktree whose `.logseq-instance/` the instance lives in. Any spelling of it works:
+   * `startInstance` resolves it to its canonical path first, so the checks that compare it with
+   * the canonical graph folder see the same folder the same way.
+   */
   worktree: string;
   graphDir: string;
   template: string;
@@ -461,7 +466,10 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
   if (deps.platform !== 'darwin') {
     throw new InstanceError(`logseq-instance supports macOS only (this is ${deps.platform}).`);
   }
-  const paths = instancePaths(options.worktree);
+  const worktree = await deps.realDir(options.worktree);
+  if (!worktree) throw new InstanceError(`worktree not found: ${options.worktree}`);
+  const resolved: StartOptions = { ...options, worktree };
+  const paths = instancePaths(worktree);
 
   const existing = await readRecord(paths, deps);
   if (existing && existing.profileDir === paths.profile && liveInstancePid(existing, deps) !== undefined) {
@@ -493,7 +501,7 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
   const lost = new Set<number>();
   for (let attempt = 1; ; attempt++) {
     try {
-      return await launch(options, paths, sourceGraphDir, expectedFiles, spec, lost, deps);
+      return await launch(resolved, paths, sourceGraphDir, expectedFiles, spec, lost, deps);
     } catch (error) {
       if (!(error instanceof PortTakenError) || attempt >= START_ATTEMPTS) throw error;
       lost.add(error.port);
@@ -588,7 +596,7 @@ async function forget(paths: InstancePaths, deps: InstanceDeps): Promise<void> {
  * profile; otherwise the record is stale (the process is gone) or refused.
  */
 export async function stopInstance(worktree: string, deps: InstanceDeps): Promise<StopResult> {
-  const paths = instancePaths(worktree);
+  const paths = instancePaths((await deps.realDir(worktree)) ?? worktree);
   const record = await readRecord(paths, deps);
   if (!record) {
     await forget(paths, deps);
@@ -638,7 +646,7 @@ async function readInstanceToken(paths: InstancePaths, deps: InstanceDeps): Prom
 
 /** Whether the recorded instance is running, and what its API says. Read-only. */
 export async function instanceStatus(worktree: string, deps: InstanceDeps): Promise<StatusResult> {
-  const paths = instancePaths(worktree);
+  const paths = instancePaths((await deps.realDir(worktree)) ?? worktree);
   const record = await readRecord(paths, deps);
   if (!record) return { state: 'none' };
   if (record.profileDir !== paths.profile || liveInstancePid(record, deps) === undefined) {
