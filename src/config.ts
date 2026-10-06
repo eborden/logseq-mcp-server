@@ -33,7 +33,10 @@ export class ConfigInvalidJsonError extends ConfigError {
 
 /**
  * A config field (or `LOGSEQ_MCP_TIPS`) has a missing or wrong value. `field`
- * names it; the message says what it must be and never shows the value.
+ * names it; the message says what it must be and never shows a config-file
+ * value, since any of them could be the token. The `LOGSEQ_MCP_TIPS` message
+ * echoes the variable's value (`(got "disabled")`), which holds no secret; don't
+ * copy that for a field that could.
  */
 export class ConfigValidationError extends ConfigError {
   constructor(readonly field: string, problem: string) {
