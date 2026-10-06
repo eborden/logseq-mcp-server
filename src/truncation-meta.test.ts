@@ -421,3 +421,87 @@ describe('logseq_query_by_date_range max_blocks (#61)', () => {
     expect(result.isError).toBe(true);
   });
 });
+
+describe('logseq_get_backlinks max_pages and max_blocks_per_page (#61)', () => {
+  // The page resolves by name with no alias; `pages` source pages of `perPage` linking blocks each,
+  // as the Editor API's linked references return them
+  const backlinks = (pages: number, perPage: number, args: Record<string, unknown> = {}) => {
+    const tuples = Array.from({ length: pages }, (_, i) => [
+      { id: 100 + i, name: `source ${i}`, originalName: `Source ${i}` },
+      Array.from({ length: perPage }, (_, k) => ({ id: (100 + i) * 1000 + k, uuid: `u${i}-${k}`, content: `link [[Alice]]`, page: { id: 100 + i } })),
+    ]);
+    const callAPI = vi.fn(async (method: string) =>
+      method === 'logseq.DB.datascriptQuery' ? [[{ id: 1, name: 'alice', 'original-name': 'Alice' }, 'name']] : tuples
+    );
+    return callTool(callAPI, 'logseq_get_backlinks', { page_name: 'Alice', ...args });
+  };
+  const blocksIn = (results: any[]) => results.reduce((sum: number, [, blocks]: any) => sum + blocks.length, 0);
+
+  it('keeps the array as the first block, cut at 20 pages of 10, and reports both cuts in a second block', async () => {
+    const result = await backlinks(25, 12);
+
+    expect(result.content).toHaveLength(2);
+    const results = JSON.parse(result.content[0].text);
+    expect(Array.isArray(results)).toBe(true);
+    expect(results).toHaveLength(20);
+    expect(blocksIn(results)).toBe(200);
+    expect(JSON.parse(result.content[1].text).meta).toMatchObject({
+      hasMore: true,
+      totals: { pages: 25, blocks: 300 },
+      warnings: [
+        {
+          code: 'pages_truncated',
+          message: 'Showing 20 of 25 source pages (the first ones listed; the last one shown is "Source 19").',
+          howToFetchAll: 'Set max_pages to 25 (or higher) to get all 25.',
+        },
+        {
+          code: 'page_blocks_truncated',
+          howToFetchAll: 'Set max_blocks_per_page to 12 (or higher) to get every block of these pages.',
+        },
+      ],
+    });
+  });
+
+  it('clamps max_pages above 100 and reports the maximum, with hasMore false', async () => {
+    const result = await backlinks(120, 1, { max_pages: 5000 });
+
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0].text)).toHaveLength(100);
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta.hasMore).toBe(false);
+    expect(meta.warnings).toHaveLength(1);
+    expect(meta.warnings[0].code).toBe('pages_truncated');
+    expect(meta.warnings[0].message).toContain('capped at its maximum of 100 (5000 was asked for)');
+    expect(meta.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('clamps max_blocks_per_page above 50 and reports the maximum, with hasMore false', async () => {
+    const result = await backlinks(1, 60, { max_blocks_per_page: 5000 });
+
+    expect(result.isError).toBeUndefined();
+    expect(blocksIn(JSON.parse(result.content[0].text))).toBe(50);
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta.hasMore).toBe(false);
+    expect(meta.warnings).toHaveLength(1);
+    expect(meta.warnings[0].code).toBe('page_blocks_truncated');
+    expect(meta.warnings[0].message).toContain('capped at its maximum of 50 (5000 was asked for)');
+    expect(meta.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('adds no cap meta, and the same array, when both caps hold everything', async () => {
+    const atDefault = await backlinks(20, 10);
+    const atMax = await backlinks(20, 10, { max_pages: 100, max_blocks_per_page: 50 });
+    const above = await backlinks(20, 10, { max_pages: 5000, max_blocks_per_page: 5000 });
+
+    expect(JSON.parse(atDefault.content[0].text)).toHaveLength(20);
+    // What follows the array is the tips block (on by default) and nothing about the caps
+    expect(Object.keys(JSON.parse(atDefault.content[1].text).meta)).toEqual(['tips']);
+    expect(atMax.content).toEqual(atDefault.content);
+    expect(above.content).toEqual(atDefault.content);
+  });
+
+  it('rejects a max_pages that is not a number', async () => {
+    expect((await backlinks(2, 2, { max_pages: 'many' })).isError).toBe(true);
+    expect((await backlinks(2, 2, { max_blocks_per_page: 'many' })).isError).toBe(true);
+  });
+});
