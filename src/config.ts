@@ -93,9 +93,15 @@ const configSchema = z
     })
   );
 
-// Fails tsc if the schema's output and LogseqMCPConfig drift apart in either direction.
+// Fails tsc if the schema's output and LogseqMCPConfig drift apart in either
+// direction. Mutual assignability alone misses an optional key added to one side
+// (`newFlag?: string` on the interface, or `.optional()` in the schema), and zod
+// would then strip that field on load without a word. So the key sets must match too.
 type ParsedConfig = z.output<typeof configSchema>;
-const _schemaMatchesType: [ParsedConfig, LogseqMCPConfig] extends [LogseqMCPConfig, ParsedConfig] ? true : never = true;
+type SameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
+const _schemaMatchesType: [ParsedConfig, LogseqMCPConfig] extends [LogseqMCPConfig, ParsedConfig]
+  ? SameKeys<ParsedConfig, LogseqMCPConfig>
+  : never = true;
 void _schemaMatchesType;
 
 /**
