@@ -5,7 +5,7 @@ import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * get_graph_info against the fixture graph. LogSeq names a graph after its folder, so the fixture
- * is `graph`, opened from some checkout's tests/fixtures/graph. Which checkout is not asserted:
+ * is `graph`, opened from the instance's copy or some checkout's tests/fixtures/graph. Which is not asserted:
  * the path includes the user's home directory, and nothing here prints it.
  */
 describe('getGraphInfo - Integration', () => {
@@ -20,7 +20,11 @@ describe('getGraphInfo - Integration', () => {
 
     expect(result.name).toBe('graph');
     expect(result.path.startsWith('/'), 'the path is absolute').toBe(true);
-    expect(result.path.endsWith('/tests/fixtures/graph'), 'the path is a tests/fixtures/graph folder').toBe(true);
+    // The instance opens its copy, .logseq-instance/graph (#151); your own LogSeq opens tests/fixtures/graph
+    expect(
+      result.path.endsWith('/.logseq-instance/graph') || result.path.endsWith('/tests/fixtures/graph'),
+      'the path is the instance\'s copy or a tests/fixtures/graph folder'
+    ).toBe(true);
     expect(result.url === `logseq_local_${result.path}`, 'the url is the local url of that path').toBe(true);
   });
 
