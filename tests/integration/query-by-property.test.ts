@@ -182,7 +182,7 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
         expect(block.left).toEqual(old.left);
         expect(normalizeProps(block.properties)).toEqual(normalizeProps(old.properties));
         expect(block.propertiesOrder).toEqual(old.propertiesOrder);
-        expect(block.page.id).toBe(old.page.id);
+        expect(block.page?.id).toBe(old.page?.id);
         expect(block).not.toHaveProperty('children');
       }
     }
@@ -209,7 +209,7 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
 
       for (const block of slim.slice(0, 25)) {
         const old = byUuid.get(block.uuid)!;
-        const expected: any = toSlimBlock({ ...old, children: [] }, nameById.get(old.page.id!) ?? '');
+        const expected: any = toSlimBlock({ ...old, children: [] }, nameById.get(old.page?.id!) ?? '');
         expect(block.pageName, label).toBe(expected.pageName);
         expect(block.content, label).toBe(expected.content);
         expect(block.marker, label).toBe(expected.marker);

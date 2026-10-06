@@ -1,22 +1,21 @@
-// Entity reference (can be numeric ID or full entity)
-export interface IEntityID {
-  id: number;
-}
+import type { EditorPage, EntityRef, GraphInfo as WireGraphInfo, WireBlock } from './response-schemas.js';
 
-// Block entity structure
-export interface BlockEntity {
-  id: number;
-  uuid: string;
-  content: string;
-  format?: 'markdown' | 'org';
-  /**
-   * The page the block sits on: a bare `{ id }` ref from the Editor API, or the page itself
-   * when a pull or a tool nested it (`PageLike` covers both). Read it with `blockPageId` or
-   * `pageDisplayName` from `src/utils/entity-fields.ts`.
-   */
-  page: PageLike;
-  parent: IEntityID;
-  left: IEntityID;
+// What LogSeq sends is described once, by the zod schemas in src/response-schemas.ts (#202). The
+// entities below take their fields from them and add the ones a tool derives: `children`, `level`
+// and the camelCase fields of a camelized pull. A page of either spelling is `PageLike`.
+export type { PageLike, PulledPage } from './response-schemas.js';
+
+// Entity reference: a bare `{ id }`
+export type IEntityID = EntityRef;
+
+/**
+ * Block entity structure: the fields LogSeq spells the same in both dialects (checked by
+ * `blockSchema`), plus the ones a tool adds or a camelized pull carries. `page`, `parent` and
+ * `left` are optional because not every query pulls them (the outline's doesn't pull `page`).
+ * `page` is a bare `{ id }` from the Editor API, or the page itself when a pull or a tool nested it;
+ * read it with `blockPageId` or `pageDisplayName` from `src/utils/entity-fields.ts`.
+ */
+export interface BlockEntity extends WireBlock {
   level?: number;
   children?: BlockEntity[];
   /**
@@ -24,7 +23,6 @@ export interface BlockEntity {
    * `limit` on `search_by_relationship` with `connected-within`
    */
   childrenTruncated?: boolean;
-  properties?: Record<string, unknown>;
   /** Property keys in file order. Editor API blocks carry it, and so do pulls camelized by `camelizeBlock` */
   propertiesOrder?: string[];
   unordered?: boolean;
@@ -36,8 +34,7 @@ export interface BlockEntity {
   };
   // Additional properties from search/query results
   pathRefs?: IEntityID[]; // Path of entity references from root to this block
-  refs?: IEntityID[]; // Page references in block content (e.g., [[PageName]])
-  marker?: string; // TODO/DONE/etc status
+  format?: 'markdown' | 'org';
   'journal?'?: boolean; // Whether this is a journal block
   journalDay?: number; // Journal date in YYYYMMDD format
   scheduled?: number; // Scheduled date in YYYYMMDD format
@@ -47,54 +44,13 @@ export interface BlockEntity {
   resolvedRefs?: ResolvedRef[];
 }
 
-// Page entity structure
-export interface PageEntity {
-  id: number;
-  'db/id'?: number; // Datalog queries return db/id instead of id
-  uuid: string;
-  name: string;
-  originalName: string;
-  'original-name'?: string; // Datalog queries use kebab-case
-  properties?: Record<string, unknown>;
-  journal?: boolean;
-  'journal?'?: boolean; // Logseq uses this property name
-  journalDay?: number;
-  'journal-day'?: number; // Datalog pulls use kebab-case
-  namespace?: IEntityID;
-  /** Set when the page is backed by a file; absent on stub pages that only exist as link targets */
-  file?: IEntityID;
-  /**
-   * Pages linked by `alias::`, as bare ids. Present on `Editor.getAllPages` entities.
-   * LogSeq stores each link in both directions, so the declaring page lists its
-   * stubs and every stub lists the declaring page.
-   */
-  alias?: IEntityID[];
+/**
+ * Page entity structure, as the Editor API sends it (camelCase). A Datalog pull has
+ * its own spelling, `PulledPage`; `PageLike` is either.
+ */
+export interface PageEntity extends EditorPage {
   children?: (PageEntity | BlockEntity)[];
-  createdAt?: number;
-  updatedAt?: number;
 }
-
-/**
- * The keys a Datalog pull spells differently from the Editor API. The Editor API camelizes
- * (`originalName`, `journalDay`, `createdAt`); a pull keeps LogSeq's kebab-case.
- * `db/id` is the id as Datascript spells it. LogSeq 0.10.15 renames it to `id` in a query
- * result (checked against the fixture graph, for `[*]` and `[:db/id ...]` pulls alike), so a
- * live graph never shows it, but the readers still accept it.
- */
-export interface PulledPageKeys {
-  'db/id'?: number;
-  'original-name'?: string;
-  'journal-day'?: number;
-  'created-at'?: number;
-  'updated-at'?: number;
-}
-
-/**
- * A page in either spelling, or a partial pull of one (a block's nested `page`, a ref).
- * Every field is optional, so it takes a {@link PageEntity}, a pulled page and a bare
- * `{ id }` alike. Read it through `src/utils/entity-fields.ts`, never by spelling.
- */
-export type PageLike = Partial<PageEntity> & PulledPageKeys;
 
 // LogSeq API request/response types
 export interface LogseqAPIRequest {
@@ -113,11 +69,7 @@ export interface LogseqMCPConfig {
 }
 
 // Graph info structure
-export interface GraphInfo {
-  url: string;
-  name: string;
-  path: string;
-}
+export type GraphInfo = WireGraphInfo;
 
 // Pagination metadata for paginated results
 export interface PaginationMetadata {

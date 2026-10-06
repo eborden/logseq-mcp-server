@@ -5,6 +5,8 @@ import { blocksInlineMax, buildResultMeta, cappedTruncationWarning } from '../ut
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { camelizeBlock, camelizeKeys } from '../utils/block-tree.js';
 import { pageDisplayName } from '../utils/entity-fields.js';
+import { queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /** Blocks returned when `limit` is absent. */
 export const DEFAULT_PROPERTY_LIMIT = 100;
@@ -74,7 +76,7 @@ export async function queryByPropertyWithMeta(
   limit: number = DEFAULT_PROPERTY_LIMIT
 ): Promise<{ results: BlockEntity[] | SlimBlock[] | null; meta: ResultMeta | null }> {
   const { query, inputs } = DatalogQueryBuilder.blocksByProperty(propertyName, propertyValue);
-  const rows = await client.executeDatalogQuery<BlockEntity[][] | null>(query, ...inputs);
+  const rows = await queryParsed(client, responses.nullableBlockRows, query, ...inputs);
 
   if (!rows) {
     return { results: null, meta: null };
@@ -82,7 +84,7 @@ export async function queryByPropertyWithMeta(
 
   const matches: BlockEntity[] = rows
     .map(row => row[0])
-    .filter(Boolean)
+    .filter(pulled => pulled != null)
     .map(pulled => {
       const block = camelizeBlock(pulled);
       if (block.page && typeof block.page === 'object') {

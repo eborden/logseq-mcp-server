@@ -2,6 +2,8 @@ import { LogseqClient } from '../client.js';
 import { ResolvedRef, ResultWarning } from '../types.js';
 import { DatalogQueryBuilder, EMBED_DESCENDANT_LEVELS } from '../datalog/queries.js';
 import { orderSiblings } from './block-tree.js';
+import { queryParsed } from './parse-response.js';
+import { responses, type RefTarget } from '../response-schemas.js';
 
 /**
  * Resolve `((uuid))` block refs and `{{embed}}`s in returned blocks (#18).
@@ -42,17 +44,8 @@ export interface RefBearingBlock {
   children?: RefBearingBlock[];
 }
 
-// A pulled block or page row (see DatalogQueryBuilder.refTargets)
-interface Row {
-  id: number;
-  uuid?: string;
-  content?: string;
-  name?: string;
-  'original-name'?: string;
-  left?: { id: number };
-  parent?: { id: number };
-  page?: { id: number; name?: string; 'original-name'?: string };
-}
+// A pulled block or page row (see DatalogQueryBuilder.refTargets), as `responses.refTargetRows` checks it
+type Row = RefTarget;
 
 type TokenKind = 'ref' | 'block_embed' | 'page_embed';
 
@@ -202,7 +195,7 @@ async function fetchLevels(
         descendantUuids: [...descendantUuids],
         pageNames: [...pageNames]
       });
-      const rows = ((await client.executeDatalogQuery<Array<[Row]>>(query, ...inputs)) || [])
+      const rows = ((await queryParsed(client, responses.refTargetRows, query, ...inputs)) || [])
         .map(row => row[0])
         .filter(row => row != null);
       ingest(store, rows, blockUuids, descendantUuids, pageNames);

@@ -1,9 +1,11 @@
 import { LogseqClient } from '../client.js';
-import { BlockEntity, PageEntity, ResolveRefsMeta } from '../types.js';
+import { PageEntity, ResolveRefsMeta } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 import { PageNotFoundError } from '../errors.js';
+import { callParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 /**
  * Get a LogSeq page by name
@@ -33,7 +35,7 @@ export async function getPage(
   // answer. Aliases, dates and namespace leaves come back null here; a stub (no
   // file) may be an alias target or have a journal behind it, so both go to the resolver.
   const lookup = pageName.trim();
-  const direct = await client.callAPI<PageEntity | null>('logseq.Editor.getPage', [lookup]);
+  const direct = await callParsed(client, responses.editorPage, 'logseq.Editor.getPage', [lookup]);
 
   let entity: PageEntity | null = direct;
   let lookupName = lookup;
@@ -45,7 +47,7 @@ export async function getPage(
     // An exact match is the page already fetched; anything else needs its own fetch
     entity = resolved.matchedBy === 'name' && direct != null
       ? direct
-      : await client.callAPI<PageEntity | null>('logseq.Editor.getPage', [lookupName]);
+      : await callParsed(client, responses.editorPage, 'logseq.Editor.getPage', [lookupName]);
   }
 
   // The page vanished between the two calls
@@ -56,10 +58,7 @@ export async function getPage(
 
   // If includeChildren is requested, fetch the page blocks tree
   if (includeChildren) {
-    const blocks = await client.callAPI<BlockEntity[] | null>(
-      'logseq.Editor.getPageBlocksTree',
-      [lookupName]
-    );
+    const blocks = await callParsed(client, responses.blocks, 'logseq.Editor.getPageBlocksTree', [lookupName]);
 
     // Add blocks as children to the result
     if (blocks && blocks.length > 0) {

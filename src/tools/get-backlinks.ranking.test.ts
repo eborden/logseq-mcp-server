@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { capBacklinks, fetchBacklinks, getBacklinksWithMeta, rankBacklinks } from './get-backlinks.js';
+import { capBacklinks, fetchBacklinks, getBacklinksWithMeta, rankBacklinks, type Backlink as BacklinkTuple } from './get-backlinks.js';
 import { resolveAliasSet } from '../utils/alias-set.js';
 import { LogseqClient } from '../client.js';
 import type { BlockEntity, PageEntity } from '../types.js';
@@ -85,9 +85,9 @@ const paths: Array<[string, (list: Source[] | null) => Harness]> = [
   ['the alias group Datalog path (#69)', aliasGroupPath]
 ];
 
-type Tuple = [{ id: number; name?: string }, Array<{ id: number }>];
-const names = (results: Tuple[] | null) => (results ?? []).map(([page]) => page.name);
-const ids = (results: Tuple[] | null) => (results ?? []).map(([page]) => page.id);
+type Tuple = [{ id?: number; name?: string } | null, Array<{ id: number }>];
+const names = (results: Tuple[] | null) => (results ?? []).map(([page]) => page?.name);
+const ids = (results: Tuple[] | null) => (results ?? []).map(([page]) => page?.id);
 const counts = (results: Tuple[] | null) => (results ?? []).map(([, blocks]) => blocks.length);
 
 // Listed in an order that is neither by count nor by name
@@ -193,10 +193,10 @@ describe('get_backlinks ranks source pages by linking blocks (#178)', () => {
 });
 
 describe('rankBacklinks and capBacklinks', () => {
-  type Backlink = [PageEntity, BlockEntity[]];
+  type Backlink = BacklinkTuple;
   const page = (id: number, name: string) => ({ id, name }) as unknown as PageEntity;
   const blocks = (n: number) => Array.from({ length: n }, (_, i) => ({ id: i }) as BlockEntity);
-  const pageIds = (list: Backlink[]) => list.map(([p]) => p.id);
+  const pageIds = (list: Backlink[]) => list.map(([p]) => p?.id);
 
   it('sorts a copy: the input is not mutated', () => {
     const input: Backlink[] = [[page(1, 'b'), blocks(1)], [page(2, 'a'), blocks(3)]];
@@ -211,7 +211,7 @@ describe('rankBacklinks and capBacklinks', () => {
 
   it('ranks a tuple with no page by the page of its first block', () => {
     const orphan = (id: number, name: string): Backlink => [
-      null as unknown as PageEntity,
+      null,
       [{ id: 1, page: { id, name } } as unknown as BlockEntity]
     ];
     const ranked = rankBacklinks([orphan(2, 'b'), orphan(1, 'a')]);
@@ -227,7 +227,7 @@ describe('rankBacklinks and capBacklinks', () => {
 
   it('is deterministic whatever order it is given', () => {
     const list: Backlink[] = Array.from({ length: 12 }, (_, i): Backlink => [page(i + 1, `p${i % 4}`), blocks(i % 3)]);
-    const shuffled = [...list].sort((a, b) => ((a[0].id * 7) % 11) - ((b[0].id * 7) % 11));
+    const shuffled = [...list].sort((a, b) => ((a[0]!.id! * 7) % 11) - ((b[0]!.id! * 7) % 11));
     expect(pageIds(rankBacklinks(shuffled))).toEqual(pageIds(rankBacklinks(list)));
   });
 });
@@ -247,7 +247,7 @@ describe('fetchBacklinks stays unranked, so build_context keeps its order (#178)
 });
 
 describe('a source page with no name or entity does not break the per-page warning (#190 review)', () => {
-  type Backlink = [PageEntity, BlockEntity[]];
+  type Backlink = BacklinkTuple;
   type BlockPage = { id: number; name?: string; originalName?: string };
   const block = (id: number, page?: BlockPage) =>
     ({ id, uuid: `b-${id}`, content: 'x [[Target]]', page }) as unknown as BlockEntity;

@@ -13,6 +13,8 @@ import {
   resolvedAliases,
   singleAliasSet
 } from '../utils/alias-set.js';
+import { queryParsed } from '../utils/parse-response.js';
+import { responses } from '../response-schemas.js';
 
 export interface ConceptNetworkNode {
   id: number;
@@ -70,9 +72,6 @@ export const DEFAULT_MAX_FANOUT = 15;
 export const MAX_NODES_LIMIT = 500;
 /** The most the MCP handler lets a caller set `max_fanout` to. */
 export const MAX_FANOUT_LIMIT = 100;
-
-/** One row of `DatalogQueryBuilder.connectedPages`. */
-type ConnectedRow = [number, number, string, string, boolean, 'outbound' | 'inbound', number];
 
 /** Directed link counts, keyed `"<from>><to>"`: blocks on `from` referencing `to`. */
 type LinkCounts = Map<string, number>;
@@ -164,7 +163,7 @@ export async function getConceptNetwork(
       depth === 1 && hasAliases(aliasSet)
         ? DatalogQueryBuilder.connectedPagesGrouped(aliasIds(aliasSet), rootGroup)
         : DatalogQueryBuilder.connectedPages(frontier);
-    const rows = (await client.executeDatalogQuery<ConnectedRow[]>(q.query, ...q.inputs)) || [];
+    const rows = (await queryParsed(client, responses.connectedRows, q.query, ...q.inputs)) || [];
 
     const candidates = new Map<number, Candidate>();
     for (const [sourceId, connectedId, name, originalName, isJournal, relType, count] of rows) {

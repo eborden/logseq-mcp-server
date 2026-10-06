@@ -1,11 +1,13 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import type { BlockEntity, ResultMeta, ResultWarning } from '../types.js';
+import type { ResultMeta, ResultWarning } from '../types.js';
 import { orderSiblings } from '../utils/block-tree.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { entityId, pageDisplayName } from '../utils/entity-fields.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 import { firstLineSnippet } from '../utils/snippet.js';
+import { queryParsed } from '../utils/parse-response.js';
+import { responses, type OutlineRow } from '../response-schemas.js';
 
 /** Most top-level blocks one outline lists. A page with more is cut, and the result says so. */
 export const MAX_OUTLINE_BLOCKS = 200;
@@ -27,11 +29,11 @@ export interface PageOutline extends ResultMeta, ResolvedFrom {
   blocks: OutlineBlock[];
 }
 
-/** A pulled block row; `id` and `uuid` as the resolver's pulls return them. */
-type PulledBlock = BlockEntity & { 'db/id'?: number };
+/** A pulled block row, as `responses.outlineRows` checks it. */
+type PulledBlock = OutlineRow;
 
 const parentIdOf = (block: PulledBlock): number | undefined => {
-  const parent = block.parent as unknown as { id?: number } | number | undefined;
+  const parent = block.parent;
   return typeof parent === 'number' ? parent : parent?.id;
 };
 
@@ -59,10 +61,10 @@ export async function getPageOutline(client: LogseqClient, pageName: string): Pr
   const pageId = entityId(page) as number;
 
   const { query, inputs } = DatalogQueryBuilder.pageOutlineBlocks(pageId);
-  const rows = (await client.executeDatalogQuery<Array<[PulledBlock]>>(query, ...inputs)) || [];
+  const rows = (await queryParsed(client, responses.outlineRows, query, ...inputs)) || [];
 
   // Top-level blocks hang off the page; every other row is a child of one of them
-  const top: PulledBlock[] = [];
+  const top: Array<PulledBlock & { id: number }> = [];
   const childCount = new Map<number, number>();
   for (const [block] of rows) {
     if (block == null) continue;

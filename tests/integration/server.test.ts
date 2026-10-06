@@ -53,7 +53,7 @@ describe('LogSeq MCP Server Integration Tests', () => {
   describe('logseq_get_backlinks', () => {
     it('groups the blocks that link a page by their source page', async () => {
       const result = await getBacklinks(client, 'Alice');
-      const bySource = Object.fromEntries((result ?? []).map(([page, blocks]) => [page.name, blocks.length]));
+      const bySource = Object.fromEntries((result ?? []).map(([page, blocks]) => [page!.name, blocks.length]));
 
       expect(bySource).toEqual({
         'dec 31st, 2024': 1,

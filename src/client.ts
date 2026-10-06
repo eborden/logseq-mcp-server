@@ -21,8 +21,9 @@ export class LogseqClient {
    * @param args - Optional array of arguments for the method
    * @typeParam T - What the caller expects the response to be. It is a claim, not a
    *   check: nothing here validates the response, and `unknown` is the default so a
-   *   caller that names no type gets one it must narrow. Name the shape LogSeq returns
-   *   for that method (`PageEntity | null`, `BlockEntity[]`), and read its fields through
+   *   caller that names no type gets one it must narrow. Tools don't name a shape: they
+   *   read through `callParsed` (`src/utils/parse-response.ts`), which checks the response
+   *   against a schema from `src/response-schemas.ts`. Read an entity's fields through
    *   `src/utils/entity-fields.ts`, which knows both key spellings.
    * @returns The response data from the API
    * @throws LogSeqAuthError if LogSeq rejects the auth token (HTTP 401)
@@ -107,7 +108,8 @@ export class LogseqClient {
    *
    * @param query - The Datalog query string. Use `:in $ ?a ?b` for parameters.
    * @param inputs - Values bound to the `:in` variables after `$`, in order
-   * @typeParam T - What the caller expects the rows to be (a claim, as for {@link callAPI})
+   * @typeParam T - What the caller expects the rows to be (a claim, as for {@link callAPI}; tools read
+   *   through `queryParsed`, which checks them)
    * @returns The query results
    * @throws Error if the query fails
    */
