@@ -389,6 +389,21 @@ describe('result caps (#61)', () => {
         const resumed = (await range(MAX_DATE_RANGE_BLOCKS, { start_date: lastDay })).body;
         const expected = atMax.body.entries.filter(e => e.date >= lastDay).flatMap(e => flatten(e.blocks));
         expect(uuidsOf(resumed), `${label}: resuming at the last kept day`).toEqual(expected);
+
+        // The same query at the same cap must move forward, or the advice could loop: it reaches
+        // blocks the first call did not return, unless the last kept day alone filled the cap
+        const keptBefore = uuidsOf({ ...body, entries: body.entries.slice(0, -1) }).length;
+        const again = uuidsOf((await range(max, { start_date: lastDay })).body);
+        if (keptBefore > 0) {
+          const seen = new Set(uuidsOf(body));
+          expect(again.some(uuid => !seen.has(uuid)), `${label}: resuming at the same cap reaches new blocks`).toBe(true);
+        } else {
+          expect(again, `${label}: the first day alone fills the cap, so resuming there repeats it`).toEqual(uuidsOf(body));
+        }
+
+        // A kept block that lost children is marked, and the warning names the marker exactly then
+        const marked = JSON.stringify(body.entries).includes('"childrenTruncated":true');
+        expect(body.warnings![0].message.includes('childrenTruncated'), `${label}: warning matches the marks`).toBe(marked);
       }
     });
 
