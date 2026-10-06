@@ -1,6 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
-import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { requirePage, resolvedFromInfo, ResolvedPage } from '../utils/resolve-page.js';
 import { isInfrastructureError } from '../errors.js';
@@ -352,7 +352,8 @@ export async function searchByRelationship(
           param: 'limit',
           max: MAX_RELATIONSHIP_LIMIT,
           narrower: NARROWER,
-          requested: limit
+          requested: limit,
+          inlineMax: INLINE_ITEMS.blocks
         })
       );
     }
@@ -367,7 +368,8 @@ export async function searchByRelationship(
         param: 'limit',
         max: MAX_RELATIONSHIP_LIMIT,
         narrower: NARROWER,
-        requested: limit
+        requested: limit,
+        inlineMax: INLINE_ITEMS.blocks
       })
     );
   }

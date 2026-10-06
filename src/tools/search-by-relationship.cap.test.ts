@@ -175,7 +175,7 @@ describe.each(['plain', 'aliased'] as const)('searchByRelationship caps, %s path
         expect(result.totals).toEqual({ blocks: 700 });
         const [warning] = result.warnings.filter(w => w.code === 'results_truncated');
         expect(warning.howToFetchAll).toBe(
-          'Set limit to 500 (the maximum) to get 500 of 700. No other parameter narrows this query.'
+          'Set limit to 500 (the maximum) to get 500 of 700. A result this large may be saved to a file by the host instead of shown; the server can\'t tell. No other parameter narrows this query.'
         );
         expect(warning.howToFetchAll).not.toContain('to 700');
       });

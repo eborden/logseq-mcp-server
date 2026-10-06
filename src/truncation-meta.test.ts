@@ -100,7 +100,7 @@ describe('logseq_search_blocks maximum limit (#61)', () => {
     const { meta } = JSON.parse(result.content[1].text);
     expect(meta.hasMore).toBe(true);
     expect(meta.warnings[0].howToFetchAll).toBe(
-      'Set limit to 500 (the maximum) to get 500 of 900. Narrow the query to see the rest.'
+      'Set limit to 500 (the maximum) to get 500 of 900. A result this large may be saved to a file by the host instead of shown; the server can\'t tell. Narrow the query to see the rest.'
     );
   });
 
