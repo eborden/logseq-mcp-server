@@ -1,23 +1,19 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { queryByProperty } from '../../src/tools/query-by-property.js';
 import { InvalidParameterError } from '../../src/errors.js';
 import { buildPageNameMap, toSlimBlock } from '../../src/utils/slim-entities.js';
 import { BlockEntity, PageEntity } from '../../src/types.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * query_by_property: Datalog implementation vs the Editor API crawl it replaced.
  *
  * The crawl (getAllPages, then getPageBlocksTree per page, then a walk over
- * every block) lives here as the oracle. Property names and values are
- * discovered from the graph at run time, so nothing is hard-coded and the test
- * works against any graph that has some properties.
- *
- * Requires LogSeq running with the HTTP API enabled and
- * ~/.logseq-mcp/config.json (see tests/integration/setup.md). The crawl takes
- * ~10s on a ~2k-page graph, so the setup timeout is generous.
+ * every block) lives here as the oracle, against the fixture graph. The cases
+ * are the fixture's `property types` page and project pages, one per value
+ * shape (tests/fixtures/README.md, "Properties"), each with the exact number of
+ * blocks it matches. The crawl is ~260 calls on the fixture.
  */
 
 class CountingClient extends LogseqClient {
@@ -59,7 +55,24 @@ interface Case {
   label: string;
   key: string;
   value: string;
+  /** Blocks the query returns */
+  count: number;
 }
+
+/** One case per value shape, with the number of blocks each matches in the fixture */
+const CASES: Case[] = [
+  { label: 'string', key: 'status', value: 'testing', count: 1 },
+  { label: 'number', key: 'effort', value: '3', count: 1 },
+  { label: 'decimal (stored as text)', key: 'ratio', value: '0.75', count: 1 },
+  { label: 'boolean', key: 'reviewed', value: 'true', count: 1 },
+  { label: 'boolean false', key: 'archived', value: 'false', count: 1 },
+  // project atlas's page properties and a block on property types
+  { label: 'one-element set', key: 'owner', value: 'Alice', count: 2 },
+  { label: 'multi-element set, one element', key: 'participants', value: 'Bob', count: 1 },
+  { label: 'comma-separated set (config.edn)', key: 'reviewers', value: 'Carol', count: 1 },
+  { label: 'page property on three pages', key: 'type', value: 'project', count: 3 },
+  { label: 'tag value', key: 'topic', value: 'planning', count: 1 },
+];
 
 describe('query_by_property: Datalog vs Editor API crawl', () => {
   let client: CountingClient;
@@ -69,16 +82,8 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
   let cases: Case[];
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. ' +
-          'See tests/integration/setup.md for setup instructions.'
-      );
-    }
-    client = new CountingClient(await loadConfig(configPath));
+    const { config } = await connectFixture();
+    client = new CountingClient(config);
 
     pages = (await client.callAPI<PageEntity[] | null>('logseq.Editor.getAllPages')) ?? [];
     crawled = [];
@@ -94,54 +99,23 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     }
     withProps = crawled.filter(b => b.properties && Object.keys(b.properties).length > 0);
 
-    // One discovered (key, value) case per property shape. Keys that don't pass
-    // the tool's name check (e.g. dotted internal keys) can't be queried.
-    const queryable = /^[a-z0-9][a-z0-9_-]*$/i;
-    const find = (label: string, want: (v: unknown) => boolean, toValue: (v: any) => string) => {
-      for (const block of withProps) {
-        for (const [key, v] of Object.entries<any>(block.properties!)) {
-          if (queryable.test(key) && want(v)) cases.push({ label, key, value: toValue(v) });
-          if (cases.some(c => c.label === label)) return;
-        }
-      }
-    };
-    cases = [];
-    find('string', v => typeof v === 'string', v => v);
-    find('number', v => typeof v === 'number', v => String(v));
-    find('boolean', v => typeof v === 'boolean', v => String(v));
-    find('one-element set', v => Array.isArray(v) && v.length === 1, v => String(v[0]));
-    find('multi-element set, one element', v => Array.isArray(v) && v.length > 1, v => String(v[0]));
-
-    // A dashed key (`created-by::`) comes back from the Editor API camelCased
-    // (`createdBy`). Scan every crawled block rather than stopping at the first
-    // key seen, and pick the smallest (key, value) pair, so the choice does not
-    // depend on page order (#83).
-    const camelCandidates: Case[] = [];
-    for (const block of withProps) {
-      for (const [key, v] of Object.entries<any>(block.properties!)) {
-        if (!queryable.test(key) || !/[A-Z]/.test(key)) continue;
-        // Every element of a set, so the pick doesn't depend on element order
-        for (const value of Array.isArray(v) ? v : [v]) {
-          if (!['string', 'number', 'boolean'].includes(typeof value) || String(value) === '') continue;
-          camelCandidates.push({ label: 'camelCase key', key, value: String(value) });
-        }
-      }
-    }
-    camelCandidates.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.value < b.value ? -1 : a.value > b.value ? 1 : 0));
-    if (camelCandidates.length > 0) cases.push(camelCandidates[0]);
+    cases = CASES;
   }, 180_000);
 
-  it('discovers properties to test with', () => {
-    expect(withProps.length).toBeGreaterThan(
-      0,
-      'No blocks with properties found. Add some (for example status:: testing). See tests/integration/setup.md'
-    );
-    for (const label of ['string', 'one-element set']) {
-      expect(cases.some(c => c.label === label)).toBe(
-        true,
-        `No ${label} property value found in the graph. Add one. See tests/integration/setup.md`
-      );
+  it('finds each case in exactly the expected number of blocks', async () => {
+    for (const { label, key, value, count } of cases) {
+      expect(await queryByProperty(client, key, value), label).toHaveLength(count);
     }
+  });
+
+  it('matches set elements with their original casing only', async () => {
+    expect(await queryByProperty(client, 'owner', 'alice')).toEqual([]);
+    expect(await queryByProperty(client, 'participants', 'bob')).toEqual([]);
+  });
+
+  it('keeps a value with commas whole when config.edn does not split its key', async () => {
+    const result = await queryByProperty(client, 'summary', 'ships after review, then Alice and Bob sign off');
+    expect(result).toHaveLength(1);
   });
 
   it('matches exactly the blocks the crawl finds, plus any-element matches on multi-value properties', async () => {
@@ -163,8 +137,8 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     const queryable = /^[a-z0-9][a-z0-9_-]*$/i;
     const found = withProps
       .flatMap(b => Object.entries<any>(b.properties!).map(([key, v]) => ({ b, key, v })))
-      .find(({ key, v }) => queryable.test(key) && Array.isArray(v) && v.length > 1);
-    expect(found, 'No multi-value property found. Add a block with, for example, type:: [[a]], [[b]]').toBeDefined();
+      .find(({ key, v }) => queryable.test(key) && key === 'participants' && Array.isArray(v) && v.length > 1);
+    expect(found, 'property types lost its participants:: [[Alice]], [[Bob]] block').toBeDefined();
     const joined = found!.v.join(',');
 
     const result = (await queryByProperty(client, found!.key, joined)) as BlockEntity[];
@@ -176,7 +150,6 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
 
   it('an any-element match exists where the old rule would have missed it', async () => {
     const multi = cases.find(c => c.label === 'multi-element set, one element');
-    expect(multi, 'No multi-value property found. Add a block with, for example, type:: [[a]], [[b]]').toBeDefined();
     const { key, value } = multi!;
 
     const result = (await queryByProperty(client, key, value)) as BlockEntity[];
@@ -251,22 +224,17 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
   });
 
   it('accepts the stored dashed key and the camelCase key the Editor API returns', async () => {
-    const camel = cases.find(c => c.label === 'camelCase key');
-    expect(
-      camel,
-      'No block in the graph has a property with a dashed name. Add one, for example created-by:: Alice. ' +
-        'See tests/integration/setup.md'
-    ).toBeDefined();
-    const { key, value } = camel!;
-    const dashed = key.replace(/([A-Z])/g, '-$1').toLowerCase();
-    // The stored form must itself pass the tool's property-name rule (lowercase here)
-    expect(dashed).toMatch(/^[a-z0-9][a-z0-9_-]*$/);
+    // `created-by:: Bob` on a block, and `created-by:: Alice` in the page properties
+    const crawledKeys = new Set(withProps.flatMap(b => Object.keys(b.properties!)));
+    expect(crawledKeys.has('createdBy'), 'the Editor API camelCases created-by').toBe(true);
 
-    const a = (await queryByProperty(client, key, value)) as BlockEntity[];
-    const b = (await queryByProperty(client, dashed, value)) as BlockEntity[];
+    for (const value of ['Bob', 'Alice']) {
+      const a = (await queryByProperty(client, 'createdBy', value)) as BlockEntity[];
+      const b = (await queryByProperty(client, 'created-by', value)) as BlockEntity[];
 
-    expect(a.length).toBeGreaterThan(0);
-    expect(uuids(b)).toEqual(uuids(a));
+      expect(a, value).toHaveLength(1);
+      expect(uuids(b), value).toEqual(uuids(a));
+    }
   });
 
   it('returns an empty array, not null, for a property that does not exist', async () => {
