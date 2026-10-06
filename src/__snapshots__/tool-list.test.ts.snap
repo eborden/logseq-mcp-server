@@ -520,8 +520,18 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "string",
         },
         "property_value": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "number",
+            },
+            {
+              "type": "boolean",
+            },
+          ],
           "description": "Value to match for the property. For multi-value properties, matches if any one value equals it",
-          "type": "string",
         },
         "slim_results": {
           "default": true,

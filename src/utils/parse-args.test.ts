@@ -79,6 +79,17 @@ describe('parseArgs', () => {
     expect(errorFor({ page_name: 'my page', limit: '5' }).message).toMatch(/\nExample: limit: 5$/);
     expect(errorFor({}).message).toMatch(/\nExample: page_name: "\.\.\."$/);
   });
+
+  it('names every type of a union of plain types, without coercing', () => {
+    const union = z.object({ value: z.union([z.string(), z.number(), z.boolean()]) });
+    expect(parseArgs(union, { value: 1 })).toEqual({ value: 1 });
+    expect(parseArgs(union, { value: true })).toEqual({ value: true });
+    expect(parseArgs(union, { value: '1' })).toEqual({ value: '1' });
+    const missing = () => parseArgs(union, {});
+    expect(missing).toThrow(/'value': missing.*Expected: a string, a number or a boolean \(required\).*\nExample: value: "\.\.\."$/s);
+    expect(() => parseArgs(union, { value: ['x'] })).toThrow(/'value': \["x"\].*a string, a number or a boolean, not an array/s);
+    expect(() => parseArgs(union, { value: NaN })).toThrow(/'value': NaN.*a string, a number or a boolean, not NaN/s);
+  });
 });
 
 describe('toInputSchema', () => {

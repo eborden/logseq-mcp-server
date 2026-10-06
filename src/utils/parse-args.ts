@@ -108,10 +108,35 @@ const expectedMessage: z.core.$ZodErrorMap = issue => {
     }
     case 'invalid_value':
       return `one of ${issue.values.map(v => JSON.stringify(v)).join(', ')}`;
+    case 'invalid_union': {
+      const kinds = unionKinds(issue);
+      if (kinds === undefined) return undefined;
+      const expected = `${kinds.slice(0, -1).join(', ')} or ${kinds[kinds.length - 1]}`;
+      if (issue.input === undefined) return `${expected} (required)`;
+      return `${expected}, not ${kindOf(issue.input)}`;
+    }
     default:
       return undefined; // zod's own message
   }
 };
+
+/** What each alternative of a union expects, in the plural-free words of the `Expected:` line. */
+const UNION_KIND: Record<string, string> = {
+  string: 'a string',
+  number: 'a number',
+  boolean: 'a boolean',
+};
+
+/**
+ * The kinds a union of plain types accepts (`["a string", "a number", "a boolean"]`),
+ * or undefined for any other union, which keeps zod's own message.
+ */
+function unionKinds(issue: z.core.$ZodRawIssue<z.core.$ZodIssueInvalidUnion>): string[] | undefined {
+  const kinds = issue.errors.map(alternative =>
+    alternative.length === 1 && alternative[0].code === 'invalid_type' ? UNION_KIND[alternative[0].expected] : undefined
+  );
+  return kinds.length > 1 && kinds.every(kind => kind !== undefined) ? (kinds as string[]) : undefined;
+}
 
 /** A legal value of each type for the `Example:` line, which the unconverted tools' errors also carry. */
 const EXAMPLE_VALUE: Record<string, string> = {
@@ -129,6 +154,12 @@ function exampleFor(param: string, issue: z.core.$ZodIssue): string | undefined 
   }
   if (issue.code === 'invalid_type') {
     const sample = EXAMPLE_VALUE[issue.expected];
+    return sample === undefined ? undefined : `${param}: ${sample}`;
+  }
+  if (issue.code === 'invalid_union') {
+    // The first alternative's sample: `property_value: "..."`
+    const first = issue.errors[0]?.[0];
+    const sample = first?.code === 'invalid_type' ? EXAMPLE_VALUE[first.expected] : undefined;
     return sample === undefined ? undefined : `${param}: ${sample}`;
   }
   return undefined;

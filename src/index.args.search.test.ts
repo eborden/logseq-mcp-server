@@ -43,10 +43,21 @@ const JOURNAL = {
   'journal?': true,
 };
 
+/** Blocks with a `status` property, as LogSeq stores them: numbers and booleans are not strings. */
+const PROPERTY_BLOCKS = [
+  block(1, 'status:: active', { properties: { status: 'active' } }),
+  block(4, 'status:: 1', { properties: { status: 1 } }),
+  block(5, 'status:: 1', { properties: { status: '1' } }),
+  block(6, 'status:: true', { properties: { status: true } }),
+];
+
 /** Datalog stub: answers each query by its shape, so tests don't depend on call order. */
 function answer(query: string, inputs: unknown[]): unknown {
   if (query.includes(':in $ ?n')) return [[page(String(inputs[0])), 'name']];
-  if (query.includes(':block/properties')) return [[block(1, 'status:: active', { properties: { status: 'active' } })]];
+  if (query.includes(':block/properties')) {
+    // Like the query: a property matches when its value, as text, equals the input
+    return PROPERTY_BLOCKS.filter(b => String(b.properties.status) === inputs[1]).map(b => [b]);
+  }
   if (query.includes(':block/journal-day') && query.includes(':block/name') && !query.includes(':block/page ?page')) {
     return [[JOURNAL]];
   }
@@ -187,7 +198,6 @@ async function rejection(name: string, args: Record<string, unknown>): Promise<s
 const REQUIRED: ReadonlyArray<readonly [string, string, Record<string, unknown>]> = [
   ['logseq_search_blocks', 'query', { query: 'alice' }],
   ['logseq_query_by_property', 'property_key', { property_key: 'status', property_value: 'active' }],
-  ['logseq_query_by_property', 'property_value', { property_key: 'status', property_value: 'active' }],
   ['logseq_get_concept_network', 'concept_name', { concept_name: 'Alice' }],
   ['logseq_get_context_for_query', 'query', { query: 'about [[Alice]]' }],
   ['logseq_search_by_relationship', 'topic_a', { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references' }],
@@ -389,5 +399,57 @@ describe('numbers that pass the parser keep their old meaning', () => {
   it('search_blocks: a fractional limit is cut down to a whole number of blocks', async () => {
     const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: 2.5 });
     expect(JSON.parse(result.content[0].text)).toHaveLength(2);
+  });
+});
+
+describe('logseq_query_by_property property_value: a string, number or boolean, matched as text (#60)', () => {
+  /** The value input the one Datalog query was sent, and the uuids of the blocks it matched. */
+  async function matching(value: unknown) {
+    const { result, queries } = await call('logseq_query_by_property', { ...PROPERTY, property_value: value });
+    expect(result.isError, result.content[0]?.text).toBeUndefined();
+    expect(queries).toHaveLength(1);
+    const blocks: Array<{ uuid: string }> = JSON.parse(result.content[0].text);
+    return { input: queries[0][1][1], uuids: blocks.map(b => b.uuid) };
+  }
+
+  it('1 and "1" send the same text and match the same blocks', async () => {
+    const number = await matching(1);
+    const text = await matching('1');
+    expect(number.input).toBe('1');
+    expect(number).toEqual(text);
+    expect(number.uuids).toHaveLength(2);
+  });
+
+  it('true and "true" send the same text and match the same blocks, not the 1s', async () => {
+    const boolean = await matching(true);
+    const text = await matching('true');
+    expect(boolean.input).toBe('true');
+    expect(boolean).toEqual(text);
+    expect(boolean.uuids).toHaveLength(1);
+    expect(boolean.uuids).not.toEqual(expect.arrayContaining((await matching(1)).uuids));
+  });
+
+  it('a string still matches as before', async () => {
+    expect(await matching('active')).toEqual({ input: 'active', uuids: [PROPERTY_BLOCKS[0].uuid] });
+  });
+
+  it('reports it missing, also when sent as null, naming the three types', async () => {
+    for (const args of [{ property_key: 'status' }, { property_key: 'status', property_value: null }]) {
+      const error = await rejection('logseq_query_by_property', args);
+      expect(error).toContain("Invalid parameter 'property_value': missing");
+      expect(error).toContain('a string, a number or a boolean (required)');
+      expect(error).toContain('Example: property_value: "..."');
+    }
+  });
+
+  it.each([
+    [['active'], 'an array'],
+    [{ status: 'active' }, 'an object'],
+    [NaN, 'NaN'],
+    [Infinity, 'Infinity'],
+  ])('rejects %j', async (value, kind) => {
+    expect(await rejection('logseq_query_by_property', { ...PROPERTY, property_value: value })).toMatch(
+      new RegExp(`'property_value'.*a string, a number or a boolean, not ${kind}`, 's')
+    );
   });
 });

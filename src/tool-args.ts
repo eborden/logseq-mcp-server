@@ -81,8 +81,10 @@ export const queryByPropertyArgs = z.object({
   property_key: z
     .string()
     .describe('Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)'),
+  // A number or boolean is matched as text, `String(value)` in the query builder, as it
+  // always was: `3` and `"3"` find the same blocks. Declared so the schema says so.
   property_value: z
-    .string()
+    .union([z.string(), z.number(), z.boolean()])
     .describe('Value to match for the property. For multi-value properties, matches if any one value equals it'),
   slim_results: slimResultsArg,
 });
