@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { loadConfig, resolveTipsEnabled } from './config.js';
-import { mkdir, writeFile, rm } from 'fs/promises';
+import { mkdtemp, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -9,9 +9,10 @@ describe('loadConfig', () => {
   let configPath: string;
 
   beforeEach(async () => {
-    // Create a temporary directory for tests
-    testDir = join(tmpdir(), `logseq-mcp-test-${Date.now()}`);
-    await mkdir(testDir, { recursive: true });
+    // A directory no other run can share. It was `logseq-mcp-test-${Date.now()}`, so two vitest
+    // runs starting a test in the same millisecond (worktrees run suites side by side) shared one
+    // directory, and one run's cleanup deleted the other's config file mid-test (#193).
+    testDir = await mkdtemp(join(tmpdir(), 'logseq-mcp-test-'));
     configPath = join(testDir, 'config.json');
   });
 
