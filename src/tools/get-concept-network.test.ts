@@ -380,6 +380,77 @@ describe('getConceptNetwork', () => {
     });
   });
 
+  describe('true depth (#155)', () => {
+    it('labels a direct neighbour the fanout cap dropped at depth 1 with depth 1 when it returns through another page', async () => {
+      const { client, executeDatalogQuery } = mockClient(rootPage, [
+        // Root links to 2 (3 references) and 3 (1 reference); maxFanout 1 keeps only page 2
+        [row(1, 2, 'outbound', 3), row(1, 3, 'outbound', 1)],
+        // Page 2 links to 3, so 3 is admitted now, one level too deep
+        [row(2, 3, 'outbound', 1), row(2, 1, 'inbound', 3)]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { maxFanout: 1 });
+
+      expect(result.nodes.map(n => [n.id, n.depth])).toEqual([[1, 0], [2, 1], [3, 1]]);
+      // The root-3 edge is still returned, now consistent with the labels
+      expect(result.edges.map(e => [e.from, e.to])).toEqual([[1, 2], [1, 3], [2, 3]]);
+      // Nothing else changes: the first level still dropped nothing it did not before
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(3);
+    });
+
+    it('keeps the node and edge sets, truncated and warnings as the walk left them', async () => {
+      const { client } = mockClient(rootPage, [
+        [row(1, 2, 'outbound', 3), row(1, 3, 'outbound', 1), row(1, 4, 'outbound', 1)],
+        [row(2, 3, 'outbound', 1)]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { maxFanout: 1 });
+
+      expect(result.nodes.map(n => n.id)).toEqual([1, 2, 3]);
+      expect(result.truncated).toBe(true);
+      expect(result.warnings.map(w => w.code)).toEqual(['network_truncated']);
+      expect(result.warnings[0].message).toBe('Kept 3 pages; at least 2 more connected pages were dropped.');
+    });
+
+    it('shortens a deeper node that has a link to a closer page the walk did not use', async () => {
+      const { client, executeDatalogQuery } = mockClient(rootPage, [
+        [row(1, 2, 'outbound', 3), row(1, 3, 'outbound', 1)],
+        [row(2, 4, 'outbound', 1)],
+        // Page 4 (depth 2) links to 5; page 5 also links back to the root, which depth 3 reports
+        [row(4, 5, 'outbound', 1), row(5, 1, 'outbound', 1)]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 3, { maxFanout: 1 });
+
+      expect(result.nodes.map(n => [n.id, n.depth])).toEqual([[1, 0], [2, 1], [4, 2], [5, 1]]);
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(4);
+    });
+
+    it('orders each edge from the closer endpoint by the true depth', async () => {
+      const { client } = mockClient(rootPage, [
+        [row(1, 20, 'outbound', 3), row(1, 3, 'outbound', 1)],
+        [row(20, 3, 'outbound', 1)]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, { maxFanout: 1 });
+
+      // 3 and 20 are both at distance 1, so the lower id is `from`
+      const edge = result.edges.find(e => e.from + e.to === 23)!;
+      expect([edge.from, edge.to]).toEqual([3, 20]);
+    });
+
+    it('leaves an uncapped network as the walk labelled it', async () => {
+      const { client } = mockClient(rootPage, [
+        [row(1, 2, 'outbound'), row(1, 3, 'inbound')],
+        [row(2, 4, 'outbound'), row(3, 5, 'inbound')]
+      ]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2);
+
+      expect(result.nodes.map(n => [n.id, n.depth])).toEqual([[1, 0], [2, 1], [3, 1], [4, 2], [5, 2]]);
+    });
+  });
+
   describe('journal pages', () => {
     const journalRow = (source: number, id: number) =>
       row(source, id, 'inbound', 1, { name: `journal ${id}`, journal: true });
