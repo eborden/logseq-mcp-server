@@ -131,6 +131,7 @@ Integration tests must prove the system works. A test that skips, or passes with
 **Timeout Error:**
 - LogSeq is reachable but not answering; check it is not busy or stuck
 - Raise `timeoutMs` in the config file if calls are legitimately slow
+- A test (not a call) that times out after 120 s means the instance was swamped: LogSeq answers one request at a time, so several suites on one instance, or many instances on one machine, queue behind each other. Stop other runs and rerun. A test that fails after about 30 s with `LogSeqTimeoutError` is a single call that never answered
 
 **A test fails on a value:**
 - The fixture changed (a page, a property key or a block embed adds pages), or LogSeq indexed it differently. Re-index, compare with `tests/fixtures/README.md`, and update the README and the test together
