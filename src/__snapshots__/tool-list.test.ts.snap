@@ -572,12 +572,17 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Query by Property",
     },
-    "description": "Find blocks whose property equals a value (e.g. status::done).
+    "description": "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.
 
-**Matching:** the key as stored (created-at) or camelCase; values are exact strings ("42", "true"); a multi-value property matches if any one value equals it. Returns a flat list with the page name, no children.
-**Can't find:** partial values or ranges. For text use logseq_search_blocks.",
+**Matching:** key as stored (created-at) or camelCase; values are exact strings ("42", "true"); a multi-value property matches if any one value equals it. Flat list with page name, no children.
+**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_search_blocks.",
     "inputSchema": {
       "properties": {
+        "limit": {
+          "default": 100,
+          "description": "Max blocks to return (default: 100, max: 500)",
+          "type": "number",
+        },
         "property_key": {
           "description": "Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)",
           "type": "string",

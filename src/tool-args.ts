@@ -20,6 +20,7 @@ import {
   MAX_BLOCKS_PER_PAGE,
   MAX_PAGES,
 } from './tools/get-backlinks.js';
+import { DEFAULT_PROPERTY_LIMIT, MAX_PROPERTY_LIMIT } from './tools/query-by-property.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
 import { DEFAULT_DATE_RANGE_MAX_BLOCKS, MAX_DATE_RANGE_BLOCKS } from './tools/query-by-date-range.js';
 import { MAX_LINK_TERMS, MAX_TEXT_CHARS } from './tools/check-links.js';
@@ -124,6 +125,12 @@ export const queryByPropertyArgs = z.object({
   property_value: z
     .union([z.string(), z.number(), z.boolean()])
     .describe('Value to match for the property. For multi-value properties, matches if any one value equals it'),
+  // Plain `z.number()`, like `limit` on search_blocks: the tool floors it and clamps it to 0..500,
+  // so a larger value is clamped (and reported), not rejected (#61)
+  limit: z
+    .number()
+    .default(DEFAULT_PROPERTY_LIMIT)
+    .describe(`Max blocks to return (default: ${DEFAULT_PROPERTY_LIMIT}, max: ${MAX_PROPERTY_LIMIT})`),
   slim_results: slimResultsArg,
 });
 

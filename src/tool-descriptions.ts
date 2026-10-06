@@ -55,10 +55,10 @@ export const TOOL_DESCRIPTIONS = {
 **Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).
 **Next:** logseq_build_context on a result's page.`,
 
-  logseq_query_by_property: `Find blocks whose property equals a value (e.g. status::done).
+  logseq_query_by_property: `Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.
 
-**Matching:** the key as stored (created-at) or camelCase; values are exact strings ("42", "true"); a multi-value property matches if any one value equals it. Returns a flat list with the page name, no children.
-**Can't find:** partial values or ranges. For text use logseq_search_blocks.`,
+**Matching:** key as stored (created-at) or camelCase; values are exact strings ("42", "true"); a multi-value property matches if any one value equals it. Flat list with page name, no children.
+**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_search_blocks.`,
 
   logseq_query_by_date_range: `Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.
 

@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => {
     getBacklinksWithMeta: vi.fn(async () => withMeta()),
     getBlock: vi.fn(async () => nested()),
     searchBlocksWithMeta: vi.fn(async () => withMeta()),
-    queryByProperty: vi.fn(async () => [nested()]),
+    queryByPropertyWithMeta: vi.fn(async () => ({ results: [nested()], meta: null })),
     getConceptNetwork: vi.fn(async () => nested()),
     searchByRelationship: vi.fn(async () => [nested()]),
     buildContextForTopic: vi.fn(async () => nested()),
@@ -54,7 +54,10 @@ vi.mock('./tools/search-blocks.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   searchBlocksWithMeta: mocks.searchBlocksWithMeta,
 }));
-vi.mock('./tools/query-by-property.js', () => ({ queryByProperty: mocks.queryByProperty }));
+vi.mock('./tools/query-by-property.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  queryByPropertyWithMeta: mocks.queryByPropertyWithMeta,
+}));
 // Keep the modules' constants: the argument schemas take their defaults from them (#60)
 vi.mock('./tools/get-concept-network.js', async importOriginal => ({
   ...(await importOriginal<object>()),
