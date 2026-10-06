@@ -265,3 +265,68 @@ describe('logseq_get_context_for_query keyword-hit maximum (#61)', () => {
     expect(markdown).not.toContain('hasMore: true');
   });
 });
+
+describe('logseq_get_concept_evolution max_entries (#61)', () => {
+  // The concept page resolves by name; `n` journal blocks link it (the mentions query)
+  const evolve = (n: number, args: Record<string, unknown> = {}) => {
+    const callAPI = vi.fn(async (method: string, params: unknown[]) => {
+      if (method === 'logseq.DB.datascriptQuery') {
+        if (String(params[0]).includes(':in $ ?n')) {
+          return [[{ id: 100, name: 'concept', 'original-name': 'Concept' }, 'name']];
+        }
+        return Array.from({ length: n }, (_, i) => [
+          { id: i + 1, content: `m${i}`, page: { id: 500 + i, 'journal-day': 20240101 + i } },
+        ]);
+      }
+      return method === 'logseq.Editor.getPageBlocksTree' ? [] : { id: 100, name: 'concept' };
+    });
+    return callTool(callAPI, 'logseq_get_concept_evolution', { concept_name: 'Concept', ...args });
+  };
+
+  it('cuts at the default 100 and reports it in the result object', async () => {
+    const body = JSON.parse((await evolve(150)).content[0].text);
+
+    expect(body.timeline).toHaveLength(100);
+    expect(body).toMatchObject({ hasMore: true, totals: { mentions: 150 } });
+    expect(body.summary.totalMentions).toBe(150);
+    expect(body.warnings).toEqual([
+      {
+        code: 'entries_truncated',
+        message: 'Showing 100 of 150 mentions (oldest first, undated last).',
+        howToFetchAll: 'Set max_entries to 150 (or higher) to get all 150.',
+      },
+    ]);
+  });
+
+  it('clamps a value above 500 and reports the maximum, with hasMore false', async () => {
+    const result = await evolve(600, { max_entries: 5000 });
+
+    expect(result.isError).toBeUndefined();
+    const body = JSON.parse(result.content[0].text);
+    expect(body.timeline).toHaveLength(500);
+    expect(body.hasMore).toBe(false);
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0].code).toBe('entries_truncated');
+    expect(body.warnings[0].message).toContain('capped at its maximum of 500 (5000 was asked for)');
+    expect(body.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('leaves the result unchanged when every mention fits', async () => {
+    const atDefault = await evolve(100);
+    const atMax = await evolve(100, { max_entries: 500 });
+    const above = await evolve(100, { max_entries: 5000 });
+
+    const body = JSON.parse(atDefault.content[0].text);
+    expect(body.timeline).toHaveLength(100);
+    expect(Object.keys(body)).not.toContain('warnings');
+    expect(Object.keys(body)).not.toContain('totals');
+    expect(atMax.content[0].text).toBe(atDefault.content[0].text);
+    expect(above.content[0].text).toBe(atDefault.content[0].text);
+  });
+
+  it('rejects a max_entries that is not a number', async () => {
+    const result = await evolve(3, { max_entries: 'many' });
+
+    expect(result.isError).toBe(true);
+  });
+});
