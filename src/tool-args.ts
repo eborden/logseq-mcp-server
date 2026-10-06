@@ -36,13 +36,13 @@ const RESOLVE_REFS_DESCRIPTION =
 
 const OUTPUT_FORMAT_VALUES = ['json', 'markdown'] as const satisfies readonly OutputFormat[];
 
-/** `format` (#43): absent means json, as `parseFormat` reads it. No advertised default. */
+/** `format` (#43): absent means json. No advertised default. */
 const formatArg = z.enum(OUTPUT_FORMAT_VALUES).optional().describe(FORMAT_DESCRIPTION);
 
 /** Description of the `compact` parameter (#43). */
 const COMPACT_DESCRIPTION = 'Block snippets and uuids, no bodies. Read one with logseq_get_block';
 
-/** `compact` (#43): default false, as `parseCompact` reads it. */
+/** `compact` (#43): default false. */
 const compactArg = z.boolean().default(false).describe(COMPACT_DESCRIPTION);
 
 /** `resolve_refs` (#18): opt-in, default false. */
