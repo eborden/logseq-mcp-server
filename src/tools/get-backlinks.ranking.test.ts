@@ -245,3 +245,50 @@ describe('fetchBacklinks stays unranked, so build_context keeps its order (#178)
     expect(names(raw)).toEqual(['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot']);
   });
 });
+
+describe('a source page with no name or entity does not break the per-page warning (#190 review)', () => {
+  type Backlink = [PageEntity, BlockEntity[]];
+  type BlockPage = { id: number; name?: string; originalName?: string };
+  const block = (id: number, page?: BlockPage) =>
+    ({ id, uuid: `b-${id}`, content: 'x [[Target]]', page }) as unknown as BlockEntity;
+  const orphan = (blockCount: number, page?: BlockPage): Backlink => [
+    null as unknown as PageEntity,
+    Array.from({ length: blockCount }, (_, j) => block(j + 1, page))
+  ];
+  const warningOf = (out: { warnings: Array<{ code: string; message: string }> }) =>
+    out.warnings.find(w => w.code === 'page_blocks_truncated')!.message;
+
+  it("names a page-less tuple by its first block's page (capBacklinks)", () => {
+    const out = capBacklinks([orphan(3, { id: 5, name: 'solo', originalName: 'Solo' })], 'target', { maxBlocksPerPage: 1 });
+    expect(out.results[0][1]).toHaveLength(1);
+    expect(warningOf(out)).toContain('"Solo" (3)');
+  });
+
+  it("falls back to the first block's page id, then to a neutral label", () => {
+    expect(warningOf(capBacklinks([orphan(3, { id: 5 })], 'target', { maxBlocksPerPage: 1 }))).toContain('"5" (3)');
+    expect(warningOf(capBacklinks([orphan(3)], 'target', { maxBlocksPerPage: 1 }))).toContain('"unknown page" (3)');
+  });
+
+  it('works through the Editor path, which can return a tuple with no page', async () => {
+    const callAPI = vi.fn().mockResolvedValue([orphan(3, { id: 5, name: 'solo' })]);
+    const executeDatalogQuery = vi.fn().mockResolvedValue([[{ id: 1, name: 'target', 'original-name': 'Target' }, 'name']]);
+    const client = { callAPI, executeDatalogQuery } as unknown as LogseqClient;
+    const { results, meta } = await getBacklinksWithMeta(client, 'Target', { maxBlocksPerPage: 1 });
+    expect(results![0][1]).toHaveLength(1);
+    expect(meta!.warnings.find(w => w.code === 'page_blocks_truncated')!.message).toContain('"solo" (3)');
+  });
+
+  it('works through the alias group path when the blocks name their page by id only', async () => {
+    // The group query's rows carry a page with just an id; the tuple's page is that bare entity
+    const executeDatalogQuery = vi.fn(async (query: string, ...inputs: unknown[]) => {
+      if (query.includes(':in $ ?n')) return inputs[0] === 'target alias' ? [[alias, 'name'], [target, 'alias']] : [[target, 'name']];
+      if (query.includes('?start')) return [[1, member(target)], [1, member(alias)]];
+      if (query.includes(':block/path-refs')) return [1, 2, 3].map(id => [{ id, uuid: `b-${id}`, content: 'x', page: { id: 77 } }]);
+      throw new Error(`unexpected query: ${query}`);
+    });
+    const client = { callAPI: vi.fn(), executeDatalogQuery } as unknown as LogseqClient;
+    const { results, meta } = await getBacklinksWithMeta(client, 'Target', { maxBlocksPerPage: 1 });
+    expect(results![0][1]).toHaveLength(1);
+    expect(meta!.warnings.find(w => w.code === 'page_blocks_truncated')!.message).toContain('"77" (3)');
+  });
+});
