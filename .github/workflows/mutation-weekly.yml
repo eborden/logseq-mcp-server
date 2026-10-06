@@ -9,6 +9,9 @@ name: Mutation testing (full run)
 # (its cache save then finds the key taken and skips). A run never restores a cache, so each
 # one starts cold.
 on:
+  # THROWAWAY (#204): run the full cold run on a push to this branch, to time it on CI and seed the cache.
+  push:
+    branches: [throwaway-204-base]
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
