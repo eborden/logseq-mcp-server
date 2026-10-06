@@ -2,7 +2,7 @@ import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { ResultMeta, ResultWarning } from '../types.js';
 import { entityId, pageDisplayName } from '../utils/entity-fields.js';
-import { buildResultMeta } from '../utils/result-meta.js';
+import { buildResultMeta, INLINE_ITEMS, largeResultNote } from '../utils/result-meta.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 import {
   ResolvedAliases,
@@ -285,7 +285,7 @@ function networkTruncatedWarning(f: TruncationFacts): ResultWarning {
       message: base,
       howToFetchAll:
         `Set max_nodes to ${suggestedNodes} (max ${MAX_NODES_LIMIT}) and/or max_fanout higher (max ${MAX_FANOUT_LIMIT}), ` +
-        'or set expand_journals to walk through journal pages.'
+        `or set expand_journals to walk through journal pages.${largeResultNote(suggestedNodes, INLINE_ITEMS.networkNodes)}`
     };
   }
 
@@ -301,9 +301,11 @@ function networkTruncatedWarning(f: TruncationFacts): ResultWarning {
   // With the node budget full at its maximum, no other parameter adds a page; a larger
   // fanout would only change which pages are kept.
   const raise: string[] = [];
+  let raisedNodes = 0;
   if (nodesBit && !nodesAtMax) {
     // Pages the fanout cap dropped are not the budget's to hold, so count only the budget's
     const holdsAll = f.kept + f.droppedByBudget;
+    raisedNodes = Math.min(holdsAll, MAX_NODES_LIMIT);
     raise.push(
       holdsAll <= MAX_NODES_LIMIT
         ? `max_nodes to ${holdsAll} (max ${MAX_NODES_LIMIT})`
@@ -317,7 +319,7 @@ function networkTruncatedWarning(f: TruncationFacts): ResultWarning {
     return {
       code: 'network_truncated',
       message: reachedClause ? `${base} ${reachedClause}.` : base,
-      howToFetchAll: `Set ${raise.join(' and/or ')}.`
+      howToFetchAll: `Set ${raise.join(' and/or ')}.${largeResultNote(raisedNodes, INLINE_ITEMS.networkNodes)}`
     };
   }
 

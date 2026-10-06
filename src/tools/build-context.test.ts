@@ -374,6 +374,23 @@ describe('buildContextForTopic', () => {
       expect(result.summary.totalBlocks).toBe(5);
     });
 
+    it('says a large raise may be saved to a file only past what plausibly comes back inline (#196)', async () => {
+      const note = "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
+      // 200 blocks, 150 references and 500 related pages still plausibly come back inline
+      const edge = await buildContextForTopic(mkClient(200, []), 'Topic', { maxBlocks: 5 });
+      expect(edge.warnings[0].howToFetchAll).toBe('Set max_blocks to 200 (or higher) to get all 200.');
+
+      const big = await buildContextForTopic(mkClient(201, []), 'Topic', { maxBlocks: 5 });
+      expect(big.warnings[0].howToFetchAll).toBe(`Set max_blocks to 201 (or higher) to get all 201. ${note}`);
+
+      const many = Array.from({ length: 151 }, (_, i) => [{ id: 1000 + i, name: `Source ${i}` }, [{ id: 5000 + i, content: 'a' }]]);
+      const refs = await buildContextForTopic(mkClient(0, many), 'Topic', { maxReferences: 5, maxRelatedPages: 5 });
+      expect(refs.warnings.map(w => [w.code, w.howToFetchAll])).toEqual([
+        ['references_truncated', `Set max_references to 151 (or higher) to get all 151. ${note}`],
+        ['related_pages_truncated', 'Set max_related_pages to 151 (or higher) to get all 151.']
+      ]);
+    });
+
     it('warns when maxReferences cuts references', async () => {
       const result = await buildContextForTopic(mkClient(0, backlinks), 'Topic', { maxReferences: 3 });
 
