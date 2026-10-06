@@ -66,16 +66,16 @@ Measured through Claude Code (October 2026) on made-up journals: a result of abo
 | Call | Size on those journals | Under the limit |
 |------|------------------------|-----------------|
 | `query_by_date_range`, `max_blocks=100` | ~16,000 chars | yes |
-| `query_by_date_range`, `max_blocks=200` | ~31,000 chars (about 155 per block) | yes, up to about 250 chars per block |
+| `query_by_date_range`, `max_blocks=200` | ~31,000 chars (about 155 per block) | yes, up to about 250 chars per block as returned (about 200 of content) |
 | `query_by_date_range`, `max_blocks=300` | ~46,000 chars | borderline: inline here, saved for longer blocks |
 | `query_by_date_range`, `max_blocks=1000` | ~150,000 chars, or ~86,000 for very short blocks | no, saved to a file |
-| `query_by_date_range`, `include_content=false`, `max_blocks=500` | ~43,000 chars (a snippet is at most 80 characters) | always |
-| `query_by_date_range`, `max_blocks=1`, `top_concepts_limit=0` | ~1,000 chars | always |
+| `query_by_date_range`, `include_content=false`, `max_blocks=500` | ~43,000 chars (a snippet is at most 80 characters) | yes on typical page names |
+| `query_by_date_range`, `max_blocks=1`, `top_concepts_limit=0` | ~1,000 chars | yes |
 
 What to do:
 
 - **Page small.** For a period's journals use `max_blocks=200` and follow the `blocks_truncated` warning's `start_date` until a result has no warning. Don't raise the cap to avoid a second call. A block's size is unknown before the call, so the cap in blocks is the only handle, and 200 leaves room for long blocks.
-- **Use `include_content=false` for shape.** Its size is bounded by the cap (at most 80 characters per snippet), so `max_blocks=500` is always shown. `summary.totalBlocks` there counts top-level blocks.
+- **Use `include_content=false` for shape.** Its size is bounded by the cap and not by block length (at most 80 characters per snippet, plus page names in `topConcepts`), so `max_blocks=500` is shown on typical page names. `summary.totalBlocks` there counts top-level blocks.
 - **Size a range cheaply.** `max_blocks=1` with `top_concepts_limit=0` costs about 1,000 characters, and its `blocks_truncated` warning carries `totals.blocks` (nested blocks) and `totals.days` for the whole range. A range with no warning had 1 block or fewer.
 - **If a result is saved to a file anyway** (the message says "Output too large" or "exceeds maximum allowed tokens" and names a file), don't open it. Repeat the call with a lower `max_blocks` (halve it) or one day per call. A single day that is still saved can't be read whole: read it in pieces with a `search_term` (one call per name, person or marker you are after) and say that part of the day went unread. A day-sized call at `max_blocks=500` is often too big too: about 75,000 characters on the journals above.
 
