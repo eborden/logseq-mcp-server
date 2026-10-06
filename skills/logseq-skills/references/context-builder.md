@@ -390,16 +390,18 @@ User: "Help me plan my week"
 User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]]?"
 
 1. logseq_search_by_relationship("TypeScript", "GraphQL", "connected-within", max_distance=3)
-   → Found connection at distance 2
+   → Returns blocks of both pages, so they are connected within 3 hops
+     (the result gives no distance or path)
 
 2. logseq_get_concept_network("TypeScript", max_depth=2)
    → Network analysis: 15 nodes including [[GraphQL]], 28 edges
+     ([[API Development]] links to both: the bridge comes from these edges)
 
 3. logseq_get_backlinks("TypeScript")
    → 12 pages with backlinks
 
 4. Present:
-   "CONNECTION FOUND (Distance 2):
+   "CONNECTION FOUND (within 3 hops):
     [[TypeScript]] → [[API Development]] → [[GraphQL]]
 
     SHARED CONTEXT:

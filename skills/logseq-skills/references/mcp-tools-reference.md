@@ -288,7 +288,7 @@ Other warnings (`frontier_truncated`, `same_topic`) are separate and can appear 
 | `references` | Blocks about A that reference B | "React" blocks mentioning "TypeScript" |
 | `referenced-by` | Blocks about A in pages referenced by B | "Testing" notes in pages linked from "Project" |
 | `in-pages-linking-to` | Blocks about A in pages linking to B | "Architecture" blocks in pages linking to "Backend" |
-| `connected-within` | A and B connected within N hops | "TypeScript" and "GraphQL" connected via "API Development" |
+| `connected-within` | Both pages' blocks, when a path of N hops or fewer links A and B (no path or distance is returned; find a bridge page with `get_concept_network`) | "TypeScript" and "GraphQL" linked within 3 hops |
 
 **Use when:**
 - Finding connections between topics
