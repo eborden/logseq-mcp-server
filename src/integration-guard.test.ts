@@ -97,6 +97,17 @@ describe('scripts/probe-constraints.ts', () => {
     expect(client).toBeGreaterThan(refuse);
     expect(code.split('new LogseqClient(').length - 1, 'one client, built after the check').toBe(1);
   });
+
+  it('has a manual-probe helper that loads the same guarded config', () => {
+    const start = source.indexOf('npx tsx --input-type=module');
+    const end = source.indexOf('Every step uses a THROWAWAY graph');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const helper = source.slice(start, end);
+    expect(helper).toMatch(/loadConfig\(resolveFixtureConfigPath\(\)\)/);
+    expect(helper).toMatch(/assertNotPersonalLogseq\(config\.apiUrl\)/);
+    expect(helper).not.toMatch(/\bhomedir\b|\.logseq-mcp\b|\bresolveConfigPath\b/);
+  });
 });
 
 describe('integration suites', () => {

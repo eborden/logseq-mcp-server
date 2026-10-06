@@ -361,9 +361,10 @@ main().catch((e) => {
 //   shape of each call and nothing else. `--input-type=module` is required:
 //   without it `tsx -e` compiles to CJS and the top-level await fails.
 //     npx tsx --input-type=module -e "
-//       import {homedir} from 'os'; import {join} from 'path';
 //       import {loadConfig} from './src/config.js'; import {LogseqClient} from './src/client.js';
-//       const c = new LogseqClient(await loadConfig(join(homedir(), '.logseq-mcp', 'config.json')));
+//       import {assertNotPersonalLogseq, resolveFixtureConfigPath} from './tests/integration/helpers/instance-config.js';
+//       const config = await loadConfig(resolveFixtureConfigPath()); assertNotPersonalLogseq(config.apiUrl);
+//       const c = new LogseqClient(config);
 //       for (const m of ['logseq.Editor.getAllPages', 'logseq.App.getCurrentGraph']) {
 //         try { const r = await c.callAPI(m, []);
 //           console.log(m, r === null ? 'null' : Array.isArray(r) ? 'array(' + r.length + ')' : typeof r);
