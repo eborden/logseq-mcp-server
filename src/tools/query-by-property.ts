@@ -28,7 +28,7 @@ function displayName(page: any): string {
  *
  * @param client - LogseqClient instance
  * @param propertyName - Name of the property to query
- * @param propertyValue - Value to match for the property
+ * @param propertyValue - Value to match for the property; a number or boolean is compared as `String(value)`
  * @param slimResults - Return slim results (40-50% fewer tokens, essential data only). Direct calls default to full (false); the MCP handler defaults to slim through its argument schema (#42, #60)
  * @returns Array of BlockEntity or SlimBlock objects with matching property (empty if none), or null if the API returns a null response
  * @throws InvalidParameterError if the property name has characters other than letters, digits, "-" and "_"
@@ -36,7 +36,7 @@ function displayName(page: any): string {
 export async function queryByProperty(
   client: LogseqClient,
   propertyName: string,
-  propertyValue: string,
+  propertyValue: string | number | boolean,
   slimResults: boolean = false
 ): Promise<BlockEntity[] | SlimBlock[] | null> {
   const { query, inputs } = DatalogQueryBuilder.blocksByProperty(propertyName, propertyValue);

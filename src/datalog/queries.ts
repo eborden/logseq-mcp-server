@@ -606,11 +606,11 @@ export class DatalogQueryBuilder {
    * properties, and that is the one the Editor API returned.
    *
    * @param propertyName - Property name (see `normalizePropertyKey`)
-   * @param propertyValue - Value to match (compared as a string)
+   * @param propertyValue - Value to match (compared as a string: `String(propertyValue)`)
    * @returns Query and inputs (`[normalized key, value]`)
    * @throws InvalidParameterError if the property name is invalid
    */
-  static blocksByProperty(propertyName: string, propertyValue: string): DatalogQuery {
+  static blocksByProperty(propertyName: string, propertyValue: string | number | boolean): DatalogQuery {
     return {
       query: `[:find (pull ?b [* {:block/page [:db/id :block/name :block/original-name]}])
              :in $ ?key ?value
