@@ -120,4 +120,4 @@ Date: 2026-10-06
 
 ## Mechanical enforcement
 
-- none-yet: #205 (adds `mutation-baseline.json`, `scripts/mutation-ratchet.ts` and makes the `mutation` job fail on a lowered score). #204 only adds Stryker, its config and an informational job that fails nothing, so it doesn't change this tier, and #205 moves the line to `ci:`. #206 holds the strengthen and prune work.
+- ci: `.github/workflows/ci.yml` + `mutation-baseline.json` (the `mutation` job runs `scripts/mutation-ratchet.ts` on every PR and push to main, and `.github/workflows/mutation-weekly.yml` runs it on the full cold run). #206 holds the strengthen and prune work.
