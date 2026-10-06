@@ -1,22 +1,23 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { access } from 'fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { createServer } from '../../src/index.js';
-import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from '../../src/tools/search-blocks.js';
+import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, searchBlocksWithMeta } from '../../src/tools/search-blocks.js';
 import { DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS } from '../../src/tools/get-context-for-query.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * Result caps hold against a real graph (#61): no tool returns more than its
  * maximum, whatever the caller asks for, and a cut is reported in meta. One
  * describe block per capped tool; later cap PRs add theirs here.
  *
- * Property-based: the query is a common letter, so any graph of a realistic
- * size matches more blocks than the maximum. Read-only.
- *
- * Needs LogSeq running; see tests/integration/setup.md.
+ * Against the fixture graph. Read-only. Its ~480 blocks are fewer than
+ * search_blocks' maximum of 500, so through MCP only the cut below the maximum
+ * and the clamp can be seen; the cut at the maximum runs through
+ * searchBlocksWithMeta with a lower maxLimit, the same code with a smaller
+ * bound. The keyword `neighbour` matches 190 blocks (the hub fixture), past
+ * get_context_for_query's maximum of 100.
  */
 
 interface Meta {
@@ -27,25 +28,10 @@ interface Meta {
 
 describe('result caps (#61)', () => {
   let mcp: Client;
+  let client: LogseqClient;
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. See tests/integration/setup.md for setup instructions.'
-      );
-    }
-    const client = new LogseqClient(await loadConfig(configPath));
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}. ` +
-          'Ensure LogSeq is running with the HTTP server enabled. See tests/integration/setup.md'
-      );
-    }
+    ({ client } = await connectFixture());
     const server = createServer(client, { tips: false });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     mcp = new Client({ name: 'result-caps-test', version: '1.0.0' }, { capabilities: {} });
@@ -75,63 +61,70 @@ describe('result caps (#61)', () => {
   }
 
   describe('logseq_search_blocks limit (max 500)', () => {
-    // A one-letter search returns most of the graph, so each call takes seconds:
-    // one query, the default, the maximum and one value above it.
+    // "e" is in all but two of the fixture's blocks
     const QUERY = 'e';
-    const LIMITS: Array<number | undefined> = [undefined, MAX_SEARCH_LIMIT, 1000];
+    let matches: number;
 
-    it('never returns more than the maximum, reports every cut, and clamps to the same blocks', { timeout: 120_000 }, async () => {
-      let overMax = 0;
-      const firstBlock = new Map<number | undefined, string>();
-      for (const limit of LIMITS) {
-        const args = limit === undefined ? { query: QUERY } : { query: QUERY, limit };
-        const result = await call('logseq_search_blocks', args);
-        const label = `limit ${limit ?? 'default'}`;
-        // A null API response sends no meta block; say so instead of a bare JSON.parse error
-        expect(result.content, `${label}: results block plus meta block`).toHaveLength(2);
-        firstBlock.set(limit, result.content[0].text);
-        const results = JSON.parse(result.content[0].text);
-        const { meta } = JSON.parse(result.content[1].text) as { meta: Meta };
-        const effective = Math.min(limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
-        const matches = meta.totals!.matches;
+    async function search(limit?: number) {
+      const args = limit === undefined ? { query: QUERY } : { query: QUERY, limit };
+      const result = await call('logseq_search_blocks', args);
+      // A null API response sends no meta block; say so instead of a bare JSON.parse error
+      expect(result.content, `limit ${limit ?? 'default'}: results block plus meta block`).toHaveLength(2);
+      return {
+        text: result.content[0].text,
+        results: JSON.parse(result.content[0].text) as unknown[],
+        meta: (JSON.parse(result.content[1].text) as { meta: Meta }).meta,
+      };
+    }
 
-        expect(Array.isArray(results), label).toBe(true);
-        expect(results.length, label).toBeLessThanOrEqual(MAX_SEARCH_LIMIT);
-        expect(results.length, label).toBe(Math.min(effective, matches));
-        expectNoSuggestionPast(meta, 'limit', MAX_SEARCH_LIMIT);
+    beforeAll(async () => {
+      const { meta } = await searchBlocksWithMeta(client, QUERY, 0);
+      matches = meta!.totals!.matches;
+      // Every block bar two (the fixture holds ~480): computed, so a new fixture block does not break it
+      expect(matches).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+      expect(matches).toBeLessThan(MAX_SEARCH_LIMIT);
+    });
 
-        if (matches <= results.length) {
-          // Nothing cut: no warning
-          expect(meta, label).toMatchObject({ hasMore: false, warnings: [] });
-        } else if (effective === MAX_SEARCH_LIMIT) {
-          // Cut at the maximum: the warning is the signal, and nothing can be raised
-          overMax++;
-          expect(meta.hasMore, label).toBe(false);
-          expect(meta.warnings, label).toHaveLength(1);
-          expect(meta.warnings[0].code).toBe('results_truncated');
-          expect(meta.warnings[0].message).toContain(`maximum of ${MAX_SEARCH_LIMIT}`);
-          expect(meta.warnings[0].howToFetchAll).toBeUndefined();
-        } else {
-          // Cut below the maximum: raising limit gets more
-          expect(meta.hasMore, label).toBe(true);
-          expect(meta.warnings[0].howToFetchAll).toMatch(/^Set limit to \d+/);
-        }
+    it('the default cuts below the maximum and says which limit gets the rest', async () => {
+      const { results, meta } = await search();
+
+      expect(results).toHaveLength(DEFAULT_SEARCH_LIMIT);
+      expect(meta.totals).toEqual({ matches });
+      expect(meta.hasMore).toBe(true);
+      expect(meta.warnings.map(w => w.code)).toEqual(['results_truncated']);
+      expect(meta.warnings[0].howToFetchAll).toMatch(new RegExp(`^Set limit to ${matches}\\b`));
+      expectNoSuggestionPast(meta, 'limit', MAX_SEARCH_LIMIT);
+    });
+
+    it('the maximum returns every match, and a limit above it clamps to the same blocks', async () => {
+      const atMax = await search(MAX_SEARCH_LIMIT);
+      const above = await search(1000);
+
+      expect(atMax.results).toHaveLength(matches);
+      expect(atMax.meta).toMatchObject({ hasMore: false, warnings: [], totals: { matches } });
+      expect(above.text).toBe(atMax.text);
+      expect(above.meta).toEqual(atMax.meta);
+    });
+
+    it('a cut at the maximum is a warning with nothing to raise', async () => {
+      // The fixture has fewer blocks than 500, so a lower bound stands in for it
+      const max = 100;
+      for (const limit of [max, 1000]) {
+        const { results, meta } = await searchBlocksWithMeta(client, QUERY, limit, false, false, max);
+
+        expect(results, `limit ${limit}`).toHaveLength(max);
+        expect(meta!.hasMore).toBe(false);
+        expect(meta!.warnings).toHaveLength(1);
+        expect(meta!.warnings[0].code).toBe('results_truncated');
+        expect(meta!.warnings[0].message).toContain(`maximum of ${max}`);
+        expect(meta!.warnings[0].howToFetchAll).toBeUndefined();
       }
-      expect(
-        overMax,
-        `A one-letter search matched no more than ${MAX_SEARCH_LIMIT} blocks, so the maximum was never tested. ` +
-          'Use a graph with more content; see tests/integration/setup.md'
-      ).toBeGreaterThan(0);
-      // Above the maximum the caller gets exactly the blocks the maximum gives
-      expect(firstBlock.get(1000)).toBe(firstBlock.get(MAX_SEARCH_LIMIT));
     });
   });
 
   describe('logseq_get_context_for_query max_search_results (max 100)', () => {
-    // The query names no [[topic]], so the tool falls back to a keyword search.
-    // Keywords must be over 3 letters and not stop words; these common English
-    // words are tried in turn until one matches more blocks than the maximum.
-    const CANDIDATES = ['that', 'this', 'have', 'from', 'will'];
+    // The query names no [[topic]], so the tool falls back to a keyword search
+    const QUERY = 'neighbour';
     const VALUES: Array<number | undefined> = [undefined, MAX_SEARCH_RESULTS, 1000];
 
     interface QueryBody extends Meta {
@@ -153,18 +146,8 @@ describe('result caps (#61)', () => {
     }
 
     it('never returns more than the maximum, reports every cut, and clamps to the same hits', { timeout: 180_000 }, async () => {
-      let query: string | undefined;
-      for (const candidate of CANDIDATES) {
-        if (totalHits(await ask(candidate, 1)) > MAX_SEARCH_RESULTS) {
-          query = candidate;
-          break;
-        }
-      }
-      expect(
-        query,
-        `No keyword of ${JSON.stringify(CANDIDATES)} matched more than ${MAX_SEARCH_RESULTS} blocks, so the maximum ` +
-          'was never tested. Use a graph with more content; see tests/integration/setup.md'
-      ).toBeDefined();
+      const query = QUERY;
+      expect(totalHits(await ask(query, 1))).toBe(190);
 
       const hitsAt = new Map<number | undefined, string>();
       for (const max of VALUES) {
@@ -177,7 +160,7 @@ describe('result caps (#61)', () => {
         expect(Array.isArray(body.searchResults), label).toBe(true);
         expect(body.searchResults!.length, label).toBeLessThanOrEqual(MAX_SEARCH_RESULTS);
         expect(body.searchResults!.length, label).toBe(Math.min(effective, total));
-        expect(total, label).toBeGreaterThan(MAX_SEARCH_RESULTS);
+        expect(total, label).toBe(190);
         expectNoSuggestionPast(body, 'max_search_results', MAX_SEARCH_RESULTS);
         expect(body.warnings.map(w => w.code), label).toEqual(['search_results_truncated']);
 
