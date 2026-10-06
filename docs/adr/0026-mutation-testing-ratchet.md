@@ -1,0 +1,120 @@
+# Ratchet per-file mutation scores on the unit suite
+
+## Context
+
+The unit suite is the CI quality gate (`npx vitest run src`): 108 test files and about 2,750 tests against 48 source files, and nothing measures how good they are. There is no coverage or mutation tooling. A passing line says a line ran, not that a test would fail if the line were wrong, and a suite this size has weak tests (they assert too little) and redundant ones (they repeat another test). Issue #200 asked for a mutation-testing gate, and a spike to size it before committing to one. This ADR is that decision, and its numbers come from the spike. The follow-up work is in #204, #205 and #206.
+
+The decisions taken in the interview on #200, which this ADR keeps:
+
+- The goal is to prune and strengthen, with a ratchet so the suite can't regress. It is not a coverage target.
+- Scope is the unit tests only. The integration tests don't run in CI, so they are out of the runs and the score.
+- The gate is a committed baseline, per file, so a strong file can't hide a regression in a weak one.
+- Pull requests keep to the current 10-minute job timeout.
+- Survivors that can't be killed get an inline ignore with a written reason, counted in the report.
+- Pruning is report first, then human review in separate PRs. Tests that guard an ADR or business rule stay.
+
+### Dependency vetting (foundations 4.10)
+
+Checked against the npm registry on 2026-10-06.
+
+| Check | `@stryker-mutator/core` and `@stryker-mutator/vitest-runner` 10.0.0 |
+|---|---|
+| Maintenance | StrykerJS, three npm maintainers, 10 releases since 2025-08, latest 2026-08-14, about 3.9M downloads a week, not deprecated, npm provenance attestation present (SLSA v1) |
+| Licence | Apache-2.0. It is a `devDependency` that is never shipped (`files` in `package.json` lists `dist`, `skills`, `CHANGELOG.md`, `LICENSE`, `README.md`), so it doesn't touch the MIT licence (ADR-0023) |
+| Compatibility | `engines.node >=22.0.0` (our floor is 22.12, ADR-0022). `vitest` peer `>=2.0.0` (we are on 3.2.4), so it needs no vitest upgrade |
+| Size | `node_modules` grew from about 96 MB to about 149 MB (+53 MB). 133 packages added to the lockfile tree, of which 108 are MIT, 15 Apache-2.0, 6 ISC and 4 other permissive licences (BSD-3-Clause, 0BSD, BlueOak-1.0.0, and CC-BY-4.0 for the `caniuse-lite` data) |
+| Install scripts | None. No added package has `hasInstallScript`. The two existing ones (`esbuild`, `fsevents`) are unchanged |
+| `npm audit` | 19 findings before and after. None of the added packages is a new finding. The `ajv`, `fast-uri` and `picomatch` entries come from the MCP SDK and vite and were already there |
+| Network use | A grep of `@stryker-mutator/core` for its HTTP client (`typed-rest-client`) finds only the `init` wizard (registry lookup) and the optional dashboard reporter. Neither runs under `stryker run` with the reporters we use |
+
+Caveat: that is a read of the metadata, the lockfile and `grep`, not an audit of 130 packages' code. The tooling PR repeats the lockfile checks.
+
+### Spike
+
+Run locally on a 12-core macOS laptop with 16 GB, sharing the machine with other agents (load average between about 20 and 340), Node 24.13.1, Stryker 10.0.0, vitest runner, `coverageAnalysis: perTest`, `vitest.related: true`. Wall-clock times are therefore noisy and are given as ranges. CPU seconds are steadier. Nothing here touches LogSeq, and the report holds source paths and counts only.
+
+| Target | Mutants | Killed / survived | Score | Cold run (wall, CPU) | One-line change, incremental |
+|---|---|---|---|---|---|
+| A util (`src/utils/result-meta.ts`, 124 lines) | 66 | 65 / 1 | 98.5% | 51 s, 93 s CPU (4 min when the machine was loaded) | 7 of 66 re-run, 59 reused |
+| A tool (`src/tools/list-pages.ts`, 213 lines) | 135 | 127 / 8 | 94.1% | 86 s, 135 s CPU | 3 of 135 re-run, 35 s |
+| A query builder slice (`src/datalog/queries.ts`, lines 33 to 300) | 127 | 116 / 11 | 91.3% | 82 s, 148 s CPU | not run |
+| Whole mutated scope (42 files, `types.ts`, `tool-args.ts`, `index.ts`, `tool-descriptions.ts`, `instructions.ts`, `version.ts` excluded) | 6,164 | 5,182 killed, 8 timed out, 902 survived, 72 no coverage | 84.2% total | 39 min, about 8,770 CPU-seconds (2.4 CPU-hours), 8 workers | 4 of 6,164 re-run, 93 s |
+
+- **Dry run is the floor.** Stryker runs the whole related test set once, instrumented, even in incremental mode. That took 18 to 30 s for 800 to 1,900 tests on a quiet machine and 1 to 2.5 min under load, and most of it was vitest's per-file transform overhead, not test time (for the util: 3.6 s of tests, 21 s of overhead). The full scope's no-change incremental run took 93 to 133 s wall and about 90 s CPU, with all 6,164 results reused.
+- **`perTest` coverage** cut the work to 4 to 10 tests per mutant, from 800 to 1,900 related tests. Disabling the bail (`disableBail`, needed for the redundancy report) cost 54.6 tests per mutant on the tool file and made the run about 2.2 times longer.
+- **Static mutants** (module-level code that has to be re-imported to test) are 226 of 6,164 (4%). `ignoreStatic: true` cut a cold full run from 39 min and 8,770 CPU-seconds to 28 min and 6,830 CPU-seconds (-22%) and moved the total score by 0.1 point. Stryker's own warning predicted a larger saving.
+- **Full cold run.** About 2 CPU-hours (1.9 with `ignoreStatic`). On a 4 vCPU GitHub runner that is about 30 to 37 minutes if it scaled perfectly, and on 2 vCPU about an hour. It is far over the 10-minute PR budget, so a cold run is a scheduled job, not a PR job.
+- **Per-file scores.** 41 files had mutants: median 88.8%, 6 files at 100%, 11 at 90 to 99%, 14 at 80 to 89%, 6 at 70 to 79%, 4 below 70% (the lowest 59.5%). The lowest were the error classes, the resource and prompt registrations, and `block-tree`.
+- **What survives** (974 survivors and no-coverage mutants): string literals 301 (31%), conditional expressions 268 (28%), equality operators 85, array declarations 65, method expressions 56, logical operators 53, optional chaining 35, arithmetic operators 28, the rest 18 or fewer each. The string-literal survivors are mostly prose in messages, tips and prompts that no test pins. One of the util's survivors is an equivalent mutant (`requested !== undefined && requested > max` where `undefined > n` is already false), which is what an inline ignore is for.
+- **Node 22 and 24.** Node 22.12.0 (the floor) and 24.13.1 gave the same mutant counts and the same scores for the util and the query slice (98.5% and 91.3%) at the same speed within noise (Stryker's own "done in" was 54 s on 22.12 against 45 s on 24 for the util, and 73 s against 76 s for the query slice). I did not run the full scope on 22.
+- **Guard and snapshot tests.** Running the three spike files with the guard and snapshot tests excluded from the vitest config (`tool-list`, `index.args.guard`, `index.minified`, `no-stdout`, `docs-format`, the `adr-*` tests, `repo-hygiene`, `integration-guard`, `package-metadata`, `version`) changed nothing: the same scores and the same survivors. In the full run, a guard test file is the first recorded killer of 9 of 5,190 killed mutants (0.2%).
+- **Timeouts.** 8 of 6,164 mutants timed out (5 with static mutants ignored). 7 of the 8 stopped at Stryker's own loop-iteration limit ("Hit limit reached"), which is a counter and not a clock.
+- **Determinism.** Two cold runs of the util gave the same score. Two cold full-scope runs (one with and one without `ignoreStatic`, so the mutants common to both are comparable, leaving out one file I edited in between) agreed on 5,802 and disagreed on 44 (0.75%): 40 survived in the first and were killed in the second, 3 went the other way and 1 changed from timeout to killed. 875 survivors were stable. The `coveredBy` sets were identical, so it isn't coverage attribution. The cause isn't isolated. The first run overlapped my other Stryker runs on one machine at a load average of 200 or more, so load or shared state is a candidate, and I didn't repeat it on a quiet machine. Overall that is small, but it lands unevenly: one file changed by 7 of its 285 mutants (about 2.5 points). A strict gate on one run would sometimes fail for no reason.
+- **Redundancy and effectiveness report.** `reporters: ["json"]` writes the mutation-testing-elements schema: for each source file its mutants (`status`, `mutatorName`, `location`, `replacement`, `coveredBy`, `killedBy`) and, for each test file, its tests (`id`, `name`). The HTML reporter shows the same per test and per mutant. By default Stryker bails at the first failing test, so `killedBy` holds one test and "never recorded as a killer" overstates redundancy (853 of 2,487 tests were recorded as a killer; 11 test files, 238 tests, recorded none). With `disableBail` on the tool file, all 86 tests that cover a mutant killed at least one, 84 of 127 killed mutants were killed by 11 or more tests, and only 5 tests were the sole killer of any mutant. So the report can tell us which tests are never anyone's sole killer (candidates to prune) and which files hold survivors (candidates to strengthen). It can't tell us that a test is worthless, since a test can pin a rule that no mutant in the mutated scope touches.
+- **Two things the sandbox needs.** Stryker copies the project into a sandbox, and the `.claude/skills` symlink makes the copy fail with `ENOTSUP`, so `.claude` goes in `ignorePatterns`. The sandbox symlinks `node_modules`. Stryker removes the link on cleanup. Anything that deletes a sandbox must not follow it.
+
+## Decision
+
+We adopt mutation testing on the unit suite with StrykerJS, and a per-file ratchet in CI. The tool and its cost are accepted. The gate is introduced in two steps: an informational job first (#204), then a committed baseline and enforcement (#205), with a calibration period of report-only runs in between.
+
+**Tool and scope.**
+- Every run, PR and scheduled, sets `ignoreStatic: true`, so one score definition feeds the baseline and both jobs. It leaves the 4% static mutants (module-level code) untested. That is the cost of a 22% cheaper run and one consistent score.
+- `@stryker-mutator/core` and `@stryker-mutator/vitest-runner`, as `devDependencies`, pinned to an exact version. A Stryker upgrade can change the mutator set and so every score, so it is its own PR, and it re-baselines.
+- The mutated scope is `src/**/*.ts` minus tests, `src/types.ts`, `src/tool-args.ts`, `src/index.ts`, `src/tool-descriptions.ts`, `src/instructions.ts` and `src/version.ts`. Those are type declarations, zod schema declarations, entry-point wiring and text constants, which `tsc` and the snapshot in [ADR-0016 (tool-list-size-guardrails)](0016-tool-list-size-guardrails.md) already guard. Mutating them only adds string noise. Test files are never mutated.
+- Tests: the unit suite through a `vitest.mutation.config.ts` that extends `vitest.config.ts` and excludes the guard and snapshot tests (the spike's list: `tool-list`, `index.args.guard`, `index.minified`, `no-stdout`, `docs-format`, the `adr-*` tests, `repo-hygiene`, `integration-guard`, `package-metadata` and `version`, 40 of 2,487 tests). They check layout, wording and docs, not behaviour, so the score reflects behavioural tests. It is cheap to do: the spike found they decide about 0.2% of kills and moved no score on the three files tried. #204 re-derives the list from the files that don't test behaviour, and the config keeps it short. Related mode narrows each run to the tests that import the mutated file. Integration tests are excluded as they are today.
+- `StringLiteral` mutants stay on. They are 1,009 of 5,964 mutants (17%) and 286 of 951 survivors (30%), but 72% of them are killed, and those include the Datalog query text, where a changed character changes behaviour. Excluding the mutator everywhere would drop 723 real kills to hide 286 survivors, and would lift the total score from 84.1% to 86.6% for nothing. The survivors are concentrated: 4 files (the prompts, the `get_context_for_query` tool, the error classes and the resource registrations) hold 168 of the 286, because they are model-facing prose that no test pins. Where a file's wording is deliberately untested, #206 may disable `StringLiteral` for that file with a written reason, and the ignored mutants are counted like any other ignore (below).
+- The score that gates is Stryker's total score: killed and timed-out mutants over killed, timed-out, survived and no-coverage ones. Ignored mutants are out of both. A file's uncovered code therefore counts against it.
+
+**Where it runs (PR runtime).**
+- The PR job runs on Node 24 only, with `concurrency` set to the runner's cores (4). The spike gave identical scores on 22.12 and 24, and the Node matrix stays on the existing unit-test job. It has `timeout-minutes: 10` (the CI job timeout today), and the target is 1 to 3 minutes.
+- It runs the whole mutated scope incrementally and restores Stryker's incremental file from `actions/cache`. The key is `mutation-incremental-<main sha>` with `restore-keys: mutation-incremental-`, so a PR restores the newest one saved from `main`, and every push to `main` runs the same incremental job and saves its file under its own SHA. A PR then re-tests only the mutants whose source or covering tests changed, and reuses the rest. The spike's cost for that is the dry run plus the changed mutants: 93 to 133 s wall, with about 90 s of CPU, for no change or one changed line, on a laptop that other jobs were loading. A cold file took about 1 to 1.5 min. By the spike's rate (roughly 0.4 s per mutant on 4 workers), a 300-line change is a few hundred mutants and adds a minute or two. These are estimates for a runner we haven't used.
+- On a cache miss, the job passes `--mutate` with only the changed source files and says so in its summary, and it still checks those files against the baseline. **It never starts a cold full run on a PR**, since that costs 30 to 60 minutes.
+- **A scheduled full cold run, weekly and by hand, never blocks a PR.** It runs the whole scope from scratch, uploads the report, and saves a fresh incremental file, which also resets any drift in the cache. It fails when any file is below its baseline, so a test deleted without touching a source file is caught within a week. It doesn't push commits: the report it publishes is what `--update` raises the baseline from, by hand, and what the baseline is regenerated from after a Stryker upgrade.
+
+**Baseline.**
+- `mutation-baseline.json` at the repo root, the only place a score is recorded. Keys are source paths, sorted, one entry per line: `"src/x.ts": { "score": 91.3, "ignores": 2 }`, plus the Stryker version. `score` is the total score rounded down to one decimal. `ignores` is the number of mutants Stryker reports as ignored in the file (from `Stryker disable` comments), so a region disable that hides 80 mutants counts as 80. The incremental file and reports are never committed. They are large (the full incremental file is about 13 MB) and hold source and test text.
+- One line per file, in sorted order, so two PRs that raise different files merge without a conflict. On a conflict in one file, take the higher number and rerun `npx tsx scripts/mutation-ratchet.ts --update`, which recomputes from the report and only raises.
+- **Raising is by hand.** The PR that strengthens a file runs `--update` and commits the new number in the same atomic commit. CI never writes to the repo, and a higher score than the baseline is a notice, not a failure, so improving a file doesn't force a baseline edit on an unrelated PR.
+- **Lowering is a decision.** The check compares the baseline against its copy on the base branch and fails on any lowered `score`, unless the PR has the `mutation-baseline-change` label and says why. Lowering needs the maintainer's OK, like weakening any other enforcement. Typical reasons are a Stryker upgrade that adds mutators, or code moved between files.
+- **New files.** A source file with no baseline entry must reach at least 80% (the spike's median was 88.8%, and 10 of 41 files were under 80) and the PR adds its entry at the score it reached. The floor applies only to new files, so the initial baseline can record today's lower scores, and ratcheting them up is #206's work. A renamed file moves its entry in the same PR. A deleted file's entry is removed, and an entry with no file fails the check.
+- **Ignores.** A survivor that is an equivalent mutant or can't be killed gets `// Stryker disable next-line <mutator>: <reason>` (or a region or file form for a whole mutator). The reason is required (the check rejects a bare disable), and the file's `ignores` count in the baseline goes up in the same PR, so the growth shows in the diff and in review.
+
+**Timeouts and flakiness.**
+- A timed-out mutant counts as killed, as Stryker does. The spike's timeouts were almost all Stryker's deterministic loop counter. `timeoutMS` is 30,000 to match `testTimeout` in `vitest.config.ts`.
+- A no-coverage mutant counts as a survivor.
+- The score isn't perfectly deterministic (see the spike). A file that falls below its baseline is re-run once from a fresh sandbox, mutating only that file, and the check fails only if it is still below. The initial baseline takes the lower of two cold runs, rounded down. Files a PR didn't touch reuse the results saved from `main`, so they can't flake on that PR. #205's calibration weeks log how often the re-run changes the answer, and the check gets a tolerance only if that shows one is needed.
+
+**Guard and snapshot tests are excluded from the mutation runs** (see Tests above). They keep running in the unit-test job, and nothing in this ADR lets a pruning PR remove them (below).
+
+**Pruning and strengthening (#206).**
+- Strengthening PRs change tests only. A survivor that shows dead code or a bug becomes an issue, and the code is changed in a separate, explicit decision. This keeps foundations hard rules 1 and 2 and section 4.7: "behaviour-preserving" applies to the source, and mutation score is not a reason to remove a safeguard or code that looks unused. Removing code to lift a score is not allowed.
+- Pruning is report first, then human review, in PRs of their own, never in the same PR as a strengthening. A candidate is a test that is nobody's sole killer in a `disableBail` run. The report lists and never deletes.
+- **Never a candidate:** a test file named in a `test:` line of any ADR or business rule's Mechanical enforcement section (the report script reads those lines from `docs/` and excludes the files, so [ADR-0016 (tool-list-size-guardrails)](0016-tool-list-size-guardrails.md)'s `src/tool-list.test.ts` and its snapshot, and the guards behind the other ADRs, can't be pruned by accident), any snapshot or guard test, and a characterization test that pins current behaviour while code is being refactored. A pruning PR states how many tests it removed and the file's score before and after, and the score must not fall below the baseline.
+
+**Relationship to existing rules.**
+- [ADR-0016 (tool-list-size-guardrails)](0016-tool-list-size-guardrails.md): its snapshot, budget and description cap keep guarding the excluded files, and pruning can't touch them (above). The new CI job adds nothing to the tool list.
+- [ADR-0022 (minimum-node-22-12)](0022-minimum-node-22-12.md): the mutation job is not a unit-test job in the sense of `src/adr-workflow-guards.test.ts` (that test finds jobs by the step `npx vitest run src`), so Node 24 only is consistent with it. The unit-test job keeps its Node 22 and 24 matrix.
+- Foundations 4.7 and hard rule 2: see above. Hard rule 7 is the vetting table. [BR-0001 (no-graph-data-in-repo)](../business-rules/0001-no-graph-data-in-repo.md): the unit suite never reads the graph and uses made-up names, so reports hold only source and test text. Nothing from `scripts/probe-constraints.ts` or the integration tests enters a run.
+
+## Consequences
+
+- We get a number per file for how well the tests catch changes, and a list of exactly which changes they miss. The first full run found 974 survivors across 41 files, and a handful of files at 60 to 70%.
+- CI gains a job that costs a few minutes a PR on a warm cache, and a weekly job of 30 to 60 minutes of runner time. `actions/cache` holds a ~13 MB file that is rebuilt whenever it is evicted.
+- A PR that adds code must test it to its file's standard. That is the point, and it adds work to every change in a weak file. The ratchet is strict on the percentage: adding untested code to a file lowers its score even when old tests are unchanged.
+- The score is noisy in two ways. Small files move several points per mutant (a 66-mutant file moves 1.5 points per survivor). And the run to run flake described above sets how strict the check can be. Equivalent mutants are real and need written ignores.
+- A score can be gamed by weakening what is measured: deleting code, adding ignores, or excluding files. The defences are the reviewer, the visible baseline diff, the `ignores` count, and the rule that strengthening PRs touch tests only. None of them is mechanical for deleted code.
+- Redundancy from mutation data is a weak pruning signal. Tests overlap heavily for good reasons, and a test that is never anyone's sole killer may pin an ADR, so every deletion is a human decision.
+- The list of excluded guard tests is kept by hand in `vitest.mutation.config.ts`. A new guard test left off it is counted in the run, which is harmless but slower and noisier. The spike's list covers 40 tests.
+- The dependency adds about 53 MB and 133 packages to a dev install, and a Stryker upgrade is a re-baseline.
+- The spike did not run the full scope on Node 22, run on a real GitHub runner, or measure a cache miss, so the PR and weekly durations are extrapolations. The local timings were also inflated by other jobs on the same machine. #204 records the real ones.
+- Until #205 lands there is no gate, and this ADR's enforcement is only a promise.
+
+## Status
+
+proposed
+
+Date: 2026-10-06
+
+## Mechanical enforcement
+
+- none-yet: #204 (adds Stryker, its config and an informational `mutation` CI job). #205 turns it into a gate (`mutation-baseline.json` and `scripts/mutation-ratchet.ts`) and moves this line to `ci:`. #206 holds the strengthen and prune work.
