@@ -522,7 +522,7 @@ describe('getContextForQuery', () => {
           code: 'search_results_truncated',
           message: 'Showing 50 of 150 keyword hits.',
           howToFetchAll:
-            'Set max_search_results to 100 (the maximum) to get 100 of 150. Use more specific words in the query to see the rest.'
+            'Set max_search_results to 100 (the maximum) to get 100 of 150. Put the most specific words first: only the first three words longer than three letters, other than stop words, are searched.'
         }
       ]);
     });
@@ -537,7 +537,7 @@ describe('getContextForQuery', () => {
           code: 'search_results_truncated',
           message:
             "Showing 100 of 150 keyword hits: max_search_results is capped at its maximum of 100, so the rest can't be fetched in one call. " +
-            'Use more specific words in the query to see the rest.'
+            'Put the most specific words first: only the first three words longer than three letters, other than stop words, are searched.'
         }
       ]);
     });
