@@ -99,6 +99,15 @@ function cleanContent(content: string | undefined): string {
   return (content ?? '').replace(/^[ \t]*id::[ \t]*[0-9a-f-]{36}[ \t]*(\r?\n|$)/gim, '').trimEnd();
 }
 
+/**
+ * A row LogSeq made for a `((uuid))` that no real block has (#138). LogSeq 0.10 creates a
+ * placeholder entity holding just that uuid: no `:block/page`, `:block/parent` or `:block/name`,
+ * and content `id:: <uuid>`. Every real block has a page, and a page has a name, so a row with
+ * neither is the placeholder. Content is not the signal: a real empty block with a pinned id
+ * holds the same `id::` line and must still resolve.
+ */
+const isPlaceholder = (row: Row): boolean => row.page?.id == null && row.name === undefined;
+
 const pageNameOf = (row: Row | undefined | null): string | null =>
   row?.page?.['original-name'] ?? row?.page?.name ?? null;
 
@@ -223,7 +232,11 @@ function ingest(
     }
   }
 
-  for (const uuid of blockUuids) store.blocks.set(uuid, byUuid.get(uuid) ?? null);
+  // A placeholder counts as not found: its ref or embed is `missing`, not `ok` with empty text (#138)
+  for (const uuid of blockUuids) {
+    const row = byUuid.get(uuid);
+    store.blocks.set(uuid, row && !isPlaceholder(row) ? row : null);
+  }
 
   for (const uuid of descendantUuids) {
     const root = store.blocks.get(uuid);

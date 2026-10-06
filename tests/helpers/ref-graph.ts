@@ -23,6 +23,11 @@ export interface FakeGraphDef {
   pages: string[];
   /** Blocks in document order: siblings keep this order */
   blocks: FakeBlockDef[];
+  /**
+   * uuids that no block has but LogSeq made a placeholder entity for (#138): a row with
+   * only `id`, `uuid` and content `id:: <uuid>`, and no page, parent or left
+   */
+  placeholders?: string[];
 }
 
 export function uuidN(n: number): string {
@@ -76,6 +81,8 @@ export function fakeRefGraph(def: FakeGraphDef) {
     for (const uuid of groundList(query, '?u')) {
       const b = def.blocks.find(x => x.uuid === uuid);
       if (b) rows.set(blockId(b.uuid), blockRow(b));
+      const p = (def.placeholders ?? []).indexOf(uuid);
+      if (p >= 0) rows.set(5000 + p, { id: 5000 + p, uuid, content: `id:: ${uuid}` });
     }
     for (const uuid of groundList(query, '?ru')) {
       for (const b of descendants(uuid, 3)) rows.set(blockId(b.uuid), blockRow(b));
