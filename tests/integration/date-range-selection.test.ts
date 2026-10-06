@@ -1,58 +1,38 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { resolve } from 'path';
-import { access } from 'fs/promises';
 import { isDeepStrictEqual } from 'util';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { queryJournals, DateRangeResult } from '../../src/tools/query-by-date-range.js';
 import { formatLogseqDate } from '../../src/utils/date-utils.js';
+import { connectFixture, FIXTURE_JOURNAL_DAYS, laterJournalDays } from './helpers/fixture-client.js';
 
 /**
  * Integration tests for last_n, presets and include_content on query_by_date_range.
  *
- * Read-only. These compare results against each other and against invariants, and
- * never assert on or print real dates or content. Assertions on values use booleans
- * so a failure message doesn't echo graph data.
- *
- * Requires LogSeq running with the HTTP API enabled, ~/.logseq-mcp/config.json,
- * and at least a few journal pages. See tests/integration/setup.md.
+ * Read-only, against the fixture graph. Its journals are dated 2024 and 2025, and
+ * LogSeq adds today's journal when the graph opens, so anything counted back from
+ * today (last_n, today, year_to_date) is computed from the journal days the graph
+ * holds after the fixture's last one (`laterJournalDays`).
  */
 
 describe('query_by_date_range: last_n, presets and include_content', () => {
   let client: LogseqClient;
+  /** Every journal day in the graph, newest first */
+  let newestFirst: number[];
+  /** Journal days LogSeq made (today's), oldest first */
+  let later: number[];
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. ' +
-        'See tests/integration/setup.md for setup instructions.'
-      );
-    }
-    client = new LogseqClient(await loadConfig(configPath));
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
-        'See tests/integration/setup.md'
-      );
-    }
+    ({ client } = await connectFixture());
+    later = await laterJournalDays(client);
+    newestFirst = [...later, ...FIXTURE_JOURNAL_DAYS].sort((a, b) => b - a);
   });
 
   describe('last_n', () => {
     it('returns at most N entries, newest first, with no duplicate dates', async () => {
       const result = (await queryJournals(client, { lastN: 3 })) as DateRangeResult;
 
-      expect(
-        result.entries.length,
-        'No journal pages found. The graph needs at least one journal page. See tests/integration/setup.md'
-      ).toBeGreaterThan(0);
-      expect(result.entries.length).toBeLessThanOrEqual(3);
-
       const dates = result.entries.map(e => e.date);
+      expect(dates).toEqual(newestFirst.slice(0, 3));
       expect(new Set(dates).size === dates.length, 'duplicate journal dates').toBe(true);
       expect(
         dates.every((d, i) => i === 0 || dates[i - 1] > d),
@@ -71,7 +51,7 @@ describe('query_by_date_range: last_n, presets and include_content', () => {
 
     it('matches an explicit range over the same span', async () => {
       const viaLastN = (await queryJournals(client, { lastN: 3 })) as DateRangeResult;
-      expect(viaLastN.entries.length).toBeGreaterThan(0);
+      expect(viaLastN.entries).toHaveLength(3);
 
       const { start, end } = viaLastN.dateRange;
       const viaDates = (await queryJournals(client, { startDate: start, endDate: end })) as DateRangeResult;
@@ -87,9 +67,7 @@ describe('query_by_date_range: last_n, presets and include_content', () => {
     it('returns every journal when N is huge', async () => {
       const result = (await queryJournals(client, { lastN: 1_000_000, includeContent: false })) as any;
 
-      expect(result.entries.length).toBeGreaterThan(0);
-      const dates: number[] = result.entries.map((e: any) => e.date);
-      expect(new Set(dates).size === dates.length, 'duplicate journal dates').toBe(true);
+      expect(result.entries.map((e: any) => e.date)).toEqual(newestFirst);
     });
 
     it('rejects last_n of 0 before touching the graph', async () => {
@@ -107,6 +85,7 @@ describe('query_by_date_range: last_n, presets and include_content', () => {
 
       expect(isDeepStrictEqual(viaPreset, viaDates), 'preset and explicit range disagree').toBe(true);
       expect(viaPreset.dateRange).toEqual({ start: 20250106, end: 20250112 });
+      expect((viaPreset as DateRangeResult).entries.map(e => e.date)).toEqual([20250106, 20250107, 20250108, 20250110]);
     });
 
     it('this_month matches the equivalent explicit range', async () => {
@@ -114,14 +93,15 @@ describe('query_by_date_range: last_n, presets and include_content', () => {
       const viaDates = await queryJournals(client, { startDate: 20250101, endDate: 20250131 }, now);
 
       expect(isDeepStrictEqual(viaPreset, viaDates), 'preset and explicit range disagree').toBe(true);
+      expect((viaPreset as DateRangeResult).entries).toHaveLength(7);
     });
 
     it('today and yesterday resolve against the real clock without error', async () => {
       const today = (await queryJournals(client, { preset: 'today' })) as DateRangeResult;
       const yesterday = (await queryJournals(client, { preset: 'yesterday' })) as DateRangeResult;
 
-      expect(today.entries.length).toBeLessThanOrEqual(1);
-      expect(yesterday.entries.length).toBeLessThanOrEqual(1);
+      expect(today.entries.map(e => e.date)).toEqual(later.filter(day => day === today.dateRange.end));
+      expect(yesterday.entries.map(e => e.date)).toEqual(later.filter(day => day === yesterday.dateRange.end));
       expect(yesterday.dateRange.end).toBeLessThan(today.dateRange.end);
     });
 
@@ -130,6 +110,8 @@ describe('query_by_date_range: last_n, presets and include_content', () => {
 
       expect(result.dateRange.end).toBe(formatLogseqDate(new Date()));
       const dates = result.entries.map(e => e.date);
+      // The fixture's journals are all from earlier years
+      expect(dates).toEqual(later.filter(day => day >= result.dateRange.start && day <= result.dateRange.end));
       expect(dates.every((d, i) => i === 0 || dates[i - 1] < d), 'entries are not oldest first').toBe(true);
     });
   });
@@ -139,6 +121,7 @@ describe('query_by_date_range: last_n, presets and include_content', () => {
       const full = (await queryJournals(client, { lastN: 5 })) as DateRangeResult;
       const outline = (await queryJournals(client, { lastN: 5, includeContent: false })) as any;
 
+      expect(outline.entries.map((e: any) => e.date)).toEqual(newestFirst.slice(0, 5));
       expect(outline.entries.map((e: any) => e.date)).toEqual(full.entries.map(e => e.date));
       expect(outline.summary).toEqual(full.summary);
       for (const [i, entry] of outline.entries.entries()) {
