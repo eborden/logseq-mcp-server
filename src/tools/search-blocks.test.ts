@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchBlocks, searchBlocksWithMeta, SearchBlocksResult, SlimSearchBlocksResult } from './search-blocks.js';
+import {
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+  searchBlocks,
+  searchBlocksWithMeta,
+  SearchBlocksResult,
+  SlimSearchBlocksResult
+} from './search-blocks.js';
 import { LogseqClient } from '../client.js';
 
 // Rows as logseq.DB.datascriptQuery returns them for (pull ?b [* {:block/page [...]}]):
@@ -304,6 +311,112 @@ describe('searchBlocks', () => {
 
       expect(Array.isArray(result)).toBe(true);
       expect(result).toHaveLength(5);
+    });
+  });
+
+  describe('maximum limit (#61)', () => {
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => block(i + 1, 'k', 1, 'a', 'A'));
+    const maxReached = (total: number, asked = '') => ({
+      code: 'results_truncated',
+      message:
+        `Showing 500 of ${total} matching blocks: limit is capped at its maximum of 500${asked}, ` +
+        "so the rest can't be fetched in one call. Narrow the query to see the rest."
+    });
+
+    it('is 500, with a default of 100', () => {
+      expect(MAX_SEARCH_LIMIT).toBe(500);
+      expect(DEFAULT_SEARCH_LIMIT).toBe(100);
+    });
+
+    it('returns every match and no warning when matches fit under the maximum', async () => {
+      callAPI.mockResolvedValueOnce(rows(500));
+
+      const { results, meta } = await searchBlocksWithMeta(client, 'k', 1000);
+
+      expect(results).toHaveLength(500);
+      expect(meta).toEqual({ hasMore: false, warnings: [], totals: { matches: 500 } });
+    });
+
+    it('stops at the maximum with limit 500, hasMore false and no howToFetchAll', async () => {
+      callAPI.mockResolvedValueOnce(rows(501));
+
+      const { results, meta } = await searchBlocksWithMeta(client, 'k', 500);
+
+      expect(results).toHaveLength(500);
+      expect(full(results)!.map(b => b.id).slice(0, 2)).toEqual([501, 500]);
+      expect(meta).toEqual({ hasMore: false, totals: { matches: 501 }, warnings: [maxReached(501)] });
+    });
+
+    it('clamps a limit above the maximum and names the value asked for', async () => {
+      callAPI.mockResolvedValueOnce(rows(800));
+
+      const { results, meta } = await searchBlocksWithMeta(client, 'k', 1000);
+
+      expect(results).toHaveLength(500);
+      expect(meta).toEqual({
+        hasMore: false,
+        totals: { matches: 800 },
+        warnings: [maxReached(800, ' (1000 was asked for)')]
+      });
+      expect(meta!.warnings[0].howToFetchAll).toBeUndefined();
+    });
+
+    it('suggests the maximum, not the total, when the total is above it', async () => {
+      callAPI.mockResolvedValueOnce(rows(800));
+
+      const { results, meta } = await searchBlocksWithMeta(client, 'k');
+
+      expect(results).toHaveLength(100);
+      expect(meta).toEqual({
+        hasMore: true,
+        totals: { matches: 800 },
+        warnings: [
+          {
+            code: 'results_truncated',
+            message: 'Showing 100 of 800 matching blocks.',
+            howToFetchAll: 'Set limit to 500 (the maximum) to get 500 of 800. Narrow the query to see the rest.'
+          }
+        ]
+      });
+    });
+
+    it('keeps the plain warning when the total is at most the maximum', async () => {
+      callAPI.mockResolvedValueOnce(rows(500));
+
+      const { meta } = await searchBlocksWithMeta(client, 'k', 100);
+
+      expect(meta!.warnings).toEqual([
+        {
+          code: 'results_truncated',
+          message: 'Showing 100 of 500 matching blocks.',
+          howToFetchAll: 'Set limit to 500 (or higher) to get all 500.'
+        }
+      ]);
+    });
+
+    it('makes one call at the maximum, as under it', async () => {
+      callAPI.mockResolvedValueOnce(rows(800));
+
+      await searchBlocksWithMeta(client, 'k', 1000);
+
+      expect(callAPI).toHaveBeenCalledTimes(1);
+    });
+
+    it('looks up context pages only for the blocks kept at the maximum', async () => {
+      callAPI.mockResolvedValueOnce(Array.from({ length: 600 }, (_, i) => block(i + 1, 'k', i + 1, `p${i + 1}`, `P${i + 1}`)));
+      callAPI.mockResolvedValueOnce([]);
+
+      await searchBlocksWithMeta(client, 'k', 1000, true);
+
+      // Pages 600..101 belong to the 500 newest blocks; 100..1 were cut
+      const kept = Array.from({ length: 500 }, (_, i) => 600 - i).join(' ');
+      expect(callAPI.mock.calls[1][1][0]).toContain(`[(ground [${kept}]) [?p ...]]`);
+    });
+
+    it('leaves searchBlocks without a maximum for internal callers', async () => {
+      callAPI.mockResolvedValueOnce(rows(800));
+
+      expect(await searchBlocks(client, 'k', 1000)).toHaveLength(800);
     });
   });
 
