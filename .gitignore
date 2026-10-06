@@ -25,6 +25,9 @@ measure-*.tsv
 # src/repo-hygiene.test.ts fails if a file matching these is tracked or a pattern is dropped.
 # These patterns are case-sensitive; the test's tracked-file check is not.
 
+# Per-worktree LogSeq test instance (#118): profile, home, log, instance.json, config.json
+.logseq-instance/
+
 # Personal Claude Code settings (permissions); never commit
 .claude/settings.local.json
 

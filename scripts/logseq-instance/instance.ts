@@ -1,0 +1,489 @@
+/**
+ * Per-worktree LogSeq instances (#118): the logic behind `scripts/logseq-instance.ts`.
+ *
+ * An instance is a second LogSeq app process with its own Chromium profile, its own home
+ * directory, its own API port and a fixed test token, serving one graph. Every worktree gets its
+ * own, under `<worktree>/.logseq-instance/` (gitignored), so agents in separate worktrees can run
+ * the integration tests against their own copy of the fixture graph at the same time, next to
+ * the LogSeq the maintainer uses.
+ *
+ * Everything that touches the file system, processes or the network goes through
+ * `InstanceDeps`, so the unit tests (`src/logseq-instance.test.ts`) run on fakes.
+ *
+ * Safety rules this module keeps:
+ * - It only writes and deletes inside `<worktree>/.logseq-instance/`.
+ * - It launches LogSeq only with `--user-data-dir` pointing at the profile it created there.
+ * - It stops only the pid it recorded, and only while that pid's command line still names this
+ *   instance's profile. Never `quit app "Logseq"`, `pkill` or `killall`.
+ */
+import { join, sep } from 'path';
+import { createHash } from 'crypto';
+import { z } from 'zod/v4';
+import type { LogseqMCPConfig } from '../../src/types.js';
+import { LogSeqAuthError } from '../../src/errors.js';
+import { levelDbFiles, localStorageEntries, logseqGraphId, logseqSeedItems } from './local-storage.js';
+
+/** Ports an instance may use. The maintainer's LogSeq keeps the default, 12315. */
+export const PORT_FIRST = 12320;
+export const PORT_LAST = 12399;
+
+/**
+ * The API token every instance accepts. Not a secret (ADR-0003): an instance listens on
+ * 127.0.0.1 only and serves the made-up fixture graph, so the token guards nothing private.
+ * It is fixed so test configs never need generating per run.
+ */
+export const INSTANCE_TOKEN = 'logseq-mcp-test-instance-not-a-secret';
+
+/** The macOS app bundle launched unless `LOGSEQ_APP` names another. */
+export const DEFAULT_APP_BUNDLE = '/Applications/Logseq.app';
+
+/** How long `start` waits for the API and the graph, and how often it asks. */
+export const READY_TIMEOUT_MS = 90_000;
+export const READY_POLL_MS = 500;
+
+/** How long `stop` waits after SIGTERM before SIGKILL, and after SIGKILL before giving up. */
+export const STOP_GRACE_MS = 10_000;
+export const KILL_GRACE_MS = 5_000;
+
+/** Most graph files `start` lists to check the index; the fixture has a few dozen. */
+export const MAX_GRAPH_FILES = 5_000;
+
+/** Raised for every expected failure, with a message that says what to do. */
+export class InstanceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InstanceError';
+  }
+}
+
+/** Where an instance keeps its files, all under `<worktree>/.logseq-instance/`. */
+export interface InstancePaths {
+  dir: string;
+  /** Chromium profile, passed as `--user-data-dir`. Holds configs.edn and localStorage. */
+  profile: string;
+  /** HOME for the instance, so LogSeq's `~/.logseq` (global config, plugins, graph cache) is its own. */
+  home: string;
+  /** What `start` recorded about the running instance. */
+  record: string;
+  /** A config file for the MCP server and the tests: point `LOGSEQ_MCP_CONFIG` at it. */
+  config: string;
+  /** The app's stdout and stderr. */
+  log: string;
+}
+
+export function instancePaths(worktree: string): InstancePaths {
+  const dir = join(worktree, '.logseq-instance');
+  return {
+    dir,
+    profile: join(dir, 'profile'),
+    home: join(dir, 'home'),
+    record: join(dir, 'instance.json'),
+    config: join(dir, 'config.json'),
+    log: join(dir, 'logseq.log'),
+  };
+}
+
+/** This worktree's preferred port: a hash of its path into PORT_FIRST..PORT_LAST. */
+export function derivePort(worktree: string): number {
+  const digest = createHash('sha256').update(worktree).digest();
+  return PORT_FIRST + (digest.readUInt32BE(0) % (PORT_LAST - PORT_FIRST + 1));
+}
+
+/** Ports to try in order: the derived one, then the rest of the range, wrapping around. */
+export function candidatePorts(worktree: string): number[] {
+  const size = PORT_LAST - PORT_FIRST + 1;
+  const start = derivePort(worktree) - PORT_FIRST;
+  return Array.from({ length: size }, (_, i) => PORT_FIRST + ((start + i) % size));
+}
+
+/** configs.edn from the committed template, with the port and token filled in. */
+export function renderConfigsEdn(template: string, port: number, token: string): string {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new InstanceError(`not a port: ${port}`);
+  }
+  // The token goes inside an EDN string; refuse anything that would need escaping.
+  if (!/^[A-Za-z0-9._-]+$/.test(token)) throw new InstanceError('the instance token must be plain ASCII');
+  for (const placeholder of ['{{port}}', '{{token}}']) {
+    if (!template.includes(placeholder)) {
+      throw new InstanceError(`configs.edn template is missing ${placeholder}`);
+    }
+  }
+  const rendered = template.replaceAll('{{port}}', String(port)).replaceAll('{{token}}', token);
+  const leftover = rendered.match(/\{\{[^}]*\}\}/);
+  if (leftover) throw new InstanceError(`configs.edn template has an unknown placeholder ${leftover[0]}`);
+  return rendered;
+}
+
+/** The MCP config file for an instance on `port`. */
+export function instanceConfig(port: number): LogseqMCPConfig {
+  return { apiUrl: `http://127.0.0.1:${port}`, authToken: INSTANCE_TOKEN };
+}
+
+/**
+ * The file name LogSeq gives a graph's cache in `~/.logseq/graphs` (`electron.handler`,
+ * `sanitize-graph-name`). LogSeq lists graphs from these files at startup, and without one it
+ * switches the window to the demo graph whatever `current-repo` says. An empty file is enough:
+ * LogSeq treats it as an invalid cache, starts from an empty database and parses the files.
+ */
+export function graphCacheFileName(graphDir: string): string {
+  return `${logseqGraphId(graphDir).replaceAll('/', '++').replaceAll(':', '+3A+')}.transit`;
+}
+
+const instanceRecordSchema = z.object({
+  pid: z.number().int().positive(),
+  port: z.number().int().min(PORT_FIRST).max(PORT_LAST),
+  apiUrl: z.string(),
+  graphDir: z.string(),
+  profileDir: z.string(),
+  configPath: z.string(),
+  logPath: z.string(),
+  startedAt: z.string(),
+});
+
+/** What `start` writes to `instance.json`. */
+export type InstanceRecord = z.output<typeof instanceRecordSchema>;
+
+/** Parse `instance.json`. Throws InstanceError naming the file when it is not a record. */
+export function parseInstanceRecord(text: string, path: string): InstanceRecord {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new InstanceError(`${path} is not valid JSON. Delete it if no instance is running.`);
+  }
+  const result = instanceRecordSchema.safeParse(raw);
+  if (!result.success) {
+    const field = String(result.error.issues[0]?.path[0] ?? 'record');
+    throw new InstanceError(`${path} is not an instance record (bad ${field}). Delete it if no instance is running.`);
+  }
+  return result.data;
+}
+
+/**
+ * Whether a process's command line is this instance's LogSeq: it passes our profile as
+ * `--user-data-dir`. Guards `stop` against a pid the system has since given to another process.
+ */
+export function isInstanceProcess(commandLine: string | undefined, profileDir: string): boolean {
+  if (!commandLine) return false;
+  const flag = `--user-data-dir=${profileDir}`;
+  const at = commandLine.indexOf(flag);
+  if (at < 0) return false;
+  const next = commandLine[at + flag.length];
+  return next === undefined || next === ' ' || next === '\n';
+}
+
+/** How to launch the app. */
+export interface LaunchSpec {
+  command: string;
+  args: string[];
+  env: Record<string, string | undefined>;
+}
+
+/**
+ * Launch the app's executable directly rather than through `open -n -a Logseq`, so the pid we
+ * get is the app's own (which `stop` needs) and the environment reaches it.
+ *
+ * HOME and CFFIXED_USER_HOME both point at the instance's home: LogSeq finds `~/.logseq` through
+ * Node's `os.homedir()` (which reads HOME) and through Electron's `app.getPath("home")` (which
+ * on macOS ignores HOME and honours CFFIXED_USER_HOME). With only HOME set, the instance shared
+ * the maintainer's global config, preferences and plugins.
+ * ELECTRON_RUN_AS_NODE is dropped: inherited from an Electron-based terminal, it would start
+ * the app as plain Node.
+ */
+export function launchSpec(appBundle: string, paths: InstancePaths, env: Record<string, string | undefined>): LaunchSpec {
+  const childEnv: Record<string, string | undefined> = { ...env, HOME: paths.home, CFFIXED_USER_HOME: paths.home };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  return {
+    command: join(appBundle, 'Contents', 'MacOS', 'Logseq'),
+    args: [`--user-data-dir=${paths.profile}`],
+    env: childEnv,
+  };
+}
+
+/** Graph files (relative paths, as LogSeq's `:file/path` stores them) not yet in the index. */
+export function missingFiles(expected: readonly string[], indexed: readonly string[]): string[] {
+  const have = new Set(indexed);
+  return expected.filter(path => !have.has(path));
+}
+
+/** A connection to an instance's API, as `start` and `status` need it. */
+export interface InstanceProbe {
+  /** `logseq.App.getCurrentGraph`'s `path`, or undefined when no graph is open. */
+  currentGraphPath(): Promise<string | undefined>;
+  /** `requireFixtureGraph`: the fixture version, or a FixtureGraphError. */
+  requireFixture(): Promise<number>;
+  /** Every `:file/path` in the graph's database. */
+  indexedFiles(): Promise<string[]>;
+}
+
+/** Side effects, injected so the tests can fake them. */
+export interface InstanceDeps {
+  platform: string;
+  env: Record<string, string | undefined>;
+  readFile(path: string): Promise<string | undefined>;
+  writeFile(path: string, data: string | Uint8Array): Promise<void>;
+  mkdir(path: string): Promise<void>;
+  /** Recursive, and fine when the path is missing. */
+  remove(path: string): Promise<void>;
+  exists(path: string): Promise<boolean>;
+  /** Canonical absolute path, or undefined when it does not exist or is not a directory. */
+  realDir(path: string): Promise<string | undefined>;
+  /** Names of the entries in a directory, or [] when it is missing. */
+  listDir(path: string): Promise<string[]>;
+  isPortFree(port: number): Promise<boolean>;
+  /** Start the process detached, its output written to `logPath` (replacing the last run's). Returns its pid. */
+  spawnDetached(spec: LaunchSpec, logPath: string): Promise<number>;
+  isAlive(pid: number): boolean;
+  commandLine(pid: number): string | undefined;
+  kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
+  connect(config: LogseqMCPConfig): InstanceProbe;
+  sleep(ms: number): Promise<void>;
+  now(): Date;
+  log(line: string): void;
+}
+
+export interface StartOptions {
+  worktree: string;
+  graphDir: string;
+  template: string;
+  sentinelFile: string;
+  readyTimeoutMs?: number;
+}
+
+/** Read the record, or undefined when there is none. */
+export async function readRecord(paths: InstancePaths, deps: InstanceDeps): Promise<InstanceRecord | undefined> {
+  const text = await deps.readFile(paths.record);
+  return text === undefined ? undefined : parseInstanceRecord(text, paths.record);
+}
+
+/** The recorded pid, when it is alive and still this instance's LogSeq. */
+function liveInstancePid(record: InstanceRecord, deps: InstanceDeps): number | undefined {
+  return deps.isAlive(record.pid) && isInstanceProcess(deps.commandLine(record.pid), record.profileDir)
+    ? record.pid
+    : undefined;
+}
+
+function assertInside(dir: string, path: string): void {
+  if (!path.startsWith(dir + sep)) throw new InstanceError(`refusing to touch ${path}: it is outside ${dir}`);
+}
+
+async function choosePort(worktree: string, deps: InstanceDeps): Promise<number> {
+  for (const port of candidatePorts(worktree)) {
+    if (await deps.isPortFree(port)) return port;
+  }
+  throw new InstanceError(`no free port in ${PORT_FIRST}-${PORT_LAST}. Stop an instance you no longer need.`);
+}
+
+/** Relative paths of the Markdown files LogSeq will index from `pages/` and `journals/`. */
+async function graphFiles(graphDir: string, deps: InstanceDeps): Promise<string[]> {
+  const files: string[] = [];
+  for (const dir of ['pages', 'journals']) {
+    for (const name of await deps.listDir(join(graphDir, dir))) {
+      if (name.endsWith('.md') && !name.startsWith('.')) files.push(`${dir}/${name}`);
+    }
+  }
+  if (files.length > MAX_GRAPH_FILES) {
+    throw new InstanceError(`${graphDir} has ${files.length} pages and journals; an instance is for the small fixture graph`);
+  }
+  return files;
+}
+
+/** Write a fresh profile: configs.edn, seeded localStorage, the graph cache stub and config.json. */
+async function writeProfile(paths: InstancePaths, graphDir: string, port: number, template: string, deps: InstanceDeps) {
+  for (const dir of [paths.profile, paths.home]) {
+    assertInside(paths.dir, dir);
+    await deps.remove(dir);
+  }
+  await deps.mkdir(paths.profile);
+  await deps.writeFile(join(paths.profile, 'configs.edn'), renderConfigsEdn(template, port, INSTANCE_TOKEN));
+
+  const leveldb = join(paths.profile, 'Local Storage', 'leveldb');
+  await deps.mkdir(leveldb);
+  for (const [name, data] of levelDbFiles(localStorageEntries(logseqSeedItems(graphDir), deps.now()))) {
+    await deps.writeFile(join(leveldb, name), data);
+  }
+
+  const graphs = join(paths.home, '.logseq', 'graphs');
+  await deps.mkdir(graphs);
+  await deps.writeFile(join(graphs, graphCacheFileName(graphDir)), '');
+
+  await deps.writeFile(paths.config, `${JSON.stringify(instanceConfig(port), null, 2)}\n`);
+}
+
+/**
+ * Wait until the instance serves `graphDir`, the fixture guard passes and every graph file is
+ * indexed. Connection errors and an unfinished index are retried until the deadline; a rejected
+ * token or another graph on the port means the port is not ours, so those fail at once.
+ */
+async function waitUntilReady(
+  record: InstanceRecord,
+  expectedFiles: readonly string[],
+  timeoutMs: number,
+  deps: InstanceDeps,
+): Promise<number> {
+  const probe = deps.connect({ ...instanceConfig(record.port), timeoutMs: 5_000 });
+  const deadline = deps.now().getTime() + timeoutMs;
+  let last = 'the API did not answer';
+  while (deps.now().getTime() < deadline) {
+    if (!deps.isAlive(record.pid)) {
+      throw new InstanceError(`LogSeq (pid ${record.pid}) exited while starting. See ${record.logPath}.`);
+    }
+    try {
+      const graph = await probe.currentGraphPath();
+      if (graph !== undefined && graph !== record.graphDir) {
+        throw new InstanceError(
+          `port ${record.port} is serving another graph (${graph}), so another LogSeq holds it. Run stop, then start again.`,
+        );
+      }
+      if (graph === undefined) {
+        last = 'LogSeq has no graph open yet';
+      } else {
+        const version = await probe.requireFixture();
+        const missing = missingFiles(expectedFiles, await probe.indexedFiles());
+        if (missing.length === 0) return version;
+        last = `LogSeq has not indexed ${missing.length} of ${expectedFiles.length} graph files yet`;
+      }
+    } catch (error) {
+      if (error instanceof InstanceError) throw error;
+      if (error instanceof LogSeqAuthError) {
+        throw new InstanceError(`port ${record.port} rejected the instance token, so another LogSeq holds it. Run stop, then start again.`);
+      }
+      last = error instanceof Error ? `${error.name}: ${error.message.split('\n')[0]}` : String(error);
+    }
+    await deps.sleep(READY_POLL_MS);
+  }
+  throw new InstanceError(`the instance was not ready after ${Math.round(timeoutMs / 1000)}s: ${last}. See ${record.logPath}.`);
+}
+
+/**
+ * Start this worktree's instance on `graphDir` and wait until it serves the fixture graph.
+ * On any failure after the launch, the instance is stopped again.
+ */
+export async function startInstance(options: StartOptions, deps: InstanceDeps): Promise<InstanceRecord & { fixtureVersion: number }> {
+  if (deps.platform !== 'darwin') {
+    throw new InstanceError(`logseq-instance supports macOS only (this is ${deps.platform}).`);
+  }
+  const paths = instancePaths(options.worktree);
+
+  const existing = await readRecord(paths, deps);
+  if (existing && existing.profileDir === paths.profile && liveInstancePid(existing, deps) !== undefined) {
+    throw new InstanceError(`an instance is already running (pid ${existing.pid}, port ${existing.port}). Run stop first.`);
+  }
+
+  const graphDir = await deps.realDir(options.graphDir);
+  if (!graphDir) throw new InstanceError(`graph directory not found: ${options.graphDir}`);
+  if (!(await deps.exists(join(graphDir, options.sentinelFile)))) {
+    throw new InstanceError(
+      `${graphDir} has no ${options.sentinelFile}, so it is not the fixture graph. An instance only opens the fixture (tests/fixtures/graph).`,
+    );
+  }
+  const expectedFiles = await graphFiles(graphDir, deps);
+
+  const appBundle = deps.env.LOGSEQ_APP?.trim() || DEFAULT_APP_BUNDLE;
+  const spec = launchSpec(appBundle, paths, deps.env);
+  if (!(await deps.exists(spec.command))) {
+    throw new InstanceError(`LogSeq not found at ${spec.command}. Set LOGSEQ_APP to the app bundle (e.g. ~/Applications/Logseq.app).`);
+  }
+
+  const port = await choosePort(options.worktree, deps);
+  await deps.mkdir(paths.dir);
+  await deps.remove(paths.record);
+  await writeProfile(paths, graphDir, port, options.template, deps);
+
+  const pid = await deps.spawnDetached(spec, paths.log);
+  const record: InstanceRecord = {
+    pid,
+    port,
+    apiUrl: instanceConfig(port).apiUrl,
+    graphDir,
+    profileDir: paths.profile,
+    configPath: paths.config,
+    logPath: paths.log,
+    startedAt: deps.now().toISOString(),
+  };
+  // Recorded before waiting, so stop can find the process if the wait fails or is interrupted.
+  await deps.writeFile(paths.record, `${JSON.stringify(record, null, 2)}\n`);
+  deps.log(`Started LogSeq (pid ${pid}) on port ${port}; waiting for the fixture graph...`);
+
+  try {
+    const fixtureVersion = await waitUntilReady(record, expectedFiles, options.readyTimeoutMs ?? READY_TIMEOUT_MS, deps);
+    return { ...record, fixtureVersion };
+  } catch (error) {
+    await stopInstance(options.worktree, deps).catch(stopError =>
+      deps.log(`Could not stop pid ${pid} after the failed start: ${(stopError as Error).message}`),
+    );
+    throw error;
+  }
+}
+
+export type StopResult =
+  | { state: 'stopped'; pid: number }
+  | { state: 'none' }
+  | { state: 'stale'; pid: number };
+
+/** Wait for `pid` to exit, polling until `ms` have passed. */
+async function exited(pid: number, ms: number, deps: InstanceDeps): Promise<boolean> {
+  const deadline = deps.now().getTime() + ms;
+  while (deps.isAlive(pid)) {
+    if (deps.now().getTime() >= deadline) return false;
+    await deps.sleep(200);
+  }
+  return true;
+}
+
+/**
+ * Stop the recorded instance: SIGTERM, then SIGKILL if it is still running after STOP_GRACE_MS.
+ * Only the recorded pid is signalled, and only while its command line names this worktree's
+ * profile; otherwise the record is stale (the process is gone) or refused.
+ */
+export async function stopInstance(worktree: string, deps: InstanceDeps): Promise<StopResult> {
+  const paths = instancePaths(worktree);
+  const record = await readRecord(paths, deps);
+  if (!record) return { state: 'none' };
+  if (record.profileDir !== paths.profile) {
+    throw new InstanceError(`${paths.record} names another profile (${record.profileDir}); not stopping pid ${record.pid}.`);
+  }
+  if (!deps.isAlive(record.pid)) {
+    await deps.remove(paths.record);
+    return { state: 'stale', pid: record.pid };
+  }
+  if (!isInstanceProcess(deps.commandLine(record.pid), record.profileDir)) {
+    throw new InstanceError(
+      `pid ${record.pid} is running but is not this worktree's LogSeq (its command line does not pass ` +
+        `--user-data-dir=${record.profileDir}), so it was not stopped. If the instance is gone, delete ${paths.record}.`,
+    );
+  }
+
+  deps.kill(record.pid, 'SIGTERM');
+  if (!(await exited(record.pid, STOP_GRACE_MS, deps))) {
+    deps.kill(record.pid, 'SIGKILL');
+    if (!(await exited(record.pid, KILL_GRACE_MS, deps))) {
+      throw new InstanceError(`pid ${record.pid} is still running after SIGKILL.`);
+    }
+  }
+  await deps.remove(paths.record);
+  return { state: 'stopped', pid: record.pid };
+}
+
+export type StatusResult =
+  | { state: 'none' }
+  | { state: 'stale'; record: InstanceRecord }
+  | { state: 'running'; record: InstanceRecord; api: string };
+
+/** Whether the recorded instance is running, and what its API says. Read-only. */
+export async function instanceStatus(worktree: string, deps: InstanceDeps): Promise<StatusResult> {
+  const paths = instancePaths(worktree);
+  const record = await readRecord(paths, deps);
+  if (!record) return { state: 'none' };
+  if (record.profileDir !== paths.profile || liveInstancePid(record, deps) === undefined) {
+    return { state: 'stale', record };
+  }
+  const probe = deps.connect({ ...instanceConfig(record.port), timeoutMs: 5_000 });
+  let api: string;
+  try {
+    api = `serving the fixture graph, version ${await probe.requireFixture()}`;
+  } catch (error) {
+    api = error instanceof Error ? `${error.name}: ${error.message.split('\n')[0]}` : String(error);
+  }
+  return { state: 'running', record, api };
+}
