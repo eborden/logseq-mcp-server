@@ -7,11 +7,17 @@
  * the integration tests against their own copy of the fixture graph at the same time, next to
  * the LogSeq the maintainer uses.
  *
+ * The instance opens a copy of the graph, `.logseq-instance/graph/`, made fresh on every start
+ * (#151). LogSeq writes to the graph it opens (it rewrites `logseq/config.edn`, adds
+ * `logseq/bak/`, today's journal and `pages/contents.md`), and the copy keeps all of that out of
+ * the committed `tests/fixtures/graph`.
+ *
  * Everything that touches the file system, processes or the network goes through
  * `InstanceDeps`, so the unit tests (`src/logseq-instance.test.ts`) run on fakes.
  *
  * Safety rules this module keeps:
- * - It only writes and deletes inside `<worktree>/.logseq-instance/`.
+ * - It only writes and deletes inside `<worktree>/.logseq-instance/`. The source graph is only
+ *   read: checked for the sentinel, listed and copied.
  * - It launches LogSeq only with `--user-data-dir` pointing at the profile it created there.
  * - It stops only the pid it recorded, and only while that pid's command line still names this
  *   instance's profile. Never `quit app "Logseq"`, `pkill` or `killall`.
@@ -60,6 +66,18 @@ export const KILL_GRACE_MS = 5_000;
 /** Most graph files `start` lists to check the index; the fixture has a few dozen. */
 export const MAX_GRAPH_FILES = 5_000;
 
+/**
+ * Paths under the source graph, relative to it, that `start` leaves out of the copy: LogSeq's
+ * backups from an earlier time the folder was opened as a graph. Each entry also covers
+ * everything below it.
+ */
+export const GRAPH_COPY_EXCLUDES = ['logseq/bak'] as const;
+
+/** Whether `relPath` (relative to the source graph, `/`-separated) stays out of the copy. */
+export function excludedFromCopy(relPath: string): boolean {
+  return GRAPH_COPY_EXCLUDES.some(excluded => relPath === excluded || relPath.startsWith(`${excluded}/`));
+}
+
 /** Raised for every expected failure, with a message that says what to do. */
 export class InstanceError extends Error {
   constructor(message: string) {
@@ -89,6 +107,8 @@ export interface InstancePaths {
   profile: string;
   /** HOME for the instance, so LogSeq's `~/.logseq` (global config, plugins, graph cache) is its own. */
   home: string;
+  /** The copy of the source graph that LogSeq opens, replaced on every start (#151). */
+  graph: string;
   /** What `start` recorded about the running instance. */
   record: string;
   /** A config file for the MCP server and the tests: point `LOGSEQ_MCP_CONFIG` at it. */
@@ -103,6 +123,7 @@ export function instancePaths(worktree: string): InstancePaths {
     dir,
     profile: join(dir, 'profile'),
     home: join(dir, 'home'),
+    graph: join(dir, 'graph'),
     record: join(dir, 'instance.json'),
     config: join(dir, 'config.json'),
     log: join(dir, 'logseq.log'),
@@ -159,7 +180,13 @@ const instanceRecordSchema = z.object({
   pid: z.number().int().positive(),
   port: z.number().int().min(PORT_FIRST).max(PORT_LAST),
   apiUrl: z.string(),
+  /** The graph LogSeq has open: the copy in `.logseq-instance/graph`. */
   graphDir: z.string(),
+  /**
+   * The folder the copy was made from. Optional so that `stop` and `status` still read a record
+   * written before the copy existed (#151), when `graphDir` was the source itself.
+   */
+  sourceGraphDir: z.string().optional(),
   profileDir: z.string(),
   configPath: z.string(),
   logPath: z.string(),
@@ -265,6 +292,12 @@ export interface InstanceDeps {
   realDir(path: string): Promise<string | undefined>;
   /** Names of the entries in a directory, or [] when it is missing. */
   listDir(path: string): Promise<string[]>;
+  /**
+   * Copy the directory `from` to `to` (which does not exist yet), recursively, leaving out every
+   * entry whose path relative to `from` is `excludedFromCopy`. Symbolic links are copied as the
+   * files they point at, so nothing in the copy leads back into `from`.
+   */
+  copyDir(from: string, to: string): Promise<void>;
   isPortFree(port: number): Promise<boolean>;
   /** Start the process detached, its output written to `logPath` (replacing the last run's). Returns its pid. */
   spawnDetached(spec: LaunchSpec, logPath: string): Promise<number>;
@@ -302,6 +335,25 @@ function liveInstancePid(record: InstanceRecord, deps: InstanceDeps): number | u
 
 function assertInside(dir: string, path: string): void {
   if (!path.startsWith(dir + sep)) throw new InstanceError(`refusing to touch ${path}: it is outside ${dir}`);
+}
+
+/** Whether `path` is `dir` or below it. */
+function within(dir: string, path: string): boolean {
+  return path === dir || path.startsWith(dir + sep);
+}
+
+/**
+ * Replace the copy with a fresh one of `sourceGraphDir`, and return the copy's canonical path
+ * (what LogSeq reports as the open graph). The previous copy, with whatever LogSeq wrote to it,
+ * is deleted first.
+ */
+async function copyGraph(paths: InstancePaths, sourceGraphDir: string, deps: InstanceDeps): Promise<string> {
+  assertInside(paths.dir, paths.graph);
+  await deps.remove(paths.graph);
+  await deps.copyDir(sourceGraphDir, paths.graph);
+  const copy = await deps.realDir(paths.graph);
+  if (!copy) throw new InstanceError(`copying ${sourceGraphDir} to ${paths.graph} left no directory there`);
+  return copy;
 }
 
 async function choosePort(worktree: string, lost: ReadonlySet<number>, deps: InstanceDeps): Promise<number> {
@@ -414,14 +466,21 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
     throw new InstanceError(`an instance is already running (pid ${existing.pid}, port ${existing.port}). Run stop first.`);
   }
 
-  const graphDir = await deps.realDir(options.graphDir);
-  if (!graphDir) throw new InstanceError(`graph directory not found: ${options.graphDir}`);
-  if (!(await deps.exists(join(graphDir, options.sentinelFile)))) {
+  const sourceGraphDir = await deps.realDir(options.graphDir);
+  if (!sourceGraphDir) throw new InstanceError(`graph directory not found: ${options.graphDir}`);
+  // The copy goes in paths.dir and replaces what is there: a source in it would be deleted, and
+  // a source holding it would be copied into itself.
+  if (within(paths.dir, sourceGraphDir) || within(sourceGraphDir, paths.dir)) {
     throw new InstanceError(
-      `${graphDir} has no ${options.sentinelFile}, so it is not the fixture graph. An instance only opens the fixture (tests/fixtures/graph).`,
+      `refusing to open ${sourceGraphDir}: start copies the graph into ${paths.graph}, so the graph folder must not be in ${paths.dir} or hold it.`,
     );
   }
-  const expectedFiles = await graphFiles(graphDir, deps);
+  if (!(await deps.exists(join(sourceGraphDir, options.sentinelFile)))) {
+    throw new InstanceError(
+      `${sourceGraphDir} has no ${options.sentinelFile}, so it is not the fixture graph. An instance only opens the fixture (tests/fixtures/graph).`,
+    );
+  }
+  const expectedFiles = await graphFiles(sourceGraphDir, deps);
 
   const appBundle = deps.env.LOGSEQ_APP?.trim() || DEFAULT_APP_BUNDLE;
   const spec = launchSpec(appBundle, paths, deps.env);
@@ -432,7 +491,7 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
   const lost = new Set<number>();
   for (let attempt = 1; ; attempt++) {
     try {
-      return await launch(options, paths, graphDir, expectedFiles, spec, lost, deps);
+      return await launch(options, paths, sourceGraphDir, expectedFiles, spec, lost, deps);
     } catch (error) {
       if (!(error instanceof PortTakenError) || attempt >= START_ATTEMPTS) throw error;
       lost.add(error.port);
@@ -441,11 +500,14 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
   }
 }
 
-/** One launch on the next free port. On any failure after the spawn, the instance is stopped again. */
+/**
+ * One launch on the next free port, on a fresh copy of the graph. On any failure after the
+ * spawn, the instance is stopped again.
+ */
 async function launch(
   options: StartOptions,
   paths: InstancePaths,
-  graphDir: string,
+  sourceGraphDir: string,
   expectedFiles: readonly string[],
   spec: LaunchSpec,
   lost: ReadonlySet<number>,
@@ -455,6 +517,7 @@ async function launch(
   const token = newInstanceToken(deps.randomBytes);
   await deps.mkdir(paths.dir);
   await deps.remove(paths.record);
+  const graphDir = await copyGraph(paths, sourceGraphDir, deps);
   await writeProfile(paths, graphDir, port, token, options.template, deps);
 
   const pid = await deps.spawnDetached(spec, paths.log);
@@ -463,6 +526,7 @@ async function launch(
     port,
     apiUrl: instanceConfig(port, token).apiUrl,
     graphDir,
+    sourceGraphDir,
     profileDir: paths.profile,
     configPath: paths.config,
     logPath: paths.log,
@@ -508,7 +572,8 @@ async function exited(pid: number, ms: number, deps: InstanceDeps): Promise<bool
 
 /**
  * Remove the record and config.json once no instance runs. Left behind, config.json would point
- * LOGSEQ_MCP_CONFIG at a port that another worktree's instance may take next.
+ * LOGSEQ_MCP_CONFIG at a port that another worktree's instance may take next. The graph copy,
+ * profile, home and log stay, so what LogSeq wrote can be inspected; the next start replaces them.
  */
 async function forget(paths: InstancePaths, deps: InstanceDeps): Promise<void> {
   await deps.remove(paths.record);

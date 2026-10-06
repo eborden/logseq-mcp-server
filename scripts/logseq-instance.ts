@@ -8,9 +8,10 @@
  *
  * `start` launches a second LogSeq app on a fresh profile in `.logseq-instance/` (gitignored),
  * on a port derived from this worktree's path (12320-12399) with a new random API token (written
- * only to the gitignored .logseq-instance/config.json and the profile's configs.edn), opens the
- * fixture graph and waits until `requireFixtureGraph` passes and every page is indexed. Then
- * point the tests at it:
+ * only to the gitignored .logseq-instance/config.json and the profile's configs.edn), copies the
+ * fixture graph to .logseq-instance/graph/ and opens the copy, so LogSeq never writes to the
+ * committed fixture (#151), and waits until `requireFixtureGraph` passes and every page is
+ * indexed. Then point the tests at it:
  *
  *   LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration
  *
@@ -21,8 +22,8 @@
 import { spawn, execFileSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { createServer } from 'net';
-import { mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'fs/promises';
-import { dirname, join, resolve } from 'path';
+import { cp, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'fs/promises';
+import { dirname, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { LogseqClient } from '../src/client.js';
 import { FIXTURE_SENTINEL_PAGE, requireFixtureGraph } from '../tests/integration/helpers/fixture-graph.js';
@@ -30,6 +31,7 @@ import {
   InstanceDeps,
   InstanceError,
   InstanceProbe,
+  excludedFromCopy,
   instanceStatus,
   startInstance,
   stopInstance,
@@ -102,6 +104,14 @@ const deps: InstanceDeps = {
       throw error;
     }
   },
+  copyDir: (from, to) =>
+    cp(from, to, {
+      recursive: true,
+      dereference: true,
+      errorOnExist: true,
+      force: false,
+      filter: src => src === from || !excludedFromCopy(relative(from, src).split(sep).join('/')),
+    }),
   isPortFree: port =>
     new Promise(resolvePort => {
       const server = createServer();
@@ -172,6 +182,7 @@ async function main(argv: string[]): Promise<number> {
       deps,
     );
     console.log(`Ready: pid ${started.pid}, ${started.apiUrl}, fixture version ${started.fixtureVersion}.`);
+    console.log(`Graph: ${started.graphDir}, a copy of ${started.sourceGraphDir}; LogSeq writes only to the copy.`);
     console.log('Run the integration tests against it with:');
     console.log(`  LOGSEQ_MCP_CONFIG=${started.configPath} npm run test:integration`);
     console.log('Stop it with: npx tsx scripts/logseq-instance.ts stop');
@@ -198,6 +209,11 @@ async function main(argv: string[]): Promise<number> {
     }
     const { record } = status;
     console.log(`Running: pid ${record.pid}, ${record.apiUrl}, started ${record.startedAt}.`);
+    console.log(
+      record.sourceGraphDir === undefined
+        ? `Graph: ${record.graphDir}.`
+        : `Graph: ${record.graphDir}, copied from ${record.sourceGraphDir} at start.`,
+    );
     console.log(`API: ${status.api}.`);
     console.log(`Config: LOGSEQ_MCP_CONFIG=${record.configPath}`);
     return 0;

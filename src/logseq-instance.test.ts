@@ -6,6 +6,7 @@ import { LogSeqAuthError, LogSeqNotRunningError } from './errors.js';
 import { FixtureGraphError } from '../tests/integration/helpers/fixture-graph.js';
 import {
   DEFAULT_APP_BUNDLE,
+  GRAPH_COPY_EXCLUDES,
   InstanceDeps,
   InstanceError,
   InstanceProbe,
@@ -18,6 +19,7 @@ import {
   START_ATTEMPTS,
   candidatePorts,
   derivePort,
+  excludedFromCopy,
   graphCacheFileName,
   instancePaths,
   instanceStatus,
@@ -39,6 +41,8 @@ const WORKTREE = '/work/tree';
 const GRAPH = '/work/tree/tests/fixtures/graph';
 const SENTINEL = 'pages/logseq-mcp-fixture-sentinel.md';
 const PATHS = instancePaths(WORKTREE);
+/** The copy of GRAPH that start makes and LogSeq opens (#151). */
+const COPY = PATHS.graph;
 const APP = `${DEFAULT_APP_BUNDLE}/Contents/MacOS/Logseq`;
 const TOKEN = 'made-up_Token-123';
 
@@ -57,17 +61,20 @@ class World {
   logs: string[] = [];
   /** What each readiness poll sees, in order; the last one repeats. */
   readiness: Step[] = [async () => {}];
-  graphPath: string | undefined = GRAPH;
+  graphPath: string | undefined = COPY;
   indexed = [SENTINEL];
   fixtureVersion = 1;
   polls = 0;
   modes = new Map<string, number | undefined>();
   randomSeed = 1;
   connected: string[] = [];
+  /** Every path the code under test wrote, created, removed or copied to, in order. */
+  written: string[] = [];
 
   constructor() {
-    this.dirs.add(GRAPH);
+    for (const dir of [GRAPH, join(GRAPH, 'pages'), join(GRAPH, 'journals'), join(GRAPH, 'logseq')]) this.dirs.add(dir);
     this.files.set(join(GRAPH, SENTINEL), 'fixture-version:: 1\n');
+    this.files.set(join(GRAPH, 'logseq', 'config.edn'), '{:meta/version 1}\n');
     this.files.set(APP, '');
   }
 
@@ -91,13 +98,16 @@ class World {
         return data === undefined ? undefined : String(data);
       },
       writeFile: async (path, data, mode) => {
+        this.written.push(path);
         this.files.set(path, data);
         this.modes.set(path, mode);
       },
       mkdir: async path => {
+        this.written.push(path);
         this.dirs.add(path);
       },
       remove: async path => {
+        this.written.push(path);
         for (const key of [...this.files.keys()]) if (key === path || key.startsWith(`${path}/`)) this.files.delete(key);
         for (const dir of [...this.dirs]) if (dir === path || dir.startsWith(`${path}/`)) this.dirs.delete(dir);
       },
@@ -105,6 +115,21 @@ class World {
       realDir: async path => (this.dirs.has(path) ? path : undefined),
       listDir: async path =>
         [...this.files.keys()].filter(key => dirname(key) === path).map(key => key.slice(path.length + 1)),
+      copyDir: async (from, to) => {
+        this.written.push(to);
+        const taken = (key: string) => key === to || key.startsWith(`${to}/`);
+        if ([...this.files.keys()].some(taken) || [...this.dirs].some(taken)) throw new Error(`EEXIST: ${to}`);
+        const below = (key: string) => (key.startsWith(`${from}/`) ? key.slice(from.length + 1) : undefined);
+        for (const [key, data] of [...this.files]) {
+          const rel = below(key);
+          if (rel !== undefined && !excludedFromCopy(rel)) this.files.set(join(to, rel), data);
+        }
+        for (const dir of [...this.dirs]) {
+          const rel = below(dir);
+          if (rel !== undefined && !excludedFromCopy(rel)) this.dirs.add(join(to, rel));
+        }
+        this.dirs.add(to);
+      },
       isPortFree: async port => !this.busyPorts.has(port),
       spawnDetached: async spec => {
         this.spawned.push(spec);
@@ -155,7 +180,8 @@ function runningInstance(world: World, commandLine = `${APP} --user-data-dir=${P
       pid,
       port: 12345,
       apiUrl: 'http://127.0.0.1:12345',
-      graphDir: GRAPH,
+      graphDir: COPY,
+      sourceGraphDir: GRAPH,
       profileDir: PATHS.profile,
       configPath: PATHS.config,
       logPath: PATHS.log,
@@ -248,6 +274,16 @@ describe('small helpers', () => {
     expect(isInstanceProcess(undefined, '/p/profile')).toBe(false);
   });
 
+  it('leaves logseq/bak, and only it, out of the graph copy', () => {
+    expect(GRAPH_COPY_EXCLUDES).toEqual(['logseq/bak']);
+    expect(excludedFromCopy('logseq/bak')).toBe(true);
+    expect(excludedFromCopy('logseq/bak/pages/a.md')).toBe(true);
+    expect(excludedFromCopy('logseq/bakery')).toBe(false);
+    expect(excludedFromCopy('logseq/config.edn')).toBe(false);
+    expect(excludedFromCopy('pages/logseq/bak')).toBe(false);
+    expect(excludedFromCopy('pages/a.md')).toBe(false);
+  });
+
   it('lists graph files the index does not have yet', () => {
     expect(missingFiles(['pages/a.md', 'journals/b.md'], ['pages/a.md', 'logseq/config.edn'])).toEqual(['journals/b.md']);
   });
@@ -269,7 +305,14 @@ describe('startInstance', () => {
     const port = derivePort(WORKTREE);
     const started = await start(world);
 
-    expect(started).toMatchObject({ pid: 4242, port, apiUrl: `http://127.0.0.1:${port}`, graphDir: GRAPH, fixtureVersion: 1 });
+    expect(started).toMatchObject({
+      pid: 4242,
+      port,
+      apiUrl: `http://127.0.0.1:${port}`,
+      graphDir: COPY,
+      sourceGraphDir: GRAPH,
+      fixtureVersion: 1,
+    });
     expect(world.text(join(PATHS.profile, 'configs.edn'))).toContain(`:server/port ${port}`);
     const config = JSON.parse(world.text(PATHS.config));
     expect(config).toEqual({ apiUrl: `http://127.0.0.1:${port}`, authToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
@@ -278,12 +321,94 @@ describe('startInstance', () => {
     expect(world.modes.get(join(PATHS.profile, 'configs.edn'))).toBe(PRIVATE_FILE_MODE);
     expect(world.connected.every(token => token === config.authToken)).toBe(true);
     expect(world.text(PATHS.record)).not.toContain(config.authToken);
-    expect(parseInstanceRecord(world.text(PATHS.record), PATHS.record)).toMatchObject({ pid: 4242, port, profileDir: PATHS.profile });
+    expect(parseInstanceRecord(world.text(PATHS.record), PATHS.record)).toMatchObject({
+      pid: 4242,
+      port,
+      profileDir: PATHS.profile,
+      graphDir: COPY,
+      sourceGraphDir: GRAPH,
+    });
 
     const leveldb = join(PATHS.profile, 'Local Storage', 'leveldb');
     expect(world.text(join(leveldb, 'CURRENT'))).toBe('MANIFEST-000001\n');
-    expect(world.text(join(leveldb, '000002.log'))).toContain(`"logseq_local_${GRAPH}"`);
-    expect(world.files.get(join(PATHS.home, '.logseq', 'graphs', graphCacheFileName(GRAPH)))).toBe('');
+    expect(world.text(join(leveldb, '000002.log'))).toContain(`"logseq_local_${COPY}"`);
+    expect(world.text(join(leveldb, '000002.log'))).not.toContain(GRAPH);
+    expect(world.files.get(join(PATHS.home, '.logseq', 'graphs', graphCacheFileName(COPY)))).toBe('');
+    expect(world.files.has(join(PATHS.home, '.logseq', 'graphs', graphCacheFileName(GRAPH)))).toBe(false);
+  });
+
+  it('copies the graph to .logseq-instance/graph and opens the copy (#151)', async () => {
+    world.files.set(join(GRAPH, 'journals', '2025_01_01.md'), '- a journal\n');
+    world.indexed = [SENTINEL, 'journals/2025_01_01.md'];
+
+    await start(world);
+
+    expect(world.text(join(COPY, SENTINEL))).toBe('fixture-version:: 1\n');
+    expect(world.text(join(COPY, 'logseq', 'config.edn'))).toBe('{:meta/version 1}\n');
+    expect(world.text(join(COPY, 'journals', '2025_01_01.md'))).toBe('- a journal\n');
+    expect(world.dirs.has(join(COPY, 'pages'))).toBe(true);
+  });
+
+  it('never writes to the source graph (#151)', async () => {
+    const before = new Map([...world.files].filter(([key]) => key.startsWith(`${GRAPH}/`)));
+
+    await start(world);
+    await stopInstance(WORKTREE, world.deps());
+
+    expect(world.written.length).toBeGreaterThan(0);
+    expect(world.written.filter(path => path === GRAPH || path.startsWith(`${GRAPH}/`))).toEqual([]);
+    expect(world.written.every(path => path.startsWith(`${PATHS.dir}/`) || path === PATHS.dir)).toBe(true);
+    expect(new Map([...world.files].filter(([key]) => key.startsWith(`${GRAPH}/`)))).toEqual(before);
+  });
+
+  it('replaces a stale copy, and leaves logseq/bak out of the new one', async () => {
+    world.files.set(join(COPY, 'pages', 'stale page.md'), '- from the last run\n');
+    world.files.set(join(COPY, 'logseq', 'config.edn'), '{:rewritten-by-logseq true}\n');
+    world.files.set(join(COPY, 'logseq', 'bak', 'pages', 'old.md'), 'old');
+    world.dirs.add(COPY);
+    world.files.set(join(GRAPH, 'logseq', 'bak', 'logseq', 'config.edn'), 'a backup');
+    world.dirs.add(join(GRAPH, 'logseq', 'bak'));
+
+    await start(world);
+
+    expect(world.files.has(join(COPY, 'pages', 'stale page.md'))).toBe(false);
+    expect(world.text(join(COPY, 'logseq', 'config.edn'))).toBe('{:meta/version 1}\n');
+    expect([...world.files.keys(), ...world.dirs].filter(key => key.startsWith(join(COPY, 'logseq', 'bak')))).toEqual([]);
+    expect(world.text(join(GRAPH, 'logseq', 'bak', 'logseq', 'config.edn'))).toBe('a backup');
+  });
+
+  it('makes a fresh copy for each launch when it retries on another port', async () => {
+    world.readiness = [
+      async () => {
+        world.files.set(join(COPY, 'pages', 'contents.md'), '- written by the first launch\n');
+        throw new LogSeqAuthError('http://127.0.0.1:1');
+      },
+      async () => {},
+    ];
+
+    await start(world);
+
+    expect(world.spawned).toHaveLength(2);
+    expect(world.files.has(join(COPY, 'pages', 'contents.md'))).toBe(false);
+  });
+
+  it('keeps the copy when the instance stops; the next start replaces it', async () => {
+    await start(world);
+    await stopInstance(WORKTREE, world.deps());
+    expect(world.text(join(COPY, SENTINEL))).toBe('fixture-version:: 1\n');
+  });
+
+  it('refuses a graph folder inside .logseq-instance, or one that holds it, before touching anything', async () => {
+    for (const graphDir of [COPY, join(COPY, 'pages'), WORKTREE]) {
+      world.dirs.add(graphDir);
+      world.files.set(join(graphDir, SENTINEL), 'fixture-version:: 1\n');
+      const written = world.written.length;
+      await expect(
+        startInstance({ worktree: WORKTREE, graphDir, template: TEMPLATE, sentinelFile: SENTINEL }, world.deps()),
+      ).rejects.toThrow(/must not be in .*\.logseq-instance or hold it/);
+      expect(world.written.slice(written)).toEqual([]);
+    }
+    expect(world.spawned).toHaveLength(0);
   });
 
   it('generates a new token on every start', async () => {
@@ -386,7 +511,7 @@ describe('startInstance', () => {
         world.graphPath = undefined;
       },
       async () => {
-        world.graphPath = GRAPH;
+        world.graphPath = COPY;
       },
     ];
     world.indexed = [];
@@ -492,12 +617,21 @@ describe('startInstance', () => {
     expect(world.signals).toEqual([]);
   });
 
-  it('refuses a folder without the fixture sentinel, before launching anything', async () => {
+  it('refuses a folder without the fixture sentinel, before launching or copying anything', async () => {
     world.files.delete(join(GRAPH, SENTINEL));
 
     await expect(start(world)).rejects.toThrow(/not the fixture graph/);
     expect(world.spawned).toHaveLength(0);
     expect(world.files.has(PATHS.config)).toBe(false);
+    expect(world.written).toEqual([]);
+  });
+
+  it('checks the sentinel in the source, not in a copy left by the last run', async () => {
+    world.files.delete(join(GRAPH, SENTINEL));
+    world.files.set(join(COPY, SENTINEL), 'fixture-version:: 1\n');
+    world.dirs.add(COPY);
+
+    await expect(start(world)).rejects.toThrow(`${GRAPH} has no ${SENTINEL}`);
   });
 
   it('refuses a missing graph folder', async () => {
