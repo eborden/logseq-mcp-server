@@ -69,6 +69,28 @@ export interface PageEntity {
   updatedAt?: number;
 }
 
+/**
+ * The keys a Datalog pull spells differently from the Editor API. The Editor API camelizes
+ * (`originalName`, `journalDay`, `createdAt`); a pull keeps LogSeq's kebab-case.
+ * `db/id` is the id as Datascript spells it. LogSeq 0.10.15 renames it to `id` in a query
+ * result (checked against the fixture graph, for `[*]` and `[:db/id ...]` pulls alike), so a
+ * live graph never shows it, but the readers still accept it.
+ */
+export interface PulledPageKeys {
+  'db/id'?: number;
+  'original-name'?: string;
+  'journal-day'?: number;
+  'created-at'?: number;
+  'updated-at'?: number;
+}
+
+/**
+ * A page in either spelling, or a partial pull of one (a block's nested `page`, a ref).
+ * Every field is optional, so it takes a {@link PageEntity}, a pulled page and a bare
+ * `{ id }` alike. Read it through `src/utils/entity-fields.ts`, never by spelling.
+ */
+export type PageLike = Partial<PageEntity> & PulledPageKeys;
+
 // LogSeq API request/response types
 export interface LogseqAPIRequest {
   method: string;
