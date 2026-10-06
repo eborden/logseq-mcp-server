@@ -10,14 +10,19 @@ which is what lets it live in a public repository (CLAUDE.md, Privacy).
 logseq/config.edn   pins the settings that change parsing and page names
 pages/              one file per page
 journals/           one file per journal day (yyyy_MM_dd.md)
-README.md           this file, hidden from LogSeq by :hidden in config.edn
+README.md           this file, meant to be hidden from LogSeq by :hidden in config.edn
 ```
+
+The per-worktree instance (#118) indexes `README.md` anyway, as a page `readme`, with a tag page for
+each issue number written with a `#`. LogSeq 0.10 applies `:hidden` when it loads a new graph, but
+not on the load path the instance takes. Exact page counts against the instance must allow for it
+until that is fixed.
 
 ## What is here so far
 
-This is the skeleton (#87). Content comes next:
+The skeleton (#87) and its content:
 
-- #88: edge cases (aliases, namespaces, block refs and embeds, properties), journals, tags and tasks
+- #88: edge cases (aliases, namespaces, block refs and embeds, properties), journals, tags and tasks (done, see "Edge cases, journals, tags and tasks" below)
 - #89: a hub page with 100+ neighbours (done, see "The hub" below)
 - #90: moves `npm run test:integration` from the maintainer's own graph to this one
 
@@ -27,6 +32,101 @@ This is the skeleton (#87). Content comes next:
 
 `fixture-version` and `FIXTURE_VERSION` in the helper change together. Bump both when the tests
 start depending on content an older copy of the fixture doesn't have.
+
+## Edge cases, journals, tags and tasks
+
+Hand-written. Names in the tables are `:block/name` (lowercase). Every result below was checked
+against a per-worktree instance (#118, LogSeq 0.10.15).
+
+### Page resolution and aliases
+
+| Page | File | Exists to test |
+|---|---|---|
+| `project atlas` | `pages/project atlas.md` | **Unique alias**: `alias:: atlas`, declared by no other page. `atlas` resolves to it (`matchedBy` alias), and journal blocks link `atlas`, so asking by either name covers the same blocks (`alias-sets`). Also a page with a file, page properties (`type`, `status`, `owner`) and 3 or more blocks, a nested list, and the block `0088f1a0-...-000000000001` that other pages ref |
+| `atlas` | none | The stub LogSeq makes for that alias: no file, no blocks, linked both ways to `project atlas` by `:block/alias` |
+| `project borealis`, `project cascade` | `pages/project borealis.md`, `pages/project cascade.md` | **Ambiguous alias**: both say `alias:: roadmap`. `roadmap` resolves as ambiguous with those two candidates (`AmbiguousPageError`) |
+| `project atlas/notes` | `pages/project atlas___notes.md` | **Unique namespace leaf**: `notes` resolves to it (`matchedBy` namespace-leaf). No page or alias is named `notes` |
+| `project atlas/meetings`, `project borealis/meetings` | `pages/project atlas___meetings.md`, `pages/project borealis___meetings.md` | **Ambiguous namespace leaf**: `meetings` under two namespaces, with no page or alias named `meetings`. Resolves as ambiguous with both |
+| `archive` | none | **Exists with no file, blocks, refs or aliases**: the namespace parent of `archive/old plans`. Nothing links it, so `get_concept_evolution` returns an empty timeline |
+| `archive/old plans` | `pages/archive___old plans.md` | Makes the `archive` page above |
+| `empty page` | `pages/empty page.md` | **Empty page with a file**: one block with empty content. A file with no bytes is never indexed (the instance waits for it forever), so the file holds a single `-` |
+| `alice`, `bob` | `pages/Alice.md`, `pages/Bob.md` | Pages with a file, a page property (`role`) and **no alias** (the unchanged case in `alias-sets`). The files are capitalized, so `original-name` is `Alice` and `Bob`: lookups by `alice`, `Alice` or `ALICE` all find them |
+| `carol`, `bird watching`, `test data` | none | **Link targets only**: linked from blocks or a property value, with no file and no blocks |
+| `meeting`, `moving`, `planning`, `weekly review` | none | **Tags**: `#meeting`, `#moving`, `#[[weekly review]]` in blocks, `tags:: planning` on `project cascade` (its `:block/tags`) and `topic:: #planning` |
+
+### Block refs and embeds (`block refs`, `pages/block refs.md`)
+
+Every target has a pinned `id::`, so tests can name it. The uuids are
+`0088f1a0-0000-4000-8000-0000000000NN`; below, `NN` is the last part.
+
+| Block | `resolve_refs` gives |
+|---|---|
+| `02`, the target | no refs (`resolvedRefs` absent) |
+| `03`: a ref to `02` | one ref, `ok` |
+| A ref to `01` on `project atlas` | one ref, `ok`, `page` is `project atlas` |
+| `04`: a ref to `03` | two refs (`03`, then `02`), both `ok` |
+| A ref to `04` | three: `ok`, `ok`, then `depth_limit` at the default depth 2, with a `refs_depth_limit` warning |
+| Two sibling blocks, each a ref to `02` | each one `ok` (seen is tracked per path) |
+| A block embed of `02` | one embed, `ok` |
+| A page embed of `bob` | one embed, `ok` |
+| `10` and `11`: refs to each other | `ok`, then `cycle` |
+| `20` and `21`: embeds of each other | `ok`, then `cycle` |
+| A ref to `...00000000dead` and an embed of `...00000000beef` (no such block) | `ok`, **not** `missing`. LogSeq 0.10 makes a placeholder block for a uuid nobody has: no page, content `id:: <uuid>`. The resolver finds that row, so `missing` never shows up for a ref in a file graph |
+
+LogSeq also makes a **page named after each block-embed uuid** (`0088f1a0-...-000000000002`, `...020`,
+`...021`, `...beef`), with no file and no blocks. Plain `((uuid))` refs make no such page.
+
+### Properties (`property types`, `pages/property types.md`)
+
+One block per value type, and page properties on the first lines. Types as `:block/properties` returns them:
+
+| Property | Written | Comes back as |
+|---|---|---|
+| `status` | `testing` | text `"testing"` |
+| `effort` | `3` | number `3` |
+| `ratio` | `0.75` | text `"0.75"`: a decimal is not a number |
+| `reviewed`, `archived` | `true`, `false` | booleans (`false` is a value; slim output keeps it) |
+| `owner` | `[[Alice]]` | one-element set `["Alice"]` |
+| `participants` | `[[Alice]], [[Bob]]` | set `["Alice", "Bob"]` |
+| `reviewers` | `Bob, Carol` | set `["Bob", "Carol"]`, because `config.edn` lists it in `:property/separated-by-commas` |
+| `summary` | text with commas | one text value: not listed, so not split |
+| `created-by` | `Bob` (block), `Alice` (page) | text. A **dashed key**: the Editor API returns it as `createdBy` |
+| `due-date` | `[[Jan 15th, 2025]]` | set `["Jan 15th, 2025"]`, a ref to that journal page |
+| `topic` | `#planning` | set `["planning"]` |
+| `link` | a URL on `example.com` | text |
+| `type`, `category`, `created-by` (page) | `reference`, `[[test data]]`, `Alice` | page properties: text, set, text |
+
+`query_by_property` matches set elements with their original casing (`participants` = `Bob`, not `bob`).
+`status` = `testing` finds the one block on this page. `type` = `project` finds the three project pages.
+The page holds the word "test" for `search_blocks`.
+
+With `:property-pages/enabled?`, every property key that is not built in (`status`, `effort`,
+`created-by` and so on, but not `alias`, `tags` or `id`) is also a page with no file.
+
+### Journals, tasks, tags and nesting
+
+| Journal | File | Has |
+|---|---|---|
+| `dec 31st, 2024` | `journals/2024_12_31.md` | The year boundary: links `project atlas` and `alice`, a `DONE` |
+| `jan 2nd, 2025` | `journals/2025_01_02.md` | A link to the alias `atlas`, a `TODO` with `SCHEDULED: <2025-01-06 Mon>`, the only link to `bird watching` |
+| `jan 6th, 2025` | `journals/2025_01_06.md` | A `#meeting` nested three levels, a `DOING`, a ref to block `01` on `project atlas` |
+| `jan 7th, 2025` | `journals/2025_01_07.md` | A `TODO` with `DEADLINE: <2025-01-10 Fri>`, a link to `atlas`, `#moving` |
+| `jan 8th, 2025` | `journals/2025_01_08.md` | `DONE`, `NOW`, and a `TODO` with both `SCHEDULED: <2025-01-15 Wed>` and `DEADLINE: <2025-01-24 Fri>` |
+| `jan 10th, 2025` | `journals/2025_01_10.md` | `#[[weekly review]]` with links to the three projects |
+| `jan 13th, 2025` | `journals/2025_01_13.md` | `LATER`, `WAITING`, `CANCELED` |
+| `jan 15th, 2025` | `journals/2025_01_15.md` | A `#meeting` with nested blocks. Also the target of `due-date` and a `SCHEDULED` date |
+| `feb 3rd, 2025` | `journals/2025_02_03.md` | After a gap of almost three weeks, so a January window ends before it |
+
+`query_by_date_range` from 20250101 to 20250131 returns 7 days (Jan 2nd to Jan 15th). Add the Dec 31st
+and Feb 3rd days, and the hub's journal below, for wider windows.
+
+| Page | File | Exists to test |
+|---|---|---|
+| `project cascade` | `pages/project cascade.md` | Every task marker on one page: `TODO`, `DOING`, `DONE`, `LATER`, `NOW`, `WAITING`, `CANCELED`, a priority `[#A]` (LogSeq links the page `a` for it), and tasks nested under a task. Page `tags:: planning` |
+| `deep outline` | `pages/deep outline.md` | Six levels of nesting, a task and a tag at level 6, and a second root block |
+
+Counts across these pages and journals: 7 `TODO`, 6 `DONE`, 2 each of `DOING`, `LATER`, `NOW`,
+`WAITING` and `CANCELED`; 2 `SCHEDULED` and 2 `DEADLINE` blocks. None of them links the hub pages below.
 
 ## The hub (#89)
 
