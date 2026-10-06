@@ -1,6 +1,6 @@
 # LogSeq MCP Tools Reference
 
-Complete documentation for the LogSeq MCP tools organized by category. The server has 15 tools; `logseq_get_graph_info` (graph name and path) is the one not covered below.
+Complete documentation for the LogSeq MCP tools organized by category. The server has 16 tools; `logseq_get_graph_info` (graph name and path) is the one not covered below.
 
 ## Tool Categories Overview
 
@@ -11,6 +11,7 @@ Complete documentation for the LogSeq MCP tools organized by category. The serve
 | Semantic Search | 1 tool | Topic-based relationship queries |
 | Context Building | 3 tools | Comprehensive multi-source context aggregation, and what the user is looking at |
 | Temporal Query | 2 tools | Time-based analysis and journal queries |
+| Linking | 1 tool | Checking a `[[link]]` pass before it is reported done |
 
 ## Basic Tools (7 tools)
 
@@ -401,6 +402,38 @@ logseq_get_concept_evolution("Machine Learning")  # All time
 
 ---
 
+## Linking Tools (1 tool)
+
+### logseq_check_links
+
+The gate for a `[[link]]` pass (`skills/concept-linking.md`, step 8). Read-only: it compares two texts and looks the refs up in the graph.
+
+**Parameters:**
+- `before` (required): The text before linking, at most 50,000 characters
+- `after` (required): The same text with `[[brackets]]` added, at most 50,000 characters and 500 distinct terms
+
+**Returns:**
+- `ok`: True only when all four checks pass
+- `prose`: `{ ok, firstDifference? }`. Stripping `[[ ]]` from both texts leaves them identical. `firstDifference` gives the line, column and an excerpt of each side
+- `brackets`: `{ ok, opens, closes, nested? }`. Balanced, and no `[[` opened inside another
+- `refs`: `{ ok, resolved, unresolved, ambiguous }`. Every `[[term]]` in `after` names exactly one page or alias, file-less pages included. An alias several pages declare is `ambiguous`; one the note already had, with no copy added, is reported but doesn't fail
+- `refsPreserved`: `{ ok, removed }`. Every ref in `before` is still a ref in `after`, as many times
+- `hasMore`, `warnings`, `totals` (`refsBefore`, `refsAfter`, `terms`). A `refs_unchecked` warning means LogSeq gave no answer, so no ref was checked
+
+**Context cost:** ~100-500 tokens, depending on how many refs the text holds
+
+**Use when:**
+- A linking pass has been applied and is about to be reported done
+
+**Example:**
+```
+logseq_check_links(before="- met Alice about project atlas", after="- met [[Alice]] about [[project atlas]]")
+```
+
+**Can't find:** a link to the wrong page, or a name split across a ref (`[[Kofi]] Mensah`). Both pass every check.
+
+---
+
 ## Tool Selection Guide
 
 ### By Use Case
@@ -528,12 +561,13 @@ All temporal queries use **YYYYMMDD format:**
 
 ## Summary
 
-15 MCP tools. The 14 below are organized into 5 categories; `logseq_get_graph_info` (graph name and path) is the 15th:
+16 MCP tools. The 15 below are organized into 6 categories; `logseq_get_graph_info` (graph name and path) is the 16th:
 
 1. **Basic Tools (7)** - Core search, retrieval, page outline, property queries
 2. **Graph Traversal (1)** - Network visualization
 3. **Semantic Search (1)** - Relationship-based queries
 4. **Context Building (3)** - Comprehensive aggregation and current UI context
 5. **Temporal Query (2)** - Time-based analysis
+6. **Linking (1)** - Checking a link pass
 
 **Key principle:** Start with high-level tools (`build_context`, `get_context_for_query`) and drill down with specific tools only when needed.
