@@ -106,7 +106,7 @@ function cleanContent(content: string | undefined): string {
  * neither is the placeholder. Content is not the signal: a real empty block with a pinned id
  * holds the same `id::` line and must still resolve.
  */
-const isPlaceholder = (row: Row): boolean => row.page?.id == null && row.name === undefined;
+const isPlaceholder = (row: Row): boolean => row.page?.id == null && row.name == null;
 
 const pageNameOf = (row: Row | undefined | null): string | null =>
   row?.page?.['original-name'] ?? row?.page?.name ?? null;
