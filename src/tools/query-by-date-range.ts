@@ -1,7 +1,7 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, BlockEntity, SlimBlock, ResolveRefsMeta } from '../types.js';
+import { PageEntity, BlockEntity, SlimBlock, ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
-import { buildResultMeta } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import {
   AliasSet,
   ResolvedAliases,
@@ -29,10 +29,23 @@ import {
 export type { TopConcept } from '../utils/top-concepts.js';
 export { BUILT_IN_CONCEPTS, DEFAULT_TOP_CONCEPTS_LIMIT } from '../utils/top-concepts.js';
 
+/** Blocks kept when `maxBlocks` is absent (#61). */
+export const DEFAULT_DATE_RANGE_MAX_BLOCKS = 200;
+
 /**
- * The `summary` of every result shape. `topConcepts` is the pages most referenced
- * (`:block/refs`) by the returned blocks, nested ones included; it is left out when
- * `topConceptsLimit` is 0.
+ * Most blocks one call returns (#61). A larger `maxBlocks` is clamped to it, and a cut
+ * at the maximum is reported by a `blocks_truncated` warning with no `howToFetchAll`.
+ * Dates narrow a result to whole days, so a day holding more blocks than this can't
+ * be fetched whole by any call.
+ */
+export const MAX_DATE_RANGE_BLOCKS = 1000;
+
+/**
+ * The `summary` of every result shape. It describes every day and block found in the
+ * range, also when `maxBlocks` cut the entries (#61): `totalDays` and `totalBlocks`
+ * (top-level blocks) can exceed what `entries` holds, and `totals` says by how much.
+ * `topConcepts` is the pages most referenced (`:block/refs`) by those blocks, nested
+ * ones included; it is left out when `topConceptsLimit` is 0.
  */
 export interface DateRangeSummary {
   totalDays: number;
@@ -41,8 +54,14 @@ export interface DateRangeSummary {
   topConcepts?: TopConcept[];
 }
 
-/** `hasMore` / `warnings` are present only when `resolve_refs` is on. */
+/**
+ * `hasMore` / `warnings` are present only when `resolve_refs` is on, an alias warning
+ * applies, or `maxBlocks` cut the entries. `totals` ({ blocks, days }: what there was
+ * before the cut) comes only with a cut. `dateRange` is the range queried, not where
+ * the cut left the entries: the `blocks_truncated` warning says where they end.
+ */
 export interface DateRangeResult extends ResolveRefsMeta, ResolvedAliases {
+  totals?: ResultMeta['totals'];
   dateRange: {
     start: number;
     end: number;
@@ -56,6 +75,7 @@ export interface DateRangeResult extends ResolveRefsMeta, ResolvedAliases {
 }
 
 export interface SlimDateRangeResult extends ResolveRefsMeta, ResolvedAliases {
+  totals?: ResultMeta['totals'];
   dateRange: {
     start: number;
     end: number;
@@ -74,6 +94,7 @@ export interface SlimDateRangeResult extends ResolveRefsMeta, ResolvedAliases {
  * included; `snippets` has one entry per top-level block (its first line, shortened).
  */
 export interface OutlineDateRangeResult extends ResolveRefsMeta, ResolvedAliases {
+  totals?: ResultMeta['totals'];
   dateRange: {
     start: number;
     end: number;
@@ -116,6 +137,14 @@ export interface DateRangeOptions extends DateRangeSelection {
    * Ignored when `includeContent` is false. Default false.
    */
   resolveRefs?: boolean;
+  /**
+   * Blocks kept across all days (default 200), clamped to 0..`MAX_DATE_RANGE_BLOCKS` (1000) and
+   * floored (#61). Counts every block, nested ones included, in document order: a block,
+   * then its children, then the next sibling, day by day in the order of `entries`.
+   * With `includeContent: false` it counts top-level blocks, the ones the result lists
+   * as snippets. `summary` still covers every block found.
+   */
+  maxBlocks?: number;
 }
 
 /**
@@ -273,6 +302,116 @@ function countBlocks(blocks: BlockEntity[]): number {
   return blocks.reduce((sum, block) => sum + 1 + countBlocks(block.children ?? []), 0);
 }
 
+type Entry = DateRangeResult['entries'][number];
+
+/** Blocks an entry lists against the cap: nested ones too, or only top-level ones (the outline). */
+const listedBlocks = (blocks: BlockEntity[], nested: boolean): number =>
+  nested ? countBlocks(blocks) : blocks.length;
+
+/**
+ * The first `budget.room` blocks of these trees in document order: a block, then its
+ * children, then its next sibling. What is kept is a valid tree. A block whose children
+ * don't all fit keeps the first ones that do, so it can hold fewer children than it has.
+ */
+function takeBlocks(blocks: BlockEntity[], budget: { room: number }): BlockEntity[] {
+  const kept: BlockEntity[] = [];
+  for (const block of blocks) {
+    if (budget.room === 0) break;
+    budget.room -= 1;
+    kept.push(block.children?.length ? { ...block, children: takeBlocks(block.children, budget) } : block);
+  }
+  return kept;
+}
+
+/** Where `capEntries` cut, for the warning. */
+interface BlockCut {
+  entries: Entry[];
+  /** Blocks there were before the cut, counted the way the cap counts them */
+  total: number;
+  /** Day of the last entry kept; null when nothing was kept */
+  endsAt: number | null;
+  /** Where a caller continues: `endsAt` when that day was cut part-way, else the first day dropped */
+  resumeAt: number | null;
+  /** The last kept day lost blocks */
+  splitDay: boolean;
+}
+
+/**
+ * Keep the first `cap` blocks across `entries` (#61), in the order of the entries.
+ * At or below the cap this returns null and the entries stay untouched. Days after the
+ * last kept block are dropped, empty ones included; a day kept part-way keeps its first
+ * blocks.
+ */
+function capEntries(entries: Entry[], cap: number, nested: boolean): BlockCut | null {
+  const total = entries.reduce((sum, entry) => sum + listedBlocks(entry.blocks, nested), 0);
+  if (total <= cap) return null;
+
+  const budget = { room: cap };
+  const kept: Entry[] = [];
+  let firstDropped: Entry | undefined;
+  let splitDay = false;
+  for (const entry of entries) {
+    if (budget.room === 0) {
+      firstDropped = entry;
+      break;
+    }
+    const before = budget.room;
+    let blocks: BlockEntity[];
+    if (nested) {
+      blocks = takeBlocks(entry.blocks, budget);
+    } else {
+      blocks = entry.blocks.slice(0, budget.room);
+      budget.room -= blocks.length;
+    }
+    kept.push({ ...entry, blocks });
+    splitDay = before - budget.room < listedBlocks(entry.blocks, nested);
+  }
+  const last = kept[kept.length - 1];
+  const endsAt = last ? last.date : null;
+  return { entries: kept, total, endsAt, resumeAt: splitDay ? endsAt : (firstDropped?.date ?? null), splitDay };
+}
+
+/**
+ * The `blocks_truncated` warning. Names where the entries end and how to continue from
+ * there, and says what dates can reach: whole days after the cut, never part of one day.
+ * `newestFirst` is the `last_n` order, which continues with older days.
+ */
+function blocksTruncated(
+  cut: BlockCut,
+  shown: number,
+  options: { nested: boolean; newestFirst: boolean; start: number; end: number; requested: number }
+): ResultWarning {
+  const { nested, newestFirst, start, end, requested } = options;
+  const { endsAt, resumeAt, splitDay } = cut;
+  let narrower: string;
+  if (endsAt === null || resumeAt === null) {
+    narrower = 'Narrow the dates or last_n, or add a search_term.';
+  } else {
+    const repeats = splitDay ? ' (that day repeats its kept blocks)' : '';
+    const later = newestFirst
+      ? `Query start_date ${start} with end_date ${resumeAt} for the older days${repeats}`
+      : `Query start_date ${resumeAt} with end_date ${end} for the later days${repeats}`;
+    narrower =
+      `${later}, or add a search_term.` +
+      (splitDay
+        ? ` A day is the narrowest date range, so a day with more than ${MAX_DATE_RANGE_BLOCKS} blocks can't be fetched whole.` +
+          (nested ? ' The last kept block may show fewer children than it has.' : '')
+        : '');
+  }
+  return cappedTruncationWarning({
+    what:
+      `blocks (${nested ? 'nested ones counted' : 'top-level only'}; ` +
+      `${newestFirst ? 'newest' : 'oldest'} day first${endsAt !== null ? `; the entries end at ${endsAt}` : ''})`,
+    shown,
+    total: cut.total,
+    param: 'max_blocks',
+    max: MAX_DATE_RANGE_BLOCKS,
+    narrower,
+    requested,
+    code: 'blocks_truncated'
+  });
+}
+
 /** First line of a block, trimmed and shortened. */
 function snippetOf(block: BlockEntity): string {
   const firstLine = (block.content ?? '').split('\n')[0].trim();
@@ -355,7 +494,8 @@ export async function queryJournals(
     slimResults = false,
     includeContent = true,
     topConceptsLimit = DEFAULT_TOP_CONCEPTS_LIMIT,
-    resolveRefs = false
+    resolveRefs = false,
+    maxBlocks = DEFAULT_DATE_RANGE_MAX_BLOCKS
   } = options;
   if (!Number.isInteger(topConceptsLimit) || topConceptsLimit < 0) {
     throw new InvalidParameterError(
@@ -422,7 +562,7 @@ export async function queryJournals(
   const aliasSet =
     searchTerm && journals.length > 0 ? await resolveAliasSetByName(client, searchTerm) : null;
   const matchesSearch = blockMatcher(searchTerm ?? '', aliasSet);
-  const entries: DateRangeResult['entries'] = [];
+  const allEntries: DateRangeResult['entries'] = [];
   let totalBlocks = 0;
 
   for (const page of journals) {
@@ -435,7 +575,7 @@ export async function queryJournals(
     }
 
     if (filteredBlocks.length > 0 || !searchTerm) {
-      entries.push({
+      allEntries.push({
         date: page.journalDay!,
         page,
         blocks: filteredBlocks
@@ -446,15 +586,36 @@ export async function queryJournals(
   }
 
   const dateRange = { start: rangeStart, end: rangeEnd };
-  const summary: DateRangeSummary = { totalDays: entries.length, totalBlocks, searchTerm };
+  // The summary describes every block found, cut or not (#61), so a cut result still shows what the period was about
+  const summary: DateRangeSummary = { totalDays: allEntries.length, totalBlocks, searchTerm };
   if (topConceptsLimit > 0) {
-    summary.topConcepts = rollUpTopConcepts(entries, refsByBlock, topConceptsLimit);
+    summary.topConcepts = rollUpTopConcepts(allEntries, refsByBlock, topConceptsLimit);
   }
+
+  // Cap the blocks (#61) on data already fetched, so it adds no API call. At or below the
+  // cap nothing changes. What comes after (resolving refs, slimming) sees only the kept blocks.
+  const cap = Math.min(Math.max(0, Math.floor(maxBlocks)), MAX_DATE_RANGE_BLOCKS);
+  const cut = capEntries(allEntries, cap, includeContent);
+  const entries = cut ? cut.entries : allEntries;
 
   // Which names the search covered (#69); absent unless the term named a page with aliases
   const aliasCoverage: ResolvedAliases = aliasSet ? resolvedAliases(aliasSet) : {};
-  const aliasWarnings = aliasSet ? aliasSetWarnings(aliasSet) : [];
-  const aliasMeta: ResolveRefsMeta = aliasWarnings.length > 0 ? buildResultMeta(aliasWarnings) : {};
+  const warnings: ResultWarning[] = aliasSet ? aliasSetWarnings(aliasSet) : [];
+  if (cut) {
+    warnings.push(
+      blocksTruncated(cut, cap, {
+        nested: includeContent,
+        newestFirst: selection.mode === 'last_n',
+        start: rangeStart,
+        end: rangeEnd,
+        requested: maxBlocks
+      })
+    );
+  }
+  // The totals come only with a cut, so output below the cap is unchanged
+  const totals = cut ? { blocks: cut.total, days: allEntries.length } : undefined;
+  const cutMeta: ResolveRefsMeta & Pick<ResultMeta, 'totals'> =
+    warnings.length > 0 ? buildResultMeta(warnings, totals) : {};
 
   if (!includeContent) {
     return {
@@ -467,12 +628,14 @@ export async function queryJournals(
       })),
       summary,
       ...aliasCoverage,
-      ...aliasMeta
+      ...cutMeta
     };
   }
 
-  // Opt-in (#18): resolve once over every returned block, whatever the number of days
-  let resolveMeta: ResolveRefsMeta = aliasMeta;
+  // Opt-in (#18): resolve once over every returned block, whatever the number of days.
+  // Only the kept blocks: each block resolves on its own, so their output is the same, and
+  // the batched queries never carry the refs of blocks that were cut.
+  let resolveMeta: ResolveRefsMeta & Pick<ResultMeta, 'totals'> = cutMeta;
   if (resolveRefs) {
     const resolved = await resolveBlockRefs(client, entries.flatMap(entry => entry.blocks));
     let offset = 0;
@@ -480,8 +643,7 @@ export async function queryJournals(
       entry.blocks = resolved.blocks.slice(offset, offset + entry.blocks.length);
       offset += entry.blocks.length;
     }
-    const { hasMore, warnings } = buildResultMeta([...aliasWarnings, ...resolved.warnings]);
-    resolveMeta = { hasMore, warnings };
+    resolveMeta = buildResultMeta([...warnings, ...resolved.warnings], totals);
   }
 
   // Return slim results if requested
