@@ -160,7 +160,7 @@ describe('logseq_list_pages limit and offset (#61)', () => {
   it('returns the same object as before at 200 or fewer pages, whatever the limit', async () => {
     const atDefault = await list(200);
     expect(JSON.parse(atDefault.content[0].text)).toEqual({
-      pages: pages(200).map(p => p.originalName),
+      pages: pages(200).map(p => ({ name: p.originalName })),
       total: 200,
     });
     for (const limit of [200, 1000, 5000]) {
@@ -197,7 +197,7 @@ describe('logseq_list_pages limit and offset (#61)', () => {
   it('returns the last page with no warning, and total still counts every page', async () => {
     const body = JSON.parse((await list(1500, { limit: 1000, offset: 1000 })).content[0].text);
 
-    expect(body).toEqual({ pages: pages(1500).slice(1000).map(p => p.originalName), total: 1500 });
+    expect(body).toEqual({ pages: pages(1500).slice(1000).map(p => ({ name: p.originalName })), total: 1500 });
   });
 });
 
