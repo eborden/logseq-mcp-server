@@ -7,7 +7,8 @@
  *   npx tsx scripts/logseq-instance.ts stop
  *
  * `start` launches a second LogSeq app on a fresh profile in `.logseq-instance/` (gitignored),
- * on a port derived from this worktree's path (12320-12399) with a fixed test token, opens the
+ * on a port derived from this worktree's path (12320-12399) with a new random API token (written
+ * only to the gitignored .logseq-instance/config.json and the profile's configs.edn), opens the
  * fixture graph and waits until `requireFixtureGraph` passes and every page is indexed. Then
  * point the tests at it:
  *
@@ -18,6 +19,7 @@
  * scripts/logseq-instance/instance.ts for how it works.
  */
 import { spawn, execFileSync } from 'child_process';
+import { randomBytes } from 'crypto';
 import { createServer } from 'net';
 import { mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
@@ -71,7 +73,7 @@ const deps: InstanceDeps = {
       throw error;
     }
   },
-  writeFile: (path, data) => writeFile(path, data),
+  writeFile: (path, data, mode) => writeFile(path, data, mode === undefined ? undefined : { mode }),
   mkdir: async path => {
     await mkdir(path, { recursive: true });
   },
@@ -144,6 +146,7 @@ const deps: InstanceDeps = {
     process.kill(pid, signal);
   },
   connect: config => probe(new LogseqClient(config)),
+  randomBytes: size => randomBytes(size),
   sleep: ms => new Promise(done => setTimeout(done, ms)),
   now: () => new Date(),
   log: line => console.log(line),

@@ -2,7 +2,7 @@
  * Per-worktree LogSeq instances (#118): the logic behind `scripts/logseq-instance.ts`.
  *
  * An instance is a second LogSeq app process with its own Chromium profile, its own home
- * directory, its own API port and a fixed test token, serving one graph. Every worktree gets its
+ * directory, its own API port and its own random API token, serving one graph. Every worktree gets its
  * own, under `<worktree>/.logseq-instance/` (gitignored), so agents in separate worktrees can run
  * the integration tests against their own copy of the fixture graph at the same time, next to
  * the LogSeq the maintainer uses.
@@ -28,11 +28,23 @@ export const PORT_FIRST = 12320;
 export const PORT_LAST = 12399;
 
 /**
- * The API token every instance accepts. Not a secret (ADR-0003): an instance listens on
- * 127.0.0.1 only and serves the made-up fixture graph, so the token guards nothing private.
- * It is fixed so test configs never need generating per run.
+ * Bytes of randomness in each instance's API token. A new token is generated on every `start`
+ * and written only to gitignored files, never committed (ADR-0003). It must be secret even
+ * though the graph is made up: LogSeq's API answers CORS `*` and can run git commands, write
+ * files and open links, so a web page in a browser could scan the port range and drive any
+ * instance whose token it knows.
  */
-export const INSTANCE_TOKEN = 'logseq-mcp-test-instance-not-a-secret';
+export const TOKEN_BYTES = 32;
+
+/** A fresh API token: TOKEN_BYTES random bytes, base64url (letters, digits, `-` and `_`). */
+export function newInstanceToken(randomBytes: (size: number) => Uint8Array): string {
+  const bytes = randomBytes(TOKEN_BYTES);
+  if (bytes.length !== TOKEN_BYTES) throw new InstanceError('the random source returned too few bytes');
+  return Buffer.from(bytes).toString('base64url');
+}
+
+/** Files that hold the token are readable by their owner only. */
+export const PRIVATE_FILE_MODE = 0o600;
 
 /** The macOS app bundle launched unless `LOGSEQ_APP` names another. */
 export const DEFAULT_APP_BUNDLE = '/Applications/Logseq.app';
@@ -115,8 +127,8 @@ export function renderConfigsEdn(template: string, port: number, token: string):
 }
 
 /** The MCP config file for an instance on `port`. */
-export function instanceConfig(port: number): LogseqMCPConfig {
-  return { apiUrl: `http://127.0.0.1:${port}`, authToken: INSTANCE_TOKEN };
+export function instanceConfig(port: number, token: string): LogseqMCPConfig {
+  return { apiUrl: `http://127.0.0.1:${port}`, authToken: token };
 }
 
 /**
@@ -221,7 +233,8 @@ export interface InstanceDeps {
   platform: string;
   env: Record<string, string | undefined>;
   readFile(path: string): Promise<string | undefined>;
-  writeFile(path: string, data: string | Uint8Array): Promise<void>;
+  /** `mode` applies when the file is created; callers remove a file first to be sure of it. */
+  writeFile(path: string, data: string | Uint8Array, mode?: number): Promise<void>;
   mkdir(path: string): Promise<void>;
   /** Recursive, and fine when the path is missing. */
   remove(path: string): Promise<void>;
@@ -237,6 +250,8 @@ export interface InstanceDeps {
   commandLine(pid: number): string | undefined;
   kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
   connect(config: LogseqMCPConfig): InstanceProbe;
+  /** Cryptographically secure random bytes (`crypto.randomBytes`). */
+  randomBytes(size: number): Uint8Array;
   sleep(ms: number): Promise<void>;
   now(): Date;
   log(line: string): void;
@@ -289,13 +304,20 @@ async function graphFiles(graphDir: string, deps: InstanceDeps): Promise<string[
 }
 
 /** Write a fresh profile: configs.edn, seeded localStorage, the graph cache stub and config.json. */
-async function writeProfile(paths: InstancePaths, graphDir: string, port: number, template: string, deps: InstanceDeps) {
-  for (const dir of [paths.profile, paths.home]) {
-    assertInside(paths.dir, dir);
-    await deps.remove(dir);
+async function writeProfile(
+  paths: InstancePaths,
+  graphDir: string,
+  port: number,
+  token: string,
+  template: string,
+  deps: InstanceDeps,
+) {
+  for (const path of [paths.profile, paths.home, paths.config]) {
+    assertInside(paths.dir, path);
+    await deps.remove(path);
   }
   await deps.mkdir(paths.profile);
-  await deps.writeFile(join(paths.profile, 'configs.edn'), renderConfigsEdn(template, port, INSTANCE_TOKEN));
+  await deps.writeFile(join(paths.profile, 'configs.edn'), renderConfigsEdn(template, port, token), PRIVATE_FILE_MODE);
 
   const leveldb = join(paths.profile, 'Local Storage', 'leveldb');
   await deps.mkdir(leveldb);
@@ -307,7 +329,7 @@ async function writeProfile(paths: InstancePaths, graphDir: string, port: number
   await deps.mkdir(graphs);
   await deps.writeFile(join(graphs, graphCacheFileName(graphDir)), '');
 
-  await deps.writeFile(paths.config, `${JSON.stringify(instanceConfig(port), null, 2)}\n`);
+  await deps.writeFile(paths.config, `${JSON.stringify(instanceConfig(port, token), null, 2)}\n`, PRIVATE_FILE_MODE);
 }
 
 /**
@@ -317,11 +339,12 @@ async function writeProfile(paths: InstancePaths, graphDir: string, port: number
  */
 async function waitUntilReady(
   record: InstanceRecord,
+  token: string,
   expectedFiles: readonly string[],
   timeoutMs: number,
   deps: InstanceDeps,
 ): Promise<number> {
-  const probe = deps.connect({ ...instanceConfig(record.port), timeoutMs: 5_000 });
+  const probe = deps.connect({ ...instanceConfig(record.port, token), timeoutMs: 5_000 });
   const deadline = deps.now().getTime() + timeoutMs;
   let last = 'the API did not answer';
   while (deps.now().getTime() < deadline) {
@@ -386,15 +409,16 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
   }
 
   const port = await choosePort(options.worktree, deps);
+  const token = newInstanceToken(deps.randomBytes);
   await deps.mkdir(paths.dir);
   await deps.remove(paths.record);
-  await writeProfile(paths, graphDir, port, options.template, deps);
+  await writeProfile(paths, graphDir, port, token, options.template, deps);
 
   const pid = await deps.spawnDetached(spec, paths.log);
   const record: InstanceRecord = {
     pid,
     port,
-    apiUrl: instanceConfig(port).apiUrl,
+    apiUrl: instanceConfig(port, token).apiUrl,
     graphDir,
     profileDir: paths.profile,
     configPath: paths.config,
@@ -406,7 +430,7 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
   deps.log(`Started LogSeq (pid ${pid}) on port ${port}; waiting for the fixture graph...`);
 
   try {
-    const fixtureVersion = await waitUntilReady(record, expectedFiles, options.readyTimeoutMs ?? READY_TIMEOUT_MS, deps);
+    const fixtureVersion = await waitUntilReady(record, token, expectedFiles, options.readyTimeoutMs ?? READY_TIMEOUT_MS, deps);
     return { ...record, fixtureVersion };
   } catch (error) {
     await stopInstance(options.worktree, deps).catch(stopError =>
@@ -470,6 +494,18 @@ export type StatusResult =
   | { state: 'stale'; record: InstanceRecord }
   | { state: 'running'; record: InstanceRecord; api: string };
 
+/** The token `start` wrote to config.json, or undefined when the file is missing or malformed. */
+async function readInstanceToken(paths: InstancePaths, deps: InstanceDeps): Promise<string | undefined> {
+  const text = await deps.readFile(paths.config);
+  if (text === undefined) return undefined;
+  try {
+    const parsed = z.object({ authToken: z.string().min(1) }).safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data.authToken : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Whether the recorded instance is running, and what its API says. Read-only. */
 export async function instanceStatus(worktree: string, deps: InstanceDeps): Promise<StatusResult> {
   const paths = instancePaths(worktree);
@@ -478,7 +514,11 @@ export async function instanceStatus(worktree: string, deps: InstanceDeps): Prom
   if (record.profileDir !== paths.profile || liveInstancePid(record, deps) === undefined) {
     return { state: 'stale', record };
   }
-  const probe = deps.connect({ ...instanceConfig(record.port), timeoutMs: 5_000 });
+  const token = await readInstanceToken(paths, deps);
+  if (token === undefined) {
+    return { state: 'running', record, api: `no token: ${paths.config} is missing or unreadable; run stop, then start` };
+  }
+  const probe = deps.connect({ ...instanceConfig(record.port, token), timeoutMs: 5_000 });
   let api: string;
   try {
     api = `serving the fixture graph, version ${await probe.requireFixture()}`;

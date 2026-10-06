@@ -88,7 +88,7 @@ What `start` does:
 
 - **A fresh profile each time**, in `.logseq-instance/` (gitignored): `profile/` (LogSeq's `--user-data-dir`), `home/` (its home directory, so its `~/.logseq` is its own), `logseq.log`, `instance.json` (pid, port) and `config.json` (the file `LOGSEQ_MCP_CONFIG` points at).
 - **A port from the worktree path**, in 12320-12399, or the next free one in that range. Your LogSeq keeps 12315.
-- **A fixed test token**, `logseq-mcp-test-instance-not-a-secret`, from `scripts/logseq-instance/configs.edn.template`. It is not a secret under ADR-0003: the instance listens on 127.0.0.1 only and serves made-up data.
+- **A new random API token on every start**, written only to the gitignored `.logseq-instance/config.json` and the profile's `configs.edn` (owner-only files). No token is committed (ADR-0003). It has to stay secret even though the graph is made up: LogSeq's API answers CORS `*` and can run git commands, write files and open links, so a web page that knew the token could drive the instance from a browser.
 - **Waits** up to 90 seconds until the API serves the graph, `requireFixtureGraph` passes and every page and journal is indexed. If that fails, it stops the instance again and points at `logseq.log`.
 - **`stop` signals only the pid it recorded**, and only while that process still runs on this worktree's profile. It never quits your LogSeq.
 

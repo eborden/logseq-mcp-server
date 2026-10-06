@@ -3,8 +3,10 @@
 ;; instance's own profile. It never touches the LogSeq profile you use day to day.
 ;;
 ;; - :server/* starts the HTTP API on launch, on localhost only, on this worktree's port.
-;; - The token is fixed and is not a secret (ADR-0003): the server only listens on 127.0.0.1
-;;   and only ever serves the made-up fixture graph in tests/fixtures/graph.
+;; - No token is committed. {{token}} is a new random token on every start, written only to
+;;   gitignored files (ADR-0003). It has to stay secret even for made-up data: the API answers
+;;   CORS * and can run git commands, write files and open links, so a web page that knew the
+;;   token could drive the instance from a browser.
 ;; - :auto-update false keeps the instance from updating the LogSeq app you share with it.
 ;; - :git/disable-auto-commit? true keeps LogSeq's version control off (it is off by default).
 {:server/autostart true
