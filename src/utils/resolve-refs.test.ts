@@ -438,6 +438,26 @@ describe('resolveBlockRefs with placeholder rows for missing uuids', () => {
     expect((blocks[0] as any).resolvedRefs).toEqual([{ uuid: B, content: '', page: 'Alpha', status: 'ok' }]);
   });
 
+  it('keeps a ref to a page entity ok, with the page name as its text', async () => {
+    // A page has a uuid but no :block/page, like a placeholder; its name is what tells them apart
+    const PAGE_UUID = uuidN(97);
+    const { client, queries } = fakeRefGraph({
+      pages: ['My Page'],
+      blocks: [],
+      pageUuids: { 'My Page': PAGE_UUID },
+      placeholders: [PLACEHOLDER]
+    });
+    const { blocks } = await resolveBlockRefs(client, [
+      { uuid: A, content: `see ${ref(PAGE_UUID)} and ${ref(PLACEHOLDER)}` }
+    ]);
+    expect((blocks[0] as any).resolvedContent).toBe(`see My Page and ${ref(PLACEHOLDER)}`);
+    expect((blocks[0] as any).resolvedRefs).toEqual([
+      { uuid: PAGE_UUID, content: 'My Page', page: 'My Page', status: 'ok' },
+      { uuid: PLACEHOLDER, content: null, page: null, status: 'missing' }
+    ]);
+    expect(queries).toHaveLength(1);
+  });
+
   it('keeps real targets ok next to a placeholder, and other statuses unchanged', async () => {
     const { client } = fakeRefGraph({
       pages: ['Alpha'],

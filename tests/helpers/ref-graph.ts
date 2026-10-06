@@ -28,6 +28,11 @@ export interface FakeGraphDef {
    * only `id`, `uuid` and content `id:: <uuid>`, and no page, parent or left
    */
   placeholders?: string[];
+  /**
+   * Page uuids by page name (original casing). A `((uuid))` ref can point at a page entity,
+   * so `?u` lookups find these pages: a row with `name` and `original-name` and no `page`
+   */
+  pageUuids?: Record<string, string>;
 }
 
 export function uuidN(n: number): string {
@@ -54,7 +59,7 @@ export function fakeRefGraph(def: FakeGraphDef) {
   };
   const pageRow = (name: string) => ({
     id: pageId(name),
-    uuid: `page-${name.toLowerCase()}`,
+    uuid: def.pageUuids?.[name] ?? `page-${name.toLowerCase()}`,
     name: name.toLowerCase(),
     'original-name': name
   });
@@ -83,6 +88,8 @@ export function fakeRefGraph(def: FakeGraphDef) {
       if (b) rows.set(blockId(b.uuid), blockRow(b));
       const p = (def.placeholders ?? []).indexOf(uuid);
       if (p >= 0) rows.set(5000 + p, { id: 5000 + p, uuid, content: `id:: ${uuid}` });
+      const page = def.pages.find(name => def.pageUuids?.[name] === uuid);
+      if (page) rows.set(pageId(page), pageRow(page));
     }
     for (const uuid of groundList(query, '?ru')) {
       for (const b of descendants(uuid, 3)) rows.set(blockId(b.uuid), blockRow(b));
