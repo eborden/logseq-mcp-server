@@ -86,6 +86,9 @@ describe('Graph Traversal Tools Integration Tests', () => {
       const result = await getConceptNetwork(client, 'hub central', 2);
 
       expect(result.nodes).toHaveLength(50);
+      // 1 + 15 + 34: which 34 of the 40 fringe pages depends on id order, the split does not
+      expect(result.nodes.filter(n => n.depth === 1)).toHaveLength(15);
+      expect(result.nodes.filter(n => n.depth === 2)).toHaveLength(34);
       expect(result.nodes.filter(n => n.depth === 2).every(n => n.name.startsWith('fringe-'))).toBe(true);
       expect(result.truncated).toBe(true);
       expect(result.warnings.map(w => w.code)).toEqual(['network_truncated']);
