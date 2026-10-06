@@ -70,9 +70,11 @@ class World {
   connected: string[] = [];
   /** Every path the code under test wrote, created, removed or copied to, in order. */
   written: string[] = [];
+  /** Symlinked folders: another spelling of a path, and the canonical prefix it stands for. */
+  aliases = new Map<string, string>();
 
   constructor() {
-    for (const dir of [GRAPH, join(GRAPH, 'pages'), join(GRAPH, 'journals'), join(GRAPH, 'logseq')]) this.dirs.add(dir);
+    for (const dir of [WORKTREE, GRAPH, join(GRAPH, 'pages'), join(GRAPH, 'journals'), join(GRAPH, 'logseq')]) this.dirs.add(dir);
     this.files.set(join(GRAPH, SENTINEL), 'fixture-version:: 1\n');
     this.files.set(join(GRAPH, 'logseq', 'config.edn'), '{:meta/version 1}\n');
     this.files.set(APP, '');
@@ -112,7 +114,10 @@ class World {
         for (const dir of [...this.dirs]) if (dir === path || dir.startsWith(`${path}/`)) this.dirs.delete(dir);
       },
       exists: async path => this.files.has(path) || this.dirs.has(path),
-      realDir: async path => (this.dirs.has(path) ? path : undefined),
+      realDir: async path => {
+        const real = this.canonical(path);
+        return this.dirs.has(real) ? real : undefined;
+      },
       listDir: async path =>
         [...this.files.keys()].filter(key => dirname(key) === path).map(key => key.slice(path.length + 1)),
       copyDir: async (from, to) => {
@@ -158,6 +163,14 @@ class World {
       },
       ...overrides,
     };
+  }
+
+  /** `path` with a symlinked prefix replaced by the folder it points at, as realpath would. */
+  canonical(path: string): string {
+    for (const [alias, target] of this.aliases) {
+      if (path === alias || path.startsWith(`${alias}/`)) return target + path.slice(alias.length);
+    }
+    return path;
   }
 
   text(path: string): string {
@@ -632,6 +645,39 @@ describe('startInstance', () => {
     world.dirs.add(COPY);
 
     await expect(start(world)).rejects.toThrow(`${GRAPH} has no ${SENTINEL}`);
+  });
+
+  it('resolves a non-canonical worktree first, so the overlap guard still sees the copy', async () => {
+    const alias = '/alias/tree';
+    world.aliases.set(alias, WORKTREE);
+    world.dirs.add(COPY);
+    world.files.set(join(COPY, SENTINEL), 'fixture-version:: 1\n');
+
+    await expect(
+      startInstance({ worktree: alias, graphDir: COPY, template: TEMPLATE, sentinelFile: SENTINEL }, world.deps()),
+    ).rejects.toThrow(/must not be in .*\.logseq-instance or hold it/);
+    await expect(
+      startInstance({ worktree: alias, graphDir: `${alias}/.logseq-instance/graph`, template: TEMPLATE, sentinelFile: SENTINEL }, world.deps()),
+    ).rejects.toThrow(/must not be in .*\.logseq-instance or hold it/);
+    expect(world.written).toEqual([]);
+  });
+
+  it('records canonical paths when started through a non-canonical worktree, and stops through either', async () => {
+    const alias = '/alias/tree';
+    world.aliases.set(alias, WORKTREE);
+
+    const started = await startInstance({ worktree: alias, graphDir: GRAPH, template: TEMPLATE, sentinelFile: SENTINEL }, world.deps());
+
+    expect(started).toMatchObject({ port: derivePort(WORKTREE), graphDir: COPY, profileDir: PATHS.profile, configPath: PATHS.config });
+    expect(world.written.every(path => path.startsWith(`${PATHS.dir}/`) || path === PATHS.dir)).toBe(true);
+    await expect(instanceStatus(alias, world.deps())).resolves.toMatchObject({ state: 'running' });
+    await expect(stopInstance(alias, world.deps())).resolves.toEqual({ state: 'stopped', pid: started.pid });
+  });
+
+  it('refuses a missing worktree', async () => {
+    world.dirs.delete(WORKTREE);
+    await expect(start(world)).rejects.toThrow(`worktree not found: ${WORKTREE}`);
+    expect(world.written).toEqual([]);
   });
 
   it('refuses a missing graph folder', async () => {
