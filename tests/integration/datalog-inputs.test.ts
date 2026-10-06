@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { DatalogQueryBuilder } from '../../src/datalog/queries.js';
-import { discoverPages, DiscoveredPage } from './helpers/discovery.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * Integration tests for :in inputs (issue #6)
@@ -12,84 +10,84 @@ import { discoverPages, DiscoveredPage } from './helpers/discovery.js';
  * that casing does not matter, and that names containing characters that
  * used to break embedded queries are handled as plain data.
  *
- * Requires LogSeq running with the HTTP API enabled and at least one page.
- * See tests/integration/setup.md. Read-only: nothing is written to the graph.
+ * Runs against the fixture graph (tests/integration/setup.md). The page is
+ * `Bob` (tests/fixtures/graph/pages/Bob.md): a property block and two blocks,
+ * linking `project atlas` and `project cascade`, and linked from 13 blocks
+ * on 10 pages. Read-only.
  */
+
+const PAGE = 'Bob';
 
 describe('Datalog :in inputs Integration Tests', () => {
   let client: LogseqClient;
-  let page: DiscoveredPage;
+  let pageId: number;
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. ' +
-        'Integration tests require LogSeq configuration. ' +
-        'See tests/integration/setup.md for setup instructions.'
-      );
-    }
-
-    client = new LogseqClient(await loadConfig(configPath));
-
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
-        'Ensure LogSeq is running with HTTP server enabled. ' +
-        'See tests/integration/setup.md'
-      );
-    }
-
-    const pages = await discoverPages(client, 1);
-    expect(pages.length).toBeGreaterThan(0,
-      'No pages found in LogSeq graph. Create at least one page. ' +
-      'See tests/integration/setup.md'
-    );
-    page = pages[0];
+    ({ client } = await connectFixture());
+    const rows = await run(DatalogQueryBuilder.getPage(PAGE));
+    pageId = rows[0][0].id;
   });
 
   async function run({ query, inputs }: { query: string; inputs: unknown[] }) {
     return client.executeDatalogQuery<any[]>(query, ...inputs);
   }
 
-  it('getPage finds a discovered page through the :in path', async () => {
-    const rows = await run(DatalogQueryBuilder.getPage(page.name));
+  it('getPage finds the page through the :in path', async () => {
+    const rows = await run(DatalogQueryBuilder.getPage(PAGE));
 
     expect(rows).toHaveLength(1);
-    expect(rows[0][0].id ?? rows[0][0]['db/id']).toBe(page.id);
+    expect(rows[0][0].name).toBe('bob');
+    expect(rows[0][0]['original-name']).toBe('Bob');
+    expect(Number.isInteger(pageId)).toBe(true);
   });
 
   it('getPage is case-insensitive', async () => {
-    const lower = await run(DatalogQueryBuilder.getPage(page.name.toLowerCase()));
-    const upper = await run(DatalogQueryBuilder.getPage(page.name.toUpperCase()));
-
-    expect(lower).toHaveLength(1);
-    expect(upper).toHaveLength(1);
+    for (const name of ['bob', 'BOB', 'bOb']) {
+      const rows = await run(DatalogQueryBuilder.getPage(name));
+      expect(rows.map(row => row[0].id), name).toEqual([pageId]);
+    }
   });
 
-  it('conceptNetwork depth 0 finds the discovered page', async () => {
-    const rows = await run(DatalogQueryBuilder.conceptNetwork(page.name, 0));
+  it('conceptNetwork depth 0 finds the page', async () => {
+    const rows = await run(DatalogQueryBuilder.conceptNetwork(PAGE, 0));
 
-    expect(rows).toHaveLength(1);
+    expect(rows.map(row => row[0].id)).toEqual([pageId]);
   });
 
-  it('conceptNetwork depth 1 runs without error', async () => {
-    const rows = await run(DatalogQueryBuilder.conceptNetwork(page.name, 1));
+  it('conceptNetwork depth 1 finds every page it links and every page that links it', async () => {
+    const rows = await run(DatalogQueryBuilder.conceptNetwork('BOB', 1));
+    const pairs = rows.map(row => `${row[2]} ${row[1].name}`).sort();
 
-    expect(Array.isArray(rows)).toBe(true);
+    expect(pairs).toEqual([
+      'inbound alice',
+      'inbound block refs',
+      'inbound jan 10th, 2025',
+      'inbound jan 15th, 2025',
+      'inbound jan 6th, 2025',
+      'inbound jan 7th, 2025',
+      'inbound project atlas',
+      'inbound project atlas/meetings',
+      'inbound project cascade',
+      'inbound property types',
+      'outbound project atlas',
+      'outbound project cascade',
+      // `role:: engineer` makes the property page `role` a ref of the property block
+      'outbound role',
+    ]);
   });
 
-  it('getPageBlocks and getBlocksReferencingPage run without error', async () => {
-    const blocks = await run(DatalogQueryBuilder.getPageBlocks(page.name));
-    const refs = await run(DatalogQueryBuilder.getBlocksReferencingPage(page.name));
+  it('getPageBlocks and getBlocksReferencingPage find the exact blocks', async () => {
+    const blocks = await run(DatalogQueryBuilder.getPageBlocks(PAGE));
+    const refs = await run(DatalogQueryBuilder.getBlocksReferencingPage('bob'));
 
-    expect(Array.isArray(blocks)).toBe(true);
-    expect(Array.isArray(refs)).toBe(true);
+    // The property block, then the two content blocks
+    expect(blocks).toHaveLength(3);
+    expect(blocks.every(row => row[0].page.id === pageId)).toBe(true);
+    expect(refs).toHaveLength(13);
+    expect([...new Set(refs.map(row => row[0].page.name))].sort()).toEqual([
+      'alice', 'block refs', 'jan 10th, 2025', 'jan 15th, 2025', 'jan 6th, 2025', 'jan 7th, 2025',
+      'project atlas', 'project atlas/meetings', 'project cascade', 'property types',
+    ]);
   });
 
   // These names used to produce "Unexpected EOF reading string" or a
@@ -109,9 +107,9 @@ describe('Datalog :in inputs Integration Tests', () => {
 
   it('groundIds batches integer ids in a real query', async () => {
     // Bind ?p straight to the entity id, then require it to be a page
-    const query = `[:find (pull ?p [:db/id]) :where ${DatalogQueryBuilder.groundIds([page.id], '?p')} [?p :block/name]]`;
+    const query = `[:find (pull ?p [:db/id]) :where ${DatalogQueryBuilder.groundIds([pageId], '?p')} [?p :block/name]]`;
     const rows = await client.executeDatalogQuery<any[]>(query);
 
-    expect(rows).toHaveLength(1);
+    expect(rows).toEqual([[{ id: pageId }]]);
   });
 });
