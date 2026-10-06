@@ -1,14 +1,14 @@
 # Fixture: concept linking
 
 A synthetic LogSeq graph for exercising `skills/logseq-skills/skills/concept-linking.md`
-and its gate, `scripts/check-link-safety.sh`.
+and its gate, the `logseq_check_links` tool (`src/tools/check-links.ts`).
 
 Every name, page and event here is invented. Nothing in this fixture comes from a real graph,
 which is what allows it to live in a public repository.
 
 ```
 pages/       13 pages, each engineered for one rule
-pages.txt    the page list, as logseq_list_pages would return it
+pages.txt    the page names, as logseq_list_pages would return them (the unit tests build their fake graph from it)
 journals/    2024_03_11.md  the unlinked input
 expected/    2024_03_11.md  the only correct result
 negative/    deliberate defects the gate must reject
@@ -79,18 +79,17 @@ the note's does not. `unresolved-only.md` isolates check 3 by keeping the prose 
 
 ## Running
 
+`src/tools/check-links.test.ts` runs `checkLinks` on `expected/` and on each file in `negative/`
+against a fake graph built from `pages.txt`. It passes `expected/` and fails each negative case
+on the checks in the table above:
+
 ```bash
-S=skills/logseq-skills/scripts/check-link-safety.sh
-F=tests/fixtures/graph-linking
-
-./$S "$F/journals/2024_03_11.md" "$F/expected/2024_03_11.md"      "$F" "$F/pages.txt"  # exit 0
-./$S "$F/journals/2024_03_11.md" "$F/negative/reworded.md"        "$F" "$F/pages.txt"  # exit 1
-./$S "$F/journals/2024_03_11.md" "$F/negative/invented-page.md"   "$F" "$F/pages.txt"  # exit 1
-./$S "$F/journals/2024_03_11.md" "$F/negative/unresolved-only.md" "$F" "$F/pages.txt"  # exit 1
-
-# Omitting the page list downgrades check 3 to a warning:
-./$S "$F/journals/2024_03_11.md" "$F/negative/unresolved-only.md"                      # exit 0
+npx vitest run src/tools/check-links.test.ts
 ```
+
+The shell script that used to be the gate, `skills/logseq-skills/scripts/check-link-safety.sh`,
+was retired in #142. The tool runs the same checks, plus one the script lacked: every ref in the
+input is still a ref in the result.
 
 The gate proves an edit was safe. It cannot prove the classification was right, since a pass that
 links nothing at all passes every check. Judgement cases (`Kofi`, `Wren`, `Tobias`, `Marisol`, `structured logs`)

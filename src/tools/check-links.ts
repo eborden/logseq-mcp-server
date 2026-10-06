@@ -6,8 +6,8 @@ import { resolveLinkTargets } from '../utils/resolve-page.js';
 
 /**
  * The concept-linking safety gate (#146), run in the server instead of
- * `skills/logseq-skills/scripts/check-link-safety.sh`. Each check matches the
- * script's, regex for regex, with one addition (check 4) the script lacks:
+ * `skills/logseq-skills/scripts/check-link-safety.sh` (retired in #142). Each check
+ * matches the script's, regex for regex, with one addition (check 4) the script lacked:
  *
  * 1. **Prose preserved:** stripping `[[ ]]` from both texts leaves them identical.
  * 2. **Brackets balanced:** as many `[[` as `]]`, and no `[[` opened inside another

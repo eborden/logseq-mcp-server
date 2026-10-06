@@ -23,7 +23,7 @@ LogSeq matches `[[X]]` to a page by name, **case-insensitively but not fuzzily**
 
 A page that is referenced but never given content exists in LogSeq's database with **no file on disk**. One real graph carries 621 pages against 149 page files, so more than three quarters of its pages are file-less. Deciding a page does not exist because `pages/<Title>.md` is missing will wrongly skip most of the graph's vocabulary, and the error is invisible: it looks like a conservative decision not to link.
 
-Call `list_pages` once, use that listing as the candidate set, and keep it for the gate in the last step.
+Call `list_pages` once and use that listing as the candidate set.
 
 ### Substring bracketing
 
@@ -138,25 +138,25 @@ Each corroboration check costs one or two tool calls, so only run them on partia
 
 ## The Gate
 
-Before reporting a linking pass complete, run:
+Before reporting a linking pass complete, call:
 
-```bash
-scripts/check-link-safety.sh <before> <after> [graph-root] [page-list]
+```
+logseq_check_links(before="<text before the edit>", after="<text after it>")
 ```
 
-It asserts that stripping every `[[` and `]]` from both files leaves them byte-identical, that brackets are balanced and unnested, and that every ref resolves to a known page or alias.
+It checks that stripping every `[[` and `]]` from both texts leaves them identical, that brackets are balanced and unnested, that every ref resolves to exactly one page or alias, and that every ref in `before` is still in `after`. It resolves refs in the graph itself, file-less pages included.
 
-The first check is the load-bearing one. It proves mechanically that the pass added brackets and changed nothing else, capitalisation included, which is what distinguishes bracketing the text as written from substituting a page's spelling for the note's. Keep a copy of the file from before the edit so the gate has a baseline.
+The first check is the load-bearing one. It proves mechanically that the pass added brackets and changed nothing else, capitalisation included, which is what distinguishes bracketing the text as written from substituting a page's spelling for the note's. Keep a copy of the file from before the edit so the gate has the before text.
 
-Pass the `page-list` (one title per line, from `list_pages`) to make the resolvability check meaningful. Without it the check degrades to a warning, because page files are a subset of pages and absence of a file proves nothing.
+The last check closes the gap the first leaves: stripping brackets from both sides means un-bracketing a ref the note already had changes nothing the first check can see. Never remove a pre-existing ref to make the gate pass. An unresolved ref the note already had is a lookup problem: confirm it with `logseq_list_pages(name_contains=...)`, leave it, and report it.
 
-Exits non-zero on violation. Fix the edit and re-run rather than explaining the failure away.
+`ok` is false on any violation. Fix the edit and re-run rather than explaining the failure away.
 
 ### What the gate cannot do
 
 It proves an edit was **safe**, not that the classification was **right**. A pass that links nothing at all passes every check. Two whole classes of error are invisible to it:
 
 - **Identity errors**, the failure this skill exists to prevent. A wrongly-linked `[[Devon]]` is as well-formed as a right one. Corroboration in step 6 is the only defence.
-- **Fragmented names.** `[[Kofi]] Mensah` preserves the prose byte for byte, balances its brackets, and resolves to a real page, so all three checks pass while the note has stopped naming a person in one piece. The leftover test in step 6 is the only defence.
+- **Fragmented names.** `[[Kofi]] Mensah` preserves the prose byte for byte, balances its brackets, and resolves to a real page, so every check passes while the note has stopped naming a person in one piece. The leftover test in step 6 is the only defence.
 
 Both failures are judgement, and the gate does not do judgement. Do not read a green gate as a correct pass.

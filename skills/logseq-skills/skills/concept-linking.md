@@ -15,7 +15,7 @@ Add `[[refs]]` to existing notes for concepts that already have pages, without c
 | Output | The same file, with brackets added and nothing else changed |
 | Default mode | Propose a diff, apply after confirmation |
 | New pages | Never created. Recurring unlinked terms are reported instead |
-| Gate | `scripts/check-link-safety.sh` (mandatory) |
+| Gate | `logseq_check_links` (mandatory) |
 
 ## Workflow
 
@@ -39,13 +39,7 @@ logseq_list_pages()
 
 One call gives every page title, which is the candidate set. Do not guess at page names, and do not assume a concept has a page because it plainly deserves one. This listing is also what tells you a term has zero candidates, which is a skip and not a question.
 
-**Do not substitute a directory listing for this call.** A referenced page with no content has no file, so `pages/` is a strict subset of the graph's pages and often a small one. Save the listing for the gate in step 8:
-
-```bash
-cat > /tmp/link-pages.txt <<'EOF'
-<one page title per line, from the list_pages result>
-EOF
-```
+**Do not substitute a directory listing for this call.** A referenced page with no content has no file, so `pages/` is a strict subset of the graph's pages and often a small one.
 
 ### Step 3: Locate the File and Detect Its Shape
 
@@ -77,11 +71,13 @@ Match whatever the file already uses. Mixing tabs and spaces breaks the outline.
 
 The LogSeq MCP server is commonly read-only, exposing query tools with no write counterpart. Check the tools actually available to you this session. If a write tool exists, prefer it. If not, edit the file on disk with the normal file-editing tools, which is a supported path because LogSeq reads these markdown files as its source of truth.
 
-Either way, **keep a copy of the pre-edit file** so the gate in step 8 has a baseline:
+Either way, **keep a copy of the pre-edit file** so the gate in step 8 has the text from before the edit:
 
 ```bash
 cp <file> /tmp/link-baseline-$(basename <file>)
 ```
+
+With no shell, keep the file's text as you read it in step 3 instead. The copy is the default because it survives a long session.
 
 ### Step 5: Classify Every Candidate
 
@@ -119,13 +115,22 @@ Then show the proposed edits as a diff and wait for confirmation before writing.
 
 ### Step 8: Apply, Then Run the Gate
 
-Make the edits, then:
+Make the edits, then pass the whole pre-edit copy and the whole edited file to the gate. Each text is capped at 50,000 characters, and both count against your context. For a long page, gate only the edited blocks, cutting `before` and `after` at the same block boundaries:
 
-```bash
-scripts/check-link-safety.sh /tmp/link-baseline-<name> <file> <graph> /tmp/link-pages.txt
+```
+logseq_check_links(before="<text of /tmp/link-baseline-<name>>", after="<text of <file>>")
 ```
 
-All three checks must pass. The prose-preservation check is the important one: it proves the pass added brackets and altered nothing else, capitalisation included. A failure here means the edit reworded something, which is a defect regardless of how much better the new wording reads.
+`ok` must be true, which takes all four checks (one exception follows):
+
+- **`prose`**, the important one. Stripping the brackets from both texts leaves them identical, which proves the pass added brackets and altered nothing else, capitalisation included. A failure here means the edit reworded something, which is a defect regardless of how much better the new wording reads.
+- **`brackets`**: balanced, and none nested.
+- **`refs`**: every `[[term]]` names exactly one page or alias, file-less pages included. An unresolved term is a link that would create a page.
+- **`refsPreserved`**: every ref the note already had is still there.
+
+Fix a failure in what you added and run the gate again. A `refs_unchecked` warning means LogSeq gave no answer for the refs, so `refs` wasn't checked (the other three were). Call the gate once more. If the warning comes back, stop and tell the requester the refs couldn't be checked. Don't report the pass as done.
+
+**Never remove a ref the note already had.** `refsPreserved` fails if you do, so it can't be the way to a pass. If `refs.unresolved` names a term the before text already linked, the pass didn't cause it. It's a lookup problem, not an edit to undo. Confirm the page with `logseq_list_pages(name_contains="<term>")`, leave the ref as it was, and report the failure and what the lookup found. This is the only failure you report with `ok: false`: every other check passes, and each unresolved term was already linked the same number of times before. If you added a copy of that term, remove your copy.
 
 The most common way to trip it is inserting a word so a ref reads naturally. Wanting to link a page called `Ledger Service` from prose that says `the ledger`, and writing `the [[Ledger Service]]`, adds two words the note never said. Bracket what is there or skip it.
 
