@@ -8,6 +8,12 @@ import { DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS } from '../../src/tools/
 import { DEFAULT_LIST_PAGES_LIMIT, MAX_LIST_PAGES_LIMIT } from '../../src/tools/list-pages.js';
 import { DEFAULT_MAX_ENTRIES, MAX_ENTRIES } from '../../src/tools/get-concept-evolution.js';
 import { DEFAULT_DATE_RANGE_MAX_BLOCKS, MAX_DATE_RANGE_BLOCKS } from '../../src/tools/query-by-date-range.js';
+import {
+  DEFAULT_MAX_BLOCKS_PER_PAGE,
+  DEFAULT_MAX_PAGES,
+  MAX_BLOCKS_PER_PAGE,
+  MAX_PAGES,
+} from '../../src/tools/get-backlinks.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.js';
 
 /**
@@ -31,6 +37,10 @@ import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.j
  * same way: the fixture's journals hold well under 200 blocks. The test passes small
  * caps through MCP (the same code, a smaller bound), and the unit tests feed the tool
  * 1,100 blocks for the cut at the maximum.
+ * get_backlinks' maximums of 100 pages and 50 blocks per page are out of reach the same way:
+ * the hub has 61 source pages and no page has more than 12 linking blocks. Through MCP the
+ * default cuts, the values below the maximum and the clamp can be seen; the cut at each
+ * maximum is covered by the unit tests, which feed the tool 150 pages and 80 blocks.
  */
 
 interface Meta {
@@ -422,6 +432,152 @@ describe('result caps (#61)', () => {
         expect(body.warnings![0].code, `max_blocks ${max}`).toBe('blocks_truncated');
         expect(body.warnings![0].message, `max_blocks ${max}`).toContain('top-level only');
       }
+    });
+  });
+
+  describe('logseq_get_backlinks max_pages and max_blocks_per_page (default 20 and 10, max 100 and 50)', () => {
+    // The hub: 61 source pages (60 pages and a journal), 66 blocks, none of them over 2 per page.
+    // The crowded topic: 2 source pages, one with 12 linking blocks and one with 2. A project
+    // with an alias takes the alias-group query (#69) instead of the Editor call.
+    const HUB = 'hub central';
+    const CROWDED = 'popular topic';
+    const ALIASED = 'project atlas';
+
+    type BacklinkTuple = [{ id: number; name?: string }, Array<{ uuid: string }>];
+    interface BacklinksBody {
+      text: string;
+      results: BacklinkTuple[];
+      /** The second content block's meta, absent when the tool sent none */
+      meta?: Partial<Meta>;
+    }
+
+    async function backlinks(page: string, maxPages?: number, maxBlocksPerPage?: number): Promise<BacklinksBody> {
+      const args = {
+        page_name: page,
+        ...(maxPages === undefined ? {} : { max_pages: maxPages }),
+        ...(maxBlocksPerPage === undefined ? {} : { max_blocks_per_page: maxBlocksPerPage }),
+      };
+      const result = await call('logseq_get_backlinks', args);
+      return {
+        text: result.content[0].text,
+        results: JSON.parse(result.content[0].text) as BacklinkTuple[],
+        meta: result.content[1] ? (JSON.parse(result.content[1].text) as { meta: Partial<Meta> }).meta : undefined,
+      };
+    }
+
+    const blockUuids = (results: BacklinkTuple[]) => results.map(([, blocks]) => blocks.map(b => b.uuid));
+    const codes = (body: BacklinksBody) => (body.meta?.warnings ?? []).map(w => w.code);
+
+    it('never returns more pages than max_pages, keeps the same first pages, and reports every cut', async () => {
+      const full = await backlinks(HUB, MAX_PAGES);
+      const total = full.results.length;
+      const blocks = blockUuids(full.results).flat().length;
+      expect(total, 'the hub fixture needs more source pages than the default cap. See tests/fixtures/README.md').toBeGreaterThan(DEFAULT_MAX_PAGES);
+      expect(total, 'the hub fixture must stay under the maximum for this test to see every page').toBeLessThanOrEqual(MAX_PAGES);
+      // Nothing is cut, so the maximum sends no warning and no totals
+      expect(codes(full)).toEqual([]);
+      expect(full.meta?.totals).toBeUndefined();
+      expect(full.meta?.hasMore ?? false).toBe(false);
+
+      // A value above the maximum is clamped to it, not rejected
+      expect((await backlinks(HUB, 5000)).text).toBe(full.text);
+
+      for (const max of [undefined, 0, 1, 5, DEFAULT_MAX_PAGES, total - 1, total, total + 1, MAX_PAGES]) {
+        const body = await backlinks(HUB, max);
+        const label = `max_pages ${max ?? 'default'}`;
+        const effective = Math.min(max ?? DEFAULT_MAX_PAGES, MAX_PAGES);
+        expect(body.results.length, label).toBeLessThanOrEqual(MAX_PAGES);
+        expect(body.results.length, label).toBe(Math.min(effective, total));
+        // The first pages of the full list, in its order, with their blocks
+        expect(blockUuids(body.results), label).toEqual(blockUuids(full.results).slice(0, effective));
+
+        if (effective >= total) {
+          expect(body.text, `${label}: nothing is cut, so the result is the full one`).toBe(full.text);
+          expect(codes(body), label).toEqual([]);
+          continue;
+        }
+        expect(codes(body), label).toEqual(['pages_truncated']);
+        expect(body.meta!.totals, label).toEqual({ pages: total, blocks });
+        // Below the maximum the warning says which value gets the rest, and it is within the maximum
+        expect(body.meta!.hasMore, label).toBe(true);
+        expect(body.meta!.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_pages to ${total}\\b`));
+        expectNoSuggestionPast(body.meta as Meta, 'max_pages', MAX_PAGES);
+        // The message names the page the list stops at
+        const last = body.results[body.results.length - 1];
+        if (last) expect(body.meta!.warnings![0].message, label).toMatch(/the last one shown is ".+"\)/);
+      }
+    });
+
+    it('never returns more blocks per page than max_blocks_per_page, keeps the first blocks, and reports every cut', async () => {
+      const full = await backlinks(CROWDED, undefined, MAX_BLOCKS_PER_PAGE);
+      const counts = full.results.map(([, blocks]) => blocks.length).sort((a, b) => b - a);
+      expect(counts[0], 'the crowded topic needs a source page with more than the default cap. See tests/fixtures/README.md').toBeGreaterThan(
+        DEFAULT_MAX_BLOCKS_PER_PAGE
+      );
+      expect(counts[0], 'the crowded topic must stay under the maximum for this test to see every block').toBeLessThanOrEqual(MAX_BLOCKS_PER_PAGE);
+      expect(counts.length, 'the crowded topic needs a second, smaller source page').toBeGreaterThan(1);
+      expect(codes(full)).toEqual([]);
+      const largest = counts[0];
+      const totalBlocks = counts.reduce((a, b) => a + b, 0);
+
+      expect((await backlinks(CROWDED, undefined, 5000)).text).toBe(full.text);
+
+      for (const max of [undefined, 0, 1, counts[1], DEFAULT_MAX_BLOCKS_PER_PAGE, largest - 1, largest, largest + 1, MAX_BLOCKS_PER_PAGE]) {
+        const body = await backlinks(CROWDED, undefined, max);
+        const label = `max_blocks_per_page ${max ?? 'default'}`;
+        const effective = Math.min(max ?? DEFAULT_MAX_BLOCKS_PER_PAGE, MAX_BLOCKS_PER_PAGE);
+        expect(body.results.length, `${label}: every source page stays`).toBe(full.results.length);
+        for (const [i, uuids] of blockUuids(body.results).entries()) {
+          expect(uuids.length, label).toBeLessThanOrEqual(MAX_BLOCKS_PER_PAGE);
+          expect(uuids, label).toEqual(blockUuids(full.results)[i].slice(0, effective));
+        }
+
+        if (effective >= largest) {
+          expect(body.text, `${label}: nothing is cut, so the result is the full one`).toBe(full.text);
+          expect(codes(body), label).toEqual([]);
+          continue;
+        }
+        expect(codes(body), label).toEqual(['page_blocks_truncated']);
+        expect(body.meta!.totals, label).toEqual({ pages: full.results.length, blocks: totalBlocks });
+        expect(body.meta!.hasMore, label).toBe(true);
+        expect(body.meta!.warnings![0].howToFetchAll, label).toBe(
+          `Set max_blocks_per_page to ${largest} (or higher) to get every block of these pages.`
+        );
+        expectNoSuggestionPast(body.meta as Meta, 'max_blocks_per_page', MAX_BLOCKS_PER_PAGE);
+      }
+    });
+
+    it('both caps together cut pages first, then the blocks of the pages kept', async () => {
+      const full = await backlinks(CROWDED, MAX_PAGES, MAX_BLOCKS_PER_PAGE);
+      const body = await backlinks(CROWDED, 1, 1);
+
+      expect(body.results).toHaveLength(1);
+      expect(blockUuids(body.results)).toEqual([blockUuids(full.results)[0].slice(0, 1)]);
+      expect(codes(body)).toEqual(['pages_truncated', 'page_blocks_truncated']);
+      expect(body.meta!.totals).toEqual({
+        pages: full.results.length,
+        blocks: blockUuids(full.results).flat().length,
+      });
+    });
+
+    it('caps a page with aliases the same way, through the alias-group query', async () => {
+      const full = await backlinks(ALIASED, MAX_PAGES, MAX_BLOCKS_PER_PAGE);
+      const pages = full.results.length;
+      const blocks = blockUuids(full.results).flat().length;
+      expect(pages, 'the aliased project needs more than 3 source pages. See tests/fixtures/README.md').toBeGreaterThan(3);
+      expect(full.meta?.warnings ?? [], 'the maximums cut nothing').toEqual([]);
+
+      const fewer = await backlinks(ALIASED, 3);
+      expect(blockUuids(fewer.results)).toEqual(blockUuids(full.results).slice(0, 3));
+      expect(codes(fewer)).toEqual(['pages_truncated']);
+      expect(fewer.meta!.totals).toEqual({ pages, blocks });
+      expect(fewer.meta!.hasMore).toBe(true);
+      expect((fewer.meta as { resolvedAliases?: string[] }).resolvedAliases, 'the alias group is still reported').toBeDefined();
+
+      expect(blocks, 'the aliased project needs a source page with more than one linking block. See tests/fixtures/README.md').toBeGreaterThan(pages);
+      const one = await backlinks(ALIASED, undefined, 1);
+      expect(blockUuids(one.results)).toEqual(blockUuids(full.results).map(uuids => uuids.slice(0, 1)));
+      expect(codes(one)).toEqual(['page_blocks_truncated']);
     });
   });
 });
