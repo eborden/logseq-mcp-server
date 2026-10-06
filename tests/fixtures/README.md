@@ -234,3 +234,9 @@ also a page with no file, so each new key in the fixture adds one. LogSeq also
 creates **today's journal page** in its database when the graph opens, whether or not it writes
 the file, and its date changes every day. Exact assertions on page, journal or `list_pages`
 counts must exclude it, and date-range tests must use fixed windows that end before 2026.
+
+Measured total (#139, LogSeq 0.10.15 on a per-worktree instance, after the README moved out): the graph
+holds **263 pages** in `:block/name`, today's journal included, so 262 without it. There is no `readme`
+page and no `#NN` tag page, and the 146 indexed files are all under `pages/` and `journals/`. The number
+moves whenever a page, a property key or a block embed is added to the fixture, so tests should compute what
+they need rather than copy it (#90).
