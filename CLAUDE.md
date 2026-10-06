@@ -149,6 +149,7 @@ Done by whoever merges:
 - `npx tsc --noEmit`
 - `npx vitest run src`
 - `npm run test:integration` against the live graph (read-only)
+- `npm run test:integration:fixture` against this worktree's own instance (`npx tsx scripts/logseq-instance.ts start`, then `LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json`, then `stop`), until #90 folds `tests/integration/fixture-only/` into `test:integration`
 - `npx tsx scripts/measure-api-calls.ts` still runs
 - A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
 
