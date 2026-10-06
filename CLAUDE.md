@@ -46,7 +46,7 @@ Two kinds of record live in `docs/`. Their READMEs hold the full process. Read t
   - Its Mechanical enforcement section may be updated in place, for example `none-yet` becoming `test:` once a guard lands.
 - A business rule is edited in place, with a new Changelog row. To retire one, follow the README; don't delete the file.
 
-Adding an ADR or rule, or any of these changes, needs the maintainer's OK before merge (see Merge policy).
+Adding an ADR or rule, or any of these changes, needs the maintainer's OK before merge (see Merge policy), with one exception. A PR whose only ADR change adds or strengthens a Mechanical enforcement line needs no OK: `none-yet` to `test:` or `ci:`, a new `test:` or `ci:` line, or a stronger tier (order: `type`, `test`, `ci`, `reviewer`, `none-yet`). Removing or weakening enforcement still needs the OK: dropping a line, a weaker tier, or back to `none-yet`. So does every other ADR change, and every business-rule change, enforcement lines included.
 
 **Format.** `src/docs-format.test.ts` checks both directories in CI: filenames, the Index table, required headings, ADR status lines, business-rule Changelog tables, `<tier>: <reference>` enforcement lines and relative links. Run `npx tsx scripts/docs-format.ts` to check locally.
 
@@ -98,7 +98,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 ### Code review (required for every PR)
 1. After a PR opens, a **separate reviewer subagent** reviews it. It starts fresh, with only the PR number, the linked issue and this file.
 2. It posts **one review with inline comments** on specific lines. Each comment says what's wrong, why, and what to do. Focus on correctness, the constraints in this file, privacy, test gaps and contract changes. No nits about style the codebase doesn't enforce.
-   - Does the PR add, change, supersede or retire an ADR or business rule, including an edit to its Mechanical enforcement lines? If so, say in the review body that it needs the maintainer's OK before merge, even with self-merge (see Merge policy).
+   - Does the PR add, change, supersede or retire an ADR or business rule, including an edit to its Mechanical enforcement lines? If so, say in the review body that it needs the maintainer's OK before merge, even with self-merge (see Merge policy). The exception is a PR whose only ADR change adds or strengthens a Mechanical enforcement line: it needs no OK. State in the review body whether the ADR edit is additive-only.
    - Does the PR contradict an accepted ADR or business rule without citing the change that allows it (a superseding ADR or an edited rule)? If so, comment on the contradicting line.
    ```bash
    gh api repos/eborden/logseq-mcp-server/pulls/<n>/reviews --input review.json
@@ -135,7 +135,7 @@ Done by whoever merges:
 - A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
 
 ### Merge policy
-- **Three actions need the maintainer's explicit OK:** merging a PR, moving a board item from *Backlog* to *Ready*, and merging any PR that adds, changes, supersedes or retires an ADR or business rule, even with self-merge. Everything else (issues, PRs, reviews, resolving threads, pushing to feature branches, other status moves) is allowed by default.
+- **Three actions need the maintainer's explicit OK:** merging a PR, moving a board item from *Backlog* to *Ready*, and merging any PR that adds, changes, supersedes or retires an ADR or business rule, even with self-merge. The exception is a PR whose only ADR change adds or strengthens a Mechanical enforcement line (see "ADRs and business rules"). Everything else (issues, PRs, reviews, resolving threads, pushing to feature branches, other status moves) is allowed by default.
 - **The maintainer merges by default.** Claude may merge its own PRs only if the maintainer has explicitly granted self-merge to the session. Without that grant, open the PR and stop.
 - **The ADR and business-rule gate applies even with self-merge.** Before merge, a PR comment records the approval: the maintainer writes it, or Claude posts it quoting the maintainer's message verbatim with its date. If the maintainer merges the PR, the merge is the record (see the Approval gate in [`docs/adr/README.md`](docs/adr/README.md#change-process)). What an approval survives is set here only, not in the READMEs:
   - A rebase or conflict resolution that changes nothing of substance keeps the approval.
