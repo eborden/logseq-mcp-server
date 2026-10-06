@@ -5,9 +5,7 @@
  * Usage: npx tsx scripts/measure-api-calls.ts [pageName]
  * Requires LogSeq running with the HTTP API enabled. Read-only.
  */
-import { homedir } from 'os';
-import { join } from 'path';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, resolveConfigPath } from '../src/config.js';
 import { LogseqClient } from '../src/client.js';
 import { getConceptNetwork } from '../src/tools/get-concept-network.js';
 import { searchBlocks } from '../src/tools/search-blocks.js';
@@ -44,7 +42,8 @@ function ymd(d: Date): number {
 }
 
 async function main() {
-  const config = await loadConfig(join(homedir(), '.logseq-mcp', 'config.json'));
+  // LOGSEQ_MCP_CONFIG if set (e.g. the fixture instance), else ~/.logseq-mcp/config.json
+  const config = await loadConfig(resolveConfigPath());
   const client = new CountingClient(config);
 
   const pages = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
