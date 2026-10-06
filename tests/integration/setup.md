@@ -84,6 +84,12 @@ npx tsx scripts/logseq-instance.ts stop
 
 Until #90 moves the suites to the fixture, most of them still need the data listed above and fail against the instance. Use your own graph for them as before.
 
+Suites that make exact assertions on the fixture live in `tests/integration/fixture-only/` until then. `npm run test:integration` and `npm test` leave them out, and they call `requireFixtureGraph` first, so they fail loud against any other graph. Run them against the instance:
+
+```bash
+LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration:fixture
+```
+
 What `start` does:
 
 - **A fresh profile each time**, in `.logseq-instance/` (gitignored): `profile/` (LogSeq's `--user-data-dir`), `home/` (its home directory, so its `~/.logseq` is its own), `logseq.log`, `instance.json` (pid, port) and `config.json` (the file `LOGSEQ_MCP_CONFIG` points at).
