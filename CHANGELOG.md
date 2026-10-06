@@ -48,7 +48,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 - Infrastructure errors (LogSeq down, a bad token, a timeout) are no longer reported as "page not found" or as empty results in `get_page`, `build_context` and `get_context_for_query`. Partial results are returned with `warnings`.
 - Page lookups are case-insensitive, and pages with no blocks return an empty page rather than nothing.
-- A journal page is no longer matched twice when a block on it carries a scheduled or deadline date.
+- A journal page is no longer matched twice when a block LogSeq created on it carries `:block/journal-day` (the journal queries now require a page name). A scheduled or deadline date does not add it (#140).
 - Property names from Datalog are camelCased the same way the Editor API returns them.
 - `LOGSEQ_MCP_TIPS` rejects an unrecognised value at startup instead of leaving tips on.
 - Link-following tools no longer miss references written under another name of the same page. With `alias:: Jordan Rivera` on `Jordan`, asking for either name now covers both: `get_backlinks`, `build_context` (and so `get_context_for_query`), `get_concept_evolution`, `get_concept_network`, `search_by_relationship` and `query_by_date_range` with a `search_term` that names the page. The result says which names it covered in `resolvedAliases` (in `meta` for `get_backlinks`, keyed by topic for `search_by_relationship`), absent for a page with no aliases. In `query_by_date_range` the other names match as whole words or by reference, so a short alias doesn't match inside a word; the term itself still matches anywhere, as before. Costs at most one extra Datalog query, and none for a page without aliases (#69).
