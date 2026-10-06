@@ -79,7 +79,7 @@ Every target has a pinned `id::`, so tests can name it. The uuids are
 | A page embed of `bob` | one embed, `ok` |
 | `10` and `11`: refs to each other | `ok`, then `cycle` |
 | `20` and `21`: embeds of each other | `ok`, then `cycle` |
-| A ref to `...00000000dead` and an embed of `...00000000beef` (no such block) | `ok`, **not** `missing`. LogSeq 0.10 makes a placeholder block for a uuid nobody has: no page, content `id:: <uuid>`. The resolver finds that row, so `missing` never shows up for a ref in a file graph |
+| A ref to `...00000000dead` and an embed of `...00000000beef` (no such block) | `ok`, **not** `missing`. LogSeq 0.10 makes a placeholder block for a uuid nobody has: no page, content `id:: <uuid>`. The resolver finds that row, so `missing` never shows up for a ref in a file graph (#138). When that is fixed, these become `missing` |
 
 LogSeq also makes a **page named after each block-embed uuid** (`0088f1a0-...-000000000002`, `...020`,
 `...021`, `...beef`), with no file and no blocks. Plain `((uuid))` refs make no such page.
@@ -135,6 +135,8 @@ and Feb 3rd days, and the hub's journal below, for wider windows.
 
 Counts across these pages and journals: 8 `TODO`, 7 `DONE`, 2 each of `DOING`, `LATER`, `NOW`,
 `WAITING` and `CANCELED`; 2 `SCHEDULED` and 2 `DEADLINE` blocks. None of them links the hub pages below.
+The dates are integers `YYYYMMDD` in `:block/scheduled` and `:block/deadline`. The `DEADLINE` blocks
+carry no `:block/journal-day`, unlike what CLAUDE.md's data shapes say (#140).
 
 ## The hub (#89)
 
