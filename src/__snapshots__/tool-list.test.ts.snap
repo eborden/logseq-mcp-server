@@ -74,6 +74,39 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "idempotentHint": true,
       "openWorldHint": false,
       "readOnlyHint": true,
+      "title": "Check Links",
+    },
+    "description": "Check a [[link]] pass: after must be before plus brackets only. ok is true only if prose is unchanged once brackets are stripped, brackets balance and don't nest, no ref in before was dropped, and each [[term]] names a page or alias.
+
+**Can't find:** a link to the wrong page, or a name split across a ref. It checks safety, not judgement.",
+    "inputSchema": {
+      "properties": {
+        "after": {
+          "description": "before plus [[links]], at most 500 distinct terms",
+          "maxLength": 50000,
+          "type": "string",
+        },
+        "before": {
+          "description": "Text before linking",
+          "maxLength": 50000,
+          "type": "string",
+        },
+      },
+      "required": [
+        "before",
+        "after",
+      ],
+      "type": "object",
+    },
+    "name": "logseq_check_links",
+    "title": "Check Links",
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true,
       "title": "Get Backlinks",
     },
     "description": "List the pages and blocks that link to a page with [[page]] or #tag.

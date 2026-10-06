@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => {
     getGraphInfo: vi.fn(async () => nested()),
     getCurrentContext: vi.fn(async () => nested()),
     listPages: vi.fn(async () => ({ pages: ['x'], ...nested() })),
+    checkLinks: vi.fn(async () => nested()),
   };
 });
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
@@ -76,6 +77,11 @@ vi.mock('./tools/get-concept-evolution.js', async importOriginal => ({
 vi.mock('./tools/get-graph-info.js', () => ({ getGraphInfo: mocks.getGraphInfo }));
 vi.mock('./tools/get-current-context.js', () => ({ getCurrentContext: mocks.getCurrentContext }));
 vi.mock('./tools/list-pages.js', () => ({ listPages: mocks.listPages }));
+// Keep the module's constants: the argument schema takes its size cap from them
+vi.mock('./tools/check-links.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  checkLinks: mocks.checkLinks,
+}));
 
 /** Minimal valid arguments for every tool. */
 const CALLS: Record<string, Record<string, unknown>> = {
@@ -94,6 +100,7 @@ const CALLS: Record<string, Record<string, unknown>> = {
   logseq_get_graph_info: {},
   logseq_get_current_context: {},
   logseq_list_pages: { name_contains: 'x' },
+  logseq_check_links: { before: 'x', after: '[[x]]' },
 };
 
 async function withClient<T>(fn: (mcp: Client) => Promise<T>): Promise<T> {

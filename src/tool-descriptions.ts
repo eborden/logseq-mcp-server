@@ -95,6 +95,11 @@ export const TOOL_DESCRIPTIONS = {
 **Use when:** "how has X evolved?" or "what's the history of Y?"
 **Can't find:** plain-text mentions with no link (logseq_search_blocks), or topics with no page.
 **Alternatives:** logseq_query_by_date_range for plain journal queries.`,
+
+  // Editing gates (check a change before it is reported done)
+  logseq_check_links: `Check a [[link]] pass: after must be before plus brackets only. ok is true only if prose is unchanged once brackets are stripped, brackets balance and don't nest, no ref in before was dropped, and each [[term]] names a page or alias.
+
+**Can't find:** a link to the wrong page, or a name split across a ref. It checks safety, not judgement.`,
 } as const;
 
 export type ToolName = keyof typeof TOOL_DESCRIPTIONS;

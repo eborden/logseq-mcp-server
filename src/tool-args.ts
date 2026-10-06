@@ -14,6 +14,7 @@ import {
 } from './tools/build-context.js';
 import { GROUP_BY_PERIODS } from './tools/get-concept-evolution.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
+import { MAX_LINK_TERMS, MAX_TEXT_CHARS } from './tools/check-links.js';
 
 /**
  * Argument schemas of every tool, parsed with zod (#60).
@@ -240,3 +241,17 @@ export const listPagesArgs = z.object({
  */
 export const getGraphInfoArgs = z.object({});
 export const getCurrentContextArgs = z.object({});
+
+/**
+ * Both texts are required and capped at MAX_TEXT_CHARS (50,000 characters, about
+ * 12k tokens each), so the input stays bounded (ADR-0011). An empty string is a
+ * text, not a missing one. The cap on distinct terms (MAX_LINK_TERMS) is checked
+ * by `checkLinks`, before any LogSeq call.
+ */
+export const checkLinksArgs = z.object({
+  before: z.string().max(MAX_TEXT_CHARS).describe('Text before linking'),
+  after: z
+    .string()
+    .max(MAX_TEXT_CHARS)
+    .describe(`before plus [[links]], at most ${MAX_LINK_TERMS} distinct terms`),
+});
