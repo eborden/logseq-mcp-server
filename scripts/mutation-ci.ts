@@ -8,7 +8,7 @@
  * Runs on Node 24 as plain TypeScript (type stripping), so it imports `node:` modules only,
  * uses `import type` for types and has no enums. Unit tests: src/mutation-ci.test.ts.
  *
- *   node scripts/mutation-ci.ts plan --cache hit|miss --since <sha> [--out reports/mutation/plan.json]
+ *   node scripts/mutation-ci.ts plan --cache hit|miss [--since <cache's commit>] [--fallback-since <PR base>] [--out reports/mutation/plan.json]
  *   node scripts/mutation-ci.ts summary [--plan reports/mutation/plan.json] [--report reports/mutation/mutation.json]
  *
  * `plan` prints `mode=` and `mutate=` lines for $GITHUB_OUTPUT. Markdown goes to stdout from `summary`.
@@ -103,6 +103,8 @@ export function changedBaselineFiles(before: unknown, after: unknown): string[] 
 export interface PlanInput {
   /** True when a restored incremental file matches a commit that is in this checkout's history. */
   cacheUsable: boolean;
+  /** Why the cache can't be used, when it can't. Defaults to "no usable incremental cache". */
+  cacheNote?: string | null;
   /** Paths changed since the commit the cache (or the PR base) is from, deleted ones included. */
   changed: string[];
   /** Paths among `changed` that no longer exist at HEAD. */
@@ -137,7 +139,7 @@ export function plan(input: PlanInput): Plan {
   const { scope, changed } = input;
   const blind = changed.filter(p => isBlindSpot(p, scope));
   const reasons: string[] = [];
-  if (!input.cacheUsable) reasons.push('no usable incremental cache');
+  if (!input.cacheUsable) reasons.push(input.cacheNote ?? 'no usable incremental cache');
   if (blind.length > 0) reasons.push(`changed inputs that incremental mode can't see: ${blind.join(', ')}`);
 
   if (reasons.length === 0) return { mode: 'incremental', mutate: [], reasons, changedSources: [], fromBaseline: [], fromTests: [] };
@@ -245,42 +247,115 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
 // ---------------------------------------------------------------------------
 // CLI
 
-const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
 }
 
-function runPlan(args: string[]): void {
-  const cache = flag(args, 'cache');
-  const since = flag(args, 'since') ?? '';
-  const out = flag(args, 'out') ?? 'reports/mutation/plan.json';
-  if (cache !== 'hit' && cache !== 'miss') throw new Error('plan needs --cache hit|miss');
-  const scope = scopeFromConfig(JSON.parse(readFileSync('stryker.config.json', 'utf8')));
-  const known = since !== '' && (() => { try { git('cat-file', '-e', `${since}^{commit}`); return true; } catch { return false; } })();
-  const changed = known ? git('diff', '--name-only', since, 'HEAD').split('\n').filter(Boolean) : [];
-  const deleted = changed.filter(p => !existsSync(p));
+/** What `plan` diffs against, and whether the restored cache can be trusted. */
+export interface BaseChoice {
+  /** The commit to diff against, or null when no candidate is in this checkout. */
+  since: string | null;
+  cacheUsable: boolean;
+  /** Why the cache isn't usable, for the summary. Null for the ordinary cases. */
+  note: string | null;
+}
+
+/**
+ * The commit the cache was saved from, when the cache hit and that commit is in this checkout. Otherwise
+ * the cache can't be trusted (a run on a commit outside this history, a deleted branch), and the diff goes
+ * against the fallback (the PR base), then `lastResort` (the first parent). A base that can't be found must
+ * not read as "nothing changed", so with none the plan says so and mutates nothing.
+ */
+export function chooseBase(input: {
+  cache: 'hit' | 'miss';
+  since: string;
+  fallbackSince: string;
+  lastResort: string;
+  isCommit: (rev: string) => boolean;
+}): BaseChoice {
+  if (input.cache === 'hit' && input.since !== '' && input.isCommit(input.since)) {
+    return { since: input.since, cacheUsable: true, note: null };
+  }
+  const note = input.cache === 'hit' ? 'the cache was saved from a commit that is not in this checkout' : null;
+  const fallback = [input.fallbackSince, input.lastResort].find(rev => rev !== '' && input.isCommit(rev));
+  if (fallback === undefined) return { since: null, cacheUsable: false, note: 'no commit to diff against was found' };
+  return { since: fallback, cacheUsable: false, note };
+}
+
+/** What `planFromRepo` needs from the repository and the working tree. Faked in tests. */
+export interface PlanIo {
+  /** Runs git and returns stdout; throws when git fails. */
+  git(...args: string[]): string;
+  exists(path: string): boolean;
+  read(path: string): string;
+}
+
+export function planFromRepo(
+  opts: { cache: 'hit' | 'miss'; since: string; fallbackSince: string; config: { mutate: string[] } },
+  io: PlanIo,
+): Plan {
+  const scope = scopeFromConfig(opts.config);
+  const isCommit = (rev: string) => {
+    try {
+      io.git('cat-file', '-e', `${rev}^{commit}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const base = chooseBase({ cache: opts.cache, since: opts.since, fallbackSince: opts.fallbackSince, lastResort: 'HEAD~1', isCommit });
+  const since = base.since;
+  if (since === null) {
+    return { mode: 'empty', mutate: [], reasons: [base.note ?? 'no commit to diff against was found'], changedSources: [], fromBaseline: [], fromTests: [] };
+  }
+  // --no-renames: a rename lists the old path too, so a moved blind-spot file is still seen.
+  const changed = io.git('diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);
+  const deleted = changed.filter(p => !io.exists(p));
   const readTest = (p: string): string | null => {
-    if (existsSync(p)) return readFileSync(p, 'utf8');
-    try { return git('show', `${since}:${p}`); } catch { return null; }
+    if (io.exists(p)) return io.read(p);
+    try {
+      return io.git('show', `${since}:${p}`);
+    } catch {
+      return null;
+    }
   };
   let baselineChanged: string[] = [];
-  if (known && changed.includes('mutation-baseline.json')) {
-    const parse = (text: string | null) => { try { return text === null ? null : JSON.parse(text); } catch { return null; } };
+  if (changed.includes('mutation-baseline.json')) {
+    const parse = (text: string | null): unknown => {
+      try {
+        return text === null ? null : JSON.parse(text);
+      } catch {
+        return null;
+      }
+    };
     let before: string | null = null;
-    try { before = git('show', `${since}:mutation-baseline.json`); } catch { /* the file is new */ }
-    baselineChanged = changedBaselineFiles(parse(before), parse(existsSync('mutation-baseline.json') ? readFileSync('mutation-baseline.json', 'utf8') : null));
+    try {
+      before = io.git('show', `${since}:mutation-baseline.json`);
+    } catch {
+      /* the file is new */
+    }
+    baselineChanged = changedBaselineFiles(parse(before), parse(io.exists('mutation-baseline.json') ? io.read('mutation-baseline.json') : null));
   }
-  const result = plan({
-    cacheUsable: cache === 'hit' && known,
-    changed,
-    deleted,
-    scope,
-    readTest,
-    exists: existsSync,
-    baselineChanged,
-  });
+  return plan({ cacheUsable: base.cacheUsable, cacheNote: base.note, changed, deleted, scope, readTest, exists: io.exists, baselineChanged });
+}
+
+function runPlan(args: string[]): void {
+  const cache = flag(args, 'cache');
+  const out = flag(args, 'out') ?? 'reports/mutation/plan.json';
+  if (cache !== 'hit' && cache !== 'miss') throw new Error('plan needs --cache hit|miss');
+  const io: PlanIo = { git, exists: existsSync, read: p => readFileSync(p, 'utf8') };
+  const result = planFromRepo(
+    {
+      cache,
+      since: flag(args, 'since') ?? '',
+      fallbackSince: flag(args, 'fallback-since') ?? '',
+      config: JSON.parse(readFileSync('stryker.config.json', 'utf8')),
+    },
+    io,
+  );
   mkdirSync(posix.dirname(out), { recursive: true });
   writeFileSync(out, `${JSON.stringify(result, null, 2)}\n`);
   console.log(`mode=${result.mode}`);

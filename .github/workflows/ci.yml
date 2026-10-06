@@ -102,9 +102,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -n "$MATCHED_KEY" ]; then
-            node scripts/mutation-ci.ts plan --cache hit --since "${MATCHED_KEY#mutation-incremental-}" >> "$GITHUB_OUTPUT"
+            node scripts/mutation-ci.ts plan --cache hit --since "${MATCHED_KEY#mutation-incremental-}" --fallback-since "$BASE_SHA" >> "$GITHUB_OUTPUT"
           else
-            node scripts/mutation-ci.ts plan --cache miss --since "$BASE_SHA" >> "$GITHUB_OUTPUT"
+            node scripts/mutation-ci.ts plan --cache miss --fallback-since "$BASE_SHA" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Mutation tests, whole scope (incremental)
