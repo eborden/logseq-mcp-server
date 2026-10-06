@@ -9,7 +9,12 @@ export interface BlockEntity {
   uuid: string;
   content: string;
   format?: 'markdown' | 'org';
-  page: IEntityID;
+  /**
+   * The page the block sits on: a bare `{ id }` ref from the Editor API, or the page itself
+   * when a pull or a tool nested it (`PageLike` covers both). Read it with `blockPageId` or
+   * `pageDisplayName` from `src/utils/entity-fields.ts`.
+   */
+  page: PageLike;
   parent: IEntityID;
   left: IEntityID;
   level?: number;
@@ -19,15 +24,15 @@ export interface BlockEntity {
    * `limit` on `search_by_relationship` with `connected-within`
    */
   childrenTruncated?: boolean;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   /** Property keys in file order. Editor API blocks carry it, and so do pulls camelized by `camelizeBlock` */
   propertiesOrder?: string[];
   unordered?: boolean;
   meta?: {
     startPos?: number;
     endPos?: number;
-    properties?: any;
-    timestamps?: any;
+    properties?: unknown;
+    timestamps?: unknown;
   };
   // Additional properties from search/query results
   pathRefs?: IEntityID[]; // Path of entity references from root to this block
@@ -50,7 +55,7 @@ export interface PageEntity {
   name: string;
   originalName: string;
   'original-name'?: string; // Datalog queries use kebab-case
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   journal?: boolean;
   'journal?'?: boolean; // Logseq uses this property name
   journalDay?: number;
@@ -142,7 +147,7 @@ export interface SlimBlock {
   uuid: string;
   content: string;
   pageName?: string;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   marker?: string;
   tags?: string[];
   pageRefs?: string[];
@@ -162,7 +167,7 @@ export interface SlimBlock {
 export interface SlimPage {
   name: string;
   originalName: string;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   isJournal?: boolean;
   journalDate?: number;
 }
