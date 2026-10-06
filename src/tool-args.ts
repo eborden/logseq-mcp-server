@@ -14,6 +14,12 @@ import {
   DEFAULT_MAX_RELATED_PAGES,
 } from './tools/build-context.js';
 import { DEFAULT_MAX_ENTRIES, GROUP_BY_PERIODS, MAX_ENTRIES } from './tools/get-concept-evolution.js';
+import {
+  DEFAULT_MAX_BLOCKS_PER_PAGE,
+  DEFAULT_MAX_PAGES,
+  MAX_BLOCKS_PER_PAGE,
+  MAX_PAGES,
+} from './tools/get-backlinks.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
 import { DEFAULT_DATE_RANGE_MAX_BLOCKS, MAX_DATE_RANGE_BLOCKS } from './tools/query-by-date-range.js';
 import { MAX_LINK_TERMS, MAX_TEXT_CHARS } from './tools/check-links.js';
@@ -72,8 +78,21 @@ export const getPageOutlineArgs = z.object({
   page_name: z.string().describe('Page name, alias, or ISO date (2025-01-01) for a journal'),
 });
 
+/**
+ * `max_pages` and `max_blocks_per_page` (#61) are plain `z.number()`, like `limit` on
+ * search_blocks: the tool clamps them to 0..100 and 0..50 and floors them, so a larger
+ * value is clamped, not rejected.
+ */
 export const getBacklinksArgs = z.object({
   page_name: z.string().describe('Page to get backlinks for (name, alias or ISO date)'),
+  max_pages: z
+    .number()
+    .default(DEFAULT_MAX_PAGES)
+    .describe(`Max source pages (default: ${DEFAULT_MAX_PAGES}, max: ${MAX_PAGES})`),
+  max_blocks_per_page: z
+    .number()
+    .default(DEFAULT_MAX_BLOCKS_PER_PAGE)
+    .describe(`Max linking blocks per source page (default: ${DEFAULT_MAX_BLOCKS_PER_PAGE}, max: ${MAX_BLOCKS_PER_PAGE})`),
 });
 
 export const getBlockArgs = z.object({

@@ -16,7 +16,11 @@ vi.mock('./tools/search-blocks.js', async importOriginal => ({
   searchBlocksWithMeta: mocks.searchBlocksWithMeta,
 }));
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
-vi.mock('./tools/get-backlinks.js', () => ({ getBacklinks: mocks.getBacklinks }));
+// Keep the module's constants: the argument schema takes its caps from them (#61)
+vi.mock('./tools/get-backlinks.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getBacklinks: mocks.getBacklinks,
+}));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
 // The real buildTips, wrapped so a test can see which arguments it was given (#60)
 vi.mock('./utils/tips.js', async importOriginal => {
