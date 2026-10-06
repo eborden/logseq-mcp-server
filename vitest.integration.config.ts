@@ -22,8 +22,13 @@ export default defineConfig({
     // Never a copy under the instance's scratch folder (profile, graph copy)
     exclude: [...configDefaults.exclude, '**/.logseq-instance/**'],
     globalSetup: ['tests/integration/global-setup.ts'],
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    // LogSeq answers one request at a time, so with several worktrees' suites (or one suite's
+    // parallel files) on a machine, each call waits behind everyone else's. With 4 full suites
+    // sharing one instance, tests that take ~1 s alone ran past 30 s (#193). The budget is for
+    // that queueing. A call that hangs outright still fails after the client's own 30 s
+    // `timeoutMs` (LogSeqTimeoutError), so this doesn't turn a hang into a pass.
+    testTimeout: 120000,
+    hookTimeout: 120000,
     environment: 'node',
     globals: true,
   },
