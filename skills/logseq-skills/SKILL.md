@@ -59,6 +59,7 @@ Use this skill when:
 **`references/summary-compression.md`** - Compression philosophy shared by all summary granularities
 - Salience filtering, emotional markers, the hard word budget, merge-vs-drop
 - Output structure, LogSeq formatting (tabs, `[[refs]]`, `((uuids))`), open-item verification
+- Reading the period: the query first, journal files only after a tool call has failed
 - Trend contextualization and a before/after compression example
 - **ALWAYS read this alongside any `skills/*-summary.md` sub-skill**
 - **Non-negotiable constraint, whether creating or updating:** signals are one line each (weekly 10-15 words / 150 total; monthly 12-18 words / 200 total), zero em-dashes. A bullet whose second sentence explains its first is the defect. A signal with no number is usually the one most worth keeping. Validate with `scripts/check-terseness.sh <file>` before reporting done.
@@ -68,6 +69,7 @@ Use this skill when:
 **`scripts/check-terseness.sh`** - Mandatory validation gate for any summary
 - Detects weekly vs monthly from the filename and applies that budget
 - Reports per-signal word counts, totals, item count, em-dashes, two-sentence bullets, missing sections
+- Checks the page's `source::` line, the roll-up of the `logseq_query_by_date_range` call it was built from. A page with none fails, so a summary built from journal files alone doesn't pass
 - Exits non-zero on violation; rewrite and re-run rather than explaining the failure away
 
 ### Gates
@@ -120,6 +122,8 @@ Use this skill when:
 - Read `references/summary-compression.md` for the shared compression philosophy and formatting
 - Read the matching sub-skill for cadence specifics: `skills/weekly-summary.md` or `skills/monthly-summary.md`
 - Optionally read `references/mcp-tools-reference.md` for tool syntax
+- **Query before files.** Step 0 of each sub-skill loads the LogSeq tools (search for them if they're deferred), calls `logseq_get_graph_info`, and runs the period query before any shell command that reads the graph. The journals are also files on disk, but they are the fallback for a tool call that has failed, never a shortcut past loading the tools
+- The open-items `grep` over `journals/` checks marker state only. It doesn't replace the period query
 - Adding a new granularity (quarterly, annual) means adding one sub-skill; the compression rules are inherited from the reference
 
 **For linking concepts in existing notes:**

@@ -71,6 +71,7 @@ Every summary page carries these sections in this order. `## Unresolved` and `##
 
 ```markdown
 tags:: [[<Granularity> Summary]], <constituent page links>
+source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top <name> <count>/<days>, <name> <count>/<days>
 
 - **<Period>**: [1-2 sentence gist]
 - ## Signals
@@ -82,6 +83,8 @@ tags:: [[<Granularity> Summary]], <constituent page links>
 	- [non-work items worth remembering, if any]
 ```
 
+The `source::` line records the roll-up (`summary.totalDays`, `summary.totalBlocks`, the first five `summary.topConcepts`) of the `logseq_query_by_date_range` call the page was built from. It has no `[[brackets]]`, so it adds no links to the graph. The sub-skill says which call to copy it from.
+
 ## Formatting
 
 1. **Indent with tabs.** LogSeq's outliner requires tabs; spaces break nesting silently.
@@ -89,6 +92,16 @@ tags:: [[<Granularity> Summary]], <constituent page links>
 3. **Block refs**: `((uuid))` for open items. These render live content and stay linked to source. Never paste TODO text into a summary — a copy goes stale without any visible sign.
 4. **Tags line**: link only the constituent periods that actually had content. Weekly day links use an English ordinal with a three-letter month: `[[Sep 1st, 2026]]`, `[[Sep 2nd, 2026]]`, `[[Sep 3rd, 2026]]`, `[[Sep 8th, 2026]]`, `[[Sep 22nd, 2026]]`. Monthly links constituent weeks as `[[Weekly YYYY-MM-DD]]`. Omit periods with no content rather than linking an empty page.
 5. **Partial periods**: state the boundary in the gist when the period is incomplete — for example "(through Thu Aug 27)". Remove the caveat when completing it later.
+
+## Reading the Period: Query First, Files Only After a Failure
+
+Build every summary from `logseq_query_by_date_range`, after loading the tools and calling `logseq_get_graph_info` (Step 0 of the sub-skill). A journal file is a fallback for a tool call that has actually failed: you made the call and it returned an error, or the server wouldn't connect. These are not failures: the tool is deferred and needs a search to load, a search took a call, or files looked easier. Load the tool.
+
+If a call did fail:
+
+- **Say so.** Put the error in the gist, write `source:: files; <the error>` where the roll-up line goes, and pass `--allow-files` to the gate.
+- **Read each file of the period whole, oldest first.** Don't truncate with `head`, `head -c`, `cut` or `tail`. The end of a day is where meeting outcomes and hand-offs sit, and a cut file loses them without a sign. A file too large for one read is read in line ranges (`sed -n '1,200p'`, then the next range) until its last line.
+- **Say what you couldn't read.** A day you skipped or read in part is named in the gist.
 
 ## Unresolved Items
 
@@ -100,9 +113,11 @@ Verify against the journal source directly:
 grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <journals>/<period-glob>.md
 ```
 
+This `grep` reads marker state only. It doesn't replace the period query and can't tell you what the period held.
+
 **Check past the end of the period before calling anything unresolved.** An item raised on the last Thursday of the period may have been closed the following Monday. Read the journals between the end of the period and today, and drop anything since marked DONE. A summary that lists closed work as open is worse than one that omits it.
 
-If the MCP tools are unavailable, scan the journal files directly for `TODO`/`DOING`/`DONE` markers; block UUIDs come from the `id::` property on the block.
+Block UUIDs come from the `id::` property on the block, or from the blocks the period query returned.
 
 Also check whether an item's own text has expired. A TODO reading "token expires in 3 weeks", written five weeks ago, is no longer a pending task — it is a missed deadline. Surface these to the user rather than carrying them forward silently.
 
@@ -114,7 +129,7 @@ Do not report a summary complete until the gate passes:
 <skill-dir>/scripts/check-terseness.sh <summary path>
 ```
 
-The granularity is detected from the filename (`Weekly *` or `Monthly *`) and the matching budget above is applied. The script reports per-signal word counts, the Signals total, item count, em-dashes, and two-sentence bullets, and exits non-zero on a budget violation.
+The granularity is detected from the filename (`Weekly *` or `Monthly *`) and the matching budget above is applied. The script reports per-signal word counts, the Signals total, item count, em-dashes, and two-sentence bullets, and exits non-zero on a budget violation. It also checks the `source::` line: a page without the roll-up of a period query fails, and so does one whose range isn't the page's week or month. `--allow-files` accepts `source:: files; <error>`, for a run where a tool call failed.
 
 **If it fails, rewrite the offending bullets and re-run.** Do not hand over a failing summary and do not explain away a violation. The two legitimate fixes are deleting the explanatory clause (almost always right) and merging two genuinely related signals. This applies when UPDATING a summary as much as when creating one: adding late-period signals to an existing page is where the budget usually breaks.
 
