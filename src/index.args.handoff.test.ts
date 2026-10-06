@@ -370,8 +370,20 @@ describe('logseq_get_concept_evolution hand-off', () => {
   const evolution = (args: Record<string, unknown>) =>
     handedOff('logseq_get_concept_evolution', { concept_name: 'Alice', ...args }, mocks.getConceptEvolution);
 
-  it('defaults: no dates and no grouping', async () => {
-    expect(await evolution({})).toEqual(['Alice', { startDate: undefined, endDate: undefined, groupBy: undefined }]);
+  it('defaults: no dates, no grouping and 100 mentions', async () => {
+    expect(await evolution({})).toEqual([
+      'Alice',
+      { startDate: undefined, endDate: undefined, groupBy: undefined, maxEntries: 100 },
+    ]);
+  });
+
+  it.each([
+    [{ max_entries: 7 }, 7],
+    [{ max_entries: 0 }, 0],
+    [{ max_entries: 5000 }, 5000],
+  ])('%j passes max_entries %j to the tool, which clamps it', async (args, maxEntries) => {
+    const [, options] = await evolution(args);
+    expect(options).toMatchObject({ maxEntries });
   });
 
   it.each(['day', 'week', 'month'])('group_by %j passes through', async groupBy => {

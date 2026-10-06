@@ -13,7 +13,7 @@ import {
   DEFAULT_MAX_REFERENCES,
   DEFAULT_MAX_RELATED_PAGES,
 } from './tools/build-context.js';
-import { GROUP_BY_PERIODS } from './tools/get-concept-evolution.js';
+import { DEFAULT_MAX_ENTRIES, GROUP_BY_PERIODS, MAX_ENTRIES } from './tools/get-concept-evolution.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
 import { MAX_LINK_TERMS, MAX_TEXT_CHARS } from './tools/check-links.js';
 
@@ -223,12 +223,18 @@ export const queryByDateRangeArgs = z.object({
 /**
  * Types only. The tool does no range checks on the dates: 0 or an absent date is
  * no bound, and any other number is compared with each block's YYYYMMDD day.
+ * `max_entries` (#61) is a plain `z.number()`, like `limit` on search_blocks: the
+ * tool clamps it to 0..500 and floors it, so a larger value is clamped, not rejected.
  */
 export const getConceptEvolutionArgs = z.object({
   concept_name: z.string().describe('Concept to track (page name, alias or ISO date)'),
   start_date: z.number().optional().describe('Optional start date in YYYYMMDD format'),
   end_date: z.number().optional().describe('Optional end date in YYYYMMDD format'),
   group_by: z.enum(GROUP_BY_PERIODS).optional().describe('Optional grouping period'),
+  max_entries: z
+    .number()
+    .default(DEFAULT_MAX_ENTRIES)
+    .describe(`Max mentions, oldest first (default: ${DEFAULT_MAX_ENTRIES}, max: ${MAX_ENTRIES})`),
 });
 
 /**
