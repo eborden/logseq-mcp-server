@@ -1,0 +1,2 @@
+- Planning session with [[Carol]] #meeting
+	- Picked a moving week in spring
