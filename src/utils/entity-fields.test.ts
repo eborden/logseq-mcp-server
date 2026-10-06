@@ -196,3 +196,76 @@ describe('journalDayOf', () => {
     expect(journalDayOf(page)).toEqual(legacyContext(page));
   });
 });
+
+/**
+ * Values LogSeq never sends, where a reader and the chain it replaced give different answers.
+ * Each row runs the old chain (copied as it was) and the reader on the same page, so the
+ * contract is on record: the next change to a reader sees which of these it moves.
+ * `old` is asserted against the legacy chain, not just stated.
+ */
+describe('values LogSeq never sends: old chain against reader (#62)', () => {
+  type Row = {
+    label: string;
+    page: PageLike;
+    legacy: (p: any) => unknown;
+    old: unknown;
+    reader: (p: PageLike) => unknown;
+    now: unknown;
+  };
+
+  const rows: Row[] = [
+    {
+      label: 'id 0 beside db/id 1, read with ?? (resolve-page, alias-set, search-blocks)',
+      page: { id: 0, 'db/id': 1 },
+      legacy: p => p?.id ?? p?.['db/id'],
+      old: 0,
+      reader: entityId,
+      now: 1
+    },
+    {
+      label: 'id 0 alone, read with ?? (resolve-page, alias-set, search-blocks)',
+      page: { id: 0 },
+      legacy: p => p?.id ?? p?.['db/id'],
+      old: 0,
+      reader: entityId,
+      now: undefined
+    },
+    {
+      label: 'empty originalName beside original-name, read as compactPage did (??)',
+      page: { originalName: '', 'original-name': 'Alice', name: 'alice' },
+      legacy: p => p.originalName ?? p['original-name'],
+      old: '',
+      reader: originalNameOf,
+      now: 'Alice'
+    },
+    {
+      label: 'empty original-name and a name, read as resolve-page did (??)',
+      page: { 'original-name': '', name: 'stub' },
+      legacy: p => p?.['original-name'] ?? p?.originalName ?? p?.name ?? '',
+      old: '',
+      reader: pageDisplayName,
+      now: 'stub'
+    },
+    {
+      label: 'journalDay 0 beside journal-day, read with || (get_concept_evolution)',
+      page: { journalDay: 0, 'journal-day': 20250101 },
+      legacy: p => p?.journalDay || p?.['journal-day'],
+      old: 20250101,
+      reader: journalDayOf,
+      now: 0
+    },
+    {
+      label: "'journal?' false beside journal true, read truthy (toSlimPage, list_pages)",
+      page: { 'journal?': false, journal: true },
+      legacy: p => !!(p?.['journal?'] || p?.journal),
+      old: true,
+      reader: p => !!journalFlag(p),
+      now: false
+    }
+  ];
+
+  it.each(rows)('$label', ({ page, legacy, old, reader, now }) => {
+    expect(legacy(page)).toEqual(old);
+    expect(reader(page)).toEqual(now);
+  });
+});
