@@ -54,11 +54,14 @@ Read the 2-3 most recent `Weekly *` pages to pick up ongoing situations, trend t
 ```
 logseq_query_by_date_range(
   start_date=<Monday YYYYMMDD>,
-  end_date=<Friday YYYYMMDD>
+  end_date=<Friday YYYYMMDD>,
+  max_blocks=1000
 )
 ```
 
 Results are slim by default, which cuts 40-50% of tokens; don't pass `slim_results=false`. Slim blocks keep `uuid`, `content`, `marker` and `properties`, which is all this skill reads. This single call returns the week's blocks including their markers, so a separate TODO search against the graph is redundant.
+
+**Always pass `max_blocks=1000`.** The default of 200 counts nested blocks and keeps the oldest days first, so a busy work week comes back without its last days, which are the ones that decide what the week ended on. 1000 is the maximum. If the result still has a `blocks_truncated` warning, the week held more than that: query the days after the day the warning names for the rest. If you can't reach the end of the week, say so in the gist rather than summarizing as if you had. A kept block with `childrenTruncated: true` lost some of its children; `totals` says how much there was.
 
 When the result has `summary.topConcepts` (`[{ name, count, days }]`, the pages linked most that week), start there. A concept with a high `days` came up all week and a high `count` with `days` of 1 was one busy day. Use it to pick which threads to read closely in the blocks; it is a starting point, not the salience filter. Pass `top_concepts_limit` to change the default of 10. Skip it when the field is absent.
 
