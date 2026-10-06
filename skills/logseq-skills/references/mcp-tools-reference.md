@@ -137,10 +137,7 @@ Find blocks by property key/value pairs.
 **Parameters:**
 - `property_key` (required): Property name (e.g., "status", "priority")
 - `property_value` (required): Property value (e.g., "doing", "high")
-- `limit` (optional): Most blocks returned (default 100, max 500; a larger value is clamped)
 - `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
-
-**A cut result:** the array stays the first content block and is cut after sorting by page, then block, so it keeps the first blocks listed, not the best ones. A second content block `{ "meta": ... }` then carries a `results_truncated` warning and `totals.matches` (every match). Below 500, `howToFetchAll` names the `limit` that returns them; at 500 it has none, `hasMore` is false and no parameter fetches the rest. Below the cap there is no cap meta and the output is unchanged
 
 **Use when:**
 - Structured data queries
