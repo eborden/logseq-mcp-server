@@ -34,8 +34,13 @@ describe('requireFixtureGraph', () => {
     expect(query.mock.calls[0].slice(1)).toEqual([FIXTURE_SENTINEL_PAGE]);
   });
 
-  it('accepts the version as text or under the camelCase key', async () => {
-    for (const properties of [{ 'fixture-version': `${FIXTURE_VERSION}` }, { fixtureVersion: FIXTURE_VERSION }]) {
+  it('accepts the version as text, as a one-element set, or under the camelCase key', async () => {
+    for (const properties of [
+      { 'fixture-version': `${FIXTURE_VERSION}` },
+      { 'fixture-version': [FIXTURE_VERSION] },
+      { 'fixture-version': [`${FIXTURE_VERSION}`] },
+      { fixtureVersion: FIXTURE_VERSION },
+    ]) {
       await expect(requireFixtureGraph(clientReturning(sentinel(properties)).client)).resolves.toBe(FIXTURE_VERSION);
     }
   });
@@ -49,7 +54,14 @@ describe('requireFixtureGraph', () => {
   });
 
   it('fails when the sentinel page has no usable fixture-version', async () => {
-    for (const properties of [undefined, {}, { 'fixture-version': 'one' }, { 'fixture-version': 1.5 }]) {
+    for (const properties of [
+      undefined,
+      {},
+      { 'fixture-version': 'one' },
+      { 'fixture-version': 1.5 },
+      { 'fixture-version': [] },
+      { 'fixture-version': [1, 2] },
+    ]) {
       const run = requireFixtureGraph(clientReturning(sentinel(properties)).client);
       await expect(run).rejects.toThrow(FixtureGraphError);
       await expect(run).rejects.toThrow(/no integer fixture-version.*setup\.md/s);
