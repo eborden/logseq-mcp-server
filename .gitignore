@@ -27,3 +27,13 @@ measure-*.tsv
 
 # Personal Claude Code settings (permissions); never commit
 .claude/settings.local.json
+
+# Files LogSeq writes when tests/fixtures/graph is opened as a graph (#87).
+# The fixture is hand-written: only its pages, journals and logseq/config.edn are committed.
+# src/fixture-graph.test.ts checks these patterns.
+tests/fixtures/graph/logseq/*
+!tests/fixtures/graph/logseq/config.edn
+tests/fixtures/graph/pages/contents.md
+# Today's journal, created on open. Fixture journals are dated 2025 or earlier.
+tests/fixtures/graph/journals/202[6-9]_*
+tests/fixtures/graph/journals/20[3-9][0-9]_*
