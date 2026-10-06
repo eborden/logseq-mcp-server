@@ -149,12 +149,13 @@ describe('MCP prompts (#46)', () => {
       expect(text).toContain('start_date 20260928, end_date 20260930 and max_blocks 200');
       expect(text).toContain('blocks_truncated');
       // the warning's own start_date is the way on: the first day not shown, or the cut day itself (#174)
-      expect(text).toContain('call again with the same end_date and max_blocks and the start_date the warning gives');
+      expect(text).toContain('follow its howToFetchAll, which leads with this call: again with the same end_date, the max_blocks you last used and the start_date the warning gives');
       expect(text).toContain('or the day the cut fell inside, which repeats its kept blocks');
-      // 1000 gets saved to a file by hosts like Claude Code, so the warning's own suggestion is ignored (#186)
-      expect(text).toContain("Ignore the warning's advice to set max_blocks to 1000");
+      // The warning no longer suggests 1000 (#195), so the prompt has no sentence about ignoring it (#196)
+      expect(text).not.toContain('Ignore the warning');
       expect(text).not.toContain('max_blocks 1000');
-      expect(text).toContain('query that day alone at max_blocks 300, then keep paging from the next day at max_blocks 200');
+      expect(text).toContain("the warning names that day's block count: query that day alone at it when it is about 300 or less, then keep paging from the next day at max_blocks 200");
+      expect(text).toContain('keep the lower cap for the pages after');
       // the 200 in the paging line is the cap, not the default (the cut keeps the oldest days first)
       expect(text).toContain('the cut keeps the oldest days first');
       expect(text).not.toContain('the default of 200');
@@ -234,10 +235,10 @@ describe('MCP prompts (#46)', () => {
     it("follows the truncation warning's own start_date, not the days after it (#174)", () => {
       const text = textOf(getPrompt('monthly_summary', { month: '2026-08' }, WED) as any);
       expect(text).toContain('blocks_truncated');
-      expect(text).toContain('call again with the same arguments and the start_date it gives');
+      expect(text).toContain('follow its howToFetchAll, which leads with this call: again with the same arguments (max_blocks as you last used it) and the start_date it gives');
       expect(text).toContain('or the day the cut fell inside, which repeats its kept blocks');
-      expect(text).toContain("Ignore the warning's advice to set max_blocks to 1000");
-      expect(text).toContain('query it alone at max_blocks 300 (500 with include_content false), then keep paging from the next day');
+      expect(text).not.toContain('Ignore the warning');
+      expect(text).toContain("the warning names that day's block count: query it alone at that count when it is about 300 or less (500 with include_content false), then keep paging from the next day");
       expect(text).toContain('until a result has no warning or you have what the step needs');
       expect(text).toContain('Say in the gist if weeks after a cut went unread');
       expect(text).toContain("don't open the file or raise the cap");
