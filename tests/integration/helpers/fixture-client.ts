@@ -53,8 +53,13 @@ export async function connectFixture(): Promise<FixtureConnection> {
   return { client, config, configPath };
 }
 
+/** The journal days of the fixture's files (tests/fixtures/graph/journals/), oldest first. */
+export const FIXTURE_JOURNAL_DAYS = [
+  20240617, 20241231, 20250102, 20250106, 20250107, 20250108, 20250110, 20250113, 20250115, 20250203,
+];
+
 /** The last journal day the fixture's own files hold. Later days are journals LogSeq made. */
-export const LAST_FIXTURE_JOURNAL_DAY = 20250203;
+export const LAST_FIXTURE_JOURNAL_DAY = FIXTURE_JOURNAL_DAYS[FIXTURE_JOURNAL_DAYS.length - 1];
 
 /**
  * Journal days in the graph that are not fixture files: today's journal, which LogSeq creates on
