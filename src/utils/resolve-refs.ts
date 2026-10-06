@@ -39,7 +39,7 @@ export interface ResolveRefsOptions {
 export interface RefBearingBlock {
   uuid?: string;
   content?: string;
-  children?: any[];
+  children?: RefBearingBlock[];
 }
 
 // A pulled block or page row (see DatalogQueryBuilder.refTargets)
@@ -155,7 +155,7 @@ function walkDescendants(root: Row, childrenOf: Map<number, Row[]>, levels: numb
     members.push({ row, depth });
     if (depth >= levels) return;
     const children = childrenOf.get(row.id) ?? [];
-    for (const child of orderSiblings(children as any[]) as unknown as Row[]) walk(child, depth + 1);
+    for (const child of orderSiblings(children)) walk(child, depth + 1);
   };
   walk(root, 0);
   return members;
@@ -246,7 +246,7 @@ function ingest(
   for (const name of pageNames) {
     const entity = rows.find(row => row.name !== undefined && row.name.toLowerCase() === name) ?? null;
     const top = entity
-      ? (orderSiblings((childrenOf.get(entity.id) ?? []) as any[]) as unknown as Row[])
+      ? orderSiblings(childrenOf.get(entity.id) ?? [])
       : [];
     store.pages.set(name, { name, entity, top });
   }
@@ -264,8 +264,8 @@ class Renderer {
 
   /** Render `text`, whose own refs are at `depth`, pushing one entry per ref into `sink`. */
   render(text: string, path: string[], depth: number, sink: ResolvedRef[]): string {
-    return text.replace(tokenRegex(), (...m: any[]) => {
-      const token = toToken(m[0], m[1], m[2], m[3]);
+    return text.replace(tokenRegex(), (raw: string, blockEmbed?: string, pageEmbed?: string, ref?: string) => {
+      const token = toToken(raw, blockEmbed, pageEmbed, ref);
       return this.expand(token, path, depth, sink);
     });
   }
@@ -435,7 +435,8 @@ export async function resolveBlockRefs<T extends RefBearingBlock>(
       Object.assign(out, { resolvedContent, resolvedRefs: dedupeRefs(refs) });
     }
     if (Array.isArray(block.children)) {
-      out.children = block.children.map(child => annotate(child));
+      // A block's children are blocks of the same kind the caller passed in
+      out.children = block.children.map(child => annotate(child as T));
     }
     return out;
   };
