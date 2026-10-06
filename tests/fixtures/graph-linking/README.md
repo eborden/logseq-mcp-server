@@ -29,7 +29,7 @@ patterns-to-copy first, then the cases that must go to a question.
 |---|---|---|---|
 | `Priya Raghavan` | `Priya` with `alias:: Priya Raghavan` | `[[Priya Raghavan]]` | **The preferred pattern for any full name:** a full-name alias links it whole |
 | `Beacon's` | `Beacon` | `[[Beacon]]'s` | **The canonical safe substring case:** the leftover `'s` is inflection, not part of the noun |
-| `Devon` | `Devon` | `[[Devon]]` | Exact title match |
+| `Devon` | `Devon` | `[[Devon]]` | Exact title match on a bare first name, so it needs corroboration: `Atlas Squad` lists Devon beside Priya, whom the same sentence names |
 | `Kofi Mensah` | `Kofi` | ask; plain without an alias | **Regression: a proper-noun leftover fragments the name.** Corroborated by `Atlas Squad.manager`, and still not bracketable safely |
 | `Wren` | `Wren Calloway`, in `Atlas Squad.teamMembers` | ask; plain without an alias | **Regression: prose inside the title is not bracketable at all, however certain the identity** |
 | `Tobias` | `Tobias Fenn` | ask; plain unless confirmed | **Regression: a lone candidate is not evidence.** Identity only; the mechanics questions are `Kofi`'s and `Wren`'s |
