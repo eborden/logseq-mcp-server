@@ -635,6 +635,8 @@ scripts/
 ├── measure-api-calls.ts           - Counts API calls per tool against a live graph
 ├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
 ├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on the fixture graph (#118, macOS)
+├── generate-hub-fixture.ts        - Writes (or --check's) the hub fixture's files from fixture-hub/hub-graph.ts (#89)
+├── fixture-hub/hub-graph.ts       - Shape and counts of the hub fixture; src/fixture-hub.test.ts checks the committed files against it
 └── logseq-instance/
     ├── instance.ts                - Instance logic: paths, port, random token, launch, readiness, stop (deps injected)
     ├── local-storage.ts           - Writes a fresh profile's Chromium localStorage LevelDB (current-repo, http-server-enabled)
