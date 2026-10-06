@@ -97,9 +97,9 @@ export const TOOL_DESCRIPTIONS = {
 **Alternatives:** logseq_query_by_date_range for plain journal queries.`,
 
   // Editing gates (check a change before it is reported done)
-  logseq_check_links: `Check a [[link]] pass: after must be before plus brackets only. ok is true only if prose is unchanged once brackets are stripped, brackets balance and don't nest, no ref in before was dropped, and each [[term]] names a page or alias.
+  logseq_check_links: `Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.
 
-**Can't find:** a link to the wrong page, or a name split across a ref. It checks safety, not judgement.`,
+**Can't find:** a link to the wrong page, or a name split across a ref.`,
 } as const;
 
 export type ToolName = keyof typeof TOOL_DESCRIPTIONS;
