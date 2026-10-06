@@ -42,7 +42,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0023-mit-license](0023-mit-license.md) | License the project under MIT | accepted |
 | [0024-baseline-test-before-skill-edits](0024-baseline-test-before-skill-edits.md) | Baseline-test a skill before editing it | accepted |
 | [0025-rust-implementation-alongside-typescript](0025-rust-implementation-alongside-typescript.md) | Explore a Rust implementation alongside TypeScript, and re-scope the process docs per toolchain | accepted |
-| [0026-mutation-testing-ratchet](0026-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the unit suite | proposed |
+| [0026-mutation-testing-ratchet](0026-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the unit suite | accepted |
 
 ## File naming rule
 
