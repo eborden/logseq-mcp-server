@@ -238,6 +238,7 @@ async function rejection(name: string, args: Record<string, unknown>): Promise<s
 const REQUIRED: ReadonlyArray<readonly [string, string, Record<string, unknown>]> = [
   ['logseq_build_context', 'topic_name', { topic_name: 'Alice' }],
   ['logseq_get_concept_evolution', 'concept_name', { concept_name: 'Alice' }],
+  ['logseq_get_page_outline', 'page_name', { page_name: 'Alice' }],
 ];
 
 describe.each(REQUIRED)('%s rejects a bad %s before calling LogSeq', (tool, required, valid) => {
@@ -292,6 +293,10 @@ const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, stri
   ['logseq_get_concept_evolution', EVOLUTION, 'group_by', 'Month', /'group_by': "Month".*one of/s],
   ['logseq_get_concept_evolution', EVOLUTION, 'group_by', '', /'group_by': "".*one of/s],
   ['logseq_get_concept_evolution', EVOLUTION, 'group_by', 1, /'group_by': 1.*one of/s],
+  ['logseq_list_pages', {}, 'name_contains', 5, /'name_contains': 5.*a string, not a number.*Example: name_contains: "..."/s],
+  ['logseq_list_pages', {}, 'name_contains', true, /'name_contains': true.*a string, not a boolean/s],
+  ['logseq_list_pages', {}, 'name_contains', ['al'], /'name_contains'.*a string, not an array/s],
+  ['logseq_list_pages', {}, 'name_contains', { text: 'al' }, /'name_contains'.*a string, not an object/s],
 ];
 
 describe('wrong-typed options are rejected before calling LogSeq', () => {
@@ -304,6 +309,7 @@ describe('aliases still fold in before parsing', () => {
   it.each([
     ['logseq_build_context', 'topic_name', 'page_name'],
     ['logseq_get_concept_evolution', 'concept_name', 'name'],
+    ['logseq_get_page_outline', 'page_name', 'page'],
   ])(
     '%s: %s takes the %s alias, and a malformed alias value is rejected like the canonical one',
     async (tool, canonical, alias) => {
@@ -331,7 +337,13 @@ describe('null now reads as absent where it used to be a value (#60)', () => {
   });
 });
 
-describe('numbers that pass the parser keep their old meaning', () => {
+describe('tools without parameters ignore whatever they are sent', () => {
+  it.each(['logseq_get_graph_info', 'logseq_get_current_context'])('%s', async tool => {
+    await expectSame(tool, { page_name: 5, format: 'html', limit: null }, {});
+  });
+});
+
+describe('values that pass the parser keep their old meaning', () => {
   it('build_context: a negative max_blocks still slices from the end (current, not endorsed)', async () => {
     const capped = await body('logseq_build_context', { ...CONTEXT, max_blocks: -1 });
     expect(capped.directBlocks).toHaveLength(1);
@@ -340,6 +352,10 @@ describe('numbers that pass the parser keep their old meaning', () => {
 
   it('build_context: a fractional max_blocks is cut down to a whole number of blocks', async () => {
     expect((await body('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).directBlocks).toHaveLength(1);
+  });
+
+  it('list_pages: an empty name_contains is still no filter', async () => {
+    await expectSame('logseq_list_pages', { name_contains: '' }, {});
   });
 
   it('get_concept_evolution: a start_date of 0 is still no bound', async () => {

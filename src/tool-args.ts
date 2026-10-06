@@ -64,6 +64,10 @@ export const getPageArgs = z.object({
   format: formatArg,
 });
 
+export const getPageOutlineArgs = z.object({
+  page_name: z.string().describe('Page name, alias, or ISO date (2025-01-01) for a journal'),
+});
+
 export const getBacklinksArgs = z.object({
   page_name: z.string().describe('Page to get backlinks for (name, alias or ISO date)'),
 });
@@ -215,3 +219,15 @@ export const getConceptEvolutionArgs = z.object({
   end_date: z.number().optional().describe('Optional end date in YYYYMMDD format'),
   group_by: z.enum(GROUP_BY_PERIODS).optional().describe('Optional grouping period'),
 });
+
+/** An empty `name_contains` is no filter, as the tool always read it. */
+export const listPagesArgs = z.object({
+  name_contains: z.string().optional().describe('Filter page names containing this text (case-insensitive)'),
+});
+
+/**
+ * No parameters. Parsed anyway, so these handlers read no raw arguments either and
+ * their inputSchema comes from a schema like every other tool's. Any field is ignored.
+ */
+export const getGraphInfoArgs = z.object({});
+export const getCurrentContextArgs = z.object({});

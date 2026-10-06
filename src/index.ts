@@ -40,7 +40,7 @@ import { ambiguousPageResult } from './utils/resolve-page.js';
 import { compactQueryContext, compactTopicContext } from './utils/compact.js';
 import { renderNetwork, renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
-import { parseArgs, toInputSchema } from './utils/parse-args.js';
+import { parseArgs, toInputSchema, type ToolInputSchema } from './utils/parse-args.js';
 import {
   buildContextArgs,
   getBacklinksArgs,
@@ -48,7 +48,11 @@ import {
   getConceptEvolutionArgs,
   getConceptNetworkArgs,
   getContextForQueryArgs,
+  getCurrentContextArgs,
+  getGraphInfoArgs,
   getPageArgs,
+  getPageOutlineArgs,
+  listPagesArgs,
   queryByDateRangeArgs,
   queryByPropertyArgs,
   searchBlocksArgs,
@@ -72,6 +76,14 @@ function readOnlyAnnotations(title: string) {
   return { title, ...READ_ONLY_HINTS };
 }
 
+/**
+ * These tools have always advertised `required: []`, which zod leaves out when no
+ * field is required. Kept so tools/list doesn't change; a generated `required` wins.
+ */
+function withEmptyRequired(schema: ToolInputSchema): ToolInputSchema {
+  return { required: [], ...schema };
+}
+
 // Define MCP tool schemas for all 15 tools
 const TOOLS = [
   {
@@ -84,16 +96,7 @@ const TOOLS = [
     name: 'logseq_get_page_outline',
     description: TOOL_DESCRIPTIONS.logseq_get_page_outline,
     annotations: readOnlyAnnotations('Get Page Outline'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        page_name: {
-          type: 'string',
-          description: 'Page name, alias, or ISO date (2025-01-01) for a journal',
-        },
-      },
-      required: ['page_name'],
-    },
+    inputSchema: toInputSchema(getPageOutlineArgs),
   },
   {
     name: 'logseq_get_backlinks',
@@ -159,11 +162,7 @@ const TOOLS = [
     name: 'logseq_get_graph_info',
     description: TOOL_DESCRIPTIONS.logseq_get_graph_info,
     annotations: readOnlyAnnotations('Get Graph Info'),
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    inputSchema: withEmptyRequired(toInputSchema(getGraphInfoArgs)),
   },
   {
     name: 'logseq_get_current_context',
@@ -171,26 +170,13 @@ const TOOLS = [
     // Read-only like every other tool, but not idempotent: the result depends on
     // what the user has open in the LogSeq UI, which changes between calls.
     annotations: { ...readOnlyAnnotations('Get Current Context'), idempotentHint: false },
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    inputSchema: withEmptyRequired(toInputSchema(getCurrentContextArgs)),
   },
   {
     name: 'logseq_list_pages',
     description: TOOL_DESCRIPTIONS.logseq_list_pages,
     annotations: readOnlyAnnotations('List Pages'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name_contains: {
-          type: 'string',
-          description: 'Filter page names containing this text (case-insensitive)',
-        },
-      },
-      required: [],
-    },
+    inputSchema: withEmptyRequired(toInputSchema(listPagesArgs)),
   },
 ];
 
@@ -262,7 +248,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_page_outline': {
-          const pageName = args?.page_name as string;
+          const { page_name: pageName } = parseArgs(getPageOutlineArgs, args);
           const result = await getPageOutline(client, pageName);
           return {
             content: [
@@ -497,6 +483,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_graph_info': {
+          parseArgs(getGraphInfoArgs, args);
           const result = await getGraphInfo(client);
           return {
             content: [
@@ -509,6 +496,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_current_context': {
+          parseArgs(getCurrentContextArgs, args);
           const result = await getCurrentContext(client);
           return {
             content: [
@@ -521,9 +509,8 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_list_pages': {
-          const result = await listPages(client, {
-            nameContains: args?.name_contains as string | undefined,
-          });
+          const { name_contains: nameContains } = parseArgs(listPagesArgs, args);
+          const result = await listPages(client, { nameContains });
           return {
             content: [
               {
