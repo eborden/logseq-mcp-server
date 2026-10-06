@@ -6,6 +6,7 @@ import { createServer } from '../../src/index.js';
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, searchBlocksWithMeta } from '../../src/tools/search-blocks.js';
 import { DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS } from '../../src/tools/get-context-for-query.js';
 import { DEFAULT_LIST_PAGES_LIMIT, MAX_LIST_PAGES_LIMIT } from '../../src/tools/list-pages.js';
+import { DEFAULT_MAX_ENTRIES, MAX_ENTRIES } from '../../src/tools/get-concept-evolution.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -21,6 +22,10 @@ import { connectFixture } from './helpers/fixture-client.js';
  * get_context_for_query's maximum of 100. list_pages needs more than 200
  * non-journal pages, which the hub fixture's pages supply. Assertions on page
  * names compare booleans or counts, so a failure prints no names from the graph.
+ * get_concept_evolution's maximum of 500 mentions is out of reach: the hub page has
+ * ~140 mentions, the most of any fixture page. Through MCP only the default cut and
+ * the clamp can be seen; the cut at 500 is covered by the unit tests, which feed the
+ * tool 600 mentions.
  */
 
 interface Meta {
@@ -247,6 +252,62 @@ describe('result caps (#61)', () => {
       }
       expect(seen.length, 'paging returns every page').toBe(first.total);
       expect(new Set(seen).size, 'paging returns no page twice').toBe(first.total);
+    });
+  });
+
+  describe('logseq_get_concept_evolution max_entries (default 100, max 500)', () => {
+    // The hub page's own blocks plus every block that links it
+    const CONCEPT = 'hub central';
+
+    interface EvolutionBody extends Partial<Meta> {
+      timeline: Array<{ date: number | null; blocks: unknown[] }>;
+      summary: { totalMentions: number };
+    }
+
+    async function evolve(max?: number): Promise<{ text: string; body: EvolutionBody }> {
+      const args = max === undefined ? { concept_name: CONCEPT } : { concept_name: CONCEPT, max_entries: max };
+      const text = (await call('logseq_get_concept_evolution', args)).content[0].text;
+      return { text, body: JSON.parse(text) as EvolutionBody };
+    }
+
+    const mentions = (body: EvolutionBody) => body.timeline.reduce((sum, entry) => sum + entry.blocks.length, 0);
+
+    it('never returns more than the cap, reports every cut, and clamps to the same mentions', async () => {
+      const atMax = await evolve(MAX_ENTRIES);
+      const total = mentions(atMax.body);
+      expect(
+        total,
+        `The hub page has ${total} mentions, not more than the default of ${DEFAULT_MAX_ENTRIES}, ` +
+          'so the cap was never tested. See tests/fixtures/README.md'
+      ).toBeGreaterThan(DEFAULT_MAX_ENTRIES);
+      expect(total, 'the fixture must stay under the maximum for this test to see every mention').toBeLessThan(MAX_ENTRIES);
+
+      // At the maximum nothing is cut, so there is no meta at all
+      expect(atMax.body.summary.totalMentions).toBe(total);
+      expect(atMax.body.warnings).toBeUndefined();
+      expect(atMax.body.hasMore).toBeUndefined();
+
+      // A value above the maximum is clamped to it, not rejected
+      expect((await evolve(5000)).text).toBe(atMax.text);
+
+      for (const max of [undefined, 1, 50, DEFAULT_MAX_ENTRIES, 101, total - 1]) {
+        const { body } = await evolve(max);
+        const label = `max_entries ${max ?? 'default'}`;
+        const effective = Math.min(max ?? DEFAULT_MAX_ENTRIES, MAX_ENTRIES);
+        expect(mentions(body), label).toBe(effective);
+        expect(mentions(body), label).toBeLessThanOrEqual(MAX_ENTRIES);
+        expect(body.summary.totalMentions, `${label}: the summary counts every mention`).toBe(total);
+        expect(body.totals, label).toEqual({ mentions: total });
+        expect(body.warnings!.map(w => w.code), label).toEqual(['entries_truncated']);
+        // Below the maximum the warning says which value gets the rest, and it is within the maximum
+        expect(body.hasMore, label).toBe(true);
+        expect(body.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_entries to ${total}\\b`));
+        expectNoSuggestionPast(body as Meta, 'max_entries', MAX_ENTRIES);
+      }
+
+      // At the cap exactly, nothing is cut
+      const exact = await evolve(total);
+      expect(exact.text).toBe(atMax.text);
     });
   });
 });
