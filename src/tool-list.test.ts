@@ -49,6 +49,8 @@ import { LogseqClient } from './client.js';
  * "Can't find" line), bringing it to 17,134, so the budget was raised once to 19,700 (17,134 plus ~15%): the
  * remaining #61 rows add parameters to query_by_date_range, get_backlinks (two), query_by_property and
  * search_by_relationship, about 600 characters in all, which leaves about 1,960 characters of headroom after them.
+ * `limit` on logseq_query_by_property (#61) added about 160 characters net (the parameter and a clause in two
+ * description lines, less a trimmed "Matching" line), bringing it to 17,754 across 16 tools; the budget was not raised.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,
  * and say in the PR description why the extra tokens are worth paying for every session.
