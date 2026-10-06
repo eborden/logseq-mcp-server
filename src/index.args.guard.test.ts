@@ -127,9 +127,24 @@ describe('every advertised parameter is parsed before any LogSeq call (#60)', ()
 describe('src/index.ts reads no raw arguments (#60)', () => {
   const source = readFileSync(fileURLToPath(new URL('./index.ts', import.meta.url)), 'utf8');
 
-  it('has no args?.x reads', () => {
-    // `args.` but not `tool-args.js`
-    expect(source).not.toMatch(/(?<![\w-])args\??\./);
+  /** The identifier `args` (or `rawArgs`), not `tool-args.js`, `parseArgs` or `rawArgs`. */
+  const uses = (identifier: string) => source.match(new RegExp(`(?<![\\w-])${identifier}(?![\\w-])`, 'g')) ?? [];
+
+  it('uses args only to parse it: parseArgs(<schema>, args), one call per tool', () => {
+    const declaration = 'const args = resolveParamAliases(name, rawArgs);';
+    expect(source.split(declaration)).toHaveLength(2);
+    const parseCalls = source.match(/\bparseArgs\(\w+Args, args\)/g) ?? [];
+    // Everything else (args.x, args['x'], { x } = args, a cast) is a raw read
+    const rest = source.replace(declaration, '').replace(/\bparseArgs\(\w+Args, args\)/g, '');
+    expect(rest.match(/(?<![\w-])args(?![\w-])/g) ?? []).toEqual([]);
+    expect(parseCalls).toHaveLength(15);
+    expect(parseCalls).toHaveLength(uses('args').length - 1);
+  });
+
+  it('uses rawArgs only to fold the aliases in', () => {
+    expect(uses('rawArgs')).toHaveLength(2);
+    expect(source).toContain('const { name, arguments: rawArgs } = request.params;');
+    expect(source).toContain('resolveParamAliases(name, rawArgs)');
   });
 
   it('has no `as any` casts', () => {
