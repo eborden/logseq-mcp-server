@@ -14,6 +14,7 @@ import {
   MAX_BLOCKS_PER_PAGE,
   MAX_PAGES,
 } from '../../src/tools/get-backlinks.js';
+import { DEFAULT_PROPERTY_LIMIT, MAX_PROPERTY_LIMIT } from '../../src/tools/query-by-property.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.js';
 
 /**
@@ -41,6 +42,9 @@ import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.j
  * the hub has 61 source pages and no page has more than 12 linking blocks. Through MCP the
  * default cuts, the values below the maximum and the clamp can be seen; the cut at each
  * maximum is covered by the unit tests, which feed the tool 150 pages and 80 blocks.
+ * query_by_property's default of 100 and maximum of 500 are out of reach too: no property value sits
+ * on more than a few fixture blocks. Through MCP small limits stand in for the default, and the unit
+ * tests feed the tool 600 matches for the cut at the maximum.
  */
 
 interface Meta {
@@ -583,6 +587,73 @@ describe('result caps (#61)', () => {
       const one = await backlinks(ALIASED, undefined, 1);
       expect(blockUuids(one.results)).toEqual(blockUuids(full.results).map(uuids => uuids.slice(0, 1)));
       expect(codes(one)).toEqual(['page_blocks_truncated']);
+    });
+  });
+
+  describe('logseq_query_by_property limit (default 100, max 500)', () => {
+    // No fixture property value sits on more than a handful of blocks, so the default of 100 and
+    // the maximum of 500 are out of reach. Through MCP small limits see the same code with a
+    // smaller bound, and the clamp shows above the maximum; the cut at 500 is covered by the
+    // unit tests, which feed the tool 600 matches.
+    const KEY = 'type';
+    const VALUE = 'project';
+
+    interface PropertyBody {
+      text: string;
+      results: Array<{ uuid: string }>;
+      /** The second content block's meta, absent when the tool sent none */
+      meta?: Partial<Meta>;
+    }
+
+    async function byProperty(limit?: number): Promise<PropertyBody> {
+      const result = await call('logseq_query_by_property', {
+        property_key: KEY,
+        property_value: VALUE,
+        ...(limit === undefined ? {} : { limit }),
+      });
+      return {
+        text: result.content[0].text,
+        results: JSON.parse(result.content[0].text) as Array<{ uuid: string }>,
+        meta: result.content[1] ? (JSON.parse(result.content[1].text) as { meta: Partial<Meta> }).meta : undefined,
+      };
+    }
+
+    const uuids = (body: PropertyBody) => body.results.map(block => block.uuid);
+
+    it('never returns more blocks than limit, keeps the same first blocks, and reports every cut', async () => {
+      const full = await byProperty(MAX_PROPERTY_LIMIT);
+      const total = full.results.length;
+      expect(total, `the fixture needs at least 3 blocks with ${KEY}:: ${VALUE} to see a cut. See tests/fixtures/README.md`).toBeGreaterThanOrEqual(3);
+      expect(total, 'the fixture must stay under the default cap for the default to return every match').toBeLessThanOrEqual(DEFAULT_PROPERTY_LIMIT);
+      // Nothing is cut, so the maximum sends no warning and no totals
+      expect(full.meta?.warnings ?? []).toEqual([]);
+      expect(full.meta?.totals).toBeUndefined();
+
+      // The default and a value above the maximum are the full result, byte for byte
+      expect((await byProperty()).text).toBe(full.text);
+      expect((await byProperty(5000)).text).toBe(full.text);
+
+      for (const limit of [0, 1, 2, total - 1, total, total + 1, DEFAULT_PROPERTY_LIMIT]) {
+        const body = await byProperty(limit);
+        const label = `limit ${limit}`;
+        expect(body.results.length, label).toBeLessThanOrEqual(MAX_PROPERTY_LIMIT);
+        expect(body.results.length, label).toBe(Math.min(limit, total));
+        // The first blocks of the full list, in its order
+        expect(uuids(body), label).toEqual(uuids(full).slice(0, limit));
+
+        if (limit >= total) {
+          expect(body.text, `${label}: nothing is cut, so the result is the full one`).toBe(full.text);
+          expect(body.meta?.warnings ?? [], label).toEqual([]);
+          continue;
+        }
+        expect(body.meta!.warnings!.map(w => w.code), label).toEqual(['results_truncated']);
+        expect(body.meta!.totals, label).toEqual({ matches: total });
+        // Below the maximum the warning says which value gets the rest, and it is within the maximum
+        expect(body.meta!.hasMore, label).toBe(true);
+        expect(body.meta!.warnings![0].howToFetchAll, label).toBe(`Set limit to ${total} (or higher) to get all ${total}.`);
+        expectNoSuggestionPast(body.meta as Meta, 'limit', MAX_PROPERTY_LIMIT);
+        expect(body.meta!.warnings![0].message, label).toContain('the first ones listed, not ranked');
+      }
     });
   });
 });
