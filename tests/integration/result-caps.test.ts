@@ -410,46 +410,43 @@ describe('result caps (#61)', () => {
         expect(how, label).not.toContain('Set max_blocks');
         expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
 
-        // The warning names the last day kept, and a query from that day reaches everything after the cut
+        // The warning names the last day kept
         const lastDay = body.entries[body.entries.length - 1]?.date;
         if (lastDay === undefined) continue;
         expect(body.warnings![0].message, label).toContain(`the entries end at ${lastDay}`);
-        const resumed = (await range(MAX_DATE_RANGE_BLOCKS, { start_date: lastDay })).body;
-        const expected = atMax.body.entries.filter(e => e.date >= lastDay).flatMap(e => flatten(e.blocks));
-        expect(uuidsOf(resumed), `${label}: resuming at the last kept day`).toEqual(expected);
 
-        // The same query at the same cap must move forward, or the advice could loop: it reaches
-        // blocks the first call did not return, unless the last kept day alone filled the cap
-        const keptBefore = uuidsOf({ ...body, entries: body.entries.slice(0, -1) }).length;
-        const again = uuidsOf((await range(max, { start_date: lastDay })).body);
-        if (keptBefore > 0) {
-          const seen = new Set(uuidsOf(body));
-          expect(again.some(uuid => !seen.has(uuid)), `${label}: resuming at the same cap reaches new blocks`).toBe(true);
-        } else {
-          expect(again, `${label}: the first day alone fills the cap, so resuming there repeats it`).toEqual(uuidsOf(body));
+        // Follow the warning literally, call by call: the start_date it names, the same end of the range
+        // and the same max_blocks (or the day alone at the count it names). Every call must reach blocks
+        // not yet seen, so the advice can't loop, and the calls together must read every block.
+        const everything = atMax.body.entries.flatMap(e => flatten(e.blocks));
+        const seen = new Set(uuidsOf(body));
+        let warning = body.warnings![0];
+        let calls = 1;
+        while (warning.howToFetchAll) {
+          expect(++calls, `${label}: following the warning ends`).toBeLessThanOrEqual(everything.length + 1);
+          const how = warning.howToFetchAll;
+          const alone = /To read it whole, call again with start_date (\d+), end_date (\d+) and max_blocks (\d+)\./.exec(how);
+          const paged = /^Call again with start_date (\d+), the same end_date \((\d+)\) and the same max_blocks/.exec(how);
+          expect(alone ?? paged, `${label}: a call the warning names: ${how}`).not.toBeNull();
+          const before = seen.size;
+          let next: RangeBody | undefined;
+          if (alone) {
+            const day = (await range(Number(alone[3]), { start_date: Number(alone[1]), end_date: Number(alone[2]) })).body;
+            expect(day.warnings, `${label}: the day alone at max_blocks ${alone[3]} is whole`).toBeUndefined();
+            uuidsOf(day).forEach(uuid => seen.add(uuid));
+            const then = /Then continue with start_date (\d+), the same end_date \((\d+)\) and max_blocks (\d+)/.exec(how);
+            if (then) next = (await range(Number(then[3]), { start_date: Number(then[1]), end_date: Number(then[2]) })).body;
+          } else {
+            expect(Number(paged![2]), `${label}: the same end_date`).toBe(END);
+            next = (await range(max, { start_date: Number(paged![1]), end_date: Number(paged![2]) })).body;
+          }
+          if (next) uuidsOf(next).forEach(uuid => seen.add(uuid));
+          expect(seen.size, `${label}: the call reaches blocks not seen before`).toBeGreaterThan(before);
+          if (!next) break;
+          if (!next.warnings) break;
+          warning = next.warnings[0];
         }
-
-        // The start_date the warning names is the last kept day (it repeats its kept blocks) or the day after it
-        const named = Number(/start_date (\d+)/.exec(how)![1]);
-        const nextEntry = atMax.body.entries.map(e => e.date).find(date => date > lastDay);
-        expect([lastDay, nextEntry], `${label}: the named start_date`).toContain(named);
-        if (how.startsWith('To read it whole')) {
-          // The first day alone fills the cap: the day alone, at the cap the warning names, returns it whole
-          expect(keptBefore, label).toBe(0);
-          expect(named, label).toBe(lastDay);
-          const dayCap = Number(/max_blocks (\d+)\./.exec(how)![1]);
-          const day = (await range(dayCap, { start_date: lastDay, end_date: lastDay })).body;
-          expect(uuidsOf(day), `${label}: the day alone at max_blocks ${dayCap}`).toEqual(
-            atMax.body.entries.filter(e => e.date === lastDay).flatMap(e => flatten(e.blocks))
-          );
-          expect(day.warnings, `${label}: the day alone is whole`).toBeUndefined();
-        } else {
-          // Paging from the named day reaches every block from that day on
-          const paged = (await range(MAX_DATE_RANGE_BLOCKS, { start_date: named })).body;
-          expect(uuidsOf(paged), `${label}: paging from ${named}`).toEqual(
-            atMax.body.entries.filter(e => e.date >= named).flatMap(e => flatten(e.blocks))
-          );
-        }
+        expect([...seen].sort(), `${label}: following the warning reads every block`).toEqual([...everything].sort());
 
         // A kept block that lost children is marked, and the warning names the marker exactly then
         const marked = JSON.stringify(body.entries).includes('"childrenTruncated":true');
