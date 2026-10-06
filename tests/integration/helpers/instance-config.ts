@@ -60,7 +60,7 @@ export function resolveFixtureConfigPath(
   if (exists(instance)) return instance;
   throw new FixtureConfigError(
     `No fixture instance is running (no ${instance}) and ${CONFIG_PATH_ENV} is unset. ` +
-      'The integration tests never fall back to ~/.logseq-mcp/config.json.'
+      'The integration tests and probe-constraints never fall back to ~/.logseq-mcp/config.json.'
   );
 }
 
