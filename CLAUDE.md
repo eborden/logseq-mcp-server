@@ -2,14 +2,14 @@
 
 ## Privacy: Never Commit Details From the Personal Graph
 
-The LogSeq instance this server is developed against is the maintainer's **personal** graph. The measure scripts read real data from it when run with the default config, and so does anything else pointed at port 12315. The integration tests never do: they run against the committed fixture graph only (#90). None of the personal graph's data may leave the machine through this repo or its GitHub project.
+The LogSeq instance this server is developed against is the maintainer's **personal** graph, on port 12315. **`scripts/measure-api-calls.ts` and `scripts/measure-output-size.ts` read real data from it, by design**: with no `LOGSEQ_MCP_CONFIG` they load `~/.logseq-mcp/config.json`, because the measurements in this file are a real-graph baseline. So does anything else pointed at port 12315. The integration tests and `scripts/probe-constraints.ts` never contact it: they use `LOGSEQ_MCP_CONFIG` or this worktree's fixture instance, never fall back to `~/.logseq-mcp/config.json`, and the tests refuse port 12315 before any network call (#90). None of the personal graph's data may leave the machine through this repo or its GitHub project.
 
 **Never put any of the following in committed files** (code, tests, fixtures, docs, skills, CLAUDE.md), **commit messages, GitHub issues, PR descriptions or comments:**
 - Page names, journal titles, tags or property values from the graph
 - Block content, quotes or paraphrases of what the graph says
 - People's names (journals mention real colleagues, friends and family)
 - Dates of specific journal entries, or anything that reveals what happened on a given day
-- Raw output from `scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`, `scripts/measure-output-size.ts` or integration-test runs. Their output includes real page names.
+- Raw output from `scripts/measure-api-calls.ts` or `scripts/measure-output-size.ts` run on the real graph, or from `scripts/probe-constraints.ts` pointed at it with `LOGSEQ_MCP_CONFIG`. Their output includes real page names.
 
 **Do instead:**
 - Use made-up examples: `"Alice"`, `"Bob"`, `"my page"`, `"project atlas"`, `"20250101"`.
@@ -214,7 +214,7 @@ Re-run the script after changing any of these tools, and update this table.
 
 LogSeq's Datalog implementation (via `logseq.DB.datascriptQuery`) has significant limitations compared to standard DataScript. Understanding these constraints is essential for writing working queries.
 
-Every constraint below marked **Verified** is reproduced by `npx tsx scripts/probe-constraints.ts` (read-only, needs a running LogSeq). Re-run it after LogSeq upgrades.
+Every constraint below marked **Verified** is reproduced by `npx tsx scripts/probe-constraints.ts` (read-only) against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start` first; the probe never falls back to the personal config). Row counts in the tables below come from the real graph and differ on the fixture. Re-run it after LogSeq upgrades.
 
 ### 1. `:in` Parameters Need EDN-Encoded Inputs
 
@@ -479,7 +479,7 @@ Quick reference checklist for future work:
 - [ ] A hung request is aborted after `timeoutMs` (config field, default 30000, applied per `callAPI` call) and surfaces as `LogSeqTimeoutError`.
 - [ ] `logseq.Editor.getEditingBlockSelection` doesn't exist. Use `getSelectedBlocks`, which returns `null` when nothing is selected.
 - [ ] Without `includeChildren`, Editor API blocks carry `children` as unfetched `["uuid", "<id>"]` tuples, not block entities. `getCurrentPage` can return `null` while `getCurrentBlock` returns a block, or return a block when zoomed in. `get_current_context` handles all three.
-- [ ] `LOGSEQ_MCP_CONFIG=<absolute path>` replaces `~/.logseq-mcp/config.json` for the server and the integration tests (`resolveConfigPath` in `src/config.ts`; a relative path is a `ConfigValidationError`). Load the config through `resolveConfigPath()`, never a hard-coded path. `scripts/logseq-instance.ts start` prints the value for this worktree's instance (#118).
+- [ ] `LOGSEQ_MCP_CONFIG=<absolute path>` replaces `~/.logseq-mcp/config.json` for the server (`resolveConfigPath` in `src/config.ts`; a relative path is a `ConfigValidationError`). Load the config through `resolveConfigPath()`, never a hard-coded path. The integration tests and the probe use `resolveFixtureConfigPath()` (`tests/integration/helpers/instance-config.ts`) instead, which has no fallback to `~/.logseq-mcp/config.json`. `scripts/logseq-instance.ts start` prints the value for this worktree's instance (#118).
 - [ ] A fresh LogSeq profile opens the demo graph with no API server. Seeding it takes the localStorage keys `current-repo` and `http-server-enabled` plus an empty graph cache file, and isolating `~/.logseq` takes both HOME and `CFFIXED_USER_HOME`. Details: `scripts/logseq-instance/local-storage.ts` and `instance.ts`. The API answers CORS `*` and can run commands, so an instance's token is random per start and never committed.
 - [ ] LogSeq writes to the graph it opens: it rewrites `logseq/config.edn` and adds `logseq/bak/`, today's journal and `pages/contents.md`. The instance therefore opens a copy, `.logseq-instance/graph/`, made fresh on every `start` without `logseq/bak/`, and the committed fixture is only read (#151). `stop` leaves the copy for inspection.
 
@@ -525,11 +525,11 @@ it('returns every neighbour of a page under the caps', async () => {
 - **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026.
 - **Caps that pick by `:db/id` order** are stable in count, not by name; the fixture README's hub section says which is which.
 - **Invariants** that hold for any graph stay as property tests (`tests/integration/properties/`), run over a fixed list of fixture pages.
-- **A known bug** is an `it.fails` case that names its issue.
+- **A known bug** is a plain `it` that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails`, which also passes when the body throws for another reason.
 
 **Test Categories:**
 - **Unit tests** (`npx vitest run src`): Query builders, data transformations, mocked clients
-- **Integration tests** (`npm run test:integration`, ~190 in 20 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool
+- **Integration tests** (`npm run test:integration`, ~190 in 21 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool
 - Note: `npm test` runs the unit tests, then `npm run test:integration`, so it needs the fixture instance running. The default vitest config leaves `tests/integration/` out.
 - **Property tests**: Universal invariants, equivalence validation (`tests/integration/properties/`, and the crawl oracles in `query-by-property` and `temporal-queries`)
 
@@ -667,7 +667,7 @@ npx tsx scripts/logseq-instance.ts stop
 git status                        # sanity check: nothing under tests/fixtures/graph/ (the instance opens a copy, #151)
 
 # Verify Datalog/API constraints (read-only); the fixture reproduces all of them
-LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npx tsx scripts/probe-constraints.ts
+npx tsx scripts/probe-constraints.ts   # uses the running instance; never the personal config
 
 # Count API calls per tool (read-only): the default config is the real-graph baseline; the fixture gives reproducible counts
 npx tsx scripts/measure-api-calls.ts
@@ -738,6 +738,6 @@ Datalog is how this project gets its performance gains (see "Current Implementat
 5. **Handle empty results** gracefully, but never turn errors into empty results
 6. **Batch, don't crawl**: one query or `ground`-batched queries, never one call per page
 
-When a constraint seems to block you, re-run `scripts/probe-constraints.ts` before working around it.
+When a constraint seems to block you, re-run `scripts/probe-constraints.ts` against the fixture instance before working around it.
 
 When in doubt, look at `src/datalog/queries.ts` for working patterns and `src/tools/build-context.ts` or `src/tools/get-concept-network.ts` for implementation examples.
