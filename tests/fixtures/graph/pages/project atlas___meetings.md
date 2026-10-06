@@ -1,0 +1,4 @@
+- Kickoff with [[Alice]] and [[Bob]] #meeting
+	- Agreed to ship the read-only view first
+- Second check-in #meeting
+	- The importer works for two floors out of three

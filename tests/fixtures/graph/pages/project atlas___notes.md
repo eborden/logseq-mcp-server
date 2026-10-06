@@ -1,0 +1,3 @@
+- Notes on [[project atlas]]: the floor plan importer reads one sheet per floor.
+- Room names follow the pattern floor number, then room number.
+- No other page is named just "notes", so that leaf name resolves to this page alone.
