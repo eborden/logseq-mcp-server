@@ -1,22 +1,57 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, ResultMeta } from '../types.js';
-import { buildResultMeta } from '../utils/result-meta.js';
+import { PageEntity, ResultMeta, ResultWarning } from '../types.js';
+import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+
+/** Pages returned when `limit` is absent (#61). */
+export const DEFAULT_LIST_PAGES_LIMIT = 200;
+
+/**
+ * Most pages one MCP call returns (#61). A larger `limit` is clamped to it, as
+ * `limit` on logseq_search_blocks is. `offset` reaches the pages past it, so a
+ * cut at the maximum still has a `howToFetchAll` (the next offset).
+ */
+export const MAX_LIST_PAGES_LIMIT = 1000;
+
+/** Pages skipped when `offset` is absent. */
+export const DEFAULT_LIST_PAGES_OFFSET = 0;
 
 /**
  * `hasMore` and `warnings` are present only when LogSeq returned no page list
- * (`null`), see {@link listPages}. A normal result, including a genuinely empty
- * graph, carries neither.
+ * (`null`) or `limit` cut the list, see {@link listPages}. A result that holds
+ * every matching page from `offset` on, including a genuinely empty graph,
+ * carries neither.
  */
 export interface ListPagesResult extends Partial<Pick<ResultMeta, 'hasMore' | 'warnings'>> {
   pages: string[];
+  /** Every matching page, before `offset` and `limit` */
   total: number;
 }
 
+export interface ListPagesOptions {
+  nameContains?: string;
+  /** Pages to return, clamped to 0..`MAX_LIST_PAGES_LIMIT` and floored */
+  limit?: number;
+  /** Matching pages to skip first, in name order, floored at 0 */
+  offset?: number;
+}
+
+/**
+ * Non-journal page names in name order, `offset` pages in, at most `limit` of
+ * them (#61). `total` counts every matching page, whatever `offset` and `limit`
+ * are. When pages remain after the ones returned, a `pages_truncated` warning
+ * says how to get them: raise `limit` when that fits under the maximum, and
+ * set `offset` to the next page in any case, so `hasMore` is true. One API call
+ * whatever the values: `getAllPages` returns every page, and the window is cut
+ * here.
+ */
 export async function listPages(
   client: LogseqClient,
-  options: { nameContains?: string } = {}
+  options: ListPagesOptions = {}
 ): Promise<ListPagesResult> {
   const { nameContains } = options;
+  const requested = Math.floor(options.limit ?? DEFAULT_LIST_PAGES_LIMIT);
+  const limit = Math.min(Math.max(0, requested), MAX_LIST_PAGES_LIMIT);
+  const offset = Math.max(0, Math.floor(options.offset ?? DEFAULT_LIST_PAGES_OFFSET));
 
   const allPages = await client.callAPI<PageEntity[] | null>(
     'logseq.Editor.getAllPages'
@@ -53,9 +88,38 @@ export async function listPages(
     filtered = filtered.filter(p => p.name.toLowerCase().includes(lower));
   }
 
-  const pages = filtered
+  const names = filtered
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(p => p.originalName || p.name);
 
-  return { pages, total: pages.length };
+  const total = names.length;
+  const pages = names.slice(offset, offset + limit);
+  if (offset + pages.length >= total) return { pages, total };
+
+  return { pages, total, ...buildResultMeta([pagesTruncated(pages.length, total, offset, requested)]) };
+}
+
+/**
+ * The `pages_truncated` warning for `shown` pages from `offset` of `total`.
+ * Counted from `offset`, so "get all N" means the N pages from there on. The
+ * next offset is offered below the maximum too, where raising `limit` also works.
+ */
+function pagesTruncated(shown: number, total: number, offset: number, requested: number): ResultWarning {
+  const remaining = total - offset;
+  // With limit 0 there is no next page to name: the offset would not move
+  const page = shown > 0 ? `set offset to ${offset + shown} for the next page.` : 'page through them with offset.';
+  const warning = cappedTruncationWarning({
+    what: offset > 0 ? `pages from offset ${offset}` : 'pages',
+    shown,
+    total: remaining,
+    param: 'limit',
+    max: MAX_LIST_PAGES_LIMIT,
+    narrower: `Or ${page}`,
+    requested,
+    code: 'pages_truncated',
+    next: `${page.charAt(0).toUpperCase()}${page.slice(1)}`,
+  });
+  // Under the maximum the helper only suggests raising limit; name the next offset too
+  if (remaining <= MAX_LIST_PAGES_LIMIT && shown > 0) warning.howToFetchAll += ` Or ${page}`;
+  return warning;
 }
