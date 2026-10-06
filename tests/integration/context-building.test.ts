@@ -1,160 +1,108 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { buildContextForTopic } from '../../src/tools/build-context.js';
 import { getContextForQuery } from '../../src/tools/get-context-for-query.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for Context Building Tools
+ * Integration tests for build_context and get_context_for_query against the fixture graph.
  *
- * These tests require:
- * 1. LogSeq running with HTTP API enabled
- * 2. Config file at ~/.logseq-mcp/config.json
- * 3. Test data in LogSeq graph
- *
- * Tests will FAIL if prerequisites are not met.
+ * `Bob` (a property block and two blocks, linked from 10 pages), `project atlas` (an alias, 8
+ * blocks), a journal, `empty page` (one empty block), `archive` (no file, no blocks) and the hub
+ * (every cap bites; tests/fixtures/README.md, "The hub"). Read-only.
  */
+
+const BOB_SOURCES = [
+  'alice', 'block refs', 'jan 10th, 2025', 'jan 15th, 2025', 'jan 6th, 2025', 'jan 7th, 2025',
+  'project atlas', 'project atlas/meetings', 'project cascade', 'property types',
+];
 
 describe('Context Building Tools Integration Tests', () => {
   let client: LogseqClient;
 
   beforeAll(async () => {
-    // Check if config file exists
-    const configPath = resolveConfigPath();
-
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. ' +
-        'Integration tests require LogSeq configuration. ' +
-        'See tests/integration/setup.md for setup instructions.'
-      );
-    }
-
-    // Load config
-    const config = await loadConfig(configPath);
-    client = new LogseqClient(config);
-
-    // Test connection to LogSeq - fail hard if not available
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
-        'Ensure LogSeq is running with HTTP server enabled. ' +
-        'See tests/integration/setup.md'
-      );
-    }
+    ({ client } = await connectFixture());
   });
 
   describe('logseq_build_context', () => {
-    it('should return comprehensive context structure', async () => {
-      // Find any page to test with
-      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
+    it('returns every block, reference and related page of a page under the caps', async () => {
+      const result = await buildContextForTopic(client, 'Bob');
 
-      // Validate API contract: datascriptQuery should return array, not null
-      expect(Array.isArray(searchResult)).toBe(true);
-      expect(searchResult.length).toBeGreaterThan(0,
-        'No pages found in LogSeq graph. Create at least one page. ' +
-        'See tests/integration/setup.md'
+      expect(result.topic).toBe('Bob');
+      expect(result.mainPage.name).toBe('bob');
+      expect(result.directBlocks).toHaveLength(3);
+      // Linked references count the blocks under a referencing block too
+      expect(result.references).toHaveLength(18);
+      expect(result.relatedPages.map(r => `${r.relationshipType} ${r.page.name}`).sort()).toEqual(
+        BOB_SOURCES.map(name => `inbound ${name}`)
       );
-
-      // Get first page name - Datalog returns nested arrays [[page1], [page2]]
-      const firstPage = searchResult[0][0];
-      expect(firstPage).toBeDefined();
-      const pageName = firstPage.name || firstPage['original-name'];
-      expect(pageName).toBeTruthy('Page missing name property - data integrity issue');
-
-      const result = await buildContextForTopic(client, pageName);
-
-      // Validate structure
-      expect(result).toHaveProperty('topic');
-      expect(result).toHaveProperty('mainPage');
-      expect(result).toHaveProperty('directBlocks');
-      expect(result).toHaveProperty('relatedPages');
-      expect(result).toHaveProperty('references');
-      expect(result).toHaveProperty('summary');
-
-      // Validate main page structure
-      expect(result.mainPage).toHaveProperty('id');
-      expect(result.mainPage).toHaveProperty('name');
-      expect(result.topic).toBe(pageName);
-
-      // Validate arrays
-      expect(Array.isArray(result.directBlocks)).toBe(true);
-      expect(Array.isArray(result.relatedPages)).toBe(true);
-      expect(Array.isArray(result.references)).toBe(true);
-
-      // Validate summary structure
-      expect(result.summary).toHaveProperty('totalBlocks');
-      expect(result.summary).toHaveProperty('totalRelatedPages');
-      expect(result.summary).toHaveProperty('totalReferences');
-      expect(result.summary).toHaveProperty('pageProperties');
-
-      expect(typeof result.summary.totalBlocks).toBe('number');
-      expect(typeof result.summary.totalRelatedPages).toBe('number');
-      expect(typeof result.summary.totalReferences).toBe('number');
-    });
-
-    it('should respect maxBlocks limit', async () => {
-      // Find a page with blocks
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        return;
-      }
-
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
-
-      // Test with limited blocks
-      const result = await buildContextForTopic(client, pageName, {
-        maxBlocks: 5
+      expect(result.summary).toEqual({
+        totalBlocks: 3,
+        totalRelatedPages: 10,
+        totalReferences: 18,
+        pageProperties: { role: 'engineer' },
       });
-
-      expect(result.directBlocks.length).toBeLessThanOrEqual(5);
+      expect(result.totals).toEqual({ blocks: 3, relatedPages: 10, references: 18 });
+      expect(result).toMatchObject({ hasMore: false, warnings: [], temporalContext: { isJournal: false } });
+      expect(result).not.toHaveProperty('resolvedFrom');
     });
 
-    it('should handle journal pages with temporal context', async () => {
-      // Use Editor API (matches working code in query-by-date-range.ts)
-      const allPages = await client.callAPI<any[]>('logseq.Editor.getAllPages');
+    it('should respect maxBlocks limit, and say what it cut', async () => {
+      const result = await buildContextForTopic(client, 'Bob', { maxBlocks: 2 });
 
-      expect(Array.isArray(allPages)).toBe(true);
+      expect(result.directBlocks).toHaveLength(2);
+      expect(result.totals.blocks).toBe(3);
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings.map(w => w.code)).toEqual(['blocks_truncated']);
+    });
 
-      // Filter for journal pages (check both property names)
-      const journalPages = (allPages || []).filter(p => p.journal || p['journal?']);
-      expect(journalPages.length).toBeGreaterThan(0,
-        'No journal pages found. Create at least one daily journal page. ' +
-        'See tests/integration/setup.md'
-      );
+    it('folds an alias into the page and reports the references it cut', async () => {
+      const result = await buildContextForTopic(client, 'project atlas');
 
-      const firstPage = journalPages[0];
-      expect(firstPage.name).toBeTruthy('Journal page missing name - data integrity issue');
-      const pageName = firstPage.name;
+      expect(result.resolvedAliases).toEqual(['atlas', 'project atlas']);
+      expect(result.directBlocks).toHaveLength(8);
+      expect(result.summary.pageProperties).toEqual({
+        alias: ['atlas'], type: 'project', status: 'active', owner: ['Alice'],
+      });
+      expect(result.totals).toEqual({ blocks: 8, relatedPages: 14, references: 24 });
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings.map(w => w.code)).toEqual(['references_truncated', 'related_pages_truncated']);
+    });
 
-      const result = await buildContextForTopic(client, pageName);
+    it('cuts every list on the hub and reports the totals', async () => {
+      const result = await buildContextForTopic(client, 'hub central');
 
-      // Should have temporal context for journal pages
-      expect(result).toHaveProperty('temporalContext');
-      expect(result.temporalContext).toHaveProperty('isJournal');
+      expect([result.directBlocks.length, result.references.length, result.relatedPages.length]).toEqual([50, 20, 10]);
+      expect(result.totals).toEqual({ blocks: 71, relatedPages: 61, references: 66 });
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings.map(w => w.code)).toEqual([
+        'blocks_truncated', 'references_truncated', 'related_pages_truncated',
+      ]);
+    });
 
-      // buildContextForTopic checks mainPage.journal (not 'journal?')
-      // So temporalContext.isJournal reflects what was in the fetched page
-      expect(typeof result.temporalContext.isJournal).toBe('boolean');
+    it('builds context for a journal page', async () => {
+      const result = await buildContextForTopic(client, 'Jan 6th, 2025');
 
-      if (result.temporalContext?.date) {
-        expect(typeof result.temporalContext.date).toBe('number');
-      }
+      expect(result.mainPage.name).toBe('jan 6th, 2025');
+      expect(result.mainPage['journal?']).toBe(true);
+      expect(result.directBlocks).toHaveLength(8);
+      expect(result.totals).toEqual({ blocks: 8, relatedPages: 0, references: 0 });
+    });
+
+    // #152: temporalContext reads `mainPage.journal`, but the pulled page has `journal?`
+    it.fails('marks a journal page as a journal, with its date (fails until #152)', async () => {
+      const result = await buildContextForTopic(client, 'Jan 6th, 2025');
+
+      expect(result.temporalContext).toEqual({ isJournal: true, date: 20250106 });
+    });
+
+    it('returns an empty context for a page with no blocks, and one block for an empty page', async () => {
+      const archive = await buildContextForTopic(client, 'archive');
+      const empty = await buildContextForTopic(client, 'empty page');
+
+      expect(archive.totals).toEqual({ blocks: 0, relatedPages: 0, references: 0 });
+      expect(archive).toMatchObject({ directBlocks: [], relatedPages: [], references: [], hasMore: false });
+      expect(empty.totals).toEqual({ blocks: 1, relatedPages: 0, references: 0 });
     });
 
     it('should throw error for non-existent page', async () => {
@@ -162,217 +110,59 @@ describe('Context Building Tools Integration Tests', () => {
         buildContextForTopic(client, 'NonExistentPageForContextBuilding12345')
       ).rejects.toThrow(/^No page "/);
     });
-
-    it('should aggregate related pages correctly', async () => {
-      // Find a page
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        return;
-      }
-
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
-
-      const result = await buildContextForTopic(client, pageName);
-
-      // If there are related pages, validate their structure
-      if (result.relatedPages.length > 0) {
-        const related = result.relatedPages[0];
-        expect(related).toHaveProperty('page');
-        expect(related).toHaveProperty('relationshipType');
-        expect(['outbound', 'inbound']).toContain(related.relationshipType);
-        expect(related.page).toHaveProperty('id');
-        expect(related.page).toHaveProperty('name');
-      }
-
-      // Summary should match actual counts
-      expect(result.summary.totalRelatedPages).toBe(result.relatedPages.length);
-    });
   });
 
   describe('logseq_get_context_for_query', () => {
     it('should extract topics and build context', async () => {
-      // Find a page to use in query
-      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
+      const result = await getContextForQuery(client, 'What is [[Bob]]?');
 
-      // Validate API contract
-      expect(Array.isArray(searchResult)).toBe(true);
-      expect(searchResult.length).toBeGreaterThan(0,
-        'No pages found. Create at least one page in LogSeq graph. ' +
-        'See tests/integration/setup.md'
-      );
-
-      // Datalog returns nested arrays [[page1], [page2]]
-      const firstPage = searchResult[0][0];
-      expect(firstPage).toBeDefined();
-      const pageName = firstPage.name || firstPage['original-name'];
-      expect(pageName).toBeTruthy('Page missing name property - data integrity issue');
-
-      // Query with explicit page reference
-      const result = await getContextForQuery(
-        client,
-        `What is [[${pageName}]]?`
-      );
-
-      // Validate structure
-      expect(result).toHaveProperty('query');
-      expect(result).toHaveProperty('extractedTopics');
-      expect(result).toHaveProperty('contexts');
-      expect(result).toHaveProperty('summary');
-
-      // Should extract the topic
-      expect(result.extractedTopics).toContain(pageName);
-      expect(Array.isArray(result.contexts)).toBe(true);
-
-      // Validate summary
-      expect(result.summary).toHaveProperty('totalTopics');
-      expect(result.summary).toHaveProperty('totalBlocks');
-      expect(result.summary).toHaveProperty('totalPages');
-      expect(typeof result.summary.totalTopics).toBe('number');
+      expect(result.extractedTopics).toEqual(['Bob']);
+      expect(result.contexts.map(c => c.topic)).toEqual(['Bob']);
+      expect(result.contexts[0].directBlocks).toHaveLength(3);
+      expect(result.summary).toEqual({ totalTopics: 1, totalBlocks: 3, totalPages: 6 });
+      // Each topic's context is capped tighter than build_context's default
+      expect(result.warnings.map(w => w.code)).toEqual(['topic_truncated']);
+      expect(result.hasMore).toBe(true);
     });
 
     it('should handle multiple topics in query', async () => {
-      // Find two pages to use in query
-      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
+      const result = await getContextForQuery(client, 'Compare [[Bob]] and [[Alice]]');
 
-      // Validate API contract
-      expect(Array.isArray(searchResult)).toBe(true);
-      expect(searchResult.length).toBeGreaterThanOrEqual(2,
-        'Not enough pages found. Create at least 2 pages in LogSeq graph. ' +
-        'See tests/integration/setup.md'
-      );
-
-      // Datalog returns nested arrays [[page1], [page2]]
-      const firstPage = searchResult[0][0];
-      const secondPage = searchResult[1][0];
-      expect(firstPage).toBeDefined();
-      expect(secondPage).toBeDefined();
-
-      const firstName = firstPage.name || firstPage['original-name'];
-      const secondName = secondPage.name || secondPage['original-name'];
-      expect(firstName).toBeTruthy('First page missing name property - data integrity issue');
-      expect(secondName).toBeTruthy('Second page missing name property - data integrity issue');
-
-      // Query with two explicit page references
-      const result = await getContextForQuery(
-        client,
-        `Compare [[${firstName}]] and [[${secondName}]]`
-      );
-
-      // Should extract both topics
-      expect(result.extractedTopics).toContain(firstName);
-      expect(result.extractedTopics).toContain(secondName);
-
-      // Should have contexts for both (if pages exist)
-      expect(result.contexts.length).toBeGreaterThanOrEqual(0);
-      expect(result.contexts.length).toBeLessThanOrEqual(2);
+      expect(result.extractedTopics).toEqual(['Bob', 'Alice']);
+      expect(result.contexts.map(c => c.topic)).toEqual(['Bob', 'Alice']);
+      expect(result.summary).toEqual({ totalTopics: 2, totalBlocks: 7, totalPages: 9 });
     });
 
-    it('should handle queries without explicit topics', async () => {
-      // Query without page references
-      const result = await getContextForQuery(
-        client,
-        'What is machine learning?'
-      );
+    it('falls back to a keyword search that keeps blocks holding every keyword, newest first', async () => {
+      const result = await getContextForQuery(client, 'the importer design');
 
-      // Should handle gracefully
-      expect(result).toHaveProperty('query');
-      expect(result).toHaveProperty('extractedTopics');
-      expect(result).toHaveProperty('contexts');
+      expect(result.extractedTopics).toEqual([]);
+      expect(result.contexts).toEqual([]);
+      expect(result.searchResults!.map(b => (b as any).page.name)).toEqual([
+        'jan 10th, 2025', 'jan 8th, 2025', 'jan 6th, 2025', 'jan 2nd, 2025',
+      ]);
+      expect(result.summary).toEqual({ totalTopics: 0, totalBlocks: 4, totalPages: 0 });
+      expect(result).toMatchObject({ hasMore: false, warnings: [] });
+    });
 
-      // May have search results if no explicit topics
-      expect(Array.isArray(result.contexts)).toBe(true);
+    it('returns nothing, not an error, for keywords no block holds', async () => {
+      const result = await getContextForQuery(client, 'What is machine learning?');
+
+      expect(result.extractedTopics).toEqual([]);
+      expect(result.contexts).toEqual([]);
+      expect(result.searchResults).toEqual([]);
+      expect(result.summary).toEqual({ totalTopics: 0, totalBlocks: 0, totalPages: 0 });
     });
 
     it('should respect maxTopics limit', async () => {
-      // Create a query with many topics
-      const searchResult = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      // Validate API contract
-      expect(Array.isArray(searchResult)).toBe(true);
-      expect(searchResult.length).toBeGreaterThanOrEqual(3,
-        'Not enough pages found. Create at least 3 pages in LogSeq graph. ' +
-        'See tests/integration/setup.md'
-      );
-
-      // Datalog returns nested arrays [[page1], [page2]] - extract objects
-      const pageNames = searchResult
-        .slice(0, 5)
-        .map((row: any[]) => {
-          const page = row[0];
-          return page.name || page['original-name'];
-        })
-        .filter((name: string | undefined) => name);
-
-      expect(pageNames.length).toBeGreaterThanOrEqual(3,
-        'Could not extract page names - data integrity issue'
-      );
-
-      // Create query with multiple page references
-      const query = pageNames
-        .map((name: string) => `[[${name}]]`)
-        .join(' and ');
-
-      const result = await getContextForQuery(client, query, {
+      const result = await getContextForQuery(client, '[[Bob]] and [[Alice]] and [[project atlas]]', {
         maxTopics: 2
       });
 
-      // Should respect the limit
-      expect(result.contexts.length).toBeLessThanOrEqual(2);
-    });
-
-    it('should validate context aggregation', async () => {
-      // Find a page
-      const searchResult = await client.callAPI<any[]>('logseq.DB.q', [
-        '[:find (pull ?p [*]) :where [?p :block/name]]'
-      ]);
-
-      if (!searchResult || searchResult.length === 0) {
-        return;
-      }
-
-      const firstPage = searchResult[0];
-      const pageName = firstPage.name || firstPage['original-name'];
-
-      if (!pageName) {
-        return;
-      }
-
-      const result = await getContextForQuery(
-        client,
-        `Tell me about [[${pageName}]]`
-      );
-
-      // If contexts were built, validate their structure
-      if (result.contexts.length > 0) {
-        const context = result.contexts[0];
-        expect(context).toHaveProperty('topic');
-        expect(context).toHaveProperty('mainPage');
-        expect(context).toHaveProperty('directBlocks');
-        expect(context).toHaveProperty('relatedPages');
-        expect(context).toHaveProperty('summary');
-      }
-
-      // Summary should aggregate correctly
-      const expectedTotalBlocks = result.contexts.reduce(
-        (sum, ctx) => sum + ctx.directBlocks.length,
-        0
-      ) + (result.searchResults?.length || 0);
-
-      expect(result.summary.totalBlocks).toBeGreaterThanOrEqual(0);
+      expect(result.extractedTopics).toEqual(['Bob', 'Alice', 'project atlas']);
+      expect(result.contexts.map(c => c.topic)).toEqual(['Bob', 'Alice']);
+      expect(result.warnings[0].code).toBe('topics_truncated');
+      expect(result.hasMore).toBe(true);
     });
   });
 });
