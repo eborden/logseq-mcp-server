@@ -145,15 +145,17 @@ export async function loadConfig(configPath: string): Promise<LogseqMCPConfig> {
  * The parser's reason, for the ConfigInvalidJsonError message. V8 quotes a
  * stretch of the file in some messages (`Unexpected token 'a', ..."thToken":
  * abc123"... is not valid JSON`), and that stretch can be the authToken. A
- * message with a double quote in it is quoting the file, so it is replaced;
- * the rest (`Unterminated string in JSON at position 18 (line 1 column 19)`)
- * are kept word for word.
+ * message with a double quote in it is quoting the file, so it is replaced
+ * with one that names the usual causes instead (those messages carry no
+ * position to point at); the rest (`Unterminated string in JSON at position 18
+ * (line 1 column 19)`) are kept word for word.
  */
+export const REDACTED_JSON_DETAIL =
+  "the file is not valid JSON (an unquoted value, a trailing comma or a byte-order mark?); the parser's message is not shown, as it may quote the authToken";
+
 function jsonErrorDetail(parseError: unknown): string {
   if (!(parseError instanceof Error)) return 'Unknown error';
-  if (parseError.message.includes('"')) {
-    return 'Unexpected token (the text around it is not shown, as it may hold the authToken)';
-  }
+  if (parseError.message.includes('"')) return REDACTED_JSON_DETAIL;
   return parseError.message;
 }
 
