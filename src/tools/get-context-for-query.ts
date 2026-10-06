@@ -209,13 +209,18 @@ export async function getContextForQuery(
       // Import searchBlocks dynamically to search for keywords
       const { searchBlocks, withPageContext } = await import('./search-blocks.js');
 
-      // Search for the first keyword and keep the blocks holding every keyword.
+      // Search for one keyword and keep the blocks holding every keyword.
       // The one query returns every match, so nothing is cut before the filter
       // (no extra call) and the count of hits below is the real total (#61).
+      // The longest keyword (the first of equal length) is usually the rarest, so
+      // LogSeq sends back fewer blocks than for a common first word. The hits are
+      // the same whichever keyword is searched, since the filter needs all of them,
+      // and so is their order: searchBlocks sorts newest first and the filter keeps it.
       // The search is the only data source on this path, so any failure
       // propagates: an empty result must mean "nothing matched".
       // Note: slimResults=false returns SearchBlocksResult[]
-      const blocks = (await searchBlocks(client, keywords[0], Infinity, false, false)) as
+      const searched = keywords.reduce((longest, k) => (k.length > longest.length ? k : longest));
+      const blocks = (await searchBlocks(client, searched, Infinity, false, false)) as
         | import('./search-blocks.js').SearchBlocksResult[]
         | null;
 
