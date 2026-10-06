@@ -631,7 +631,8 @@ tests/
 scripts/
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live graph
 ├── measure-api-calls.ts           - Counts API calls per tool against a live graph
-└── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
+├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
+└── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on the fixture graph (#118, macOS)
 
 skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
 .claude-plugin/                    - plugin.json + marketplace.json (server declared inline in plugin.json)
@@ -674,6 +675,11 @@ npx tsx scripts/measure-output-size.ts
 
 # Debug Datalog query
 npx tsx scripts/test-datalog-query.ts
+
+# This worktree's own LogSeq on the fixture graph (macOS; own profile, port and test token)
+npx tsx scripts/logseq-instance.ts start
+LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration
+npx tsx scripts/logseq-instance.ts stop
 ```
 
 ---
