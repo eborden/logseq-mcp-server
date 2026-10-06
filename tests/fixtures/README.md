@@ -136,11 +136,14 @@ and Feb 3rd days, and the hub's journal below, for wider windows.
 |---|---|---|
 | `project cascade` | `pages/project cascade.md` | Every task marker on one page: `TODO`, `DOING`, `DONE`, `LATER`, `NOW`, `WAITING`, `CANCELED`, a priority `[#A]` (LogSeq links the page `a` for it), and tasks nested under a task. Page `tags:: planning` |
 | `deep outline` | `pages/deep outline.md` | Six levels of nesting: a `TODO` with a tag at level 6, a `DONE` at level 3, and a second root block |
+| `schedule cases` | `pages/schedule cases.md` | The dated blocks on a **non-journal page**, for the `:block/journal-day` probe (#140): one `SCHEDULED`, one `DEADLINE`, one with both (past dates in January 2025), and a plain block. No task markers, links, tags or properties, so no other count moves. The same three shapes exist on the journals above (`jan 2nd`, `jan 7th`, `jan 8th`) |
 
 Counts across these pages and journals: 8 `TODO`, 7 `DONE`, 2 each of `DOING`, `LATER`, `NOW`,
-`WAITING` and `CANCELED`; 2 `SCHEDULED` and 2 `DEADLINE` blocks. None of them links the hub pages below.
-The dates are integers `YYYYMMDD` in `:block/scheduled` and `:block/deadline`. The `DEADLINE` blocks
-carry no `:block/journal-day`, unlike what CLAUDE.md's data shapes say (#140).
+`WAITING` and `CANCELED`; 4 `SCHEDULED` and 4 `DEADLINE` blocks (2 and 2 of them on `schedule cases`, above). None of them links the hub pages below.
+The dates are integers `YYYYMMDD` in `:block/scheduled` and `:block/deadline`. None of these blocks
+carries `:block/journal-day` (#140): the probe in `scripts/probe-constraints.ts` ("Scheduled / deadline
+blocks and :block/journal-day") answers no for `SCHEDULED`, `DEADLINE` and both, on a journal and on a
+non-journal page. The dates are all in the past, 2025.
 
 ## The hub (#89)
 
@@ -239,16 +242,16 @@ the file, and its date changes every day. Exact assertions on page, journal or `
 counts must exclude it, and date-range tests must use fixed windows that end before 2026.
 
 Measured total (#139, LogSeq 0.10.15 on a per-worktree instance, after the README moved out): the graph
-holds **263 pages** in `:block/name`, built-in pages and today's journal included. They are:
+holds **264 pages** in `:block/name`, built-in pages and today's journal included. They are:
 
 | Part | Count |
 |---|---|
-| Pages with a file (`pages/` and `journals/`; 10 of them are journals) | 145 |
+| Pages with a file (`pages/` and `journals/`; 10 of them are journals) | 146 |
 | Built-in pages, none with a file (the 16 listed above) | 16 |
 | Today's journal | 1 |
 | Pages with no file: link targets, property keys, block-embed uuids, alias stubs, namespace parents | 101 |
 
-Without today's journal that is 262, and without the built-ins too, 246. There is no `readme` page and no
-`#NN` tag page, and no README among the 146 indexed files (145 pages plus `config.edn`). The number moves
+Without today's journal that is 263, and without the built-ins too, 247. There is no `readme` page and no
+`#NN` tag page, and no README among the 147 indexed files (146 pages plus `config.edn`). The number moves
 whenever a page, a property key or a block embed is added to the fixture, and nothing in the tests pins it,
 so the tests compute what they need rather than copy it (#90).
