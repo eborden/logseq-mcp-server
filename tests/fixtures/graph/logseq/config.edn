@@ -19,6 +19,15 @@
 
  ;; Property values like [[x]] create pages, as in a default graph.
  :property-pages/enabled? true
+ :property-pages/excludelist #{}
+
+ ;; Property values: only [[x]] and #x are page refs, except for the properties
+ ;; listed here, whose comma-separated values each become a page ref (reviewers:: Alice, Bob).
+ ;; The fixture's multi-value cases depend on this, so a global config can't change it.
+ ;; LogSeq 0.10 has no :rich-property-values? or :ref/linkable-journals? setting;
+ ;; journal links in property values ([[Jan 15th, 2025]]) are page refs as written.
+ :property/separated-by-commas #{:reviewers}
+ :ignored-page-references-keywords #{}
 
  ;; The fixture README describes the folder; it is not a page of the graph.
  :hidden ["/README.md"]}
