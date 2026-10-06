@@ -10,6 +10,6 @@ export const SNIPPET_MAX_CHARS = 80;
 export function firstLineSnippet(content: unknown, max: number = SNIPPET_MAX_CHARS): string {
   if (typeof content !== 'string') return '';
   const line = content.split('\n').map(l => l.trim()).find(l => l !== '') ?? '';
-  if (line.length <= max) return line;
+  if (max >= line.length) return line;
   return `${line.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
 }
