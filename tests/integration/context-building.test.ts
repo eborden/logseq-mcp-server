@@ -130,7 +130,12 @@ describe('Context Building Tools Integration Tests', () => {
 
       expect(result.extractedTopics).toEqual(['Bob', 'Alice']);
       expect(result.contexts.map(c => c.topic)).toEqual(['Bob', 'Alice']);
-      expect(result.summary).toEqual({ totalTopics: 2, totalBlocks: 7, totalPages: 9 });
+      expect(result.summary).toMatchObject({ totalTopics: 2, totalBlocks: 7 });
+      // Each topic keeps 5 related pages, picked by id order among ties, so which ones (and how many
+      // they share) changes when LogSeq re-indexes. Count the distinct pages the contexts hold.
+      const pages = new Set(result.contexts.flatMap(c => [c.mainPage.id, ...c.relatedPages.map(r => r.page.id)]));
+      expect(result.contexts.map(c => c.relatedPages.length)).toEqual([5, 5]);
+      expect(result.summary.totalPages).toBe(pages.size);
     });
 
     it('falls back to a keyword search that keeps blocks holding every keyword, newest first', async () => {
