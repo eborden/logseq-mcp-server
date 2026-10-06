@@ -1,57 +1,27 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getGraphInfo } from '../../src/tools/get-graph-info.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
+/**
+ * get_graph_info against the fixture graph. LogSeq names a graph after its folder, so the fixture
+ * is `graph`, opened from some checkout's tests/fixtures/graph. Which checkout is not asserted:
+ * the path includes the user's home directory, and nothing here prints it.
+ */
 describe('getGraphInfo - Integration', () => {
   let client: LogseqClient;
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. ' +
-        'See tests/integration/setup.md for setup instructions.'
-      );
-    }
-
-    const config = await loadConfig(configPath);
-    client = new LogseqClient(config);
+    ({ client } = await connectFixture());
   });
 
-  it('should retrieve current graph information', async () => {
+  it('names the fixture graph and its folder', async () => {
     const result = await getGraphInfo(client);
 
-    // Verify structure
-    expect(result).toBeDefined();
-    expect(result).toHaveProperty('path');
-    expect(result).toHaveProperty('name');
-    expect(result).toHaveProperty('url');
-
-    // Verify types
-    expect(typeof result.path).toBe('string');
-    expect(typeof result.name).toBe('string');
-    expect(typeof result.url).toBe('string');
-
-    // Verify path is absolute
-    expect(result.path).toMatch(/^[\/~]/);
-
-    // Verify non-empty
-    expect(result.path.length).toBeGreaterThan(0,
-      'Graph path should not be empty'
-    );
-    expect(result.name.length).toBeGreaterThan(0,
-      'Graph name should not be empty'
-    );
-    expect(result.url.length).toBeGreaterThan(0,
-      'Graph URL should not be empty'
-    );
-
-    console.log('Graph Info:', result);
+    expect(result.name).toBe('graph');
+    expect(result.path.startsWith('/'), 'the path is absolute').toBe(true);
+    expect(result.path.endsWith('/tests/fixtures/graph'), 'the path is a tests/fixtures/graph folder').toBe(true);
+    expect(result.url === `logseq_local_${result.path}`, 'the url is the local url of that path').toBe(true);
   });
 
   it('should return consistent results on multiple calls', async () => {

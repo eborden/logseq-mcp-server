@@ -1,38 +1,24 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { LogSeqAuthError } from '../../src/errors.js';
 import { LogseqMCPConfig } from '../../src/types.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * Integration test for rejected tokens (issue #8)
  *
  * Verifies that a real LogSeq answering HTTP 401 surfaces as LogSeqAuthError.
- * The URL comes from the real config; the token is deliberately bogus, so the
- * real token is never used or printed.
+ * The URL comes from the fixture instance's config; the token is deliberately
+ * bogus, so the real token is never used or printed.
  *
- * Requires LogSeq running with the HTTP API enabled.
- * See tests/integration/setup.md. Read-only: nothing is written to the graph.
+ * Runs against the fixture graph (tests/integration/setup.md). Read-only.
  */
 
 describe('Rejected auth token Integration Tests', () => {
   let config: LogseqMCPConfig;
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. ' +
-        'Integration tests require LogSeq configuration. ' +
-        'See tests/integration/setup.md for setup instructions.'
-      );
-    }
-
-    config = await loadConfig(configPath);
+    ({ config } = await connectFixture());
   });
 
   it('throws LogSeqAuthError when the token is wrong', async () => {
