@@ -377,22 +377,25 @@ describe('logseq_query_by_date_range max_blocks (#61)', () => {
       {
         code: 'blocks_truncated',
         message: 'Showing 200 of 210 blocks (nested ones counted; oldest day first; the entries end at 20250103).',
-        howToFetchAll: 'Set max_blocks to 210 (or higher) to get all 210.',
+        howToFetchAll:
+          'Call again with start_date 20250103, the same end_date (20250103) and the same max_blocks ' +
+          'to read the later days (day 20250103 repeats its kept blocks), or add a search_term.',
       },
     ]);
   });
 
-  it('clamps a value above 1000 and reports the maximum, with hasMore false', async () => {
+  it('clamps a value above 1000, reports the maximum, and pages on with hasMore true', async () => {
     const result = await dateRange(11, 100, { max_blocks: 5000 });
 
     expect(result.isError).toBeUndefined();
     const body = JSON.parse(result.content[0].text);
     expect(entryBlocks(body)).toBe(1000);
-    expect(body.hasMore).toBe(false);
+    expect(body.hasMore).toBe(true);
     expect(body.warnings).toHaveLength(1);
     expect(body.warnings[0].code).toBe('blocks_truncated');
     expect(body.warnings[0].message).toContain('capped at its maximum of 1000 (5000 was asked for)');
-    expect(body.warnings[0]).not.toHaveProperty('howToFetchAll');
+    expect(body.warnings[0].howToFetchAll).toContain('Call again with start_date 20250111');
+    expect(body.warnings[0].howToFetchAll).not.toContain('Set max_blocks');
   });
 
   it('counts top-level blocks for include_content false', async () => {
