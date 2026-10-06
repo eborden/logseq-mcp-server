@@ -89,13 +89,11 @@ describe('Context Building Tools Integration Tests', () => {
       expect(result.totals).toEqual({ blocks: 8, relatedPages: 0, references: 0 });
     });
 
-    // #152: temporalContext reads `mainPage.journal`, but the pulled page has `journal?`. This pins
-    // the current wrong value; flip it to { isJournal: true, date: 20250106 } with the fix.
-    it('reports a journal page as not a journal (#152)', async () => {
+    it('reports a journal page as a journal with its date (#152)', async () => {
       const result = await buildContextForTopic(client, 'Jan 6th, 2025');
 
       expect(result.mainPage['journal?']).toBe(true);
-      expect(result.temporalContext).toEqual({ isJournal: false });
+      expect(result.temporalContext).toEqual({ isJournal: true, date: 20250106 });
     });
 
     it('returns an empty context for a page with no blocks, and one block for an empty page', async () => {
