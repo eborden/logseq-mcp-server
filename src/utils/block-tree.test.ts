@@ -37,6 +37,12 @@ describe('buildBlockTrees', () => {
     expect([roots[0].level, roots[0].children[0].level, roots[0].children[0].children[0].level]).toEqual([1, 2, 3]);
   });
 
+  it('adds level after children, so the serialized key order is stable', () => {
+    const trees = buildBlockTrees([b(2, 1, 1, 1)], [1]);
+    const keys = Object.keys(trees.get(1)![0]);
+    expect(keys.indexOf('level')).toBeGreaterThan(keys.indexOf('children'));
+  });
+
   it('keeps pages separate', () => {
     const trees = buildBlockTrees([b(2, 1, 1, 1), b(3, 10, 10, 10)], [1, 10]);
     expect(trees.get(1)!.map(r => r.id)).toEqual([2]);
