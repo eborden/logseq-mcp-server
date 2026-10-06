@@ -216,7 +216,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 When you finish, your PR description must contain every section of the PR template. They add to the PR conventions in `CLAUDE.md` (atomic commits, `Closes #N`, a design section, a test plan with checkboxes, approximate measurements with no graph data) and don't replace them. Be brief and factual. A reviewer reads this before the diff.
 
-The sections live in [`.github/pull_request_template.md`](../.github/pull_request_template.md), which is the one copy. `gh pr create` fills it in when no `--body` is given. They are: What changed, Design, Assumptions, Failure behavior, Preserved on purpose / questions, New concepts, Test plan, Roll back.
+The sections live in [`.github/pull_request_template.md`](../.github/pull_request_template.md), which is the one copy. `gh pr create` fills it in only in its interactive flow, so agents pass `--body-file` filled from it. They are: What changed, Design, Assumptions, Failure behavior, Preserved on purpose / questions, New concepts, Test plan, Roll back.
 
 ## 7. Self-check before you finish
 

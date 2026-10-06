@@ -57,7 +57,7 @@ Adding an ADR or rule, or any of these changes, needs the maintainer's OK before
 Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.com/users/eborden/projects/1) project board.
 
 ### Issue and PR templates
-Templates live in `.github/` and are the source of truth for what an issue or PR body contains. Blank issues are off. File with `gh issue create --template <file>` (without `--body`) or fill the body to match.
+Templates live in `.github/` and are the source of truth for what an issue or PR body contains. Blank issues are off. `gh` applies a template only in its interactive flow (picked by the front-matter name), so agents fill the body to match and pass it with `--body-file`.
 
 | Kind | Template | Label | Use for |
 |---|---|---|---|
