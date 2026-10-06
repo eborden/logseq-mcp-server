@@ -191,9 +191,9 @@ describe('buildTips', () => {
   });
 
   it('logseq_list_pages suggests the first match only for a filtered listing', () => {
-    expect(argsOf(buildTips('logseq_list_pages', { name_contains: 'al' }, { pages: ['Alice'], total: 1 }), 'logseq_get_page'))
+    expect(argsOf(buildTips('logseq_list_pages', { name_contains: 'al' }, { pages: [{ name: 'Alice' }], total: 1 }), 'logseq_get_page'))
       .toEqual({ page_name: 'Alice', include_children: true });
-    expect(buildTips('logseq_list_pages', {}, { pages: ['Alice'], total: 1 })).toEqual([]);
+    expect(buildTips('logseq_list_pages', {}, { pages: [{ name: 'Alice' }], total: 1 })).toEqual([]);
     expect(buildTips('logseq_list_pages', { name_contains: 'zz' }, { pages: [], total: 0 })).toEqual([]);
   });
 

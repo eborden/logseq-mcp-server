@@ -17,7 +17,7 @@ describe('listPages', () => {
     } as any;
   });
 
-  it('should return pages as string array', async () => {
+  it('should return pages as { name } objects, with no aliases key', async () => {
     const mockPages: PageEntity[] = [
       { id: 1, uuid: 'u1', name: 'alpha', originalName: 'Alpha' },
       { id: 2, uuid: 'u2', name: 'beta', originalName: 'Beta' },
@@ -27,7 +27,7 @@ describe('listPages', () => {
     const result = await listPages(mockClient);
 
     expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getAllPages');
-    expect(result.pages).toEqual(['Alpha', 'Beta']);
+    expect(result.pages).toEqual([{ name: 'Alpha' }, { name: 'Beta' }]);
     expect(result.total).toBe(2);
   });
 
@@ -41,7 +41,7 @@ describe('listPages', () => {
 
     const result = await listPages(mockClient);
 
-    expect(result.pages).toEqual(['Project']);
+    expect(result.pages).toEqual([{ name: 'Project' }]);
     expect(result.total).toBe(1);
   });
 
@@ -55,7 +55,7 @@ describe('listPages', () => {
 
     const result = await listPages(mockClient, { nameContains: 'EXP' });
 
-    expect(result.pages).toEqual(['Experiment']);
+    expect(result.pages).toEqual([{ name: 'Experiment' }]);
   });
 
   // #64: null is not an empty graph. The list stays empty (backward compatible)
@@ -142,7 +142,7 @@ describe('listPages', () => {
 
     const result = await listPages(mockClient);
 
-    expect(result.pages).toEqual(['Alpha', 'Zebra']);
+    expect(result.pages).toEqual([{ name: 'Alpha' }, { name: 'Zebra' }]);
   });
 
   it('should sort by lowercase name but return original casing', async () => {
@@ -157,7 +157,7 @@ describe('listPages', () => {
 
     // Sorted by lowercase: aaa, api, apple
     // Returns original casing: AAA, API, Apple
-    expect(result.pages).toEqual(['AAA', 'API', 'Apple']);
+    expect(result.pages).toEqual([{ name: 'AAA' }, { name: 'API' }, { name: 'Apple' }]);
   });
 
   // #61: a default cap of 200, a maximum of 1000, and offset to page past them
@@ -168,7 +168,8 @@ describe('listPages', () => {
         const name = `p${String(i).padStart(4, '0')}`;
         return { id: i + 1, uuid: `u${i}`, name, originalName: name.toUpperCase() };
       });
-    const names = (from: number, to: number) => graph(to).slice(from).map(p => p.originalName);
+    const names = (from: number, to: number) => graph(to).slice(from).map(p => ({ name: p.originalName }));
+    const nameOnly = (pages: Array<{ name: string }>) => pages.map(p => p.name);
     const list = (n: number, options: Parameters<typeof listPages>[1] = {}) => {
       (mockClient.callAPI as any).mockResolvedValue(graph(n));
       return listPages(mockClient, options);
@@ -324,7 +325,7 @@ describe('listPages', () => {
 
     it('pages through the whole list with the offset each warning names', async () => {
       (mockClient.callAPI as any).mockResolvedValue(graph(2345));
-      const seen: string[] = [];
+      const seen: Array<{ name: string }> = [];
       let offset = 0;
       for (let calls = 0; calls < 10; calls++) {
         const result = await listPages(mockClient, { limit: 5000, offset });
@@ -340,14 +341,14 @@ describe('listPages', () => {
       const all = graph(1494);
       (mockClient.callAPI as any).mockResolvedValue(all);
       for (const limit of [1, 7, 200, 999, 1000]) {
-        const seen: string[] = [];
+        const seen: Array<{ name: string }> = [];
         for (let offset = 0; offset < all.length + limit; offset += limit) {
           const result = await listPages(mockClient, { limit, offset });
           expect(result.total, `limit ${limit}, offset ${offset}`).toBe(1494);
           seen.push(...result.pages);
         }
         expect(seen.length, `limit ${limit}: no duplicates or gaps`).toBe(1494);
-        expect(new Set(seen).size, `limit ${limit}: no duplicates`).toBe(1494);
+        expect(new Set(nameOnly(seen)).size, `limit ${limit}: no duplicates`).toBe(1494);
         expect(seen, `limit ${limit}: every page, in order`).toEqual(names(0, 1494));
       }
     });
@@ -385,16 +386,16 @@ describe('listPages', () => {
       const entities = [nfc, nfd, plain, zws].map((name, i) => ({ id: i + 1, uuid: `u${i}`, name, originalName: name }));
 
       const orders = [entities, [...entities].reverse(), [entities[1], entities[3], entities[0], entities[2]]];
-      const listings: string[][] = [];
+      const listings: Array<Array<{ name: string }>> = [];
       for (const order of orders) {
         (mockClient.callAPI as any).mockResolvedValue(order);
         listings.push((await listPages(mockClient)).pages);
       }
 
       for (const pages of listings) expect(pages).toEqual(listings[0]);
-      expect(new Set(listings[0])).toEqual(new Set([nfc, nfd, plain, zws]));
+      expect(new Set(nameOnly(listings[0]))).toEqual(new Set([nfc, nfd, plain, zws]));
       // Paging one name at a time visits each exactly once, even with the input order changing per call
-      const paged: string[] = [];
+      const paged: Array<{ name: string }> = [];
       for (let offset = 0; offset < 4; offset++) {
         (mockClient.callAPI as any).mockResolvedValue(orders[offset % orders.length]);
         paged.push(...(await listPages(mockClient, { limit: 1, offset })).pages);

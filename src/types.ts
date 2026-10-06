@@ -55,6 +55,12 @@ export interface PageEntity {
   namespace?: IEntityID;
   /** Set when the page is backed by a file; absent on stub pages that only exist as link targets */
   file?: IEntityID;
+  /**
+   * Pages linked by `alias::`, as bare ids. Present on `Editor.getAllPages` entities.
+   * LogSeq stores each link in both directions, so the declaring page lists its
+   * stubs and every stub lists the declaring page.
+   */
+  alias?: IEntityID[];
   children?: (PageEntity | BlockEntity)[];
   updatedAt?: number;
 }

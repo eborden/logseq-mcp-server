@@ -205,8 +205,8 @@ export function buildTips(
     }
 
     case 'logseq_list_pages': {
-      const first = asObject(result)?.pages?.[0];
-      if (nonEmptyString(a.name_contains) && nonEmptyString(first)) {
+      const first = nonEmptyString(asObject(asObject(result)?.pages?.[0])?.name);
+      if (nonEmptyString(a.name_contains) && first) {
         tips.push(`To open the first match: ${suggestCall('logseq_get_page', { page_name: first, include_children: true })}.`);
       }
       break;

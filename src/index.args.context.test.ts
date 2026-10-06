@@ -220,15 +220,15 @@ describe('the stub graph tells the defaults apart from neighbouring values', () 
   });
 
   it('list_pages: no filter by default; name_contains filters', async () => {
-    expect((await body('logseq_list_pages', {})).pages).toEqual(['Alice', 'Bob']);
-    expect((await body('logseq_list_pages', { name_contains: 'BO' })).pages).toEqual(['Bob']);
+    expect((await body('logseq_list_pages', {})).pages).toEqual([{ name: 'Alice' }, { name: 'Bob' }]);
+    expect((await body('logseq_list_pages', { name_contains: 'BO' })).pages).toEqual([{ name: 'Bob' }]);
   });
 
   it('list_pages: limit and offset page through the list, and total counts both pages (#61)', async () => {
     const first = await body('logseq_list_pages', { limit: 1 });
-    expect(first).toMatchObject({ pages: ['Alice'], total: 2, hasMore: true });
+    expect(first).toMatchObject({ pages: [{ name: 'Alice' }], total: 2, hasMore: true });
     expect(first.warnings[0].howToFetchAll).toBe('Set limit to 2 (or higher) to get all 2. Set offset to 1 for the next page.');
-    expect(await body('logseq_list_pages', { limit: 1, offset: 1 })).toEqual({ pages: ['Bob'], total: 2 });
+    expect(await body('logseq_list_pages', { limit: 1, offset: 1 })).toEqual({ pages: [{ name: 'Bob' }], total: 2 });
   });
 });
 
