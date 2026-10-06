@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, BlockEntity, ResultMeta, ResultWarning } from '../types.js';
+import { PageLike, BlockEntity, ResultMeta, ResultWarning } from '../types.js';
+import { blockPageId, entityId, journalDayOf, journalFlag } from '../utils/entity-fields.js';
 import { buildResultMeta, truncationWarning } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
@@ -35,15 +36,15 @@ export interface ContextOptions {
 
 export interface TopicContext extends Omit<ResultMeta, 'totals'>, ResolvedFrom, ResolvedAliases {
   topic: string;
-  mainPage: PageEntity;
+  mainPage: PageLike;
   directBlocks: BlockEntity[];
   relatedPages: Array<{
-    page: PageEntity;
+    page: PageLike;
     relationshipType: 'outbound' | 'inbound';
   }>;
   references: Array<{
     block: BlockEntity;
-    sourcePage: PageEntity;
+    sourcePage: PageLike;
   }>;
   temporalContext?: {
     isJournal: boolean;
@@ -57,7 +58,7 @@ export interface TopicContext extends Omit<ResultMeta, 'totals'>, ResolvedFrom, 
     totalBlocks: number;
     totalRelatedPages: number;
     totalReferences: number;
-    pageProperties: Record<string, any>;
+    pageProperties: Record<string, unknown>;
   };
   /**
    * Real counts before `maxBlocks` / `maxReferences` / `maxRelatedPages` were
@@ -106,18 +107,18 @@ export async function buildContextForTopic(
   const blocks = aliased
     ? DatalogQueryBuilder.getBlocksOnPages(aliasIds(aliasSet))
     : DatalogQueryBuilder.getPageBlocks(lookupName);
-  const blockResults = await client.executeDatalogQuery<Array<[any]>>(blocks.query, ...blocks.inputs);
+  const blockResults = await client.executeDatalogQuery<Array<[BlockEntity]> | null>(blocks.query, ...blocks.inputs);
 
   // Extract blocks (empty array if no blocks exist). For an alias group the
   // page asked about comes first, so a cap keeps its own blocks before the aliases'.
   const fetchedBlocks = (blockResults || [])
     .map(result => result[0])
     .filter(block => block != null);
-  const mainPageId = mainPage.id ?? mainPage['db/id'];
+  const mainPageId = entityId(mainPage);
   const allBlocks = aliased
     ? [
-        ...fetchedBlocks.filter(block => block.page?.id === mainPageId),
-        ...fetchedBlocks.filter(block => block.page?.id !== mainPageId)
+        ...fetchedBlocks.filter(block => blockPageId(block) === mainPageId),
+        ...fetchedBlocks.filter(block => blockPageId(block) !== mainPageId)
       ]
     : fetchedBlocks;
   let directBlocks = allBlocks.slice(0, maxBlocks);
@@ -141,7 +142,7 @@ export async function buildContextForTopic(
         const actualSourcePage = sourcePage || block.page;
         if (!actualSourcePage) continue;
 
-        const sourcePageId = actualSourcePage.id || actualSourcePage['db/id'];
+        const sourcePageId = entityId(actualSourcePage);
 
         // Add source page to related pages (inbound connection)
         if (sourcePageId && !seenPageIds.has(sourcePageId)) {
@@ -194,13 +195,12 @@ export async function buildContextForTopic(
     warnings.push(...resolved.warnings);
   }
 
-  // Build temporal context if requested. A Datalog pull spells the fields `journal?` and
-  // `journal-day`; the Editor API spells them `journal` and `journalDay`. Accept both (#152).
+  // Build temporal context if requested. The page is a Datalog pull (`journal?`, `journal-day`),
+  // and the readers accept the Editor API's spelling too (#152).
   let temporalContext: TopicContext['temporalContext'] | undefined;
   if (includeTemporalContext) {
-    const isJournal = (mainPage['journal?'] ?? mainPage.journal) === true;
-    temporalContext = isJournal
-      ? { isJournal: true, date: mainPage['journal-day'] ?? mainPage.journalDay }
+    temporalContext = journalFlag(mainPage) === true
+      ? { isJournal: true, date: journalDayOf(mainPage) }
       : { isJournal: false };
   }
 
