@@ -192,23 +192,31 @@ export interface LaunchSpec {
 }
 
 /**
+ * The parent's environment variables the app gets, by name: what a GUI app launched from the
+ * Dock would have, and nothing else. An allow-list keeps the isolation true by construction:
+ * NODE_OPTIONS, ELECTRON_* (ELECTRON_RUN_AS_NODE would start the app as plain Node), XDG_* and
+ * LOGSEQ_MCP_CONFIG never reach the instance. `LC_*` is passed by prefix.
+ */
+export const PASSED_ENV = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'LANG', '__CF_USER_TEXT_ENCODING'] as const;
+
+/**
  * Launch the app's executable directly rather than through `open -n -a Logseq`, so the pid we
  * get is the app's own (which `stop` needs) and the environment reaches it.
  *
  * HOME and CFFIXED_USER_HOME both point at the instance's home: LogSeq finds `~/.logseq` through
  * Node's `os.homedir()` (which reads HOME) and through Electron's `app.getPath("home")` (which
  * on macOS ignores HOME and honours CFFIXED_USER_HOME). With only HOME set, the instance shared
- * the maintainer's global config, preferences and plugins.
- * ELECTRON_RUN_AS_NODE is dropped: inherited from an Electron-based terminal, it would start
- * the app as plain Node.
+ * the maintainer's global config, preferences and plugins. Everything else comes from
+ * PASSED_ENV.
  */
 export function launchSpec(appBundle: string, paths: InstancePaths, env: Record<string, string | undefined>): LaunchSpec {
-  const childEnv: Record<string, string | undefined> = { ...env, HOME: paths.home, CFFIXED_USER_HOME: paths.home };
-  delete childEnv.ELECTRON_RUN_AS_NODE;
+  const passed = Object.entries(env).filter(
+    ([name, value]) => value !== undefined && ((PASSED_ENV as readonly string[]).includes(name) || name.startsWith('LC_')),
+  );
   return {
     command: join(appBundle, 'Contents', 'MacOS', 'Logseq'),
     args: [`--user-data-dir=${paths.profile}`],
-    env: childEnv,
+    env: { ...Object.fromEntries(passed), HOME: paths.home, CFFIXED_USER_HOME: paths.home },
   };
 }
 
