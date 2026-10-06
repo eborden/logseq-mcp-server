@@ -518,7 +518,11 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_list_pages': {
           const parsed = parseArgs(listPagesArgs, args);
-          const result = await listPages(client, { nameContains: parsed.name_contains });
+          const result = await listPages(client, {
+            nameContains: parsed.name_contains,
+            limit: parsed.limit,
+            offset: parsed.offset,
+          });
           return {
             content: [
               {

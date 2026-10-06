@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from './index.js';
 import { LogseqClient } from './client.js';
+import { DEFAULT_LIST_PAGES_LIMIT, DEFAULT_LIST_PAGES_OFFSET } from './tools/list-pages.js';
 
 /**
  * What each handler hands its tool function (#60): the
@@ -394,13 +395,28 @@ describe('logseq_get_page_outline and logseq_list_pages hand-off', () => {
     expect(await handedOff('logseq_get_page_outline', { page_name: 'Alice' }, mocks.getPageOutline)).toEqual(['Alice']);
   });
 
+  /** What the handler passes for a call with no limit or offset. */
+  const page = { limit: DEFAULT_LIST_PAGES_LIMIT, offset: DEFAULT_LIST_PAGES_OFFSET };
+
   it('list_pages: no filter by default, and name_contains is passed on', async () => {
-    expect(await handedOff('logseq_list_pages', {}, mocks.listPages)).toEqual([{ nameContains: undefined }]);
+    expect(await handedOff('logseq_list_pages', {}, mocks.listPages)).toEqual([{ nameContains: undefined, ...page }]);
     vi.clearAllMocks();
-    expect(await handedOff('logseq_list_pages', { name_contains: 'al' }, mocks.listPages)).toEqual([{ nameContains: 'al' }]);
+    expect(await handedOff('logseq_list_pages', { name_contains: 'al' }, mocks.listPages)).toEqual([
+      { nameContains: 'al', ...page },
+    ]);
   });
 
   it('list_pages: an empty name_contains is passed on, and the tool reads it as no filter', async () => {
-    expect(await handedOff('logseq_list_pages', { name_contains: '' }, mocks.listPages)).toEqual([{ nameContains: '' }]);
+    expect(await handedOff('logseq_list_pages', { name_contains: '' }, mocks.listPages)).toEqual([
+      { nameContains: '', ...page },
+    ]);
+  });
+
+  it('list_pages: limit and offset default to 200 and 0, and pass through unclamped (#61)', async () => {
+    expect(page).toEqual({ limit: 200, offset: 0 });
+    vi.clearAllMocks();
+    expect(await handedOff('logseq_list_pages', { limit: 5000, offset: -3 }, mocks.listPages)).toEqual([
+      { nameContains: undefined, limit: 5000, offset: -3 },
+    ]);
   });
 });

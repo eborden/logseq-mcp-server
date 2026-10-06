@@ -76,8 +76,11 @@ vi.mock('./tools/get-concept-evolution.js', async importOriginal => ({
 }));
 vi.mock('./tools/get-graph-info.js', () => ({ getGraphInfo: mocks.getGraphInfo }));
 vi.mock('./tools/get-current-context.js', () => ({ getCurrentContext: mocks.getCurrentContext }));
-vi.mock('./tools/list-pages.js', () => ({ listPages: mocks.listPages }));
 // Keep the module's constants: the argument schema takes its size cap from them
+vi.mock('./tools/list-pages.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  listPages: mocks.listPages,
+}));
 vi.mock('./tools/check-links.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   checkLinks: mocks.checkLinks,

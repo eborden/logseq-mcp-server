@@ -6,6 +6,7 @@ import { DEFAULT_MAX_DISTANCE, RELATIONSHIP_TYPES } from './tools/search-by-rela
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_MAX_TOPICS, MAX_SEARCH_RESULTS } from './tools/get-context-for-query.js';
 import { DATE_PRESETS } from './utils/date-presets.js';
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from './tools/search-blocks.js';
+import { DEFAULT_LIST_PAGES_LIMIT, DEFAULT_LIST_PAGES_OFFSET, MAX_LIST_PAGES_LIMIT } from './tools/list-pages.js';
 import {
   DEFAULT_INCLUDE_TEMPORAL_CONTEXT,
   DEFAULT_MAX_BLOCKS,
@@ -230,9 +231,23 @@ export const getConceptEvolutionArgs = z.object({
   group_by: z.enum(GROUP_BY_PERIODS).optional().describe('Optional grouping period'),
 });
 
-/** An empty `name_contains` is no filter, as the tool always read it. */
+/**
+ * An empty `name_contains` is no filter, as the tool always read it. `limit` and
+ * `offset` (#61) are plain `z.number()`, like `limit` on search_blocks: `.int()`
+ * would advertise `integer` with a safe-integer `maximum`. The tool clamps
+ * `limit` to 0..1000 and `offset` to 0 and up, flooring both, so a larger
+ * limit is clamped, not rejected.
+ */
 export const listPagesArgs = z.object({
   name_contains: z.string().optional().describe('Filter page names containing this text (case-insensitive)'),
+  limit: z
+    .number()
+    .default(DEFAULT_LIST_PAGES_LIMIT)
+    .describe(`Maximum pages to return (default: ${DEFAULT_LIST_PAGES_LIMIT}, max: ${MAX_LIST_PAGES_LIMIT})`),
+  offset: z
+    .number()
+    .default(DEFAULT_LIST_PAGES_OFFSET)
+    .describe('Matching pages to skip, in name order, to fetch the next page (default: 0)'),
 });
 
 /**
