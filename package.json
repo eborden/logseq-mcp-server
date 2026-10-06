@@ -51,6 +51,8 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "@types/node": "^24.10.1",
     "@vitest/ui": "^3.2.4",
     "fast-check": "^4.3.0",
