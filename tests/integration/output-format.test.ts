@@ -1,39 +1,32 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { access } from 'fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { createServer } from '../../src/index.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * The page outline tool and `format: "markdown"` / `compact` (#43) against a live
- * graph, through the real MCP server.
+ * The page outline tool and `format: "markdown"` / `compact` (#43) against the
+ * fixture graph, through the real MCP server.
  *
- * Read-only. The pages are discovered in whatever graph is running, and every
- * assertion is on structure: counts, booleans, shapes. Nothing is asserted on or
- * printed from page names or block text, so a failure cannot echo graph data.
- *
- * Needs LogSeq running; see tests/integration/setup.md. The graph needs a page
- * with a file and at least 3 blocks, a page that declares an alias nobody else
- * declares, and a journal page with content (the same data page-resolution.test.ts uses).
+ * Read-only. `project atlas` has page properties, five top-level blocks (one with
+ * three children) and the alias `atlas`; `hub central` has 71 blocks and is linked
+ * from 66; the journal is Jan 6th, 2025. See tests/fixtures/README.md.
  */
-
-const SETUP_HINT = 'See tests/integration/setup.md';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
 
-describe('page outline and markdown output against a live graph (#43)', () => {
+describe('page outline and markdown output against the fixture graph (#43)', () => {
   let mcp: Client;
   let logseq: LogseqClient;
   let apiCalls = 0;
-  /** The page with the most blocks, among pages with a file */
-  let big: string;
-  /** The most-referenced page with a file */
-  let hub: string;
-  let aliasStub: string;
-  let isoDay: string;
+  /** A page with a property block and nested blocks */
+  const big = 'project atlas';
+  /** A page linked from many blocks */
+  const hub = 'hub central';
+  const aliasStub = 'atlas';
+  const isoDay = '2025-01-06';
 
   async function call(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     const result = (await mcp.callTool({ name, arguments: args })) as ToolResult;
@@ -45,13 +38,7 @@ describe('page outline and markdown output against a live graph (#43)', () => {
   const bytes = (result: ToolResult) => result.content.reduce((n, b) => n + Buffer.byteLength(b.text, 'utf8'), 0);
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(`Config file not found at ~/.logseq-mcp/config.json. ${SETUP_HINT}`);
-    }
-    logseq = new LogseqClient(await loadConfig(configPath));
+    ({ client: logseq } = await connectFixture());
     const original = logseq.callAPI.bind(logseq);
     logseq.callAPI = (async (method: string, args?: any[]) => {
       apiCalls++;
@@ -62,32 +49,6 @@ describe('page outline and markdown output against a live graph (#43)', () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     mcp = new Client({ name: 'output-format-test', version: '1.0.0' }, { capabilities: {} });
     await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
-
-    const raw = (q: string) => original<any[]>('logseq.DB.datascriptQuery', [q]);
-
-    const sizes = await raw(`[:find ?n (count ?b) :where [?b :block/page ?p] [?p :block/name ?n] [?p :block/file]]`);
-    const biggest = [...sizes].sort((a, b) => b[1] - a[1])[0];
-    expect(biggest && biggest[1] >= 3, `No page with a file and at least 3 blocks. ${SETUP_HINT}`).toBe(true);
-    big = biggest[0];
-
-    const refRows = await raw(`[:find ?n ?b :where [?b :block/refs ?p] [?p :block/name ?n] [?p :block/file]]`);
-    const refCounts = new Map<string, number>();
-    for (const [n] of refRows) refCounts.set(n, (refCounts.get(n) ?? 0) + 1);
-    const topRef = [...refCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-    expect(topRef !== undefined, `No page with a file is referenced. ${SETUP_HINT}`).toBe(true);
-    hub = topRef[0];
-
-    const aliasRows = await raw(`[:find ?n ?sn :where [?a :block/name ?n] (not [?a :block/file]) [?p :block/alias ?a] [?p :block/name ?sn]]`);
-    const sourcesByStub = new Map<string, number>();
-    for (const [stub] of aliasRows) sourcesByStub.set(stub, (sourcesByStub.get(stub) ?? 0) + 1);
-    const unique = [...sourcesByStub.entries()].find(([, count]) => count === 1);
-    expect(unique !== undefined, `No page with an alias that only it declares. ${SETUP_HINT}`).toBe(true);
-    aliasStub = unique![0];
-
-    const days = await raw(`[:find ?d :where [?p :block/name] [?p :block/journal-day ?d] [?b :block/page ?p]]`);
-    expect(days.length, `No journal page with content. ${SETUP_HINT}`).toBeGreaterThan(0);
-    const day = String(days[days.length >> 1][0]);
-    isoDay = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
   });
 
   afterAll(async () => {
@@ -98,7 +59,11 @@ describe('page outline and markdown output against a live graph (#43)', () => {
     it('lists the top-level blocks of a page with a snippet and a child count each', async () => {
       const outline = await json('logseq_get_page_outline', { page_name: big });
 
-      expect(outline.blocks.length).toBeGreaterThan(0);
+      // The property block, then four blocks; "Goals for the first release" has three children
+      expect(outline.blocks.map((b: any) => b.childCount)).toEqual([0, 0, 3, 0, 0]);
+      expect(outline.blocks[0].snippet.startsWith('alias:: atlas')).toBe(true);
+      expect(outline.totals).toEqual({ blocks: 5 });
+      expect(outline.warnings).toEqual([]);
       expect(outline.blocks.every((b: any) => UUID.test(b.uuid))).toBe(true);
       expect(outline.blocks.every((b: any) => typeof b.snippet === 'string' && b.snippet.length <= 80)).toBe(true);
       expect(outline.blocks.every((b: any) => Number.isInteger(b.childCount) && b.childCount >= 0)).toBe(true);
@@ -134,11 +99,12 @@ describe('page outline and markdown output against a live graph (#43)', () => {
 
     it('resolves an alias to the declaring page and an ISO date to a journal, and says so', async () => {
       const viaAlias = await json('logseq_get_page_outline', { page_name: aliasStub });
-      expect(viaAlias.resolvedFrom?.matchedBy).toBe('alias');
+      expect(viaAlias.resolvedFrom).toEqual({ name: 'atlas', matchedBy: 'alias', resolvedTo: 'project atlas' });
+      expect(viaAlias.blocks).toHaveLength(5);
+      // The fixture titles journals "MMM do, yyyy", so an ISO date always goes through the resolver
       const viaDate = await json('logseq_get_page_outline', { page_name: isoDay });
-      // Absent when the graph titles its journals in ISO format, so the name is already exact
-      expect([undefined, 'journal-date']).toContain(viaDate.resolvedFrom?.matchedBy);
-      expect(Array.isArray(viaDate.blocks)).toBe(true);
+      expect(viaDate.resolvedFrom).toEqual({ name: isoDay, matchedBy: 'journal-date', resolvedTo: 'Jan 6th, 2025' });
+      expect(viaDate.blocks.map((b: any) => b.childCount)).toEqual([2, 0, 0]);
     });
 
     it('reports a page that does not exist as an error that points at the list tool', async () => {
@@ -157,9 +123,12 @@ describe('page outline and markdown output against a live graph (#43)', () => {
       expect(result.content).toHaveLength(1);
       expect(text.startsWith('# ')).toBe(true);
       expect(() => JSON.parse(text)).toThrow();
-      const topBullets = text.split('\n').filter(line => line.startsWith('- ')).length;
+      // The footer (after the `---` rule) has bullets of its own: tips
+      const topBullets = text.split('\n---\n')[0].split('\n').filter(line => line.startsWith('- ')).length;
       // The page-properties block is rendered as properties instead of a bullet
-      expect(topBullets === tree.length || topBullets === tree.length - 1).toBe(true);
+      expect(text.startsWith('# project atlas\n\nalias:: atlas\n')).toBe(true);
+      expect(tree).toHaveLength(5);
+      expect(topBullets).toBe(4);
     });
 
     it('get_page is smaller than its JSON, which stays the default', async () => {
@@ -174,8 +143,11 @@ describe('page outline and markdown output against a live graph (#43)', () => {
       const rows = await logseq.callAPI<any[][]>('logseq.DB.datascriptQuery', [
         `[:find ?n ?c :where [?b :block/pre-block? true] [?b :block/page ?p] [?p :block/name ?n] [?b :block/content ?c]]`,
       ]);
-      const sample = rows.filter(([, content]) => typeof content === 'string' && content.trim() !== '').slice(0, 15);
-      expect(sample.length, `No page with a property block. ${SETUP_HINT}`).toBeGreaterThan(0);
+      const sample = rows.filter(([, content]) => typeof content === 'string' && content.trim() !== '');
+      expect(sample.map(([name]) => name).sort()).toEqual([
+        'alice', 'bob', 'logseq-mcp-fixture-sentinel', 'project atlas', 'project borealis', 'project cascade',
+        'property types',
+      ]);
 
       let notVerbatim = 0;
       let repeatedAsBullet = 0;
@@ -192,9 +164,10 @@ describe('page outline and markdown output against a live graph (#43)', () => {
     it('build_context renders the blocks, related pages and references as sections', async () => {
       const text = (await call('logseq_build_context', { topic_name: hub, format: 'markdown' })).content[0].text;
 
-      expect(text.startsWith('# ')).toBe(true);
-      expect(text.includes('## Blocks (') || text.includes('(this page has no blocks)')).toBe(true);
-      expect(text.includes('## References (')).toBe(true);
+      expect(text.startsWith('# hub central\n')).toBe(true);
+      expect(text.includes('## Blocks (50 of 71)')).toBe(true);
+      expect(text.includes('## Related pages (10 of 61)')).toBe(true);
+      expect(text.includes('## References (20 of 66)')).toBe(true);
       expect(text.includes('### [[')).toBe(true);
       expect(() => JSON.parse(text)).toThrow();
     });
@@ -230,6 +203,7 @@ describe('page outline and markdown output against a live graph (#43)', () => {
       const compact = await json('logseq_build_context', { topic_name: hub, compact: true });
 
       expect(compact.directBlocks.length).toBe(full.directBlocks.length);
+      expect(compact.directBlocks).toHaveLength(50);
       expect(compact.directBlocks.every((b: any) => UUID.test(b.uuid) && b.snippet.length <= 80 && !('content' in b))).toBe(true);
       expect(compact.references.every((r: any) => UUID.test(r.block.uuid) && !('content' in r.block))).toBe(true);
       expect(compact.summary).toEqual(full.summary);
