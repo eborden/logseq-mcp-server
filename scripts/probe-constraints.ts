@@ -5,12 +5,12 @@
  * Usage: npx tsx scripts/probe-constraints.ts
  * Runs against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`), or
  * the config in LOGSEQ_MCP_CONFIG. It never falls back to ~/.logseq-mcp/config.json, the personal
- * graph (#90): with neither, it stops before any network call. The fixture reproduces every
+ * graph (#90): with neither, or with a config on port 12315, it stops before any network call. The fixture reproduces every
  * constraint; row counts differ from the real-graph numbers in CLAUDE.md.
  */
 import { loadConfig } from '../src/config.js';
 import { LogseqClient } from '../src/client.js';
-import { resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
+import { assertNotPersonalLogseq, resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
 
 type Outcome = { ok: boolean; rows?: number; value?: unknown; error?: string };
 
@@ -257,6 +257,8 @@ async function probeAliasSets(
 async function main() {
   // LOGSEQ_MCP_CONFIG if set, else the fixture instance's config; never ~/.logseq-mcp/config.json
   const config = await loadConfig(resolveFixtureConfigPath());
+  // Never the personal LogSeq, even when LOGSEQ_MCP_CONFIG names its config: refused before any client exists
+  assertNotPersonalLogseq(config.apiUrl);
   const client = new LogseqClient(config);
   const dq = (q: string, ...inputs: unknown[]) => raw(client, 'logseq.DB.datascriptQuery', [q, ...inputs]);
 
