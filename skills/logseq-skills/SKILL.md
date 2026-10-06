@@ -69,7 +69,7 @@ Use this skill when:
 **`scripts/check-terseness.sh`** - Mandatory validation gate for any summary
 - Detects weekly vs monthly from the filename and applies that budget
 - Reports per-signal word counts, totals, item count, em-dashes, two-sentence bullets, missing sections
-- Checks the page's `source::` line, the roll-up of the `logseq_query_by_date_range` call it was built from. A page with none fails, so a summary built from journal files alone doesn't pass
+- Checks the page's `summary-source::` line, the roll-up of the `logseq_query_by_date_range` call it was built from. A page with none fails, so a summary built from journal files alone doesn't pass
 - Exits non-zero on violation; rewrite and re-run rather than explaining the failure away
 
 ### Gates
