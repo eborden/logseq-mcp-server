@@ -3,7 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from './index.js';
 import { LogseqClient } from './client.js';
-import { DEFAULT_SLIM_RESULTS, wantsSlim } from './utils/slim-entities.js';
+import { DEFAULT_SLIM_RESULTS } from './utils/slim-entities.js';
 
 /**
  * Slim output is the default (#42): `slim_results` omitted means slim, and
@@ -83,16 +83,6 @@ const SLIM_ONLY_KEYS = ['pageName'];
 const FULL_ONLY_KEYS = ['id', 'page', 'parent', 'left', 'format'];
 
 describe('slim_results default (#42)', () => {
-  describe('wantsSlim', () => {
-    it('is slim unless the caller passes the boolean false', () => {
-      expect(DEFAULT_SLIM_RESULTS).toBe(true);
-      expect(wantsSlim(undefined)).toBe(true);
-      expect(wantsSlim(null)).toBe(true);
-      expect(wantsSlim(true)).toBe(true);
-      expect(wantsSlim(false)).toBe(false);
-    });
-  });
-
   describe('logseq_search_blocks', () => {
     it('returns slim blocks when slim_results is omitted', async () => {
       const [block] = await call('logseq_search_blocks', { query: 'alice' });
@@ -219,6 +209,7 @@ describe('slim_results default (#42)', () => {
 
   describe('schema', () => {
     it('advertises default: true on every slim_results parameter, and there are three', async () => {
+      expect(DEFAULT_SLIM_RESULTS).toBe(true);
       const server = createServer(stubClient());
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       const mcpClient = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
