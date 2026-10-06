@@ -1,7 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity, ResultMeta, ResultWarning } from '../types.js';
 import { journalFlag } from '../utils/entity-fields.js';
-import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS } from '../utils/result-meta.js';
 
 /** Pages returned when `limit` is absent (#61). */
 export const DEFAULT_LIST_PAGES_LIMIT = 200;
@@ -195,9 +195,11 @@ export async function listPages(
  * The `pages_truncated` warning for `shown` pages from `offset` of `total`.
  * Counted from `offset`, so "get all N" means the N pages from there on. Paging
  * leads (#196): `howToFetchAll` starts with the next offset whenever there is one,
- * and raising `limit` is the alternative. No large-result note: a listed page is a
- * name, so even 1000 of them (about 35 characters each) plausibly come back inline. With limit 0 there is no next offset, because it would not move, so
- * only raising limit is suggested.
+ * and raising `limit` is the alternative, with the large-result note when that raise passes
+ * `INLINE_ITEMS.pages` (800): an entry is 12 characters of JSON plus the name, so 1000 pages
+ * of 35-character names are about 47,000 characters, near the host's limit, and aliases add
+ * more. With limit 0 there is no next offset, because it would not move, so only raising
+ * limit is suggested.
  */
 function pagesTruncated(shown: number, total: number, offset: number, requested: number): ResultWarning {
   return cappedTruncationWarning({
@@ -209,6 +211,7 @@ function pagesTruncated(shown: number, total: number, offset: number, requested:
     narrower: 'Narrow name_contains to see the rest.',
     requested,
     code: 'pages_truncated',
+    inlineMax: INLINE_ITEMS.pages,
     paging: shown > 0 ? { param: 'offset', next: `Set offset to ${offset + shown} for the next page.` } : undefined,
   });
 }

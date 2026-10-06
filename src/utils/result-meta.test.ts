@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   buildResultMeta,
   CappedTruncation,
+  blocksInlineMax,
   cappedTruncationWarning,
+  INLINE_ITEMS,
   LARGE_RESULT_NOTE,
   largeResultNote,
   metaContent,
@@ -48,6 +50,20 @@ describe('largeResultNote (#196)', () => {
   it('says the host may save the result, and names no size', () => {
     expect(LARGE_RESULT_NOTE).toContain('may be saved to a file by the host');
     expect(LARGE_RESULT_NOTE).not.toMatch(/[0-9]/);
+  });
+});
+
+describe('blocksInlineMax and INLINE_ITEMS (#196)', () => {
+  it('is 200 for slim blocks and lower where a hit comes back larger', () => {
+    expect(blocksInlineMax()).toBe(INLINE_ITEMS.blocks);
+    expect(blocksInlineMax({ context: false, slim: true })).toBe(200);
+    expect(blocksInlineMax({ context: true })).toBe(120);
+    expect(blocksInlineMax({ slim: false })).toBe(125);
+    expect(blocksInlineMax({ context: true, slim: false })).toBe(65);
+  });
+
+  it('pins the other estimates', () => {
+    expect(INLINE_ITEMS).toEqual({ blocks: 200, references: 150, relatedPages: 500, networkNodes: 200, pages: 800 });
   });
 });
 

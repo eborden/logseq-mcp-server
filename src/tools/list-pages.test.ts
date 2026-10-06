@@ -246,8 +246,8 @@ describe('listPages', () => {
       expect(await list(30, { offset: 5000 })).toEqual({ pages: [], total: 30 });
     });
 
-    it('leads with the next offset in every cut, and adds no large-result note (#196)', async () => {
-      // A listed page is a name, about 35 characters, so even 1000 of them plausibly come back inline
+    it('leads with the next offset in every cut, and notes a raise past 800 pages (#196)', async () => {
+      // An entry is 12 characters of JSON plus the name: 1000 pages of 35-character names are about 47,000 characters
       for (const [total, offset, limit] of [[500, 0, 200], [700, 0, 200], [1500, 0, 200], [1500, 0, 1000], [2500, 500, 1000]]) {
         const result = await list(total, { offset, limit });
         const [w] = result.warnings!;
@@ -255,7 +255,8 @@ describe('listPages', () => {
         expect(result.hasMore, label).toBe(true);
         expect(w.howToFetchAll, label).toMatch(/^Set offset to \d+ for the next page\./);
         expect(w.message, label).toContain('Page through the rest with offset.');
-        expect(w.howToFetchAll, label).not.toContain('saved to a file');
+        const raised = Number(w.howToFetchAll!.match(/set limit to (\d+)/)?.[1] ?? 0);
+        expect(w.howToFetchAll!.includes('may be saved to a file'), label).toBe(raised > 800);
       }
     });
 
@@ -268,7 +269,7 @@ describe('listPages', () => {
         {
           code: 'pages_truncated',
           message: 'Showing 200 of 1500 pages. Page through the rest with offset.',
-          howToFetchAll: 'Set offset to 200 for the next page. Or set limit to 1000 (the maximum) to get 1000 of 1500 in one call.',
+          howToFetchAll: 'Set offset to 200 for the next page. Or set limit to 1000 (the maximum) to get 1000 of 1500 in one call. A result this large may be saved to a file by the host instead of shown; the server can\'t tell.',
         },
       ]);
     });
@@ -379,7 +380,7 @@ describe('listPages', () => {
         },
       ]);
       expect((await list(1500, { limit: 0 })).warnings![0].howToFetchAll).toBe(
-        "Set limit to 1000 (the maximum) to get 1000 of 1500. Narrow name_contains to see the rest."
+        "Set limit to 1000 (the maximum) to get 1000 of 1500. A result this large may be saved to a file by the host instead of shown; the server can't tell. Narrow name_contains to see the rest."
       );
     });
 
