@@ -83,7 +83,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **In this repo.**
 - **MCP tool arguments:** each tool parses its arguments into a typed value in one place and throws `InvalidParameterError` on failure. Handlers never read raw `args`. The parser and the tool's `inputSchema` should come from the same definition so they can't drift. Parsing runs after `resolveParamAliases` (`src/utils/param-aliases.ts`). See [BR-0008 (param-aliases-best-effort)](business-rules/0008-param-aliases-best-effort.md).
-- **LogSeq responses:** parse the shapes you read at the client edge. LogSeq returns different spellings from the Editor API and from Datalog (`originalName` vs `original-name`). Normalize that once in an adapter so tool code sees one shape.
+- **LogSeq responses:** check every response against a zod schema from `src/response-schemas.ts`, through `callParsed` / `queryParsed` (`src/utils/parse-response.ts`), before a tool reads it. The schema is strict about the fields the code reads with no fallback, silent about the rest, and tolerant of what the code already reads with a fallback or skips (an optional field stays optional). A mismatch is a `LogSeqResponseError`, never an empty result, and `null` stays distinct from `[]`. The check returns LogSeq's own answer, not a rebuilt copy: LogSeq spells the same field differently in the Editor API and in Datalog (`originalName` vs `original-name`), a full result carries each entity as it came, and renaming those output keys is a contract change ([BR-0004 (additive-tool-contracts)](business-rules/0004-additive-tool-contracts.md)). So the schemas name each dialect, and `src/utils/entity-fields.ts` keeps both spellings readable in one place.
 - **Config:** parse once at startup into a typed value and fail fast.
 - **Tool inputs that become queries:** strings go in as `:in` inputs, never embedded in query text (see `CLAUDE.md`, constraint 6). Numeric ids go through `DatalogQueryBuilder.groundIds`.
 
@@ -97,7 +97,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **In this repo.** Tool names, parameter names, required fields and the shape of results are the contract. Contracts change additively ([BR-0004 (additive-tool-contracts)](business-rules/0004-additive-tool-contracts.md)), and every tool keeps its read-only annotations ([BR-0002 (tools-read-only)](business-rules/0002-tools-read-only.md)).
 
-**Agents get wrong.** "Simplifying" LogSeq's awkward API in tool output by leaking its quirks into the contract, or the reverse: reshaping a result field because it looks neater. Conform to LogSeq at the boundary with an adapter and keep its shape out of the tool contract.
+**Agents get wrong.** "Simplifying" LogSeq's awkward API in tool output by leaking its quirks into the contract, or the reverse: reshaping a result field because it looks neater. Validate LogSeq's answer at the boundary and keep its two key spellings behind `entity-fields.ts`, so tool code never carries its own `a ?? b ?? c`. Don't rewrite the keys of an entity a tool returns: that changes the output contract (BR-0004), and a canonical shape needs a deliberate, versioned change, not a refactor.
 
 ### 4.4 Minimize state; derive, don't duplicate
 
