@@ -304,8 +304,43 @@ describe('startInstance', () => {
     const [spec] = world.spawned;
     expect(spec.command).toBe(APP);
     expect(spec.args).toEqual([`--user-data-dir=${PATHS.profile}`]);
-    expect(spec.env).toMatchObject({ HOME: PATHS.home, CFFIXED_USER_HOME: PATHS.home, PATH: '/usr/bin' });
-    expect(spec.env).not.toHaveProperty('ELECTRON_RUN_AS_NODE');
+    expect(spec.env).toEqual({ HOME: PATHS.home, CFFIXED_USER_HOME: PATHS.home, PATH: '/usr/bin' });
+  });
+
+  it('passes only the allow-listed environment, with HOME and CFFIXED_USER_HOME replaced', async () => {
+    const env = {
+      PATH: '/usr/bin',
+      USER: 'alice',
+      LOGNAME: 'alice',
+      SHELL: '/bin/zsh',
+      TMPDIR: '/tmp/alice',
+      LANG: 'en_US.UTF-8',
+      LC_ALL: 'en_US.UTF-8',
+      __CF_USER_TEXT_ENCODING: '0x1F5:0x0:0x0',
+      HOME: '/Users/alice',
+      CFFIXED_USER_HOME: '/Users/alice',
+      NODE_OPTIONS: '--require evil.js',
+      ELECTRON_RUN_AS_NODE: '1',
+      ELECTRON_ENABLE_LOGGING: '1',
+      XDG_CONFIG_HOME: '/Users/alice/.config',
+      LOGSEQ_MCP_CONFIG: '/x/config.json',
+      UNSET: undefined,
+    };
+
+    await start(world, world.deps({ env }));
+
+    expect(world.spawned[0].env).toEqual({
+      PATH: '/usr/bin',
+      USER: 'alice',
+      LOGNAME: 'alice',
+      SHELL: '/bin/zsh',
+      TMPDIR: '/tmp/alice',
+      LANG: 'en_US.UTF-8',
+      LC_ALL: 'en_US.UTF-8',
+      __CF_USER_TEXT_ENCODING: '0x1F5:0x0:0x0',
+      HOME: PATHS.home,
+      CFFIXED_USER_HOME: PATHS.home,
+    });
   });
 
   it('honours LOGSEQ_APP', async () => {
