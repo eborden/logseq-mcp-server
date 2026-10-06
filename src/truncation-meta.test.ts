@@ -570,3 +570,91 @@ describe('logseq_query_by_property limit (#61)', () => {
     expect((await byProperty(2, { limit: 'many' })).isError).toBe(true);
   });
 });
+
+describe('logseq_search_by_relationship limit (#61)', () => {
+  // A mock of the HTTP API: the resolver answers each topic with a page that has a file and no alias,
+  // the connected-within hop finds topic B, and any other Datalog query is the data query,
+  // which returns `n` blocks. The result is an object, so meta sits in it, not in a second block.
+  const pages: Record<string, any> = {
+    '"alice"': { id: 9, name: 'alice', 'original-name': 'Alice', file: { id: 900 } },
+    '"bob"': { id: 10, name: 'bob', 'original-name': 'Bob', file: { id: 900 } },
+  };
+  const relationship = (n: number, args: Record<string, unknown> = {}) => {
+    const callAPI = vi.fn(async (method: string, params: unknown[]) => {
+      if (method === 'logseq.Editor.getPageBlocksTree') {
+        return Array.from({ length: Math.ceil(n / 2) }, (_, i) => ({ id: 1000 + i, content: `Block ${i}` }));
+      }
+      const [query, ...inputs] = params as string[];
+      if (query.includes(':in $ ?n')) return [[pages[inputs[0]], 'name']];
+      if (query.includes('?neighbor')) return [[10]];
+      return Array.from({ length: n }, (_, i) => blockRow(i + 1));
+    });
+    return callTool(callAPI, 'logseq_search_by_relationship', {
+      topic_a: 'Alice',
+      topic_b: 'Bob',
+      relationship_type: 'references',
+      ...args,
+    });
+  };
+  const body = (result: any) => JSON.parse(result.content[0].text);
+
+  it('cuts results at 50 by default, reports it in the object, and sends no second block', async () => {
+    const result = await relationship(80);
+
+    expect(result.content).toHaveLength(1);
+    const parsed = body(result);
+    expect(parsed.results).toHaveLength(50);
+    expect(parsed).toMatchObject({
+      hasMore: true,
+      totals: { blocks: 80 },
+      warnings: [
+        {
+          code: 'results_truncated',
+          message: 'Showing 50 of 80 matching blocks (the first ones listed, not ranked).',
+          howToFetchAll: 'Set limit to 80 (or higher) to get all 80.',
+        },
+      ],
+    });
+  });
+
+  // connected-within returns both pages' trees, `n / 2` top-level blocks each, so 80 in all
+  it.each(['references', 'referenced-by', 'in-pages-linking-to', 'connected-within'])(
+    'honours limit for %s and returns the rest on request',
+    async type => {
+      expect(body(await relationship(80, { relationship_type: type, limit: 5 })).results).toHaveLength(5);
+      expect(body(await relationship(80, { relationship_type: type, limit: 80 })).results).toHaveLength(80);
+    }
+  );
+
+  it('clamps limit above 500 and reports the maximum, with hasMore false', async () => {
+    const result = await relationship(600, { limit: 5000 });
+
+    expect(result.isError).toBeUndefined();
+    const parsed = body(result);
+    expect(parsed.results).toHaveLength(500);
+    expect(parsed.hasMore).toBe(false);
+    expect(parsed.totals).toEqual({ blocks: 600 });
+    expect(parsed.warnings).toHaveLength(1);
+    expect(parsed.warnings[0].code).toBe('results_truncated');
+    expect(parsed.warnings[0].message).toContain('capped at its maximum of 500 (5000 was asked for)');
+    expect(parsed.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('adds nothing to the result when everything fits, whatever limit is passed', async () => {
+    const atDefault = await relationship(50);
+    const explicit = await relationship(50, { limit: 50 });
+    const atMax = await relationship(50, { limit: 500 });
+    const above = await relationship(50, { limit: 5000 });
+
+    expect(body(atDefault).results).toHaveLength(50);
+    expect(body(atDefault)).toMatchObject({ hasMore: false, warnings: [] });
+    expect(body(atDefault)).not.toHaveProperty('totals');
+    expect(explicit.content).toEqual(atDefault.content);
+    expect(atMax.content).toEqual(atDefault.content);
+    expect(above.content).toEqual(atDefault.content);
+  });
+
+  it('rejects a limit that is not a number', async () => {
+    expect((await relationship(2, { limit: 'many' })).isError).toBe(true);
+  });
+});
