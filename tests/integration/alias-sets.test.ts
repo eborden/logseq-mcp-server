@@ -1,6 +1,4 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getBacklinksWithMeta } from '../../src/tools/get-backlinks.js';
 import { buildContextForTopic } from '../../src/tools/build-context.js';
@@ -8,32 +6,26 @@ import { getConceptEvolution } from '../../src/tools/get-concept-evolution.js';
 import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
 import { searchByRelationship } from '../../src/tools/search-by-relationship.js';
 import { queryJournals } from '../../src/tools/query-by-date-range.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for alias-aware link following (#69).
+ * Integration tests for alias-aware link following (#69), against the fixture graph.
  *
- * Read-only. Finds a page that declares an alias (`alias:: x`) whose stub
- * `x` is referenced by at least one block, then asks each link-following tool
- * for the page by its canonical name and by the alias, and checks that both
- * calls cover the same blocks. Asserts structure only (booleans and counts);
- * it never prints or asserts on a name or block content from the graph.
- *
- * Requires LogSeq running with the HTTP API enabled, ~/.logseq-mcp/config.json,
- * and a page with an `alias::` whose alias is linked from some other block.
- * See tests/integration/setup.md ("Alias data").
+ * Read-only. `project atlas` declares `alias:: atlas`, which no other page declares, and two
+ * journal blocks link `[[atlas]]` (Jan 2nd and Jan 7th, 2025). Each link-following tool is asked
+ * for the page by its canonical name and by the alias, and both calls must cover the same blocks.
+ * `Bob` is a page with a file and no alias, for the unchanged case.
  */
-
-const SETUP_HINT = 'See tests/integration/setup.md ("Alias data")';
 
 const sameSet = (a: Set<unknown>, b: Set<unknown>) => a.size === b.size && [...a].every(x => b.has(x));
 
-describe('alias-aware link following against a live graph', () => {
+const ALIAS_GROUP = ['atlas', 'project atlas'];
+
+describe('alias-aware link following against the fixture graph', () => {
   let client: LogseqClient;
   let apiCalls = 0;
-  /** Canonical page name, its alias, and how many blocks reference the alias */
-  let target: { canonical: string; alias: string; aliasRefs: number };
-  /** A page with a file and no alias link */
-  let plain: string;
+  const target = { canonical: 'project atlas', alias: 'atlas', aliasRefs: 2 };
+  const plain = 'bob';
 
   const counted = async <T>(run: () => Promise<T>): Promise<{ result: T; calls: number }> => {
     const before = apiCalls;
@@ -42,47 +34,12 @@ describe('alias-aware link following against a live graph', () => {
   };
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(`Config file not found at ~/.logseq-mcp/config.json. ${SETUP_HINT}`);
-    }
-    client = new LogseqClient(await loadConfig(configPath));
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n${SETUP_HINT}`
-      );
-    }
+    ({ client } = await connectFixture());
     const original = client.callAPI.bind(client);
     client.callAPI = (async (method: string, args?: any[]) => {
       apiCalls++;
       return original(method, args);
     }) as typeof client.callAPI;
-
-    const raw = (q: string) => original<any[]>('logseq.DB.datascriptQuery', [q]);
-    // Aliases declared by exactly one page (a shared alias is ambiguous for the resolver) that other blocks link
-    const declared = await raw(
-      `[:find ?pn ?an :where [?p :block/alias ?a] [?p :block/file] (not [?a :block/file]) [?p :block/name ?pn] [?a :block/name ?an]]`
-    );
-    const sources = new Map<string, string[]>();
-    for (const [pn, an] of declared) sources.set(an, [...(sources.get(an) ?? []), pn]);
-    const refCounts = new Map<string, number>(
-      (await raw(`[:find ?an (count ?b) :where [?p :block/alias ?a] (not [?a :block/file]) [?a :block/name ?an] [?b :block/refs ?a]]`)).map(
-        ([an, n]) => [an, n]
-      )
-    );
-    const pick = [...sources.entries()].find(([an, pages]) => pages.length === 1 && (refCounts.get(an) ?? 0) > 0);
-    expect(pick !== undefined, `No page with an alias that only it declares and other blocks link. ${SETUP_HINT}`).toBe(true);
-    target = { canonical: pick![1][0], alias: pick![0], aliasRefs: refCounts.get(pick![0])! };
-
-    const plains = await raw(
-      `[:find ?n :where [?p :block/name ?n] [?p :block/file] (not [?p :block/alias ?x]) (not [?p :block/journal? true])]`
-    );
-    expect(plains.length, `No page with a file and no alias. ${SETUP_HINT}`).toBeGreaterThan(0);
-    plain = plains[0][0];
   });
 
   it('get_backlinks: the alias and the canonical name return the same blocks, from at most 3 calls', async () => {
@@ -91,9 +48,11 @@ describe('alias-aware link following against a live graph', () => {
 
     const ids = (r: typeof byName.result) =>
       new Set((r.results ?? []).flatMap(([, blocks]) => blocks.map(b => b.id)));
-    expect(ids(byName.result).size).toBeGreaterThan(0);
+    // 24 blocks on 14 pages link project atlas or atlas
+    expect(ids(byName.result).size).toBe(24);
+    expect(byName.result.results).toHaveLength(14);
     expect(sameSet(ids(byName.result), ids(byAlias.result))).toBe(true);
-    expect((byName.result.meta?.resolvedAliases?.length ?? 0) >= 2).toBe(true);
+    expect(byName.result.meta?.resolvedAliases).toEqual(ALIAS_GROUP);
     expect(byAlias.result.meta?.resolvedAliases).toEqual(byName.result.meta?.resolvedAliases);
     expect(byName.calls <= 3 && byAlias.calls <= 3).toBe(true); // resolver, alias group, references
   });
@@ -119,7 +78,7 @@ describe('alias-aware link following against a live graph', () => {
     }
 
     const shared = (results ?? []).filter(([page]) => editorKeys.has(page.id));
-    expect(shared.length, `No source page in both results. ${SETUP_HINT}`).toBeGreaterThan(0);
+    expect(shared).toHaveLength(14);
     const mismatched = shared.filter(([page, blocks]) =>
       keysOf(page) !== editorKeys.get(page.id) || blocks.some(b => keysOf(b.page as object) !== keysOf(page))
     ).length;
@@ -142,8 +101,9 @@ describe('alias-aware link following against a live graph', () => {
 
     const ids = (r: typeof byName.result) => new Set(r.timeline.flatMap(t => t.blocks.map(b => b.id)));
     expect(sameSet(ids(byName.result), ids(byAlias.result))).toBe(true);
-    expect(ids(byName.result).size).toBeGreaterThanOrEqual(target.aliasRefs);
-    expect((byName.result.resolvedAliases?.length ?? 0) >= 2).toBe(true);
+    expect(ids(byName.result).size).toBe(22);
+    expect(byName.result.summary).toMatchObject({ totalMentions: 22, journalMentions: 12, nonJournalMentions: 10 });
+    expect(byName.result.resolvedAliases).toEqual(ALIAS_GROUP);
     expect(byName.calls <= 5 && byAlias.calls <= 5).toBe(true);
   });
 
@@ -154,6 +114,7 @@ describe('alias-aware link following against a live graph', () => {
     const refIds = (c: typeof byName) => new Set(c.references.map(r => r.block.id));
     expect(sameSet(refIds(byName), refIds(byAlias))).toBe(true);
     expect(byName.totals).toEqual(byAlias.totals);
+    expect(byName.totals).toEqual({ blocks: 8, relatedPages: 14, references: 24 });
     expect(byAlias.resolvedAliases).toEqual(byName.resolvedAliases);
   });
 
@@ -165,7 +126,7 @@ describe('alias-aware link following against a live graph', () => {
     expect(byName.edges).toEqual(byAlias.edges);
     // one node for the whole group: the root, and no second node for an alias
     expect(byName.nodes.filter(n => n.depth === 0)).toHaveLength(1);
-    expect((byName.resolvedAliases?.length ?? 0) >= 2).toBe(true);
+    expect(byName.resolvedAliases).toEqual(ALIAS_GROUP);
     const rootNames = new Set(byName.resolvedAliases!.map(n => n.toLowerCase()));
     expect(byName.nodes.filter(n => rootNames.has(n.name.toLowerCase()))).toHaveLength(1);
   });
@@ -175,8 +136,9 @@ describe('alias-aware link following against a live graph', () => {
     const byAlias = await searchByRelationship(client, target.alias, plain, 'in-pages-linking-to');
 
     expect(sameSet(new Set(byName.results.map(b => b.id)), new Set(byAlias.results.map(b => b.id)))).toBe(true);
+    expect(byName.results).toHaveLength(9);
     expect(byAlias.resolvedAliases?.topicA).toEqual(byName.resolvedAliases?.topicA);
-    expect((byName.resolvedAliases?.topicA?.length ?? 0) >= 2).toBe(true);
+    expect(byName.resolvedAliases?.topicA).toEqual(ALIAS_GROUP);
     expect(byName.resolvedAliases?.topicB).toBeUndefined();
   });
 
@@ -193,11 +155,14 @@ describe('alias-aware link following against a live graph', () => {
     // match as whole words or refs only. So a block only one call finds holds that call's term.
     const onlyIn = (a: Map<number, string>, b: Map<number, string>, term: string) =>
       [...a].filter(([id]) => !b.has(id)).filter(([, content]) => !content.includes(term.toLowerCase())).length;
-    expect(nameBlocks.size).toBeGreaterThan(0);
+    expect(nameBlocks.size).toBe(10);
+    expect(byName.entries.map((e: any) => e.date)).toEqual(
+      [20241231, 20250102, 20250106, 20250107, 20250108, 20250113, 20250115]
+    );
     expect(onlyIn(nameBlocks, aliasBlocks, target.canonical)).toBe(0);
     expect(onlyIn(aliasBlocks, nameBlocks, target.alias)).toBe(0);
     expect(byName.resolvedAliases).toEqual(byAlias.resolvedAliases);
-    expect((byName.resolvedAliases?.length ?? 0) >= 2).toBe(true);
+    expect(byName.resolvedAliases).toEqual(ALIAS_GROUP);
   });
 
   it('a page with no aliases is unchanged: no resolvedAliases, no extra calls', async () => {
