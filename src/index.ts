@@ -271,7 +271,10 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
 
         case 'logseq_get_backlinks': {
           const parsed = parseArgs(getBacklinksArgs, args);
-          const { results: result, meta } = await getBacklinksWithMeta(client, parsed.page_name);
+          const { results: result, meta } = await getBacklinksWithMeta(client, parsed.page_name, {
+            maxPages: parsed.max_pages,
+            maxBlocksPerPage: parsed.max_blocks_per_page,
+          });
           return {
             content: [
               {
