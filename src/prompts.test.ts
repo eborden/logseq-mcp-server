@@ -153,6 +153,12 @@ describe('MCP prompts (#46)', () => {
       expect(text).toContain('"Weekly 2026-09-28"');
     });
 
+    it('reaches the newest weekly pages when list_pages is cut, since names sort oldest first (#61)', () => {
+      const text = textOf(getPrompt('weekly_summary', {}, WED) as any);
+      expect(text).toContain('name_contains "Weekly"');
+      expect(text).toContain('if hasMore is true, call again with offset set to total minus 3');
+    });
+
     it('ends on Friday once the week is over', () => {
       const text = textOf(getPrompt('weekly_summary', { week: 'this' }, SAT) as any);
       expect(text).toContain('end_date 20261002');
@@ -204,6 +210,11 @@ describe('MCP prompts (#46)', () => {
       expect(text).toContain('"Weekly 2026-08"');
       expect(text).toContain('start_date 20260801, end_date 20260831');
       expect(text).toContain('"Monthly 2026-08"');
+    });
+
+    it('reaches the newest monthly pages when list_pages is cut (#61)', () => {
+      const text = textOf(getPrompt('monthly_summary', { month: '2026-08' }, WED) as any);
+      expect(text).toContain('if hasMore is true, call again with offset set to total minus 2');
     });
   });
 

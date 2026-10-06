@@ -195,6 +195,13 @@ function summaryRules(budget: { words: string; total: number; items: string }): 
   ].join('\n');
 }
 
+/**
+ * logseq_list_pages returns names A-Z, 200 per call (#61), so dated pages come
+ * oldest first and a long list cuts the newest. This says how to reach the last `n`.
+ */
+const NEWEST_LAST = (n: number): string =>
+  `Names come A-Z, oldest first: if hasMore is true, call again with offset set to total minus ${n}.`;
+
 const SKILL_NOTE = (skill: string): string =>
   `If the logseq-skills skill is available, follow its ${skill} workflow instead of the steps below.`;
 
@@ -221,7 +228,7 @@ const PROMPT_DEFINITIONS: PromptDefinition[] = [
         '',
         'Steps:',
         `1. logseq_query_by_date_range with start_date ${w.start}, end_date ${w.end}. If the result has summary.topConcepts, use it to pick the threads to read closely.`,
-        '2. For trend context, logseq_list_pages with name_contains "Weekly", then logseq_get_page (include_children true) on the 2 or 3 most recent. Read them for trends only, not for style.',
+        `2. For trend context, logseq_list_pages with name_contains "Weekly", then logseq_get_page (include_children true) on the 2 or 3 most recent. ${NEWEST_LAST(3)} Read them for trends only, not for style.`,
         '3. Find what is still open: look for TODO, DOING and NOW blocks in the week (and any closed since) with logseq_search_blocks. Report only items still open.',
         '4. Write the summary.',
         '',
@@ -253,7 +260,7 @@ const PROMPT_DEFINITIONS: PromptDefinition[] = [
         '',
         'Steps:',
         `1. logseq_list_pages with name_contains "Weekly ${m.month}", then logseq_get_page (include_children true) on each. If a week is missing, say so; do not invent it.`,
-        '2. logseq_list_pages with name_contains "Monthly", then logseq_get_page on the 1 or 2 most recent, for trajectory context only.',
+        `2. logseq_list_pages with name_contains "Monthly", then logseq_get_page on the 1 or 2 most recent, for trajectory context only. ${NEWEST_LAST(2)}`,
         `3. Spot-check the busiest days in the raw journal: logseq_query_by_date_range with start_date ${m.start}, end_date ${m.end}, include_content false and top_concepts_limit 20 for the shape, then a narrow range with content for any day a weekly flagged.`,
         '4. For each candidate signal, state its trajectory against earlier months in the text: escalating, improving, unchanged, resolved or new. A candidate with no trajectory gets merged or dropped.',
         '5. Verify open items against the journal, past the end of the month, before listing any as unresolved.',
