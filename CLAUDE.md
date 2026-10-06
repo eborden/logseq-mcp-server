@@ -124,9 +124,12 @@ Done by whoever merges:
 - A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
 
 ### Merge policy
-- **Three actions need the maintainer's explicit OK:** merging a PR, moving a board item from *Backlog* to *Ready*, and merging any PR that adds, changes, supersedes or retires an ADR or business rule. Everything else (issues, PRs, reviews, resolving threads, pushing to feature branches, other status moves) is allowed by default.
+- **Three actions need the maintainer's explicit OK:** merging a PR, moving a board item from *Backlog* to *Ready*, and merging any PR that adds, changes, supersedes or retires an ADR or business rule, even with self-merge. Everything else (issues, PRs, reviews, resolving threads, pushing to feature branches, other status moves) is allowed by default.
 - **The maintainer merges by default.** Claude may merge its own PRs only if the maintainer has explicitly granted self-merge to the session. Without that grant, open the PR and stop.
-- **The ADR and business-rule gate applies even with self-merge.** Before merge, a PR comment records the approval: the maintainer writes it, or Claude posts it quoting the maintainer's message verbatim with its date. If the maintainer merges the PR, the merge is the record. The approval survives a rebase that changes nothing of substance. If a rebase changes the wording of an ADR or rule, or the behaviour of the PR, ask again. See the Approval gate in [`docs/adr/README.md`](docs/adr/README.md#change-process).
+- **The ADR and business-rule gate applies even with self-merge.** Before merge, a PR comment records the approval: the maintainer writes it, or Claude posts it quoting the maintainer's message verbatim with its date. If the maintainer merges the PR, the merge is the record (see the Approval gate in [`docs/adr/README.md`](docs/adr/README.md#change-process)). What an approval survives is set here only, not in the READMEs:
+  - A rebase or conflict resolution that changes nothing of substance keeps the approval.
+  - A renumber on rebase (the stem, Index row and citations only, required when another PR merged the number first) is mechanical and keeps the approval. Whoever merges reports the new number to the maintainer.
+  - Any push after the approval that changes the wording of an ADR or rule, or the behaviour of the PR, needs a fresh OK.
 - Even with self-merge, the verification and the merge gate above still apply. Raise decisions that belong to the maintainer (behaviour changes, publishing, accounts) instead of merging past them.
 
 ---
