@@ -17,20 +17,24 @@ describe('getConceptEvolution', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce([
       {
         id: 1,
+        uuid: 'u',
         content: 'First mention of [[Concept]]',
         page: { journalDay: 20251101, name: 'nov 1st, 2025' }
       },
       {
         id: 2,
+        uuid: 'u',
         content: 'Later thoughts on [[Concept]]',
         page: { journalDay: 20251115, name: 'nov 15th, 2025' }
       },
       {
         id: 3,
+        uuid: 'u',
         content: 'Updated understanding of [[Concept]]',
         page: { journalDay: 20251120, name: 'nov 20th, 2025' }
       }
     ]);
+    (mockClient.callAPI as any).mockResolvedValueOnce(null); // getPage
 
     // Mock Datalog query for inline mentions
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce(RESOLVED_CONCEPT);
@@ -54,20 +58,24 @@ describe('getConceptEvolution', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce([
       {
         id: 1,
+        uuid: 'u',
         content: 'Week 1 mention',
         page: { journalDay: 20251101 }
       },
       {
         id: 2,
+        uuid: 'u',
         content: 'Also week 1',
         page: { journalDay: 20251102 }
       },
       {
         id: 3,
+        uuid: 'u',
         content: 'Week 2 mention',
         page: { journalDay: 20251108 }
       }
     ]);
+    (mockClient.callAPI as any).mockResolvedValueOnce(null); // getPage
 
     // Mock Datalog query for inline mentions
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce(RESOLVED_CONCEPT);
@@ -93,10 +101,12 @@ describe('getConceptEvolution', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce([
       {
         id: 1,
+        uuid: 'u',
         content: 'Non-journal mention',
         page: { name: 'Regular Page', 'journal?': false }
       }
     ]);
+    (mockClient.callAPI as any).mockResolvedValueOnce(null); // getPage
 
     // Mock Datalog query for inline mentions
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce(RESOLVED_CONCEPT);
@@ -117,15 +127,18 @@ describe('getConceptEvolution', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce([
       {
         id: 1,
+        uuid: 'u',
         content: 'Old mention',
         page: { journalDay: 20240101 }
       },
       {
         id: 2,
+        uuid: 'u',
         content: 'Recent mention',
         page: { journalDay: 20251115 }
       }
     ]);
+    (mockClient.callAPI as any).mockResolvedValueOnce(null); // getPage
 
     // Mock Datalog query for inline mentions
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce(RESOLVED_CONCEPT);
@@ -151,6 +164,7 @@ describe('getConceptEvolution', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce([
       {
         id: 1,
+        uuid: 'u',
         content: 'On concept page',
         page: { id: 100 }
       }
@@ -160,6 +174,7 @@ describe('getConceptEvolution', () => {
     (mockClient.callAPI as any).mockResolvedValueOnce({
       id: 100,
       name: 'concept',
+      originalName: 'Concept',
       'journal?': false,
       journalDay: undefined
     });
@@ -169,6 +184,7 @@ describe('getConceptEvolution', () => {
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
       [{
         id: 2,
+        uuid: 'u',
         content: 'Inline mention in journal',
         page: {
           id: 200,
@@ -197,7 +213,7 @@ describe('getConceptEvolution', () => {
       query.includes(':in $ ?n') ? RESOLVED_CONCEPT : []
     );
     const mockClient = {
-      callAPI: vi.fn().mockResolvedValue([]),
+      callAPI: vi.fn(async (method: string) => (method === 'logseq.Editor.getPage' ? null : [])),
       executeDatalogQuery
     } as unknown as LogseqClient;
 
@@ -223,7 +239,7 @@ describe('getConceptEvolution', () => {
             ]
           : []
       );
-      const callAPI = vi.fn().mockResolvedValue([]);
+      const callAPI = vi.fn(async (method: string) => (method === 'logseq.Editor.getPage' ? null : []));
       const mockClient = { callAPI, executeDatalogQuery } as unknown as LogseqClient;
 
       await getConceptEvolution(mockClient, 'Cpt');
@@ -235,7 +251,7 @@ describe('getConceptEvolution', () => {
 
     it('says which page was tracked when the name was an alias', async () => {
       const mockClient = {
-        callAPI: vi.fn().mockResolvedValue([]),
+        callAPI: vi.fn(async (method: string) => (method === 'logseq.Editor.getPage' ? null : [])),
         executeDatalogQuery: vi.fn(async (query: string) =>
           query.includes(':in $ ?n') ? [[{ id: 100, name: 'concept', 'original-name': 'Concept' }, 'alias']] : []
         )
@@ -251,7 +267,7 @@ describe('getConceptEvolution', () => {
       const executeDatalogQuery = vi.fn(async (query: string) =>
         query.includes(':in $ ?suffix') ? [[{ id: 5, name: 'work/cpt', 'original-name': 'Work/Cpt' }]] : []
       );
-      const mockClient = { callAPI: vi.fn().mockResolvedValue([]), executeDatalogQuery } as unknown as LogseqClient;
+      const mockClient = { callAPI: vi.fn(async (method: string) => (method === 'logseq.Editor.getPage' ? null : [])), executeDatalogQuery } as unknown as LogseqClient;
 
       const result = await getConceptEvolution(mockClient, 'Cpt');
 
@@ -260,7 +276,7 @@ describe('getConceptEvolution', () => {
 
     it('omits resolvedFrom for an exact name', async () => {
       const mockClient = {
-        callAPI: vi.fn().mockResolvedValue([]),
+        callAPI: vi.fn(async (method: string) => (method === 'logseq.Editor.getPage' ? null : [])),
         executeDatalogQuery: vi.fn(async (query: string) =>
           query.includes(':in $ ?n') ? [[{ id: 100, name: 'concept', 'original-name': 'Concept' }, 'name']] : []
         )
@@ -273,7 +289,7 @@ describe('getConceptEvolution', () => {
 
     it('throws PageNotFoundError guidance instead of an empty timeline for an unknown concept', async () => {
       const mockClient = {
-        callAPI: vi.fn().mockResolvedValue([]),
+        callAPI: vi.fn(async (method: string) => (method === 'logseq.Editor.getPage' ? null : [])),
         executeDatalogQuery: vi.fn().mockResolvedValue([])
       } as unknown as LogseqClient;
 

@@ -108,8 +108,8 @@ describe('MCP resources (#46)', () => {
 
     it('reads a page as an outline, with nested blocks indented by tabs', async () => {
       const tree = [
-        { content: 'first line\nsecond line', children: [{ content: 'child', children: [{ content: 'grandchild' }] }] },
-        { content: 'sibling', children: ['uuid', '123'] },
+        { id: 10, uuid: 'u-10', content: 'first line\nsecond line', children: [{ content: 'child', children: [{ content: 'grandchild' }] }] },
+        { id: 11, uuid: 'u-11', content: 'sibling', children: ['uuid', '123'] },
       ];
       const { mcp } = await connect(method => {
         if (method === 'logseq.Editor.getPage') return { ...aliceEntity };
@@ -132,8 +132,8 @@ describe('MCP resources (#46)', () => {
       // and returns multi-value refs as arrays, while the pre-block text is as stored.
       const preBlock = ['project-status:: active', 'related-to:: [[Bob]], [[Carol]]', 'rating:: 3', 'archived:: false'];
       const tree = [
-        { content: preBlock.join('\n'), 'pre-block?': true },
-        { content: 'a block', children: [{ content: 'a child' }] },
+        { id: 10, uuid: 'u-10', content: preBlock.join('\n'), 'pre-block?': true },
+        { id: 11, uuid: 'u-11', content: 'a block', children: [{ content: 'a child' }] },
       ];
       const properties = { projectStatus: 'active', relatedTo: ['Bob', 'Carol'], rating: 3, archived: false };
       // What main printed (#46): every block, the pre-block included, as a bullet
@@ -158,7 +158,7 @@ describe('MCP resources (#46)', () => {
     });
 
     it('renders page properties before the blocks, through the shared renderer (#43)', async () => {
-      const tree = [{ content: 'type:: person', 'pre-block?': true }, { content: 'a block' }];
+      const tree = [{ id: 10, uuid: 'u-10', content: 'type:: person', 'pre-block?': true }, { id: 11, uuid: 'u-11', content: 'a block' }];
       const { mcp } = await connect(method => {
         if (method === 'logseq.Editor.getPage') return { ...aliceEntity, properties: { type: 'person' } };
         if (method === 'logseq.Editor.getPageBlocksTree') return tree;
@@ -193,7 +193,7 @@ describe('MCP resources (#46)', () => {
     });
 
     it('cuts a very large page at the cap and says so', async () => {
-      const big = Array.from({ length: 400 }, (_, i) => ({ content: `${i} ${'x'.repeat(200)}` }));
+      const big = Array.from({ length: 400 }, (_, i) => ({ id: i + 1, uuid: `u-${i}`, content: `${i} ${'x'.repeat(200)}` }));
       const { mcp } = await connect(method => {
         if (method === 'logseq.Editor.getPage') return { ...aliceEntity };
         if (method === 'logseq.Editor.getPageBlocksTree') return big;
@@ -211,7 +211,7 @@ describe('MCP resources (#46)', () => {
     });
 
     it('shows the start of a single block that exceeds the cap, with a notice', async () => {
-      const huge = [{ content: `START-OF-BLOCK ${'y'.repeat(MAX_PAGE_CHARS * 2)}` }];
+      const huge = [{ id: 1, uuid: 'u-1', content: `START-OF-BLOCK ${'y'.repeat(MAX_PAGE_CHARS * 2)}` }];
       const { mcp } = await connect(method => {
         if (method === 'logseq.Editor.getPage') return { ...aliceEntity };
         if (method === 'logseq.Editor.getPageBlocksTree') return huge;

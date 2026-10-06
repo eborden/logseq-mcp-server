@@ -42,8 +42,8 @@ async function call(
 describe('format on logseq_get_page', () => {
   const entity = { id: 1, name: 'alice', originalName: 'Alice', file: { id: 5 }, properties: { type: 'person' } };
   const tree = [
-    { uuid: UUID_A, content: 'type:: person', 'pre-block?': true },
-    { uuid: UUID_B, content: 'first\nsecond', children: [{ content: `child ((${UUID_A}))` }] },
+    { id: 10, uuid: UUID_A, content: 'type:: person', 'pre-block?': true },
+    { id: 11, uuid: UUID_B, content: 'first\nsecond', children: [{ content: `child ((${UUID_A}))` }] },
   ];
   const api: Api = method => {
     if (method === 'logseq.Editor.getPage') return { ...entity };

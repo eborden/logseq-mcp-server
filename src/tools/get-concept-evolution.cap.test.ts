@@ -16,6 +16,7 @@ const RESOLVED_CONCEPT = [[{ id: 100, name: 'concept', 'original-name': 'Concept
 const dated = (n: number, firstId = 1) =>
   Array.from({ length: n }, (_, i) => ({
     id: firstId + i,
+    uuid: `u-${firstId + i}`,
     content: `Mention ${firstId + i} of [[Concept]]`,
     page: { journalDay: 20240101 + i, name: `day ${i}` }
   }));
@@ -24,12 +25,13 @@ const dated = (n: number, firstId = 1) =>
 const undated = (n: number, firstId = 10_000) =>
   Array.from({ length: n }, (_, i) => ({
     id: firstId + i,
+    uuid: `u-${firstId + i}`,
     content: `Note ${firstId + i} about [[Concept]]`,
     page: { name: `note ${i}` }
   }));
 
 function clientWith(blocks: unknown[]) {
-  const callAPI = vi.fn().mockResolvedValueOnce(blocks);
+  const callAPI = vi.fn().mockResolvedValueOnce(blocks).mockResolvedValueOnce(null); // getPageBlocksTree, then getPage
   const executeDatalogQuery = vi
     .fn()
     .mockResolvedValueOnce(RESOLVED_CONCEPT)
@@ -127,7 +129,7 @@ describe('getConceptEvolution max_entries (#61)', () => {
     });
 
     it('splits one day across the cut', async () => {
-      const sameDay = [1, 2, 3].map(id => ({ id, content: `Mention ${id}`, page: { journalDay: 20240101 } }));
+      const sameDay = [1, 2, 3].map(id => ({ id, uuid: `u-${id}`, content: `Mention ${id}`, page: { journalDay: 20240101 } }));
       const result = await getConceptEvolution(clientWith(sameDay), 'Concept', { maxEntries: 2 });
       expect(result.timeline).toHaveLength(1);
       expect(result.timeline[0].blocks.map(b => b.id)).toEqual([1, 2]);
@@ -293,7 +295,7 @@ describe('getConceptEvolution max_entries (#61)', () => {
     });
 
     it('names a day that is split across the cut', async () => {
-      const sameDay = [1, 2, 3].map(id => ({ id, content: `Mention ${id}`, page: { journalDay: 20240301 } }));
+      const sameDay = [1, 2, 3].map(id => ({ id, uuid: `u-${id}`, content: `Mention ${id}`, page: { journalDay: 20240301 } }));
       const result = await getConceptEvolution(clientWith(sameDay), 'Concept', { maxEntries: 2 });
       expect(result.timeline[0].blocks).toHaveLength(2);
       expect(result.warnings![0].message).toContain('the timeline ends at 20240301');

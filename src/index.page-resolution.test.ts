@@ -21,7 +21,7 @@ describe('page resolution through MCP', () => {
     name: string,
     args: Record<string, unknown>,
     datalog: (query: string) => unknown,
-    api: (method: string, args: unknown[]) => unknown = () => []
+    api: (method: string, args: unknown[]) => unknown = method => (method === 'logseq.Editor.getPage' ? null : [])
   ) {
     const logseq = new LogseqClient({ apiUrl: 'http://localhost:12315', authToken: 'test-token-123' });
     vi.spyOn(logseq, 'executeDatalogQuery').mockImplementation(async (query: string) => datalog(query) as any);

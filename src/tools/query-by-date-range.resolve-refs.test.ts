@@ -38,6 +38,7 @@ function setup(blocks: any[]) {
     if (query.includes(':block/uuid ?u') || query.includes(':block/name ?n')) {
       return graph.executeDatalogQuery(query, ...inputs);
     }
+    if (query.includes(':block/alias')) return []; // the search term's alias lookup
     return query.includes(':block/page ?page')
       ? blocks.map(b => [b])
       : pages.map(p => [p]);

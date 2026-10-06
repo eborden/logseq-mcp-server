@@ -24,14 +24,14 @@ describe('buildContextForTopic', () => {
 
     // Mock Query 2: Get blocks
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce([
-      [{ id: 10, content: 'Block 1' }],
-      [{ id: 11, content: 'Block 2' }]
+      [{ id: 10, uuid: 'u', content: 'Block 1' }],
+      [{ id: 11, uuid: 'u', content: 'Block 2' }]
     ]);
 
     // Mock Query 3: Get backlinks (references) - format: [page, [blocks]]
     // relatedPages will be derived from this
     (mockClient.callAPI as any).mockResolvedValueOnce([
-      [{ id: 3, name: 'Source Page' }, [{ id: 20, content: 'Block referencing Topic' }]]
+      [{ id: 3, name: 'Source Page' }, [{ id: 20, uuid: 'u', content: 'Block referencing Topic' }]]
     ]);
 
     const result = await buildContextForTopic(mockClient, 'Topic', {});
@@ -206,7 +206,7 @@ describe('buildContextForTopic', () => {
 
     // Mock Query 2: Get many blocks
     const manyBlocks = Array.from({ length: 100 }, (_, i) => [
-      { id: 10 + i, content: `Block ${i}` }
+      { id: 10 + i, uuid: 'u', content: `Block ${i}` }
     ]);
     (mockClient.executeDatalogQuery as any).mockResolvedValueOnce(manyBlocks);
 
@@ -270,8 +270,8 @@ describe('buildContextForTopic', () => {
 
     // Mock Query 3: Get backlinks with multiple references - format: [page, [blocks]]
     (mockClient.callAPI as any).mockResolvedValueOnce([
-      [{ id: 3, name: 'Page A' }, [{ id: 20, content: 'First reference' }]],
-      [{ id: 4, name: 'Page B' }, [{ id: 21, content: 'Second reference' }]]
+      [{ id: 3, name: 'Page A' }, [{ id: 20, uuid: 'u', content: 'First reference' }]],
+      [{ id: 4, name: 'Page B' }, [{ id: 21, uuid: 'u', content: 'Second reference' }]]
     ]);
 
     const result = await buildContextForTopic(mockClient, 'Topic', {});
@@ -305,7 +305,7 @@ describe('buildContextForTopic', () => {
 
     // Mock Query 3: Get backlinks - relatedPages derived from this
     (mockClient.callAPI as any).mockResolvedValueOnce([
-      [{ 'db/id': 95, name: 'Core' }, [{ id: 100, content: 'Mentions Bob' }]]
+      [{ 'db/id': 95, name: 'Core' }, [{ id: 100, uuid: 'u', content: 'Mentions Bob' }]]
     ]);
 
     const result = await buildContextForTopic(mockClient, 'Bob', {});
@@ -326,7 +326,7 @@ describe('buildContextForTopic', () => {
       (client.executeDatalogQuery as any)
         .mockResolvedValueOnce([[{ id: 1, name: 'Topic', properties: {} }]])
         .mockResolvedValueOnce(
-          Array.from({ length: blockCount }, (_, i) => [{ id: 100 + i, content: `Block ${i}` }])
+          Array.from({ length: blockCount }, (_, i) => [{ id: 100 + i, uuid: 'u', content: `Block ${i}` }])
         );
       (client.callAPI as any).mockResolvedValueOnce(backlinks);
       return client;
@@ -335,7 +335,7 @@ describe('buildContextForTopic', () => {
     // 4 source pages with 2 blocks each: 8 references, 4 related pages
     const backlinks = [1, 2, 3, 4].map(p => [
       { id: 10 + p, name: `Source ${p}` },
-      [{ id: 200 + p * 2, content: 'a' }, { id: 201 + p * 2, content: 'b' }]
+      [{ id: 200 + p * 2, uuid: 'u', content: 'a' }, { id: 201 + p * 2, uuid: 'u', content: 'b' }]
     ]);
 
     it('reports no warning and hasMore false when under every cap', async () => {
@@ -383,7 +383,7 @@ describe('buildContextForTopic', () => {
       const big = await buildContextForTopic(mkClient(201, []), 'Topic', { maxBlocks: 5 });
       expect(big.warnings[0].howToFetchAll).toBe(`Set max_blocks to 201 (or higher) to get all 201. ${note}`);
 
-      const many = Array.from({ length: 151 }, (_, i) => [{ id: 1000 + i, name: `Source ${i}` }, [{ id: 5000 + i, content: 'a' }]]);
+      const many = Array.from({ length: 151 }, (_, i) => [{ id: 1000 + i, name: `Source ${i}` }, [{ id: 5000 + i, uuid: 'u', content: 'a' }]]);
       const refs = await buildContextForTopic(mkClient(0, many), 'Topic', { maxReferences: 5, maxRelatedPages: 5 });
       expect(refs.warnings.map(w => [w.code, w.howToFetchAll])).toEqual([
         ['references_truncated', `Set max_references to 151 (or higher) to get all 151. ${note}`],
@@ -442,7 +442,7 @@ describe('buildContextForTopic', () => {
       } as unknown as LogseqClient;
       (mockClient.executeDatalogQuery as any)
         .mockResolvedValueOnce([[{ id: 1, name: 'topic', properties: {} }]])
-        .mockResolvedValueOnce([[{ id: 10, content: 'A block' }]]);
+        .mockResolvedValueOnce([[{ id: 10, uuid: 'u', content: 'A block' }]]);
       (mockClient.callAPI as any).mockImplementation(backlinks);
       return mockClient;
     }

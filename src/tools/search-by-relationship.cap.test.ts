@@ -46,13 +46,13 @@ function fakeClient({ n = 0, treeA = 0, treeB = 0, aliasStubs = 1 }: FakeOptions
       ];
     }
     if (query.includes('?p ...')) return [[10]];
-    return Array.from({ length: n }, (_, i) => [{ id: i + 1, content: `Block ${i + 1}` }]);
+    return Array.from({ length: n }, (_, i) => [{ id: i + 1, uuid: `u-${i + 1}`, content: `Block ${i + 1}` }]);
   });
   const callAPI = vi.fn(async (method: string, args: unknown[]) => {
     if (method !== 'logseq.Editor.getPageBlocksTree') return [];
     const side = String(args[0]).toLowerCase() === 'bob' ? 'B' : 'A';
     const count = side === 'A' ? treeA : treeB;
-    return Array.from({ length: count }, (_, i) => ({ id: (side === 'A' ? 1000 : 2000) + i, content: `${side} ${i + 1}` }));
+    return Array.from({ length: count }, (_, i) => ({ id: (side === 'A' ? 1000 : 2000) + i, uuid: `u-${side}-${i}`, content: `${side} ${i + 1}` }));
   });
   return { client: { executeDatalogQuery, callAPI } as unknown as LogseqClient, executeDatalogQuery, callAPI };
 }

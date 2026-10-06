@@ -18,7 +18,7 @@ function createMockClient() {
     queryCount++;
     if (queryCount % 2 === 1) {
       // Odd calls: page+blocks query
-      return [[{ id: queryCount, name: `Page ${queryCount}`, properties: {} }, { id: queryCount * 10, content: `Block ${queryCount}` }]];
+      return [[{ id: queryCount, name: `Page ${queryCount}`, properties: {} }, { id: queryCount * 10, uuid: 'u', content: `Block ${queryCount}` }]];
     } else {
       // Even calls: connections query
       return [];
@@ -51,7 +51,7 @@ describe('getContextForQuery', () => {
         return [[{ id: topicIndex + 1, name: `Topic ${topicIndex + 1}`, properties: {} }]];
       } else {
         // Blocks query
-        return [[{ id: (topicIndex + 1) * 10, content: `Block ${topicIndex + 1}` }]];
+        return [[{ id: (topicIndex + 1) * 10, uuid: 'u', content: `Block ${topicIndex + 1}` }]];
       }
     });
 
@@ -75,12 +75,12 @@ describe('getContextForQuery', () => {
     const mockClient = {
       config: { apiUrl: 'http://test', authToken: 'test' },
       callAPI: vi.fn(),
-      executeDatalogQuery: vi.fn()
+      executeDatalogQuery: vi.fn(async () => [])
     } as unknown as LogseqClient;
 
     // Mock search results
     (mockClient.callAPI as any).mockResolvedValueOnce([
-      { id: 1, content: 'Block about databases', page: { name: 'Tech' } }
+      { id: 1, uuid: 'u', content: 'Block about databases', page: { name: 'Tech' } }
     ]);
 
     const result = await getContextForQuery(
@@ -108,13 +108,13 @@ describe('getContextForQuery', () => {
         return [[{ id: 1, name: 'Topic A', properties: {} }]];
       } else if (callCount === 2) {
         // Topic A: blocks
-        return [[{ id: 10, content: 'Block A' }]];
+        return [[{ id: 10, uuid: 'u', content: 'Block A' }]];
       } else if (callCount === 3) {
         // Topic B: page
         return [[{ id: 2, name: 'Topic B', properties: {} }]];
       } else if (callCount === 4) {
         // Topic B: blocks
-        return [[{ id: 20, content: 'Block B' }]];
+        return [[{ id: 20, uuid: 'u', content: 'Block B' }]];
       }
       return [];
     });
@@ -147,7 +147,7 @@ describe('getContextForQuery', () => {
         return [[{ id: 1, name: 'important', properties: {} }]];
       } else if (callCount === 2) {
         // Blocks query
-        return [[{ id: 10, content: 'Tagged content' }]];
+        return [[{ id: 10, uuid: 'u', content: 'Tagged content' }]];
       }
       return [];
     });
@@ -180,7 +180,7 @@ describe('getContextForQuery', () => {
         return [[{ id: 1, name: 'Topic', properties: {} }]];
       } else if (callCount === 2) {
         // Blocks
-        return [[{ id: 10, content: 'Block' }]];
+        return [[{ id: 10, uuid: 'u', content: 'Block' }]];
       }
       return [];
     });
@@ -213,7 +213,7 @@ describe('getContextForQuery', () => {
         return [[{ id: 1, name: 'Exists', properties: {} }]];
       } else if (callCount === 2) {
         // First topic: blocks
-        return [[{ id: 10, content: 'Block' }]];
+        return [[{ id: 10, uuid: 'u', content: 'Block' }]];
       } else if (callCount === 3) {
         // Second topic: page (doesn't exist - empty result)
         return [];
@@ -289,7 +289,7 @@ describe('getContextForQuery', () => {
         .mockResolvedValueOnce([])                                           // first topic: no exact name or alias
         .mockResolvedValueOnce([])                                           // first topic: no namespace leaf either
         .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])  // second topic: page
-        .mockResolvedValueOnce([[{ id: 20, content: 'A block' }]]);          // second topic: blocks
+        .mockResolvedValueOnce([[{ id: 20, uuid: 'u', content: 'A block' }]]);          // second topic: blocks
       (client.callAPI as any).mockResolvedValue([]);
 
       const result = await getContextForQuery(client, 'Compare [[Missing Topic]] and [[Beta]]');
@@ -308,7 +308,7 @@ describe('getContextForQuery', () => {
           [{ id: 3, name: 'atlas cafe', 'original-name': 'Atlas Cafe' }, 'alias']
         ])                                                                   // first topic: alias shared by two pages
         .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])  // second topic: page
-        .mockResolvedValueOnce([[{ id: 20, content: 'A block' }]]);          // second topic: blocks
+        .mockResolvedValueOnce([[{ id: 20, uuid: 'u', content: 'A block' }]]);          // second topic: blocks
       (client.callAPI as any).mockResolvedValue([]);
 
       const result = await getContextForQuery(client, 'Compare [[Atlas]] and [[Beta]]');
@@ -398,7 +398,7 @@ describe('getContextForQuery', () => {
       const client = newClient();
       (client.executeDatalogQuery as any)
         .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
-        .mockResolvedValueOnce([[{ id: 10, content: 'one' }]]);
+        .mockResolvedValueOnce([[{ id: 10, uuid: 'u', content: 'one' }]]);
       (client.callAPI as any).mockResolvedValue([]);
 
       const result = await getContextForQuery(client, 'About [[Alpha]]');
@@ -411,7 +411,7 @@ describe('getContextForQuery', () => {
 
     it('rolls a topic that hit a cap up into a warning with a build_context call', async () => {
       const client = newClient();
-      const blocks = Array.from({ length: 14 }, (_, i) => [{ id: 100 + i, content: `b${i}` }]);
+      const blocks = Array.from({ length: 14 }, (_, i) => [{ id: 100 + i, uuid: 'u', content: `b${i}` }]);
       (client.executeDatalogQuery as any)
         .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
         .mockResolvedValueOnce(blocks);
@@ -451,7 +451,8 @@ describe('getContextForQuery', () => {
 
     it('does not set hasMore for a skipped topic that has no way to continue', async () => {
       const client = newClient();
-      (client.executeDatalogQuery as any).mockResolvedValueOnce([]);
+      (client.executeDatalogQuery as any).mockResolvedValue([]);
+      (client.callAPI as any).mockResolvedValue(null); // the page list the suggestions come from
 
       const result = await getContextForQuery(client, 'About [[Missing]]');
 
@@ -473,7 +474,7 @@ describe('getContextForQuery', () => {
 
     /** `n` search rows that all contain the keyword, ids 1..n (so newest first is n..1). */
     function hitRows(n: number, content = (i: number) => `widgets ${i}`) {
-      return Array.from({ length: n }, (_, i) => [{ id: i + 1, content: content(i + 1), page: { id: 1000 + i + 1 } }]);
+      return Array.from({ length: n }, (_, i) => [{ id: i + 1, uuid: 'u', content: content(i + 1), page: { id: 1000 + i + 1 } }]);
     }
 
     async function run(rows: unknown, options: Parameters<typeof getContextForQuery>[2] = {}) {
@@ -596,13 +597,13 @@ describe('getContextForQuery', () => {
       // A small graph, in no particular order: LogSeq answers a search with the
       // blocks whose content matches the pattern, unsorted.
       const corpus = [
-        { id: 7, content: 'that one' },
-        { id: 3, content: 'that widgets gadget' },
-        { id: 9, content: 'Widgets, that is' },
-        { id: 1, content: 'widgets only' },
-        { id: 12, content: 'THAT WIDGETS again' },
-        { id: 5, content: 'that and that' },
-        { id: 10, content: 'widgets that gadget' }
+        { id: 7, uuid: 'u', content: 'that one' },
+        { id: 3, uuid: 'u', content: 'that widgets gadget' },
+        { id: 9, uuid: 'u', content: 'Widgets, that is' },
+        { id: 1, uuid: 'u', content: 'widgets only' },
+        { id: 12, uuid: 'u', content: 'THAT WIDGETS again' },
+        { id: 5, uuid: 'u', content: 'that and that' },
+        { id: 10, uuid: 'u', content: 'widgets that gadget' }
       ].map(block => ({ ...block, page: { id: 100 } }));
 
       function corpusClient() {

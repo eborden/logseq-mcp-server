@@ -14,6 +14,7 @@ const member = (p: { id: number; name: string; 'original-name': string }) => ({
 });
 const refBlock = (id: number, pageId: number, pageName: string, journalDay?: number) => ({
   id,
+  uuid: `u-${id}`,
   content: `block ${id}`,
   'path-refs': [{ id: 1 }],
   page: { id: pageId, name: pageName, 'original-name': pageName, ...(journalDay && { 'journal-day': journalDay }) }
@@ -36,8 +37,8 @@ function fakeClient(opts: { aliasError?: Error } = {}) {
     if (query.includes('ground [1 2]')) {
       // blocks on either page of the group, aliases' blocks returned first on purpose
       return [
-        [{ id: 31, content: 'own block of the alias page', page: { id: 2 } }],
-        [{ id: 30, content: 'own block of the page', page: { id: 1 } }]
+        [{ id: 31, uuid: 'u', content: 'own block of the alias page', page: { id: 2 } }],
+        [{ id: 30, uuid: 'u', content: 'own block of the page', page: { id: 1 } }]
       ];
     }
     return [];

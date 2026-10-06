@@ -44,7 +44,7 @@ describe('getPage', () => {
 
   beforeEach(() => {
     datalog = vi.fn();
-    mockClient = { callAPI: vi.fn(), executeDatalogQuery: datalog } as any;
+    mockClient = { callAPI: vi.fn(async () => null), executeDatalogQuery: datalog } as any;
   });
 
   it('calls logseq.Editor.getPage with the name as given and skips the blocks tree when includeChildren is false', async () => {
