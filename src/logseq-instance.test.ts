@@ -26,6 +26,7 @@ import {
   isInstanceProcess,
   missingFiles,
   newInstanceToken,
+  parseFrontApp,
   parseInstanceRecord,
   renderConfigsEdn,
   startInstance,
@@ -74,6 +75,8 @@ class World {
   aliases = new Map<string, string>();
   front: { pid: number; bundleId: string } | undefined = { pid: 1111, bundleId: 'com.example.editor' };
   activated: string[] = [];
+  /** Pids of other apps that are running, besides the instance's own processes. */
+  runningApps = new Set([1111]);
 
   constructor() {
     for (const dir of [WORKTREE, GRAPH, join(GRAPH, 'pages'), join(GRAPH, 'journals'), join(GRAPH, 'logseq')]) this.dirs.add(dir);
@@ -144,7 +147,7 @@ class World {
         this.processes.set(pid, { commandLine: `${spec.command} ${spec.args.join(' ')}` });
         return pid;
       },
-      isAlive: pid => this.processes.has(pid),
+      isAlive: pid => this.processes.has(pid) || this.runningApps.has(pid),
       frontmostApp: async () => this.front,
       activateApp: async bundleId => {
         this.activated.push(bundleId);
@@ -561,23 +564,68 @@ describe('startInstance', () => {
     expect(world.activated).toEqual([]);
   });
 
-  it('does not fail start when focus cannot be read or restored', async () => {
+  it('hands focus back on the final tick when the instance takes it only as the index completes', async () => {
+    const deps = world.deps({
+      connect: () => ({
+        ...world.probe(),
+        indexedFiles: async () => {
+          world.front = { pid: 4242, bundleId: 'org.logseq.instance' };
+          return world.indexed;
+        },
+      }),
+    });
+
+    await start(world, deps);
+
+    expect(world.activated).toEqual(['com.example.editor']);
+  });
+
+  it('leaves an app that quit during startup alone', async () => {
     world.readiness = [
       async () => {
         world.front = { pid: 4242, bundleId: 'org.logseq.instance' };
+        world.runningApps.delete(1111);
       },
       async () => {},
     ];
+    await start(world);
+
+    expect(world.activated).toEqual([]);
+  });
+
+  it('starts when the front app cannot be read before the launch', async () => {
+    let reads = 0;
     const deps = world.deps({
       frontmostApp: async () => {
+        reads++;
+        throw new Error('lsappinfo missing');
+      },
+    });
+
+    await expect(start(world, deps)).resolves.toMatchObject({ pid: 4242 });
+    expect(reads).toBeGreaterThanOrEqual(1);
+    expect(world.activated).toEqual([]);
+  });
+
+  it('starts when the guard cannot read or restore focus after the launch', async () => {
+    let reads = 0;
+    let attempts = 0;
+    const deps = world.deps({
+      frontmostApp: async () => {
+        // The pre-launch read sees the editor; every later one sees the instance, then fails.
+        if (++reads === 1) return { pid: 1111, bundleId: 'com.example.editor' };
+        if (reads === 2) return { pid: 4242, bundleId: 'org.logseq.instance' };
         throw new Error('lsappinfo missing');
       },
       activateApp: async () => {
+        attempts++;
         throw new Error('open failed');
       },
     });
 
     await expect(start(world, deps)).resolves.toMatchObject({ pid: 4242 });
+    expect(attempts).toBe(1);
+    expect(reads).toBeGreaterThan(2);
   });
 
   it('waits through a refused connection, an unfinished index and a missing sentinel', async () => {
@@ -867,5 +915,22 @@ describe('instanceStatus', () => {
     world.processes.delete(pid);
     await expect(instanceStatus(WORKTREE, world.deps())).resolves.toMatchObject({ state: 'stale' });
     expect(world.signals).toEqual([]);
+  });
+});
+
+describe('parseFrontApp', () => {
+  // The shape `lsappinfo info -only pid -only bundleid <asn>` prints, with a made-up app.
+  const info = '"pid"=12345\n"CFBundleIdentifier"="com.example.notes"\n';
+
+  it('reads the pid and bundle id', () => {
+    expect(parseFrontApp(info)).toEqual({ pid: 12345, bundleId: 'com.example.notes' });
+    expect(parseFrontApp('"CFBundleIdentifier"="com.example.notes"\n"pid"=7')).toEqual({ pid: 7, bundleId: 'com.example.notes' });
+  });
+
+  it('returns undefined when a field is missing or the output is not that format', () => {
+    expect(parseFrontApp('"pid"=12345\n')).toBeUndefined();
+    expect(parseFrontApp('"CFBundleIdentifier"="com.example.notes"\n')).toBeUndefined();
+    expect(parseFrontApp('"pid"=[ NULL ]\n"CFBundleIdentifier"=[ NULL ]')).toBeUndefined();
+    expect(parseFrontApp('')).toBeUndefined();
   });
 });

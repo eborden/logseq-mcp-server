@@ -32,6 +32,7 @@ import {
   InstanceError,
   InstanceProbe,
   instanceStatus,
+  parseFrontApp,
   startInstance,
   stopInstance,
 } from './logseq-instance/instance.js';
@@ -64,8 +65,11 @@ function probe(client: LogseqClient): InstanceProbe {
   };
 }
 
+/** Both focus calls block the poll loop, so a hung one must not stall `start` past its deadline. */
+const FOCUS_CALL_TIMEOUT_MS = 2_000;
+
 function lsappinfo(args: string[]): string {
-  return execFileSync('lsappinfo', args, { encoding: 'utf-8' }).trim();
+  return execFileSync('lsappinfo', args, { encoding: 'utf-8', timeout: FOCUS_CALL_TIMEOUT_MS }).trim();
 }
 
 const deps: InstanceDeps = {
@@ -146,17 +150,17 @@ const deps: InstanceDeps = {
     try {
       const asn = lsappinfo(['front']);
       const info = lsappinfo(['info', '-only', 'pid', '-only', 'bundleid', asn]);
-      const pid = /"pid"=(\d+)/.exec(info)?.[1];
-      const bundleId = /"CFBundleIdentifier"="([^"]+)"/.exec(info)?.[1];
-      return pid && bundleId ? { pid: Number(pid), bundleId } : undefined;
+      return parseFrontApp(info);
     } catch {
       return undefined;
     }
   },
   async activateApp(bundleId) {
     try {
-      // Activates the running app without Automation permission (unlike System Events).
-      execFileSync('open', ['-b', bundleId], { stdio: 'ignore' });
+      // Raises the app with this bundle id, no Automation permission needed (unlike System Events).
+      // It also sends a running app a reopen event, which some apps answer with a window; the guard
+      // calls this only for an app that is still running and is not LogSeq itself.
+      execFileSync('open', ['-b', bundleId], { stdio: 'ignore', timeout: FOCUS_CALL_TIMEOUT_MS });
     } catch {
       // best effort
     }
