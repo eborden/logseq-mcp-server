@@ -37,7 +37,7 @@ Note the scope you were given. A block ref means that block and its descendants,
 logseq_list_pages(limit=1000)
 ```
 
-Every page title together is the candidate set, and on a large graph that takes more than one call. Read the names from each result as it arrives and keep them in context. Don't save a result to a file.
+Every page together is the candidate set, and on a large graph that takes more than one call. Each entry is `{ name, aliases? }`: `name` is the page, and `aliases` holds its other names (an `alias::` on the page), left off when it has none. An alias is never listed as a page of its own, so a term equal to one is a candidate for the page that lists it, and `total` counts pages, not aliases. Read the entries from each result as it arrives and keep them in context. Don't save a result to a file.
 
 - **`hasMore: true`:** call again with the `offset` the `pages_truncated` warning names, and add the names to the ones you have. A server that doesn't page the list sends no `hasMore`, so its one call is the whole listing.
 - **`pages_unavailable` warning:** LogSeq sent no page list, so `pages: []` means the list is unknown, not that the graph is empty. Stop the pass and tell the requester. Don't classify against an empty or partial listing.

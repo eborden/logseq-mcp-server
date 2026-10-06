@@ -15,7 +15,7 @@ LogSeq matches `[[X]]` to a page by name, **case-insensitively but not fuzzily**
 
 - `[[ledger service]]`, `[[Ledger Service]]` and `[[LEDGER SERVICE]]` all resolve to the same page, and each renders with the capitalisation you typed. So bracketing text whose case differs from the page title is safe and preserves the prose.
 - `[[Structured Logs]]` does **not** reach a page called `Structured Logging`. Any difference beyond case creates a new, empty page. Near-misses are not matches.
-- An `alias::` property makes its values resolve to the aliased page. If `Priya` carries `alias:: Priya Raghavan`, then `[[Priya Raghavan]]` resolves to `Priya`. Check aliases before reaching for substring bracketing, because the full-string link is the better one.
+- An `alias::` property makes its values resolve to the aliased page. If `Priya` carries `alias:: Priya Raghavan`, then `[[Priya Raghavan]]` resolves to `Priya`. Check aliases before reaching for substring bracketing, because the full-string link is the better one. The listing shows them: a page's `aliases`.
 
 ### Which pages exist
 
@@ -23,7 +23,7 @@ LogSeq matches `[[X]]` to a page by name, **case-insensitively but not fuzzily**
 
 A page that is referenced but never given content exists in LogSeq's database with **no file on disk**. One real graph carries 621 pages against 149 page files, so more than three quarters of its pages are file-less. Deciding a page does not exist because `pages/<Title>.md` is missing will wrongly skip most of the graph's vocabulary, and the error is invisible: it looks like a conservative decision not to link.
 
-Page through `list_pages` until you hold every page: `limit: 1000`, then the `offset` the warning names while `hasMore` is true. Stop on `pages_unavailable`, and restart once if `total` changes. Step 2 of the workflow has the details. Read the names in context and use them as the candidate set.
+Page through `list_pages` until you hold every page: `limit: 1000`, then the `offset` the warning names while `hasMore` is true. Stop on `pages_unavailable`, and restart once if `total` changes. Step 2 of the workflow has the details. Read the entries in context and use the page names and each page's `aliases` as the candidate set. An alias isn't a page of its own, so it appears only under the page that declares it, and under every page that declares it.
 
 ### Substring bracketing
 
@@ -66,7 +66,7 @@ Run this check on every partial name, including the ones corroboration has alrea
 When the prose sits inside the title there are exactly three responses:
 
 1. **Add an `alias::` to the target page.** Putting `alias:: Wren` on `Wren Calloway` makes a bare `[[Wren]]` resolve there, so the prose is bracketed exactly as written and nothing is reworded. This is usually the right answer, because it is the only response that both links this mention and fixes every future bare mention of that short form anywhere in the graph. Two conditions attach to it:
-   - **The short form must be unambiguous**, meaning exactly one page in the listing could claim it. If two pages carry `Chris`, an `alias:: Chris` on either one makes that page win every future `[[Chris]]` silently, including the mentions that meant the other person. An ambiguous short form never gets an alias.
+   - **The short form must be unambiguous**, meaning exactly one page in the listing could claim it, as its name or as an alias. If two pages carry `Chris`, an `alias:: Chris` on either one makes that page win every future `[[Chris]]` silently, including the mentions that meant the other person. An ambiguous short form never gets an alias.
    - **It edits a page outside the note being worked on**, which is beyond what a linking pass was asked to do and affects every other note in the graph. Get the user's consent before writing it, and say which page gains the property.
 2. **Expand the prose to the full title.** Available only if the writer explicitly asks for it, because it changes what the note says. It is an edit to the note rather than a linking pass, so the gate will reject it against the original baseline, correctly.
 3. **Leave it unlinked.** Always available and always safe. A missing edge costs retrieval; a reworded note costs the record.
@@ -79,7 +79,8 @@ Hold `Kofi` and `Wren` side by side, because together they say what neither says
 |---|---|
 | Identical ignoring case, and not a bare first name | **Link.** Bracket the text exactly as written |
 | Identical ignoring case, a bare first name | **Corroborate, then link.** Treat it as a partial name: link only if corroborated, else **Ask** |
-| Matches an `alias::` value | **Link** the full alias string |
+| Matches an `alias::` value listed under one page | **Link** the full alias string |
+| Matches an `alias::` value listed under two or more pages | **Ask.** Never pick: `[[alias]]` would be ambiguous, whichever page you meant |
 | Page title is a substring, remainder is an inflection (possessive, plural, hyphenated suffix) | **Link** the substring only |
 | Page title is a substring, remainder is the rest of the same proper noun (a surname) | **Ask.** See The leftover decides: offer a full-name `alias::` rather than fragmenting the name |
 | Partial name (first name), two or more candidate pages | **Ask.** Never pick |
@@ -95,7 +96,7 @@ A bare first name, meaning a one-word title that could be someone's given name, 
 
 Note the two candidate-count rows. **A lone candidate is not evidence.** That exactly one page happens to share a first name says nothing about whether this mention is that person. Candidate count measures the graph's vocabulary, not the identity of the mention, so one candidate and five candidates get the same treatment: ask.
 
-Note also that the surname row and the prose-inside-title row land on the same remedy from opposite mechanics. Four of the thirteen rows send a name to a question rather than to a link, and a fifth does when corroboration is missing. That proportion is the table working rather than the table being timid: names are where this goes wrong, and a question is cheaper than an edge recorded against the wrong person or against half of a right one.
+Note also that the surname row and the prose-inside-title row land on the same remedy from opposite mechanics. Five of the fourteen rows send a name to a question rather than to a link, and a sixth does when corroboration is missing. That proportion is the table working rather than the table being timid: names are where this goes wrong, and a question is cheaper than an edge recorded against the wrong person or against half of a right one.
 
 ## Asking Is Part of the Job
 
