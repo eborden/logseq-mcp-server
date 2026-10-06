@@ -15,6 +15,7 @@ import {
 } from './tools/build-context.js';
 import { DEFAULT_MAX_ENTRIES, GROUP_BY_PERIODS, MAX_ENTRIES } from './tools/get-concept-evolution.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
+import { DEFAULT_DATE_RANGE_MAX_BLOCKS, MAX_DATE_RANGE_BLOCKS } from './tools/query-by-date-range.js';
 import { MAX_LINK_TERMS, MAX_TEXT_CHARS } from './tools/check-links.js';
 
 /**
@@ -200,7 +201,9 @@ export const buildContextArgs = z.object({
  * Only the types are checked here. Which selection was given (exactly one of
  * start_date + end_date, last_n or preset), the YYYYMMDD format, last_n >= 1 and
  * a whole top_concepts_limit >= 0 are still checked by `queryJournals`, the one
- * validation path for direct callers too.
+ * validation path for direct callers too. `max_blocks` (#61) is a plain `z.number()`
+ * like `limit` on search_blocks: the tool clamps it to 0..1000 and floors it, so a
+ * larger value is clamped, not rejected.
  */
 export const queryByDateRangeArgs = z.object({
   start_date: z.number().optional().describe('Start date in YYYYMMDD format (e.g., 20251115). Needs end_date'),
@@ -218,6 +221,12 @@ export const queryByDateRangeArgs = z.object({
     .default(DEFAULT_TOP_CONCEPTS_LIMIT)
     .describe('Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it'),
   resolve_refs: resolveRefsArg,
+  max_blocks: z
+    .number()
+    .default(DEFAULT_DATE_RANGE_MAX_BLOCKS)
+    .describe(
+      `Max blocks across all days, nested ones counted (top-level with include_content false), default ${DEFAULT_DATE_RANGE_MAX_BLOCKS}, max ${MAX_DATE_RANGE_BLOCKS}`
+    ),
 });
 
 /**

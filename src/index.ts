@@ -459,6 +459,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
             includeContent: parsed.include_content,
             topConceptsLimit: parsed.top_concepts_limit,
             resolveRefs: parsed.resolve_refs,
+            maxBlocks: parsed.max_blocks,
           });
           return {
             content: [

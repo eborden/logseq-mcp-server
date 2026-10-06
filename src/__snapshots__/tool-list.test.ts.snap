@@ -486,10 +486,10 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Query by Date Range",
     },
-    "description": "Query journal entries by date range, last N journals, or named period, with optional search. Give exactly one of: start_date + end_date, last_n, preset.
+    "description": "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.
 
 **Use when:** "what did I do last week?" or catching up. summary.topConcepts shows what a period was about.
-**Can't find:** non-journal pages, or days with no journal.
+**Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).
 **Alternatives:** logseq_get_concept_evolution, logseq_search_blocks.",
     "inputSchema": {
       "properties": {
@@ -504,6 +504,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         },
         "last_n": {
           "description": "The N most recent journals that exist (whole number, 1+), newest first",
+          "type": "number",
+        },
+        "max_blocks": {
+          "default": 200,
+          "description": "Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000",
           "type": "number",
         },
         "preset": {
