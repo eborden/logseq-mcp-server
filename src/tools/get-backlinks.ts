@@ -253,7 +253,7 @@ async function fetchAliasedBacklinks(
   aliasSet: AliasSet
 ): Promise<[PageEntity, BlockEntity[]][]> {
   const { query, inputs } = DatalogQueryBuilder.linkedReferencesOfPages(aliasIds(aliasSet));
-  const rows = (await client.executeDatalogQuery<Array<[any]>>(query, ...inputs)) || [];
+  const rows = (await client.executeDatalogQuery<Array<[object | null]> | null>(query, ...inputs)) || [];
 
   const byPage = new Map<number, { page: PageEntity; blocks: Map<number, BlockEntity> }>();
   for (const [row] of rows) {
@@ -265,7 +265,7 @@ async function fetchAliasedBacklinks(
       group = { page: camelizeKeys<PageEntity>(block.page), blocks: new Map() };
       byPage.set(group.page.id, group);
     }
-    group.blocks.set(block.id, { ...block, page: group.page as any });
+    group.blocks.set(block.id, { ...block, page: group.page });
   }
 
   return [...byPage.values()]

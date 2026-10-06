@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
+import { BlockEntity, PageEntity, PageLike, SlimBlock, SlimPage } from '../types.js';
+import { blockPageId, entityId, pageDisplayName } from '../utils/entity-fields.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
 
 /**
@@ -21,21 +22,16 @@ export const NO_PAGE_OPEN_MESSAGE =
 
 /** Blocks arrive with `page` as a bare `{id}` (or `{'db/id'}` from Datalog). */
 function pageIdOf(block: BlockEntity): number | undefined {
-  const ref = block.page as any;
-  const id = ref?.id ?? ref?.['db/id'];
+  const id = blockPageId(block);
   return typeof id === 'number' ? id : undefined;
-}
-
-function displayName(page: any): string {
-  return page?.originalName || page?.['original-name'] || page?.name || '';
 }
 
 /**
  * `getCurrentPage` returns a block entity instead of a page when the user has
  * zoomed into a block.
  */
-function isBlockEntity(entity: any): entity is BlockEntity {
-  return entity != null && entity.name === undefined && typeof entity.uuid === 'string' && 'page' in entity;
+function isBlockEntity(entity: PageEntity | BlockEntity | null): entity is BlockEntity {
+  return entity != null && !('name' in entity && entity.name !== undefined) && typeof entity.uuid === 'string' && 'page' in entity;
 }
 
 /**
@@ -86,7 +82,7 @@ export async function getCurrentContext(client: LogseqClient): Promise<CurrentCo
   // Page names by id: the open page is already known; resolve the rest in one pull.
   const pageNames = new Map<number, string>();
   if (pageEntity) {
-    pageNames.set(pageEntity.id, displayName(pageEntity));
+    pageNames.set(pageEntity.id, pageDisplayName(pageEntity));
   }
 
   const missingIds = [...new Set(
@@ -97,12 +93,12 @@ export async function getCurrentContext(client: LogseqClient): Promise<CurrentCo
 
   if (missingIds.length > 0) {
     const { query, inputs } = DatalogQueryBuilder.getPagesByIds(missingIds);
-    const rows = await client.executeDatalogQuery<any[][] | null>(query, ...inputs);
+    const rows = await client.executeDatalogQuery<Array<[PageLike | null]> | null>(query, ...inputs);
     for (const row of rows || []) {
       const pulled = row[0];
-      const id = pulled?.['db/id'] ?? pulled?.id;
+      const id = entityId(pulled);
       if (typeof id === 'number') {
-        pageNames.set(id, displayName(pulled));
+        pageNames.set(id, pageDisplayName(pulled));
       }
     }
   }

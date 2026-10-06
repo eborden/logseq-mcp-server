@@ -1,5 +1,5 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, ResolveRefsMeta } from '../types.js';
+import { BlockEntity, PageEntity, ResolveRefsMeta } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
@@ -56,7 +56,7 @@ export async function getPage(
 
   // If includeChildren is requested, fetch the page blocks tree
   if (includeChildren) {
-    const blocks = await client.callAPI<any[]>(
+    const blocks = await client.callAPI<BlockEntity[] | null>(
       'logseq.Editor.getPageBlocksTree',
       [lookupName]
     );
@@ -68,7 +68,7 @@ export async function getPage(
   }
 
   if (options.resolveRefs) {
-    const { blocks, warnings } = await resolveBlockRefs(client, (result.children ?? []) as any[]);
+    const { blocks, warnings } = await resolveBlockRefs(client, result.children ?? []);
     return {
       ...result,
       ...(result.children ? { children: blocks } : {}),

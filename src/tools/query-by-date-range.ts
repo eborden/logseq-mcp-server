@@ -1,5 +1,5 @@
 import { LogseqClient } from '../client.js';
-import { PageEntity, BlockEntity, SlimBlock, ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
+import { PageEntity, PageLike, BlockEntity, SlimBlock, ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import {
@@ -16,6 +16,7 @@ import { escapeRegex } from '../utils/escape-regex.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { buildBlockTrees, camelizeKeys } from '../utils/block-tree.js';
+import { entityId } from '../utils/entity-fields.js';
 import { Budget, countBlocks, takeBlocks } from '../utils/block-budget.js';
 import { formatLogseqDate } from '../utils/date-utils.js';
 import { DATE_PRESETS, isDatePreset, resolveDatePreset } from '../utils/date-presets.js';
@@ -174,6 +175,9 @@ function blockMatcher(searchTerm: string, aliasSet: AliasSet | null): (block: Bl
     return pageIds.size > 0 && (block.refs ?? []).some(ref => pageIds.has(ref?.id));
   };
 }
+
+/** A block as the journal query pulls it: `refs` are nested page maps, not the bare `{ id }` refs of the Editor API. */
+type PulledJournalBlock = Omit<BlockEntity, 'refs'> & { refs?: PageLike[] };
 
 /** The validated, resolved form of a {@link DateRangeSelection}. */
 type ResolvedSelection =
@@ -602,7 +606,7 @@ export async function queryJournals(
   const refsByBlock = new Map<number, ConceptRef[]>();
   if (journals.length > 0) {
     const blocksQuery = DatalogQueryBuilder.getJournalBlocksInRange(rangeStart, rangeEnd);
-    const blockRows = await client.executeDatalogQuery<Array<[any]>>(
+    const blockRows = await client.executeDatalogQuery<Array<[PulledJournalBlock | null]> | null>(
       blocksQuery.query,
       ...blocksQuery.inputs
     );
@@ -617,7 +621,7 @@ export async function queryJournals(
         if (concepts.length > 0) refsByBlock.set(block.id, concepts);
         return {
           ...block,
-          refs: block.refs.map((ref: any) => ({ id: ref?.id ?? ref?.['db/id'] }))
+          refs: block.refs.map(ref => ({ id: entityId(ref) }))
         };
       });
     treesByPage = buildBlockTrees(flatBlocks, journals.map(page => page.id));

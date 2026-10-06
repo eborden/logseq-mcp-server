@@ -4,6 +4,7 @@ import { BlockEntity, ResultMeta, SlimBlock } from '../types.js';
 import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { camelizeBlock, camelizeKeys } from '../utils/block-tree.js';
+import { pageDisplayName } from '../utils/entity-fields.js';
 
 /** Blocks returned when `limit` is absent. */
 export const DEFAULT_PROPERTY_LIMIT = 100;
@@ -16,11 +17,6 @@ export const MAX_PROPERTY_LIMIT = 500;
 
 /** The query takes only a key and an exact value, so nothing narrows it further. */
 const NARROWER = 'No other parameter narrows this query.';
-
-/** Page name used for slim output: original casing when known. */
-function displayName(page: any): string {
-  return page?.originalName || page?.name || '';
-}
 
 /**
  * Query blocks by a specific property name and value using one Datalog query
@@ -116,5 +112,5 @@ export async function queryByPropertyWithMeta(
         )
       : null;
 
-  return { results: slimResults ? kept.map(block => toSlimBlock(block, displayName(block.page))) : kept, meta };
+  return { results: slimResults ? kept.map(block => toSlimBlock(block, pageDisplayName(block.page))) : kept, meta };
 }
