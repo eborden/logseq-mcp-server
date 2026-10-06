@@ -495,6 +495,18 @@ describe('slim output leaves out empty fields (#42)', () => {
 });
 
 describe('toSlimPage', () => {
+  it('reads a pulled journal page, which spells the day journal-day, as it reads the Editor API one (#62)', () => {
+    // toSlimPage once read only journalDay. Both callers camelize first today, so no output
+    // changed; this pins the wider reading as intended, so a kebab-case pull that reaches
+    // it gives the same journalDate as a camelCase page.
+    const pulled = { id: 2, uuid: 'u', name: 'jan 1st, 2025', 'original-name': 'Jan 1st, 2025', 'journal?': true, 'journal-day': 20250101 };
+    const editor = { id: 2, uuid: 'u', name: 'jan 1st, 2025', originalName: 'Jan 1st, 2025', 'journal?': true, journalDay: 20250101 };
+
+    const expected = { name: 'jan 1st, 2025', originalName: 'Jan 1st, 2025', isJournal: true, journalDate: 20250101 };
+    expect(toSlimPage(pulled as unknown as PageEntity)).toEqual(expected);
+    expect(toSlimPage(editor as PageEntity)).toEqual(expected);
+  });
+
   it('should transform basic page with essential fields', () => {
     const page: PageEntity = {
       id: 1,
