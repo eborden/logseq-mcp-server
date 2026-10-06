@@ -5,7 +5,7 @@ import { createServer } from './index.js';
 import { LogseqClient } from './client.js';
 
 /**
- * What the search and relationship handlers hand their tool function (#60): the
+ * What each handler hands its tool function (#60): the
  * defaults, every clamp at and above its limit, and the values that pass through
  * unclamped (negative and fractional numbers). The tool functions are mocked, so
  * these pin the handler alone. The clamps are safeguards: `max_depth` <= 3,
@@ -26,6 +26,20 @@ const mocks = vi.hoisted(() => ({
     summary: { totalTopics: 0, totalBlocks: 0, totalPages: 0 },
   })),
   queryJournals: vi.fn(async () => ({ entries: [] })),
+  buildContextForTopic: vi.fn(async () => ({
+    topic: 't',
+    mainPage: { id: 1, name: 't' },
+    directBlocks: [],
+    relatedPages: [],
+    references: [],
+    summary: { totalBlocks: 0, totalRelatedPages: 0, totalReferences: 0, pageProperties: {} },
+    totals: { blocks: 0, relatedPages: 0, references: 0 },
+    warnings: [],
+    hasMore: false,
+  })),
+  getConceptEvolution: vi.fn(async () => ({ concept: 'c', timeline: [] })),
+  getPageOutline: vi.fn(async () => ({ page: 'p', blocks: [] })),
+  listPages: vi.fn(async () => ({ pages: [], total: 0 })),
 }));
 
 vi.mock('./tools/search-blocks.js', async importOriginal => ({
@@ -51,6 +65,23 @@ vi.mock('./tools/get-context-for-query.js', async importOriginal => ({
 vi.mock('./tools/query-by-date-range.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   queryJournals: mocks.queryJournals,
+}));
+
+vi.mock('./tools/build-context.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  buildContextForTopic: mocks.buildContextForTopic,
+}));
+vi.mock('./tools/get-concept-evolution.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getConceptEvolution: mocks.getConceptEvolution,
+}));
+vi.mock('./tools/get-page-outline.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getPageOutline: mocks.getPageOutline,
+}));
+vi.mock('./tools/list-pages.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  listPages: mocks.listPages,
 }));
 
 beforeEach(() => vi.clearAllMocks());
@@ -274,5 +305,78 @@ describe('logseq_query_by_date_range hand-off', () => {
   ])('%j reaches the tool as %j, which owns the range checks', async (args, expected) => {
     const [options] = await range(args);
     expect(options).toMatchObject(expected);
+  });
+});
+
+describe('logseq_build_context hand-off', () => {
+  const context = (args: Record<string, unknown>) =>
+    handedOff('logseq_build_context', { topic_name: 'Alice', ...args }, mocks.buildContextForTopic);
+
+  it.each([
+    [{ max_blocks: 5 }, { maxBlocks: 5 }],
+    [{ max_blocks: 0 }, { maxBlocks: 0 }],
+    [{ max_blocks: -1 }, { maxBlocks: -1 }],
+    [{ max_blocks: 2.5 }, { maxBlocks: 2.5 }],
+    [{ max_blocks: 100_000 }, { maxBlocks: 100_000 }],
+    [{ max_related_pages: 0 }, { maxRelatedPages: 0 }],
+    [{ max_related_pages: -1 }, { maxRelatedPages: -1 }],
+    [{ max_related_pages: 1_000 }, { maxRelatedPages: 1_000 }],
+    [{ max_references: 0 }, { maxReferences: 0 }],
+    [{ max_references: -1 }, { maxReferences: -1 }],
+    [{ max_references: 1_000 }, { maxReferences: 1_000 }],
+    [{ include_temporal_context: false }, { includeTemporalContext: false }],
+    [{ include_temporal_context: true }, { includeTemporalContext: true }],
+  ])('%j passes through as %j (no clamp)', async (args, expected) => {
+    const [name, options] = await context(args);
+    expect(name).toBe('Alice');
+    expect(options).toMatchObject(expected);
+  });
+
+  it('resolve_refs: true is passed on, but not with compact, which warns instead', async () => {
+    const [, plain] = await context({ resolve_refs: true });
+    expect(plain).toMatchObject({ resolveRefs: true });
+    vi.clearAllMocks();
+    const [, compact] = await context({ resolve_refs: true, compact: true });
+    expect(compact).toMatchObject({ resolveRefs: false });
+  });
+});
+
+describe('logseq_get_concept_evolution hand-off', () => {
+  const evolution = (args: Record<string, unknown>) =>
+    handedOff('logseq_get_concept_evolution', { concept_name: 'Alice', ...args }, mocks.getConceptEvolution);
+
+  it('defaults: no dates and no grouping', async () => {
+    expect(await evolution({})).toEqual(['Alice', { startDate: undefined, endDate: undefined, groupBy: undefined }]);
+  });
+
+  it.each(['day', 'week', 'month'])('group_by %j passes through', async groupBy => {
+    const [, options] = await evolution({ group_by: groupBy });
+    expect(options).toMatchObject({ groupBy });
+  });
+
+  it.each([
+    [{ start_date: 20250101, end_date: 20250131 }, { startDate: 20250101, endDate: 20250131 }],
+    [{ start_date: 0 }, { startDate: 0 }],
+    [{ end_date: -1 }, { endDate: -1 }],
+    [{ start_date: 2025 }, { startDate: 2025 }],
+  ])('%j passes through as %j (the tool does no range checks)', async (args, expected) => {
+    const [, options] = await evolution(args);
+    expect(options).toMatchObject(expected);
+  });
+});
+
+describe('logseq_get_page_outline and logseq_list_pages hand-off', () => {
+  it('get_page_outline passes the page name on', async () => {
+    expect(await handedOff('logseq_get_page_outline', { page_name: 'Alice' }, mocks.getPageOutline)).toEqual(['Alice']);
+  });
+
+  it('list_pages: no filter by default, and name_contains is passed on', async () => {
+    expect(await handedOff('logseq_list_pages', {}, mocks.listPages)).toEqual([{ nameContains: undefined }]);
+    vi.clearAllMocks();
+    expect(await handedOff('logseq_list_pages', { name_contains: 'al' }, mocks.listPages)).toEqual([{ nameContains: 'al' }]);
+  });
+
+  it('list_pages: an empty name_contains is passed on, and the tool reads it as no filter', async () => {
+    expect(await handedOff('logseq_list_pages', { name_contains: '' }, mocks.listPages)).toEqual([{ nameContains: '' }]);
   });
 });
