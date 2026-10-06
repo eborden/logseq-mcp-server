@@ -1,0 +1,15 @@
+;; App settings for a per-worktree LogSeq test instance (#118). scripts/logseq-instance.ts fills
+;; in {{port}} and {{token}} and writes the result to .logseq-instance/profile/configs.edn, the
+;; instance's own profile. It never touches the LogSeq profile you use day to day.
+;;
+;; - :server/* starts the HTTP API on launch, on localhost only, on this worktree's port.
+;; - The token is fixed and is not a secret (ADR-0003): the server only listens on 127.0.0.1
+;;   and only ever serves the made-up fixture graph in tests/fixtures/graph.
+;; - :auto-update false keeps the instance from updating the LogSeq app you share with it.
+;; - :git/disable-auto-commit? true keeps LogSeq's version control off (it is off by default).
+{:server/autostart true
+ :server/host "127.0.0.1"
+ :server/port {{port}}
+ :server/tokens [{:name "logseq-mcp-test-instance" :value "{{token}}"}]
+ :auto-update false
+ :git/disable-auto-commit? true}
