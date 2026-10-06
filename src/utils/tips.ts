@@ -122,8 +122,9 @@ function suggestTopic(blocks: unknown[]): { name: string; kind: 'page' | 'topic'
 }
 
 /**
- * Tips for one finished tool call. `args` are the arguments after alias
- * resolution; `result` is the tool's return value; `meta` is the ResultMeta the tool
+ * Tips for one finished tool call. `args` are the tool's parsed arguments (after
+ * alias resolution and `parseArgs`, so defaults are filled in and nulls dropped);
+ * `result` is the tool's return value; `meta` is the ResultMeta the tool
  * reported, if any (a search uses it to tell a real miss from `limit: 0`). Returns [] when there is
  * nothing useful to add.
  */

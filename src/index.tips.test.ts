@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from './index.js';
 import { LogseqClient } from './client.js';
+import { buildTips } from './utils/tips.js';
 
 const mocks = vi.hoisted(() => ({
   searchBlocksWithMeta: vi.fn(),
@@ -14,6 +15,11 @@ vi.mock('./tools/search-blocks.js', () => ({ searchBlocksWithMeta: mocks.searchB
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
 vi.mock('./tools/get-backlinks.js', () => ({ getBacklinks: mocks.getBacklinks }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
+// The real buildTips, wrapped so a test can see which arguments it was given (#60)
+vi.mock('./utils/tips.js', async importOriginal => {
+  const tips = await importOriginal<typeof import('./utils/tips.js')>();
+  return { ...tips, buildTips: vi.fn(tips.buildTips) };
+});
 
 const QUOTED = 'say "hi" \\ there';
 
@@ -84,6 +90,14 @@ describe('next-step tips through MCP (#44)', () => {
   it('applies tips to a call made with an alias, using the canonical argument', async () => {
     const result = await call('logseq_get_page', { name: 'alice' });
     expect(result.content[1].text).toContain('logseq_get_backlinks');
+  });
+
+  it('builds tips from the parsed arguments: alias folded, null dropped, defaults filled, unknown fields gone (#60)', async () => {
+    await call('logseq_get_page', { page: 'alice', include_children: null, verbose: true });
+    expect(buildTips).toHaveBeenCalledTimes(1);
+    const [tool, args] = vi.mocked(buildTips).mock.calls[0];
+    expect(tool).toBe('logseq_get_page');
+    expect(args).toStrictEqual({ page_name: 'alice', include_children: false, resolve_refs: false });
   });
 
   it('adds no block for a tool with no next step', async () => {
