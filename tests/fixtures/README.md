@@ -83,7 +83,7 @@ Every target has a pinned `id::`, so tests can name it. The uuids are
 | A page embed of `bob` | one embed, `ok` |
 | `10` and `11`: refs to each other | `ok`, then `cycle` |
 | `20` and `21`: embeds of each other | `ok`, then `cycle` |
-| A ref to `...00000000dead` and an embed of `...00000000beef` (no such block) | `ok`, **not** `missing`. LogSeq 0.10 makes a placeholder block for a uuid nobody has: no page, content `id:: <uuid>`. The resolver finds that row, so `missing` never shows up for a ref in a file graph (#138). When that is fixed, these become `missing` |
+| A ref to `...00000000dead` and an embed of `...00000000beef` (no such block) | each one `missing`, left as written. LogSeq 0.10 makes a placeholder block for a uuid nobody has: no page, content `id:: <uuid>`. The resolver reads a row with no page and no name as not found (#138). `tests/integration/fixture-only/resolve-refs-missing.test.ts` checks both |
 
 LogSeq also makes a **page named after each block-embed uuid** (`0088f1a0-...-000000000002`, `...020`,
 `...021`, `...beef`), with no file and no blocks. Plain `((uuid))` refs make no such page.
