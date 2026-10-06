@@ -76,9 +76,9 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Check Links",
     },
-    "description": "Check a [[link]] pass: after must be before plus brackets only. ok is true only if prose is unchanged once brackets are stripped, brackets balance and don't nest, no ref in before was dropped, and each [[term]] names a page or alias.
+    "description": "Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.
 
-**Can't find:** a link to the wrong page, or a name split across a ref. It checks safety, not judgement.",
+**Can't find:** a link to the wrong page, or a name split across a ref.",
     "inputSchema": {
       "properties": {
         "after": {
