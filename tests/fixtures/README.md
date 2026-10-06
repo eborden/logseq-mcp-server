@@ -36,7 +36,7 @@ The skeleton (#87) and its content:
 
 - #88: edge cases (aliases, namespaces, block refs and embeds, properties), journals, tags and tasks (done, see "Edge cases, journals, tags and tasks" below)
 - #89: a hub page with 100+ neighbours (done, see "The hub" below)
-- #90: moves `npm run test:integration` from the maintainer's own graph to this one
+- #90: `npm run test:integration` runs against this graph only, with exact assertions (done; see `tests/integration/setup.md`)
 
 | Page | Exists to test |
 |---|---|
@@ -248,4 +248,4 @@ holds **263 pages** in `:block/name`, built-in pages and today's journal include
 Without today's journal that is 262, and without the built-ins too, 246. There is no `readme` page and no
 `#NN` tag page, and no README among the 146 indexed files (145 pages plus `config.edn`). The number moves
 whenever a page, a property key or a block embed is added to the fixture, and nothing in the tests pins it,
-so #90 should compute what it needs rather than copy it.
+so the tests compute what they need rather than copy it (#90).

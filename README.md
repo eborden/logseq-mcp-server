@@ -215,8 +215,9 @@ To check a build locally first, `npm pack --dry-run` lists the tarball, and `npm
 ```bash
 npm install
 npm run build
-npm test
-npm run test:integration  # Requires running LogSeq instance
+npx vitest run src        # unit tests
+npm run test:integration  # needs LogSeq serving the fixture graph; see tests/integration/setup.md
+npm test                  # both
 ```
 
 ## Architecture

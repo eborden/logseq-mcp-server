@@ -2,7 +2,7 @@
 
 ## Privacy: Never Commit Details From the Personal Graph
 
-The LogSeq instance this server is developed against is the maintainer's **personal** graph. Integration tests, probes and scripts read real data from it. None of that data may leave the machine through this repo or its GitHub project.
+The LogSeq instance this server is developed against is the maintainer's **personal** graph. The measure scripts read real data from it when run with the default config, and so does anything else pointed at port 12315. The integration tests never do: they run against the committed fixture graph only (#90). None of the personal graph's data may leave the machine through this repo or its GitHub project.
 
 **Never put any of the following in committed files** (code, tests, fixtures, docs, skills, CLAUDE.md), **commit messages, GitHub issues, PR descriptions or comments:**
 - Page names, journal titles, tags or property values from the graph
@@ -148,7 +148,7 @@ Done by whoever merges:
 - Privacy grep of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
 - `npx tsc --noEmit`
 - `npx vitest run src`
-- `npm run test:integration` against the live graph (read-only)
+- `npm run test:integration` against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`, the run, then `stop`; read-only). Afterwards `git status` must show no change under `tests/fixtures/graph/`: restore anything LogSeq rewrote with `git checkout -- tests/fixtures/graph` and delete `logseq/bak/`
 - `npx tsx scripts/measure-api-calls.ts` still runs
 - A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
 
@@ -169,7 +169,7 @@ This is an MCP (Model Context Protocol) server that provides Claude with 16 tool
 
 **Key Stats:**
 - 16 MCP tools for graph operations, search, and temporal queries
-- Unit tests (`npx vitest run src`) plus integration tests against a live graph (`npm run test:integration`). `npm test` runs both.
+- Unit tests (`npx vitest run src`) plus integration tests against the committed fixture graph (`npm run test:integration`). `npm test` runs both.
 - Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see "Current Implementation Status" below)
 
 **Architecture:**
@@ -435,7 +435,7 @@ The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
 
 1. **LogSeq's Datalog ≠ standard DataScript.** Probe before concluding something "doesn't work": the original conclusions on `:in` and `clojure.string` were over-generalized from a single failing case (constraints 1 and 2, ADR-0013).
 2. **Simple is better.** Two queries that always work beat one query that sometimes works. No clever `or-join` tricks (Pattern 1, ADR-0007).
-3. **Test with real data.** Property-style tests against a live graph found the empty-page and case-sensitivity bugs (Testing Philosophy, below).
+3. **Test with real data.** Property-style tests against a live graph found the empty-page and case-sensitivity bugs. The fixture graph now holds those cases, so the tests assert them exactly (Testing Philosophy, below).
 4. **Feature flags added complexity.** They maintained dual implementations and were eventually removed in favor of simplicity: one direct Datalog path (ADR-0005).
 
 ---
@@ -503,37 +503,35 @@ Quick reference checklist for future work:
 
 ## Testing Philosophy
 
-### Property-Based Testing
-Tests work with ANY LogSeq graph without requiring specific test data.
+### Fixture Graph, Exact Assertions
+
+The integration tests run against `tests/fixtures/graph/`, a small made-up graph in the repo (#86, #90), and nothing else. `connectFixture()` (`tests/integration/helpers/fixture-client.ts`) loads the config and calls `requireFixtureGraph`, and the run's global setup does it once first, so a run against any other graph fails loud. `tests/integration/setup.md` has the run steps; `tests/fixtures/README.md` says what each page is for and what it returns.
 
 **Pattern:**
 ```typescript
-// Discover pages dynamically
-const pages = await discoverPages(client, 5);
+beforeAll(async () => {
+  ({ client } = await connectFixture());
+});
 
-// Test universal properties
-for (const page of pages) {
-  const result = await getConceptNetwork(client, page.name, 2);
+it('returns every neighbour of a page under the caps', async () => {
+  const result = await getConceptNetwork(client, 'bob', 1);
 
-  // Property: All nodes should have IDs
-  expect(result.nodes.every(n => n.id)).toBe(true);
-
-  // Property: Root node always at depth 0
-  expect(result.nodes.find(n => n.depth === 0)).toBeDefined();
-}
+  expect(result.nodes.map(n => n.name).sort()).toEqual(BOB_NETWORK); // known fixture data
+  expect(result).toMatchObject({ truncated: false, hasMore: false, warnings: [] });
+});
 ```
 
-**Benefits:**
-- No test data setup required
-- Tests real-world scenarios
-- Discovers edge cases (empty pages, special characters)
-- Works across different LogSeq databases
+- **Exact values from known pages**, never data discovered at run time. A test that needs new data adds it to the fixture and its README in the same PR.
+- **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026.
+- **Caps that pick by `:db/id` order** are stable in count, not by name; the fixture README's hub section says which is which.
+- **Invariants** that hold for any graph stay as property tests (`tests/integration/properties/`), run over a fixed list of fixture pages.
+- **A known bug** is an `it.fails` case that names its issue.
 
 **Test Categories:**
-- **Unit tests** (`npx vitest run src`, 181 as of Oct 2026): Query builders, data transformations, mocked clients
-- **Integration tests** (`npm run test:integration`, 60 as of Oct 2026, with real LogSeq): API connectivity, actual graph queries
-- Note: `npm test` runs **both** suites (the default vitest config doesn't exclude `tests/integration/`), so it needs a running LogSeq
-- **Property tests**: Universal invariants, equivalence validation
+- **Unit tests** (`npx vitest run src`): Query builders, data transformations, mocked clients
+- **Integration tests** (`npm run test:integration`, ~190 in 20 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool
+- Note: `npm test` runs the unit tests, then `npm run test:integration`, so it needs the fixture instance running. The default vitest config leaves `tests/integration/` out.
+- **Property tests**: Universal invariants, equivalence validation (`tests/integration/properties/`, and the crawl oracles in `query-by-property` and `temporal-queries`)
 
 ### Integration Test Requirements (Hard Failures)
 
@@ -542,7 +540,7 @@ Integration tests must fail loud on BOTH setup issues AND missing test data.
 **Rules:**
 1. **NO it.skipIf() for integration tests** - Tests must run or fail, never skip
 2. **NO console.warn() in tests** - Silent warnings hide real failures
-3. **REQUIRE prerequisites explicitly** - Config file, LogSeq connection, test data
+3. **REQUIRE prerequisites explicitly** - `connectFixture()` checks the config, the connection and the fixture graph
 4. **Fail with helpful messages** - Point to setup.md for resolution steps
 
 **Pattern:**
@@ -564,25 +562,14 @@ if (!result || result.length === 0) {
   return;
 }
 
-// ✅ GOOD: Fail loud with clear message
+// ✅ GOOD: Fail loud, and assert exactly what the fixture holds
 beforeAll(async () => {
-  try {
-    await access(configPath);
-  } catch {
-    throw new Error(
-      'Config file not found at ~/.logseq-mcp/config.json. ' +
-      'See tests/integration/setup.md for setup instructions.'
-    );
-  }
+  ({ client } = await connectFixture()); // throws, pointing at setup.md, unless LogSeq serves the fixture
 });
 
 it('test', async () => {
-  const result = await searchBlocks(client, 'test');
-  expect(result).toBeDefined();
-  expect(result.length).toBeGreaterThan(0,
-    'No pages found. Create test data in LogSeq graph. ' +
-    'See tests/integration/setup.md'
-  );
+  const result = await searchBlocks(client, 'importer');
+  expect(result).toHaveLength(11); // the fixture's 11 blocks that say "importer"
 });
 ```
 
@@ -603,6 +590,8 @@ npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
 npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
 npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42), markdown and compact vs json (#43); bytes only, no names
 ```
+
+These runs use the default config, the real ~2k-page graph: time and output size depend on scale, so the table stays a real-graph baseline. With `LOGSEQ_MCP_CONFIG` pointing at the fixture instance they measure the fixture instead (subject `hub central`), which is reproducible and good for checking a change's call count, but don't update the table from it. Decision recorded in #90; `tests/integration/setup.md` ("Probe and measure scripts") has the details.
 
 ---
 
@@ -633,8 +622,8 @@ tests/
 └── [unit test files]              - Mocked tests (co-located in src/)
 
 scripts/
-├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live graph
-├── measure-api-calls.ts           - Counts API calls per tool against a live graph
+├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live LogSeq (use the fixture)
+├── measure-api-calls.ts           - Counts API calls per tool against a live graph (baseline: the real graph)
 ├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
 ├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on a copy of the fixture graph (#118, #151, macOS)
 ├── generate-hub-fixture.ts        - Writes (or --check's) the hub fixture's files from fixture-hub/hub-graph.ts (#89)
@@ -659,7 +648,7 @@ skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, refe
 ## Useful Commands
 
 ```bash
-# Run all tests (unit + integration; integration needs a running LogSeq)
+# Run all tests (unit, then integration; integration needs the fixture instance)
 npm test
 
 # Run unit tests only
@@ -671,13 +660,16 @@ npx vitest run src/tools/build-context.test.ts
 # Build the project
 npm run build
 
-# Test against real LogSeq (requires running instance)
-npm run test:integration
+# Integration tests against this worktree's fixture instance (macOS; own profile, port and random API token)
+npx tsx scripts/logseq-instance.ts start
+npm run test:integration          # picks up .logseq-instance/config.json while the instance runs
+npx tsx scripts/logseq-instance.ts stop
+git status                        # LogSeq may rewrite fixture files; restore them, never commit them
 
-# Verify Datalog/API constraints against the live graph (read-only)
-npx tsx scripts/probe-constraints.ts
+# Verify Datalog/API constraints (read-only); the fixture reproduces all of them
+LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npx tsx scripts/probe-constraints.ts
 
-# Count API calls per tool against the live graph (read-only)
+# Count API calls per tool (read-only): the default config is the real-graph baseline; the fixture gives reproducible counts
 npx tsx scripts/measure-api-calls.ts
 
 # Output size per tool: slim vs full, markdown and compact vs json (read-only; prints byte counts only)
@@ -685,11 +677,6 @@ npx tsx scripts/measure-output-size.ts
 
 # Debug Datalog query
 npx tsx scripts/test-datalog-query.ts
-
-# This worktree's own LogSeq on the fixture graph (macOS; own profile, port and random API token)
-npx tsx scripts/logseq-instance.ts start
-LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration
-npx tsx scripts/logseq-instance.ts stop
 ```
 
 ---
@@ -714,8 +701,8 @@ Checklist for new Datalog-based tools:
    - Test case-insensitive lookup
 
 4. **Integration Test** - Add to `tests/integration/`
-   - Use property-based testing if possible
-   - Fail loud if no real data is available (never skip; see Integration Test Requirements)
+   - Connect with `connectFixture()` and assert exact results on fixture pages; add fixture data (and its README rows) if the tool needs a case the fixture lacks
+   - Fail loud, never skip (see Integration Test Requirements)
 
 5. **Documentation** - Update MCP tool handler in `src/index.ts`
    - Give the tool `annotations: readOnlyAnnotations('Title')` (a guard test in `src/index.test.ts` fails without it). Every tool is read-only: [BR-0002 (tools-read-only)](docs/business-rules/0002-tools-read-only.md)

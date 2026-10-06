@@ -42,8 +42,8 @@ jobs:
         run: npx tsc -p tsconfig.scripts.json
 
       # Unit tests only. The integration tests (tests/integration, run locally
-      # with `npm run test:integration`) read the maintainer's personal LogSeq
-      # graph, which CI can't reach. Don't switch this to `npm test`, which
-      # runs both suites.
+      # with `npm run test:integration`) need a LogSeq desktop app serving the
+      # fixture graph, which CI doesn't have. Don't switch this to `npm test`,
+      # which runs both suites.
       - name: Unit tests
         run: npx vitest run src

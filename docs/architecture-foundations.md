@@ -135,7 +135,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **Why.** Without a recorded baseline you can't tell a regression from an intended change. The original author's reasons are usually invisible. The code is the only specification left.
 
-**In this repo.** Unit tests mock the client. Integration tests (`npm run test:integration`) run against a live graph and use property-based checks that work on any graph. Use the unit tests to pin shapes and the integration tests to pin behavior against real data. Commit tests, refactors and behavior changes separately.
+**In this repo.** Unit tests mock the client. Integration tests (`npm run test:integration`) run against the committed fixture graph in a live LogSeq and assert exact results on its known pages. Use the unit tests to pin shapes and the integration tests to pin behavior against real data. Commit tests, refactors and behavior changes separately.
 
 **How to treat what you find.**
 - Odd early returns, magic thresholds and special cases are often safeguards against real LogSeq behavior (see the constraints in `CLAUDE.md`). Preserve them, give them intention-revealing names and comment what they protect against if it's evident. Ask if it isn't.
