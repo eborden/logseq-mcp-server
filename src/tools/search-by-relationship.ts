@@ -26,6 +26,16 @@ export const RELATIONSHIP_TYPES = [
   'connected-within',
 ] as const satisfies readonly RelationshipType[];
 
+/**
+ * Compile-time check that {@link RELATIONSHIP_TYPES} lists every {@link RelationshipType}.
+ * `satisfies` only checks that each entry is valid. A member left out of the list
+ * becomes the type argument here, which fails `extends never`, so tsc fails.
+ */
+type EveryMemberListed<Missing extends never> = Missing;
+export type RelationshipTypesComplete = EveryMemberListed<
+  Exclude<RelationshipType, (typeof RELATIONSHIP_TYPES)[number]>
+>;
+
 /** Hops `connected-within` walks when `max_distance` is absent. */
 export const DEFAULT_MAX_DISTANCE = 2;
 
