@@ -64,8 +64,8 @@ const CASES: Array<{ type: RelationshipType; make: (n: number) => FakeOptions; w
   { type: 'references', make: n => ({ n }), what: /matching blocks \(the first ones listed, not ranked\)/ },
   { type: 'referenced-by', make: n => ({ n }), what: /matching blocks \(the first ones listed, not ranked\)/ },
   { type: 'in-pages-linking-to', make: n => ({ n }), what: /matching blocks \(the first ones listed, not ranked\)/ },
-  // n top-level blocks in all: topic A's page first
-  { type: 'connected-within', make: n => ({ treeA: Math.ceil(n / 2), treeB: Math.floor(n / 2) }), what: /top-level blocks of the two pages/ }
+  // n blocks in all (flat trees, so nested counting changes nothing here): topic A's page first
+  { type: 'connected-within', make: n => ({ treeA: Math.ceil(n / 2), treeB: Math.floor(n / 2) }), what: /blocks of the two pages, nested ones counted/ }
 ];
 
 const run = (
@@ -247,29 +247,6 @@ describe.each(['plain', 'aliased'] as const)('searchByRelationship caps, %s path
 });
 
 describe('searchByRelationship caps, what each type counts', () => {
-  it('connected-within counts top-level blocks and leaves a kept block its children', async () => {
-    const { client, callAPI } = fakeClient();
-    callAPI.mockImplementation(async (_method: string, args: unknown[]) =>
-      String(args[0]).toLowerCase() === 'bob'
-        ? [{ id: 2000, content: 'B 1', children: [{ id: 2001 }] }]
-        : [
-            { id: 1000, content: 'A 1', children: [{ id: 1001 }, { id: 1002 }, { id: 1003 }] },
-            { id: 1004, content: 'A 2' },
-            { id: 1005, content: 'A 3' }
-          ]
-    );
-
-    const result = await searchByRelationship(client, 'Alice', 'Bob', 'connected-within', 2, { limit: 1 });
-
-    expect(result.results).toHaveLength(1);
-    expect((result.results[0] as { children?: unknown[] }).children).toHaveLength(3);
-    expect(result.totals).toEqual({ blocks: 4 });
-    const warning = result.warnings.find(w => w.code === 'results_truncated')!;
-    expect(warning.message).toBe(
-      "Showing 1 of 4 top-level blocks of the two pages (kept 1 from topic A and 0 from topic B, of 3 and 1; topic A's first, then topic B's; a kept block keeps all its children, which are not counted)."
-    );
-  });
-
   it('connected-within says how many kept blocks came from each topic, including when topic B drops out', async () => {
     const fromEach = async (limit: number) => {
       const { result } = await run('connected-within', 'plain', { treeA: 8, treeB: 5 }, limit);
