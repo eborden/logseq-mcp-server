@@ -50,9 +50,9 @@ export const TOOL_DESCRIPTIONS = {
 **Alternatives:** logseq_build_context for the page plus related pages.`,
 
   // Search Tools (exploratory, when you don't know exactly what exists)
-  logseq_search_blocks: `Case-insensitive literal substring search over block content, newest first, capped by limit. Check hasMore and warnings.
+  logseq_search_blocks: `Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.
 
-**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), or link structure (logseq_search_by_relationship).
+**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).
 **Next:** logseq_build_context on a result's page.`,
 
   logseq_query_by_property: `Find blocks whose property equals a value (e.g. status::done).

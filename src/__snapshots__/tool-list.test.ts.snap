@@ -556,9 +556,9 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Search Blocks",
     },
-    "description": "Case-insensitive literal substring search over block content, newest first, capped by limit. Check hasMore and warnings.
+    "description": "Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.
 
-**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), or link structure (logseq_search_by_relationship).
+**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).
 **Next:** logseq_build_context on a result's page.",
     "inputSchema": {
       "properties": {
@@ -568,7 +568,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
           "type": "boolean",
         },
         "limit": {
-          "description": "Maximum number of results to return (optional)",
+          "description": "Maximum number of results to return (default: 100, max: 500)",
           "type": "number",
         },
         "query": {
