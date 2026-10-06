@@ -40,7 +40,8 @@ import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.j
  * caps through MCP (the same code, a smaller bound), and the unit tests feed the tool
  * 1,100 blocks for the cut at the maximum.
  * get_backlinks' maximums of 100 pages and 50 blocks per page are out of reach the same way:
- * the hub has 61 source pages and no page has more than 12 linking blocks. Through MCP the
+ * the hub has 61 source pages and no page has more than 12 linking blocks. Source pages are ranked by
+ * linking blocks (#178), so the pages a cut keeps are the same names on every run. Through MCP the
  * default cuts, the values below the maximum and the clamp can be seen; the cut at each
  * maximum is covered by the unit tests, which feed the tool 150 pages and 80 blocks.
  * query_by_property's default of 100 and maximum of 500 are out of reach too: no property value sits
@@ -452,6 +453,8 @@ describe('result caps (#61)', () => {
     // The hub: 61 source pages (60 pages and a journal), 66 blocks, none of them over 2 per page.
     // The crowded topic: 2 source pages, one with 12 linking blocks and one with 2. A project
     // with an alias takes the alias-group query (#69) instead of the Editor call.
+    // Source pages are ranked by linking blocks, most first, ties by lowercase page name (#178), so
+    // the order is the same on every run and the tests below assert it by name.
     const HUB = 'hub central';
     const CROWDED = 'popular topic';
     const ALIASED = 'project atlas';
@@ -479,7 +482,36 @@ describe('result caps (#61)', () => {
     }
 
     const blockUuids = (results: BacklinkTuple[]) => results.map(([, blocks]) => blocks.map(b => b.uuid));
+    const pageNames = (results: BacklinkTuple[]) => results.map(([page]) => page.name);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const range = (prefix: string, from: number, to: number) =>
+      Array.from({ length: to - from + 1 }, (_, i) => `${prefix}${pad(from + i)}`);
     const codes = (body: BacklinksBody) => (body.meta?.warnings ?? []).map(w => w.code);
+
+    it('ranks the hub by linking blocks, ties by page name, and keeps the top of that ranking at the default cut', async () => {
+      const full = await backlinks(HUB, MAX_PAGES);
+      const counts = full.results.map(([, blocks]) => blocks.length);
+      // Most first, and within a count by lowercase name (code-unit order), whatever order LogSeq listed them in
+      const expected = [...full.results].sort(
+        ([a, aBlocks], [b, bBlocks]) =>
+          bBlocks.length - aBlocks.length || ((a.name ?? '') < (b.name ?? '') ? -1 : (a.name ?? '') > (b.name ?? '') ? 1 : 0)
+      );
+      expect(pageNames(full.results)).toEqual(pageNames(expected));
+      expect(counts).toEqual([...counts].sort((a, b) => b - a));
+      expect(counts.slice(0, 6), 'five pages link the hub twice, the rest once').toEqual([2, 2, 2, 2, 2, 1]);
+
+      // The default 20 are named by the ranking, not by LogSeq's order
+      const body = await backlinks(HUB);
+      expect(pageNames(body.results)).toEqual([
+        ...range('neighbour-in-', 1, 5),
+        'jun 17th, 2024',
+        ...range('neighbour-both-', 1, 10),
+        ...range('neighbour-in-', 6, 9),
+      ]);
+      expect(codes(body)).toEqual(['pages_truncated']);
+      expect(body.meta!.warnings![0].message).toContain('ranked by linking blocks (most first, ties by page name)');
+      expect(body.meta!.warnings![0].message).toContain('The last page kept has 1 linking block, the first dropped page has 1.');
+    });
 
     it('never returns more pages than max_pages, keeps the same first pages, and reports every cut', async () => {
       const full = await backlinks(HUB, MAX_PAGES);
@@ -515,8 +547,9 @@ describe('result caps (#61)', () => {
         expect(body.meta!.hasMore, label).toBe(true);
         expect(body.meta!.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_pages to ${total}\\b`));
         expectNoSuggestionPast(body.meta as Meta, 'max_pages', MAX_PAGES);
-        // The order is not a ranking, and the per-page cap is a separate one
-        expect(body.meta!.warnings![0].message, label).toContain('the first ones listed, not ranked');
+        // The pages are ranked, and the per-page cap is a separate one
+        expect(body.meta!.warnings![0].message, label).toContain('ranked by linking blocks (most first, ties by page name)');
+        expect(body.meta!.warnings![0].message, label).not.toContain('not ranked');
         expect(body.meta!.warnings![0].message, label).toContain('Blocks per page are capped separately by max_blocks_per_page.');
       }
     });
@@ -532,6 +565,9 @@ describe('result caps (#61)', () => {
       expect(codes(full)).toEqual([]);
       const largest = counts[0];
       const totalBlocks = counts.reduce((a, b) => a + b, 0);
+      // Ranked: the page with 12 linking blocks comes before the one with 2, at every cap
+      expect(pageNames(full.results)).toEqual(['busy source', 'light source']);
+      expect(pageNames((await backlinks(CROWDED, 1)).results)).toEqual(['busy source']);
 
       expect((await backlinks(CROWDED, undefined, 5000)).text).toBe(full.text);
 
@@ -565,6 +601,7 @@ describe('result caps (#61)', () => {
       const body = await backlinks(CROWDED, 1, 1);
 
       expect(body.results).toHaveLength(1);
+      expect(pageNames(body.results)).toEqual(['busy source']);
       expect(blockUuids(body.results)).toEqual([blockUuids(full.results)[0].slice(0, 1)]);
       expect(codes(body)).toEqual(['pages_truncated', 'page_blocks_truncated']);
       expect(body.meta!.totals).toEqual({
@@ -580,7 +617,12 @@ describe('result caps (#61)', () => {
       expect(pages, 'the aliased project needs more than 3 source pages. See tests/fixtures/README.md').toBeGreaterThan(3);
       expect(full.meta?.warnings ?? [], 'the maximums cut nothing').toEqual([]);
 
+      // Ranked by linking blocks across the whole alias group: 7, 3, 2, 2, then single blocks by name
+      expect(full.results.slice(0, 4).map(([, b]) => b.length)).toEqual([7, 3, 2, 2]);
+      expect(pageNames(full.results).slice(0, 3)).toEqual(['jan 6th, 2025', 'jan 15th, 2025', 'jan 13th, 2025']);
+
       const fewer = await backlinks(ALIASED, 3);
+      expect(pageNames(fewer.results)).toEqual(['jan 6th, 2025', 'jan 15th, 2025', 'jan 13th, 2025']);
       expect(blockUuids(fewer.results)).toEqual(blockUuids(full.results).slice(0, 3));
       expect(codes(fewer)).toEqual(['pages_truncated']);
       expect(fewer.meta!.totals).toEqual({ pages, blocks });

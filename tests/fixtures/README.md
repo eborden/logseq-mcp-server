@@ -209,9 +209,10 @@ lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count
   whether `hub central` is among them. For these, assert only the node count, `truncated` and the
   `network_truncated` warning (#90). A test that needs a particular fringe or topic page present must use a case
   where the cap does not bite (the `Infinity` rows).
-- **Depends on LogSeq's order.** Which 20 of the hub's 61 source pages `get_backlinks` keeps at the defaults is the order
-  LogSeq lists them in (not sorted by name, and not a ranking), so a test can't assert those names. Compare with the
-  full list (`max_pages` 100) and check the kept pages are its first ones, as `result-caps.test.ts` does.
+- **Fixed by ranking (#178).** `get_backlinks` ranks source pages by linking blocks, most first, ties by lowercase page
+  name. The hub's 61 source pages come out as `neighbour-in-01..05` (2 blocks each), then the 56 single-block pages by
+  name: `jun 17th, 2024`, `neighbour-both-01..10`, `neighbour-in-06..50`. The default 20 are `neighbour-in-01..05`,
+  `jun 17th, 2024`, `neighbour-both-01..10` and `neighbour-in-06..09`. Tests may assert these names.
 - **Also depends on id order, outside the hub.** `get_context_for_query` on `[[Bob]]` and `[[Alice]]` keeps 5
   related pages per topic, picked among ties, so how many the two share (and so `summary.totalPages`) changed
   between two instance starts. Assert 5 per topic and count the distinct pages from the result.
@@ -235,8 +236,8 @@ written `Row N on [[popular topic]]`, and the target has no file.
 
 `get_backlinks` on `popular topic`: 2 source pages, 14 blocks. At the defaults `busy source` keeps its first 10 blocks and
 `light source` keeps both, with one `page_blocks_truncated` warning, `totals` `{ pages: 2, blocks: 14 }`, `hasMore` true and
-`Set max_blocks_per_page to 12`. At `max_blocks_per_page` 12 or more the result is whole and there is no `meta`. Which of the
-two pages comes first is up to LogSeq, so assert on counts and on the blocks of each page in order, not on the page order.
+`Set max_blocks_per_page to 12`. At `max_blocks_per_page` 12 or more the result is whole and there is no `meta`. `busy source`
+comes first, then `light source` (ranked by linking blocks, #178), at every `max_pages`; `max_pages` 1 keeps `busy source`.
 
 The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
 `search_blocks`' maximum of 500 matches. The fixture holds 494 blocks, 478 of them with an `e` (16 without: 2 older ones and
