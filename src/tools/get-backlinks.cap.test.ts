@@ -180,7 +180,7 @@ describe('get_backlinks max_pages and max_blocks_per_page (#61)', () => {
           warnings: [
             {
               code: 'pages_truncated',
-              message: 'Showing 20 of 21 source pages (the first ones listed; the last one shown is "Source 020").',
+              message: 'Showing 20 of 21 source pages (the first ones listed, not ranked). Blocks per page are capped separately by max_blocks_per_page.',
               howToFetchAll: 'Set max_pages to 21 (or higher) to get all 21.'
             }
           ]
@@ -195,7 +195,7 @@ describe('get_backlinks max_pages and max_blocks_per_page (#61)', () => {
 
         const none = await run(sources(3), { maxPages: 0 });
         expect(none.results).toEqual([]);
-        expect(none.meta!.warnings[0].message).toBe('Showing 0 of 3 source pages (the first ones listed).');
+        expect(none.meta!.warnings[0].message).toBe('Showing 0 of 3 source pages (the first ones listed, not ranked). Blocks per page are capped separately by max_blocks_per_page.');
         expect(suggestedValues(none.meta, 'max_pages')).toEqual([3]);
       });
 
