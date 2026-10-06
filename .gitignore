@@ -40,3 +40,8 @@ tests/fixtures/graph/pages/contents.md
 # Today's journal, created on open. Fixture journals are dated 2025 or earlier.
 tests/fixtures/graph/journals/202[6-9]_*
 tests/fixtures/graph/journals/20[3-9][0-9]_*
+
+# StrykerJS (ADR-0026, #204): its sandbox, and the reports and incremental file it writes.
+# They hold source and test text and are large; never commit them.
+.stryker-tmp/
+reports/mutation/
