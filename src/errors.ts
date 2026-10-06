@@ -158,6 +158,30 @@ export class LogSeqAuthError extends Error {
 }
 
 /**
+ * Thrown when LogSeq answers, but the answer is not the shape this server reads (#202): a field
+ * the code relies on is missing or has another type. The message names the API method and where
+ * in the response it went wrong, and never a value from it (a response is the user's graph).
+ * It is never turned into "no data": a tool that reads a response it can't understand fails.
+ */
+export class LogSeqResponseError extends Error {
+  constructor(
+    readonly method: string,
+    /** Where the first mismatch sits, e.g. `[0].id`, or `(response)` for the top level */
+    readonly path: string,
+    /** What was expected there, in zod's words (types only, never the received value) */
+    readonly problem: string
+  ) {
+    super(
+      `LogSeq answered ${method} in a shape this server can't read: ${path}: ${problem}\n\n` +
+      `Steps to fix:\n` +
+      `1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\n` +
+      `2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)`
+    );
+    this.name = 'LogSeqResponseError';
+  }
+}
+
+/**
  * True for failures of the connection to LogSeq itself (not running, timeout,
  * rejected token). These must never be turned into "no data".
  */
