@@ -170,7 +170,7 @@ describe('get_backlinks max_pages and max_blocks_per_page (#61)', () => {
     });
 
     describe('above max_pages', () => {
-      it('keeps the first 20 pages in the order listed and says how to get them all', async () => {
+      it('keeps the first 20 pages (ranked, see the ranking test file) and says how to get them all', async () => {
         const { results, meta } = await run(sources(21, 2));
         expect(pageIds(results)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
         expect(blockCounts(results).every(n => n === 2)).toBe(true);
@@ -180,7 +180,7 @@ describe('get_backlinks max_pages and max_blocks_per_page (#61)', () => {
           warnings: [
             {
               code: 'pages_truncated',
-              message: 'Showing 20 of 21 source pages (the first ones listed, not ranked). Blocks per page are capped separately by max_blocks_per_page.',
+              message: 'Showing 20 of 21 source pages, ranked by linking blocks (most first, ties by page name). The last page kept has 2 linking blocks, the first dropped page has 2. Blocks per page are capped separately by max_blocks_per_page.',
               howToFetchAll: 'Set max_pages to 21 (or higher) to get all 21.'
             }
           ]
@@ -195,7 +195,7 @@ describe('get_backlinks max_pages and max_blocks_per_page (#61)', () => {
 
         const none = await run(sources(3), { maxPages: 0 });
         expect(none.results).toEqual([]);
-        expect(none.meta!.warnings[0].message).toBe('Showing 0 of 3 source pages (the first ones listed, not ranked). Blocks per page are capped separately by max_blocks_per_page.');
+        expect(none.meta!.warnings[0].message).toBe('Showing 0 of 3 source pages, ranked by linking blocks (most first, ties by page name). Blocks per page are capped separately by max_blocks_per_page.');
         expect(suggestedValues(none.meta, 'max_pages')).toEqual([3]);
       });
 
@@ -205,11 +205,12 @@ describe('get_backlinks max_pages and max_blocks_per_page (#61)', () => {
       });
 
       it('names only the pages kept in the per-page warning, but counts the dropped page in the totals', async () => {
-        const { meta } = await run([...sources(2, 2), { id: 3, blocks: 30 }], { maxPages: 2, maxBlocksPerPage: 1 });
+        // The dropped page links least, so the ranking puts it last and the cut falls on it
+        const { meta } = await run([{ id: 1, blocks: 3 }, { id: 2, blocks: 3 }, { id: 3, blocks: 1 }], { maxPages: 2, maxBlocksPerPage: 1 });
         expect(meta!.warnings.map(w => w.code)).toEqual(['pages_truncated', 'page_blocks_truncated']);
         expect(meta!.warnings[1].message).toContain('2 source pages');
         expect(meta!.warnings[1].message).not.toContain('Source 003');
-        expect(meta!.totals).toEqual({ pages: 3, blocks: 34 });
+        expect(meta!.totals).toEqual({ pages: 3, blocks: 7 });
       });
 
       it('keeps the pages it kept at a larger cap, as a prefix', async () => {
