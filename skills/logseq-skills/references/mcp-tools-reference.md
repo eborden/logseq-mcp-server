@@ -157,21 +157,21 @@ logseq_query_by_property("scheduled", "*")  # All scheduled items
 
 ### logseq_list_pages
 
-List non-journal page names, A-Z, to discover graph vocabulary. A large graph's list comes in pages.
+List non-journal pages, A-Z, to discover graph vocabulary. Each page carries its aliases. A large graph's list comes in pages.
 
 **Parameters:**
-- `name_contains` (optional): Filter page names containing this text (case-insensitive)
-- `limit` (optional): Maximum names per call (default: 200, max: 1000)
+- `name_contains` (optional): Filter pages whose name or alias contains this text (case-insensitive). The page comes back whole, with all its aliases, so searching an alias finds its page
+- `limit` (optional): Maximum pages per call (default: 200, max: 1000). Aliases take no slots
 - `offset` (optional): Matching pages to skip, in name order, to fetch the next page (default: 0)
 
 A server that doesn't page the list ignores `limit` and `offset` and returns every page.
 
 **Returns:**
-- `pages`: Sorted array of page names (strings)
-- `total`: Count of all matching pages, including any not returned in this call
+- `pages`: Array of `{ name, aliases? }` sorted by `name`. `aliases` is the page's other names (original casing, sorted) and is left off when there are none. An alias is not a page of its own and is never listed alone, so a name declared by two pages shows under both
+- `total`: Count of all matching pages (aliases not counted), including any not returned in this call
 - `hasMore`, `warnings`: present only when something is missing. `pages_truncated` (with `hasMore: true`) means the list was cut, and names the `offset` of the next page. `pages_unavailable` (with `pages: []`, `total: 0`, `hasMore: false`) means LogSeq sent no page list: the list is unknown, not empty
 
-**Context cost:** ~4-8 tokens per name: ~1-2k tokens for a 200-name page, ~4-8k for a 1000-name page. Use `name_contains` when you only need a few
+**Context cost:** ~6-10 tokens per page: ~1.5-2k tokens for a 200-page call, ~6-10k for a 1000-page call. Use `name_contains` when you only need a few
 
 **Use when:**
 - Starting a new conversation about the user's knowledge graph

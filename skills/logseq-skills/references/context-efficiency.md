@@ -18,7 +18,7 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 
 If you don't know what pages exist in the user's graph:
 → **Call `logseq_list_pages(limit=1000)` FIRST** before searching. While `hasMore` is true, call again with the `offset` the warning names. With a term in mind, `name_contains` is much cheaper
-→ Review page names to understand the vocabulary
+→ Review page names, and each page's aliases, to understand the vocabulary
 → Then search using terms that actually exist
 
 **Red Flag:** About to search for a compound phrase like "engineering experiment"? Check if those pages exist first with `list_pages`.
