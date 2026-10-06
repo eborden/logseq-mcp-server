@@ -123,9 +123,9 @@ and Feb 3rd days, and the hub's journal below, for wider windows.
 | Page | File | Exists to test |
 |---|---|---|
 | `project cascade` | `pages/project cascade.md` | Every task marker on one page: `TODO`, `DOING`, `DONE`, `LATER`, `NOW`, `WAITING`, `CANCELED`, a priority `[#A]` (LogSeq links the page `a` for it), and tasks nested under a task. Page `tags:: planning` |
-| `deep outline` | `pages/deep outline.md` | Six levels of nesting, a task and a tag at level 6, and a second root block |
+| `deep outline` | `pages/deep outline.md` | Six levels of nesting: a `TODO` with a tag at level 6, a `DONE` at level 3, and a second root block |
 
-Counts across these pages and journals: 7 `TODO`, 6 `DONE`, 2 each of `DOING`, `LATER`, `NOW`,
+Counts across these pages and journals: 8 `TODO`, 7 `DONE`, 2 each of `DOING`, `LATER`, `NOW`,
 `WAITING` and `CANCELED`; 2 `SCHEDULED` and 2 `DEADLINE` blocks. None of them links the hub pages below.
 
 ## The hub (#89)
