@@ -83,8 +83,10 @@ export interface AmbiguousRef {
   candidates: string[];
   totalCandidates: number;
   /**
-   * True when `before` already linked it. Such a ref is reported but doesn't
-   * fail the check: the pass didn't add it and can't remove it (check 4).
+   * True when `before` already linked it and the pass added no copies (as many
+   * refs to it in `after` as in `before`, counted case-insensitively). Such a ref
+   * is reported but doesn't fail the check: the pass didn't add it and can't
+   * remove it (check 4). A new copy fails, since its mention may mean another page.
    */
   preexisting: boolean;
 }
@@ -136,6 +138,13 @@ function linkCounts(text: string): Map<string, number> {
 }
 
 const keyOf = (term: string) => term.trim().toLowerCase();
+
+/** Refs per page name (`keyOf` of each term), however each copy is spelled. */
+function keyCounts(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const [term, count] of linkCounts(text)) counts.set(keyOf(term), (counts.get(keyOf(term)) ?? 0) + count);
+  return counts;
+}
 
 /** The stretch of the line around `index`, cut to the excerpt window, in whole code points. */
 function excerpt(text: string, index: number): string {
@@ -217,7 +226,13 @@ export async function checkLinks(client: LogseqClient, before: string, after: st
       `at most ${MAX_LINK_TERMS} distinct [[terms]]. Check the text in parts`
     );
   }
-  const linkedBefore = new Set([...linkCounts(before).keys()].map(keyOf));
+  // Preexisting: linked before, and no copy added (check 4 rules out fewer)
+  const refsBefore = keyCounts(before);
+  const refsAfter = keyCounts(after);
+  const preexisting = (term: string) => {
+    const was = refsBefore.get(keyOf(term)) ?? 0;
+    return was > 0 && (refsAfter.get(keyOf(term)) ?? 0) <= was;
+  };
 
   const { resolutions, unavailable } = await resolveLinkTargets(client, terms);
   const warnings: ResultWarning[] = [];
@@ -240,7 +255,7 @@ export async function checkLinks(client: LogseqClient, before: string, after: st
           term,
           candidates: resolution.candidates.map(c => c.originalName),
           totalCandidates: resolution.totalCandidates,
-          preexisting: linkedBefore.has(keyOf(term)),
+          preexisting: preexisting(term),
         });
         if (resolution.totalCandidates > resolution.candidates.length) {
           warnings.push({

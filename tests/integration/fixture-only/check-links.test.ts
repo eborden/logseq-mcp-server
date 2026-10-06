@@ -112,6 +112,17 @@ describe('check_links on the fixture graph (#146)', () => {
     ]);
   });
 
+  it('fails a second copy of the ambiguous roadmap, even though the note already linked it', async () => {
+    const { result } = await counted(() =>
+      checkLinks(client, '[[roadmap]] and the roadmap', '[[roadmap]] and the [[roadmap]]')
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.refs.ambiguous).toEqual([
+      { term: 'roadmap', candidates: ['project borealis', 'project cascade'], totalCandidates: 2, preexisting: false },
+    ]);
+  });
+
   it('fails a removed ref, which the prose check alone passes', async () => {
     const { result } = await counted(() =>
       checkLinks(client, '[[Alice]] met Bob', 'Alice met [[Bob]]')
