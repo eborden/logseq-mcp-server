@@ -18,7 +18,11 @@ vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
 vi.mock('./tools/get-page-outline.js', () => ({ getPageOutline: mocks.getPageOutline }));
 vi.mock('./tools/get-backlinks.js', () => ({ getBacklinksWithMeta: mocks.getBacklinks }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
-vi.mock('./tools/build-context.js', () => ({ buildContextForTopic: mocks.buildContextForTopic }));
+// Keep the module's constants: the argument schemas take their defaults from them (#60)
+vi.mock('./tools/build-context.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  buildContextForTopic: mocks.buildContextForTopic,
+}));
 // Keep the module's constants: the argument schemas take their defaults from them (#60)
 vi.mock('./tools/get-concept-network.js', async importOriginal => ({
   ...(await importOriginal<object>()),

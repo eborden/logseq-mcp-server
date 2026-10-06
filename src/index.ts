@@ -37,15 +37,12 @@ import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { AmbiguousPageError } from './errors.js';
 import { ambiguousPageResult } from './utils/resolve-page.js';
-import { parseCompact, parseFormat } from './utils/output-format.js';
 import { compactQueryContext, compactTopicContext } from './utils/compact.js';
 import { renderNetwork, renderQueryContext, renderTopicContext } from './utils/markdown-context.js';
 import { renderBlock, renderPage, withFooter } from './utils/markdown.js';
 import { parseArgs, toInputSchema } from './utils/parse-args.js';
 import {
-  COMPACT_DESCRIPTION,
-  FORMAT_DESCRIPTION,
-  RESOLVE_REFS_DESCRIPTION,
+  buildContextArgs,
   getBacklinksArgs,
   getBlockArgs,
   getConceptNetworkArgs,
@@ -73,20 +70,6 @@ const READ_ONLY_HINTS = {
 function readOnlyAnnotations(title: string) {
   return { title, ...READ_ONLY_HINTS };
 }
-
-/** `format` parameter shared by the tools that can render Markdown (#43). */
-const FORMAT_PARAM = {
-  type: 'string',
-  enum: ['json', 'markdown'],
-  description: FORMAT_DESCRIPTION,
-} as const;
-
-/** `compact` parameter shared by the tools whose blocks can shrink to snippets (#43). */
-const COMPACT_PARAM = {
-  type: 'boolean',
-  description: COMPACT_DESCRIPTION,
-  default: false,
-} as const;
 
 // Define MCP tool schemas for all 15 tools
 const TOOLS = [
@@ -151,43 +134,7 @@ const TOOLS = [
     name: 'logseq_build_context',
     description: TOOL_DESCRIPTIONS.logseq_build_context,
     annotations: readOnlyAnnotations('Build Context'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        topic_name: {
-          type: 'string',
-          description: 'Topic to build context for (page name, alias or ISO date)',
-        },
-        max_blocks: {
-          type: 'number',
-          description: 'Maximum number of blocks to include (default: 50)',
-          default: 50,
-        },
-        max_related_pages: {
-          type: 'number',
-          description: 'Maximum number of related pages to include (default: 10)',
-          default: 10,
-        },
-        max_references: {
-          type: 'number',
-          description: 'Maximum number of reference blocks to include (default: 20)',
-          default: 20,
-        },
-        include_temporal_context: {
-          type: 'boolean',
-          description: 'Include temporal context for journal pages (default: true)',
-          default: true,
-        },
-        resolve_refs: {
-          type: 'boolean',
-          description: RESOLVE_REFS_DESCRIPTION,
-          default: false,
-        },
-        format: FORMAT_PARAM,
-        compact: COMPACT_PARAM,
-      },
-      required: ['topic_name'],
-    },
+    inputSchema: toInputSchema(buildContextArgs),
   },
   {
     name: 'logseq_get_context_for_query',
@@ -460,20 +407,27 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_build_context': {
-          const topicName = args?.topic_name as string;
-          const format = parseFormat(args?.format);
-          const compact = parseCompact(args?.compact);
+          const {
+            topic_name: topicName,
+            max_blocks: maxBlocks,
+            max_related_pages: maxRelatedPages,
+            max_references: maxReferences,
+            include_temporal_context: includeTemporalContext,
+            resolve_refs: resolveRefs,
+            format,
+            compact,
+          } = parseArgs(buildContextArgs, args);
           const options = {
-            maxBlocks: args?.max_blocks as number | undefined,
-            maxRelatedPages: args?.max_related_pages as number | undefined,
-            maxReferences: args?.max_references as number | undefined,
-            includeTemporalContext: args?.include_temporal_context as boolean | undefined,
+            maxBlocks,
+            maxRelatedPages,
+            maxReferences,
+            includeTemporalContext,
             // Compact output drops the bodies, so there is nothing to resolve refs in
-            resolveRefs: args?.resolve_refs === true && !compact
+            resolveRefs: resolveRefs && !compact
           };
           const result = await buildContextForTopic(client, topicName, options);
           // Compact output has no block bodies to resolve refs in. Say so rather than drop the request silently.
-          if (compact && args?.resolve_refs === true) {
+          if (compact && resolveRefs) {
             result.warnings = [
               ...result.warnings,
               {

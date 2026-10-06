@@ -56,7 +56,11 @@ vi.mock('./tools/search-by-relationship.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   searchByRelationship: mocks.searchByRelationship,
 }));
-vi.mock('./tools/build-context.js', () => ({ buildContextForTopic: mocks.buildContextForTopic }));
+// Keep the module's constants: the argument schemas take their defaults from them (#60)
+vi.mock('./tools/build-context.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  buildContextForTopic: mocks.buildContextForTopic,
+}));
 vi.mock('./tools/get-context-for-query.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   getContextForQuery: mocks.getContextForQuery,
