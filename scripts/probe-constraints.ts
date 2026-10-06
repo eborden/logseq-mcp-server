@@ -5,9 +5,7 @@
  * Usage: npx tsx scripts/probe-constraints.ts
  * Requires LogSeq running with the HTTP API enabled.
  */
-import { homedir } from 'os';
-import { join } from 'path';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, resolveConfigPath } from '../src/config.js';
 import { LogseqClient } from '../src/client.js';
 
 type Outcome = { ok: boolean; rows?: number; value?: unknown; error?: string };
@@ -253,7 +251,8 @@ async function probeAliasSets(
 }
 
 async function main() {
-  const config = await loadConfig(join(homedir(), '.logseq-mcp', 'config.json'));
+  // LOGSEQ_MCP_CONFIG if set (e.g. the fixture instance), else ~/.logseq-mcp/config.json
+  const config = await loadConfig(resolveConfigPath());
   const client = new LogseqClient(config);
   const dq = (q: string, ...inputs: unknown[]) => raw(client, 'logseq.DB.datascriptQuery', [q, ...inputs]);
 

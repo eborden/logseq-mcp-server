@@ -13,11 +13,9 @@
  * Usage: npx tsx scripts/measure-output-size.ts [pageName]
  * Requires LogSeq running with the HTTP API enabled. Read-only.
  */
-import { homedir } from 'os';
-import { join } from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig } from '../src/config.js';
+import { loadConfig, resolveConfigPath } from '../src/config.js';
 import { LogseqClient } from '../src/client.js';
 import { createServer } from '../src/index.js';
 
@@ -41,7 +39,8 @@ async function jsonOf(mcp: Client, name: string, args: Args): Promise<any> {
 const pct = (slim: number, full: number) => (full === 0 ? '  n/a' : `${(((full - slim) / full) * 100).toFixed(0).padStart(4)}%`);
 
 async function main() {
-  const config = await loadConfig(join(homedir(), '.logseq-mcp', 'config.json'));
+  // LOGSEQ_MCP_CONFIG if set (e.g. the fixture instance), else ~/.logseq-mcp/config.json
+  const config = await loadConfig(resolveConfigPath());
   const logseq = new LogseqClient(config);
 
   // Most-referenced non-journal page: a realistic hub (same pick as measure-api-calls.ts)
