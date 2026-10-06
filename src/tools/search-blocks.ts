@@ -71,6 +71,45 @@ function pulledPageToEntity(pulled: any): PageEntity {
 }
 
 /**
+ * `blocks` with `context` (page, references, tags) added, from one batched page
+ * lookup (not one per block). A block with no page id, or whose page isn't found,
+ * gets no `context`. A caller that cuts a list passes only the blocks it keeps,
+ * so the lookup covers no more pages than the result shows.
+ *
+ * API calls: 1, or 0 when no block has a page id.
+ */
+export async function withPageContext(client: LogseqClient, blocks: BlockEntity[]): Promise<SearchBlocksResult[]> {
+  const pageIdOf = (block: BlockEntity) => (block.page as any)?.id ?? (block.page as any)?.['db/id'];
+  const pageById = new Map<number, PageEntity>();
+  const pageIds = [...new Set(blocks.map(pageIdOf).filter((id): id is number => typeof id === 'number'))];
+
+  if (pageIds.length > 0) {
+    const { query: pagesQuery, inputs: pagesInputs } = DatalogQueryBuilder.getPagesByIds(pageIds);
+    const pageRows = await client.executeDatalogQuery<any[][] | null>(pagesQuery, ...pagesInputs);
+    for (const row of pageRows || []) {
+      const page = pulledPageToEntity(row[0]);
+      pageById.set(page.id, page);
+    }
+  }
+
+  return blocks.map(block => {
+    const result: SearchBlocksResult = { ...block };
+    const page = pageById.get(pageIdOf(block));
+
+    // No page id, or page not found: skip context for this block
+    if (page) {
+      result.context = {
+        page,
+        references: Array.from(block.content.matchAll(/\[\[([^\]]+)\]\]/g), m => m[1]),
+        tags: Array.from(block.content.matchAll(/#([^\s#]+)/g), m => m[1])
+      };
+    }
+
+    return result;
+  });
+}
+
+/**
  * Search for blocks containing a specific text query using one Datalog query
  *
  * Matching is a case-insensitive, literal substring match on block content,
@@ -150,44 +189,10 @@ export async function searchBlocksWithMeta(
     { matches: matches.length }
   );
 
-  // Full page entities for context, in one batched call (not one per block)
-  const pageById = new Map<number, PageEntity>();
-  if (includeContext && results.length > 0) {
-    const pageIds = [...new Set(
-      results
-        .map(block => (block.page as any)?.id ?? (block.page as any)?.['db/id'])
-        .filter((id): id is number => typeof id === 'number')
-    )];
-
-    if (pageIds.length > 0) {
-      const { query: pagesQuery, inputs: pagesInputs } = DatalogQueryBuilder.getPagesByIds(pageIds);
-      const pageRows = await client.executeDatalogQuery<any[][] | null>(pagesQuery, ...pagesInputs);
-      for (const row of pageRows || []) {
-        const page = pulledPageToEntity(row[0]);
-        pageById.set(page.id, page);
-      }
-    }
-  }
-
-  const enriched: SearchBlocksResult[] = results.map(block => {
-    const result: SearchBlocksResult = { ...block };
-
-    if (includeContext) {
-      const pageId = (block.page as any)?.id ?? (block.page as any)?.['db/id'];
-      const page = pageById.get(pageId);
-
-      // No page id, or page not found: skip context for this block
-      if (page) {
-        result.context = {
-          page,
-          references: Array.from(block.content.matchAll(/\[\[([^\]]+)\]\]/g), m => m[1]),
-          tags: Array.from(block.content.matchAll(/#([^\s#]+)/g), m => m[1])
-        };
-      }
-    }
-
-    return result;
-  });
+  // Page context only for the blocks kept, so the lookup never covers cut ones
+  const enriched: SearchBlocksResult[] = includeContext
+    ? await withPageContext(client, results)
+    : results.map(block => ({ ...block }));
 
   if (!slimResults) {
     return { results: enriched, meta };
