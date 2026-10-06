@@ -1,8 +1,10 @@
 name: Mutation testing (full run)
 
-# A full cold mutation run of the unit suite (ADR-0026, #204), weekly and on demand. It never
+# A full cold mutation run of the unit suite (ADR-0026, #204, #205), weekly and on demand. It never
 # blocks a PR and it is the only job besides a push to main that saves Stryker's incremental
-# file, which resets any drift in the cache the PR job restores.
+# file, which resets any drift in the cache the PR job restores. It fails when any file is below
+# its score in mutation-baseline.json (scripts/mutation-ratchet.ts), which is the backstop for what
+# the PR job's cache can't see. A failing check still saves the cache and uploads the report.
 #
 # By hand (Actions tab, "Run workflow") it runs against any commit: put a SHA in "ref". The
 # baseline work needs three runs on one main SHA, so a repeat run on the same ref is fine
@@ -57,7 +59,15 @@ jobs:
 
       # No incremental file exists in a fresh checkout, so Stryker mutates the whole scope.
       - name: Full cold run
+        id: stryker
         run: npx stryker run
+
+      # No plan.json here, so the check expects a row for every baseline entry. No base: a scheduled
+      # run has no PR to compare with. It runs before the summary and the saves and fails after them.
+      - name: Ratchet
+        id: ratchet
+        continue-on-error: true
+        run: node scripts/mutation-ratchet.ts check
 
       - name: Job summary
         if: always()
@@ -83,8 +93,15 @@ jobs:
           retention-days: 90
 
       - name: Save the incremental file
-        if: steps.commit.outputs.on_main == 'true'
+        if: always() && steps.stryker.outcome == 'success' && steps.commit.outputs.on_main == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: reports/mutation/stryker-incremental.json
           key: mutation-incremental-${{ steps.commit.outputs.sha }}
+
+      # Last, so the report, the summary and the cache are saved first.
+      - name: Fail when a file is below its baseline
+        if: steps.ratchet.outcome == 'failure'
+        run: |
+          echo "The ratchet failed. See the Mutation ratchet section of the job summary." >&2
+          exit 1

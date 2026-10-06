@@ -399,8 +399,9 @@ describe('mutation workflows', () => {
     expect(saves[0]).toMatch(/\bif: github\.event_name == 'push'/);
   });
 
-  it('the mutation job is Node 24 only, informational and inside the 10-minute budget', () => {
-    expect(mutationJob).toMatch(/\n    continue-on-error: true\n/);
+  it('the mutation job is Node 24 only, enforcing and inside the 10-minute budget', () => {
+    // #205 dropped continue-on-error: a ratchet failure fails the job.
+    expect(mutationJob).not.toMatch(/continue-on-error/);
     expect(mutationJob).toMatch(/\n    timeout-minutes: 10\n/);
     expect(mutationJob).toMatch(/node-version: 24\n/);
     // src/adr-workflow-guards.test.ts finds the unit-test jobs by this step. The mutation job isn't one.
@@ -428,7 +429,32 @@ describe('mutation workflows', () => {
     expect(weekly).toMatch(/merge-base --is-ancestor "\$SHA" origin\/main/);
     const saves = steps(weekly).filter(s => s.includes('actions/cache/save@'));
     expect(saves).toHaveLength(1);
-    expect(saves[0]).toMatch(/\bif: steps\.commit\.outputs\.on_main == 'true'/);
+    expect(saves[0]).toMatch(/\bif: always\(\) && steps\.stryker\.outcome == 'success' && steps\.commit\.outputs\.on_main == 'true'/);
+  });
+
+  // ADR-0026, #205: the enforcement. A job that quietly stopped running the ratchet would pass anything.
+  it('the PR mutation job runs the ratchet against the base branch, with the labels, as its last step', () => {
+    const all = steps(mutationJob);
+    const ratchet = all.filter(s => s.includes('scripts/mutation-ratchet.ts'));
+    expect(ratchet).toHaveLength(1);
+    expect(all[all.length - 1]).toBe(ratchet[0]);
+    expect(ratchet[0]).toMatch(/run: node scripts\/mutation-ratchet\.ts check .*--base "origin\/\$BASE_REF"/);
+    expect(ratchet[0]).toMatch(/PR_LABELS: \$\{\{ join\(github\.event\.pull_request\.labels\.\*\.name, ','\) \}\}/);
+    expect(ratchet[0]).not.toMatch(/continue-on-error|\bif:/);
+  });
+
+  it('a label change re-runs the pull request checks, so the label can excuse a lowered score', () => {
+    expect(ci).toMatch(/pull_request:\n(?:\s+#.*\n)*\s+types: \[[^\]]*\blabeled\b[^\]]*\bunlabeled\b[^\]]*\]/);
+  });
+
+  it('the weekly job runs the ratchet on the whole scope and fails after it has saved the report and the cache', () => {
+    const all = steps(weekly);
+    const ratchet = all.find(s => s.includes('scripts/mutation-ratchet.ts'));
+    expect(ratchet).toMatch(/continue-on-error: true/);
+    expect(ratchet).not.toMatch(/--base|--plan|--no-rerun/);
+    const last = all[all.length - 1];
+    expect(last).toMatch(/if: steps\.ratchet\.outcome == 'failure'/);
+    expect(last).toMatch(/exit 1/);
   });
 
   it('pins every action by a full commit SHA', () => {

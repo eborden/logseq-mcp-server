@@ -2,8 +2,8 @@
  * The decisions and the report table of the CI mutation jobs (ADR-0026, #204).
  *
  * `plan` decides what the PR `mutation` job runs, `summary` turns Stryker's JSON report
- * into the per-file table for the job summary. Informational: neither fails a build, and
- * there is no baseline or ratchet here (#205).
+ * into the per-file table for the job summary. Neither fails a build: the gate is
+ * scripts/mutation-ratchet.ts (#205).
  *
  * Runs on Node 24 as plain TypeScript (type stripping), so it imports `node:` modules only,
  * uses `import type` for types and has no enums. Unit tests: src/mutation-ci.test.ts.
@@ -85,7 +85,7 @@ export function importedSources(
   return [...found].sort();
 }
 
-/** Keys of `mutation-baseline.json` (#205) whose entry differs. The file's shape is #205's: read `files` when it has one. */
+/** Keys of `mutation-baseline.json` (#205) whose entry differs. Entries sit under `files`, beside the Stryker version. */
 export function changedBaselineFiles(before: unknown, after: unknown): string[] {
   const entries = (doc: unknown): Record<string, unknown> => {
     if (typeof doc !== 'object' || doc === null) return {};
@@ -114,7 +114,7 @@ export interface PlanInput {
   readTest: (path: string) => string | null;
   /** True when a path exists at HEAD. */
   exists: (path: string) => boolean;
-  /** Source files whose `mutation-baseline.json` entry changed (empty until #205 adds the file). */
+  /** Source files whose `mutation-baseline.json` entry changed. */
   baselineChanged: string[];
 }
 
@@ -206,7 +206,7 @@ export function fileScores(report: Report): FileScore[] {
 }
 
 export function renderSummary(plan: Plan | null, scores: FileScore[] | null): string {
-  const out: string[] = ['## Mutation testing (informational)', ''];
+  const out: string[] = ['## Mutation testing', ''];
   if (plan) {
     if (plan.mode === 'incremental') {
       out.push('Mode: incremental run of the whole mutated scope, reusing the cached results from `main`.', '');
