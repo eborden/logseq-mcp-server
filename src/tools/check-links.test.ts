@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { checkLinks, checkRefsPreserved, MAX_LINK_TERMS } from './check-links.js';
 import { LogseqClient } from '../client.js';
@@ -158,6 +158,75 @@ describe('checkLinks: the cases of check-link-safety.sh (tests/fixtures/graph-li
 
     expect(result.ok).toBe(true);
     expect(result.totals).toEqual({ refsBefore: 1, refsAfter: 1, terms: 1 });
+  });
+});
+
+// ---------------------------------------------------------------- the bare variant (#169)
+
+const fixtureDir = fileURLToPath(new URL('../../tests/fixtures/graph-linking/', import.meta.url));
+const pageFiles = (dir: string) => readdirSync(`${fixtureDir}${dir}`).filter(f => f.endsWith('.md'));
+/** The bare graph's pages: the base `pages/`, with the same-named files of `variants/bare/pages/` replacing theirs. */
+function bareGraphPages(): Map<string, string> {
+  const pages = new Map<string, string>();
+  for (const f of pageFiles('pages')) pages.set(f, fixture(`pages/${f}`));
+  for (const f of pageFiles('variants/bare/pages')) pages.set(f, fixture(`variants/bare/pages/${f}`));
+  return pages;
+}
+
+describe('checkLinks: the bare variant (tests/fixtures/graph-linking/variants/bare)', () => {
+  it('only overrides pages that exist in the base graph, so no page is added or removed', () => {
+    const base = pageFiles('pages');
+    for (const f of pageFiles('variants/bare/pages')) expect(base).toContain(f);
+    expect([...bareGraphPages().keys()].sort()).toEqual([...base].sort());
+  });
+
+  it('leaves nothing that ties the bare first name to the note: no other page mentions it, and its own page links nothing', () => {
+    const pages = bareGraphPages();
+
+    for (const [file, text] of pages) {
+      if (file === 'Devon.md') expect(text).not.toContain('[[');
+      else expect(text).not.toMatch(/devon/i);
+    }
+    // The premise is an exact title match, so the page and its name in pages.txt stay
+    expect(pages.has('Devon.md')).toBe(true);
+    expect(fixture('pages.txt')).toMatch(/^Devon$/m);
+  });
+
+  it('passes its expected result: Devon is plain, the single-referent matches still link', async () => {
+    const { client } = fixtureGraph();
+    const expected = fixture('variants/bare/expected/2024_03_11.md');
+
+    const result = await checkLinks(client, baseline, expected);
+
+    expect(expected).toContain('; Devon took the rollback owner slot.');
+    expect(result.ok).toBe(true);
+    expect(result.refs).toEqual({
+      ok: true,
+      resolved: [
+        { term: 'Beacon', page: 'Beacon', matchedBy: 'name' },
+        { term: 'NorthWind', page: 'Northwind', matchedBy: 'name' },
+        { term: 'Priya Raghavan', page: 'Priya', matchedBy: 'alias' },
+        { term: 'Quarterly Planning', page: 'Quarterly Planning', matchedBy: 'name' },
+      ],
+      unresolved: [],
+      ambiguous: [],
+    });
+    expect(result.totals).toEqual({ refsBefore: 1, refsAfter: 4, terms: 4 });
+  });
+
+  it('differs from the roster graph result in the Devon ref alone', () => {
+    const roster = fixture('expected/2024_03_11.md');
+    const bare = fixture('variants/bare/expected/2024_03_11.md');
+
+    expect(roster.replace('[[Devon]]', 'Devon')).toBe(bare);
+  });
+
+  it('cannot tell the two graphs apart: the roster result also passes the gate, which does not judge identity', async () => {
+    const { client } = fixtureGraph();
+
+    const result = await checkLinks(client, baseline, fixture('expected/2024_03_11.md'));
+
+    expect(result.ok).toBe(true);
   });
 });
 
