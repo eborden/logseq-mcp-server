@@ -16,6 +16,7 @@ import { escapeRegex } from '../utils/escape-regex.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { buildBlockTrees, camelizeKeys } from '../utils/block-tree.js';
+import { Budget, countBlocks, takeBlocks } from '../utils/block-budget.js';
 import { formatLogseqDate } from '../utils/date-utils.js';
 import { DATE_PRESETS, isDatePreset, resolveDatePreset } from '../utils/date-presets.js';
 import {
@@ -299,46 +300,11 @@ function resolveSelection(selection: DateRangeSelection, now: Date): ResolvedSel
 const pageNameOf = (page: PageEntity): string =>
   page.originalName || page['original-name'] || page.name;
 
-/** Number of blocks in these trees, nested ones included. */
-function countBlocks(blocks: BlockEntity[]): number {
-  return blocks.reduce((sum, block) => sum + 1 + countBlocks(block.children ?? []), 0);
-}
-
 type Entry = DateRangeResult['entries'][number];
 
 /** Blocks an entry lists against the cap: nested ones too, or only top-level ones (the outline). */
 const listedBlocks = (blocks: BlockEntity[], nested: boolean): number =>
   nested ? countBlocks(blocks) : blocks.length;
-
-/** What is left to keep, and whether a kept block lost a child (so it needs `childrenTruncated`). */
-interface Budget {
-  room: number;
-  partial: boolean;
-}
-
-/**
- * The first `budget.room` blocks of these trees in document order: a block, then its
- * children, then its next sibling. What is kept is a valid tree. A kept block whose
- * children don't all fit keeps the first ones that do and gains `childrenTruncated: true`,
- * so it isn't mistaken for a leaf (slim output drops an empty `children`).
- */
-function takeBlocks(blocks: BlockEntity[], budget: Budget): BlockEntity[] {
-  const kept: BlockEntity[] = [];
-  for (const block of blocks) {
-    if (budget.room === 0) break;
-    budget.room -= 1;
-    const children = block.children ?? [];
-    if (children.length === 0) {
-      kept.push(block);
-      continue;
-    }
-    const keptChildren = takeBlocks(children, budget);
-    const lostChildren = keptChildren.length < children.length;
-    if (lostChildren) budget.partial = true;
-    kept.push({ ...block, children: keptChildren, ...(lostChildren ? { childrenTruncated: true } : {}) });
-  }
-  return kept;
-}
 
 /** Where `capEntries` cut, for the warning. */
 interface BlockCut {
