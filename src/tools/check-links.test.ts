@@ -183,9 +183,20 @@ describe('checkLinks: the bare variant (tests/fixtures/graph-linking/variants/ba
   it('leaves nothing that ties the bare first name to the note: no other page mentions it, and its own page links nothing', () => {
     const pages = bareGraphPages();
 
+    // Pinned exactly: any property, link or "Engineer on Atlas Squad" would tie him to the roster
+    expect(
+      pages.get('Devon.md')?.trim(),
+      'variants/bare/pages/Devon.md must hold only "- Engineer." (nothing may tie Devon to a roster page)'
+    ).toBe('- Engineer.');
     for (const [file, text] of pages) {
-      if (file === 'Devon.md') expect(text).not.toContain('[[');
-      else expect(text).not.toMatch(/devon/i);
+      if (file !== 'Devon.md') expect(text, `${file} mentions Devon`).not.toMatch(/devon/i);
+      // A property value is a ref to that page in LogSeq, so a `key:: ...Atlas Squad...` line anywhere in the
+      // graph would corroborate like a roster entry. The roster page itself has no such line.
+      for (const line of text.split('\n')) {
+        if (/^\s*(- )?[\w-]+::/.test(line) && /atlas squad/i.test(line)) {
+          throw new Error(`${file} has a property that refs the roster page: ${line.trim()}`);
+        }
+      }
     }
     // The premise is an exact title match, so the page and its name in pages.txt stay
     expect(pages.has('Devon.md')).toBe(true);
