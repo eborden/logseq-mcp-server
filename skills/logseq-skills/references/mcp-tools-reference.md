@@ -23,6 +23,7 @@ Full-text search across all blocks with optional semantic context.
 - `query` (required): Search term or phrase
 - `limit` (optional): Maximum results to return (default: 10, **recommend: 5**)
 - `include_context` (optional): Include parent/child blocks for context (default: false, **keep false unless needed**)
+- `include_content` (optional): `false` returns only per-day block counts and top-level snippets, without the blocks (default `true`)
 - `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
 
 **Context cost:** ~200-500 tokens per result. With `include_context=true`: ~500-1000 per result.
@@ -354,8 +355,8 @@ Query journal entries within a date range. **Preferred tool for time-bounded que
 - `max_blocks` (optional): Most blocks returned across all days (default 200, max 1000; a larger value is clamped). Nested blocks count, except with `include_content=false`, where only the top-level blocks (the snippets) count. The oldest days are kept first, and `last_n` keeps the newest first. Pass `1000` for a work week or a month of journals
 
 **A cut result:** when the range holds more than `max_blocks`, the result keeps the first blocks and says so:
-- A `blocks_truncated` warning gives what was kept out of how many (in `totals: { blocks, days }`, counted in the same unit as the cap) and where the entries end (`the entries end at <day>`), then says how to continue: query the days after that day, or add a `search_term`. When the cut fell inside a day, that day repeats its kept blocks in the continuation. At the maximum of 1000 the warning has no `howToFetchAll`, and a day holding more than 1000 blocks can't be fetched whole by any call
-- A kept block that lost some children has `childrenTruncated: true`
+- A `blocks_truncated` warning gives what was kept out of how many (in `totals: { blocks, days }`, range-wide and counted in the same unit as the cap) and where the entries end (`the entries end at <day>`), then says which `start_date` to continue from: the first day not shown, or, when the cut fell inside a day, that day itself (it repeats its kept blocks). If the first day alone fills the cap, it says to raise `max_blocks`. Below the maximum it also gives `howToFetchAll` (set `max_blocks` higher). At the maximum of 1000 the warning has no `howToFetchAll`, and a day holding more than 1000 blocks can't be fetched whole by any call
+- A kept block that lost some children has `childrenTruncated: true`: the children shown are not all of them, so fetch the block with `get_block` and `include_children` if they matter
 - `summary` (`totalDays`, `totalBlocks`, `topConcepts`) still covers every block found, so it describes the whole range even when `entries` stops early. `summary.totalBlocks` counts top-level blocks, while `totals.blocks` counts in the cap's unit (nested blocks too), so the two differ and neither is an error. `dateRange` stays the range you asked for
 - Below the cap none of this appears and the output is unchanged
 
