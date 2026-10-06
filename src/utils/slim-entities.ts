@@ -148,6 +148,11 @@ export function toSlimBlock(block: BlockEntity, pageName: string): SlimBlock {
     slim.resolvedRefs = block.resolvedRefs;
   }
 
+  // Only when max_blocks cut some of the children, so a cut block is not read as a leaf
+  if (block.childrenTruncated) {
+    slim.childrenTruncated = true;
+  }
+
   // Recursively transform children
   if (block.children && block.children.length > 0) {
     slim.children = block.children.map(child => toSlimBlock(child, ''));

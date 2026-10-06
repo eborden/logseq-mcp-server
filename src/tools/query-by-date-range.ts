@@ -59,6 +59,8 @@ export interface DateRangeSummary {
  * applies, or `maxBlocks` cut the entries. `totals` ({ blocks, days }: what there was
  * before the cut) comes only with a cut. `dateRange` is the range queried, not where
  * the cut left the entries: the `blocks_truncated` warning says where they end.
+ * `totals.blocks` counts in the cap's unit (nested blocks too in full and slim output),
+ * while `summary.totalBlocks` counts top-level blocks, so the two differ when blocks nest.
  */
 export interface DateRangeResult extends ResolveRefsMeta, ResolvedAliases {
   totals?: ResultMeta['totals'];
@@ -308,17 +310,32 @@ type Entry = DateRangeResult['entries'][number];
 const listedBlocks = (blocks: BlockEntity[], nested: boolean): number =>
   nested ? countBlocks(blocks) : blocks.length;
 
+/** What is left to keep, and whether a kept block lost a child (so it needs `childrenTruncated`). */
+interface Budget {
+  room: number;
+  partial: boolean;
+}
+
 /**
  * The first `budget.room` blocks of these trees in document order: a block, then its
- * children, then its next sibling. What is kept is a valid tree. A block whose children
- * don't all fit keeps the first ones that do, so it can hold fewer children than it has.
+ * children, then its next sibling. What is kept is a valid tree. A kept block whose
+ * children don't all fit keeps the first ones that do and gains `childrenTruncated: true`,
+ * so it isn't mistaken for a leaf (slim output drops an empty `children`).
  */
-function takeBlocks(blocks: BlockEntity[], budget: { room: number }): BlockEntity[] {
+function takeBlocks(blocks: BlockEntity[], budget: Budget): BlockEntity[] {
   const kept: BlockEntity[] = [];
   for (const block of blocks) {
     if (budget.room === 0) break;
     budget.room -= 1;
-    kept.push(block.children?.length ? { ...block, children: takeBlocks(block.children, budget) } : block);
+    const children = block.children ?? [];
+    if (children.length === 0) {
+      kept.push(block);
+      continue;
+    }
+    const keptChildren = takeBlocks(children, budget);
+    const lostChildren = keptChildren.length < children.length;
+    if (lostChildren) budget.partial = true;
+    kept.push({ ...block, children: keptChildren, ...(lostChildren ? { childrenTruncated: true } : {}) });
   }
   return kept;
 }
@@ -330,10 +347,16 @@ interface BlockCut {
   total: number;
   /** Day of the last entry kept; null when nothing was kept */
   endsAt: number | null;
-  /** Where a caller continues: `endsAt` when that day was cut part-way, else the first day dropped */
-  resumeAt: number | null;
+  /** The first day dropped; null when the last kept day was the last entry */
+  nextDay: number | null;
   /** The last kept day lost blocks */
   splitDay: boolean;
+  /** Blocks kept on the days before the last kept one: 0 means that day alone filled the cap */
+  keptBefore: number;
+  /** Blocks the last kept day holds in all */
+  lastDayTotal: number;
+  /** A kept block lost some of its children */
+  partialBlock: boolean;
 }
 
 /**
@@ -346,10 +369,12 @@ function capEntries(entries: Entry[], cap: number, nested: boolean): BlockCut | 
   const total = entries.reduce((sum, entry) => sum + listedBlocks(entry.blocks, nested), 0);
   if (total <= cap) return null;
 
-  const budget = { room: cap };
+  const budget: Budget = { room: cap, partial: false };
   const kept: Entry[] = [];
   let firstDropped: Entry | undefined;
   let splitDay = false;
+  let keptBefore = 0;
+  let lastDayTotal = 0;
   for (const entry of entries) {
     if (budget.room === 0) {
       firstDropped = entry;
@@ -364,17 +389,30 @@ function capEntries(entries: Entry[], cap: number, nested: boolean): BlockCut | 
       budget.room -= blocks.length;
     }
     kept.push({ ...entry, blocks });
-    splitDay = before - budget.room < listedBlocks(entry.blocks, nested);
+    keptBefore = cap - before;
+    lastDayTotal = listedBlocks(entry.blocks, nested);
+    splitDay = before - budget.room < lastDayTotal;
   }
   const last = kept[kept.length - 1];
-  const endsAt = last ? last.date : null;
-  return { entries: kept, total, endsAt, resumeAt: splitDay ? endsAt : (firstDropped?.date ?? null), splitDay };
+  return {
+    entries: kept,
+    total,
+    endsAt: last ? last.date : null,
+    nextDay: firstDropped?.date ?? null,
+    splitDay,
+    keptBefore,
+    lastDayTotal,
+    partialBlock: budget.partial
+  };
 }
 
 /**
  * The `blocks_truncated` warning. Names where the entries end and how to continue from
  * there, and says what dates can reach: whole days after the cut, never part of one day.
- * `newestFirst` is the `last_n` order, which continues with older days.
+ * The advice always moves the reader forward: a query from a day that alone filled the cap
+ * would return the same blocks again, so then it says to raise `max_blocks` or, past the
+ * maximum, that the day can't be fetched whole. `newestFirst` is the `last_n` order, which
+ * continues with older days.
  */
 function blocksTruncated(
   cut: BlockCut,
@@ -382,26 +420,40 @@ function blocksTruncated(
   options: { nested: boolean; newestFirst: boolean; start: number; end: number; requested: number }
 ): ResultWarning {
   const { nested, newestFirst, start, end, requested } = options;
-  const { endsAt, resumeAt, splitDay } = cut;
+  const { endsAt, nextDay, splitDay } = cut;
+  const query = (day: number) =>
+    newestFirst ? `start_date ${start} with end_date ${day}` : `start_date ${day} with end_date ${end}`;
+  const direction = newestFirst ? 'older' : 'later';
   let narrower: string;
-  if (endsAt === null || resumeAt === null) {
+  if (endsAt === null) {
     narrower = 'Narrow the dates or last_n, or add a search_term.';
-  } else {
-    const repeats = splitDay ? ' (that day repeats its kept blocks)' : '';
-    const later = newestFirst
-      ? `Query start_date ${start} with end_date ${resumeAt} for the older days${repeats}`
-      : `Query start_date ${resumeAt} with end_date ${end} for the later days${repeats}`;
+  } else if (!splitDay) {
+    narrower = `Query ${query(nextDay ?? endsAt)} for the ${direction} days, or add a search_term.`;
+  } else if (cut.keptBefore > 0) {
     narrower =
-      `${later}, or add a search_term.` +
-      (splitDay
-        ? ` A day is the narrowest date range, so a day with more than ${MAX_DATE_RANGE_BLOCKS} blocks can't be fetched whole.` +
-          (nested ? ' The last kept block may show fewer children than it has.' : '')
+      `Query ${query(endsAt)} for the ${direction} days (that day repeats its kept blocks), or add a search_term.` +
+      (cut.lastDayTotal > MAX_DATE_RANGE_BLOCKS
+        ? ` A day is the narrowest date range, so day ${endsAt}, with ${cut.lastDayTotal} blocks, can't be fetched whole.`
         : '');
+  } else {
+    // The first day alone filled the cap: a query from it at this cap returns the same blocks
+    const day =
+      cut.lastDayTotal > MAX_DATE_RANGE_BLOCKS
+        ? `Day ${endsAt} holds ${cut.lastDayTotal} blocks, more than the maximum of ${MAX_DATE_RANGE_BLOCKS}, ` +
+          "so it comes back the same however it is queried and can't be fetched whole."
+        : `Day ${endsAt} alone holds ${cut.lastDayTotal} blocks, more than ${shown}, so a query from it returns the ` +
+          `same blocks at this max_blocks. Raise max_blocks to ${cut.lastDayTotal} or more to read it whole.`;
+    narrower =
+      nextDay === null
+        ? `${day} Add a search_term to narrow it.`
+        : `${day} Query ${query(nextDay)} for the rest of the range, or add a search_term.`;
   }
+  const unit = nested ? 'nested ones counted' : 'top-level only';
+  const order = `${newestFirst ? 'newest' : 'oldest'} day first`;
+  const ends = endsAt !== null ? `; the entries end at ${endsAt}` : '';
+  const partial = cut.partialBlock ? '; a kept block shows fewer children than it has (childrenTruncated)' : '';
   return cappedTruncationWarning({
-    what:
-      `blocks (${nested ? 'nested ones counted' : 'top-level only'}; ` +
-      `${newestFirst ? 'newest' : 'oldest'} day first${endsAt !== null ? `; the entries end at ${endsAt}` : ''})`,
+    what: `blocks (${unit}; ${order}${ends}${partial})`,
     shown,
     total: cut.total,
     param: 'max_blocks',
