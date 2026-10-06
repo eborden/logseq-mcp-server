@@ -156,16 +156,21 @@ logseq_query_by_property("scheduled", "*")  # All scheduled items
 
 ### logseq_list_pages
 
-List all non-journal page names to discover graph vocabulary.
+List non-journal page names, A-Z, to discover graph vocabulary. A large graph's list comes in pages.
 
 **Parameters:**
 - `name_contains` (optional): Filter page names containing this text (case-insensitive)
+- `limit` (optional): Maximum names per call (default: 200, max: 1000)
+- `offset` (optional): Matching pages to skip, in name order, to fetch the next page (default: 0)
+
+A server that doesn't page the list ignores `limit` and `offset` and returns every page.
 
 **Returns:**
 - `pages`: Sorted array of page names (strings)
-- `total`: Count of pages returned
+- `total`: Count of all matching pages, including any not returned in this call
+- `hasMore`, `warnings`: present only when something is missing. `pages_truncated` (with `hasMore: true`) means the list was cut, and names the `offset` of the next page. `pages_unavailable` (with `pages: []`, `total: 0`, `hasMore: false`) means LogSeq sent no page list: the list is unknown, not empty
 
-**Context cost:** ~50-200 tokens depending on graph size (<1000 pages typical)
+**Context cost:** ~4-8 tokens per name: ~1-2k tokens for a 200-name page, ~4-8k for a 1000-name page. Use `name_contains` when you only need a few
 
 **Use when:**
 - Starting a new conversation about the user's knowledge graph
@@ -175,7 +180,7 @@ List all non-journal page names to discover graph vocabulary.
 
 **Example:**
 ```
-logseq_list_pages()  # Get all non-journal pages
+logseq_list_pages(limit=1000)  # First 1000 non-journal pages; while hasMore, repeat with the offset the warning names
 logseq_list_pages(name_contains="project")  # Filter to pages containing "project"
 ```
 
