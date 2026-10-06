@@ -292,7 +292,7 @@ async function probeJournalDay(client: LogseqClient) {
     }
   }
 
-  // What does carry it. Blocks read from a file never do. A block LogSeq creates itself on a
+  // What does carry it. No file-backed block in the fixture does. A block LogSeq creates itself on a
   // journal page does (today's first, empty block, which a fresh graph always gets).
   const withDay = await count(`[?b :block/journal-day ?day]`);
   const fromFile = await count(`[?b :block/journal-day ?day] [?p :block/file]`);
