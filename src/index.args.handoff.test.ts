@@ -180,8 +180,13 @@ describe('logseq_search_by_relationship hand-off', () => {
       mocks.searchByRelationship
     );
 
-  it('defaults: max_distance 2', async () => {
-    expect(await relationship({})).toEqual(['Alice', 'Bob', 'connected-within', 2]);
+  it('defaults: max_distance 2, limit 50', async () => {
+    expect(await relationship({})).toEqual(['Alice', 'Bob', 'connected-within', 2, { limit: 50 }]);
+  });
+
+  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (the tool clamps it)', async value => {
+    const [, , , , options] = await relationship({ limit: value });
+    expect(options).toEqual({ limit: value });
   });
 
   it.each([0, -1, 1.5, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {

@@ -665,12 +665,17 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Search by Relationship",
     },
-    "description": "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages.
+    "description": "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.
 
-**Can't find:** relationships that exist only as plain text. Matching is on [[links]] and #tags, not words.
+**Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.
 **Alternatives:** logseq_search_blocks (keywords), logseq_get_concept_network (overview).",
     "inputSchema": {
       "properties": {
+        "limit": {
+          "default": 50,
+          "description": "Max results to return (default: 50, max: 500)",
+          "type": "number",
+        },
         "max_distance": {
           "default": 2,
           "description": "Maximum graph distance for connected-within (default: 2)",

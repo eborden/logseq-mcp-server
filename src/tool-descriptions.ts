@@ -84,9 +84,9 @@ export const TOOL_DESCRIPTIONS = {
 **Can't find:** unlinked pages, or what pages say (logseq_build_context).`,
 
   // Relationship Tools (complex, specific relationship patterns)
-  logseq_search_by_relationship: `Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages.
+  logseq_search_by_relationship: `Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.
 
-**Can't find:** relationships that exist only as plain text. Matching is on [[links]] and #tags, not words.
+**Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.
 **Alternatives:** logseq_search_blocks (keywords), logseq_get_concept_network (overview).`,
 
   // Temporal Tools (time-based analysis)

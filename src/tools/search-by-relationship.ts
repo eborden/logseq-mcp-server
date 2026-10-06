@@ -1,6 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { BlockEntity, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
-import { buildResultMeta } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { requirePage, resolvedFromInfo, ResolvedPage } from '../utils/resolve-page.js';
 import { isInfrastructureError } from '../errors.js';
@@ -68,10 +68,39 @@ export interface SearchByRelationshipResult extends ResultMeta {
  */
 export const DEFAULT_MAX_FRONTIER = 500;
 
+/** Entries in `results` when `limit` is absent (#61). */
+export const DEFAULT_RELATIONSHIP_LIMIT = 50;
+
+/**
+ * Most entries `results` holds, whatever `limit` asks for (#61). A cut at the maximum is a
+ * `results_truncated` warning with no `howToFetchAll`, and `hasMore` stays false.
+ */
+export const MAX_RELATIONSHIP_LIMIT = 500;
+
+/**
+ * No parameter reaches past the cut: the topics and the type fix the query, and `max_distance`
+ * only decides whether `connected-within` finds a connection, not how many blocks it returns.
+ */
+const NARROWER = 'No other parameter narrows this query.';
+
 export interface SearchByRelationshipOptions {
   /** Cap on pages expanded per `connected-within` hop (default 500) */
   maxFrontier?: number;
+  /**
+   * Most entries in `results` (default 50), floored and clamped to 0..500. A cut is reported
+   * as a `results_truncated` warning with `totals.blocks`, the entry count before the cut (#61).
+   */
+  limit?: number;
 }
+
+/**
+ * What the cut list holds, for the warning. The Datalog types return matching blocks in
+ * LogSeq's order, which is not a ranking. `connected-within` returns the two pages' trees,
+ * A's first: only the top-level blocks are counted, and a kept block keeps its children.
+ */
+const MATCHING_BLOCKS = 'matching blocks (the first ones listed, not ranked)';
+const CONNECTED_WITHIN_ENTRIES =
+  "top-level blocks of the two pages (topic A's first, then topic B's; a kept block keeps all its children, which are not counted)";
 
 /** Unwrap `[[block], ...]` Datalog rows; a null result means no rows. */
 function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
@@ -111,7 +140,12 @@ async function resolveTopics(
  * @param topicB - Related topic that defines the relationship (page name, alias or ISO date)
  * @param relationshipType - Type of relationship to search
  * @param maxDistance - Maximum graph distance (for connected-within)
- * @param options - `maxFrontier`: cap on pages expanded per hop. When a hop is
+ * @param options - `limit`: most entries in `results` (default 50, at most 500). `results` is
+ *   cut to it after the query, so the cost in API calls is unchanged. The cut keeps the first
+ *   entries in the order they come: LogSeq's own for the Datalog types, which is not a ranking,
+ *   and topic A's top-level blocks before topic B's for `connected-within` (a kept block keeps
+ *   all its children; only top-level blocks are counted). The warning is merged with the others.
+ *   `maxFrontier`: cap on pages expanded per hop. When a hop is
  *   cut and the other topic is not found, a `frontier_truncated` warning says
  *   the "not connected" answer may be a false negative. A found connection is
  *   always real. Two names of one page (the same name twice, or a page and its alias)
@@ -130,7 +164,7 @@ export async function searchByRelationship(
   maxDistance: number = DEFAULT_MAX_DISTANCE,
   options: SearchByRelationshipOptions = {}
 ): Promise<SearchByRelationshipResult> {
-  const { maxFrontier = DEFAULT_MAX_FRONTIER } = options;
+  const { maxFrontier = DEFAULT_MAX_FRONTIER, limit = DEFAULT_RELATIONSHIP_LIMIT } = options;
   let results: BlockEntity[] = [];
   const warnings: ResultWarning[] = [];
 
@@ -256,6 +290,23 @@ export async function searchByRelationship(
     }
   }
 
+  // Cut after the walk and the queries, so the cut costs no call. Its warning follows the others.
+  const kept = results.slice(0, Math.min(Math.max(0, Math.floor(limit)), MAX_RELATIONSHIP_LIMIT));
+  const cut = kept.length < results.length;
+  if (cut) {
+    warnings.push(
+      cappedTruncationWarning({
+        what: relationshipType === 'connected-within' ? CONNECTED_WITHIN_ENTRIES : MATCHING_BLOCKS,
+        shown: kept.length,
+        total: results.length,
+        param: 'limit',
+        max: MAX_RELATIONSHIP_LIMIT,
+        narrower: NARROWER,
+        requested: limit
+      })
+    );
+  }
+
   const fromA = resolvedFromInfo(topicA, resolvedA);
   const fromB = resolvedFromInfo(topicB, resolvedB);
   const aliasesA = resolvedAliases(setA).resolvedAliases;
@@ -273,7 +324,7 @@ export async function searchByRelationship(
     ...(aliasesA || aliasesB
       ? { resolvedAliases: { ...(aliasesA && { topicA: aliasesA }), ...(aliasesB && { topicB: aliasesB }) } }
       : {}),
-    results,
-    ...buildResultMeta(warnings)
+    results: kept,
+    ...buildResultMeta(warnings, cut ? { blocks: results.length } : undefined)
   };
 }
