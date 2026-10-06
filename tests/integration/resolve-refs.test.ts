@@ -55,8 +55,8 @@ describe('resolve_refs against the fixture graph', () => {
     expect(resolved.resolvedContent!.split('\n')[0]).toBe(
       'A plain ref to it: A block that other blocks point at: the importer reads one sheet per floor.'
     );
-    expect(resolved.warnings).toEqual([]);
-    expect(resolved.hasMore).toBe(false);
+    expect((resolved as { warnings?: unknown }).warnings).toEqual([]);
+    expect((resolved as { hasMore?: unknown }).hasMore).toBe(false);
   });
 
   it('getBlock: off by default, the output has none of the new fields', async () => {
