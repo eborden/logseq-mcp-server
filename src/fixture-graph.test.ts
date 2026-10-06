@@ -13,7 +13,7 @@ import {
 } from '../tests/integration/helpers/fixture-graph.js';
 
 // Unit tests for the fixture graph (#87): the guard against a mocked client, and the committed
-// files it depends on. The guard is not wired into tests/integration yet; #90 does that.
+// files it depends on. Every integration suite runs it through connectFixture (#90).
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const graphDir = join(repoRoot, 'tests/fixtures/graph');
