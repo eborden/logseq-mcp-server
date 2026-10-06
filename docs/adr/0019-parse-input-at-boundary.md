@@ -26,7 +26,11 @@ Date: 2026-10-05
 
 Partial coverage today comes from the `InvalidParameterError` tests in `src/index.aliases.test.ts` and `src/tools/query-by-property.test.ts`, and the config tests in `src/config.test.ts`. None of them checks that every input is parsed.
 
-Tool arguments are covered since #60. `src/index.args.guard.test.ts` sends a wrong-typed value for every parameter in tools/list, so a new tool or parameter is covered without editing the test. It requires an error naming the parameter, with no LogSeq call. It also keeps raw `args` reads out of `src/index.ts`. LogSeq responses (#62) and the config file (#63) are not covered yet.
+Tool arguments are covered since #60, by `src/index.args.guard.test.ts`. It checks two things.
+- For every parameter in tools/list, it sends a wrong-typed value and requires an error naming the parameter, with no LogSeq call. A new parameter of a type the test has no sample for fails until a case is added.
+- It reads the source of `src/index.ts`. The only allowed use of the alias-folded `args` is `parseArgs(<schema>, args)`, one call per tool, and `as any` is not allowed.
+
+LogSeq responses (#62) and the config file (#63) are not covered yet.
 
 - reviewer: New code that reads tool arguments, LogSeq responses, config or disk content parses them into a typed value before any work.
 - test: `src/index.args.guard.test.ts`
