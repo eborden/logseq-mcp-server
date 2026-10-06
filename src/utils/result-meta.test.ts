@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildResultMeta, cappedTruncationWarning, metaContent, truncationWarning } from './result-meta.js';
+import { buildResultMeta, CappedTruncation, cappedTruncationWarning, metaContent, truncationWarning } from './result-meta.js';
 
 describe('buildResultMeta', () => {
   it('has no more results when there are no warnings', () => {
@@ -29,18 +29,16 @@ describe('truncationWarning', () => {
 
 describe('cappedTruncationWarning (#61)', () => {
   const narrower = 'Narrow the query to see them.';
+  const cut = (shown: number, total: number, extra: Partial<CappedTruncation> = {}) =>
+    cappedTruncationWarning({ what: 'blocks', shown, total, param: 'limit', max: 500, narrower, ...extra });
 
   it('is the plain truncation warning when the total fits under the maximum', () => {
-    expect(cappedTruncationWarning('blocks', 5, 9, 'limit', 500, narrower)).toEqual(
-      truncationWarning('blocks', 5, 9, 'limit')
-    );
-    expect(cappedTruncationWarning('blocks', 5, 500, 'limit', 500, narrower)).toEqual(
-      truncationWarning('blocks', 5, 500, 'limit')
-    );
+    expect(cut(5, 9)).toEqual(truncationWarning('blocks', 5, 9, 'limit'));
+    expect(cut(5, 500)).toEqual(truncationWarning('blocks', 5, 500, 'limit'));
   });
 
   it('suggests the maximum, never a value past it, when the total is above it', () => {
-    const w = cappedTruncationWarning('blocks', 100, 2000, 'limit', 500, narrower);
+    const w = cut(100, 2000);
     expect(w).toEqual({
       code: 'results_truncated',
       message: 'Showing 100 of 2000 blocks.',
@@ -50,7 +48,7 @@ describe('cappedTruncationWarning (#61)', () => {
   });
 
   it('has no howToFetchAll and hasMore false once the maximum is reached', () => {
-    const w = cappedTruncationWarning('blocks', 500, 2000, 'limit', 500, narrower);
+    const w = cut(500, 2000);
     expect(w).toEqual({
       code: 'results_truncated',
       message:
@@ -61,19 +59,32 @@ describe('cappedTruncationWarning (#61)', () => {
   });
 
   it('names the requested value when it was above the maximum', () => {
-    const w = cappedTruncationWarning('blocks', 500, 2000, 'limit', 500, narrower, 1000);
+    const w = cut(500, 2000, { requested: 1000 });
     expect(w.message).toContain('limit is capped at its maximum of 500 (1000 was asked for)');
     expect(w.howToFetchAll).toBeUndefined();
   });
 
   it('does not name the requested value when it was the maximum', () => {
-    const w = cappedTruncationWarning('blocks', 500, 2000, 'limit', 500, narrower, 500);
-    expect(w.message).not.toContain('asked for');
+    expect(cut(500, 2000, { requested: 500 }).message).not.toContain('asked for');
   });
 
   it('keeps a custom code', () => {
-    expect(cappedTruncationWarning('blocks', 500, 2000, 'limit', 500, narrower, undefined, 'blocks_truncated').code)
-      .toBe('blocks_truncated');
+    expect(cut(500, 2000, { code: 'blocks_truncated' }).code).toBe('blocks_truncated');
+  });
+
+  it('keeps hasMore true at the maximum for a paged tool (next)', () => {
+    const w = cut(500, 2000, { requested: 1000, next: 'Set offset to 500 for the next page.' });
+    expect(w).toEqual({
+      code: 'results_truncated',
+      message: 'Showing 500 of 2000 blocks: limit is capped at its maximum of 500 (1000 was asked for).',
+      howToFetchAll: 'Set offset to 500 for the next page.'
+    });
+    expect(buildResultMeta([w]).hasMore).toBe(true);
+  });
+
+  it('ignores next below the maximum', () => {
+    expect(cut(100, 2000, { next: 'Set offset to 100.' })).toEqual(cut(100, 2000));
+    expect(cut(5, 9, { next: 'Set offset to 5.' })).toEqual(cut(5, 9));
   });
 });
 

@@ -135,7 +135,17 @@ export async function searchBlocksWithMeta(
 
   const meta = buildResultMeta(
     matches.length > results.length
-      ? [cappedTruncationWarning('matching blocks', results.length, matches.length, 'limit', maxLimit, NARROWER, limit)]
+      ? [
+          cappedTruncationWarning({
+            what: 'matching blocks',
+            shown: results.length,
+            total: matches.length,
+            param: 'limit',
+            max: maxLimit,
+            narrower: NARROWER,
+            requested: limit
+          })
+        ]
       : [],
     { matches: matches.length }
   );
