@@ -684,6 +684,7 @@ Checklist for new Datalog-based tools:
 
 5. **Documentation** - Update MCP tool handler in `src/index.ts`
    - Give the tool `annotations: readOnlyAnnotations('Title')` (a guard test in `src/index.test.ts` fails without it). Every tool is read-only: [BR-0002 (tools-read-only)](docs/business-rules/0002-tools-read-only.md)
+   - Declare the tool's zod schema in `src/tool-args.ts` and parse with `parseArgs`. The guard test (`src/index.args.guard.test.ts`) checks it
 
 6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
 
