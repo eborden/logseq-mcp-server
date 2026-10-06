@@ -22,4 +22,4 @@ test: `src/utils/slim-entities.test.ts`
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #72 |
-| 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #TBD |
+| 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #121 |
