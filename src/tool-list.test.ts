@@ -43,7 +43,7 @@ import { LogseqClient } from './client.js';
  * bringing it to about 16,820 across 16 tools, inside the budget, so the budget was not raised (about 180
  * characters of headroom remain; the next tool will need trimming or a deliberate raise).
  * The #61 caps on logseq_search_blocks and logseq_get_context_for_query took it to about 16,120. `limit` and
- * `offset` on logseq_list_pages (#61) added 106 + 130 characters, bringing it to about 16,360 (about 640
+ * `offset` on logseq_list_pages (#61) added 106 + 168 characters, bringing it to about 16,400 (about 600
  * characters of headroom remain), so the budget was not raised.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list,

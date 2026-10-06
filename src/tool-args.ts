@@ -247,7 +247,7 @@ export const listPagesArgs = z.object({
   offset: z
     .number()
     .default(DEFAULT_LIST_PAGES_OFFSET)
-    .describe('Matching pages to skip, in name order, to fetch the next page (default: 0)'),
+    .describe('Matching pages to skip, in name order, to fetch the next page. Shifts if pages change between calls (default: 0)'),
 });
 
 /**

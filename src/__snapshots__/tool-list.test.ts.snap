@@ -463,7 +463,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         },
         "offset": {
           "default": 0,
-          "description": "Matching pages to skip, in name order, to fetch the next page (default: 0)",
+          "description": "Matching pages to skip, in name order, to fetch the next page. Shifts if pages change between calls (default: 0)",
           "type": "number",
         },
       },

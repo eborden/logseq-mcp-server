@@ -336,6 +336,22 @@ describe('listPages', () => {
       expect(mockClient.callAPI).toHaveBeenCalledTimes(3);
     });
 
+    it('keeps total constant at every offset for a fixed page list, and the pages add up to it', async () => {
+      const all = graph(1494);
+      (mockClient.callAPI as any).mockResolvedValue(all);
+      for (const limit of [1, 7, 200, 999, 1000]) {
+        const seen: string[] = [];
+        for (let offset = 0; offset < all.length + limit; offset += limit) {
+          const result = await listPages(mockClient, { limit, offset });
+          expect(result.total, `limit ${limit}, offset ${offset}`).toBe(1494);
+          seen.push(...result.pages);
+        }
+        expect(seen.length, `limit ${limit}: no duplicates or gaps`).toBe(1494);
+        expect(new Set(seen).size, `limit ${limit}: no duplicates`).toBe(1494);
+        expect(seen, `limit ${limit}: every page, in order`).toEqual(names(0, 1494));
+      }
+    });
+
     it('treats limit 0 as a count: no pages, the total, and no next offset that would not move', async () => {
       const result = await list(50, { limit: 0 });
 
