@@ -126,6 +126,41 @@ describe('network_truncated at the maximum of max_nodes and max_fanout (#132)', 
       expect(leaves.warnings[0].message).not.toContain('expand_journals');
     });
 
+    it('does not name max_depth when every drop is at depth 1, however deep the walk may go', async () => {
+      const client = mockClient([neighbours(150)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 3, { maxNodes: 500, maxFanout: 100 });
+
+      expect(result.warnings[0]).not.toHaveProperty('howToFetchAll');
+      expect(result.warnings[0].message).toContain('max_fanout reached its maximum of 100');
+      expect(result.warnings[0].message).not.toContain('max_depth');
+    });
+
+    it('names max_depth when the first drop is at depth 2, even with a walk up to depth 3', async () => {
+      const client = mockClient([[row(1, 2), row(1, 3)], neighbours(150, 3, 1000)]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 3, { maxNodes: 500, maxFanout: 100 });
+
+      expect(result.warnings[0].message).toContain('lower max_depth');
+    });
+
+    it('does not name expand_journals when the journal pages were expanded only after the first drop', async () => {
+      // Depth 1 holds 90 pages and 20 journals; max_fanout 100 drops 10 journals, and the other 10 are expanded
+      const journals = Array.from({ length: 20 }, (_, i) => row(1, 500 + i, { journal: true }));
+      const client = mockClient([[...neighbours(90), ...journals], []]);
+
+      const result = await getConceptNetwork(client, 'Root Page', 2, {
+        maxNodes: 500,
+        maxFanout: 100,
+        expandJournals: true
+      });
+
+      expect(result.nodes).toHaveLength(101);
+      expect(result.warnings[0].message).toContain('max_fanout reached its maximum of 100');
+      expect(result.warnings[0].message).not.toContain('expand_journals');
+      expect(result.warnings[0].message).not.toContain('max_depth');
+    });
+
     it('does not name expand_journals when the journal was admitted at the last depth', async () => {
       const client = mockClient([[...neighbours(150), row(1, 999, { journal: true })]]);
 
