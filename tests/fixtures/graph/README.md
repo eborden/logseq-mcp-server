@@ -13,10 +13,18 @@ journals/           one file per journal day (yyyy_MM_dd.md)
 README.md           this file, meant to be hidden from LogSeq by :hidden in config.edn
 ```
 
-The per-worktree instance (#118) indexes `README.md` anyway, as a page `readme`, with a tag page for
-each issue number written with a `#`. LogSeq 0.10 applies `:hidden` when it loads a new graph, but
-not on the load path the instance takes. Exact page counts against the instance must allow for it
-until that is fixed.
+The per-worktree instance (#118) indexes `README.md` anyway, as a page `readme`, plus a tag page for
+each issue number written with a `#` outside a code span (`88`, `89)` and the like). The two ways of
+opening the folder differ: **Add new graph** in the UI applies `:hidden` and leaves the README out,
+while the instance's load path skips `:hidden` (a LogSeq 0.10 bug, see #139). So a page count that is
+right for one is off by the `readme` page and its tag pages on the other. #139 moves the README out of
+the graph folder. Until it lands:
+
+- #90 must count the `readme` page and the tag pages it links dynamically, by name, and not
+  hard-code an allowance. The number changes whenever someone writes another issue number here.
+- The README's text is searchable on the instance. Words like "importer", "meeting" and "test"
+  appear in it, so `search_blocks` hit counts for fixture words must filter out the `readme` page
+  or use words this file does not contain.
 
 ## What is here so far
 
