@@ -29,6 +29,23 @@ const LINKED = PAGES;
 /** Pages with nothing to traverse */
 const ISOLATED = ['archive', 'empty page'];
 
+/** Every node at depth d > 0 has an edge to some node at depth d - 1 (its BFS parent). */
+function assertBfsParent(
+  nodes: Array<{ id: number; depth: number }>,
+  edges: Array<{ from: number; to: number }>,
+  label: string
+) {
+  const depth = new Map(nodes.map(n => [n.id, n.depth]));
+  for (const node of nodes) {
+    if (node.depth === 0) continue;
+    const hasParent = edges.some(e =>
+      (e.from === node.id && depth.get(e.to) === node.depth - 1) ||
+      (e.to === node.id && depth.get(e.from) === node.depth - 1)
+    );
+    expect(hasParent, `${label}: a depth-${node.depth} node has no edge to depth ${node.depth - 1}`).toBe(true);
+  }
+}
+
 describe('Property: Graph Traversal Invariants', () => {
   let client: LogseqClient;
 
@@ -99,17 +116,24 @@ describe('Property: Graph Traversal Invariants', () => {
         const result = await getConceptNetwork(client, page, 2);
 
         expect(result.edges.length, page).toBeGreaterThan(0);
-        // Under a cap, depth is the BFS level a node was admitted at, not its distance: a direct
-        // neighbour the fanout cap dropped at depth 1 can come back at depth 2 through another
-        // page, with its edge to the root (project atlas and project cascade do this with their
-        // journals). So the property holds for the networks no cap cut.
-        if (result.truncated) continue;
+        // #155: under a cap, depth is the BFS level a node was admitted at, not its distance: a
+        // direct neighbour the fanout cap dropped at depth 1 can come back at depth 2 through
+        // another page, with its edge to the root (project atlas and project cascade do this with
+        // their journals). This is a bug, not the intended meaning: #155 relabels each node with
+        // its true distance and removes this branch. Until then a capped network gets the weaker
+        // check that still holds: every node past the root has an edge to a node one level up,
+        // the page it was reached from.
+        if (result.truncated) {
+          assertBfsParent(result.nodes, result.edges, page);
+          continue;
+        }
         untruncated++;
 
         // Property: Depth increases by at most 1 along edges
         assertDepthMonotonic(result.nodes, result.edges);
       }
       expect(untruncated, 'no fixture network was below the caps').toBeGreaterThanOrEqual(3);
+      expect(untruncated, 'no fixture network was capped').toBeLessThan(pages.length);
     });
 
     it('should maintain graph connectivity from root', async () => {
