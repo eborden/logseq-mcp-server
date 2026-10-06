@@ -10,10 +10,10 @@
 
 export const TOOL_DESCRIPTIONS = {
   // Discovery Tools (use early in conversation)
-  logseq_list_pages: `List non-journal page names, filtered by name_contains (substring, not fuzzy).
+  logseq_list_pages: `List non-journal pages as { name, aliases? }, filtered by name_contains (substring of name or alias). Aliases nest under pages.
 
 **Use when:** unsure which pages exist or what the user calls something.
-**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 names (use offset). Warning pages_unavailable: list unknown, not empty.
+**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.
 **Next:** logseq_get_page.`,
 
   logseq_get_current_context: `Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.

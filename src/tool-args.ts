@@ -280,7 +280,7 @@ export const getConceptEvolutionArgs = z.object({
  * limit is clamped, not rejected.
  */
 export const listPagesArgs = z.object({
-  name_contains: z.string().optional().describe('Filter page names containing this text (case-insensitive)'),
+  name_contains: z.string().optional().describe('Filter pages whose name or alias contains this text (case-insensitive)'),
   limit: z
     .number()
     .default(DEFAULT_LIST_PAGES_LIMIT)
