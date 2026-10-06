@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { listPages } from './list-pages.js';
+import {
+  DEFAULT_LIST_PAGES_LIMIT,
+  DEFAULT_LIST_PAGES_OFFSET,
+  MAX_LIST_PAGES_LIMIT,
+  listPages,
+} from './list-pages.js';
 import { LogseqClient } from '../client.js';
 import { PageEntity } from '../types.js';
 
@@ -153,5 +158,223 @@ describe('listPages', () => {
     // Sorted by lowercase: aaa, api, apple
     // Returns original casing: AAA, API, Apple
     expect(result.pages).toEqual(['AAA', 'API', 'Apple']);
+  });
+
+  // #61: a default cap of 200, a maximum of 1000, and offset to page past them
+  describe('limit and offset (#61)', () => {
+    /** `n` non-journal pages named p0000, p0001, ... so name order is index order. */
+    const graph = (n: number): PageEntity[] =>
+      Array.from({ length: n }, (_, i) => {
+        const name = `p${String(i).padStart(4, '0')}`;
+        return { id: i + 1, uuid: `u${i}`, name, originalName: name.toUpperCase() };
+      });
+    const names = (from: number, to: number) => graph(to).slice(from).map(p => p.originalName);
+    const list = (n: number, options: Parameters<typeof listPages>[1] = {}) => {
+      (mockClient.callAPI as any).mockResolvedValue(graph(n));
+      return listPages(mockClient, options);
+    };
+
+    it('exports the default, the maximum and the default offset', () => {
+      expect(DEFAULT_LIST_PAGES_LIMIT).toBe(200);
+      expect(MAX_LIST_PAGES_LIMIT).toBe(1000);
+      expect(DEFAULT_LIST_PAGES_OFFSET).toBe(0);
+    });
+
+    it('is unchanged when 200 or fewer pages match: every page, no meta fields', async () => {
+      for (const n of [0, 1, 199, 200]) {
+        const result = await list(n);
+        expect(result, `${n} pages`).toEqual({ pages: names(0, n), total: n });
+      }
+    });
+
+    it('cuts at 200 by default and names both ways to get the rest', async () => {
+      const result = await list(500);
+
+      expect(result).toEqual({
+        pages: names(0, 200),
+        total: 500,
+        hasMore: true,
+        warnings: [
+          {
+            code: 'pages_truncated',
+            message: 'Showing 200 of 500 pages.',
+            howToFetchAll: 'Set limit to 500 (or higher) to get all 500. Or set offset to 200 for the next page.',
+          },
+        ],
+      });
+    });
+
+    it('keeps total as the count of every matching page, not the page returned', async () => {
+      const result = await list(1500, { limit: 10, offset: 700 });
+
+      expect(result.pages).toEqual(names(700, 710));
+      expect(result.total).toBe(1500);
+    });
+
+    it('counts total after the name filter, before offset and limit', async () => {
+      (mockClient.callAPI as any).mockResolvedValue([
+        ...graph(300),
+        { id: 9001, uuid: 'j', name: 'jan 1st, 2025', originalName: 'Jan 1st, 2025', 'journal?': true },
+        { id: 9002, uuid: 'x', name: 'other', originalName: 'Other' },
+      ]);
+
+      const result = await listPages(mockClient, { nameContains: 'P0', limit: 50 });
+
+      expect(result.total).toBe(300);
+      expect(result.pages).toEqual(names(0, 50));
+      expect(result.warnings![0].message).toBe('Showing 50 of 300 pages.');
+    });
+
+    it('returns the page at offset, and no warning once nothing is left after it', async () => {
+      expect(await list(500, { offset: 400 })).toEqual({ pages: names(400, 500), total: 500 });
+      expect(await list(500, { offset: 300, limit: 200 })).toEqual({ pages: names(300, 500), total: 500 });
+    });
+
+    it('counts the warning from offset when pages remain after the page returned', async () => {
+      const [w] = (await list(500, { offset: 100, limit: 50 })).warnings!;
+
+      expect(w).toEqual({
+        code: 'pages_truncated',
+        message: 'Showing 50 of 400 pages from offset 100.',
+        howToFetchAll: 'Set limit to 400 (or higher) to get all 400. Or set offset to 150 for the next page.',
+      });
+    });
+
+    it('returns no pages and no warning for an offset past the end, with the real total', async () => {
+      expect(await list(30, { offset: 30 })).toEqual({ pages: [], total: 30 });
+      expect(await list(30, { offset: 5000 })).toEqual({ pages: [], total: 30 });
+    });
+
+    it('suggests the maximum, never a value past it, when more than 1000 remain', async () => {
+      const result = await list(1500);
+
+      expect(result.pages).toHaveLength(200);
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings).toEqual([
+        {
+          code: 'pages_truncated',
+          message: 'Showing 200 of 1500 pages.',
+          howToFetchAll: 'Set limit to 1000 (the maximum) to get 1000 of 1500. Or set offset to 200 for the next page.',
+        },
+      ]);
+    });
+
+    it('keeps hasMore true at the maximum: the next offset fetches the rest', async () => {
+      const result = await list(1500, { limit: 1000 });
+
+      expect(result.pages).toEqual(names(0, 1000));
+      expect(result.hasMore).toBe(true);
+      expect(result.warnings).toEqual([
+        {
+          code: 'pages_truncated',
+          message: 'Showing 1000 of 1500 pages: limit is capped at its maximum of 1000.',
+          howToFetchAll: 'Set offset to 1000 for the next page.',
+        },
+      ]);
+    });
+
+    it('clamps a limit above the maximum to 1000 and names the value asked for', async () => {
+      const result = await list(2500, { limit: 5000, offset: 1000 });
+
+      expect(result.pages).toEqual(names(1000, 2000));
+      expect(result.total).toBe(2500);
+      expect(result.warnings).toEqual([
+        {
+          code: 'pages_truncated',
+          message: 'Showing 1000 of 1500 pages from offset 1000: limit is capped at its maximum of 1000 (5000 was asked for).',
+          howToFetchAll: 'Set offset to 2000 for the next page.',
+        },
+      ]);
+    });
+
+    it('returns the same pages for any limit at or above the maximum', async () => {
+      const at1000 = await list(1200, { limit: 1000 });
+      const at5000 = await list(1200, { limit: 5000 });
+
+      expect(at5000.pages).toEqual(at1000.pages);
+      expect(at5000.pages).toHaveLength(MAX_LIST_PAGES_LIMIT);
+      expect(at5000.hasMore).toBe(true);
+    });
+
+    it('adds no warning above the maximum when every remaining page fits', async () => {
+      expect(await list(1000, { limit: 5000 })).toEqual({ pages: names(0, 1000), total: 1000 });
+      expect(await list(1500, { limit: 5000, offset: 500 })).toEqual({ pages: names(500, 1500), total: 1500 });
+    });
+
+    it('never suggests a limit past the maximum, and always names the next offset', async () => {
+      for (const [n, limit, offset] of [
+        [201, undefined, 0],
+        [999, 10, 0],
+        [1001, undefined, 0],
+        [5000, 999, 0],
+        [5000, 1000, 0],
+        [5000, 20_000, 3000],
+        [1300, 100, 250],
+      ] as const) {
+        const result = await list(n, { limit, offset });
+        const [w] = result.warnings!;
+        const label = `${n} pages, limit ${limit}, offset ${offset}`;
+        for (const m of w.howToFetchAll!.matchAll(/Set limit to (\d+)/g)) {
+          expect(Number(m[1]), label).toBeLessThanOrEqual(MAX_LIST_PAGES_LIMIT);
+        }
+        expect(w.howToFetchAll, label).toContain(`offset to ${offset + result.pages.length} for the next page`);
+        expect(result.hasMore, label).toBe(true);
+      }
+    });
+
+    it('pages through the whole list with the offset each warning names', async () => {
+      (mockClient.callAPI as any).mockResolvedValue(graph(2345));
+      const seen: string[] = [];
+      let offset = 0;
+      for (let calls = 0; calls < 10; calls++) {
+        const result = await listPages(mockClient, { limit: 5000, offset });
+        seen.push(...result.pages);
+        if (!result.hasMore) break;
+        offset = Number(result.warnings![0].howToFetchAll!.match(/Set offset to (\d+)/)![1]);
+      }
+      expect(seen).toEqual(names(0, 2345));
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(3);
+    });
+
+    it('treats limit 0 as a count: no pages, the total, and no next offset that would not move', async () => {
+      const result = await list(50, { limit: 0 });
+
+      expect(result.pages).toEqual([]);
+      expect(result.total).toBe(50);
+      expect(result.warnings).toEqual([
+        {
+          code: 'pages_truncated',
+          message: 'Showing 0 of 50 pages.',
+          howToFetchAll: 'Set limit to 50 (or higher) to get all 50.',
+        },
+      ]);
+      expect((await list(1500, { limit: 0 })).warnings![0].howToFetchAll).toBe(
+        'Set limit to 1000 (the maximum) to get 1000 of 1500. Or page through them with offset.'
+      );
+    });
+
+    it('reads a negative limit as 0 and a negative offset as 0, and floors fractions', async () => {
+      expect((await list(5, { limit: -3 })).pages).toEqual([]);
+      expect(await list(5, { offset: -10 })).toEqual({ pages: names(0, 5), total: 5 });
+      expect((await list(20, { limit: 2.9, offset: 3.7 })).pages).toEqual(names(3, 5));
+    });
+
+    it('makes one API call whatever the limit and offset', async () => {
+      await list(5000, { limit: 1000, offset: 2000 });
+
+      expect(mockClient.callAPI).toHaveBeenCalledTimes(1);
+      expect(mockClient.callAPI).toHaveBeenCalledWith('logseq.Editor.getAllPages');
+    });
+
+    it('keeps the pages_unavailable warning alone for null, whatever limit and offset are', async () => {
+      (mockClient.callAPI as any).mockResolvedValue(null);
+
+      const result = await listPages(mockClient, { limit: 1, offset: 5 });
+
+      expect(result.pages).toEqual([]);
+      expect(result.total).toBe(0);
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings!.map(w => w.code)).toEqual(['pages_unavailable']);
+    });
   });
 });
