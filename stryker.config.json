@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts",
+    "related": true
+  },
+  "coverageAnalysis": "perTest",
+  "incremental": true,
+  "incrementalFile": "reports/mutation/stryker-incremental.json",
+  "ignoreStatic": true,
+  "timeoutMS": 30000,
+  "concurrency": 4,
+  "reporters": ["json", "clear-text"],
+  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "clearTextReporter": { "reportTests": false, "reportMutants": false, "reportScoreTable": true, "allowEmojis": false },
+  "mutate": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/types.ts",
+    "!src/tool-args.ts",
+    "!src/index.ts",
+    "!src/tool-descriptions.ts",
+    "!src/instructions.ts",
+    "!src/version.ts"
+  ],
+  "tempDirName": ".stryker-tmp",
+  "ignorePatterns": [".claude", ".logseq-instance", ".serena", ".stryker-tmp", "reports"]
+}

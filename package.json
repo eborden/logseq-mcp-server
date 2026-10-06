@@ -24,7 +24,8 @@
     "test": "vitest run && npm run test:integration",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "mutation": "stryker run"
   },
   "keywords": [
     "mcp",
