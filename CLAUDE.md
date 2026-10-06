@@ -160,6 +160,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 ### Verification before merge
 Done by whoever merges:
 - CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` and `vitest run src` on Node 22 and 24 on every PR and push to `main`. It must be green. `engines.node` is `>=22.12.0`, the floor of the dev toolchain (vite 7). The integration tests and measure script stay local.
+- The `Mutation testing` job (ADR-0026) is green. The `mutation-baseline-change` label is on the PR only when it lowers a score in `mutation-baseline.json` or edits the `mutate` globs or the exclusion list in `vitest.mutation.config.ts`, and that needs the maintainer's OK first.
 - Privacy grep of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
 - `npx tsc --noEmit`
 - `npx vitest run src`
@@ -678,7 +679,7 @@ npx vitest run src
 # Run specific test file
 npx vitest run src/tools/build-context.test.ts
 
-# Mutation testing on the unit suite (informational, ADR-0026; slow cold, `-- --mutate src/x.ts` for one file; touches no LogSeq)
+# Mutation testing on the unit suite (ADR-0026; slow cold, `-- --mutate src/x.ts` for one file; touches no LogSeq)
 npm run mutation
 
 # Build the project
