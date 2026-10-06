@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { execFileSync } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { LogseqClient } from './client.js';
@@ -87,7 +87,7 @@ describe('requireFixtureGraph', () => {
 
 describe('fixture graph files (tests/fixtures/graph)', () => {
   it('has the file-graph layout LogSeq opens', () => {
-    for (const path of ['pages', 'journals', 'logseq/config.edn', 'README.md']) {
+    for (const path of ['pages', 'journals', 'logseq/config.edn']) {
       expect(existsSync(join(graphDir, path)), path).toBe(true);
     }
   });
@@ -98,8 +98,17 @@ describe('fixture graph files (tests/fixtures/graph)', () => {
     expect(text.split('\n')[0]).toBe(`fixture-version:: ${FIXTURE_VERSION}`);
   });
 
-  it('config.edn hides the README so it is not a page', () => {
-    expect(readFileSync(join(graphDir, 'logseq/config.edn'), 'utf-8')).toMatch(/:hidden \["\/README\.md"\]/);
+  it('keeps the README out of the graph folder, where LogSeq would index it as a page (#139)', () => {
+    expect(existsSync(join(graphDir, '..', 'README.md'))).toBe(true);
+    // LogSeq 0.10.15 applies :hidden on only one load path, so config.edn is no defence.
+    expect(readFileSync(join(graphDir, 'logseq/config.edn'), 'utf-8')).not.toMatch(/^\s*:hidden\b/m);
+    // Only the graph itself may sit here. Everything else LogSeq finds becomes a page.
+    const osFiles = new Set(['.DS_Store']);
+    expect(readdirSync(graphDir).filter(name => !osFiles.has(name)).sort()).toEqual(['journals', 'logseq', 'pages']);
+    for (const dir of ['pages', 'journals']) {
+      const strays = readdirSync(join(graphDir, dir)).filter(name => !name.endsWith('.md') && !osFiles.has(name));
+      expect(strays, dir).toEqual([]);
+    }
   });
 });
 
@@ -139,7 +148,7 @@ describe('.gitignore and the fixture graph', () => {
   it('keeps the hand-written fixture files', () => {
     const kept = [
       'tests/fixtures/graph/logseq/config.edn',
-      'tests/fixtures/graph/README.md',
+      'tests/fixtures/README.md',
       `tests/fixtures/graph/pages/${FIXTURE_SENTINEL_PAGE}.md`,
       'tests/fixtures/graph/pages/project atlas___notes.md',
       'tests/fixtures/graph/journals/2025_01_01.md',

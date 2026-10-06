@@ -7,7 +7,7 @@ import { DEFAULT_MAX_BLOCKS, DEFAULT_MAX_REFERENCES, DEFAULT_MAX_RELATED_PAGES }
 import { BOTH, HUB_PAGE, IN_WITH_SECOND_BLOCK, JOURNAL_FILE, buildHubFixture, hubFixtureCounts, isHubJournal } from '../scripts/fixture-hub/hub-graph.js';
 
 // The hub fixture (#89): the committed files match their generator, the counts documented in
-// tests/fixtures/graph/README.md hold when the files are read back as a link graph, and the hub is
+// tests/fixtures/README.md hold when the files are read back as a link graph, and the hub is
 // big enough to pass every default cap.
 
 const graphDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'tests/fixtures/graph');
@@ -103,7 +103,7 @@ describe('hub fixture counts', () => {
   });
 
   it('match the numbers written in the README', () => {
-    const readme = readFileSync(join(graphDir, 'README.md'), 'utf8');
+    const readme = readFileSync(join(graphDir, '..', 'README.md'), 'utf8');
     const row = (label: string) => readme.split('\n').find(line => line.startsWith(`| ${label}`)) ?? '';
     expect(readme).toContain(`**${counts.neighbours} neighbours**`);
     expect(row('Pages the hub links (outbound)')).toContain(`| ${counts.hubOutbound} `);

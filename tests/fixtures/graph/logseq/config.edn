@@ -29,5 +29,7 @@
  :property/separated-by-commas #{:reviewers}
  :ignored-page-references-keywords #{}
 
- ;; The fixture README describes the folder; it is not a page of the graph.
- :hidden ["/README.md"]}
+ ;; No :hidden entry: the fixture README lives in tests/fixtures/, outside the graph folder.
+ ;; LogSeq 0.10.15 skips :hidden when it reloads an existing graph (#139), so a file in the
+ ;; folder would be indexed as a page whatever this says.
+ }

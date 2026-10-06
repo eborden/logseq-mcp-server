@@ -1,30 +1,34 @@
 # Fixture graph
 
-A small LogSeq file graph that the integration tests will run against (#86). Open this folder
+A small LogSeq file graph (`tests/fixtures/graph/`) that the integration tests will run against (#86). Open that folder
 as its own graph in LogSeq; `tests/integration/setup.md` ("Fixture graph") has the steps.
 
 Every page, name, date and line of content here is made up. Nothing comes from a real graph,
 which is what lets it live in a public repository (CLAUDE.md, Privacy).
 
 ```
-logseq/config.edn   pins the settings that change parsing and page names
-pages/              one file per page
-journals/           one file per journal day (yyyy_MM_dd.md)
-README.md           this file, meant to be hidden from LogSeq by :hidden in config.edn
+tests/fixtures/
+  README.md         this file. It sits outside the graph folder on purpose (see below)
+  graph/            the graph: open this folder in LogSeq
+    logseq/config.edn   pins the settings that change parsing and page names
+    pages/              one file per page
+    journals/           one file per journal day (yyyy_MM_dd.md)
+  graph-linking/    a separate fixture for the concept-linking skill, with its own README
 ```
 
-The per-worktree instance (#118) indexes `README.md` anyway, as a page `readme`, plus a tag page for
-each issue number written with a `#` outside a code span (`88`, `89)` and the like). The two ways of
-opening the folder differ: **Add new graph** in the UI applies `:hidden` and leaves the README out,
-while the instance's load path skips `:hidden` (a LogSeq 0.10 bug, see #139). So a page count that is
-right for one is off by the `readme` page and its tag pages on the other. #139 moves the README out of
-the graph folder. Until it lands:
+**Nothing but the graph lives in `graph/`.** LogSeq indexes every `.md` file in the folder as a page.
+This README used to sit in `graph/` with `:hidden ["/README.md"]` in `config.edn`, but LogSeq 0.10.15
+applies `:hidden` on only one of its two load paths (`load-new-repo-to-db!`, used by **Add new graph**).
+`load-repo-to-db!`, which the per-worktree instance (#118) and any re-index use, passes a misspelled key
+(`:file/node-node-path`) to `remove-hidden-files`, so it keeps the file. The README then showed up as a page
+`readme`, plus a tag page for every issue number written with a `#`, and page counts depended on which way
+the folder was opened (#139). Moving the file out removed the difference, so `config.edn` no longer lists it.
+`src/fixture-graph.test.ts` checks that the graph folder holds only `pages/`, `journals/` and `logseq/`, and
+that `pages/` and `journals/` hold only `.md` files. Put any new notes about the fixture here, not in `graph/`.
 
-- #90 must count the `readme` page and the tag pages it links dynamically, by name, and not
-  hard-code an allowance. The number changes whenever someone writes another issue number here.
-- The README's text is searchable on the instance. Words like "importer", "meeting" and "test"
-  appear in it, so `search_blocks` hit counts for fixture words must filter out the `readme` page
-  or use words this file does not contain.
+Page counts are the same however the folder is opened. Tests need not allow for a `readme` page or for
+`#NN` tag pages. The README's text is not searchable, so words like "importer", "meeting" and "test" in it
+do not add `search_blocks` hits.
 
 ## What is here so far
 
