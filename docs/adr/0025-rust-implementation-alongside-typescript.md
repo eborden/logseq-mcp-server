@@ -34,7 +34,7 @@ Tracked in #122.
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-05
 
