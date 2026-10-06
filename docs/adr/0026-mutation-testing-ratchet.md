@@ -114,7 +114,7 @@ We adopt mutation testing on the unit suite with StrykerJS, and a per-file ratch
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-06
 
