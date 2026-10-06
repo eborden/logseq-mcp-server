@@ -17,6 +17,8 @@ export interface BlockEntity {
   /** Set by `max_blocks` on `query_by_date_range` when some of this block's children were left out */
   childrenTruncated?: boolean;
   properties?: Record<string, any>;
+  /** Property keys in file order. Editor API blocks carry it, and so do pulls camelized by `camelizeBlock` */
+  propertiesOrder?: string[];
   unordered?: boolean;
   meta?: {
     startPos?: number;
