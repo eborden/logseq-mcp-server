@@ -29,13 +29,12 @@ describe('buildBlockTrees', () => {
       [1]
     );
 
-    // buildBlockTrees always sets children, but BlockEntity types it as optional
     const roots = trees.get(1)!;
     expect(roots.map(r => r.id)).toEqual([2, 3]);
-    expect(roots[0].children!.map(c => c.id)).toEqual([4, 5]);
-    expect(roots[0].children![0].children!.map(c => c.id)).toEqual([6]);
+    expect(roots[0].children.map(c => c.id)).toEqual([4, 5]);
+    expect(roots[0].children[0].children.map(c => c.id)).toEqual([6]);
     expect(roots[1].children).toEqual([]);
-    expect([roots[0].level, roots[0].children![0].level, roots[0].children![0].children![0].level]).toEqual([1, 2, 3]);
+    expect([roots[0].level, roots[0].children[0].level, roots[0].children[0].children[0].level]).toEqual([1, 2, 3]);
   });
 
   it('keeps pages separate', () => {

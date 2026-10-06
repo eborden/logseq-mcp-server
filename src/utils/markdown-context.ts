@@ -41,7 +41,7 @@ const count = (shown: number, total?: number) =>
  */
 function blockTree(blocks: Obj[], pageId: number): Obj[] {
   const withPage = blocks.map(b => (b.page || b.parent ? b : { ...b, page: { id: pageId } }));
-  const trees = buildBlockTrees(withPage as any[], [pageId]);
+  const trees = buildBlockTrees(withPage, [pageId]);
   return [...trees.values()].flat();
 }
 

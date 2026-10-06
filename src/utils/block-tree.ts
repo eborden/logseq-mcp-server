@@ -49,12 +49,12 @@ export function camelizeBlock(block: Record<string, any>): BlockEntity {
  * is the previous one. Blocks the chain can't reach (a corrupt graph) are
  * appended in id order so nothing is dropped.
  */
-export function orderSiblings(siblings: BlockEntity[]): BlockEntity[] {
+export function orderSiblings<T extends BlockEntity>(siblings: T[]): T[] {
   if (siblings.length < 2) return siblings;
 
   const ids = new Set(siblings.map(s => s.id));
-  const byLeft = new Map<number, BlockEntity>();
-  const heads: BlockEntity[] = [];
+  const byLeft = new Map<number, T>();
+  const heads: T[] = [];
   for (const sibling of siblings) {
     const leftId = sibling.left?.id;
     if (leftId === undefined || !ids.has(leftId)) {
@@ -64,10 +64,10 @@ export function orderSiblings(siblings: BlockEntity[]): BlockEntity[] {
     }
   }
 
-  const ordered: BlockEntity[] = [];
+  const ordered: T[] = [];
   const seen = new Set<number>();
   for (const head of heads.sort((a, b) => a.id - b.id)) {
-    let current: BlockEntity | undefined = head;
+    let current: T | undefined = head;
     while (current && !seen.has(current.id)) {
       seen.add(current.id);
       ordered.push(current);
@@ -79,6 +79,19 @@ export function orderSiblings(siblings: BlockEntity[]): BlockEntity[] {
   }
   return ordered;
 }
+
+/**
+ * A block in a rebuilt tree: `children` (empty for a leaf) and the 1-based `level`
+ * are always set, unlike on a `BlockEntity`, where both are optional because a
+ * flat pull has neither. Assignable to `BlockEntity`.
+ */
+export type BlockNode = BlockEntity & {
+  level: number;
+  children: BlockNode[];
+};
+
+/** A block that has its `children` array but is not yet placed in a tree, so has no `level`. */
+type UnplacedNode = BlockEntity & { children: BlockNode[] };
 
 /**
  * Rebuild `getPageBlocksTree`-shaped trees from flat Datalog blocks.
@@ -93,14 +106,14 @@ export function orderSiblings(siblings: BlockEntity[]): BlockEntity[] {
  * @returns Map of page id to that page's top-level blocks, in order
  */
 export function buildBlockTrees(
-  blocks: Array<Record<string, any>>,
+  blocks: Array<Record<string, unknown>>,
   pageIds: Iterable<number>
-): Map<number, BlockEntity[]> {
-  const nodes = blocks.map(b => ({ ...camelizeBlock(b), children: [] as BlockEntity[] }));
+): Map<number, BlockNode[]> {
+  const nodes: UnplacedNode[] = blocks.map(b => ({ ...camelizeBlock(b), children: [] }));
   const nodeIds = new Set(nodes.map(n => n.id));
 
-  const childrenOf = new Map<number, BlockEntity[]>();
-  const rootsOf = new Map<number, BlockEntity[]>();
+  const childrenOf = new Map<number, UnplacedNode[]>();
+  const rootsOf = new Map<number, UnplacedNode[]>();
   for (const id of pageIds) rootsOf.set(id, []);
 
   for (const node of nodes) {
@@ -118,16 +131,14 @@ export function buildBlockTrees(
     }
   }
 
-  const attach = (siblings: BlockEntity[], level: number): BlockEntity[] => {
-    const ordered = orderSiblings(siblings);
-    for (const node of ordered) {
-      node.level = level;
-      node.children = attach(childrenOf.get(node.id) ?? [], level + 1);
-    }
-    return ordered;
-  };
+  // Assigns in place, so `level` is added after `children` and the key order of
+  // the output stays what it was before the types were tightened.
+  const attach = (siblings: UnplacedNode[], level: number): BlockNode[] =>
+    orderSiblings(siblings).map(node =>
+      Object.assign(node, { level, children: attach(childrenOf.get(node.id) ?? [], level + 1) })
+    );
 
-  const trees = new Map<number, BlockEntity[]>();
+  const trees = new Map<number, BlockNode[]>();
   for (const [pageId, roots] of rootsOf) {
     trees.set(pageId, attach(roots, 1));
   }
