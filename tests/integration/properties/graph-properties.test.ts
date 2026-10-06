@@ -42,7 +42,12 @@ describe('Property: Graph Traversal Invariants', () => {
     const key = `${depth}:${page}`;
     let cached = networks.get(key);
     if (!cached) {
-      cached = getConceptNetwork(client, page, depth);
+      // A rejected call is dropped from the cache, so one transient failure (a timeout under load)
+      // fails only the test that hit it; later tests retry instead of replaying the same error.
+      cached = getConceptNetwork(client, page, depth).catch((e: unknown) => {
+        networks.delete(key);
+        throw e;
+      });
       networks.set(key, cached);
     }
     return cached;
@@ -190,6 +195,8 @@ describe('Property: Graph Traversal Invariants', () => {
       for (const page of pages) {
         // result1 may be the run's shared copy, fetched by an earlier test, so this also checks the
         // network doesn't change between calls made minutes apart. result2 is always a new call.
+        // Run alone (e.g. with -t), result1 is a fresh call too, so this compares two back-to-back
+        // calls: still a valid idempotence check, only without the cross-time part.
         const result1 = await network(page, 2);
         const result2 = await getConceptNetwork(client, page, 2);
 
