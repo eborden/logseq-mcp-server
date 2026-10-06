@@ -63,7 +63,9 @@ describe('alias-aware link following against the fixture graph', () => {
     const direct = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
       `[:find ?b :where [?a :block/name ${JSON.stringify(target.alias)}] [?b :block/refs ?a] [?b :block/page ?pg] (not [?pg :block/alias ?a])]`
     ]);
-    // A block on the alias stub's own declaring page is not a backlink; every other referencing block is
+    // A block on the alias stub's own declaring page is not a backlink; every other referencing block is.
+    // The two journal blocks that link [[atlas]]: without them the check below proves nothing.
+    expect(direct).toHaveLength(target.aliasRefs);
     const missing = direct.filter(([id]) => !found.has(id)).length;
     expect(missing).toBe(0);
   });
