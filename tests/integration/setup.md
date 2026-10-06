@@ -75,12 +75,12 @@ Opening the folder makes LogSeq write a few files of its own (`logseq/custom.css
 Instead of switching your own LogSeq to the fixture, start a LogSeq of the worktree's own (#118). It runs next to yours on its own profile, port and token, so agents in separate worktrees can each test against their own fixture at the same time:
 
 ```bash
-npx tsx scripts/logseq-instance.ts start     # opens this worktree's tests/fixtures/graph
+npx tsx scripts/logseq-instance.ts start     # opens a copy of this worktree's tests/fixtures/graph
 LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration
 npx tsx scripts/logseq-instance.ts stop
 ```
 
-`status` says whether the instance is running and whether `requireFixtureGraph` passes against it. `start` takes another graph folder as an argument, but refuses one without the fixture's sentinel page.
+`status` says whether the instance is running, which graph it opened and copied from, and whether `requireFixtureGraph` passes against it. `start` takes another graph folder as an argument, but refuses one without the fixture's sentinel page, and one inside `.logseq-instance/` or holding it.
 
 Until #90 moves the suites to the fixture, most of them still need the data listed above and fail against the instance. Use your own graph for them as before.
 
@@ -92,15 +92,16 @@ LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration:fix
 
 What `start` does:
 
-- **A fresh profile each time**, in `.logseq-instance/` (gitignored): `profile/` (LogSeq's `--user-data-dir`), `home/` (its home directory, so its `~/.logseq` is its own), `logseq.log`, `instance.json` (pid, port) and `config.json` (the file `LOGSEQ_MCP_CONFIG` points at).
+- **A fresh profile each time**, in `.logseq-instance/` (gitignored): `profile/` (LogSeq's `--user-data-dir`), `home/` (its home directory, so its `~/.logseq` is its own), `graph/` (the copy of the graph it opens), `logseq.log`, `instance.json` (pid, port, the graph copy and its source) and `config.json` (the file `LOGSEQ_MCP_CONFIG` points at).
+- **A fresh copy of the graph each time** (#151). LogSeq writes to the graph it opens: it rewrites `logseq/config.edn` and adds `logseq/bak/`, today's journal and `pages/contents.md`. So `start` copies the graph folder to `.logseq-instance/graph/`, leaving out `logseq/bak/`, and opens the copy. The committed `tests/fixtures/graph` is only read, so the worktree stays clean while the instance runs. The sentinel check runs against the source before the copy is made. An edit to the fixture reaches the instance on the next `start`, not while it runs.
 - **A port from the worktree path**, in 12320-12399, or the next free one in that range. Your LogSeq keeps 12315.
 - **A new random API token on every start**, written only to the gitignored `.logseq-instance/config.json` and the profile's `configs.edn` (owner-only files). No token is committed (ADR-0003). It has to stay secret even though the graph is made up: LogSeq's API answers CORS `*` and can run git commands, write files and open links, so a web page that knew the token could drive the instance from a browser.
 - **Waits** up to 90 seconds until the API serves the graph, `requireFixtureGraph` passes and every page and journal is indexed. If that fails, it stops the instance again and points at `logseq.log`.
-- **`stop` signals only the pid it recorded**, and only while that process still runs on this worktree's profile. It never quits your LogSeq. It also deletes `config.json`, so a leftover config never points the tests at a port another worktree's instance has taken since.
+- **`stop` signals only the pid it recorded**, and only while that process still runs on this worktree's profile. It never quits your LogSeq. It also deletes `config.json`, so a leftover config never points the tests at a port another worktree's instance has taken since. It leaves `graph/`, `profile/`, `home/` and `logseq.log`, so you can look at what LogSeq wrote; the next `start` replaces them.
 
 It never touches your LogSeq, its profile, your `~/.logseq` or `~/.logseq-mcp/config.json`. Set `LOGSEQ_APP` if LogSeq is not at `/Applications/Logseq.app`.
 
-How it opens the graph without the UI: a new LogSeq profile opens the demo graph, and the API server does not start there. Before the first launch, `start` writes the profile's localStorage (`current-repo` names the graph, `http-server-enabled` turns the API server on) and an empty graph cache file, without which LogSeq falls back to the demo graph. `scripts/logseq-instance/local-storage.ts` has the details.
+How it opens the graph without the UI: a new LogSeq profile opens the demo graph, and the API server does not start there. Before the first launch, `start` writes the profile's localStorage (`current-repo` names the graph copy, `http-server-enabled` turns the API server on) and an empty graph cache file, without which LogSeq falls back to the demo graph. `scripts/logseq-instance/local-storage.ts` has the details.
 
 ## Running Integration Tests
 
