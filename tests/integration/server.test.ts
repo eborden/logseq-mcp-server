@@ -1,125 +1,46 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getPage } from '../../src/tools/get-page.js';
 import { getBacklinks } from '../../src/tools/get-backlinks.js';
 import { searchBlocks } from '../../src/tools/search-blocks.js';
 import { queryByProperty } from '../../src/tools/query-by-property.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for LogSeq MCP Server
- *
- * These tests require:
- * 1. LogSeq running with HTTP API enabled
- * 2. Config file at ~/.logseq-mcp/config.json
- * 3. Test data in LogSeq graph
- *
- * Tests will FAIL if prerequisites are not met.
+ * Integration tests for the basic tools against the fixture graph: get_page, get_backlinks,
+ * search_blocks and query_by_property on known pages. Read-only.
  */
 
 describe('LogSeq MCP Server Integration Tests', () => {
   let client: LogseqClient;
 
   beforeAll(async () => {
-    // Check if config file exists
-    const configPath = resolveConfigPath();
-
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(
-        'Config file not found at ~/.logseq-mcp/config.json. ' +
-        'Integration tests require LogSeq configuration. ' +
-        'See tests/integration/setup.md for setup instructions.'
-      );
-    }
-
-    // Load config
-    const config = await loadConfig(configPath);
-    client = new LogseqClient(config);
-
-    // Test connection to LogSeq - fail hard if not available
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n` +
-        'Ensure LogSeq is running with HTTP server enabled. ' +
-        'See tests/integration/setup.md'
-      );
-    }
+    ({ client } = await connectFixture());
   });
 
   describe('Connection Tests', () => {
     it('should connect to LogSeq HTTP API', async () => {
-      const result = await client.callAPI('logseq.App.getCurrentGraph');
-      expect(result).toBeDefined();
-    });
-
-    it('should have valid auth token', async () => {
-      // If we got here, auth worked in beforeAll
-      expect(client).toBeDefined();
+      const result = await client.callAPI<{ name: string }>('logseq.App.getCurrentGraph');
+      expect(result.name).toBe('graph');
     });
   });
 
   describe('logseq_get_page', () => {
-    it('should retrieve a page by name', async () => {
-      // Try to get any page - we'll search for one first
-      const searchResult = await searchBlocks(client, 'test');
-
-      expect(searchResult).toBeDefined();
-      expect(searchResult.length).toBeGreaterThan(0,
-        'No pages found containing "test". Integration tests require test data. ' +
-        'Create a page with "test" in the content. See tests/integration/setup.md'
-      );
-
-      // Get the page name from the first result
-      const firstBlock = searchResult[0];
-      expect(firstBlock.page).toBeDefined(
-        'Search result has no page reference - data integrity issue'
-      );
-
-      // Try to get page by ID
-      const pageId = firstBlock.page.id;
-      const pageResult = await client.callAPI('logseq.Editor.getPage', [pageId]);
-
-      expect(pageResult).toBeDefined();
-      expect(pageResult.name).toBeTruthy();
-
-      // Now test our getPage function
-      const result = await getPage(client, pageResult.name, false);
-      expect(result).toBeDefined();
-      expect(result.name).toBeTruthy();
-      expect(result.uuid).toBeTruthy();
+    it('should retrieve a page by name, in any casing', async () => {
+      for (const name of ['property types', 'Property Types']) {
+        const result = await getPage(client, name, false);
+        expect(result.name, name).toBe('property types');
+        expect(result.originalName, name).toBe('property types');
+        expect(typeof result.uuid).toBe('string');
+        expect(result.resolvedFrom).toBeUndefined();
+      }
     });
 
     it('should include children when requested', async () => {
-      // Try to find a page with content
-      const searchResult = await searchBlocks(client, 'test');
+      const result = await getPage(client, 'property types', true);
 
-      expect(searchResult).toBeDefined();
-      expect(searchResult.length).toBeGreaterThan(0,
-        'No pages found for children test. Create a page with "test" content. ' +
-        'See tests/integration/setup.md'
-      );
-
-      const firstBlock = searchResult[0];
-      expect(firstBlock.page).toBeDefined(
-        'Search result has no page reference - data integrity issue'
-      );
-
-      const pageId = firstBlock.page.id;
-      const pageResult = await client.callAPI('logseq.Editor.getPage', [pageId]);
-
-      expect(pageResult).toBeDefined();
-      expect(pageResult.name).toBeTruthy();
-
-      const result = await getPage(client, pageResult.name, true);
-      expect(result).toBeDefined();
-      // LogSeq only includes children property if blocks exist
-      // Just verify we got the page successfully
-      expect(result.name).toBeDefined();
+      // The page-property block and ten blocks, one per value type
+      expect(result.children).toHaveLength(11);
     });
 
     it('should throw error for non-existent page', async () => {
@@ -130,84 +51,56 @@ describe('LogSeq MCP Server Integration Tests', () => {
   });
 
   describe('logseq_get_backlinks', () => {
-    it('should get backlinks for a page', async () => {
-      // Find any page first
-      const searchResult = await searchBlocks(client, 'test');
+    it('groups the blocks that link a page by their source page', async () => {
+      const result = await getBacklinks(client, 'Alice');
+      const bySource = Object.fromEntries((result ?? []).map(([page, blocks]) => [page.name, blocks.length]));
 
-      expect(searchResult).toBeDefined();
-      expect(searchResult.length).toBeGreaterThan(0,
-        'No pages found for backlinks test. Create a page with "test" content. ' +
-        'See tests/integration/setup.md'
-      );
+      expect(bySource).toEqual({
+        'dec 31st, 2024': 1,
+        'jan 6th, 2025': 6,
+        'jan 7th, 2025': 1,
+        'jan 15th, 2025': 1,
+        'project atlas': 1,
+        'project atlas/meetings': 2,
+        'project cascade': 1,
+        'property types': 2,
+      });
+    });
 
-      const firstBlock = searchResult[0];
-      expect(firstBlock.page).toBeDefined(
-        'Search result has no page reference - data integrity issue'
-      );
-
-      const pageId = firstBlock.page.id;
-      const pageResult = await client.callAPI('logseq.Editor.getPage', [pageId]);
-
-      expect(pageResult).toBeDefined();
-      expect(pageResult.name).toBeTruthy();
-
-      const result = await getBacklinks(client, pageResult.name);
-      // Result may be null or empty array if no backlinks exist
-      expect(result === null || Array.isArray(result)).toBe(true);
+    it('returns nothing for a page no block links', async () => {
+      const result = await getBacklinks(client, 'property types');
+      expect(result ?? []).toEqual([]);
     });
   });
 
   describe('logseq_search_blocks', () => {
     it('should search for blocks by content', async () => {
-      // Search for a common word
-      const result = await searchBlocks(client, 'test');
+      const result = await searchBlocks(client, 'importer');
 
-      // Result may be empty if no matching blocks
-      expect(Array.isArray(result)).toBe(true);
-
-      if (result && result.length > 0) {
-        const firstResult = result[0];
-        expect(firstResult).toHaveProperty('content');
-        expect(firstResult).toHaveProperty('uuid');
-      }
+      // The 11 blocks that say "importer": 7 in journals, 4 on pages
+      expect(result).toHaveLength(11);
+      expect(result.every(b => b.content.toLowerCase().includes('importer'))).toBe(true);
+      expect(result.every(b => typeof b.uuid === 'string')).toBe(true);
     });
 
     it('should return empty array for non-matching search', async () => {
       const result = await searchBlocks(client, 'xyzzyqwertyneverexists12345');
-      expect(Array.isArray(result)).toBe(true);
-      expect(result).toHaveLength(0);
+      expect(result).toEqual([]);
     });
   });
 
   describe('logseq_query_by_property', () => {
     it('should query blocks by property', async () => {
-      // Query for blocks with a status property
       const result = await queryByProperty(client, 'status', 'testing');
 
-      // Validate API contract
-      expect(Array.isArray(result)).toBe(true);
-      expect(result.length).toBeGreaterThan(0,
-        'No blocks with status::testing property. Add blocks with this property. ' +
-        'See tests/integration/setup.md'
-      );
-
-      // Validate structure of returned blocks
-      result.forEach(block => {
-        expect(block).toHaveProperty('uuid');
-        expect(block).toHaveProperty('properties');
-        expect(block.properties).toHaveProperty('status');
-        expect(block.properties.status).toBe('testing');
-      });
+      expect(result).toHaveLength(1);
+      expect(result[0].content).toBe('A text value\nstatus:: testing');
+      expect(result[0].properties).toEqual({ status: 'testing' });
     });
 
     it('should return empty array for non-existent property', async () => {
-      const result = await queryByProperty(
-        client,
-        'nonexistentproperty12345',
-        'neverexists'
-      );
-      expect(Array.isArray(result)).toBe(true);
-      expect(result).toHaveLength(0);
+      const result = await queryByProperty(client, 'nonexistentproperty12345', 'neverexists');
+      expect(result).toEqual([]);
     });
   });
 });
