@@ -99,8 +99,20 @@ export interface SearchByRelationshipOptions {
  * A's first: only the top-level blocks are counted, and a kept block keeps its children.
  */
 const MATCHING_BLOCKS = 'matching blocks (the first ones listed, not ranked)';
-const CONNECTED_WITHIN_ENTRIES =
-  "top-level blocks of the two pages (topic A's first, then topic B's; a kept block keeps all its children, which are not counted)";
+
+/**
+ * `what` for a cut `connected-within`: how many top-level blocks each topic's page has and how
+ * many of the kept ones came from each, so a reader can see when topic B's blocks were dropped
+ * entirely. Both counts are known from the two tree calls, so this costs nothing.
+ */
+const connectedWithinEntries = (kept: number, fromA: number, fromB: number) => {
+  const keptA = Math.min(kept, fromA);
+  return (
+    `top-level blocks of the two pages (kept ${keptA} from topic A and ${kept - keptA} from topic B, ` +
+    `of ${fromA} and ${fromB}; topic A's first, then topic B's; ` +
+    'a kept block keeps all its children, which are not counted)'
+  );
+};
 
 /** Unwrap `[[block], ...]` Datalog rows; a null result means no rows. */
 function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
@@ -166,6 +178,8 @@ export async function searchByRelationship(
 ): Promise<SearchByRelationshipResult> {
   const { maxFrontier = DEFAULT_MAX_FRONTIER, limit = DEFAULT_RELATIONSHIP_LIMIT } = options;
   let results: BlockEntity[] = [];
+  // Top-level blocks on each topic's page, for a `connected-within` that found a connection
+  let treeSizes: { a: number; b: number } | null = null;
   const warnings: ResultWarning[] = [];
 
   // Resolve both topics first (exact name, alias or ISO date: one query each), in
@@ -284,6 +298,7 @@ export async function searchByRelationship(
           );
 
           results = [...(blocksA || []), ...(blocksB || [])];
+          treeSizes = { a: (blocksA || []).length, b: (blocksB || []).length };
         }
       }
       break;
@@ -296,7 +311,7 @@ export async function searchByRelationship(
   if (cut) {
     warnings.push(
       cappedTruncationWarning({
-        what: relationshipType === 'connected-within' ? CONNECTED_WITHIN_ENTRIES : MATCHING_BLOCKS,
+        what: treeSizes ? connectedWithinEntries(kept.length, treeSizes.a, treeSizes.b) : MATCHING_BLOCKS,
         shown: kept.length,
         total: results.length,
         param: 'limit',
