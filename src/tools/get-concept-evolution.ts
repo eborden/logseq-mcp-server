@@ -10,7 +10,7 @@ import {
   resolveAliasSet,
   resolvedAliases
 } from '../utils/alias-set.js';
-import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS } from '../utils/result-meta.js';
 import { entityId, journalDayOf } from '../utils/entity-fields.js';
 import type { ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 
@@ -68,7 +68,8 @@ function entriesTruncated(
     max: MAX_ENTRIES,
     narrower,
     requested,
-    code: 'entries_truncated'
+    code: 'entries_truncated',
+    inlineMax: INLINE_ITEMS.blocks
   });
 }
 

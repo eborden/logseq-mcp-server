@@ -145,7 +145,7 @@ describe('queryByPropertyWithMeta caps', () => {
       expect(results).toHaveLength(200);
       expect(meta?.hasMore).toBe(true);
       expect(meta?.warnings[0].howToFetchAll).toBe(
-        'Set limit to 500 (the maximum) to get 500 of 700. No other parameter narrows this query.'
+        'Set limit to 500 (the maximum) to get 500 of 700. A result this large may be saved to a file by the host instead of shown; the server can\'t tell. No other parameter narrows this query.'
       );
       expect(meta?.warnings[0].howToFetchAll).not.toContain('to 700');
     });

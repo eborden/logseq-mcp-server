@@ -372,7 +372,7 @@ describe('searchBlocks', () => {
           {
             code: 'results_truncated',
             message: 'Showing 100 of 800 matching blocks.',
-            howToFetchAll: 'Set limit to 500 (the maximum) to get 500 of 800. Narrow the query to see the rest.'
+            howToFetchAll: 'Set limit to 500 (the maximum) to get 500 of 800. A result this large may be saved to a file by the host instead of shown; the server can\'t tell. Narrow the query to see the rest.'
           }
         ]
       });
@@ -387,9 +387,21 @@ describe('searchBlocks', () => {
         {
           code: 'results_truncated',
           message: 'Showing 100 of 500 matching blocks.',
-          howToFetchAll: 'Set limit to 500 (or higher) to get all 500.'
+          howToFetchAll: 'Set limit to 500 (or higher) to get all 500. A result this large may be saved to a file by the host instead of shown; the server can\'t tell.'
         }
       ]);
+    });
+
+    it('says a large result may be saved to a file only for a raise past 200 matches (#196)', async () => {
+      callAPI.mockResolvedValueOnce(rows(200));
+      const small = await searchBlocksWithMeta(client, 'k', 100);
+      expect(small.meta!.warnings[0].howToFetchAll).toBe('Set limit to 200 (or higher) to get all 200.');
+
+      callAPI.mockResolvedValueOnce(rows(201));
+      const large = await searchBlocksWithMeta(client, 'k', 100);
+      expect(large.meta!.warnings[0].howToFetchAll).toBe(
+        "Set limit to 201 (or higher) to get all 201. A result this large may be saved to a file by the host instead of shown; the server can't tell."
+      );
     });
 
     it('makes one call at the maximum, as under it', async () => {

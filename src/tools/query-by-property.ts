@@ -1,7 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { BlockEntity, ResultMeta, SlimBlock } from '../types.js';
-import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS } from '../utils/result-meta.js';
 import { toSlimBlock } from '../utils/slim-entities.js';
 import { camelizeBlock, camelizeKeys } from '../utils/block-tree.js';
 import { pageDisplayName } from '../utils/entity-fields.js';
@@ -105,7 +105,8 @@ export async function queryByPropertyWithMeta(
               param: 'limit',
               max: MAX_PROPERTY_LIMIT,
               narrower: NARROWER,
-              requested: limit
+              requested: limit,
+              inlineMax: INLINE_ITEMS.blocks
             })
           ],
           { matches: matches.length }

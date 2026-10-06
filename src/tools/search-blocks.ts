@@ -2,7 +2,7 @@ import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { BlockEntity, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
 import { blockPageId, pageDisplayName } from '../utils/entity-fields.js';
-import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS } from '../utils/result-meta.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
 
 /** Results returned when `limit` is absent. */
@@ -230,7 +230,8 @@ export async function searchBlocksWithMeta(
             param: 'limit',
             max: maxLimit,
             narrower: NARROWER,
-            requested: limit
+            requested: limit,
+            inlineMax: INLINE_ITEMS.blocks
           })
         ]
       : [],
