@@ -176,7 +176,7 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 | `build_context` | 3 (4 with an alias) | ~0.2s | 2 Datalog + 1 linked refs. A page with aliases adds 1 alias-group query and takes its blocks and linked references from Datalog over the group instead of the Editor call (#69) |
 | `get_context_for_query` (1 topic) | 3 (4 with an alias) | ~0.1s | Delegates to `build_context` |
 | `get_concept_network` depth=1 | 2 (3 with an alias) | ~0.1s | Default caps: 16 nodes. A root with aliases adds 1 alias-group query; the depth-1 walk then covers every name in one grouped query (#69) |
-| `get_concept_network` depth=2 | 3 (4 with an alias) | ~0.2s | One batched query per depth, both directions. Default caps: 50 nodes. Was ~120 calls (#3) |
+| `get_concept_network` depth=2 | 3 (4 with an alias) | ~0.2s | One batched query per depth, both directions. Default caps: 50 nodes. Was ~120 calls (#3). +1 when the root has an alias (#69) |
 | `search_blocks` | 1 | ~0.1s | One case-insensitive regex query. Was ~130 calls, or ~2k for a search with no match (#4) |
 | `query_by_date_range` (7 days) | 2 (3 with `search_term`) | ~0.2s | Journal pages + blocks, tree rebuilt in TypeScript. Same at 30 or 90 days. Was 1 + journal days (#5). A `search_term` adds 1 query that looks for a page of that name and its aliases, skipped when no journal is in range (#69) |
 | `get_page` | 1 | ~0.01s | Exact name of a page with a file: `Editor.getPage` alone, no resolver query (2 with children). An alias, ISO date, namespace leaf, file-less stub or miss adds one resolver query: 3 for an alias or date, 4 for a miss (first lookup, resolve, leaf, `getAllPages`) (#41) |
