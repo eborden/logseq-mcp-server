@@ -16,7 +16,24 @@ type Query = [query: string, inputs: unknown[]];
 
 afterEach(() => vi.restoreAllMocks());
 
-const ID_BY_NAME: Record<string, number> = { alice: 1, bob: 2 };
+const ID_BY_NAME: Record<string, number> = { alice: 1, bob: 2, carol: 3, dave: 4, erin: 5 };
+const NAME_BY_ID = Object.fromEntries(Object.entries(ID_BY_NAME).map(([name, id]) => [id, name]));
+
+/**
+ * Outbound links of a small chain, so depth, caps and distance change the result:
+ * alice -> bob, carol; bob -> dave; dave -> erin. Erin is 3 hops from Alice, so the
+ * default max_depth (2) and max_distance (2) stop one hop short of her, alice's two
+ * links exceed a max_fanout of 1, and the 4 pages within depth 2 exceed a max_nodes of 2.
+ */
+const LINKS: Record<number, number[]> = { 1: [2, 3], 2: [4], 4: [5] };
+
+/** The ids a query binds to `variable` with `DatalogQueryBuilder.groundIds`. */
+function groundedIds(query: string, variable: string): number[] {
+  const end = query.indexOf(`]) [?${variable} ...]]`);
+  const start = query.lastIndexOf('[(ground [', end);
+  if (end < 0 || start < 0) return [];
+  return query.slice(start + '[(ground ['.length, end).split(' ').filter(Boolean).map(Number);
+}
 
 function page(name: string) {
   const id = ID_BY_NAME[name] ?? 9;
@@ -54,6 +71,23 @@ const PROPERTY_BLOCKS = [
 /** Datalog stub: answers each query by its shape, so tests don't depend on call order. */
 function answer(query: string, inputs: unknown[]): unknown {
   if (query.includes(':in $ ?n')) return [[page(String(inputs[0])), 'name']];
+  if (query.includes(':find ?source ?connected')) {
+    // DatalogQueryBuilder.connectedPages: [source, connected, name, original-name, journal?, direction, count]
+    return groundedIds(query, 'source').flatMap(source =>
+      (LINKS[source] ?? []).map(target => {
+        const { name, 'original-name': originalName } = page(NAME_BY_ID[target]);
+        return [source, target, name, originalName, false, 'outbound', 1];
+      })
+    );
+  }
+  if (query.includes(':find ?neighbor')) {
+    // DatalogQueryBuilder.neighborPages: one row per page linked to or from the frontier
+    const frontier = groundedIds(query, 'p');
+    const neighbours = Object.entries(LINKS).flatMap(([from, tos]) =>
+      tos.flatMap(to => (frontier.includes(Number(from)) ? [to] : frontier.includes(to) ? [Number(from)] : []))
+    );
+    return [...new Set(neighbours)].map(id => [id]);
+  }
   if (query.includes(':block/properties')) {
     // Like the query: a property matches when its value, as text, equals the input
     return PROPERTY_BLOCKS.filter(b => String(b.properties.status) === inputs[1]).map(b => [b]);
@@ -135,7 +169,8 @@ const TOOLS = [
   },
   {
     tool: 'logseq_search_by_relationship',
-    valid: { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within' },
+    // Erin is 3 hops away, so the default max_distance (2) is told apart from 1 and 3
+    valid: { topic_a: 'Alice', topic_b: 'Erin', relationship_type: 'connected-within' },
     defaults: { max_distance: 2 },
     nullable: ['max_distance'],
   },
@@ -164,6 +199,31 @@ describe.each(TOOLS)('$tool arguments', ({ tool, valid, defaults, nullable }) =>
 
   it('ignores an unknown extra field', async () => {
     await expectSame(tool, { ...valid, future_option: 'x', verbose: true }, valid);
+  });
+});
+
+describe('the stub graph tells the defaults apart from neighbouring values', () => {
+  const body = async (name: string, args: Record<string, unknown>) => {
+    const { result, queries } = await call(name, args);
+    expect(result.isError, result.content[0]?.text).toBeUndefined();
+    return { body: JSON.parse(result.content[0].text), queries: queries.length };
+  };
+
+  it('get_concept_network: the defaults reach 4 pages at depth 2, and each nearby value differs', async () => {
+    const defaults = await body('logseq_get_concept_network', { concept_name: 'Alice' });
+    expect(defaults.body.nodes.map((n: { name: string }) => n.name).sort()).toEqual(['Alice', 'Bob', 'Carol', 'Dave']);
+    expect(defaults.body.truncated).toBe(false);
+    for (const other of [{ max_depth: 1 }, { max_depth: 3 }, { max_nodes: 2 }, { max_fanout: 1 }]) {
+      expect(await body('logseq_get_concept_network', { concept_name: 'Alice', ...other }), JSON.stringify(other)).not.toEqual(defaults);
+    }
+  });
+
+  it('search_by_relationship: the default walks 2 hops and stops short of a page 3 hops away', async () => {
+    const args = { topic_a: 'Alice', topic_b: 'Erin', relationship_type: 'connected-within' };
+    const defaults = await body('logseq_search_by_relationship', args);
+    expect(defaults.body.query.maxDistance).toBe(2);
+    expect((await body('logseq_search_by_relationship', { ...args, max_distance: 1 })).queries).toBeLessThan(defaults.queries);
+    expect((await body('logseq_search_by_relationship', { ...args, max_distance: 3 })).queries).toBeGreaterThan(defaults.queries);
   });
 });
 
