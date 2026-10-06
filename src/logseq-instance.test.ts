@@ -15,6 +15,7 @@ import {
   TOKEN_BYTES,
   PORT_LAST,
   READY_TIMEOUT_MS,
+  START_ATTEMPTS,
   candidatePorts,
   derivePort,
   graphCacheFileName,
@@ -405,12 +406,13 @@ describe('startInstance', () => {
     expect(world.signals).toEqual([]);
   });
 
-  it('stops the instance and fails when another graph answers on the port', async () => {
+  it('stops each instance and fails when another graph answers on the port twice', async () => {
     world.graphPath = '/someone/else';
 
     await expect(start(world)).rejects.toThrow(/serving another graph/);
 
-    expect(world.signals).toEqual([[4242, 'SIGTERM']]);
+    expect(world.spawned).toHaveLength(START_ATTEMPTS);
+    expect(world.signals).toEqual([[4242, 'SIGTERM'], [4243, 'SIGTERM']]);
     expect(world.files.has(PATHS.record)).toBe(false);
     expect(world.files.has(PATHS.config)).toBe(false);
   });
@@ -423,7 +425,31 @@ describe('startInstance', () => {
     ];
 
     await expect(start(world)).rejects.toThrow(/rejected the instance token/);
+    expect(world.signals).toEqual([[4242, 'SIGTERM'], [4243, 'SIGTERM']]);
+  });
+
+  it('retries once on the next free port after another LogSeq takes the first', async () => {
+    const [first, second] = candidatePorts(WORKTREE);
+    world.readiness = [
+      async () => {
+        throw new LogSeqAuthError('http://127.0.0.1:1');
+      },
+      async () => {},
+    ];
+
+    const started = await start(world);
+
+    expect(started).toMatchObject({ pid: 4243, port: second, fixtureVersion: 1 });
     expect(world.signals).toEqual([[4242, 'SIGTERM']]);
+    expect(world.text(join(PATHS.profile, 'configs.edn'))).toContain(`:server/port ${second}`);
+    expect(JSON.parse(world.text(PATHS.config)).apiUrl).toBe(`http://127.0.0.1:${second}`);
+    expect(world.logs).toContain(`Another LogSeq took port ${first}; trying the next free port.`);
+  });
+
+  it('does not retry other failures', async () => {
+    world.indexed = [];
+    await expect(start(world)).rejects.toThrow(/not ready after/);
+    expect(world.spawned).toHaveLength(1);
   });
 
   it('gives up after the timeout, says why and stops the instance', async () => {

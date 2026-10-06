@@ -68,6 +68,20 @@ export class InstanceError extends Error {
   }
 }
 
+/**
+ * Another LogSeq answers on the port we chose: it bound the port between our free-port check and
+ * our launch (two worktrees whose ports collide, starting at once). `start` retries once.
+ */
+export class PortTakenError extends InstanceError {
+  constructor(readonly port: number, why: string) {
+    super(`port ${port} ${why}, so another LogSeq holds it. Run stop, then start again.`);
+    this.name = 'PortTakenError';
+  }
+}
+
+/** Launches `start` makes before giving up when another LogSeq takes the port each time. */
+export const START_ATTEMPTS = 2;
+
 /** Where an instance keeps its files, all under `<worktree>/.logseq-instance/`. */
 export interface InstancePaths {
   dir: string;
@@ -290,9 +304,9 @@ function assertInside(dir: string, path: string): void {
   if (!path.startsWith(dir + sep)) throw new InstanceError(`refusing to touch ${path}: it is outside ${dir}`);
 }
 
-async function choosePort(worktree: string, deps: InstanceDeps): Promise<number> {
+async function choosePort(worktree: string, lost: ReadonlySet<number>, deps: InstanceDeps): Promise<number> {
   for (const port of candidatePorts(worktree)) {
-    if (await deps.isPortFree(port)) return port;
+    if (!lost.has(port) && (await deps.isPortFree(port))) return port;
   }
   throw new InstanceError(`no free port in ${PORT_FIRST}-${PORT_LAST}. Stop an instance you no longer need.`);
 }
@@ -362,9 +376,7 @@ async function waitUntilReady(
     try {
       const graph = await probe.currentGraphPath();
       if (graph !== undefined && graph !== record.graphDir) {
-        throw new InstanceError(
-          `port ${record.port} is serving another graph (${graph}), so another LogSeq holds it. Run stop, then start again.`,
-        );
+        throw new PortTakenError(record.port, `is serving another graph (${graph})`);
       }
       if (graph === undefined) {
         last = 'LogSeq has no graph open yet';
@@ -377,7 +389,7 @@ async function waitUntilReady(
     } catch (error) {
       if (error instanceof InstanceError) throw error;
       if (error instanceof LogSeqAuthError) {
-        throw new InstanceError(`port ${record.port} rejected the instance token, so another LogSeq holds it. Run stop, then start again.`);
+        throw new PortTakenError(record.port, 'rejected the instance token');
       }
       last = error instanceof Error ? `${error.name}: ${error.message.split('\n')[0]}` : String(error);
     }
@@ -388,7 +400,8 @@ async function waitUntilReady(
 
 /**
  * Start this worktree's instance on `graphDir` and wait until it serves the fixture graph.
- * On any failure after the launch, the instance is stopped again.
+ * On any failure after the launch, the instance is stopped again. When another LogSeq turns out
+ * to hold the chosen port, it tries once more on the next free one (START_ATTEMPTS).
  */
 export async function startInstance(options: StartOptions, deps: InstanceDeps): Promise<InstanceRecord & { fixtureVersion: number }> {
   if (deps.platform !== 'darwin') {
@@ -416,7 +429,29 @@ export async function startInstance(options: StartOptions, deps: InstanceDeps): 
     throw new InstanceError(`LogSeq not found at ${spec.command}. Set LOGSEQ_APP to the app bundle (e.g. ~/Applications/Logseq.app).`);
   }
 
-  const port = await choosePort(options.worktree, deps);
+  const lost = new Set<number>();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await launch(options, paths, graphDir, expectedFiles, spec, lost, deps);
+    } catch (error) {
+      if (!(error instanceof PortTakenError) || attempt >= START_ATTEMPTS) throw error;
+      lost.add(error.port);
+      deps.log(`Another LogSeq took port ${error.port}; trying the next free port.`);
+    }
+  }
+}
+
+/** One launch on the next free port. On any failure after the spawn, the instance is stopped again. */
+async function launch(
+  options: StartOptions,
+  paths: InstancePaths,
+  graphDir: string,
+  expectedFiles: readonly string[],
+  spec: LaunchSpec,
+  lost: ReadonlySet<number>,
+  deps: InstanceDeps,
+): Promise<InstanceRecord & { fixtureVersion: number }> {
+  const port = await choosePort(options.worktree, lost, deps);
   const token = newInstanceToken(deps.randomBytes);
   await deps.mkdir(paths.dir);
   await deps.remove(paths.record);
