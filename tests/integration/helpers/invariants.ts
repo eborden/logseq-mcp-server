@@ -45,6 +45,43 @@ export function assertDepthMonotonic(
 }
 
 /**
+ * Assert that each node's depth is its exact distance from the root over the edges, in
+ * either direction (#155). Unlike assertDepthMonotonic this also catches labels that are
+ * too low. Fails when the root is missing or a node cannot be reached, and when there is
+ * nothing past the root to check, so it can't pass on an empty network.
+ */
+export function assertDepthIsDistance(
+  nodes: Array<{ id: number; depth: number }>,
+  edges: Array<{ from: number; to: number }>,
+  label: string
+) {
+  const root = nodes.find(n => n.depth === 0);
+  expect(root, `${label}: no node at depth 0`).toBeDefined();
+  expect(nodes.length, `${label}: nothing past the root to check`).toBeGreaterThan(1);
+
+  const adjacency = new Map<number, number[]>(nodes.map(n => [n.id, []]));
+  for (const edge of edges) {
+    adjacency.get(edge.from)?.push(edge.to);
+    adjacency.get(edge.to)?.push(edge.from);
+  }
+
+  const distance = new Map<number, number>([[root!.id, 0]]);
+  const queue = [root!.id];
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of adjacency.get(queue[i]) ?? []) {
+      if (distance.has(next)) continue;
+      distance.set(next, distance.get(queue[i])! + 1);
+      queue.push(next);
+    }
+  }
+
+  for (const node of nodes) {
+    expect(distance.has(node.id), `${label}: node ${node.id} is not reachable from the root`).toBe(true);
+    expect(node.depth, `${label}: node ${node.id} depth is not its distance from the root`).toBe(distance.get(node.id));
+  }
+}
+
+/**
  * Assert that all nodes are reachable from root via edges
  * (Graph is connected)
  */
