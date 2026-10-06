@@ -138,7 +138,7 @@ function unionKinds(issue: z.core.$ZodRawIssue<z.core.$ZodIssueInvalidUnion>): s
   return kinds.length > 1 && kinds.every(kind => kind !== undefined) ? (kinds as string[]) : undefined;
 }
 
-/** A legal value of each type for the `Example:` line, which the unconverted tools' errors also carry. */
+/** A legal value of each type for the `Example:` line, which the hand-written InvalidParameterErrors also carry. */
 const EXAMPLE_VALUE: Record<string, string> = {
   string: '"..."',
   boolean: 'true',
