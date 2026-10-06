@@ -533,6 +533,19 @@ describe('startInstance', () => {
     expect(world.activated).toEqual(['com.example.editor']);
   });
 
+  it('never activates anything when the app in front at launch was LogSeq itself', async () => {
+    world.front = { pid: 1111, bundleId: 'org.logseq.instance' };
+    world.readiness = [
+      async () => {
+        world.front = { pid: 4242, bundleId: 'org.logseq.instance' };
+      },
+      async () => {},
+    ];
+    await start(world);
+
+    expect(world.activated).toEqual([]);
+  });
+
   it('leaves focus alone when the instance never takes it, or the user has moved on', async () => {
     await start(world);
     expect(world.activated).toEqual([]);
