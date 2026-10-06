@@ -274,6 +274,17 @@ export interface FrontApp {
 }
 
 /**
+ * Reads `lsappinfo info -only pid -only bundleid <asn>`, which prints one line per field:
+ * `"pid"=123` and `"CFBundleIdentifier"="com.example.app"`. Undefined when either is missing,
+ * so a change in that format turns the guard off rather than breaking `start`.
+ */
+export function parseFrontApp(info: string): FrontApp | undefined {
+  const pid = /"pid"=(\d+)/.exec(info)?.[1];
+  const bundleId = /"CFBundleIdentifier"="([^"]+)"/.exec(info)?.[1];
+  return pid && bundleId ? { pid: Number(pid), bundleId } : undefined;
+}
+
+/**
  * Keeps the instance from leaving the maintainer's focus on LogSeq. The app is launched directly
  * (see `launchSpec`), which has no "open in the background" flag, and Electron activates itself.
  * Each `tick` hands focus back to the app that was in front before the launch, but only while the
@@ -291,7 +302,10 @@ export function focusGuard(previous: FrontApp | undefined, instancePid: number, 
       if (previous === undefined || previous.pid === instancePid) return;
       try {
         const front = await deps.frontmostApp();
-        if (front?.pid === instancePid && front.bundleId !== previous.bundleId) await deps.activateApp(previous.bundleId);
+        // Only an app that is still running: `open -b` would launch one that quit during startup.
+        if (front?.pid === instancePid && front.bundleId !== previous.bundleId && deps.isAlive(previous.pid)) {
+          await deps.activateApp(previous.bundleId);
+        }
       } catch {
         // best effort
       }
@@ -338,7 +352,7 @@ export interface InstanceDeps {
   isAlive(pid: number): boolean;
   /** The frontmost app, or undefined when it can't be read. Best effort: never throws. */
   frontmostApp(): Promise<FrontApp | undefined>;
-  /** Bring the app with this bundle id to the front. Best effort: never throws. */
+  /** Bring the app with this bundle id to the front (`open -b`). Best effort: never throws. */
   activateApp(bundleId: string): Promise<void>;
   commandLine(pid: number): string | undefined;
   kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
