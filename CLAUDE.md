@@ -61,9 +61,19 @@ Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.co
 - Split anything multi-part into sub-issues linked to a parent. Record sequencing (waves, dependencies) in the parent or a comment on it. Close the parent when its sub-issues are done.
 - Sequence in waves so at most one open PR touches a given file area. Guardrails and conventions first, features next, output-wide changes last.
 - Add new issues to the board: *Backlog*, or *Ready* once the maintainer has approved the plan. When a plan changes, edit the issues (scope comments, new sub-issues, close obsolete ones).
+- **Hard ordering uses GitHub issue dependencies.** If B can't start until A merges (file overlap, needs A's code, or a migration order), mark B **blocked by** A and record why in a comment. The edges are the source of truth. A wave list in a comment can summarise the plan, but when a plan changes, update the edges too.
+  ```bash
+  gh api repos/eborden/logseq-mcp-server/issues/<A> --jq .id    # A's REST id (not its number)
+  gh api -X POST repos/eborden/logseq-mcp-server/issues/<B>/dependencies/blocked_by -F issue_id=<A's REST id>
+  gh api repos/eborden/logseq-mcp-server/issues/<B>/dependencies/blocked_by --jq 'map(.number)'    # list B's blockers
+  ```
+- **Grouping uses sub-issues.** A multi-part plan is a parent with sub-issues, as above.
+- **Priority only breaks ties.** P0/P1/P2 on the board orders items that aren't blocked. It doesn't express ordering.
 
 ### Board statuses
 Flow: **Backlog → Ready → In progress → In review → Done**. Move an item to *In progress* when work starts, to *In review* when its PR opens (add the PR to the board too), and to *Done* on merge.
+
+The board has three fields: **Status** (the flow above), **Priority** (P0-P2) and **Size**.
 
 ```bash
 gh project item-add 1 --owner eborden --url <issue-or-pr-url>
@@ -75,6 +85,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 
 ### Ready items go to subagents
 - **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, spawns a separate reviewer subagent for each PR it opens (see Code review) and updates the board.
+- Pick from *Ready* by taking unblocked items (no open blocked-by issue, see "Plans live in issues"), highest priority first. Run in parallel only items with no blocked-by edge between them and no file overlap.
 - Each subagent works in its own git worktree branched from `origin/main`.
 - Run subagents in parallel only when their files don't overlap. Give each a distinct anchor for new `DatalogQueryBuilder` methods and its own new test file.
 - Subagents open PRs and don't merge. They stage files by explicit path and never commit `node_modules`, `dist`, local settings or draft docs.
