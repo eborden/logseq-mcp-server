@@ -14,6 +14,12 @@ import {
 } from '../utils/alias-set.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 
+/** Defaults of {@link ContextOptions}, also advertised by `logseq_build_context` (#60). */
+export const DEFAULT_MAX_BLOCKS = 50;
+export const DEFAULT_MAX_RELATED_PAGES = 10;
+export const DEFAULT_MAX_REFERENCES = 20;
+export const DEFAULT_INCLUDE_TEMPORAL_CONTEXT = true;
+
 export interface ContextOptions {
   maxBlocks?: number;
   maxRelatedPages?: number;
@@ -79,10 +85,10 @@ export async function buildContextForTopic(
   options: ContextOptions = {}
 ): Promise<TopicContext> {
   const {
-    maxBlocks = 50,
-    maxRelatedPages = 10,
-    maxReferences = 20,
-    includeTemporalContext = true,
+    maxBlocks = DEFAULT_MAX_BLOCKS,
+    maxRelatedPages = DEFAULT_MAX_RELATED_PAGES,
+    maxReferences = DEFAULT_MAX_REFERENCES,
+    includeTemporalContext = DEFAULT_INCLUDE_TEMPORAL_CONTEXT,
     resolveRefs = false
   } = options;
 

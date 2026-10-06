@@ -5,6 +5,12 @@ import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tool
 import { DEFAULT_MAX_DISTANCE, RELATIONSHIP_TYPES } from './tools/search-by-relationship.js';
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_MAX_TOPICS } from './tools/get-context-for-query.js';
 import { DATE_PRESETS } from './utils/date-presets.js';
+import {
+  DEFAULT_INCLUDE_TEMPORAL_CONTEXT,
+  DEFAULT_MAX_BLOCKS,
+  DEFAULT_MAX_REFERENCES,
+  DEFAULT_MAX_RELATED_PAGES,
+} from './tools/build-context.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
 
 /**
@@ -19,12 +25,12 @@ import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
  * `resolveParamAliases` before parsing and never appear in a schema.
  */
 
-/** Description of the `format` parameter, shared with the tools not yet converted. */
-export const FORMAT_DESCRIPTION =
+/** Description of the `format` parameter (#43). */
+const FORMAT_DESCRIPTION =
   'json (default), or markdown text. Markdown has block uuids only on search hits and with compact';
 
-/** Description of the `resolve_refs` parameter (#18), shared with the tools not yet converted. */
-export const RESOLVE_REFS_DESCRIPTION =
+/** Description of the `resolve_refs` parameter (#18). */
+const RESOLVE_REFS_DESCRIPTION =
   'Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)';
 
 const OUTPUT_FORMAT_VALUES = ['json', 'markdown'] as const satisfies readonly OutputFormat[];
@@ -32,8 +38,8 @@ const OUTPUT_FORMAT_VALUES = ['json', 'markdown'] as const satisfies readonly Ou
 /** `format` (#43): absent means json, as `parseFormat` reads it. No advertised default. */
 const formatArg = z.enum(OUTPUT_FORMAT_VALUES).optional().describe(FORMAT_DESCRIPTION);
 
-/** Description of the `compact` parameter (#43), shared with the tools not yet converted. */
-export const COMPACT_DESCRIPTION = 'Block snippets and uuids, no bodies. Read one with logseq_get_block';
+/** Description of the `compact` parameter (#43). */
+const COMPACT_DESCRIPTION = 'Block snippets and uuids, no bodies. Read one with logseq_get_block';
 
 /** `compact` (#43): default false, as `parseCompact` reads it. */
 const compactArg = z.boolean().default(false).describe(COMPACT_DESCRIPTION);
@@ -142,6 +148,34 @@ export const getContextForQueryArgs = z.object({
     .number()
     .default(DEFAULT_MAX_SEARCH_RESULTS)
     .describe('Maximum number of search results for queries without explicit topics (default: 20)'),
+  format: formatArg,
+  compact: compactArg,
+});
+
+/**
+ * No clamps: the tool slices with the three caps as it always did, so a negative
+ * cap still cuts from the end (current behaviour, pinned, not endorsed).
+ * `resolve_refs` is skipped under `compact`, with a warning, by the handler.
+ */
+export const buildContextArgs = z.object({
+  topic_name: z.string().describe('Topic to build context for (page name, alias or ISO date)'),
+  max_blocks: z
+    .number()
+    .default(DEFAULT_MAX_BLOCKS)
+    .describe('Maximum number of blocks to include (default: 50)'),
+  max_related_pages: z
+    .number()
+    .default(DEFAULT_MAX_RELATED_PAGES)
+    .describe('Maximum number of related pages to include (default: 10)'),
+  max_references: z
+    .number()
+    .default(DEFAULT_MAX_REFERENCES)
+    .describe('Maximum number of reference blocks to include (default: 20)'),
+  include_temporal_context: z
+    .boolean()
+    .default(DEFAULT_INCLUDE_TEMPORAL_CONTEXT)
+    .describe('Include temporal context for journal pages (default: true)'),
+  resolve_refs: resolveRefsArg,
   format: formatArg,
   compact: compactArg,
 });

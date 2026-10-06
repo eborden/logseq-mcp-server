@@ -224,3 +224,107 @@ describe('the stub graph tells the defaults apart from neighbouring values', () 
     expect((await body('logseq_list_pages', { name_contains: 'BO' })).pages).toEqual(['Bob']);
   });
 });
+
+/** The error text of a rejected call, after checking it made no call to LogSeq. */
+async function rejection(name: string, args: Record<string, unknown>): Promise<string> {
+  const { result, apiCalls, queries } = await call(name, args);
+  expect(result.isError).toBe(true);
+  expect(apiCalls).toEqual([]);
+  expect(queries).toEqual([]);
+  return JSON.parse(result.content[0].text).error;
+}
+
+/** Each required string parameter, with the arguments of a valid call. */
+const REQUIRED: ReadonlyArray<readonly [string, string, Record<string, unknown>]> = [
+  ['logseq_build_context', 'topic_name', { topic_name: 'Alice' }],
+];
+
+describe.each(REQUIRED)('%s rejects a bad %s before calling LogSeq', (tool, required, valid) => {
+  it('reports it missing, also when sent as null', async () => {
+    const { [required]: _dropped, ...rest } = valid;
+    for (const args of [rest, { ...rest, [required]: null }]) {
+      const error = await rejection(tool, args);
+      expect(error).toContain(`Invalid parameter '${required}': missing`);
+      expect(error).toContain('a string (required)');
+      expect(error).toContain(`Example: ${required}: "..."`);
+    }
+  });
+
+  it.each([
+    [['alice'], 'an array'],
+    [true, 'a boolean'],
+    [5, 'a number'],
+    [NaN, 'NaN'],
+    [{ name: 'alice' }, 'an object'],
+  ])('rejects %j', async (value, kind) => {
+    expect(await rejection(tool, { ...valid, [required]: value })).toMatch(
+      new RegExp(`'${required}'.*a string, not ${kind}`, 's')
+    );
+  });
+});
+
+/** Optional parameters of the wrong type: [tool, valid arguments, parameter, value, expected error]. */
+const CONTEXT = { topic_name: 'Alice' };
+const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, string, unknown, RegExp]> = [
+  ['logseq_build_context', CONTEXT, 'max_blocks', '5', /'max_blocks': "5".*a number, not a string.*Example: max_blocks: 5/s],
+  ['logseq_build_context', CONTEXT, 'max_blocks', NaN, /'max_blocks': NaN.*a number, not NaN/s],
+  ['logseq_build_context', CONTEXT, 'max_blocks', Infinity, /'max_blocks': Infinity.*a number, not Infinity/s],
+  ['logseq_build_context', CONTEXT, 'max_blocks', true, /'max_blocks': true.*a number, not a boolean/s],
+  ['logseq_build_context', CONTEXT, 'max_related_pages', '10', /'max_related_pages': "10".*a number, not a string/s],
+  ['logseq_build_context', CONTEXT, 'max_related_pages', NaN, /'max_related_pages': NaN.*a number, not NaN/s],
+  ['logseq_build_context', CONTEXT, 'max_references', '20', /'max_references': "20".*a number, not a string/s],
+  ['logseq_build_context', CONTEXT, 'max_references', -Infinity, /'max_references': -Infinity/],
+  ['logseq_build_context', CONTEXT, 'include_temporal_context', 'no', /'include_temporal_context': "no".*true or false, not a string/s],
+  ['logseq_build_context', CONTEXT, 'include_temporal_context', 0, /'include_temporal_context': 0.*true or false, not a number/s],
+  ['logseq_build_context', CONTEXT, 'resolve_refs', 'yes', /'resolve_refs': "yes".*true or false, not a string/s],
+  ['logseq_build_context', CONTEXT, 'format', 'html', /'format': "html".*one of "json", "markdown".*Example: format: "markdown"/s],
+  ['logseq_build_context', CONTEXT, 'format', 0, /'format': 0.*one of/s],
+  ['logseq_build_context', CONTEXT, 'compact', 'yes', /'compact': "yes".*true or false, not a string.*Example: compact: true/s],
+  ['logseq_build_context', CONTEXT, 'compact', 1, /'compact': 1.*true or false, not a number/s],
+];
+
+describe('wrong-typed options are rejected before calling LogSeq', () => {
+  it.each(BAD_OPTIONS)('%s %j: %s = %j', async (tool, valid, param, value, message) => {
+    expect(await rejection(tool, { ...valid, [param]: value })).toMatch(message);
+  });
+});
+
+describe('aliases still fold in before parsing', () => {
+  it.each([['logseq_build_context', 'topic_name', 'page_name']])(
+    '%s: %s takes the %s alias, and a malformed alias value is rejected like the canonical one',
+    async (tool, canonical, alias) => {
+      await expectSame(tool, { [alias]: 'Alice' }, { [canonical]: 'Alice' });
+      expect(await rejection(tool, { [alias]: 5 })).toMatch(new RegExp(`'${canonical}': 5.*a string, not a number`, 's'));
+    }
+  );
+});
+
+describe('null now reads as absent where it used to be a value (#60)', () => {
+  it.each([
+    ['max_blocks', 'directBlocks'],
+    ['max_related_pages', 'relatedPages'],
+    ['max_references', 'references'],
+  ])('build_context %s: null uses the default (it used to keep none of %s)', async (param, field) => {
+    await expectSame('logseq_build_context', { ...CONTEXT, [param]: null }, CONTEXT);
+    expect((await body('logseq_build_context', { ...CONTEXT, [param]: null }))[field]).toHaveLength(2);
+  });
+
+  it('build_context include_temporal_context: null uses the default true (it used to drop the temporal context)', async () => {
+    await expectSame('logseq_build_context', { ...CONTEXT, include_temporal_context: null }, CONTEXT);
+    expect((await body('logseq_build_context', { ...CONTEXT, include_temporal_context: null })).temporalContext).toEqual({
+      isJournal: false,
+    });
+  });
+});
+
+describe('numbers that pass the parser keep their old meaning', () => {
+  it('build_context: a negative max_blocks still slices from the end (current, not endorsed)', async () => {
+    const capped = await body('logseq_build_context', { ...CONTEXT, max_blocks: -1 });
+    expect(capped.directBlocks).toHaveLength(1);
+    expect(capped.hasMore).toBe(true);
+  });
+
+  it('build_context: a fractional max_blocks is cut down to a whole number of blocks', async () => {
+    expect((await body('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).directBlocks).toHaveLength(1);
+  });
+});

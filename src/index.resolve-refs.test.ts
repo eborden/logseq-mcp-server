@@ -12,7 +12,11 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
-vi.mock('./tools/build-context.js', () => ({ buildContextForTopic: mocks.buildContextForTopic }));
+// Keep the module's constants: the argument schemas take their defaults from them (#60)
+vi.mock('./tools/build-context.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  buildContextForTopic: mocks.buildContextForTopic,
+}));
 vi.mock('./tools/query-by-date-range.js', () => ({ queryJournals: mocks.queryJournals }));
 
 const WITH_RESOLVE_REFS = [
@@ -47,11 +51,11 @@ describe('resolve_refs through MCP', () => {
     }
   });
 
-  // Tools whose arguments are parsed with zod (#60) reject a non-boolean instead
-  // of reading it as off
+  // Arguments are parsed with zod (#60): a non-boolean is rejected instead of read as off
   it.each([
     ['logseq_get_page', { page_name: 'p' }, () => mocks.getPage, (c: any[]) => c[3]],
     ['logseq_get_block', { block_uuid: 'u' }, () => mocks.getBlock, (c: any[]) => c[3]],
+    ['logseq_build_context', { topic_name: 't' }, () => mocks.buildContextForTopic, (c: any[]) => c[2]],
     ['logseq_query_by_date_range', { last_n: 1 }, () => mocks.queryJournals, (c: any[]) => c[1]],
   ])('%s passes resolve_refs on, off by default, and rejects a non-boolean', async (name, args, getMock, pick) => {
     const rejected = await withClient(async mcp => {
@@ -65,19 +69,5 @@ describe('resolve_refs through MCP', () => {
     expect(pick(calls[1]).resolveRefs).toBe(true);
     expect(rejected.isError).toBe(true);
     expect(JSON.parse(rejected.content[0].text).error).toContain("Invalid parameter 'resolve_refs'");
-  });
-
-  it.each([
-    ['logseq_build_context', { topic_name: 't' }, () => mocks.buildContextForTopic, (c: any[]) => c[2]],
-  ])('%s passes resolve_refs on, and off by default', async (name, args, getMock, pick) => {
-    await withClient(async mcp => {
-      await mcp.callTool({ name, arguments: args });
-      await mcp.callTool({ name, arguments: { ...args, resolve_refs: true } });
-      await mcp.callTool({ name, arguments: { ...args, resolve_refs: 'yes' } });
-    });
-    const calls = (getMock() as any).mock.calls;
-    expect(pick(calls[0]).resolveRefs).toBe(false);
-    expect(pick(calls[1]).resolveRefs).toBe(true);
-    expect(pick(calls[2]).resolveRefs).toBe(false); // only a real boolean true turns it on
   });
 });

@@ -312,6 +312,30 @@ describe('logseq_build_context hand-off', () => {
   const context = (args: Record<string, unknown>) =>
     handedOff('logseq_build_context', { topic_name: 'Alice', ...args }, mocks.buildContextForTopic);
 
+  it('defaults come from the schema: the same caps and temporal context the tool applies (#60)', async () => {
+    expect(await context({})).toEqual([
+      'Alice',
+      { maxBlocks: 50, maxRelatedPages: 10, maxReferences: 20, includeTemporalContext: true, resolveRefs: false },
+    ]);
+  });
+
+  it('reads null options as absent (#60): null caps used to reach the tool as null, which keeps nothing', async () => {
+    const [, options] = await context({
+      max_blocks: null,
+      max_related_pages: null,
+      max_references: null,
+      include_temporal_context: null,
+      resolve_refs: null,
+    });
+    expect(options).toEqual({
+      maxBlocks: 50,
+      maxRelatedPages: 10,
+      maxReferences: 20,
+      includeTemporalContext: true,
+      resolveRefs: false,
+    });
+  });
+
   it.each([
     [{ max_blocks: 5 }, { maxBlocks: 5 }],
     [{ max_blocks: 0 }, { maxBlocks: 0 }],
