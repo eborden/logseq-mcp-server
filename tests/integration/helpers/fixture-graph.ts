@@ -33,12 +33,14 @@ export class FixtureGraphError extends Error {
 /**
  * `fixture-version` from a pulled page's properties. Datalog pulls key properties as stored
  * (`fixture-version`) and the Editor API camelCases them (`fixtureVersion`); LogSeq may parse
- * the value as a number or keep it as text. Returns undefined when it is missing or not an integer.
+ * the value as a number, keep it as text, or store it as a one-element set (an array in the
+ * result). Returns undefined when it is missing or not an integer.
  */
 function readFixtureVersion(properties: unknown): number | undefined {
   if (!properties || typeof properties !== 'object') return undefined;
   const props = properties as Record<string, unknown>;
-  const raw = props['fixture-version'] ?? props['fixtureVersion'];
+  const stored = props['fixture-version'] ?? props['fixtureVersion'];
+  const raw = Array.isArray(stored) && stored.length === 1 ? stored[0] : stored;
   if (typeof raw === 'number' && Number.isInteger(raw)) return raw;
   if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) return Number(raw.trim());
   return undefined;
