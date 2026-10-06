@@ -49,3 +49,97 @@ jobs:
       # which runs both suites.
       - name: Unit tests
         run: npx vitest run src
+
+  # Mutation testing on the unit suite (ADR-0026, #204). Informational: it fails nothing, so a
+  # red result here never blocks a PR. No baseline and no gate yet (#205).
+  #
+  # Node 24 only: Node 22 and 24 gave the same scores, and the unit-test job above keeps its
+  # matrix (ADR-0022). The 10-minute timeout is the real bound on a PR.
+  #
+  # A PR job restores Stryker's incremental file and never saves it. Only a push to main saves
+  # (under its own SHA), and so does the weekly job in mutation-weekly.yml, so a PR can't fill
+  # or poison the cache.
+  #
+  # Stryker's incremental mode can't see an edit to the left-out sources, the test helpers,
+  # snapshots, fixtures, the lockfile or the configs. When a PR changes one (or there is no
+  # cache), scripts/mutation-ci.ts takes the cache-miss path: it mutates only the changed files,
+  # the files whose baseline entry changed and the files the changed tests import, and never
+  # starts a cold full run. After such a change lands on main the cache stays old until the weekly
+  # run, which resets it (run mutation-weekly.yml by hand to do it sooner).
+  mutation:
+    name: Mutation testing (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      # Full history: the plan diffs against the commit the restored cache was saved from.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # Restore only. The key names the commit the PR is based on, and restore-keys falls back to
+      # the newest file saved from main.
+      - name: Restore the incremental file
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: reports/mutation/stryker-incremental.json
+          key: mutation-incremental-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: |
+            mutation-incremental-
+
+      - name: Plan the run
+        id: plan
+        env:
+          MATCHED_KEY: ${{ steps.cache.outputs.cache-matched-key }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$MATCHED_KEY" ]; then
+            node scripts/mutation-ci.ts plan --cache hit --since "${MATCHED_KEY#mutation-incremental-}" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/mutation-ci.ts plan --cache miss --since "$BASE_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mutation tests, whole scope (incremental)
+        if: steps.plan.outputs.mode == 'incremental'
+        run: npx stryker run
+
+      # The cache-miss path. The restored file, if any, is dropped so no result from main is reused.
+      - name: Mutation tests, changed files only
+        if: steps.plan.outputs.mode == 'targeted'
+        env:
+          MUTATE: ${{ steps.plan.outputs.mutate }}
+        run: |
+          rm -f reports/mutation/stryker-incremental.json
+          npx stryker run --mutate "$MUTATE"
+
+      - name: Job summary
+        if: always()
+        run: node scripts/mutation-ci.ts summary >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-report
+          path: |
+            reports/mutation/mutation.json
+            reports/mutation/plan.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Only a push to main saves, and only a whole-scope incremental run: a cache-miss run holds
+      # a few files' results and would replace the good file.
+      - name: Save the incremental file
+        if: github.event_name == 'push' && steps.plan.outputs.mode == 'incremental'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: reports/mutation/stryker-incremental.json
+          key: mutation-incremental-${{ github.sha }}
