@@ -248,9 +248,9 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Get Context for Query",
     },
-    "description": "Context for a natural-language question. Takes [[page]] and #tag topics from the query, or falls back to keyword search, and builds context for each.
+    "description": "Context for a natural-language question. Takes [[page]] and #tag topics from the query, or falls back to keyword search (max 100 hits), and builds context for each.
 
-**Can't find:** meaning. Topics come from explicit links, tags or literal words, so put page names in [[brackets]].
+**Can't find:** meaning, or over 100 keyword hits (use specific words). Topics come from explicit links, tags or literal words, so put page names in [[brackets]].
 **Alternatives:** logseq_build_context for one known topic.",
     "inputSchema": {
       "properties": {
@@ -269,7 +269,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         },
         "max_search_results": {
           "default": 20,
-          "description": "Maximum number of search results for queries without explicit topics (default: 20)",
+          "description": "Maximum number of search results for queries without explicit topics (default: 20, max: 100)",
           "type": "number",
         },
         "max_topics": {
