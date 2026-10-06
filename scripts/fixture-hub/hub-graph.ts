@@ -1,6 +1,6 @@
 /**
  * The hub fixture (#89): one page with 120 neighbours, built from a few constants so the files and
- * the counts in tests/fixtures/graph/README.md cannot drift apart. Everything is made up.
+ * the counts in tests/fixtures/README.md cannot drift apart. Everything is made up.
  *
  * `buildHubFixture()` is pure and deterministic. `scripts/generate-hub-fixture.ts` writes its
  * output into tests/fixtures/graph, and src/fixture-hub.test.ts fails if the committed files

@@ -63,7 +63,7 @@ To set it up:
 4. **Put the token in `~/.logseq-mcp/config.json`** (step 5 above), if it isn't there already.
 5. **Check it.** Search for the page `logseq-mcp-fixture-sentinel`. It should exist and show `fixture-version: 1`. If it is missing, re-index the graph (graph menu → **Re-index**).
 
-Opening the folder makes LogSeq write a few files of its own (`logseq/custom.css`, `logseq/bak/`, `pages/contents.md`, today's journal and the like). The repo `.gitignore` ignores them, and `tests/fixtures/graph/README.md` lists them. Fixture journals are dated 2025 or earlier so that today's journal is never committed by mistake.
+Opening the folder makes LogSeq write a few files of its own (`logseq/custom.css`, `logseq/bak/`, `pages/contents.md`, today's journal and the like). The repo `.gitignore` ignores them, and `tests/fixtures/README.md` lists them. Fixture journals are dated 2025 or earlier so that today's journal is never committed by mistake.
 
 **When the guard fails** (`FixtureGraphError`):
 - "not serving the fixture graph": LogSeq has another graph open. Switch to the fixture.
