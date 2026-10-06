@@ -1,23 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
-import { LogseqClient } from '../../src/client.js';
 import { createServer } from '../../src/index.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * Slim output is the default through the real MCP server (#42): the same call
  * with and without `slim_results: false` returns the same blocks, the slim form
- * is smaller, and every content block is minified JSON.
- *
- * Needs LogSeq running; see tests/integration/setup.md.
+ * is smaller, and every content block is minified JSON. Against the fixture graph:
+ * "importer" is in 11 blocks, and January 2025 holds seven journals.
  */
 describe('slim_results default (#42)', () => {
   let mcp: Client;
 
   beforeAll(async () => {
-    const config = await loadConfig(resolveConfigPath());
-    const server = createServer(new LogseqClient(config));
+    const { client } = await connectFixture();
+    const server = createServer(client);
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     mcp = new Client({ name: 'slim-default-test', version: '1.0.0' }, { capabilities: {} });
     await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
@@ -37,11 +35,12 @@ describe('slim_results default (#42)', () => {
   }
 
   it('search_blocks: default is slim, slim_results: false is full, same blocks, slim is smaller', async () => {
-    const args = { query: 'a', limit: 20 };
+    const args = { query: 'importer', limit: 20 };
     const slim = await call('logseq_search_blocks', args);
     const full = await call('logseq_search_blocks', { ...args, slim_results: false });
 
-    expect(slim.data.length, 'the search should match blocks in any graph; see setup.md').toBeGreaterThan(0);
+    expect(slim.data).toHaveLength(11);
+    expect(slim.data.every((b: any) => typeof b.pageName === 'string' && b.pageName !== '')).toBe(true);
     expect(slim.data.map((b: any) => b.uuid)).toEqual(full.data.map((b: any) => b.uuid));
     for (const block of slim.data) {
       expect(block).not.toHaveProperty('id');
@@ -56,10 +55,14 @@ describe('slim_results default (#42)', () => {
   });
 
   it('query_by_date_range: default is slim, entries name the page and blocks do not repeat it', async () => {
-    const slim = await call('logseq_query_by_date_range', { last_n: 7 });
-    const full = await call('logseq_query_by_date_range', { last_n: 7, slim_results: false });
+    const range = { start_date: 20250101, end_date: 20250131 };
+    const slim = await call('logseq_query_by_date_range', range);
+    const full = await call('logseq_query_by_date_range', { ...range, slim_results: false });
 
-    expect(slim.data.entries.length, 'the graph needs journal pages; see setup.md').toBeGreaterThan(0);
+    expect(slim.data.entries.map((e: any) => e.pageName)).toEqual([
+      'Jan 2nd, 2025', 'Jan 6th, 2025', 'Jan 7th, 2025', 'Jan 8th, 2025', 'Jan 10th, 2025', 'Jan 13th, 2025',
+      'Jan 15th, 2025',
+    ]);
     expect(slim.data.entries.map((e: any) => e.date)).toEqual(full.data.entries.map((e: any) => e.date));
     const walk = (blocks: any[]) => {
       for (const block of blocks) {
