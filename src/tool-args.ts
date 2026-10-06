@@ -11,6 +11,7 @@ import {
   DEFAULT_MAX_REFERENCES,
   DEFAULT_MAX_RELATED_PAGES,
 } from './tools/build-context.js';
+import { GROUP_BY_PERIODS } from './tools/get-concept-evolution.js';
 import { DEFAULT_TOP_CONCEPTS_LIMIT } from './utils/top-concepts.js';
 
 /**
@@ -202,4 +203,15 @@ export const queryByDateRangeArgs = z.object({
     .default(DEFAULT_TOP_CONCEPTS_LIMIT)
     .describe('Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it'),
   resolve_refs: resolveRefsArg,
+});
+
+/**
+ * Types only. The tool does no range checks on the dates: 0 or an absent date is
+ * no bound, and any other number is compared with each block's YYYYMMDD day.
+ */
+export const getConceptEvolutionArgs = z.object({
+  concept_name: z.string().describe('Concept to track (page name, alias or ISO date)'),
+  start_date: z.number().optional().describe('Optional start date in YYYYMMDD format'),
+  end_date: z.number().optional().describe('Optional end date in YYYYMMDD format'),
+  group_by: z.enum(GROUP_BY_PERIODS).optional().describe('Optional grouping period'),
 });

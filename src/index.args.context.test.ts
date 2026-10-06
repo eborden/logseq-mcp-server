@@ -237,6 +237,7 @@ async function rejection(name: string, args: Record<string, unknown>): Promise<s
 /** Each required string parameter, with the arguments of a valid call. */
 const REQUIRED: ReadonlyArray<readonly [string, string, Record<string, unknown>]> = [
   ['logseq_build_context', 'topic_name', { topic_name: 'Alice' }],
+  ['logseq_get_concept_evolution', 'concept_name', { concept_name: 'Alice' }],
 ];
 
 describe.each(REQUIRED)('%s rejects a bad %s before calling LogSeq', (tool, required, valid) => {
@@ -265,6 +266,7 @@ describe.each(REQUIRED)('%s rejects a bad %s before calling LogSeq', (tool, requ
 
 /** Optional parameters of the wrong type: [tool, valid arguments, parameter, value, expected error]. */
 const CONTEXT = { topic_name: 'Alice' };
+const EVOLUTION = { concept_name: 'Alice' };
 const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, string, unknown, RegExp]> = [
   ['logseq_build_context', CONTEXT, 'max_blocks', '5', /'max_blocks': "5".*a number, not a string.*Example: max_blocks: 5/s],
   ['logseq_build_context', CONTEXT, 'max_blocks', NaN, /'max_blocks': NaN.*a number, not NaN/s],
@@ -281,6 +283,15 @@ const BAD_OPTIONS: ReadonlyArray<readonly [string, Record<string, unknown>, stri
   ['logseq_build_context', CONTEXT, 'format', 0, /'format': 0.*one of/s],
   ['logseq_build_context', CONTEXT, 'compact', 'yes', /'compact': "yes".*true or false, not a string.*Example: compact: true/s],
   ['logseq_build_context', CONTEXT, 'compact', 1, /'compact': 1.*true or false, not a number/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'start_date', '20250101', /'start_date': "20250101".*a number, not a string/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'start_date', NaN, /'start_date': NaN.*a number, not NaN/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'start_date', true, /'start_date': true.*a number, not a boolean/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'end_date', '20250131', /'end_date': "20250131".*a number, not a string/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'end_date', Infinity, /'end_date': Infinity.*a number, not Infinity/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'group_by', 'year', /'group_by': "year".*one of "day", "week", "month".*Example: group_by: "month"/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'group_by', 'Month', /'group_by': "Month".*one of/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'group_by', '', /'group_by': "".*one of/s],
+  ['logseq_get_concept_evolution', EVOLUTION, 'group_by', 1, /'group_by': 1.*one of/s],
 ];
 
 describe('wrong-typed options are rejected before calling LogSeq', () => {
@@ -290,7 +301,10 @@ describe('wrong-typed options are rejected before calling LogSeq', () => {
 });
 
 describe('aliases still fold in before parsing', () => {
-  it.each([['logseq_build_context', 'topic_name', 'page_name']])(
+  it.each([
+    ['logseq_build_context', 'topic_name', 'page_name'],
+    ['logseq_get_concept_evolution', 'concept_name', 'name'],
+  ])(
     '%s: %s takes the %s alias, and a malformed alias value is rejected like the canonical one',
     async (tool, canonical, alias) => {
       await expectSame(tool, { [alias]: 'Alice' }, { [canonical]: 'Alice' });
@@ -326,5 +340,14 @@ describe('numbers that pass the parser keep their old meaning', () => {
 
   it('build_context: a fractional max_blocks is cut down to a whole number of blocks', async () => {
     expect((await body('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).directBlocks).toHaveLength(1);
+  });
+
+  it('get_concept_evolution: a start_date of 0 is still no bound', async () => {
+    await expectSame('logseq_get_concept_evolution', { ...EVOLUTION, start_date: 0 }, EVOLUTION);
+  });
+
+  it('get_concept_evolution: a date that is not YYYYMMDD is still compared as given', async () => {
+    expect((await body('logseq_get_concept_evolution', { ...EVOLUTION, start_date: 2025 })).summary.totalMentions).toBe(2);
+    expect((await body('logseq_get_concept_evolution', { ...EVOLUTION, end_date: 2025 })).summary.totalMentions).toBe(0);
   });
 });

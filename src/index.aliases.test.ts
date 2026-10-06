@@ -28,7 +28,10 @@ vi.mock('./tools/get-concept-network.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   getConceptNetwork: mocks.getConceptNetwork,
 }));
-vi.mock('./tools/get-concept-evolution.js', () => ({ getConceptEvolution: mocks.getConceptEvolution }));
+vi.mock('./tools/get-concept-evolution.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getConceptEvolution: mocks.getConceptEvolution,
+}));
 
 /** The tool function each aliased MCP tool calls, and which argument index holds the aliased value. */
 const TARGETS: Record<string, { fn: ReturnType<typeof vi.fn>; argIndex: number }> = {
