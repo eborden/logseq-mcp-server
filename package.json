@@ -21,11 +21,10 @@
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
-    "test": "vitest run",
+    "test": "vitest run && npm run test:integration",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:integration:fixture": "vitest run --config vitest.fixture.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "keywords": [
     "mcp",

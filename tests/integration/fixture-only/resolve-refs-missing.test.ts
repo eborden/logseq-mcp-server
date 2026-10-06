@@ -1,23 +1,16 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../../src/config.js';
 import { LogseqClient } from '../../../src/client.js';
 import { DatalogQueryBuilder } from '../../../src/datalog/queries.js';
 import { getBlock } from '../../../src/tools/get-block.js';
 import { getPage } from '../../../src/tools/get-page.js';
 import { ResolvedRef } from '../../../src/types.js';
-import { requireFixtureGraph } from '../helpers/fixture-graph.js';
+import { connectFixture } from '../helpers/fixture-client.js';
 
 /**
  * resolve_refs on refs and embeds of blocks that do not exist (#138), against the fixture graph.
  *
- * Fixture-only: `npm run test:integration` still runs against the maintainer's graph until #90,
- * so this folder is left out of it and runs on its own, against a LogSeq serving
- * tests/fixtures/graph (`requireFixtureGraph` fails loud on any other graph):
- *
- *   npx tsx scripts/logseq-instance.ts start
- *   LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration:fixture
- *   npx tsx scripts/logseq-instance.ts stop
+ * Part of `npm run test:integration`, which runs every suite against tests/fixtures/graph (#90).
+ * The file stays in fixture-only/ because BR-0007 cites this path.
  *
  * Read-only. The page `block refs` (tests/fixtures/graph/pages/block refs.md) holds a ref to
  * `...00000000dead` and an embed of `...00000000beef`, which no block has. LogSeq 0.10 makes a
@@ -50,14 +43,7 @@ describe('resolve_refs on missing targets in the fixture graph (#138)', () => {
   let embedBlock: TreeBlock;
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(`Config file not found at ${configPath}. See tests/integration/setup.md.`);
-    }
-    client = new LogseqClient(await loadConfig(configPath));
-    await requireFixtureGraph(client);
+    ({ client } = await connectFixture());
 
     const page = await getPage(client, PAGE, true, { resolveRefs: true });
     blocks = flatten((page.children ?? []) as unknown as TreeBlock[]);
