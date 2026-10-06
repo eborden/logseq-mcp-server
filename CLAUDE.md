@@ -56,6 +56,21 @@ Adding an ADR or rule, or any of these changes, needs the maintainer's OK before
 
 Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.com/users/eborden/projects/1) project board.
 
+### Issue and PR templates
+Templates live in `.github/` and are the source of truth for what an issue or PR body contains. Blank issues are off. File with `gh issue create --template <file>` (without `--body`) or fill the body to match.
+
+| Kind | Template | Label | Use for |
+|---|---|---|---|
+| Task | [`task.md`](.github/ISSUE_TEMPLATE/task.md) | `task` | A bounded change a subagent implements. The issue is its whole brief: context, scope, out of scope, files, constraints, acceptance, verification, open questions, Definition of Ready |
+| Bug | [`bug.md`](.github/ISSUE_TEMPLATE/bug.md) | `bug` | Misbehaviour, reproduced on the fixture graph, never the personal one |
+| Plan | [`plan.md`](.github/ISSUE_TEMPLATE/plan.md) | `plan` | A parent: goal, decisions, non-goals, current state, exit criteria |
+| Proposal | [`proposal.md`](.github/ISSUE_TEMPLATE/proposal.md) | `proposal` | A new or changed ADR or business rule. Merging its PR needs the maintainer's OK |
+| Pull request | [`pull_request_template.md`](.github/pull_request_template.md) | | The handoff from [`docs/architecture-foundations.md`](docs/architecture-foundations.md) section 6, plus the author-attested verification and the conditional rows |
+
+- Sub-issues and "blocked by" edges are set in GitHub (next section), never listed in the issue body.
+- A subagent that finds a Ready issue ambiguous, or its premise wrong, comments on the issue instead of starting (the "Open questions" section; foundations section 0).
+- Subagents pass `--body-file` filled from the template, since `gh` skips templates when given `--body`. A guard test (`src/github-templates.test.ts`) keeps the templates and these links in step.
+
 ### Plans live in issues
 - Write a plan as GitHub issues, not as a file in `docs/plans/` and not only in the conversation. (Plans aren't kept in `docs/`. Git history holds the old ones.)
 - Split anything multi-part into sub-issues linked to a parent. Record sequencing (waves, dependencies) in the parent or a comment on it. Close the parent when its sub-issues are done.
@@ -90,7 +105,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 - Subagents open PRs and don't merge. They stage files by explicit path and never commit `node_modules`, `dist`, local settings or draft docs.
 
 ### PR conventions
-- Atomic commits, `Closes #N`, a design section, a test plan with checkboxes, and approximate measurements (no graph data, see Privacy).
+- Fill in `.github/pull_request_template.md`: atomic commits, `Closes #N`, a design section, a test plan with checkboxes, and approximate measurements (no graph data, see Privacy). CI, a clean merge against `main`, the review gate and the maintainer's OK stay with whoever merges (below).
 - A PR that edits a business rule adds a row to that rule's Changelog table citing the PR. The format check can't tell whether a row is new, so the reviewer checks it. A new rule also adds its Index row and an `Introduced.` Changelog row. A retired rule's Index summary starts with `Retired.`, and its Changelog row reads `Retired.`.
 - A PR that adds an ADR opens it as `proposed` and edits the status to `accepted` in the same PR before merge.
 - Rebase-merge so the atomic commits stay on `main`. Delete the branch on merge.
