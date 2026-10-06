@@ -34,10 +34,16 @@ Note the scope you were given. A block ref means that block and its descendants,
 ### Step 2: Discover the Graph's Vocabulary
 
 ```
-logseq_list_pages()
+logseq_list_pages(limit=1000)
 ```
 
-One call gives every page title, which is the candidate set. Do not guess at page names, and do not assume a concept has a page because it plainly deserves one. This listing is also what tells you a term has zero candidates, which is a skip and not a question.
+Every page title together is the candidate set, and on a large graph that takes more than one call. Read the names from each result as it arrives and keep them in context. Don't save a result to a file.
+
+- **`hasMore: true`:** call again with the `offset` the `pages_truncated` warning names, and add the names to the ones you have. A server that doesn't page the list sends no `hasMore`, so its one call is the whole listing.
+- **`pages_unavailable` warning:** LogSeq sent no page list, so `pages: []` means the list is unknown, not that the graph is empty. Stop the pass and tell the requester. Don't classify against an empty or partial listing.
+- **`total` changed between calls:** pages were added or removed while you paged, and the offsets no longer line up. Drop the names you have and page again from offset 0, once. If `total` changes during that second pass too, finish the second pass and use its names. Say in the report that the graph changed while you read it, so the listing may be missing a page.
+
+Do not guess at page names, and do not assume a concept has a page because it plainly deserves one. This listing is also what tells you a term has zero candidates, which is a skip and not a question. A cut listing turns a term that has a page into one that seems to have none, which is why the steps above insist on every page.
 
 **Do not substitute a directory listing for this call.** A referenced page with no content has no file, so `pages/` is a strict subset of the graph's pages and often a small one.
 
