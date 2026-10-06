@@ -12,7 +12,18 @@ const SRC_DIR = fileURLToPath(new URL('.', import.meta.url));
 /** The client itself, and the helpers that wrap it. */
 const ALLOWED = new Set(['client.ts', join('utils', 'parse-response.ts')]);
 
-const DIRECT_CALL = /\.\s*(?:callAPI|executeDatalogQuery)\s*(?:<[^>]*>)?\s*\(/;
+/**
+ * The two client methods, reached any way a file can reach them: `client.callAPI(...)`, a call whose
+ * `(` or `.` sits on a later line (`client\n  .callAPI<\n    T\n  >(...)`), `.bind`, `client['callAPI']`
+ * and `const { callAPI } = client`. The scan is over the whole file text, comments blanked, because a
+ * formatter wraps a long generic across lines.
+ */
+const CLIENT_METHOD = '(?:callAPI|executeDatalogQuery)';
+const BYPASS = [
+  new RegExp(`\\.\\s*${CLIENT_METHOD}\\b`), // client.callAPI, client\n.callAPI, client.callAPI.bind, client?.callAPI
+  new RegExp(`\\[\\s*['"\`]${CLIENT_METHOD}['"\`]\\s*\\]`), // client['callAPI']
+  new RegExp(`\\{[^{}]*\\b${CLIENT_METHOD}\\b[^{}]*\\}\\s*=`), // const { callAPI } = client
+];
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
@@ -22,19 +33,28 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/** Lines that call the client, not counting comments. */
+/** `source` with block and line comments blanked (newlines kept, so line numbers stay right). */
+function withoutComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, match => match.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:'"`])\/\/[^\n]*/g, (_match, before: string) => before);
+}
+
+/** The lines where the source reaches the client's methods directly. */
 function directCalls(source: string): number[] {
-  const hits: number[] = [];
-  source.split('\n').forEach((line, i) => {
-    const code = line.trim();
-    if (code.startsWith('*') || code.startsWith('//') || code.startsWith('/*')) return;
-    if (DIRECT_CALL.test(code.replace(/\/\/.*$/, ''))) hits.push(i + 1);
-  });
-  return hits;
+  const code = withoutComments(source);
+  const lines = new Set<number>();
+  for (const pattern of BYPASS) {
+    for (const match of code.matchAll(new RegExp(pattern.source, 'g'))) {
+      const at = match.index! + match[0].search(/\S/);
+      lines.add(code.slice(0, at).split('\n').length);
+    }
+  }
+  return [...lines].sort((a, b) => a - b);
 }
 
 describe('LogSeq responses are read through the schemas (#202)', () => {
-  it('no tool or utility calls client.callAPI or client.executeDatalogQuery directly', () => {
+  it('no tool or utility reaches client.callAPI or client.executeDatalogQuery directly', () => {
     const offenders = sourceFiles(SRC_DIR)
       .filter(path => !ALLOWED.has(relative(SRC_DIR, path)))
       .flatMap(path => directCalls(readFileSync(path, 'utf8')).map(line => `${relative(SRC_DIR, path)}:${line}`));
@@ -45,6 +65,22 @@ describe('LogSeq responses are read through the schemas (#202)', () => {
   it('notices a direct call, with or without a type argument', () => {
     expect(directCalls("const x = await client.callAPI<PageEntity | null>('m', []);")).toEqual([1]);
     expect(directCalls('rows = await this.client.executeDatalogQuery(query, ...inputs);')).toEqual([1]);
-    expect(directCalls(' * `client.callAPI(method)` is what this wraps\n// client.callAPI(x)')).toEqual([]);
+  });
+
+  it('notices a call wrapped across lines, the way a formatter wraps a long generic', () => {
+    expect(directCalls('const x = await client.callAPI<\n  Array<[PageEntity, BlockEntity[]]> | null\n>(\n  method\n);')).toEqual([1]);
+    expect(directCalls('const x = await client\n  .executeDatalogQuery<\n    Row[]\n  >(query);')).toEqual([2]);
+    expect(directCalls('const x = await client?.\n  callAPI(method);')).toEqual([1]);
+  });
+
+  it('notices a reference that is not a call: bind, an index, a destructuring', () => {
+    expect(directCalls('const call = client.callAPI.bind(client);')).toEqual([1]);
+    expect(directCalls("await client['callAPI'](method);")).toEqual([1]);
+    expect(directCalls('const {\n  callAPI,\n  other\n} = client;')).toEqual([1]);
+  });
+
+  it('ignores a mention in a comment, and says which line a hit is on', () => {
+    expect(directCalls('/**\n * `client.callAPI(method)` is what this wraps\n */\n// client.callAPI(x)\n/* client\n .callAPI() */')).toEqual([]);
+    expect(directCalls('const a = 1;\n\nawait client.callAPI(m);')).toEqual([3]);
   });
 });
