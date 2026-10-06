@@ -17,7 +17,7 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 ### 2. Discover Vocabulary Before Guessing
 
 If you don't know what pages exist in the user's graph:
-→ **Call `logseq_list_pages()` FIRST** before searching
+→ **Call `logseq_list_pages(limit=1000)` FIRST** before searching. While `hasMore` is true, call again with the `offset` the warning names. With a term in mind, `name_contains` is much cheaper
 → Review page names to understand the vocabulary
 → Then search using terms that actually exist
 
@@ -62,7 +62,7 @@ Only add follow-up queries if `build_context` returns insufficient results.
 ```
 Do you know what pages exist in the graph?
   │
-  ├─ NO → logseq_list_pages() first
+  ├─ NO → logseq_list_pages(limit=1000) first (follow offset while hasMore)
   │        → Then continue with search using known vocabulary
   │
   └─ YES → [Continue below]
