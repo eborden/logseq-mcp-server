@@ -16,7 +16,7 @@ import { requireFixtureGraph } from '../helpers/fixture-graph.js';
  *   LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration:fixture
  *   npx tsx scripts/logseq-instance.ts stop
  *
- * Read-only. The pages it relies on (tests/fixtures/graph/README.md, "Page resolution and
+ * Read-only. The pages it relies on (tests/fixtures/README.md, "Page resolution and
  * aliases"): `project atlas` declares the alias `atlas`, whose stub has no file; `project
  * borealis` and `project cascade` both declare `roadmap`; `archive` exists with no file and no
  * alias; `Alice` has a file and a capitalized original name.
@@ -27,12 +27,15 @@ const MADE_UP = ['zz check links probe 146 alpha', 'zz check links probe 146 bet
 
 describe('check_links on the fixture graph (#146)', () => {
   let client: LogseqClient;
-  let queries = 0;
+  /** Every API call the tool makes, by method, so a stray Editor call is counted too */
+  const calls: string[] = [];
 
-  const counted = async <T>(run: () => Promise<T>): Promise<{ result: T; queries: number }> => {
-    const before = queries;
+  /** `calls` is the number of API calls of any method; `methods` names them. */
+  const counted = async <T>(run: () => Promise<T>): Promise<{ result: T; calls: number; methods: string[] }> => {
+    const before = calls.length;
     const result = await run();
-    return { result, queries: queries - before };
+    const methods = calls.slice(before);
+    return { result, calls: methods.length, methods };
   };
 
   beforeAll(async () => {
@@ -47,7 +50,7 @@ describe('check_links on the fixture graph (#146)', () => {
 
     const original = client.callAPI.bind(client);
     client.callAPI = (async (method: string, args?: any[]) => {
-      if (method === 'logseq.DB.datascriptQuery') queries++;
+      calls.push(method);
       return original(method, args);
     }) as typeof client.callAPI;
   });
@@ -58,9 +61,11 @@ describe('check_links on the fixture graph (#146)', () => {
       `[[ALICE]] and [[project atlas]] use [[atlas]]; see [[archive]], the [[roadmap]], ` +
       `[[${MADE_UP[0]}]] and [[${MADE_UP[1]}]].`;
 
-    const { result, queries: used } = await counted(() => checkLinks(client, before, after));
+    const { result, calls: used, methods } = await counted(() => checkLinks(client, before, after));
 
+    // One call in all, and it is the Datalog query: no Editor call
     expect(used).toBe(1);
+    expect(methods).toEqual(['logseq.DB.datascriptQuery']);
     expect(result.prose).toEqual({ ok: true });
     expect(result.brackets).toEqual({ ok: true, opens: 7, closes: 7 });
     expect(result.refsPreserved).toEqual({ ok: true, removed: [] });
@@ -135,7 +140,7 @@ describe('check_links on the fixture graph (#146)', () => {
   });
 
   it('makes no call for a text without refs', async () => {
-    const { result, queries: used } = await counted(() => checkLinks(client, 'no links', 'no links'));
+    const { result, calls: used } = await counted(() => checkLinks(client, 'no links', 'no links'));
 
     expect(result.ok).toBe(true);
     expect(used).toBe(0);
