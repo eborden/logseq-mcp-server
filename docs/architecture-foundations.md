@@ -214,36 +214,9 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 ## 6. Your handoff
 
-When you finish, your PR description must contain these sections. They add to the PR conventions in `CLAUDE.md` (atomic commits, `Closes #N`, a design section, a test plan with checkboxes, approximate measurements with no graph data) and don't replace them. Be brief and factual. A reviewer reads this before the diff.
+When you finish, your PR description must contain every section of the PR template. They add to the PR conventions in `CLAUDE.md` (atomic commits, `Closes #N`, a design section, a test plan with checkboxes, approximate measurements with no graph data) and don't replace them. Be brief and factual. A reviewer reads this before the diff.
 
-```
-## What changed
-One or two sentences. One logical change. Closes #N.
-
-## Design
-The data shapes, contract changes and approach, and why.
-
-## Assumptions
-Each place you resolved an ambiguity yourself, and what you chose.
-
-## Failure behavior
-For each boundary: timeout, LogSeq not running, bad auth, malformed input,
-empty result, oversized result.
-
-## Preserved on purpose / questions
-Safeguards or odd behavior you kept, and suspected bugs you did not fix.
-
-## New concepts
-New tools, parameters, dependencies or abstractions, and why each is needed.
-"None" is a good answer.
-
-## Test plan
-- [ ] Tests added, and what each one pins
-- [ ] The verification steps from CLAUDE.md, with approximate measurements
-
-## Roll back
-How to undo the change.
-```
+The sections live in [`.github/pull_request_template.md`](../.github/pull_request_template.md), which is the one copy. `gh pr create` fills it in when no `--body` is given. They are: What changed, Design, Assumptions, Failure behavior, Preserved on purpose / questions, New concepts, Test plan, Roll back.
 
 ## 7. Self-check before you finish
 
