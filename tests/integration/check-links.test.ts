@@ -1,20 +1,10 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../../src/config.js';
-import { LogseqClient } from '../../../src/client.js';
-import { checkLinks } from '../../../src/tools/check-links.js';
-import { requireFixtureGraph } from '../helpers/fixture-graph.js';
+import { LogseqClient } from '../../src/client.js';
+import { checkLinks } from '../../src/tools/check-links.js';
+import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * logseq_check_links (#146) against the fixture graph, with exact results.
- *
- * Fixture-only: `npm run test:integration` still runs against the maintainer's graph until #90,
- * so this folder is left out of it and runs on its own, against a LogSeq serving
- * tests/fixtures/graph (`requireFixtureGraph` fails loud on any other graph):
- *
- *   npx tsx scripts/logseq-instance.ts start
- *   LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration:fixture
- *   npx tsx scripts/logseq-instance.ts stop
  *
  * Read-only. The pages it relies on (tests/fixtures/README.md, "Page resolution and
  * aliases"): `project atlas` declares the alias `atlas`, whose stub has no file; `project
@@ -39,14 +29,7 @@ describe('check_links on the fixture graph (#146)', () => {
   };
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(`Config file not found at ${configPath}. See tests/integration/setup.md.`);
-    }
-    client = new LogseqClient(await loadConfig(configPath));
-    await requireFixtureGraph(client);
+    ({ client } = await connectFixture());
 
     const original = client.callAPI.bind(client);
     client.callAPI = (async (method: string, args?: any[]) => {

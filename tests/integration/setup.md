@@ -76,7 +76,7 @@ How it opens the graph without the UI: a new LogSeq profile opens the demo graph
 - **Caps that pick by `:db/id` order** (ties at the same reference count) are not stable by name. The hub section of `tests/fixtures/README.md` lists which cases may assert names and which only counts, `truncated` and warnings.
 - **Invariants still have a place.** `properties/graph-properties.test.ts` checks properties that hold for every page over a fixed list of fixture pages.
 - **Fail loud.** No `it.skip`/`it.skipIf`, no `console.warn` (CLAUDE.md, "Integration Test Requirements"). A known bug is an `it.fails` case that names its issue, so the fix has to flip it.
-- **Open PRs that add integration cases** (such as `logseq_check_links` and the `list_pages` cap) must add them as fixture-based cases with `connectFixture`.
+- **PRs that add integration cases** (such as the `list_pages` cap) must add them as fixture-based cases with `connectFixture`, in `tests/integration/`. `fixture-only/` is not for new files.
 
 `fixture-only/resolve-refs-missing.test.ts` predates the move (#138) and runs with the rest. It stays at that path because BR-0007 cites it.
 
