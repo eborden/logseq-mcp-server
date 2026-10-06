@@ -254,6 +254,70 @@ async function probeAliasSets(
   }
 }
 
+/**
+ * Do blocks with a SCHEDULED or DEADLINE date carry `:block/journal-day`? (#140)
+ * One yes/no per case, from counts only. The fixture holds the cases: SCHEDULED, DEADLINE and
+ * both on journal pages (`journals/2025_01_02.md`, `_07` and `_08`) and on a non-journal page
+ * (`pages/schedule cases.md`), all dated in the past. It also counts the blocks that do carry
+ * the attribute, and the journal-page rows that need `[?page :block/name]` because of them.
+ *
+ * Checked by hand on a throwaway copy of the fixture (LogSeq 0.10.15), not repeated here because
+ * this script never writes: `logseq.Editor.insertBlock` of a plain, a SCHEDULED and a DEADLINE
+ * block gave 3 of 3 with `:block/journal-day` on a journal page and 0 of 3 on a non-journal one.
+ * So it is blocks LogSeq creates in the app on a journal page that carry it, whatever their text.
+ */
+async function probeJournalDay(client: LogseqClient) {
+  const query = <T = any>(q: string) => client.callAPI<T>('logseq.DB.datascriptQuery', [q]);
+  const count = async (where: string) =>
+    (await query<number | null>(`[:find (count ?b) . :where [?b :block/page ?p] ${where}]`)) ?? 0;
+  console.log('\n== Scheduled / deadline blocks and :block/journal-day (#140)');
+
+  const onJournal = `[(get-else $ ?p :block/journal? false) ?j] [(= ?j true)]`;
+  const onPage = `[(get-else $ ?p :block/journal? false) ?j] [(= ?j false)]`;
+  const shapes: Array<[string, string]> = [
+    ['SCHEDULED only', `[?b :block/scheduled ?s] (not [?b :block/deadline ?d])`],
+    ['DEADLINE only', `[?b :block/deadline ?d] (not [?b :block/scheduled ?s])`],
+    ['SCHEDULED and DEADLINE', `[?b :block/scheduled ?s] [?b :block/deadline ?d]`]
+  ];
+  for (const [where, place] of [
+    [onJournal, 'journal page'],
+    [onPage, 'non-journal page']
+  ] as const) {
+    for (const [label, clause] of shapes) {
+      const total = await count(`${where} ${clause}`);
+      const withDay = await count(`${where} ${clause} [?b :block/journal-day ?day]`);
+      const answer =
+        total === 0 ? 'n/a (no such block in the graph)' : withDay === total ? 'yes' : withDay === 0 ? 'no' : 'some';
+      console.log(`${`${label} on a ${place}`.padEnd(58)} blocks=${total} with journal-day=${withDay} -> ${answer}`);
+    }
+  }
+
+  // What does carry it. Blocks read from a file never do. A block LogSeq creates itself on a
+  // journal page does (today's first, empty block, which a fresh graph always gets).
+  const withDay = await count(`[?b :block/journal-day ?day]`);
+  const fromFile = await count(`[?b :block/journal-day ?day] [?p :block/file]`);
+  const noFile = await count(`[?b :block/journal-day ?day] (not [?p :block/file])`);
+  console.log(
+    `${'blocks with journal-day: all / page has a file / no file'.padEnd(58)} ${withDay} / ${fromFile} / ${noFile}`
+  );
+  const scheduledAny = await count(`[(get-else $ ?b :block/scheduled 0) ?s] [(get-else $ ?b :block/deadline 0) ?d] [(+ ?s ?d) ?t] [(> ?t 0)]`);
+  const scheduledWithDay = await count(
+    `[(get-else $ ?b :block/scheduled 0) ?s] [(get-else $ ?b :block/deadline 0) ?d] [(+ ?s ?d) ?t] [(> ?t 0)] [?b :block/journal-day ?day]`
+  );
+  console.log(`${'scheduled or deadline blocks: all / with journal-day'.padEnd(58)} ${scheduledAny} / ${scheduledWithDay}`);
+
+  // Why the journal queries keep [?page :block/name]: without it a block that carries
+  // journal-day matches as a "page". A range wide enough to hold every journal day.
+  const pages = (clause: string) =>
+    query<any[]>(
+      `[:find ?page :where ${clause} [?page :block/journal-day ?day] [(>= ?day 19000101)] [(<= ?day 99991231)]]`
+    );
+  const withName = (await pages(`[?page :block/name]`)).length;
+  const withoutName = (await pages(``)).length;
+  console.log(`${'journal "pages" with / without [?page :block/name]'.padEnd(58)} ${withName} / ${withoutName}`);
+  console.log(`${'extra rows without the name clause'.padEnd(58)} ${withoutName - withName}`);
+}
+
 async function main() {
   // LOGSEQ_MCP_CONFIG if set, else the fixture instance's config; never ~/.logseq-mcp/config.json
   const config = await loadConfig(resolveFixtureConfigPath());
@@ -308,6 +372,7 @@ async function main() {
   await probeProperties(client, dq);
   await probeResolution(client, dq);
   await probeAliasSets(client, dq);
+  await probeJournalDay(client);
 
   console.log('\n== Block uuids (:block/uuid) (#18)');
   const uuidRows = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
