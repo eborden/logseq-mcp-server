@@ -9,6 +9,7 @@ import {
   ConfigFileNotFoundError,
   ConfigInvalidJsonError,
   ConfigValidationError,
+  REDACTED_JSON_DETAIL,
 } from './config.js';
 
 // Typed config errors (#63). src/config.test.ts covers the behaviour; this file
@@ -87,15 +88,31 @@ describe('loadConfig typed errors', () => {
   it.each([
     ['an unquoted token', `{"authToken": ${TOKEN}}`],
     ['an unquoted token after other fields', `{"apiUrl": "http://localhost:12315", "authToken": ${TOKEN}, "tips": true}`],
-    ['single-quoted JSON', `{'authToken': '${TOKEN}'}`],
     ['a short file', TOKEN],
-  ])('never quotes the file in an invalid-JSON message (%s)', async (_label, text) => {
+    ['a trailing comma in an array', `{"authToken": "${TOKEN}", "list": [1,]}`],
+    ['a bare word', 'undefined'],
+    ['a byte-order mark', `﻿{"authToken": "${TOKEN}"}`],
+  ])('never quotes the file in an invalid-JSON message, and names the usual causes (%s)', async (_label, text) => {
     const error = await errorFor(text);
 
     expect(error).toBeInstanceOf(ConfigInvalidJsonError);
     const message = (error as Error).message;
-    expect(message.startsWith('Invalid JSON in config file: ')).toBe(true);
+    expect(message).toBe(
+      "Invalid JSON in config file: the file is not valid JSON (an unquoted value, a trailing comma or a byte-order mark?); the parser's message is not shown, as it may quote the authToken"
+    );
+    expect(message).toBe(`Invalid JSON in config file: ${REDACTED_JSON_DETAIL}`);
     expect(message).not.toContain(TOKEN);
+    expect(message).not.toContain(TOKEN.slice(0, 8));
+    expect(message).not.toContain('"');
+  });
+
+  it('keeps a position-only parser message for single-quoted JSON, and it holds no token', async () => {
+    const error = await errorFor(`{'authToken': '${TOKEN}'}`);
+
+    expect(error).toBeInstanceOf(ConfigInvalidJsonError);
+    const message = (error as Error).message;
+    expect(message.startsWith('Invalid JSON in config file: ')).toBe(true);
+    expect(message).not.toBe(`Invalid JSON in config file: ${REDACTED_JSON_DETAIL}`);
     expect(message).not.toContain(TOKEN.slice(0, 8));
     expect(message).not.toContain('"');
   });
