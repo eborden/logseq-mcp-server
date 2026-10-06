@@ -359,6 +359,33 @@ describe('listPages', () => {
       expect((await list(20, { limit: 2.9, offset: 3.7 })).pages).toEqual(names(3, 5));
     });
 
+    it('orders names that localeCompare ties the same way whatever order getAllPages returns', async () => {
+      const nfc = '\u00e9a'; // é as one code point
+      const nfd = 'e\u0301a'; // e plus a combining accent
+      const plain = 'ab';
+      const zws = 'a\u200bb'; // a zero-width space
+      expect(nfc.localeCompare(nfd)).toBe(0);
+      expect(plain.localeCompare(zws)).toBe(0);
+      const entities = [nfc, nfd, plain, zws].map((name, i) => ({ id: i + 1, uuid: `u${i}`, name, originalName: name }));
+
+      const orders = [entities, [...entities].reverse(), [entities[1], entities[3], entities[0], entities[2]]];
+      const listings: string[][] = [];
+      for (const order of orders) {
+        (mockClient.callAPI as any).mockResolvedValue(order);
+        listings.push((await listPages(mockClient)).pages);
+      }
+
+      for (const pages of listings) expect(pages).toEqual(listings[0]);
+      expect(new Set(listings[0])).toEqual(new Set([nfc, nfd, plain, zws]));
+      // Paging one name at a time visits each exactly once, even with the input order changing per call
+      const paged: string[] = [];
+      for (let offset = 0; offset < 4; offset++) {
+        (mockClient.callAPI as any).mockResolvedValue(orders[offset % orders.length]);
+        paged.push(...(await listPages(mockClient, { limit: 1, offset })).pages);
+      }
+      expect(paged).toEqual(listings[0]);
+    });
+
     it('makes one API call whatever the limit and offset', async () => {
       await list(5000, { limit: 1000, offset: 2000 });
 
