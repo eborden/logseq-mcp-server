@@ -31,8 +31,8 @@ The repository settings and the "Protect Main" ruleset hold this at the platform
 
 - Merge methods: only rebase merges are allowed (`allow_rebase_merge` on, `allow_merge_commit` and `allow_squash_merge` off), so a merge commit or a squash cannot be pressed.
 - Branch cleanup: `delete_branch_on_merge` is on, so a merged PR's branch is deleted.
-- The "Protect Main" ruleset is active on the default branch with `deletion`, `non_fast_forward` and `required_linear_history`, and has no bypass actors. `main` cannot be deleted, force-pushed or given a merge commit.
+- The "Protect Main" ruleset is active on the default branch with `deletion`, `non_fast_forward` and `required_linear_history`, and has no bypass actors. `main` cannot be deleted, force-pushed or given a merge commit. The ruleset has no pull-request rule, so ordinary fast-forward pushes straight to `main` are still allowed.
 
 Changing these settings is the maintainer's call. If someone relaxes them, nothing in the repo notices, so the reviewer checks them again when a PR touches merge policy.
 
-- reviewer: The PR's commits are atomic with clear messages, so a rebase-merge puts readable commits on main. Whoever merges picks "Rebase and merge", and the reviewer confirms the repository still allows only rebase merges and the "Protect Main" ruleset is active.
+- reviewer: The PR's commits are atomic with clear messages, so a rebase-merge puts readable commits on main. Whoever merges picks "Rebase and merge", and, when a PR touches merge policy, the reviewer confirms the repository still allows only rebase merges and the "Protect Main" ruleset is active.
