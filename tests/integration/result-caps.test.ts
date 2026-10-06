@@ -8,6 +8,7 @@ import { loadConfig } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { createServer } from '../../src/index.js';
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from '../../src/tools/search-blocks.js';
+import { DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS } from '../../src/tools/get-context-for-query.js';
 
 /**
  * Result caps hold against a real graph (#61): no tool returns more than its
@@ -125,6 +126,76 @@ describe('result caps (#61)', () => {
       ).toBeGreaterThan(0);
       // Above the maximum the caller gets exactly the blocks the maximum gives
       expect(firstBlock.get(1000)).toBe(firstBlock.get(MAX_SEARCH_LIMIT));
+    });
+  });
+
+  describe('logseq_get_context_for_query max_search_results (max 100)', () => {
+    // The query names no [[topic]], so the tool falls back to a keyword search.
+    // Keywords must be over 3 letters and not stop words; these common English
+    // words are tried in turn until one matches more blocks than the maximum.
+    const CANDIDATES = ['that', 'this', 'have', 'from', 'will'];
+    const VALUES: Array<number | undefined> = [undefined, MAX_SEARCH_RESULTS, 1000];
+
+    interface QueryBody extends Meta {
+      searchResults?: unknown[];
+    }
+
+    async function ask(query: string, max?: number): Promise<QueryBody> {
+      const args = max === undefined ? { query } : { query, max_search_results: max };
+      return JSON.parse((await call('logseq_get_context_for_query', args)).content[0].text) as QueryBody;
+    }
+
+    /** Hits before the cut: the length when nothing was cut, else the count the warning names. */
+    function totalHits(body: QueryBody): number {
+      const cut = body.warnings.find(w => w.code === 'search_results_truncated');
+      if (!cut) return body.searchResults!.length;
+      const match = cut.message.match(/^Showing \d+ of (\d+) keyword hits/);
+      expect(match, `search_results_truncated message names the total: ${cut.message}`).not.toBeNull();
+      return Number(match![1]);
+    }
+
+    it('never returns more than the maximum, reports every cut, and clamps to the same hits', { timeout: 180_000 }, async () => {
+      let query: string | undefined;
+      for (const candidate of CANDIDATES) {
+        if (totalHits(await ask(candidate, 1)) > MAX_SEARCH_RESULTS) {
+          query = candidate;
+          break;
+        }
+      }
+      expect(
+        query,
+        `No keyword of ${JSON.stringify(CANDIDATES)} matched more than ${MAX_SEARCH_RESULTS} blocks, so the maximum ` +
+          'was never tested. Use a graph with more content; see tests/integration/setup.md'
+      ).toBeDefined();
+
+      const hitsAt = new Map<number | undefined, string>();
+      for (const max of VALUES) {
+        const body = await ask(query!, max);
+        const label = `max_search_results ${max ?? 'default'}`;
+        const effective = Math.min(max ?? DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
+        const total = totalHits(body);
+        hitsAt.set(max, JSON.stringify(body.searchResults));
+
+        expect(Array.isArray(body.searchResults), label).toBe(true);
+        expect(body.searchResults!.length, label).toBeLessThanOrEqual(MAX_SEARCH_RESULTS);
+        expect(body.searchResults!.length, label).toBe(Math.min(effective, total));
+        expect(total, label).toBeGreaterThan(MAX_SEARCH_RESULTS);
+        expectNoSuggestionPast(body, 'max_search_results', MAX_SEARCH_RESULTS);
+        expect(body.warnings.map(w => w.code), label).toEqual(['search_results_truncated']);
+
+        if (effective === MAX_SEARCH_RESULTS) {
+          // Cut at the maximum: the warning is the signal, and nothing can be raised
+          expect(body.hasMore, label).toBe(false);
+          expect(body.warnings[0].message).toContain(`maximum of ${MAX_SEARCH_RESULTS}`);
+          expect(body.warnings[0].howToFetchAll).toBeUndefined();
+        } else {
+          // The default slice, which used to be silent: raising max_search_results gets more
+          expect(body.hasMore, label).toBe(true);
+          expect(body.warnings[0].howToFetchAll).toMatch(/^Set max_search_results to \d+/);
+        }
+      }
+      // Above the maximum the caller gets exactly the hits the maximum gives
+      expect(hitsAt.get(1000)).toBe(hitsAt.get(MAX_SEARCH_RESULTS));
     });
   });
 });
