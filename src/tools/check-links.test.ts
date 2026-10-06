@@ -381,6 +381,16 @@ describe('checkLinks: refs resolve', () => {
     expect(executeDatalogQuery.mock.calls[0][1]).toEqual(['alice']);
   });
 
+  it('trims a term before resolving it, as LogSeq does (the script does not)', async () => {
+    const { client, executeDatalogQuery } = people();
+
+    const result = await checkLinks(client, 'met  Alice ', 'met [[ Alice ]]');
+
+    expect(result.ok).toBe(true);
+    expect(result.refs.resolved).toEqual([{ term: ' Alice ', page: 'Alice', matchedBy: 'name' }]);
+    expect(executeDatalogQuery.mock.calls[0][1]).toEqual(['alice']);
+  });
+
   it('treats a blank ref as unresolved without asking LogSeq about it', async () => {
     const { client, executeDatalogQuery } = people();
 
