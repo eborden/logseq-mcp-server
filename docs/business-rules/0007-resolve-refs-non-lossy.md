@@ -17,6 +17,7 @@ One resolver serves every tool: `resolveBlockRefs` in `src/utils/resolve-refs.ts
 test: `src/utils/resolve-refs.test.ts`
 test: `src/index.resolve-refs.test.ts`
 test: `src/tools/get-block.resolve-refs.test.ts`
+test: `tests/integration/fixture-only/resolve-refs-missing.test.ts`
 reviewer: A new tool that returns blocks should call `resolveBlockRefs` rather than resolve refs itself.
 
 ## Changelog
@@ -24,3 +25,4 @@ reviewer: A new tool that returns blocks should call `resolveBlockRefs` rather t
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #54 |
+| 2026-10-05 | Added a `test:` enforcement line for the fixture-only suite that checks a ref or embed of a missing block comes back `missing`. | #145 |
