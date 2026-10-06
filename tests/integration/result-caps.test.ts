@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { createServer } from '../../src/index.js';
 import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from '../../src/tools/search-blocks.js';
@@ -31,7 +29,7 @@ describe('result caps (#61)', () => {
   let mcp: Client;
 
   beforeAll(async () => {
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
     try {
       await access(configPath);
     } catch {

@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { buildContextForTopic } from '../../src/tools/build-context.js';
 import { getContextForQuery } from '../../src/tools/get-context-for-query.js';
@@ -23,7 +21,7 @@ describe('Context Building Tools Integration Tests', () => {
 
   beforeAll(async () => {
     // Check if config file exists
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
 
     try {
       await access(configPath);

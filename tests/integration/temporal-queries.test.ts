@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
 import { isDeepStrictEqual } from 'util';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { PageEntity, BlockEntity } from '../../src/types.js';
 import { queryByDateRange } from '../../src/tools/query-by-date-range.js';
@@ -25,7 +23,7 @@ describe('Temporal Queries Integration Tests', () => {
 
   beforeAll(async () => {
     // Check if config file exists
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
 
     try {
       await access(configPath);

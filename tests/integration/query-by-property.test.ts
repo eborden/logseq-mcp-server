@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { queryByProperty } from '../../src/tools/query-by-property.js';
 import { InvalidParameterError } from '../../src/errors.js';
@@ -71,7 +69,7 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
   let cases: Case[];
 
   beforeAll(async () => {
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
     try {
       await access(configPath);
     } catch {
