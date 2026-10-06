@@ -46,7 +46,7 @@ export interface ConceptNetworkResult extends ResultMeta, ResolvedFrom, Resolved
   edges: ConceptNetworkEdge[];
   /** True when `maxNodes` or `maxFanout` dropped at least one page from the network. */
   truncated: boolean;
-  /** `hasMore` mirrors `truncated`; `warnings` carries a `network_truncated` entry saying what to raise. */
+  /** `warnings` carries a `network_truncated` entry; `hasMore` is true only when it names a cap that can still be raised (#132). */
 }
 
 export interface ConceptNetworkOptions {
@@ -65,6 +65,10 @@ export interface ConceptNetworkOptions {
 export const DEFAULT_MAX_DEPTH = 2;
 export const DEFAULT_MAX_NODES = 50;
 export const DEFAULT_MAX_FANOUT = 15;
+/** The most the MCP handler lets a caller set `max_nodes` to. */
+export const MAX_NODES_LIMIT = 500;
+/** The most the MCP handler lets a caller set `max_fanout` to. */
+export const MAX_FANOUT_LIMIT = 100;
 
 /** One row of `DatalogQueryBuilder.connectedPages`. */
 type ConnectedRow = [number, number, string, string, boolean, 'outbound' | 'inbound', number];
@@ -117,6 +121,12 @@ export async function getConceptNetwork(
   const expandJournals = options.expandJournals ?? false;
   let truncated = false;
   let dropped = 0;
+  // Which cap dropped them (#132): `max_fanout` leaves a page's extra neighbours out,
+  // `max_nodes` leaves out what the node budget can't hold.
+  let droppedByFanout = 0;
+  let droppedByBudget = 0;
+  // A journal page was admitted with the walk still to go and was expanded (#132)
+  let expandedJournal = false;
 
   const nodeMap = new Map<number, ConceptNetworkNode>();
   const links: LinkCounts = new Map();
@@ -183,16 +193,22 @@ export async function getConceptNetwork(
       candidate.total += count;
     }
 
-    const admitted = selectCandidates(candidates, frontier, maxFanout, maxNodes - nodeMap.size);
+    const selection = selectCandidates(candidates, frontier, maxFanout, maxNodes - nodeMap.size);
+    const admitted = selection.admitted;
     if (admitted.length < candidates.size) {
       truncated = true;
       dropped += candidates.size - admitted.length;
+      droppedByFanout += selection.droppedByFanout;
+      droppedByBudget += selection.droppedByBudget;
     }
 
     const nextFrontier: number[] = [];
     for (const candidate of admitted) {
       nodeMap.set(candidate.id, { id: candidate.id, name: candidate.name, depth });
-      if (expandJournals || !candidate.isJournal) nextFrontier.push(candidate.id);
+      if (expandJournals || !candidate.isJournal) {
+        nextFrontier.push(candidate.id);
+        if (candidate.isJournal && depth < maxDepth) expandedJournal = true;
+      }
     }
     frontier = nextFrontier;
   }
@@ -203,13 +219,19 @@ export async function getConceptNetwork(
   // seen at the depths that were walked, so it is a lower bound.
   const warnings: ResultWarning[] = aliasSetWarnings(aliasSet);
   if (truncated) {
-    warnings.push({
-      code: 'network_truncated',
-      message: `Kept ${nodes.length} pages; at least ${dropped} more connected pages were dropped.`,
-      howToFetchAll:
-        `Set max_nodes to ${nodes.length + dropped} (max 500) and/or max_fanout higher (max 100), ` +
-        'or set expand_journals to walk through journal pages.'
-    });
+    warnings.push(
+      truncationWarning({
+        kept: nodes.length,
+        dropped,
+        droppedByFanout,
+        droppedByBudget,
+        maxNodes,
+        maxFanout,
+        maxDepth,
+        expandJournals,
+        expandedJournal
+      })
+    );
   }
 
   return {
@@ -220,6 +242,87 @@ export async function getConceptNetwork(
     edges: buildEdges(nodeMap, links),
     truncated,
     ...buildResultMeta(warnings)
+  };
+}
+
+interface TruncationFacts {
+  kept: number;
+  /** Lower bound: pages dropped at the depths that were walked. */
+  dropped: number;
+  droppedByFanout: number;
+  droppedByBudget: number;
+  maxNodes: number;
+  maxFanout: number;
+  maxDepth: number;
+  expandJournals: boolean;
+  /** A journal page was expanded with a level still to walk. */
+  expandedJournal: boolean;
+}
+
+/**
+ * The `network_truncated` warning (#132). Below the maxima it says what it always
+ * did. A cap that is already at its maximum (`max_nodes` 500, `max_fanout` 100) is
+ * never offered for raising, and a suggested `max_nodes` never goes past 500. When
+ * nothing is left to raise there is no `howToFetchAll`, so `hasMore` is false and the
+ * warning says the maximum was reached (BR-0006). Each claim is made only when the
+ * walk showed it: a cap is named only if it dropped pages, and a way to narrow the
+ * walk only if it would. `cappedTruncationWarning` doesn't fit: it takes one
+ * parameter and an exact total, and this walk has two caps and a lower bound.
+ */
+function truncationWarning(f: TruncationFacts): ResultWarning {
+  const base = `Kept ${f.kept} pages; at least ${f.dropped} more connected pages were dropped.`;
+  const suggestedNodes = f.kept + f.dropped;
+
+  // No cap at its maximum, and the suggested max_nodes is in range: unchanged
+  if (suggestedNodes <= MAX_NODES_LIMIT && f.maxFanout < MAX_FANOUT_LIMIT) {
+    return {
+      code: 'network_truncated',
+      message: base,
+      howToFetchAll:
+        `Set max_nodes to ${suggestedNodes} (max ${MAX_NODES_LIMIT}) and/or max_fanout higher (max ${MAX_FANOUT_LIMIT}), ` +
+        'or set expand_journals to walk through journal pages.'
+    };
+  }
+
+  const nodesBit = f.droppedByBudget > 0;
+  const fanoutBit = f.droppedByFanout > 0;
+  const nodesAtMax = nodesBit && f.maxNodes >= MAX_NODES_LIMIT;
+  const fanoutAtMax = fanoutBit && f.maxFanout >= MAX_FANOUT_LIMIT;
+
+  const reached: string[] = [];
+  if (nodesAtMax) reached.push(`max_nodes reached its maximum of ${MAX_NODES_LIMIT}`);
+  if (fanoutAtMax) reached.push(`max_fanout reached its maximum of ${MAX_FANOUT_LIMIT}`);
+
+  // With the node budget full at its maximum, no other parameter adds a page; a larger
+  // fanout would only change which pages are kept.
+  const raise: string[] = [];
+  if (nodesBit && !nodesAtMax) {
+    // Pages the fanout cap dropped are not the budget's to hold, so count only the budget's
+    const holdsAll = f.kept + f.droppedByBudget;
+    raise.push(
+      holdsAll <= MAX_NODES_LIMIT
+        ? `max_nodes to ${holdsAll} (max ${MAX_NODES_LIMIT})`
+        : `max_nodes to ${MAX_NODES_LIMIT} (the maximum)`
+    );
+  }
+  if (fanoutBit && !fanoutAtMax && !nodesAtMax) raise.push(`max_fanout higher (max ${MAX_FANOUT_LIMIT})`);
+
+  const reachedClause = reached.join(' and ');
+  if (raise.length > 0) {
+    return {
+      code: 'network_truncated',
+      message: reachedClause ? `${base} ${reachedClause}.` : base,
+      howToFetchAll: `Set ${raise.join(' and/or ')}.`
+    };
+  }
+
+  const narrow: string[] = [];
+  if (f.maxDepth >= 2) narrow.push('lower max_depth');
+  if (f.expandJournals && f.expandedJournal) narrow.push('set expand_journals to false so journal pages stay leaves');
+  const narrowText = narrow.length > 0 ? ` To narrow the walk instead, ${narrow.join(' or ')}.` : '';
+  return {
+    code: 'network_truncated',
+    message: `${base} ${reachedClause ? `${reachedClause}, so` : 'So'} the rest can't be fetched in one call.${narrowText}`
   };
 }
 
@@ -285,14 +388,14 @@ function normalizeCap(value: number | undefined, fallback: number): number {
  *    the references to that page); the survivors are the union.
  * 2. If that still exceeds the remaining node budget, the best by total
  *    references are kept.
- * Returns the admitted candidates in rank order.
+ * Returns the admitted candidates in rank order, and how many each step dropped.
  */
 function selectCandidates(
   candidates: Map<number, Candidate>,
   frontier: number[],
   maxFanout: number,
   budget: number
-): Candidate[] {
+): { admitted: Candidate[]; droppedByFanout: number; droppedByBudget: number } {
   const rank = (score: (c: Candidate) => number) => (a: Candidate, b: Candidate) =>
     Number(a.isJournal) - Number(b.isJournal) || score(b) - score(a) || a.id - b.id;
 
@@ -305,10 +408,15 @@ function selectCandidates(
       .forEach(c => kept.add(c.id));
   }
 
-  return [...kept]
+  const admitted = [...kept]
     .map(id => candidates.get(id)!)
     .sort(rank(c => c.total))
     .slice(0, Math.max(0, budget));
+  return {
+    admitted,
+    droppedByFanout: candidates.size - kept.size,
+    droppedByBudget: kept.size - admitted.length
+  };
 }
 
 /**

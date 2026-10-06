@@ -15,7 +15,7 @@ import { getBlock } from './tools/get-block.js';
 import { getPageOutline } from './tools/get-page-outline.js';
 import { searchBlocksWithMeta } from './tools/search-blocks.js';
 import { queryByProperty } from './tools/query-by-property.js';
-import { getConceptNetwork } from './tools/get-concept-network.js';
+import { getConceptNetwork, MAX_FANOUT_LIMIT, MAX_NODES_LIMIT } from './tools/get-concept-network.js';
 import { searchByRelationship } from './tools/search-by-relationship.js';
 import { buildContextForTopic } from './tools/build-context.js';
 import { getContextForQuery } from './tools/get-context-for-query.js';
@@ -340,8 +340,8 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
           } = parseArgs(getConceptNetworkArgs, args);
           // Safeguards: caps on the walk, whatever the caller asks for
           const result = await getConceptNetwork(client, conceptName, Math.min(maxDepth, 3), {
-            maxNodes: Math.min(maxNodes, 500),
-            maxFanout: Math.min(maxFanout, 100),
+            maxNodes: Math.min(maxNodes, MAX_NODES_LIMIT),
+            maxFanout: Math.min(maxFanout, MAX_FANOUT_LIMIT),
             expandJournals,
           });
           if (format === 'markdown') return textResult(withFooter(renderNetwork(result), result));
