@@ -1,4 +1,4 @@
-import { BlockEntity } from '../types.js';
+import { BlockEntity, IEntityID } from '../types.js';
 
 const camelize = (key: string): string =>
   key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
@@ -11,12 +11,12 @@ const camelize = (key: string): string =>
  * @param entity - A pulled page or block
  * @returns A shallow copy with camelCase keys
  */
-export function camelizeKeys<T = any>(entity: Record<string, any>): T {
-  const out: Record<string, any> = {};
+export function camelizeKeys<T = Record<string, unknown>>(entity: object): T {
+  const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entity)) {
     out[camelize(key)] = value;
   }
-  return out as T;
+  return out as T; // the caller names the shape it expects of the pull
 }
 
 /**
@@ -25,8 +25,8 @@ export function camelizeKeys<T = any>(entity: Record<string, any>): T {
  * `propertiesOrder` (Datalog has `logseq.order-list-type`, the Editor API
  * `logseq.orderListType`).
  */
-export function camelizeBlock(block: Record<string, any>): BlockEntity {
-  const out = camelizeKeys<Record<string, any>>(block);
+export function camelizeBlock(block: object): BlockEntity {
+  const out = camelizeKeys(block);
   for (const key of ['properties', 'propertiesTextValues']) {
     const value = out[key];
     if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -38,7 +38,8 @@ export function camelizeBlock(block: Record<string, any>): BlockEntity {
       typeof k === 'string' ? camelize(k) : k
     );
   }
-  return out as BlockEntity;
+  // A pull is the shape the callers say it is; nothing here checks it (#62 types the boundary)
+  return out as unknown as BlockEntity;
 }
 
 /**
@@ -49,7 +50,7 @@ export function camelizeBlock(block: Record<string, any>): BlockEntity {
  * is the previous one. Blocks the chain can't reach (a corrupt graph) are
  * appended in id order so nothing is dropped.
  */
-export function orderSiblings<T extends BlockEntity>(siblings: T[]): T[] {
+export function orderSiblings<T extends { id: number; left?: IEntityID }>(siblings: T[]): T[] {
   if (siblings.length < 2) return siblings;
 
   const ids = new Set(siblings.map(s => s.id));
