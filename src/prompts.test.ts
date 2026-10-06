@@ -146,12 +146,17 @@ describe('MCP prompts (#46)', () => {
     it('defaults to this week, Monday through today while the week is under way', () => {
       const text = textOf(getPrompt('weekly_summary', {}, WED) as any);
       expect(text).toContain('Monday 2026-09-28');
-      expect(text).toContain('start_date 20260928, end_date 20260930 and max_blocks 1000');
+      expect(text).toContain('start_date 20260928, end_date 20260930 and max_blocks 200');
       expect(text).toContain('blocks_truncated');
       // the warning's own start_date is the way on: the first day not shown, or the cut day itself (#174)
-      expect(text).toContain('follow its own advice: query from the start_date it gives');
-      expect(text).toContain('or the day the cut fell inside (that day repeats its kept blocks');
-      expect(text).toContain("If it says a day can't be fetched whole");
+      expect(text).toContain('call again with the same end_date and max_blocks and the start_date the warning gives');
+      expect(text).toContain('or the day the cut fell inside, which repeats its kept blocks');
+      // 1000 gets saved to a file by hosts like Claude Code, so the warning's own suggestion is ignored (#186)
+      expect(text).toContain("Ignore the warning's advice to set max_blocks to 1000");
+      expect(text).not.toContain('max_blocks 1000');
+      expect(text).toContain('query that day alone at max_blocks 300');
+      expect(text).toContain("don't open the file or raise the cap");
+      expect(text).toContain('search_term');
       expect(text).toContain('part of that day went unread');
       expect(text).not.toContain('query the days after');
       // slim output is the server default (#42), so the prompt does not pass it
@@ -216,17 +221,23 @@ describe('MCP prompts (#46)', () => {
       const text = textOf(getPrompt('monthly_summary', { month: '2026-08' }, WED) as any);
       expect(text).toContain('"Weekly 2026-08"');
       expect(text).toContain('start_date 20260801, end_date 20260831');
-      // the default of 200 blocks (#61) would cut a month's outline short
-      expect(text).toContain('include_content false, top_concepts_limit 20 and max_blocks 1000');
+      // 500 snippets are bounded by their 80-character cap, so the shape call stays under a host's inline limit (#186)
+      expect(text).toContain('include_content false, top_concepts_limit 20 and max_blocks 500');
+      expect(text).toContain('with content and max_blocks 200');
+      expect(text).not.toContain('max_blocks 1000');
       expect(text).toContain('"Monthly 2026-08"');
     });
 
     it("follows the truncation warning's own start_date, not the days after it (#174)", () => {
       const text = textOf(getPrompt('monthly_summary', { month: '2026-08' }, WED) as any);
       expect(text).toContain('blocks_truncated');
-      expect(text).toContain('follow its own start_date');
+      expect(text).toContain('call again with the same arguments and the start_date it gives');
       expect(text).toContain('or the day the cut fell inside, which repeats its kept blocks');
-      expect(text).toContain("if a day can't be fetched whole");
+      expect(text).toContain("Ignore the warning's advice to set max_blocks to 1000");
+      expect(text).toContain('query it alone at max_blocks 300 (500 with include_content false)');
+      expect(text).toContain("don't open the file or raise the cap");
+      expect(text).toContain('read the day in pieces with a search_term');
+      expect(text).toContain('part of that day went unread');
       expect(text).not.toContain('days after');
     });
 
