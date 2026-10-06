@@ -44,7 +44,7 @@ describe('getBacklinks', () => {
 
     (mockClient.callAPI as any).mockResolvedValue(mockBacklinks);
 
-    const result = await getBacklinks(mockClient, 'target');
+    const result = (await getBacklinks(mockClient, 'target'))!; // the mock returns tuples, never null
 
     expect(result).toHaveLength(2);
     expect(result[0]).toHaveLength(2);
@@ -169,7 +169,7 @@ describe('getBacklinks', () => {
 
     (mockClient.callAPI as any).mockResolvedValue(mockBacklinks);
 
-    const result = await getBacklinks(mockClient, 'target');
+    const result = (await getBacklinks(mockClient, 'target'))!; // the mock returns tuples, never null
 
     expect(result[0][0]).toHaveProperty('properties');
     expect(result[0][0].properties).toEqual({ tags: ['important'] });
