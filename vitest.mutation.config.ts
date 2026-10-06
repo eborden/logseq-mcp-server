@@ -36,6 +36,9 @@ export default mergeConfig(
         'src/fixture-graph.test.ts',
         'src/fixture-hub.test.ts',
         'src/logseq-instance*.test.ts',
+        // The tests of the CI mutation job itself: they read the workflows, stryker.config.json and
+        // scripts/mutation-ci.ts, none of which is mutated, and incremental mode can't see edits to them.
+        'src/mutation-ci.test.ts',
       ],
     },
   }),
