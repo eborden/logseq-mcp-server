@@ -4,6 +4,7 @@ import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.j
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { requirePage, resolvedFromInfo, ResolvedPage } from '../utils/resolve-page.js';
 import { isInfrastructureError } from '../errors.js';
+import { countBlocks, takeBlocks } from '../utils/block-budget.js';
 import {
   aliasIds,
   aliasSetWarnings,
@@ -88,31 +89,42 @@ export interface SearchByRelationshipOptions {
   maxFrontier?: number;
   /**
    * Most entries in `results` (default 50), floored and clamped to 0..500. A cut is reported
-   * as a `results_truncated` warning with `totals.blocks`, the entry count before the cut (#61).
+   * as a `results_truncated` warning with `totals.blocks`, the count before the cut, in the
+   * cap's unit: one per result for the Datalog types, every block of the two pages' trees,
+   * nested ones included, for `connected-within` (#61, #183).
    */
   limit?: number;
 }
 
 /**
  * What the cut list holds, for the warning. The Datalog types return matching blocks in
- * LogSeq's order, which is not a ranking. `connected-within` returns the two pages' trees,
- * A's first: only the top-level blocks are counted, and a kept block keeps its children.
+ * LogSeq's order, which is not a ranking. `connected-within` has its own wording, below.
  */
 const MATCHING_BLOCKS = 'matching blocks (the first ones listed, not ranked)';
 
+/** What a cut `connected-within` kept from each topic's page tree, in blocks, nested ones included. */
+interface TopicCounts {
+  keptA: number;
+  keptB: number;
+  totalA: number;
+  totalB: number;
+  /** A kept block lost some of its children (it carries `childrenTruncated`) */
+  partialBlock: boolean;
+}
+
 /**
- * `what` for a cut `connected-within`: how many top-level blocks each topic's page has and how
- * many of the kept ones came from each, so a reader can see when topic B's blocks were dropped
- * entirely. Both counts are known from the two tree calls, so this costs nothing.
+ * `what` for a cut `connected-within`: the unit (every block of the two pages' trees, nested
+ * ones too, in document order, topic A's page first), how many kept blocks came from each topic
+ * and how many each page has, so a reader can see when topic B's blocks were dropped entirely,
+ * and whether a kept block lost children. All of it is known from the two tree calls, so this
+ * costs nothing.
  */
-const connectedWithinEntries = (kept: number, fromA: number, fromB: number) => {
-  const keptA = Math.min(kept, fromA);
-  return (
-    `top-level blocks of the two pages (kept ${keptA} from topic A and ${kept - keptA} from topic B, ` +
-    `of ${fromA} and ${fromB}; topic A's first, then topic B's; ` +
-    'a kept block keeps all its children, which are not counted)'
-  );
-};
+const connectedWithinEntries = ({ keptA, keptB, totalA, totalB, partialBlock }: TopicCounts) =>
+  'blocks of the two pages, nested ones counted ' +
+  `(kept ${keptA} from topic A and ${keptB} from topic B, of ${totalA} and ${totalB}; ` +
+  "topic A's first, then topic B's" +
+  (partialBlock ? '; a kept block shows fewer children than it has (childrenTruncated)' : '') +
+  ')';
 
 /** Unwrap `[[block], ...]` Datalog rows; a null result means no rows. */
 function extractBlocks(rows: Array<[BlockEntity]> | null): BlockEntity[] {
@@ -154,9 +166,10 @@ async function resolveTopics(
  * @param maxDistance - Maximum graph distance (for connected-within)
  * @param options - `limit`: most entries in `results` (default 50, at most 500). `results` is
  *   cut to it after the query, so the cost in API calls is unchanged. The cut keeps the first
- *   entries in the order they come: LogSeq's own for the Datalog types, which is not a ranking,
- *   and topic A's top-level blocks before topic B's for `connected-within` (a kept block keeps
- *   all its children; only top-level blocks are counted). The warning is merged with the others.
+ *   entries in the order they come: LogSeq's own for the Datalog types, which is not a ranking.
+ *   `connected-within` counts every block of the two pages' trees, nested ones too, in document
+ *   order, topic A's page first, and cuts subtrees at the limit: a kept block that lost
+ *   children has `childrenTruncated: true` (#183). The warning is merged with the others.
  *   `maxFrontier`: cap on pages expanded per hop. When a hop is
  *   cut and the other topic is not found, a `frontier_truncated` warning says
  *   the "not connected" answer may be a false negative. A found connection is
@@ -178,8 +191,8 @@ export async function searchByRelationship(
 ): Promise<SearchByRelationshipResult> {
   const { maxFrontier = DEFAULT_MAX_FRONTIER, limit = DEFAULT_RELATIONSHIP_LIMIT } = options;
   let results: BlockEntity[] = [];
-  // Top-level blocks on each topic's page, for a `connected-within` that found a connection
-  let treeSizes: { a: number; b: number } | null = null;
+  // Each topic's page tree, for a `connected-within` that found a connection
+  let trees: { a: BlockEntity[]; b: BlockEntity[] } | null = null;
   const warnings: ResultWarning[] = [];
 
   // Resolve both topics first (exact name, alias or ISO date: one query each), in
@@ -297,8 +310,8 @@ export async function searchByRelationship(
             [nameB]
           );
 
-          results = [...(blocksA || []), ...(blocksB || [])];
-          treeSizes = { a: (blocksA || []).length, b: (blocksB || []).length };
+          trees = { a: blocksA || [], b: blocksB || [] };
+          results = [...trees.a, ...trees.b];
         }
       }
       break;
@@ -306,12 +319,49 @@ export async function searchByRelationship(
   }
 
   // Cut after the walk and the queries, so the cut costs no call. Its warning follows the others.
-  const kept = results.slice(0, Math.min(Math.max(0, Math.floor(limit)), MAX_RELATIONSHIP_LIMIT));
-  const cut = kept.length < results.length;
-  if (cut) {
+  const cap = Math.min(Math.max(0, Math.floor(limit)), MAX_RELATIONSHIP_LIMIT);
+  let kept = results;
+  let cut = false;
+  let totalBlocks = results.length;
+  if (trees) {
+    // `connected-within` counts every block of the two trees, nested ones too, in document
+    // order (topic A's page, then B's), so the result is bounded however deep the trees run
+    // (#183). At or below the cap `results` goes out as it came, untouched.
+    const totalA = countBlocks(trees.a);
+    const totalB = countBlocks(trees.b);
+    totalBlocks = totalA + totalB;
+    if (totalBlocks > cap) {
+      cut = true;
+      // One budget over both trees, so the cut falls where one pass over A then B would put it
+      const budget = { room: cap, partial: false };
+      const keptA = takeBlocks(trees.a, budget);
+      const keptB = takeBlocks(trees.b, budget);
+      kept = [...keptA, ...keptB];
+      const keptCountA = countBlocks(keptA);
+      warnings.push(
+        cappedTruncationWarning({
+          what: connectedWithinEntries({
+            keptA: keptCountA,
+            keptB: cap - keptCountA,
+            totalA,
+            totalB,
+            partialBlock: budget.partial
+          }),
+          shown: cap,
+          total: totalBlocks,
+          param: 'limit',
+          max: MAX_RELATIONSHIP_LIMIT,
+          narrower: NARROWER,
+          requested: limit
+        })
+      );
+    }
+  } else if (results.length > cap) {
+    cut = true;
+    kept = results.slice(0, cap);
     warnings.push(
       cappedTruncationWarning({
-        what: treeSizes ? connectedWithinEntries(kept.length, treeSizes.a, treeSizes.b) : MATCHING_BLOCKS,
+        what: MATCHING_BLOCKS,
         shown: kept.length,
         total: results.length,
         param: 'limit',
@@ -340,6 +390,6 @@ export async function searchByRelationship(
       ? { resolvedAliases: { ...(aliasesA && { topicA: aliasesA }), ...(aliasesB && { topicB: aliasesB }) } }
       : {}),
     results: kept,
-    ...buildResultMeta(warnings, cut ? { blocks: results.length } : undefined)
+    ...buildResultMeta(warnings, cut ? { blocks: totalBlocks } : undefined)
   };
 }

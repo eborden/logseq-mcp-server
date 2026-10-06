@@ -14,7 +14,10 @@ export interface BlockEntity {
   left: IEntityID;
   level?: number;
   children?: BlockEntity[];
-  /** Set by `max_blocks` on `query_by_date_range` when some of this block's children were left out */
+  /**
+   * Set when a cap left out some of this block's children: `max_blocks` on `query_by_date_range`,
+   * `limit` on `search_by_relationship` with `connected-within`
+   */
   childrenTruncated?: boolean;
   properties?: Record<string, any>;
   /** Property keys in file order. Editor API blocks carry it, and so do pulls camelized by `camelizeBlock` */
@@ -131,7 +134,7 @@ export interface SlimBlock {
   /** Present only with resolve_refs, on blocks that hold a `((uuid))` ref or `{{embed}}` */
   resolvedContent?: string;
   resolvedRefs?: ResolvedRef[];
-  /** Present (true) only when `max_blocks` left out some of this block's children, so it isn't read as a leaf */
+  /** Present (true) only when a cap (`max_blocks`) left out some of this block's children, so it isn't read as a leaf */
   childrenTruncated?: boolean;
   children?: SlimBlock[];
 }
