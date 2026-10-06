@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { DatalogQueryBuilder } from '../../src/datalog/queries.js';
 import { discoverPages, DiscoveredPage } from './helpers/discovery.js';
@@ -23,7 +21,7 @@ describe('Datalog :in inputs Integration Tests', () => {
   let page: DiscoveredPage;
 
   beforeAll(async () => {
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
 
     try {
       await access(configPath);

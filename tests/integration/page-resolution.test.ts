@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getPage } from '../../src/tools/get-page.js';
 import { getBacklinks, getBacklinksWithMeta } from '../../src/tools/get-backlinks.js';
@@ -60,7 +59,7 @@ describe('page resolution against a live graph', () => {
   };
 
   beforeAll(async () => {
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
     try {
       await access(configPath);
     } catch {

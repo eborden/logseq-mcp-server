@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { createServer } from '../../src/index.js';
 
@@ -47,7 +45,7 @@ describe('page outline and markdown output against a live graph (#43)', () => {
   const bytes = (result: ToolResult) => result.content.reduce((n, b) => n + Buffer.byteLength(b.text, 'utf8'), 0);
 
   beforeAll(async () => {
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
     try {
       await access(configPath);
     } catch {

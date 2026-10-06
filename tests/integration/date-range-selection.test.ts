@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { resolve } from 'path';
-import { homedir } from 'os';
 import { access } from 'fs/promises';
 import { isDeepStrictEqual } from 'util';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { queryJournals, DateRangeResult } from '../../src/tools/query-by-date-range.js';
 import { formatLogseqDate } from '../../src/utils/date-utils.js';
@@ -23,7 +22,7 @@ describe('query_by_date_range: last_n, presets and include_content', () => {
   let client: LogseqClient;
 
   beforeAll(async () => {
-    const configPath = resolve(homedir(), '.logseq-mcp', 'config.json');
+    const configPath = resolveConfigPath();
     try {
       await access(configPath);
     } catch {
