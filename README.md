@@ -98,7 +98,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 | `get_backlinks` | Find all references to a page |
 | `get_block` | Get specific block by UUID |
 | `query_by_property` | Find blocks by property key/value |
-| `list_pages` | List non-journal page names, optionally filtered |
+| `list_pages` | List non-journal pages as `{ name, aliases? }`, optionally filtered by name or alias |
 
 ### Graph Traversal (1)
 | Tool | Purpose |

@@ -18,7 +18,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 - **MCP resources**: `logseq://guide` (the reading guide) and the `logseq://page/{name}` template (a page as Markdown text). Both are read-only (#46).
 - **Claude Code plugin and marketplace manifests**, with the skills moved to a root `skills/` directory so a plugin can find them. Skills refer to tools by bare name so they work under any host prefix (#45).
 - **`logseq_get_current_context`**: what the user has open in LogSeq right now (page, editing block, selected blocks). Read-only but not idempotent (#15).
-- **`logseq_list_pages`**: list non-journal page names, optionally filtered, to learn the graph's vocabulary.
+- **`logseq_list_pages`**: list non-journal pages as `{ name, aliases? }`, optionally filtered by name or alias, to learn the graph's vocabulary.
 - **Page name resolution** in every page-taking tool: exact name, alias, ISO date (`2025-01-01`) for a journal, and namespace leaf. An ambiguous name returns its candidates, a missing page returns guidance with the closest names, and `resolvedFrom` says when a name was resolved indirectly (#41).
 - **`query_by_date_range` options**: `last_n`, named `preset` ranges (`last_week`, `this_month` and so on) and `include_content`. Results carry a `summary.topConcepts` roll-up of the most-linked pages in the range (#16, #17).
 - **`resolve_refs`** on `get_page`, `get_block`, `build_context` and `query_by_date_range`: opt-in `resolvedContent` and `resolvedRefs` for `((uuid))` block refs and `{{embed}}`s, with depth and cycle handling (#18).
@@ -29,6 +29,10 @@ Nothing has been published to npm yet, so there is no released version to compar
 - **Concept network caps** `max_nodes` and `max_fanout`, and an `expand_journals` switch, exposed as tool parameters.
 - **`logseq-skills`**: weekly and monthly summary workflows with a word-budget gate, concept linking with a link-safety gate, and research and task workflows.
 - **Probe and measure scripts** (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`) for checking LogSeq's Datalog behavior and per-tool API call counts against a live graph.
+
+### Changed (breaking)
+
+- **`logseq_list_pages` nests aliases under their canonical page** (#171). `pages` was `string[]`; it is now `{ name, aliases? }[]`. Consumers that read `pages` as strings must read `.name` instead (`pages.map(p => p.name)`); `aliases` is the page's other names (original casing, sorted) and is absent when it has none. An alias is no longer a top-level entry, so `total` counts canonical pages only. `name_contains` also matches aliases, case-insensitively, and returns the canonical page with its full alias list, so searching an alias still finds its page. Paging is unchanged (filter, sort by canonical name, then `offset` and `limit`), and aliases take no `limit` slots. A page is canonical when it has a file, as in the page resolver: the stub pages LogSeq makes for `alias::` names nest under it, and a name that two pages with files both declare is listed under both. Still one API call. Each entry is about 9 characters longer than a bare name string (the `{"name":""}` wrapper), so a 1000-page listing grows by about 9k characters. The `logseq-skills` concept-linking steps read the new shape.
 
 ### Changed
 
