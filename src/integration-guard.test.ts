@@ -78,6 +78,27 @@ describe('assertNotPersonalLogseq', () => {
   });
 });
 
+describe('scripts/probe-constraints.ts', () => {
+  const source = readFileSync(join(repoRoot, 'scripts', 'probe-constraints.ts'), 'utf-8');
+  // Comment lines hold a manual-probe snippet with a client of its own; only the code counts
+  const code = source.split('\n').filter(line => !line.trim().startsWith('//') && !line.trim().startsWith('*')).join('\n');
+
+  it('resolves its config with resolveFixtureConfigPath, never the default path', () => {
+    expect(code).toMatch(/loadConfig\(resolveFixtureConfigPath\(\)\)/);
+    expect(code).not.toMatch(/\bhomedir\b|\.logseq-mcp\b|\bresolveConfigPath\b/);
+  });
+
+  it('refuses a personal LogSeq before it builds a client', () => {
+    const load = code.indexOf('loadConfig(resolveFixtureConfigPath())');
+    const refuse = code.indexOf('assertNotPersonalLogseq(config.apiUrl)');
+    const client = code.indexOf('new LogseqClient(');
+    expect(load).toBeGreaterThan(-1);
+    expect(refuse).toBeGreaterThan(load);
+    expect(client).toBeGreaterThan(refuse);
+    expect(code.split('new LogseqClient(').length - 1, 'one client, built after the check').toBe(1);
+  });
+});
+
 describe('integration suites', () => {
   const files = testFiles(integrationDir);
 
