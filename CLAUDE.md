@@ -478,6 +478,8 @@ Quick reference checklist for future work:
 - [ ] A hung request is aborted after `timeoutMs` (config field, default 30000, applied per `callAPI` call) and surfaces as `LogSeqTimeoutError`.
 - [ ] `logseq.Editor.getEditingBlockSelection` doesn't exist. Use `getSelectedBlocks`, which returns `null` when nothing is selected.
 - [ ] Without `includeChildren`, Editor API blocks carry `children` as unfetched `["uuid", "<id>"]` tuples, not block entities. `getCurrentPage` can return `null` while `getCurrentBlock` returns a block, or return a block when zoomed in. `get_current_context` handles all three.
+- [ ] `LOGSEQ_MCP_CONFIG=<absolute path>` replaces `~/.logseq-mcp/config.json` for the server and the integration tests (`resolveConfigPath` in `src/config.ts`; a relative path is a `ConfigValidationError`). Load the config through `resolveConfigPath()`, never a hard-coded path. `scripts/logseq-instance.ts start` prints the value for this worktree's instance (#118).
+- [ ] A fresh LogSeq profile opens the demo graph with no API server. Seeding it takes the localStorage keys `current-repo` and `http-server-enabled` plus an empty graph cache file, and isolating `~/.logseq` takes both HOME and `CFFIXED_USER_HOME`. Details: `scripts/logseq-instance/local-storage.ts` and `instance.ts`. The API answers CORS `*` and can run commands, so an instance's token is random per start and never committed.
 
 **Tool behaviour**
 - [ ] Don't turn errors into empty results; re-throw infrastructure errors: [BR-0003 (infrastructure-errors-propagate)](docs/business-rules/0003-infrastructure-errors-propagate.md)
@@ -632,7 +634,11 @@ scripts/
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live graph
 ├── measure-api-calls.ts           - Counts API calls per tool against a live graph
 ├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
-└── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on the fixture graph (#118, macOS)
+├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on the fixture graph (#118, macOS)
+└── logseq-instance/
+    ├── instance.ts                - Instance logic: paths, port, random token, launch, readiness, stop (deps injected)
+    ├── local-storage.ts           - Writes a fresh profile's Chromium localStorage LevelDB (current-repo, http-server-enabled)
+    └── configs.edn.template       - App settings for the instance (API autostart, port and token placeholders)
 
 skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
 .claude-plugin/                    - plugin.json + marketplace.json (server declared inline in plugin.json)
