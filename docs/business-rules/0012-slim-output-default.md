@@ -10,11 +10,11 @@ Slim blocks leave out empty fields: a blank `pageName`, properties with no value
 
 Full entities carry fields the model never uses, and they fill its finite context window. Dropping the `hasMore: false` signal would make "nothing was cut" indistinguishable from "unknown". Introduced in #42.
 
-The default lives in the MCP handlers (`wantsSlim`, `DEFAULT_SLIM_RESULTS` in `src/utils/slim-entities.ts`). The tool functions themselves still default to full, so internal callers (for example `get_context_for_query`'s keyword search) are unchanged.
+The default lives in the `slim_results` argument schema in `src/tool-args.ts`, which defaults it to `DEFAULT_SLIM_RESULTS` (`src/utils/slim-entities.ts`); the handlers pass the parsed boolean on. The tool functions themselves still default to full, so internal callers (for example `get_context_for_query`'s keyword search) are unchanged.
 
 ## Mechanical enforcement
 
-test: `src/index.slim-default.test.ts`
+test: `src/index.slim-default.test.ts` (omitted means slim, false means full, the schema advertises default: true on every slim_results parameter)
 test: `src/utils/slim-entities.test.ts`
 
 ## Changelog
@@ -22,3 +22,4 @@ test: `src/utils/slim-entities.test.ts`
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #72 |
+| 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #TBD |
