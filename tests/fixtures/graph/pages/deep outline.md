@@ -1,0 +1,9 @@
+- Level 1: the office move for [[project borealis]]
+	- Level 2: packing
+		- Level 3: the second floor
+			- Level 4: the meeting room
+				- Level 5: the whiteboard
+					- Level 6: TODO Photograph the whiteboard before it is wiped #moving
+	- Level 2: unpacking
+		- Level 3: DONE Label the boxes by floor
+- A second top-level block, so the page has siblings at the root
