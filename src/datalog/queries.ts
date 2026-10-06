@@ -254,7 +254,8 @@ export class DatalogQueryBuilder {
    *   page named so is the alias *target*; LogSeq creates it as a bare stub);
    * - `"journal-date"` (only when `journalDay` is given): the journal page whose
    *   `:block/journal-day` is that day. `[?page :block/name]` is required, or
-   *   blocks with a scheduled/deadline date match as pages.
+   *   blocks LogSeq created in the app on a journal page match as pages (they
+   *   carry `:block/journal-day`; blocks read from a file do not, #140).
    * Rows can come from several routes, so the caller decides which one wins.
    * @param pageName - The page name or alias (any casing)
    * @param journalDay - YYYYMMDD integer when the name was an ISO date
@@ -308,8 +309,9 @@ export class DatalogQueryBuilder {
 
   /**
    * Generate Datalog query for journal pages whose date falls in a range.
-   * `[?page :block/name]` is required: blocks with a scheduled/deadline date
-   * also carry `:block/journal-day`, and without it they match as pages.
+   * `[?page :block/name]` is required: blocks LogSeq created in the app on a
+   * journal page also carry `:block/journal-day` (scheduled or deadline dates
+   * do not add it, #140), and without it they match as pages.
    * @param startDate - First journal day, inclusive (YYYYMMDD integer)
    * @param endDate - Last journal day, inclusive (YYYYMMDD integer)
    * @returns Query and inputs (`[startDate, endDate]`)
