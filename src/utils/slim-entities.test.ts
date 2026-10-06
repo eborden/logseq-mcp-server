@@ -94,7 +94,7 @@ describe('buildPageNameMap', () => {
   });
 
   it('should handle pages with original-name kebab-case property', () => {
-    const pages: PageEntity[] = [
+    const pages: Array<PageEntity & { 'original-name'?: string }> = [
       {
         id: 1,
         uuid: 'uuid-1',
@@ -606,7 +606,7 @@ describe('toSlimPage', () => {
   });
 
   it('should use original-name kebab-case if originalName not present', () => {
-    const page: PageEntity = {
+    const page: PageEntity & { 'original-name'?: string } = {
       id: 1,
       uuid: 'page-uuid',
       name: 'project',

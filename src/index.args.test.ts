@@ -14,7 +14,7 @@ import { LogseqClient } from './client.js';
 const UUID_A = '11111111-1111-4111-8111-111111111111';
 const PAGE = { id: 1, name: 'alice', originalName: 'Alice', file: { id: 5 } };
 const PAGE_ROW = { id: 1, name: 'alice', 'original-name': 'Alice', file: { id: 5 } };
-const TREE = [{ uuid: UUID_A, content: 'first' }];
+const TREE = [{ id: 6, uuid: UUID_A, content: 'first' }];
 const BLOCK = { id: 7, uuid: UUID_A, content: 'parent' };
 
 type ApiCall = [method: string, args: unknown[]];

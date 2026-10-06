@@ -275,10 +275,10 @@ describe('logseq_get_concept_evolution max_entries (#61)', () => {
           return [[{ id: 100, name: 'concept', 'original-name': 'Concept' }, 'name']];
         }
         return Array.from({ length: n }, (_, i) => [
-          { id: i + 1, content: `m${i}`, page: { id: 500 + i, 'journal-day': 20240101 + i } },
+          { id: i + 1, uuid: 'u', content: `m${i}`, page: { id: 500 + i, 'journal-day': 20240101 + i } },
         ]);
       }
-      return method === 'logseq.Editor.getPageBlocksTree' ? [] : { id: 100, name: 'concept' };
+      return method === 'logseq.Editor.getPageBlocksTree' ? [] : { id: 100, name: 'concept', originalName: 'Concept' };
     });
     return callTool(callAPI, 'logseq_get_concept_evolution', { concept_name: 'Concept', ...args });
   };
@@ -585,7 +585,7 @@ describe('logseq_search_by_relationship limit (#61)', () => {
   const relationship = (n: number, args: Record<string, unknown> = {}) => {
     const callAPI = vi.fn(async (method: string, params: unknown[]) => {
       if (method === 'logseq.Editor.getPageBlocksTree') {
-        return Array.from({ length: Math.ceil(n / 2) }, (_, i) => ({ id: 1000 + i, content: `Block ${i}` }));
+        return Array.from({ length: Math.ceil(n / 2) }, (_, i) => ({ id: 1000 + i, uuid: 'u', content: `Block ${i}` }));
       }
       const [query, ...inputs] = params as string[];
       if (query.includes(':in $ ?n')) return [[pages[inputs[0]], 'name']];

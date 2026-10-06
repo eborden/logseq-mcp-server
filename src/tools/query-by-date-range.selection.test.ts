@@ -32,7 +32,8 @@ function mockClient(pages: any[], blocks: any[] = []) {
   const executeDatalogQuery = vi
     .fn()
     .mockResolvedValueOnce(pages.map(p => [p]))
-    .mockResolvedValueOnce(blocks.map(b => [b]));
+    .mockResolvedValueOnce(blocks.map(b => [b]))
+    .mockResolvedValue([]); // a search term's alias lookup
   return { client: { executeDatalogQuery } as unknown as LogseqClient, executeDatalogQuery };
 }
 

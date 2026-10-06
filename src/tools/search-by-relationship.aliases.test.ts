@@ -42,10 +42,10 @@ function fakeClient(opts: { edges?: Array<[number, number]>; aliasError?: Error 
       const frontier = [...query.matchAll(/\(ground \[([\d ]+)\]\) \[\?p/g)][0][1].split(' ').map(Number);
       return neighborsOf(frontier).map(id => [id]);
     }
-    return [[{ id: 500, content: 'a matching block' }]];
+    return [[{ id: 500, uuid: 'u', content: 'a matching block' }]];
   });
   const callAPI = vi.fn(async (method: string, args: unknown[]) =>
-    method === 'logseq.Editor.getPageBlocksTree' ? [{ id: 600, content: `tree of ${args[0]}` }] : []
+    method === 'logseq.Editor.getPageBlocksTree' ? [{ id: 600, uuid: 'u', content: `tree of ${args[0]}` }] : []
   );
   return { client: { executeDatalogQuery, callAPI } as unknown as LogseqClient, executeDatalogQuery, callAPI };
 }

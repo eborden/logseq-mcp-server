@@ -15,6 +15,7 @@ const member = (p: { id: number; name: string; 'original-name': string }) => ({
 });
 const journalBlock = (id: number, day: number, content: string) => ({
   id,
+  uuid: `u-${id}`,
   content,
   page: { id: 500 + id, name: `day ${day}`, 'journal-day': day }
 });
@@ -42,7 +43,7 @@ function fakeClient(opts: { aliasError?: Error } = {}) {
     throw new Error(`unexpected query: ${query}`);
   });
   const callAPI = vi.fn(async (method: string) => {
-    if (method === 'logseq.Editor.getPageBlocksTree') return [{ id: 1, content: 'alias:: Jordan Rivera' }];
+    if (method === 'logseq.Editor.getPageBlocksTree') return [{ id: 1, uuid: 'u', content: 'alias:: Jordan Rivera' }];
     if (method === 'logseq.Editor.getPage') return { id: 1, name: 'jordan', originalName: 'Jordan' };
     throw new Error(`unexpected call: ${method}`);
   });
@@ -93,7 +94,7 @@ describe('get_concept_evolution across an alias group (#69)', () => {
     const executeDatalogQuery = vi.fn(async (query: string) =>
       query.includes(':in $ ?n') ? [[{ id: 9, name: 'alice', 'original-name': 'Alice', file }, 'name']] : []
     );
-    const callAPI = vi.fn().mockResolvedValue([]);
+    const callAPI = vi.fn(async (method: string) => (method === 'logseq.Editor.getPage' ? null : []));
     const client = { executeDatalogQuery, callAPI } as unknown as LogseqClient;
 
     const result = await getConceptEvolution(client, 'Alice');

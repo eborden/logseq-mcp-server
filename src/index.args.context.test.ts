@@ -76,7 +76,7 @@ function editor(method: string): unknown {
     case 'logseq.App.getCurrentGraph':
       return { name: 'my graph', path: '/tmp/my-graph', url: 'logseq_local_/tmp/my-graph' };
     case 'logseq.Editor.getCurrentPage':
-      return page('alice');
+      return { id: 1, name: 'alice', originalName: 'Alice', file: { id: 51 } }; // the Editor API's own spelling
     case 'logseq.Editor.getCurrentBlock':
       return block(1, 'first about [[Bob]]');
     default:

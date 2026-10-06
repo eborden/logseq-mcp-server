@@ -5,7 +5,7 @@ import { PageNotFoundError } from '../errors.js';
 import type { PageEntity } from '../types.js';
 
 /** The root page as the resolver's pull returns it: only the fields a test needs. */
-type RootPull = Pick<PageEntity, 'id' | 'name'> & Partial<PageEntity>;
+type RootPull = Pick<PageEntity, 'id' | 'name'> & Partial<PageEntity> & { 'original-name'?: string };
 
 type Rel = 'outbound' | 'inbound';
 
@@ -33,7 +33,7 @@ function mockClient(root: RootPull | null, levels: unknown[][][] = []) {
     }
     return queue.shift() ?? [];
   });
-  const callAPI = vi.fn();
+  const callAPI = vi.fn(async () => null); // only the suggestion lookup calls it
   return {
     client: { config: {}, executeDatalogQuery, callAPI } as unknown as LogseqClient,
     executeDatalogQuery,

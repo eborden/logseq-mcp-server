@@ -19,6 +19,7 @@ import { AmbiguousPageError, LogSeqTimeoutError, PageNotFoundError } from '../er
  */
 interface FakeBlock {
   id: number;
+  uuid: string;
   content: string;
   page: number;
   refs: number[]; // page ids this block references
@@ -34,20 +35,23 @@ const PAGES: Record<string, number> = {
 
 const BLOCKS: FakeBlock[] = [
   // project atlas page
-  { id: 10, content: 'Met with [[Alice]] today', page: 1, refs: [2] },
-  { id: 11, content: 'Follow up with #alice', page: 1, refs: [2] },
-  { id: 12, content: 'Tag form #[[Alice]] too', page: 1, refs: [2] },
-  { id: 13, content: 'alice mentioned as plain text only', page: 1, refs: [] },
-  { id: 14, content: 'unrelated note', page: 1, refs: [] },
+  { id: 10, uuid: 'u', content: 'Met with [[Alice]] today', page: 1, refs: [2] },
+  { id: 11, uuid: 'u', content: 'Follow up with #alice', page: 1, refs: [2] },
+  { id: 12, uuid: 'u', content: 'Tag form #[[Alice]] too', page: 1, refs: [2] },
+  { id: 13, uuid: 'u', content: 'alice mentioned as plain text only', page: 1, refs: [] },
+  { id: 14, uuid: 'u', content: 'unrelated note', page: 1, refs: [] },
   // bob page links to atlas and alice
-  { id: 20, content: 'Pairing with [[Project Atlas]]', page: 3, refs: [1] },
-  { id: 21, content: 'Lunch with [[Alice]]', page: 3, refs: [2] },
+  { id: 20, uuid: 'u', content: 'Pairing with [[Project Atlas]]', page: 3, refs: [1] },
+  { id: 21, uuid: 'u', content: 'Lunch with [[Alice]]', page: 3, refs: [2] },
   // carol links to atlas and mentions bob only as plain text
-  { id: 30, content: 'bob said hi', page: 4, refs: [] },
-  { id: 31, content: 'Reviewing #project-atlas', page: 4, refs: [1] },
+  { id: 30, uuid: 'u', content: 'bob said hi', page: 4, refs: [] },
+  { id: 31, uuid: 'u', content: 'Reviewing #project-atlas', page: 4, refs: [1] },
   // dave links to carol
-  { id: 40, content: 'Notes on [[Carol]]', page: 5, refs: [4] }
+  { id: 40, uuid: 'u', content: 'Notes on [[Carol]]', page: 5, refs: [4] }
 ];
+
+/** A block the way a pull sends it: its page and refs are `{ id }` references. */
+const wireBlock = (b: FakeBlock) => ({ ...b, page: { id: b.page }, refs: b.refs.map(id => ({ id })) });
 
 function makeClient() {
   const client = new LogseqClient({ apiUrl: 'http://localhost:12315', authToken: 't' });
@@ -64,7 +68,7 @@ function makeClient() {
       const [pageName, refName] = names;
       return BLOCKS.filter(
         b => b.page === PAGES[pageName] && b.refs.includes(PAGES[refName])
-      ).map(b => [b]) as any;
+      ).map(b => [wireBlock(b)]) as any;
     }
 
     if (query.includes(':in $ ?a-name ?b-name')) {
@@ -74,7 +78,7 @@ function makeClient() {
       );
       return BLOCKS.filter(
         b => linkingPages.has(b.page) && b.refs.includes(PAGES[aName])
-      ).map(b => [b]) as any;
+      ).map(b => [wireBlock(b)]) as any;
     }
 
     if (query.includes(':in $ ?n')) {
