@@ -2,6 +2,9 @@ name: CI
 
 on:
   pull_request:
+    # labeled and unlabeled: the mutation job reads the mutation-baseline-change label (ADR-0026),
+    # so adding or removing it has to re-run the check.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -50,8 +53,10 @@ jobs:
       - name: Unit tests
         run: npx vitest run src
 
-  # Mutation testing on the unit suite (ADR-0026, #204). Informational: it fails nothing, so a
-  # red result here never blocks a PR. No baseline and no gate yet (#205).
+  # Mutation testing on the unit suite (ADR-0026, #204, #205). It fails when scripts/mutation-ratchet.ts
+  # does: a file below its score in mutation-baseline.json, a bare `Stryker disable`, a file with no
+  # entry, and, on a PR, a lowered score or an edit to the mutated scope without the
+  # mutation-baseline-change label.
   #
   # Node 24 only: Node 22 and 24 gave the same scores, and the unit-test job above keeps its
   # matrix (ADR-0022). The 10-minute timeout is the real bound on a PR.
@@ -67,10 +72,9 @@ jobs:
   # starts a cold full run. After such a change lands on main the cache stays old until the weekly
   # run, which resets it (run mutation-weekly.yml by hand to do it sooner).
   mutation:
-    name: Mutation testing (informational)
+    name: Mutation testing
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       # Full history: the plan diffs against the commit the restored cache was saved from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,6 +124,16 @@ jobs:
           rm -f reports/mutation/stryker-incremental.json
           npx stryker run --mutate "$MUTATE"
 
+      # Only a push to main saves, and only a whole-scope incremental run: a cache-miss run holds
+      # a few files' results and would replace the good file. It comes before the ratchet, so a
+      # failing check never stops the cache from being saved: its results are true either way.
+      - name: Save the incremental file
+        if: github.event_name == 'push' && steps.plan.outputs.mode == 'incremental'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: reports/mutation/stryker-incremental.json
+          key: mutation-incremental-${{ github.sha }}
+
       - name: Job summary
         if: always()
         run: node scripts/mutation-ci.ts summary >> "$GITHUB_STEP_SUMMARY"
@@ -135,11 +149,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # Only a push to main saves, and only a whole-scope incremental run: a cache-miss run holds
-      # a few files' results and would replace the good file.
-      - name: Save the incremental file
-        if: github.event_name == 'push' && steps.plan.outputs.mode == 'incremental'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: reports/mutation/stryker-incremental.json
-          key: mutation-incremental-${{ github.sha }}
+      # The gate (ADR-0026). It compares the report with mutation-baseline.json and, on a PR, the
+      # baseline and the mutated scope with the base branch's copy. A file below its baseline is
+      # re-run once from a fresh sandbox before it fails. Labels and the base go in through env:.
+      - name: Ratchet
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/mutation-ratchet.ts check ${BASE_REF:+--base "origin/$BASE_REF"}
