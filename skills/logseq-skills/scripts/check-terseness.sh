@@ -11,18 +11,34 @@
 #   signal items        12 target, 14 max 10 target, 12 max
 #   em-dashes           0                 0
 # Two-sentence bullets are flagged for review, not auto-failed.
+#
+# Source line (read-only, no graph access): the page must carry a `source::` property that records the
+# roll-up of the period query it was built from, as
+#   source:: query_by_date_range 20250106-20250110; days 5; blocks 250; top Name 12/4, Name 9/2
+# (days and blocks from summary.totalDays and summary.totalBlocks, top from the first five of
+# summary.topConcepts as "name count/days", or "top none" when the field is absent). A page with no such
+# line was not built from the query, and fails. `source:: files; <error>` is the fallback after a tool call
+# failed; it fails too unless --allow-files is given.
+#
+# Usage: check-terseness.sh [--weekly|--monthly] [--allow-files] <path to summary .md>
 
 set -uo pipefail
 
 GRAN=""
-case "${1:-}" in
-  --weekly)  GRAN=weekly;  shift ;;
-  --monthly) GRAN=monthly; shift ;;
-esac
+ALLOW_FILES=0
+FILE=""
+while (( $# )); do
+  case "$1" in
+    --weekly)      GRAN=weekly ;;
+    --monthly)     GRAN=monthly ;;
+    --allow-files) ALLOW_FILES=1 ;;
+    *)             FILE="$1" ;;
+  esac
+  shift
+done
 
-FILE="${1:-}"
 if [[ -z "$FILE" || ! -f "$FILE" ]]; then
-  echo "usage: $(basename "$0") [--weekly|--monthly] <path to summary .md>" >&2
+  echo "usage: $(basename "$0") [--weekly|--monthly] [--allow-files] <path to summary .md>" >&2
   exit 2
 fi
 
@@ -107,6 +123,47 @@ fi
 for sect in Signals Unresolved Personal; do
   grep -qE "^- ## $sect" "$FILE" || { echo "FAIL: missing mandatory '## $sect' section"; fail=1; }
 done
+
+# The page must record the roll-up of the period query it came from.
+source_line=$(grep -m1 -E '^source::' "$FILE" || true)
+source_re='^source:: query_by_date_range ([0-9]{8})-([0-9]{8}); days ([0-9]+); blocks ([0-9]+); top (.+)$'
+top_re='^(none|[^,/]+ [0-9]+/[0-9]+(, [^,/]+ [0-9]+/[0-9]+)*)$'
+src_hint="Run logseq_query_by_date_range for the period and record its summary on a source:: line under the tags line (Step 6 of the sub-skill)."
+if [[ -z "$source_line" ]]; then
+  echo "FAIL: no 'source::' line, so the page was not built from logseq_query_by_date_range. $src_hint"
+  fail=1
+elif [[ "$source_line" =~ ^source::\ files(\;|$) ]]; then
+  if (( ALLOW_FILES )); then
+    echo "WARN: source is journal files, not the query (--allow-files). That is valid only after a tool call failed, and the gist must say so."
+    warn=1
+  else
+    echo "FAIL: source is journal files. Files are a fallback after a tool call has actually failed. $src_hint If a call did fail, say so in the gist and re-run with --allow-files."
+    fail=1
+  fi
+elif [[ "$source_line" =~ $source_re ]]; then
+  src_start=${BASH_REMATCH[1]}; src_end=${BASH_REMATCH[2]}
+  src_days=${BASH_REMATCH[3]}; src_blocks=${BASH_REMATCH[4]}; src_top=${BASH_REMATCH[5]}
+  printf 'source: query_by_date_range %s-%s, %s days, %s blocks\n' "$src_start" "$src_end" "$src_days" "$src_blocks"
+  (( src_days >= 1 && src_blocks >= 1 )) || { echo "FAIL: the source line records no days or no blocks; there is nothing to summarize"; fail=1; }
+  (( 10#$src_end >= 10#$src_start )) || { echo "FAIL: source range ends ($src_end) before it starts ($src_start)"; fail=1; }
+  [[ "$src_top" =~ $top_re ]] || { echo "FAIL: source 'top' must be 'none' or 'name count/days' entries separated by ', '"; fail=1; }
+  base=$(basename "$FILE" .md)
+  if [[ "$base" =~ ^Weekly\ ([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
+    want="${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+    [[ "$src_start" == "$want" ]] || { echo "FAIL: source range starts $src_start but the page is for the week of $want"; fail=1; }
+    day_links=$(grep -m1 -E '^tags::' "$FILE" | grep -Eo '\[\[[A-Z][a-z]{2} [0-9]{1,2}(st|nd|rd|th), [0-9]{4}\]\]' | wc -l | tr -d ' ')
+    if [[ "$day_links" != "$src_days" ]]; then
+      echo "WARN: the tags line links $day_links journal days but the source line says $src_days"
+      warn=1
+    fi
+  elif [[ "$base" =~ ^Monthly\ ([0-9]{4})-([0-9]{2})$ ]]; then
+    want="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+    [[ "${src_start:0:6}" == "$want" && "${src_end:0:6}" == "$want" ]] || { echo "FAIL: source range $src_start-$src_end is not inside the month $want"; fail=1; }
+  fi
+else
+  echo "FAIL: malformed source line. Expected 'source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top none' or 'top Name 12/4, Name 9/2'. $src_hint"
+  fail=1
+fi
 
 echo
 if (( fail )); then
