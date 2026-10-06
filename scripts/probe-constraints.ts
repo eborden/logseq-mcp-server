@@ -357,6 +357,10 @@ main().catch((e) => {
 // state). Use a throwaway graph, not the personal one. Record shapes only
 // (null, array(n), error text) and never paste page names or paths anywhere.
 //
+//   Needs this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts
+//   start`) or LOGSEQ_MCP_CONFIG, and refuses port 12315. Do M1-M4 in that
+//   instance's LogSeq window, never in the personal one.
+//
 //   Helper, run from the repo root before and during each step. It prints the
 //   shape of each call and nothing else. `--input-type=module` is required:
 //   without it `tsx -e` compiles to CJS and the top-level await fails.
