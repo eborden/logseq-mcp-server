@@ -65,10 +65,12 @@ Read every `Weekly *` page in the month, plus the 1-2 most recent `Monthly *` pa
 **Guard against lossy-of-lossy compression.** The weeklies are themselves compressed, so anything they dropped is invisible from here, and one weak weekly permanently distorts the month. Spot-check the raw journals for the month's highest-salience days — the ones the weeklies flagged with `**Milestone:**` or `**Frustration:**` — rather than trusting the summaries alone:
 
 ```
-logseq_query_by_date_range(start_date=..., end_date=...)
+logseq_query_by_date_range(start_date=..., end_date=..., max_blocks=1000)
 ```
 
 For the month's overall shape, `query_by_date_range` with `include_content=false` and `top_concepts_limit=20` returns `summary.topConcepts` (`[{ name, count, days }]`) without the blocks. A concept with a high `days` ran through the month, which makes it a candidate for a trajectory in Step 4. Check any candidate against the weeklies, because the roll-up counts links and knows nothing about salience. Skip this when the field is absent.
+
+**Pass `max_blocks=1000` on both calls.** The default of 200 keeps the oldest days first, so a month of journals comes back without its last weeks. With `include_content=false` the cap counts top-level blocks, and a month usually holds more than 200, so the snippets can stop early while `summary` (`topConcepts`, `totalDays`, `totalBlocks`) still covers every block in the month. A `blocks_truncated` warning means the result stopped at the day it names (`the entries end at <day>`): query the days after that day for the rest, and where the weeklies are missing for those days, say in the gist that they weren't read. A kept block with `childrenTruncated: true` lost some children; `totals` says how much there was.
 
 ### Step 4: Diff Against Prior Months
 
