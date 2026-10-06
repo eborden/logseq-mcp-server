@@ -225,16 +225,18 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
     try {
       // Fold unadvertised aliases (`name`, `page`, ...) into their canonical parameter (#44)
       const args = resolveParamAliases(name, rawArgs);
-      // Next-step tips ride in the trailing meta block (#44); none when disabled
-      const tipsFor = (result: unknown, meta?: ResultMeta | null) => (tipsEnabled ? buildTips(name, args, result, meta) : []);
+      // Next-step tips ride in the trailing meta block (#44); none when disabled. They
+      // read the parsed arguments (#60), never the raw ones.
+      const tipsFor = (parsed: Record<string, unknown>, result: unknown, meta?: ResultMeta | null) =>
+        tipsEnabled ? buildTips(name, parsed, result, meta) : [];
       switch (name) {
         case 'logseq_get_page': {
-          const { page_name: pageName, include_children: includeChildren, resolve_refs: resolveRefs, format } =
-            parseArgs(getPageArgs, args);
+          const parsed = parseArgs(getPageArgs, args);
+          const { page_name: pageName, include_children: includeChildren, resolve_refs: resolveRefs, format } = parsed;
           const result = await getPage(client, pageName, includeChildren, { resolveRefs });
           if (format === 'markdown') {
             const text = renderPage(result, { blocksFetched: includeChildren });
-            return textResult(withFooter(text, { ...result, tips: tipsFor(result) }));
+            return textResult(withFooter(text, { ...result, tips: tipsFor(parsed, result) }));
           }
           return {
             content: [
@@ -242,35 +244,35 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(null, tipsFor(result)),
+              ...metaContent(null, tipsFor(parsed, result)),
             ],
           };
         }
 
         case 'logseq_get_page_outline': {
-          const { page_name: pageName } = parseArgs(getPageOutlineArgs, args);
-          const result = await getPageOutline(client, pageName);
+          const parsed = parseArgs(getPageOutlineArgs, args);
+          const result = await getPageOutline(client, parsed.page_name);
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(null, tipsFor(result)),
+              ...metaContent(null, tipsFor(parsed, result)),
             ],
           };
         }
 
         case 'logseq_get_backlinks': {
-          const { page_name: pageName } = parseArgs(getBacklinksArgs, args);
-          const { results: result, meta } = await getBacklinksWithMeta(client, pageName);
+          const parsed = parseArgs(getBacklinksArgs, args);
+          const { results: result, meta } = await getBacklinksWithMeta(client, parsed.page_name);
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(meta, tipsFor(result, meta)),
+              ...metaContent(meta, tipsFor(parsed, result, meta)),
             ],
           };
         }
@@ -291,8 +293,8 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_search_blocks': {
-          const { query, limit, include_context: includeContext, slim_results: slimResults } =
-            parseArgs(searchBlocksArgs, args);
+          const parsed = parseArgs(searchBlocksArgs, args);
+          const { query, limit, include_context: includeContext, slim_results: slimResults } = parsed;
           const { results: result, meta } = await searchBlocksWithMeta(client, query, limit, includeContext, slimResults);
 
           return {
@@ -301,14 +303,14 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(meta, tipsFor(result, meta)),
+              ...metaContent(meta, tipsFor(parsed, result, meta)),
             ],
           };
         }
 
         case 'logseq_query_by_property': {
-          const { property_key: propertyKey, property_value: propertyValue, slim_results: slimResults } =
-            parseArgs(queryByPropertyArgs, args);
+          const parsed = parseArgs(queryByPropertyArgs, args);
+          const { property_key: propertyKey, property_value: propertyValue, slim_results: slimResults } = parsed;
           const result = await queryByProperty(client, propertyKey, propertyValue, slimResults);
           return {
             content: [
@@ -316,7 +318,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(null, tipsFor(result)),
+              ...metaContent(null, tipsFor(parsed, result)),
             ],
           };
         }
@@ -458,7 +460,7 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(null, tipsFor(result)),
+              ...metaContent(null, tipsFor(parsed, result)),
             ],
           };
         }
@@ -509,15 +511,15 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_list_pages': {
-          const { name_contains: nameContains } = parseArgs(listPagesArgs, args);
-          const result = await listPages(client, { nameContains });
+          const parsed = parseArgs(listPagesArgs, args);
+          const result = await listPages(client, { nameContains: parsed.name_contains });
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify(result),
               },
-              ...metaContent(null, tipsFor(result)),
+              ...metaContent(null, tipsFor(parsed, result)),
             ],
           };
         }
