@@ -1,24 +1,22 @@
 import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../../src/config.js';
+import { loadConfig } from '../../../src/config.js';
 import { LogseqClient } from '../../../src/client.js';
 import { LogseqMCPConfig } from '../../../src/types.js';
 import { FixtureGraphError, requireFixtureGraph } from './fixture-graph.js';
+import { assertNotPersonalLogseq, FixtureConfigError, HOW_TO_RUN, resolveFixtureConfigPath } from './instance-config.js';
+
+export { HOW_TO_RUN };
 
 /**
- * How every integration suite connects (#90): load the config, then `requireFixtureGraph`, so a
- * suite runs against tests/fixtures/graph or not at all. Exact assertions on the fixture would
- * fail confusingly, or pass by accident, against any other graph.
+ * How every integration suite connects (#90): resolve the config, refuse a personal LogSeq, then
+ * `requireFixtureGraph`, so a suite runs against tests/fixtures/graph or not at all. Exact
+ * assertions on the fixture would fail confusingly, or pass by accident, against any other graph.
  *
- * `vitest.integration.config.ts` points `LOGSEQ_MCP_CONFIG` at this worktree's instance
- * (`.logseq-instance/config.json`) when one is running and the variable is unset, and its global
- * setup runs this once before any suite, so a wrong graph or a stopped instance fails the run
- * once, with these instructions, instead of in every file.
+ * The config is `LOGSEQ_MCP_CONFIG` or this worktree's `.logseq-instance/config.json`, never
+ * `~/.logseq-mcp/config.json`, and a config on port 12315 is refused before any network call
+ * (`instance-config.ts`). The global setup runs this once before any suite, so a missing instance
+ * fails the run once, with the instructions, instead of in every file.
  */
-
-export const HOW_TO_RUN =
-  'Start this worktree\'s fixture instance with `npx tsx scripts/logseq-instance.ts start`, then run ' +
-  '`npm run test:integration` (it finds .logseq-instance/config.json by itself), then ' +
-  '`npx tsx scripts/logseq-instance.ts stop`. See "Running the integration tests" in tests/integration/setup.md.';
 
 export interface FixtureConnection {
   client: LogseqClient;
@@ -29,18 +27,20 @@ export interface FixtureConnection {
 /**
  * Load the config and confirm the API serves the fixture graph.
  *
- * API calls: 1 Datalog query (the sentinel page).
- * @throws Error with HOW_TO_RUN when the config is missing or LogSeq cannot be reached, and
+ * API calls: 1 Datalog query (the sentinel page), and none when the config is refused.
+ * @throws FixtureConfigError (no network call) when there is no instance config, it is missing,
+ *   or it points at port 12315; Error with HOW_TO_RUN when LogSeq cannot be reached; and
  *   FixtureGraphError when it serves another graph or another version of the fixture
  */
 export async function connectFixture(): Promise<FixtureConnection> {
-  const configPath = resolveConfigPath();
+  const configPath = resolveFixtureConfigPath();
   try {
     await access(configPath);
   } catch {
-    throw new Error(`Config file not found at ${configPath}. ${HOW_TO_RUN}`);
+    throw new FixtureConfigError(`Config file not found at ${configPath}.`);
   }
   const config = await loadConfig(configPath);
+  assertNotPersonalLogseq(config.apiUrl);
   const client = new LogseqClient(config);
   try {
     await requireFixtureGraph(client);

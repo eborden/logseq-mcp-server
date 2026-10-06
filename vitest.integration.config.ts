@@ -1,18 +1,19 @@
-import { existsSync } from 'fs';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
 import { defineConfig } from 'vitest/config';
+import { CONFIG_PATH_ENV, instanceConfigPath } from './tests/integration/helpers/instance-config.js';
+import { existsSync } from 'fs';
 
 // Integration tests run against the fixture graph only (#90): tests/integration/global-setup.ts
-// and every suite's beforeAll call requireFixtureGraph and fail loud against any other graph.
+// and every suite's beforeAll call connectFixture, which uses LOGSEQ_MCP_CONFIG or this worktree's
+// .logseq-instance/config.json, never ~/.logseq-mcp/config.json, refuses a config on port 12315
+// before any network call, and fails loud against any graph but the fixture.
 //
-// With LOGSEQ_MCP_CONFIG unset, use this worktree's own instance when one is running
-// (`npx tsx scripts/logseq-instance.ts start` writes .logseq-instance/config.json and `stop`
-// deletes it), so a run never falls back to ~/.logseq-mcp/config.json while an instance is up.
-// Set here, in the main process, so the global setup and every test worker see it.
-const instanceConfig = join(dirname(fileURLToPath(import.meta.url)), '.logseq-instance', 'config.json');
-if (!process.env.LOGSEQ_MCP_CONFIG?.trim() && existsSync(instanceConfig)) {
-  process.env.LOGSEQ_MCP_CONFIG = instanceConfig;
+// With LOGSEQ_MCP_CONFIG unset, point it at the instance config when an instance is running
+// (`npx tsx scripts/logseq-instance.ts start` writes it and `stop` deletes it). Set here, in the
+// main process, so the global setup and every test worker see the same path, including suites
+// that start the MCP server.
+const instanceConfig = instanceConfigPath();
+if (!process.env[CONFIG_PATH_ENV]?.trim() && existsSync(instanceConfig)) {
+  process.env[CONFIG_PATH_ENV] = instanceConfig;
 }
 
 export default defineConfig({
