@@ -505,3 +505,68 @@ describe('logseq_get_backlinks max_pages and max_blocks_per_page (#61)', () => {
     expect((await backlinks(2, 2, { max_blocks_per_page: 'many' })).isError).toBe(true);
   });
 });
+
+describe('logseq_query_by_property limit (#61)', () => {
+  // `n` blocks carrying the property, all on one made-up page, as the one Datalog query returns them
+  const byProperty = (n: number, args: Record<string, unknown> = {}) => {
+    const callAPI = vi.fn(async () => Array.from({ length: n }, (_, i) => [blockRow(i + 1)[0]]));
+    return callTool(callAPI, 'logseq_query_by_property', { property_key: 'status', property_value: 'active', ...args });
+  };
+
+  it('keeps the array as the first block, cut at 100, and reports the cut in a second block', async () => {
+    const result = await byProperty(130);
+
+    expect(result.content).toHaveLength(2);
+    const results = JSON.parse(result.content[0].text);
+    expect(Array.isArray(results)).toBe(true);
+    expect(results).toHaveLength(100);
+    expect(JSON.parse(result.content[1].text).meta).toMatchObject({
+      hasMore: true,
+      totals: { matches: 130 },
+      warnings: [
+        {
+          code: 'results_truncated',
+          message: 'Showing 100 of 130 matching blocks (the first ones listed, not ranked).',
+          howToFetchAll: 'Set limit to 130 (or higher) to get all 130.',
+        },
+      ],
+    });
+  });
+
+  it('honours limit and returns the rest on request', async () => {
+    expect(JSON.parse((await byProperty(130, { limit: 5 })).content[0].text)).toHaveLength(5);
+    expect(JSON.parse((await byProperty(130, { limit: 130 })).content[0].text)).toHaveLength(130);
+  });
+
+  it('clamps limit above 500 and reports the maximum, with hasMore false', async () => {
+    const result = await byProperty(600, { limit: 5000 });
+
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.content[0].text)).toHaveLength(500);
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta.hasMore).toBe(false);
+    expect(meta.totals).toEqual({ matches: 600 });
+    expect(meta.warnings).toHaveLength(1);
+    expect(meta.warnings[0].code).toBe('results_truncated');
+    expect(meta.warnings[0].message).toContain('capped at its maximum of 500 (5000 was asked for)');
+    expect(meta.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('adds no cap meta, and the same array, when everything fits', async () => {
+    const atDefault = await byProperty(100);
+    const explicit = await byProperty(100, { limit: 100 });
+    const atMax = await byProperty(100, { limit: 500 });
+    const above = await byProperty(100, { limit: 5000 });
+
+    expect(JSON.parse(atDefault.content[0].text)).toHaveLength(100);
+    // What follows the array is the tips block (on by default) and nothing about the cap
+    expect(Object.keys(JSON.parse(atDefault.content[1].text).meta)).toEqual(['tips']);
+    expect(explicit.content).toEqual(atDefault.content);
+    expect(atMax.content).toEqual(atDefault.content);
+    expect(above.content).toEqual(atDefault.content);
+  });
+
+  it('rejects a limit that is not a number', async () => {
+    expect((await byProperty(2, { limit: 'many' })).isError).toBe(true);
+  });
+});
