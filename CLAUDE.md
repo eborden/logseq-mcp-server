@@ -9,7 +9,7 @@ The LogSeq instance this server is developed against is the maintainer's **perso
 - Block content, quotes or paraphrases of what the graph says
 - People's names (journals mention real colleagues, friends and family)
 - Dates of specific journal entries, or anything that reveals what happened on a given day
-- Raw output from `scripts/measure-api-calls.ts` or `scripts/measure-output-size.ts` (they read the real graph by default), or from any script, probe or integration-test run that `LOGSEQ_MCP_CONFIG` has pointed at a personal instance on another port. The probe and the tests use the fixture instance by default and refuse port 12315, so their output holds real page names only in that case. Output from any run against the real graph includes real page names.
+- Raw output from any run against the real graph. That is `scripts/measure-api-calls.ts` and `scripts/measure-output-size.ts` (they read it by default), and `scripts/probe-constraints.ts` or an integration-test run that `LOGSEQ_MCP_CONFIG` points at a personal instance on a port other than 12315 (both default to the fixture instance and refuse 12315). Their output includes real page names.
 
 **Do instead:**
 - Use made-up examples: `"Alice"`, `"Bob"`, `"my page"`, `"project atlas"`, `"20250101"`.
