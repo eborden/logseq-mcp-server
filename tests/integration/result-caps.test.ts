@@ -764,13 +764,17 @@ describe('result caps (#61)', () => {
     const capWarnings = (body: RelationshipBody) => body.warnings.filter(w => w.code === 'results_truncated');
 
     // A kept block that has fewer children than in the full result must say so, and no other may (#183)
-    function expectChildrenTruncatedMarks(full: RelationshipBlock[], kept: RelationshipBlock[], at: string): void {
+    // Returns how many blocks carry the mark, so a caller can require that a cut reached one.
+    function expectChildrenTruncatedMarks(full: RelationshipBlock[], kept: RelationshipBlock[], at: string): number {
       const fullById = new Map(flatten(full).map(block => [block.id, block]));
+      let marks = 0;
       for (const block of flatten(kept)) {
         const original = fullById.get(block.id)!;
         const lostChildren = (block.children?.length ?? 0) < (original.children?.length ?? 0);
         expect(block.childrenTruncated === true, `${at}: block ${block.id} lost children: ${lostChildren}`).toBe(lostChildren);
+        if (block.childrenTruncated === true) marks += 1;
       }
+      return marks;
     }
 
     it.each(CASES)(
@@ -794,14 +798,23 @@ describe('result caps (#61)', () => {
         expect((await relationship(args)).text).toBe(full.text);
         expect((await relationship(args, 5000)).text).toBe(full.text);
 
-        for (const limit of [0, 1, 2, total - 1, total, total + 1, DEFAULT_RELATIONSHIP_LIMIT]) {
+        // A limit that cuts inside a subtree, from the fixture's own tree: keep the first block that has
+        // children and none of them (its position in document order, plus 1). Without it no limit above
+        // need reach a block that lost children, and the mark check would never see a mark.
+        const flat = tree ? flatten(full.results) : [];
+        const firstParent = flat.findIndex(block => (block.children?.length ?? 0) > 0);
+        const insideSubtree = nested && firstParent >= 0 ? [firstParent + 1] : [];
+        if (nested) expect(insideSubtree, `${label} needs a block with children to cut inside`).toHaveLength(1);
+        let marksSeen = 0;
+
+        for (const limit of [0, 1, 2, ...insideSubtree, total - 1, total, total + 1, DEFAULT_RELATIONSHIP_LIMIT]) {
           const body = await relationship(args, limit);
           const at = `${label}, limit ${limit}`;
           expect(unitCount(body, tree), at).toBeLessThanOrEqual(MAX_RELATIONSHIP_LIMIT);
           expect(unitCount(body, tree), at).toBe(Math.min(limit, total));
           // The first results of the full list, in its order
           expect(resultIds(body, tree), at).toEqual(resultIds(full, tree).slice(0, limit));
-          if (tree) expectChildrenTruncatedMarks(full.results, body.results, at);
+          if (tree) marksSeen += expectChildrenTruncatedMarks(full.results, body.results, at);
           // The alias group is still reported when the result is cut
           expect(body.resolvedAliases, at).toEqual(full.resolvedAliases);
 
@@ -816,6 +829,7 @@ describe('result caps (#61)', () => {
           expect(capWarnings(body)[0].howToFetchAll, at).toBe(`Set limit to ${total} (or higher) to get all ${total}.`);
           expectNoSuggestionPast(body, 'limit', MAX_RELATIONSHIP_LIMIT);
         }
+        if (nested) expect(marksSeen, `${label} needs a cut inside a subtree, so a block shows childrenTruncated`).toBeGreaterThan(0);
       }
     );
   });
