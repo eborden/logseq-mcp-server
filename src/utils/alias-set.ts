@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import type { ResultWarning } from '../types.js';
+import type { PageLike, ResultWarning } from '../types.js';
+import { entityId, pageDisplayName, pageName as nameOf } from './entity-fields.js';
 
 /**
  * Most pages one alias group may hold here. Groups are written by hand
@@ -36,18 +37,13 @@ export interface ResolvedAliases {
   resolvedAliases?: string[];
 }
 
-const idOf = (page: any): number | undefined => page?.id ?? page?.['db/id'];
-const nameOf = (page: any): string => String(page?.name ?? '').toLowerCase();
-const originalNameOf = (page: any): string =>
-  page?.['original-name'] ?? page?.originalName ?? page?.name ?? '';
-
-function memberOf(page: any): AliasMember | null {
-  const id = idOf(page);
-  return typeof id === 'number' ? { id, name: nameOf(page), originalName: originalNameOf(page) } : null;
+function memberOf(page: PageLike | null | undefined): AliasMember | null {
+  const id = entityId(page);
+  return typeof id === 'number' ? { id, name: nameOf(page), originalName: pageDisplayName(page) } : null;
 }
 
 /** An alias set holding only `page`: no query, nothing to union. */
-export function singleAliasSet(page: any): AliasSet {
+export function singleAliasSet(page: PageLike): AliasSet {
   const member = memberOf(page);
   return { members: member ? [member] : [], truncated: false };
 }
@@ -59,7 +55,7 @@ export function singleAliasSet(page: any): AliasSet {
  * one-directional link). A page without `:block/alias` therefore has no
  * aliases and needs no query.
  */
-export function hasAliasLinks(page: any): boolean {
+export function hasAliasLinks(page: PageLike | null | undefined): boolean {
   return Array.isArray(page?.alias) && page.alias.length > 0;
 }
 
@@ -116,7 +112,7 @@ function buildSet(start: AliasMember, found: AliasMember[]): AliasSet {
  * Infrastructure errors (connection, timeout, auth) propagate: an alias lookup
  * that failed must not look like "no aliases".
  */
-export async function resolveAliasSets(client: LogseqClient, pages: any[]): Promise<AliasSet[]> {
+export async function resolveAliasSets(client: LogseqClient, pages: PageLike[]): Promise<AliasSet[]> {
   const starts = pages.map(page => singleAliasSet(page));
   const withLinks = starts
     .map((set, i) => ({ id: set.members[0]?.id, linked: hasAliasLinks(pages[i]) }))
@@ -124,7 +120,7 @@ export async function resolveAliasSets(client: LogseqClient, pages: any[]): Prom
   if (withLinks.length === 0) return starts;
 
   const { query, inputs } = DatalogQueryBuilder.aliasSets([...new Set(withLinks.map(entry => entry.id))]);
-  const rows = (await client.executeDatalogQuery<Array<[number, any]>>(query, ...inputs)) || [];
+  const rows = (await client.executeDatalogQuery<Array<[number, PageLike]> | null>(query, ...inputs)) || [];
 
   const byStart = new Map<number, AliasMember[]>();
   for (const [startId, page] of rows) {
@@ -139,7 +135,7 @@ export async function resolveAliasSets(client: LogseqClient, pages: any[]): Prom
 }
 
 /** The alias set of one resolved page (see {@link resolveAliasSets}). */
-export async function resolveAliasSet(client: LogseqClient, page: any): Promise<AliasSet> {
+export async function resolveAliasSet(client: LogseqClient, page: PageLike): Promise<AliasSet> {
   return (await resolveAliasSets(client, [page]))[0];
 }
 
@@ -153,7 +149,7 @@ export async function resolveAliasSetByName(
   name: string
 ): Promise<AliasSet | null> {
   const { query, inputs } = DatalogQueryBuilder.aliasSetByName(name);
-  const rows = (await client.executeDatalogQuery<Array<[any, any]>>(query, ...inputs)) || [];
+  const rows = (await client.executeDatalogQuery<Array<[PageLike, PageLike]> | null>(query, ...inputs)) || [];
   const first = rows.map(([start]) => memberOf(start)).find(member => member !== null);
   if (!first) return null;
   const found = rows.map(([, member]) => memberOf(member)).filter((m): m is AliasMember => m !== null);

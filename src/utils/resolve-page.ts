@@ -2,7 +2,8 @@ import Fuzzysort from 'fuzzysort';
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { AmbiguousPageError, PageNotFoundError, isInfrastructureError } from '../errors.js';
-import type { PageCandidate, PageEntity, PageMatchReason, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
+import type { PageCandidate, PageEntity, PageLike, PageMatchReason, PageResolvedFrom, ResultMeta, ResultWarning } from '../types.js';
+import { entityId, pageDisplayName, pageName as nameOf } from './entity-fields.js';
 import { buildResultMeta } from './result-meta.js';
 
 /** Most candidates listed for an ambiguous name; the rest are only counted. */
@@ -32,7 +33,7 @@ export function isoDateToJournalDay(input: string): number | null {
 /** A name that resolved to exactly one page. */
 export interface ResolvedPage {
   /** The page as pulled by Datalog (`pull [*]`, kebab-case keys) */
-  page: any;
+  page: PageLike;
   /** Lowercased `:block/name` of the page */
   name: string;
   originalName: string;
@@ -49,18 +50,14 @@ export type PageResolution =
   | { kind: 'ambiguous'; candidates: PageCandidate[]; totalCandidates: number }
   | { kind: 'not_found' };
 
-type Row = [any, string | undefined];
-
-const nameOf = (page: any): string => String(page?.name ?? '').toLowerCase();
-const originalNameOf = (page: any): string => page?.['original-name'] ?? page?.originalName ?? page?.name ?? '';
-const idOf = (page: any): unknown => page?.id ?? page?.['db/id'];
+type Row = [PageLike, string | undefined];
 
 /** Pages from rows, one per entity, ordered by name so output never depends on row order. */
-function distinctPages(pages: any[]): any[] {
+function distinctPages(pages: PageLike[]): PageLike[] {
   const seen = new Set<unknown>();
-  const out: any[] = [];
+  const out: PageLike[] = [];
   for (const page of pages) {
-    const key = idOf(page) ?? nameOf(page);
+    const key = entityId(page) ?? nameOf(page);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(page);
@@ -76,20 +73,20 @@ function distinctPages(pages: any[]): any[] {
  * stubs are not candidates. Two file-backed pages declaring the same name stay
  * ambiguous.
  */
-function declaringPages(pages: any[]): any[] {
+function declaringPages(pages: PageLike[]): PageLike[] {
   const written = pages.filter(page => page.file != null);
   return written.length > 0 ? written : pages;
 }
 
-function found(page: any, matchedBy: PageMatchReason, lookupName: string): PageResolution {
-  return { kind: 'found', page, name: nameOf(page), originalName: originalNameOf(page), matchedBy, lookupName };
+function found(page: PageLike, matchedBy: PageMatchReason, lookupName: string): PageResolution {
+  return { kind: 'found', page, name: nameOf(page), originalName: pageDisplayName(page), matchedBy, lookupName };
 }
 
-function pick(pages: any[], matchedBy: PageMatchReason, reason: string): PageResolution {
+function pick(pages: PageLike[], matchedBy: PageMatchReason, reason: string): PageResolution {
   if (pages.length === 1) return found(pages[0], matchedBy, nameOf(pages[0]));
   const candidates: PageCandidate[] = pages.slice(0, MAX_CANDIDATES).map(page => ({
     name: nameOf(page),
-    originalName: originalNameOf(page),
+    originalName: pageDisplayName(page),
     matchedBy,
     reason: reason
   }));
@@ -126,7 +123,7 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
     journalDay === null
       ? DatalogQueryBuilder.resolvePage(name)
       : DatalogQueryBuilder.resolvePage(name, journalDay);
-  const rows = (await client.executeDatalogQuery<Row[]>(query, ...inputs)) || [];
+  const rows = (await client.executeDatalogQuery<Row[] | null>(query, ...inputs)) || [];
 
   const resolution = resolveFromRows(name, rows);
   if (resolution) return resolution;
@@ -134,7 +131,7 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
   // Last resort, and only for names that are not dates
   if (journalDay === null) {
     const leaf = DatalogQueryBuilder.namespaceLeafPages(name);
-    const leafRows = (await client.executeDatalogQuery<Array<[any]>>(leaf.query, ...leaf.inputs)) || [];
+    const leafRows = (await client.executeDatalogQuery<Array<[PageLike]> | null>(leaf.query, ...leaf.inputs)) || [];
     const leaves = distinctPages(leafRows.map(([page]) => page));
     if (leaves.length > 0) return pick(leaves, 'namespace-leaf', `namespace page ending in ${JSON.stringify(`/${name}`)}`);
   }
@@ -153,7 +150,7 @@ function resolveFromRows(name: string, rows: Row[]): PageResolution | null {
   const byRoute = (via: string) => rows.filter(([, v]) => (v ?? 'name') === via).map(([page]) => page);
   const exact = byRoute('name')[0];
   const aliasSources = declaringPages(
-    distinctPages(byRoute('alias')).filter(page => !exact || idOf(page) !== idOf(exact))
+    distinctPages(byRoute('alias')).filter(page => !exact || entityId(page) !== entityId(exact))
   );
   const journals = distinctPages(byRoute('journal-date'));
 
@@ -166,7 +163,7 @@ function resolveFromRows(name: string, rows: Row[]): PageResolution | null {
     // `[[2025-01-01]]` links and `date:: 2025-01-01` values create a stub named
     // like the date when the graph's journal titles use another format. The
     // journal for that day is the page the caller means.
-    const otherJournals = journals.filter(page => idOf(page) !== idOf(exact));
+    const otherJournals = journals.filter(page => entityId(page) !== entityId(exact));
     if (isStub && otherJournals.length > 0) {
       return pick(otherJournals, 'journal-date', `journal page for ${name}`);
     }
@@ -209,7 +206,7 @@ export async function resolveLinkTargets(
   if (keys.length === 0) return { resolutions, unavailable: false };
 
   const { query, inputs } = DatalogQueryBuilder.linkTargets(keys);
-  const rows = await client.executeDatalogQuery<Array<[any, string, string]> | null>(query, ...inputs);
+  const rows = await client.executeDatalogQuery<Array<[PageLike | null, string, string]> | null>(query, ...inputs);
   const byName = new Map<string, Row[]>();
   for (const [page, via, n] of rows ?? []) {
     if (page == null || typeof n !== 'string') continue;
@@ -231,7 +228,7 @@ export async function resolveLinkTargets(
 export async function suggestPages(client: LogseqClient, input: string): Promise<string[]> {
   if (isoDateToJournalDay(input) !== null) return []; // fuzzy-matching a date finds nothing useful
   try {
-    const allPages = await client.callAPI<PageEntity[]>('logseq.Editor.getAllPages', []);
+    const allPages = await client.callAPI<PageEntity[] | null>('logseq.Editor.getAllPages', []);
     if (!allPages || allPages.length === 0) return [];
     return Fuzzysort.go(input, allPages, {
       key: 'originalName',
