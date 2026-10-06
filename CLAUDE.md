@@ -483,6 +483,7 @@ Quick reference checklist for future work:
 - [ ] A nested pull works on refs: `(pull ?block [* {:block/refs [:db/id :block/name :block/original-name :block/journal? :block/journal-day]}])` returns each ref as a page map in the same call (`query_by_date_range` uses it for `topConcepts`). A ref to a block (`((uuid))`) has no `name`, and journal pages carry `journal?` true and `journal-day`.
 - [ ] `:block/updated-at` is missing on some pages (roughly 1 in 10 pages lacked it in testing). Use `get-else` with a default.
 - [ ] Many pages are empty link targets with no blocks or file. Test with them.
+- [ ] Read LogSeq through `callParsed` / `queryParsed` (`src/utils/parse-response.ts`), never a bare `client.callAPI` / `executeDatalogQuery` in a tool (#202). Each checks the response against a schema from `src/response-schemas.ts` and throws `LogSeqResponseError` (method and path, never a value) when a field the code reads is missing or mistyped. The schemas name only the fields the code reads (extra keys pass, as LogSeq adds them), say `.nullable()` where LogSeq may answer `null` (a tool still treats `null` as its own case, BR-0011), and keep the key spelling LogSeq sent: the check returns the response itself, not a rebuilt copy, because full output carries `original-name` for a pulled page and `originalName` for an Editor API one and BR-0004 forbids renaming either. A new field a tool reads goes in the schema first; a block or page reached through a hot path (thousands of rows) must stay small, since each declared field costs time: re-run `npx tsx scripts/measure-parse-time.ts`. A mock in a unit test must look like LogSeq's answer (a block has `id`, `uuid` and `content`; `getPage` answers a page or `null`, never `undefined` or `[]`), or the parse fails.
 - [ ] Resolve page names with `requirePage`, not `getPage`: [BR-0010 (page-names-resolved-via-resolver)](docs/business-rules/0010-page-names-resolved-via-resolver.md)
 - [ ] An alias group is the pages that name one thing (#69). `alias:: x` stores `:block/alias` in **both directions** between the declaring page and the stub `x`, and LogSeq keeps a group of three or more as a **clique** (every page links every other), with no self-links. A reference points at whichever page entity the block named, so `[[Jordan]]` and `[[Jordan Rivera]]` are refs to different pages. Any tool that follows links to a page must use the whole group: `resolveAliasSet(s)` in `src/utils/alias-set.ts` (one Datalog query for any number of pages, two hops, bound with `groundIds`; it makes no call for a page whose pulled entity has no `alias` key, which relies on the symmetry above). Don't write the same variable twice in one pattern to test for a self-link (`[?p :block/alias ?p]` matched every link). A runaway query blocks LogSeq's HTTP API until it finishes, so bind every variable in a new `or-join` before running it. `getPageLinkedReferences` spans the group for the declaring page but not exactly for the stub (a few ids differ), which is why the aliased path uses `linkedReferencesOfPages` (same block set as the Editor call for the declaring page, symmetric for every name). A tool that unions names reports them as `resolvedAliases` (original case, sorted; in `meta` for a bare-array result, keyed by topic in `search_by_relationship`), absent when the page has no aliases. Re-run the probe after LogSeq upgrades: its "must be 0" lines are what the resolver assumes.
 - [ ] `:block/properties` is a map keyed by **keywords**, lowercase and dashed. `[(get ?props ?key) ?v]` needs a keyword: a string key, or a string `:in` input, matches nothing. Build it with `[(keyword ?key) ?kw]` from a string `:in` input. The Editor API returns the same keys camelCase.
@@ -628,8 +629,11 @@ src/
 │   ├── markdown.ts                - The one Markdown renderer (pages, blocks, footer); used by the page resource too
 │   ├── markdown-context.ts        - Markdown for build_context, get_context_for_query, get_concept_network
 │   ├── compact.ts                 - compact JSON; snippet.ts has firstLineSnippet
-│   └── parse-args.ts              - parseArgs / toInputSchema: tool arguments parsed with zod (#60)
+│   ├── parse-args.ts              - parseArgs / toInputSchema: tool arguments parsed with zod (#60)
+│   ├── parse-response.ts          - callParsed / queryParsed / parseResponse: LogSeq responses checked against the schemas (#202)
+│   └── entity-fields.ts           - Reads a page or block field in either key spelling
 ├── tool-args.ts                   - zod argument schemas, one per tool, which also generate each inputSchema
+├── response-schemas.ts            - zod schemas for LogSeq's responses (Editor API camelCase and Datalog kebab-case); the entity types are built from them (#202)
 └── types.ts                       - TypeScript interfaces
 
 tests/
@@ -641,6 +645,7 @@ scripts/
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live LogSeq (use the fixture)
 ├── measure-api-calls.ts           - Counts API calls per tool against a live graph (baseline: the real graph)
 ├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
+├── measure-parse-time.ts          - Time the response schemas on large synthetic results (no LogSeq needed; #202)
 ├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on a copy of the fixture graph (#118, #151, macOS)
 ├── generate-hub-fixture.ts        - Writes (or --check's) the hub fixture's files from fixture-hub/hub-graph.ts (#89)
 ├── fixture-hub/hub-graph.ts       - Shape and counts of the hub fixture; src/fixture-hub.test.ts checks the committed files against it
@@ -723,6 +728,7 @@ Checklist for new Datalog-based tools:
 5. **Documentation** - Update MCP tool handler in `src/index.ts`
    - Give the tool `annotations: readOnlyAnnotations('Title')` (a guard test in `src/index.test.ts` fails without it). Every tool is read-only: [BR-0002 (tools-read-only)](docs/business-rules/0002-tools-read-only.md)
    - Declare the tool's zod schema in `src/tool-args.ts` and parse with `parseArgs`. The guard test (`src/index.args.guard.test.ts`) checks it
+   - Read each LogSeq response with `callParsed` / `queryParsed` and a schema from `src/response-schemas.ts` (add one when the shape is new)
 
 6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
 
