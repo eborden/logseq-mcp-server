@@ -10,7 +10,9 @@ import { LogseqClient } from './client.js';
  * Every tool parses its arguments before doing any work (#60, ADR-0019): for each
  * parameter each tool advertises, a value of the wrong type is rejected with an
  * error naming it, and LogSeq is never called. Driven by tools/list, so a new tool
- * or parameter is covered without editing this file.
+ * or parameter is covered without editing this file, as long as its type is one the
+ * guard has sample values for (string, number, integer, boolean, an enum or an anyOf
+ * of those). Any other type fails with a message saying which case to add.
  */
 
 afterEach(() => vi.restoreAllMocks());
@@ -21,17 +23,25 @@ interface PropertySchema {
   anyOf?: PropertySchema[];
 }
 
+/** The schema's type, or a clear failure for a type the guard has no sample values for yet. */
+function typeOf(schema: PropertySchema): 'string' | 'number' | 'integer' | 'boolean' {
+  const type = schema.type;
+  if (type === 'string' || type === 'number' || type === 'integer' || type === 'boolean') return type;
+  throw new Error(`guard has no value for type ${JSON.stringify(type)}: add a case to validValue and wrongValue`);
+}
+
 /** A value the parameter accepts. */
 function validValue(schema: PropertySchema): unknown {
   if (schema.enum) return schema.enum[0];
   if (schema.anyOf) return validValue(schema.anyOf[0]);
-  switch (schema.type) {
+  switch (typeOf(schema)) {
+    case 'string':
+      return 'Alice';
     case 'number':
+    case 'integer':
       return 1;
     case 'boolean':
       return true;
-    default:
-      return 'Alice';
   }
 }
 
@@ -39,15 +49,30 @@ function validValue(schema: PropertySchema): unknown {
 function wrongValue(schema: PropertySchema): unknown {
   if (schema.enum) return 'not-one-of-them';
   if (schema.anyOf) return ['an', 'array'];
-  switch (schema.type) {
+  switch (typeOf(schema)) {
+    case 'string':
+      return 5;
     case 'number':
       return '5';
+    case 'integer':
+      // A number, but not a whole one: what `.int()` is there to reject
+      return 1.5;
     case 'boolean':
       return 'true';
-    default:
-      return 5;
   }
 }
+
+describe("the guard's sample values", () => {
+  it('cover integer parameters (z.number().int())', () => {
+    expect(validValue({ type: 'integer' })).toBe(1);
+    expect(wrongValue({ type: 'integer' })).toBe(1.5);
+  });
+
+  it('fail clearly for a type they have no values for', () => {
+    expect(() => wrongValue({ type: 'array' })).toThrow('guard has no value for type "array"');
+    expect(() => validValue({})).toThrow('guard has no value for type undefined');
+  });
+});
 
 async function withServer<T>(fn: (mcp: Client, calls: string[]) => Promise<T>): Promise<T> {
   const calls: string[] = [];
