@@ -54,7 +54,7 @@ describe('get_backlinks across an alias group (#69)', () => {
 
     const { results } = await getBacklinksWithMeta(client, 'Jordan');
 
-    expect(blockIds(results as any)).toEqual([100, 200]);
+    expect(blockIds(results)).toEqual([100, 200]);
     // not the Editor call: it would need one request per name
     expect(callAPI).not.toHaveBeenCalled();
   });
@@ -63,14 +63,14 @@ describe('get_backlinks across an alias group (#69)', () => {
     const byName = await getBacklinksWithMeta(fakeClient().client, 'Jordan');
     const byAlias = await getBacklinksWithMeta(fakeClient().client, 'Jordan Rivera');
 
-    expect(blockIds(byAlias.results as any)).toEqual(blockIds(byName.results as any));
+    expect(blockIds(byAlias.results)).toEqual(blockIds(byName.results));
     expect(byAlias.meta?.resolvedAliases).toEqual(['Jordan', 'Jordan Rivera']);
   });
 
   it('shapes the tuples like the Editor API: [page, blocks] with camelCase keys', async () => {
     const { results } = await getBacklinksWithMeta(fakeClient().client, 'Jordan');
 
-    const [page, blocks] = results!.find(([p]) => p.id === 50) as any;
+    const [page, blocks] = results!.find(([p]) => p.id === 50)!;
     expect(blocks[0].pathRefs).toEqual([{ id: 1 }]);
     expect(blocks[0].page).toEqual(page);
   });
