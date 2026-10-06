@@ -12,7 +12,7 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 - Only increase if results are insufficient
 - Never start with limit > 10 for exploratory queries
 
-**Red Flag:** If you're about to set limit=20 or higher, STOP and reconsider.
+**Red Flag:** If you're about to set limit=20 or higher on an exploratory `search_blocks` call, STOP and reconsider. A cap raise that a truncation warning names, for a question that needs every result, is a different case: see the caps table in `mcp-tools-reference.md`.
 
 ### 2. Discover Vocabulary Before Guessing
 
