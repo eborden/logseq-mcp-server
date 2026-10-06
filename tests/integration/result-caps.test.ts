@@ -7,7 +7,8 @@ import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, searchBlocksWithMeta } from '..
 import { DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS } from '../../src/tools/get-context-for-query.js';
 import { DEFAULT_LIST_PAGES_LIMIT, MAX_LIST_PAGES_LIMIT } from '../../src/tools/list-pages.js';
 import { DEFAULT_MAX_ENTRIES, MAX_ENTRIES } from '../../src/tools/get-concept-evolution.js';
-import { connectFixture } from './helpers/fixture-client.js';
+import { DEFAULT_DATE_RANGE_MAX_BLOCKS, MAX_DATE_RANGE_BLOCKS } from '../../src/tools/query-by-date-range.js';
+import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.js';
 
 /**
  * Result caps hold against a real graph (#61): no tool returns more than its
@@ -26,6 +27,10 @@ import { connectFixture } from './helpers/fixture-client.js';
  * ~140 mentions, the most of any fixture page. Through MCP only the default cut and
  * the clamp can be seen; the cut at 500 is covered by the unit tests, which feed the
  * tool 600 mentions.
+ * query_by_date_range's default of 200 blocks and maximum of 1000 are out of reach the
+ * same way: the fixture's journals hold well under 200 blocks. The test passes small
+ * caps through MCP (the same code, a smaller bound), and the unit tests feed the tool
+ * 1,100 blocks for the cut at the maximum.
  */
 
 interface Meta {
@@ -308,6 +313,100 @@ describe('result caps (#61)', () => {
       // At the cap exactly, nothing is cut
       const exact = await evolve(total);
       expect(exact.text).toBe(atMax.text);
+    });
+  });
+
+  describe('logseq_query_by_date_range max_blocks (default 200, max 1000)', () => {
+    interface SlimNode {
+      uuid: string;
+      children?: SlimNode[];
+    }
+    interface RangeBody extends Partial<Meta> {
+      dateRange: { start: number; end: number };
+      entries: Array<{ date: number; blocks: SlimNode[]; snippets?: string[] }>;
+      summary: { totalDays: number; totalBlocks: number };
+    }
+
+    // Every fixture journal, and nothing LogSeq adds for today
+    const START = Math.min(...FIXTURE_JOURNAL_DAYS);
+    const END = Math.max(...FIXTURE_JOURNAL_DAYS);
+
+    async function range(max?: number, extra: Record<string, unknown> = {}) {
+      const args = { start_date: START, end_date: END, ...(max === undefined ? {} : { max_blocks: max }), ...extra };
+      const text = (await call('logseq_query_by_date_range', args)).content[0].text;
+      return { text, body: JSON.parse(text) as RangeBody };
+    }
+
+    /** Every block uuid of the trees in document order: a block, then its children. */
+    const flatten = (blocks: SlimNode[]): string[] => blocks.flatMap(b => [b.uuid, ...flatten(b.children ?? [])]);
+    const uuidsOf = (body: RangeBody) => body.entries.flatMap(e => flatten(e.blocks));
+
+    it('never returns more blocks than the cap, reports every cut, and clamps to the same blocks', async () => {
+      const atMax = await range(MAX_DATE_RANGE_BLOCKS);
+      const all = uuidsOf(atMax.body);
+      const total = all.length;
+      const days = atMax.body.entries.length;
+      expect(total, 'the fixture journals hold too few blocks to test a cap. See tests/fixtures/README.md').toBeGreaterThan(5);
+      expect(total, 'the fixture journals must stay under the maximum for this test to see every block').toBeLessThanOrEqual(
+        MAX_DATE_RANGE_BLOCKS
+      );
+      expect(atMax.body.entries.some(e => e.blocks.some(b => (b.children ?? []).length > 0)), 'no nested block to count').toBe(true);
+
+      // At the maximum nothing is cut, so there is no meta at all
+      expect(atMax.body.warnings).toBeUndefined();
+      expect(atMax.body.hasMore).toBeUndefined();
+      expect(atMax.body.totals).toBeUndefined();
+
+      // A value above the maximum is clamped to it, not rejected
+      expect((await range(5000)).text).toBe(atMax.text);
+
+      for (const max of [undefined, 1, 2, 5, Math.floor(total / 2), total - 1, total, total + 1]) {
+        const { text, body } = await range(max);
+        const label = `max_blocks ${max ?? 'default'}`;
+        const effective = Math.min(max ?? DEFAULT_DATE_RANGE_MAX_BLOCKS, MAX_DATE_RANGE_BLOCKS);
+        expect(uuidsOf(body).length, label).toBe(Math.min(effective, total));
+        expect(uuidsOf(body).length, label).toBeLessThanOrEqual(MAX_DATE_RANGE_BLOCKS);
+
+        if (effective >= total) {
+          expect(text, `${label}: nothing is cut, so the result is the full one`).toBe(atMax.text);
+          continue;
+        }
+        // The first blocks in document order, with the summary and the queried range unchanged
+        expect(uuidsOf(body), label).toEqual(all.slice(0, effective));
+        expect(body.summary, `${label}: the summary covers every block`).toEqual(atMax.body.summary);
+        expect(body.dateRange, label).toEqual(atMax.body.dateRange);
+        expect(body.totals, label).toEqual({ blocks: total, days });
+        expect(body.warnings!.map(w => w.code), label).toEqual(['blocks_truncated']);
+        // Below the maximum the warning says which value gets the rest, and it is within the maximum
+        expect(body.hasMore, label).toBe(true);
+        expect(body.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_blocks to ${total}\\b`));
+        expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
+
+        // The warning names the last day kept, and a query from that day reaches everything after the cut
+        const lastDay = body.entries[body.entries.length - 1]?.date;
+        if (lastDay === undefined) continue;
+        expect(body.warnings![0].message, label).toContain(`the entries end at ${lastDay}`);
+        const resumed = (await range(MAX_DATE_RANGE_BLOCKS, { start_date: lastDay })).body;
+        const expected = atMax.body.entries.filter(e => e.date >= lastDay).flatMap(e => flatten(e.blocks));
+        expect(uuidsOf(resumed), `${label}: resuming at the last kept day`).toEqual(expected);
+      }
+    });
+
+    it('counts top-level blocks for the outline, and the summary still covers every block', async () => {
+      const atMax = await range(MAX_DATE_RANGE_BLOCKS, { include_content: false });
+      const snippets = (body: RangeBody) => body.entries.reduce((sum, e) => sum + (e.snippets?.length ?? 0), 0);
+      const topLevel = snippets(atMax.body);
+      expect(topLevel, 'the fixture journals hold too few top-level blocks to test a cap').toBeGreaterThan(3);
+      expect(atMax.body.warnings).toBeUndefined();
+
+      for (const max of [1, 2, topLevel - 1]) {
+        const { body } = await range(max, { include_content: false });
+        expect(snippets(body), `max_blocks ${max}`).toBe(max);
+        expect(body.summary, `max_blocks ${max}`).toEqual(atMax.body.summary);
+        expect(body.totals, `max_blocks ${max}`).toEqual({ blocks: topLevel, days: atMax.body.entries.length });
+        expect(body.warnings![0].code, `max_blocks ${max}`).toBe('blocks_truncated');
+        expect(body.warnings![0].message, `max_blocks ${max}`).toContain('top-level only');
+      }
     });
   });
 });
