@@ -40,4 +40,7 @@ The repo `.gitignore` ignores them, so they never get committed:
   ignored, so an older journal added on purpose is unaffected.
 
 The built-in pages LogSeq adds to every graph (Contents, Favorites and the like) exist in its
-database even without files, so exact page counts in tests need to allow for them.
+database even without files, so exact page counts in tests need to allow for them. LogSeq also
+creates **today's journal page** in its database when the graph opens, whether or not it writes
+the file, and its date changes every day. Exact assertions on page, journal or `list_pages`
+counts must exclude it, and date-range tests must use fixed windows that end before 2026.
