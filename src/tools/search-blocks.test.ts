@@ -394,14 +394,30 @@ describe('searchBlocks', () => {
 
     it('says a large result may be saved to a file only for a raise past 200 matches (#196)', async () => {
       callAPI.mockResolvedValueOnce(rows(200));
-      const small = await searchBlocksWithMeta(client, 'k', 100);
+      const small = await searchBlocksWithMeta(client, 'k', 100, false, true);
       expect(small.meta!.warnings[0].howToFetchAll).toBe('Set limit to 200 (or higher) to get all 200.');
 
       callAPI.mockResolvedValueOnce(rows(201));
-      const large = await searchBlocksWithMeta(client, 'k', 100);
+      const large = await searchBlocksWithMeta(client, 'k', 100, false, true);
       expect(large.meta!.warnings[0].howToFetchAll).toBe(
         "Set limit to 201 (or higher) to get all 201. A result this large may be saved to a file by the host instead of shown; the server can't tell."
       );
+    });
+
+    it('scales the threshold for include_context and slim_results false, from measured sizes (#196)', async () => {
+      const note = "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
+      const howAt = async (total: number, includeContext: boolean, slim: boolean) => {
+        callAPI.mockResolvedValueOnce(rows(total));
+        if (includeContext) callAPI.mockResolvedValue([]);
+        const { meta } = await searchBlocksWithMeta(client, 'k', 10, includeContext, slim);
+        return meta!.warnings[0].howToFetchAll;
+      };
+      // [include_context, slim_results, most matches with no note]: 200, 120, 125 and 65
+      for (const [ctx, slim, edge] of [[false, true, 200], [true, true, 120], [false, false, 125], [true, false, 65]] as const) {
+        const label = `include_context ${ctx}, slim ${slim}`;
+        expect(await howAt(edge, ctx, slim), label).toBe(`Set limit to ${edge} (or higher) to get all ${edge}.`);
+        expect(await howAt(edge + 1, ctx, slim), label).toBe(`Set limit to ${edge + 1} (or higher) to get all ${edge + 1}. ${note}`);
+      }
     });
 
     it('makes one call at the maximum, as under it', async () => {

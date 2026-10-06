@@ -89,10 +89,22 @@ describe('queryByPropertyWithMeta caps', () => {
   });
 
   describe('above the cap', () => {
+    it('scales the large-result threshold for unslimmed results (#196)', async () => {
+      const note = "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
+      const atLimit = async (matches: number, slim: boolean) =>
+        (await queryByPropertyWithMeta(clientWith(matches).client, 'status', 'active', slim)).meta!.warnings[0].howToFetchAll;
+
+      // Slim blocks: the note starts past 200 matches. Unslimmed ones are about 1.6 times larger: past 125
+      expect(await atLimit(200, true)).toBe('Set limit to 200 (or higher) to get all 200.');
+      expect(await atLimit(201, true)).toBe(`Set limit to 201 (or higher) to get all 201. ${note}`);
+      expect(await atLimit(125, false)).toBe('Set limit to 125 (or higher) to get all 125.');
+      expect(await atLimit(126, false)).toBe(`Set limit to 126 (or higher) to get all 126. ${note}`);
+    });
+
     it('cuts to 100 by default and says how to get all of them', async () => {
       const { client } = clientWith(130);
 
-      const { results, meta } = await queryByPropertyWithMeta(client, 'status', 'active');
+      const { results, meta } = await queryByPropertyWithMeta(client, 'status', 'active', true);
 
       expect(results).toHaveLength(100);
       expect(meta).toEqual({

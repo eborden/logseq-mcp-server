@@ -27,12 +27,25 @@ export const LARGE_RESULT_NOTE =
 
 /**
  * Rough counts of items that still come back inline, for the `inlineMax` of a warning
- * (#196). They are estimates, not limits: sized so the result is about 30,000-45,000
- * characters for typical items, from made-up journals with about 100 characters per
- * block (a slim block with its page name is about 210 characters, a backlink reference
- * about 260, a related page about 80, a network node with its edge about 125; a listed
- * page is a name of about 35 characters, so even 1000 fit and `list_pages` needs no entry). Longer blocks come back larger, which is why the note says "may".
- * 200 blocks is the cap `context-efficiency.md` section 7 recommends for a date range.
+ * (#196). They are estimates, not limits, each sized so the result is about 37,000-43,000
+ * characters (`context-efficiency.md` section 7: about 49,000 came back inline, about
+ * 54,000 were saved). Sizes are serialized characters per item, for made-up journals with
+ * about 100 characters per block, and for the fixture graph where a size is marked measured:
+ *  - a slim block with its page name is about 210 (measured overhead about 120 plus the
+ *    content), so 200 blocks is about 42,000. 200 is also the cap section 7 recommends for
+ *    a date range;
+ *  - a backlink reference is about 260 (150 is about 39,000);
+ *  - a related page is about 80 (500 is about 40,000);
+ *  - a network node with its edges is about 217 (measured on a hub at depth 2: a 45-character
+ *    node plus 2.3 edges of 76 characters each, with 14-character names), so 200 is about
+ *    43,000. A sparse network, one edge per node, is about 125 per node, so it can hold more;
+ *  - a listed page is `{"name":"..."}` plus a comma, 12 characters of overhead plus the name
+ *    (measured), so about 47 for a 35-character name and 800 pages is about 38,000. A page
+ *    with aliases is about twice that (measured 48 against 25 on short names).
+ * Longer blocks come back larger, which is why the note says "may".
+ * `search_blocks` and `query_by_property` come back larger per hit with `include_context`
+ * (about 1.7 times, measured) or `slim_results: false` (about 1.6 times) and both together
+ * (about 3 times), so `blocksInlineMax` scales the block estimate for them.
  */
 export const INLINE_ITEMS = {
   /** Blocks (search hits, property matches, mentions, relationship blocks, a page's blocks) */
@@ -42,8 +55,25 @@ export const INLINE_ITEMS = {
   /** Related pages: a page and its direction */
   relatedPages: 500,
   /** Concept network nodes, each with its edges */
-  networkNodes: 200
+  networkNodes: 200,
+  /** Listed pages (`list_pages`), counting aliased entries at about twice a plain one */
+  pages: 800
 } as const;
+
+/**
+ * The `inlineMax` for a list of blocks that may come back with `include_context` (a page
+ * object, references and tags on each hit) or unslimmed (`slim_results: false`). Measured
+ * on the fixture graph with short blocks, per hit against a slim hit with no context
+ * (about 147 characters): context 298 (2.0 times), unslimmed 278 (1.9 times), both 593 (4.0
+ * times). The content shared by all four is about 100 characters in the made-up blocks the
+ * estimate uses, which gives about 1.7, 1.6 and 3.0 times. Rounded to a whole number of hits.
+ */
+export function blocksInlineMax({ context = false, slim = true }: { context?: boolean; slim?: boolean } = {}): number {
+  if (context && !slim) return 65;
+  if (context) return 120;
+  if (!slim) return 125;
+  return INLINE_ITEMS.blocks;
+}
 
 /**
  * ` <LARGE_RESULT_NOTE>` when a call that returns `items` items goes past `inlineMax`
