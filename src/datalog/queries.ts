@@ -879,4 +879,30 @@ export class DatalogQueryBuilder {
       inputs: []
     };
   }
+
+  /**
+   * The name and alias routes of {@link resolvePage} for many names at once
+   * (#146), as `[page, via, name]` rows: `via` is `"name"` for the page with that
+   * `:block/name`, `"alias"` for a page whose `:block/alias` points at it. The
+   * name rides along so each row can be matched to the term it answers. Names
+   * go in as a string collection (`:in $ [?n ...]`), never as query text.
+   * `:block/file` is pulled so a file-less stub can be told from a written page.
+   * @param pageNames - Page names, any casing; lowercased here
+   * @returns Query and inputs (`[lowercased pageNames]`)
+   * @throws Error if `pageNames` is empty
+   */
+  static linkTargets(pageNames: readonly string[]): DatalogQuery {
+    if (pageNames.length === 0) {
+      throw new Error('linkTargets needs at least one page name');
+    }
+    return {
+      query: `[:find (pull ?page [:db/id :block/name :block/original-name :block/file]) ?via ?n
+             :in $ [?n ...]
+             :where
+             (or-join [?n ?page ?via]
+               (and [?page :block/name ?n] [(ground "name") ?via])
+               (and [?stub :block/name ?n] [?page :block/alias ?stub] [(ground "alias") ?via]))]`,
+      inputs: [pageNames.map(name => name.toLowerCase())]
+    };
+  }
 }

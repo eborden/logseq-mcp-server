@@ -128,6 +128,27 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
       : DatalogQueryBuilder.resolvePage(name, journalDay);
   const rows = (await client.executeDatalogQuery<Row[]>(query, ...inputs)) || [];
 
+  const resolution = resolveFromRows(name, rows);
+  if (resolution) return resolution;
+
+  // Last resort, and only for names that are not dates
+  if (journalDay === null) {
+    const leaf = DatalogQueryBuilder.namespaceLeafPages(name);
+    const leafRows = (await client.executeDatalogQuery<Array<[any]>>(leaf.query, ...leaf.inputs)) || [];
+    const leaves = distinctPages(leafRows.map(([page]) => page));
+    if (leaves.length > 0) return pick(leaves, 'namespace-leaf', `namespace page ending in ${JSON.stringify(`/${name}`)}`);
+  }
+
+  return { kind: 'not_found' };
+}
+
+/**
+ * Routes 1-3 of {@link resolvePage} over the rows of its first query, for one
+ * trimmed name. Each row is `[page, via]`, `via` being `"name"` (or absent),
+ * `"alias"` or `"journal-date"`. Null when no route matched, which is when
+ * `resolvePage` goes on to the namespace leaf.
+ */
+function resolveFromRows(name: string, rows: Row[]): PageResolution | null {
   // A row without a `via` is a plain page row, i.e. an exact match
   const byRoute = (via: string) => rows.filter(([, v]) => (v ?? 'name') === via).map(([page]) => page);
   const exact = byRoute('name')[0];
@@ -153,16 +174,53 @@ export async function resolvePage(client: LogseqClient, input: string): Promise<
   }
   if (aliasSources.length > 0) return pick(aliasSources, 'alias', `declares alias ${JSON.stringify(name)}`);
   if (journals.length > 0) return pick(journals, 'journal-date', `journal page for ${name}`);
+  return null;
+}
 
-  // Last resort, and only for names that are not dates
-  if (journalDay === null) {
-    const leaf = DatalogQueryBuilder.namespaceLeafPages(name);
-    const leafRows = (await client.executeDatalogQuery<Array<[any]>>(leaf.query, ...leaf.inputs)) || [];
-    const leaves = distinctPages(leafRows.map(([page]) => page));
-    if (leaves.length > 0) return pick(leaves, 'namespace-leaf', `namespace page ending in ${JSON.stringify(`/${name}`)}`);
+/** What {@link resolveLinkTargets} found for each name. */
+export interface LinkTargetResolutions {
+  /** Keyed by the name trimmed and lowercased */
+  resolutions: Map<string, PageResolution>;
+  /**
+   * True when LogSeq answered `null` instead of rows (#64). "No such page" and
+   * "not checked" can't be told apart then, so every name is `not_found` and the
+   * caller should say so rather than report the names as missing.
+   */
+  unavailable: boolean;
+}
+
+/**
+ * Resolve many names the way a `[[link]]` resolves (#146): by exact name or by
+ * alias, in one Datalog query however many names there are. These are routes 1
+ * and 2 of {@link resolvePage}, with the same stub and ambiguity rules, so a
+ * file-less page counts as a page. ISO dates and namespace leaves are left out
+ * on purpose: `[[2025-01-01]]` and `[[atlas]]` link to the page with exactly
+ * that name, not to a journal or to `projects/atlas`.
+ *
+ * Names are trimmed and lowercased, and duplicates are sent once. An empty list,
+ * or one of blank names only, costs no call. Infrastructure errors propagate.
+ */
+export async function resolveLinkTargets(
+  client: LogseqClient,
+  names: readonly string[]
+): Promise<LinkTargetResolutions> {
+  const keys = [...new Set(names.map(name => name.trim().toLowerCase()))].filter(key => key.length > 0);
+  const resolutions = new Map<string, PageResolution>();
+  if (keys.length === 0) return { resolutions, unavailable: false };
+
+  const { query, inputs } = DatalogQueryBuilder.linkTargets(keys);
+  const rows = await client.executeDatalogQuery<Array<[any, string, string]> | null>(query, ...inputs);
+  const byName = new Map<string, Row[]>();
+  for (const [page, via, n] of rows ?? []) {
+    if (page == null || typeof n !== 'string') continue;
+    const list = byName.get(n) ?? [];
+    list.push([page, via]);
+    byName.set(n, list);
   }
-
-  return { kind: 'not_found' };
+  for (const key of keys) {
+    resolutions.set(key, resolveFromRows(key, byName.get(key) ?? []) ?? { kind: 'not_found' });
+  }
+  return { resolutions, unavailable: rows == null };
 }
 
 /**
