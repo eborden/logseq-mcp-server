@@ -61,11 +61,11 @@ Work is tracked in GitHub issues and the [LogSeq MCP Workflow](https://github.co
 - Split anything multi-part into sub-issues linked to a parent. Record sequencing (waves, dependencies) in the parent or a comment on it. Close the parent when its sub-issues are done.
 - Sequence in waves so at most one open PR touches a given file area. Guardrails and conventions first, features next, output-wide changes last.
 - Add new issues to the board: *Backlog*, or *Ready* once the maintainer has approved the plan. When a plan changes, edit the issues (scope comments, new sub-issues, close obsolete ones).
-- **Hard ordering uses GitHub issue dependencies.** If B can't start until A merges (file overlap, needs A's code, or a migration order), mark B **blocked by** A and record why in a comment. The edges are the source of truth. A wave list in a comment can summarise the plan, but when a plan changes, update the edges too.
+- **Hard ordering uses GitHub issue dependencies.** If B can't start until A merges (file overlap, needs A's code, or a migration order), mark B **blocked by** A and record why in a comment. The edges are the source of truth. A wave list in a comment can summarise the plan, but when a plan changes, update the edges too. Waves are a summary of the edges, not a substitute.
   ```bash
   gh api repos/eborden/logseq-mcp-server/issues/<A> --jq .id    # A's REST id (not its number)
   gh api -X POST repos/eborden/logseq-mcp-server/issues/<B>/dependencies/blocked_by -F issue_id=<A's REST id>
-  gh api repos/eborden/logseq-mcp-server/issues/<B>/dependencies/blocked_by --jq 'map(.number)'    # list B's blockers
+  gh api repos/eborden/logseq-mcp-server/issues/<B>/dependencies/blocked_by --jq 'map(select(.state=="open") | .number)'    # list B's open blockers
   ```
 - **Grouping uses sub-issues.** A multi-part plan is a parent with sub-issues, as above.
 - **Priority only breaks ties.** P0/P1/P2 on the board orders items that aren't blocked. It doesn't express ordering.
