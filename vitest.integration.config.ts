@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { CONFIG_PATH_ENV, instanceConfigPath } from './tests/integration/helpers/instance-config.js';
 import { existsSync } from 'fs';
 
@@ -19,6 +19,8 @@ if (!process.env[CONFIG_PATH_ENV]?.trim() && existsSync(instanceConfig)) {
 export default defineConfig({
   test: {
     include: ['tests/integration/**/*.test.ts'],
+    // Never a copy under the instance's scratch folder (profile, graph copy)
+    exclude: [...configDefaults.exclude, '**/.logseq-instance/**'],
     globalSetup: ['tests/integration/global-setup.ts'],
     testTimeout: 30000,
     hookTimeout: 30000,
