@@ -11,6 +11,7 @@ import {
   resolvedAliases
 } from '../utils/alias-set.js';
 import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { entityId, journalDayOf } from '../utils/entity-fields.js';
 import type { ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 
 /** Every grouping period, in the order `group_by` advertises them (#60). */
@@ -181,14 +182,14 @@ export async function getConceptEvolution(
   // Enrich blocks from getPageBlocksTree with full page data
   if (blocks && conceptPage) {
     for (const block of blocks) {
-      block.page = conceptPage as any;
+      block.page = conceptPage;
     }
   }
 
   // Also search for inline mentions using Datalog
   // For an alias group, one query matches references to any of its names and
   // adds the blocks of the alias pages (the page's own come from the tree above).
-  const mainPageId = resolved.page?.id ?? resolved.page?.['db/id'];
+  const mainPageId = entityId(resolved.page);
   const { query: mentionsQuery, inputs: mentionsInputs } = hasAliases(aliasSet)
     ? DatalogQueryBuilder.getBlocksReferencingPages(
         aliasIds(aliasSet),
@@ -208,10 +209,8 @@ export async function getConceptEvolution(
   let filteredBlocks = uniqueBlocks;
   if (startDate || endDate) {
     filteredBlocks = uniqueBlocks.filter(block => {
-      // Type guard to check if page has journalDay property
-      // Handle both camelCase (HTTP API) and kebab-case (Datalog)
-      const page = block.page as any;
-      const blockDate = page?.journalDay || page?.['journal-day'];
+      // The page is camelCase (HTTP API) or kebab-case (Datalog); journalDayOf reads both
+      const blockDate = journalDayOf(block.page) || undefined;
       if (!blockDate) return true; // Keep non-journal blocks
 
       if (startDate && blockDate < startDate) return false;
@@ -227,10 +226,7 @@ export async function getConceptEvolution(
   const timelineMap = new Map<number | null, BlockEntity[]>();
 
   for (const block of filteredBlocks) {
-    // Type guard to check if page has journalDay property
-    // Handle both camelCase (HTTP API) and kebab-case (Datalog)
-    const page = block.page as any;
-    const date = page?.journalDay || page?.['journal-day'] || null;
+    const date = journalDayOf(block.page) || null;
 
     if (!timelineMap.has(date)) {
       timelineMap.set(date, []);
@@ -275,9 +271,7 @@ export async function getConceptEvolution(
     groupedTimeline = new Map();
 
     for (const block of shownBlocks) {
-      // Handle both camelCase (HTTP API) and kebab-case (Datalog)
-      const page = block.page as any;
-      const date = page?.journalDay || page?.['journal-day'];
+      const date = journalDayOf(block.page);
       if (!date) continue;
 
       let periodKey: string;
@@ -303,12 +297,8 @@ export async function getConceptEvolution(
 
   // Build summary
   const dates = filteredBlocks
-    .map(b => {
-      // Handle both camelCase (HTTP API) and kebab-case (Datalog)
-      const page = b.page as any;
-      return page?.journalDay || page?.['journal-day'];
-    })
-    .filter((d): d is number => d !== undefined && d !== null);
+    .map(b => journalDayOf(b.page) || undefined)
+    .filter((d): d is number => d !== undefined);
 
   const summary = {
     totalMentions: filteredBlocks.length,
