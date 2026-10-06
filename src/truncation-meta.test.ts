@@ -147,3 +147,68 @@ describe('logseq_list_pages pages_unavailable warning (#64)', () => {
     expect(JSON.parse(result.content[0].text)).toEqual({ pages: [], total: 0 });
   });
 });
+
+describe('logseq_get_context_for_query keyword-hit maximum (#61)', () => {
+  // The query names no topic, so the keyword search ("widgets") is the only call
+  const hitRow = (id: number) => [{ id, uuid: `u${id}`, content: `widgets ${id}`, page: { id: 1 } }];
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => hitRow(i + 1));
+  const ask = (n: number, args: Record<string, unknown> = {}) =>
+    callTool(vi.fn().mockResolvedValueOnce(rows(n)).mockResolvedValue([]), 'logseq_get_context_for_query', {
+      query: 'about widgets',
+      ...args,
+    });
+
+  it('reports the slice at the default 20 in the result object', async () => {
+    const result = await ask(30);
+
+    expect(result.content).toHaveLength(1);
+    const body = JSON.parse(result.content[0].text);
+    expect(body.searchResults).toHaveLength(20);
+    expect(body.hasMore).toBe(true);
+    expect(body.warnings).toEqual([
+      {
+        code: 'search_results_truncated',
+        message: 'Showing 20 of 30 keyword hits.',
+        howToFetchAll: 'Set max_search_results to 30 (or higher) to get all 30.',
+      },
+    ]);
+  });
+
+  it('clamps a value above 100 and reports the maximum, with hasMore false', async () => {
+    const result = await ask(250, { max_search_results: 1000 });
+
+    expect(result.isError).toBeUndefined();
+    const body = JSON.parse(result.content[0].text);
+    expect(body.searchResults).toHaveLength(100);
+    expect(body.hasMore).toBe(false);
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0].code).toBe('search_results_truncated');
+    expect(body.warnings[0].message).toContain('capped at its maximum of 100 (1000 was asked for)');
+    expect(body.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('leaves the result unchanged when every hit fits', async () => {
+    const atDefault = await ask(20);
+    const atMax = await ask(20, { max_search_results: 100 });
+    const above = await ask(20, { max_search_results: 1000 });
+
+    const body = JSON.parse(atDefault.content[0].text);
+    expect(body.searchResults).toHaveLength(20);
+    expect(body).toMatchObject({ hasMore: false, warnings: [] });
+    expect(atMax.content[0].text).toBe(atDefault.content[0].text);
+    expect(above.content[0].text).toBe(atDefault.content[0].text);
+  });
+
+  it('keeps the warning under compact and in the Markdown footer', async () => {
+    const compact = JSON.parse((await ask(250, { max_search_results: 100, compact: true })).content[0].text);
+    expect(compact.searchResults).toHaveLength(100);
+    expect(compact.warnings.map((w: { code: string }) => w.code)).toEqual(['search_results_truncated']);
+
+    const markdown = (await ask(250, { max_search_results: 100, format: 'markdown' })).content[0].text;
+    expect(markdown).toContain('## Search results (100)');
+    expect(markdown).toContain(
+      '- search_results_truncated: Showing 100 of 250 keyword hits: max_search_results is capped'
+    );
+    expect(markdown).not.toContain('hasMore: true');
+  });
+});
