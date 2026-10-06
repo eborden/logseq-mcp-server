@@ -8,6 +8,7 @@ import {
   SlimSearchBlocksResult
 } from './search-blocks.js';
 import { LogseqClient } from '../client.js';
+import { searchBlocksArgs } from '../tool-args.js';
 
 // Rows as logseq.DB.datascriptQuery returns them for (pull ?b [* {:block/page [...]}]):
 // one-element tuples, kebab-case keys, page pulled inline.
@@ -323,9 +324,12 @@ describe('searchBlocks', () => {
         "so the rest can't be fetched in one call. Narrow the query to see the rest."
     });
 
-    it('is 500, with a default of 100', () => {
+    it('is 500, with a default of 100, as the limit parameter advertises', () => {
       expect(MAX_SEARCH_LIMIT).toBe(500);
       expect(DEFAULT_SEARCH_LIMIT).toBe(100);
+      expect(searchBlocksArgs.shape.limit.description).toContain(
+        `(default: ${DEFAULT_SEARCH_LIMIT}, max: ${MAX_SEARCH_LIMIT})`
+      );
     });
 
     it('returns every match and no warning when matches fit under the maximum', async () => {

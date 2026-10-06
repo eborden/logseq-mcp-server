@@ -82,8 +82,14 @@ export const getBlockArgs = z.object({
 export const searchBlocksArgs = z.object({
   query: z.string().describe('Text to search for in block content'),
   // No advertised default: absent reaches the tool as undefined, and the tool uses 100.
-  // No clamp either: a negative limit returns no blocks, as it always did.
-  limit: z.number().optional().describe('Maximum number of results to return (optional)'),
+  // The tool clamps it to 500 and reports a cut there (#61); no schema `maximum`, so a
+  // larger value is clamped, not rejected. A negative limit returns no blocks, as it always did.
+  limit: z
+    .number()
+    .optional()
+    // Literal, not DEFAULT_SEARCH_LIMIT / MAX_SEARCH_LIMIT: importing search-blocks.js here
+    // breaks the tests that mock it. src/tools/search-blocks.test.ts pins the two in step.
+    .describe('Maximum number of results to return (default: 100, max: 500)'),
   include_context: z.boolean().default(false).describe('Include semantic context (page, references, tags)'),
   slim_results: slimResultsArg,
 });
