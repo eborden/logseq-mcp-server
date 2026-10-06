@@ -467,10 +467,26 @@ describe('checkLinks: refs preserved (a tightening over the script)', () => {
     expect(checkRefsPreserved('[[Alice]] then [[Bob]]', '[[Bob]] then [[Alice]]')).toEqual({ ok: true, removed: [] });
   });
 
-  it('counts a ref by its spelling: [[Alice]] turned into [[alice]] is a removal', () => {
-    expect(checkRefsPreserved('[[Alice]]', '[[alice]]')).toEqual({
+  it('counts refs by page name, so a ref moved to a mention spelled in another case is kept', async () => {
+    const result = await checkLinks(people().client, '[[alice]] met Alice', 'alice met [[Alice]]');
+
+    expect(result.prose).toEqual({ ok: true });
+    expect(result.refsPreserved).toEqual({ ok: true, removed: [] });
+    expect(result.ok).toBe(true);
+  });
+
+  it('reports a removed ref by its first spelling in before, counting every casing', () => {
+    expect(checkRefsPreserved('[[Alice]] and [[ALICE]]', '[[alice]] and ALICE')).toEqual({
       ok: false,
-      removed: [{ term: 'Alice', before: 1, after: 0 }],
+      removed: [{ term: 'Alice', before: 2, after: 1 }],
     });
+  });
+
+  it('still fails a ref respelled in place, through the prose check', async () => {
+    const result = await checkLinks(people().client, '[[Alice]]', '[[alice]]');
+
+    expect(result.refsPreserved).toEqual({ ok: true, removed: [] });
+    expect(result.prose.ok).toBe(false);
+    expect(result.ok).toBe(false);
   });
 });

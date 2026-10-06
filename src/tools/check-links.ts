@@ -100,10 +100,11 @@ export interface RefCheck {
 }
 
 export interface RemovedRef {
+  /** The term as `before` first spells it */
   term: string;
-  /** Times `[[term]]` appears in `before` */
+  /** Refs to that name in `before`, in any casing */
   before: number;
-  /** Times it appears in `after`, fewer than in `before` */
+  /** Refs to it in `after`, fewer than in `before` */
   after: number;
 }
 
@@ -186,13 +187,20 @@ export function checkBrackets(after: string): BracketCheck {
   return result;
 }
 
-/** Check 4. */
+/**
+ * Check 4. Refs are counted per page name (`keyOf`), the way LogSeq matches them,
+ * so a ref that moves to a mention spelled in another case is kept. A removed
+ * ref is reported by its first spelling in `before`. Respelling a ref in place
+ * still fails, through check 1.
+ */
 export function checkRefsPreserved(before: string, after: string): RefsPreservedCheck {
-  const kept = linkCounts(after);
+  const kept = keyCounts(after);
+  const spelling = new Map<string, string>();
+  for (const term of linkCounts(before).keys()) if (!spelling.has(keyOf(term))) spelling.set(keyOf(term), term);
   const removed: RemovedRef[] = [];
-  for (const [term, count] of linkCounts(before)) {
-    const left = kept.get(term) ?? 0;
-    if (left < count) removed.push({ term, before: count, after: left });
+  for (const [key, count] of keyCounts(before)) {
+    const left = kept.get(key) ?? 0;
+    if (left < count) removed.push({ term: spelling.get(key)!, before: count, after: left });
   }
   removed.sort((x, y) => (x.term < y.term ? -1 : x.term > y.term ? 1 : 0));
   return { ok: removed.length === 0, removed };
