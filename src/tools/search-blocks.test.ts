@@ -25,12 +25,6 @@ function block(id: number, content: string, pageId: number, pageName: string, or
   }];
 }
 
-// searchBlocks returns full blocks unless slimResults is true, but its return type
-// is the union of both. Narrow it for the tests that don't pass slimResults.
-function full(results: SearchBlocksResult[] | SlimSearchBlocksResult[] | null): SearchBlocksResult[] | null {
-  return results as SearchBlocksResult[] | null;
-}
-
 // Full page as pulled with [*]
 function fullPage(id: number, name: string, originalName: string, extra: object = {}) {
   return [{
@@ -104,7 +98,7 @@ describe('searchBlocks', () => {
     it('returns the matching blocks with page info inline', async () => {
       callAPI.mockResolvedValueOnce([block(1, 'Test search term', 100, 'test page', 'Test Page')]);
 
-      const result = full(await searchBlocks(client, 'search term'));
+      const result = await searchBlocks(client, 'search term');
 
       expect(result).toHaveLength(1);
       expect(result![0].content).toBe('Test search term');
@@ -117,7 +111,7 @@ describe('searchBlocks', () => {
         block(1, 'Block with properties', 10, 'p', 'P', { properties: { status: 'done' }, marker: 'DONE', level: 2 })
       ]);
 
-      const result = full(await searchBlocks(client, 'properties'));
+      const result = await searchBlocks(client, 'properties');
 
       expect(result![0].properties).toEqual({ status: 'done' });
       expect(result![0].marker).toBe('DONE');
@@ -160,7 +154,7 @@ describe('searchBlocks', () => {
         block(2, 'real block', 1, 'p', 'P')
       ]);
 
-      const result = full(await searchBlocks(client, 'real'));
+      const result = await searchBlocks(client, 'real');
 
       expect(result!.map(b => b.id)).toEqual([2]);
     });
@@ -176,7 +170,7 @@ describe('searchBlocks', () => {
         block(20, 'k', 2, 'mid', 'Mid')
       ]);
 
-      const result = full(await searchBlocks(client, 'k'));
+      const result = await searchBlocks(client, 'k');
 
       expect(result!.map(b => b.id)).toEqual([31, 30, 20, 12, 11]);
     });
@@ -189,8 +183,8 @@ describe('searchBlocks', () => {
       ];
       callAPI.mockResolvedValueOnce([...rows]).mockResolvedValueOnce([...rows].reverse());
 
-      const first = full(await searchBlocks(client, 'k'));
-      const second = full(await searchBlocks(client, 'k'));
+      const first = await searchBlocks(client, 'k');
+      const second = await searchBlocks(client, 'k');
 
       expect(first!.map(b => b.id)).toEqual(second!.map(b => b.id));
     });
@@ -203,7 +197,7 @@ describe('searchBlocks', () => {
         block(5, 'k', 3, 'gamma', 'Gamma')
       ]);
 
-      const result = full(await searchBlocks(client, 'k', 2));
+      const result = await searchBlocks(client, 'k', 2);
 
       expect(result!.map(b => b.id)).toEqual([5, 4]);
     });
@@ -347,7 +341,7 @@ describe('searchBlocks', () => {
       const { results, meta } = await searchBlocksWithMeta(client, 'k', 500);
 
       expect(results).toHaveLength(500);
-      expect(full(results)!.map(b => b.id).slice(0, 2)).toEqual([501, 500]);
+      expect(results!.map(b => b.id).slice(0, 2)).toEqual([501, 500]);
       expect(meta).toEqual({ hasMore: false, totals: { matches: 501 }, warnings: [maxReached(501)] });
     });
 
@@ -443,7 +437,7 @@ describe('searchBlocks', () => {
         ])
         .mockResolvedValueOnce([fullPage(10, 'page a', 'Page A'), fullPage(20, 'page b', 'Page B')]);
 
-      const result = full(await searchBlocks(client, 'o', 10, true));
+      const result = await searchBlocks(client, 'o', 10, true);
 
       // 1 search + 1 batched page lookup, not one per block
       expect(callAPI).toHaveBeenCalledTimes(2);
@@ -469,7 +463,7 @@ describe('searchBlocks', () => {
 
       const result = await searchBlocks(client, 'x', 10, true);
 
-      const page: any = result![0].context!.page;
+      const page = result![0].context!.page;
       expect(page.originalName).toBe('Jan 1st, 2025');
       expect(page.journalDay).toBe(20250101);
       expect(page.createdAt).toBe(1);
@@ -528,7 +522,7 @@ describe('searchBlocks', () => {
         .mockResolvedValueOnce([block(1, 'Context [[Bob]] #tag', 10, 'test page', 'Test Page')])
         .mockResolvedValueOnce([fullPage(10, 'test page', 'Test Page', { properties: { type: 'project' } })]);
 
-      const result: any = await searchBlocks(client, 'context', 10, true, true);
+      const result = (await searchBlocks(client, 'context', 10, true, true))!;
 
       expect(result).toHaveLength(1);
       expect(result[0].pageName).toBe('Test Page');
@@ -538,8 +532,8 @@ describe('searchBlocks', () => {
         tags: ['tag']
       });
       // Slim drops fields like uuid, ids and timestamps from the page
-      expect(result[0].context.page).not.toHaveProperty('uuid');
-      expect(result[0].context.page).not.toHaveProperty('id');
+      expect(result[0].context!.page).not.toHaveProperty('uuid');
+      expect(result[0].context!.page).not.toHaveProperty('id');
     });
 
     it('includes journal metadata in slim context for journal pages', async () => {
@@ -547,15 +541,15 @@ describe('searchBlocks', () => {
         .mockResolvedValueOnce([block(1, 'entry', 10, 'jan 1st, 2025', 'Jan 1st, 2025')])
         .mockResolvedValueOnce([fullPage(10, 'jan 1st, 2025', 'Jan 1st, 2025', { 'journal?': true, 'journal-day': 20250101 })]);
 
-      const result: any = await searchBlocks(client, 'entry', 10, true, true);
+      const result = (await searchBlocks(client, 'entry', 10, true, true))!;
 
-      expect(result[0].context.page).toMatchObject({ isJournal: true, journalDate: 20250101 });
+      expect(result[0].context!.page).toMatchObject({ isJournal: true, journalDate: 20250101 });
     });
 
     it('omits empty fields in slim results', async () => {
       callAPI.mockResolvedValueOnce([block(1, 'Simple block', 10, 'p', 'P')]);
 
-      const result: any = await searchBlocks(client, 'simple', 10, false, true);
+      const result = (await searchBlocks(client, 'simple', 10, false, true))!;
 
       expect(result[0]).not.toHaveProperty('tags');
       expect(result[0]).not.toHaveProperty('pageRefs');
@@ -572,7 +566,7 @@ describe('searchBlocks', () => {
         ])
         .mockResolvedValueOnce([fullPage(10, 'p', 'P')]);
 
-      const result: any[] = (await searchBlocks(client, 'x', 10, true, true)) as any[];
+      const result = (await searchBlocks(client, 'x', 10, true, true))!;
       const byContent = new Map(result.map(r => [r.content, r.context]));
 
       expect(byContent.get('No links here')).toEqual({ page: { name: 'p', originalName: 'P' } });
@@ -585,7 +579,7 @@ describe('searchBlocks', () => {
         .mockResolvedValueOnce([block(1, 'No links here', 10, 'p', 'P')])
         .mockResolvedValueOnce([fullPage(10, 'p', 'P')]);
 
-      const result: any[] = (await searchBlocks(client, 'x', 10, true, false)) as any[];
+      const result = (await searchBlocks(client, 'x', 10, true, false))!;
 
       expect(result[0].context).toMatchObject({ references: [], tags: [] });
     });
@@ -593,7 +587,7 @@ describe('searchBlocks', () => {
     it('returns full results when slimResults is false', async () => {
       callAPI.mockResolvedValueOnce([block(1, 'Full block', 10, 'p', 'P')]);
 
-      const result: any = await searchBlocks(client, 'full', 10, false, false);
+      const result = (await searchBlocks(client, 'full', 10, false, false))!;
 
       expect(result[0]).toHaveProperty('id', 1);
       expect(result[0]).toHaveProperty('parent');

@@ -218,11 +218,8 @@ export async function getContextForQuery(
       // and so is their order: searchBlocks sorts newest first and the filter keeps it.
       // The search is the only data source on this path, so any failure
       // propagates: an empty result must mean "nothing matched".
-      // Note: slimResults=false returns SearchBlocksResult[]
       const searched = keywords.reduce((longest, k) => (k.length > longest.length ? k : longest));
-      const blocks = (await searchBlocks(client, searched, Infinity, false, false)) as
-        | import('./search-blocks.js').SearchBlocksResult[]
-        | null;
+      const blocks = await searchBlocks(client, searched, Infinity, false, false);
 
       // A null response is a genuine "no matches"
       const hits = (blocks || []).filter(block => {

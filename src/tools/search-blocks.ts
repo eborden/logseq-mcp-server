@@ -1,6 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { BlockEntity, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
+import { BlockEntity, IEntityID, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
 import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
 
@@ -34,8 +34,28 @@ export interface SlimSearchBlocksResult extends SlimBlock {
   };
 }
 
+/**
+ * What a block's `page` can hold at runtime. The type says `{ id }`, but a Datalog
+ * pull spells the id `db/id`, and a pull that nests the page also carries its names.
+ */
+type BlockPageRef = Partial<IEntityID> &
+  Partial<Pick<PageEntity, 'db/id' | 'name' | 'originalName' | 'original-name'>>;
+
+/** The page id of a block, in either spelling. Undefined when the block has no page. */
+function pageIdOf(block: BlockEntity): number | undefined {
+  // A pulled block may lack `page` altogether, whatever BlockEntity says
+  const page: BlockPageRef | undefined = block.page;
+  return page?.id ?? page?.['db/id'];
+}
+
+/**
+ * What `searchBlocksWithMeta` returns: the results and their meta, or `null` for
+ * both when the API answered with `null` (no matches is an empty `results`).
+ */
+export type SearchBlocksOutcome<R> = { results: R[]; meta: ResultMeta } | { results: null; meta: null };
+
 /** Page name used for ordering and slim output: original casing when known. */
-function displayName(page: any): string {
+function displayName(page: BlockPageRef | undefined): string {
   return page?.['original-name'] || page?.originalName || page?.name || '';
 }
 
@@ -48,7 +68,7 @@ function compareBlocks(a: BlockEntity, b: BlockEntity): number {
  * Convert a page pulled with `[*]` (kebab-case keys) into the camelCase
  * PageEntity shape that `getAllPages` returns and `toSlimPage` reads.
  */
-function pulledPageToEntity(pulled: any): PageEntity {
+function pulledPageToEntity(pulled: Record<string, unknown>): PageEntity {
   const {
     'original-name': originalName,
     'journal-day': journalDay,
@@ -58,7 +78,7 @@ function pulledPageToEntity(pulled: any): PageEntity {
     ...rest
   } = pulled;
 
-  const page: any = { ...rest };
+  const page: Record<string, unknown> = { ...rest };
   if (originalName !== undefined) {
     page.originalName = originalName;
     page['original-name'] = originalName;
@@ -67,7 +87,8 @@ function pulledPageToEntity(pulled: any): PageEntity {
   if (createdAt !== undefined) page.createdAt = createdAt;
   if (updatedAt !== undefined) page.updatedAt = updatedAt;
   if (propertiesTextValues !== undefined) page.propertiesTextValues = propertiesTextValues;
-  return page as PageEntity;
+  // The pull is `[*]` on a page, so these are the PageEntity fields; #62 types the response itself
+  return page as unknown as PageEntity;
 }
 
 /**
@@ -79,13 +100,12 @@ function pulledPageToEntity(pulled: any): PageEntity {
  * API calls: 1, or 0 when no block has a page id.
  */
 export async function withPageContext(client: LogseqClient, blocks: BlockEntity[]): Promise<SearchBlocksResult[]> {
-  const pageIdOf = (block: BlockEntity) => (block.page as any)?.id ?? (block.page as any)?.['db/id'];
   const pageById = new Map<number, PageEntity>();
   const pageIds = [...new Set(blocks.map(pageIdOf).filter((id): id is number => typeof id === 'number'))];
 
   if (pageIds.length > 0) {
     const { query: pagesQuery, inputs: pagesInputs } = DatalogQueryBuilder.getPagesByIds(pageIds);
-    const pageRows = await client.executeDatalogQuery<any[][] | null>(pagesQuery, ...pagesInputs);
+    const pageRows = await client.executeDatalogQuery<Array<[Record<string, unknown>]> | null>(pagesQuery, ...pagesInputs);
     for (const row of pageRows || []) {
       const page = pulledPageToEntity(row[0]);
       pageById.set(page.id, page);
@@ -94,7 +114,8 @@ export async function withPageContext(client: LogseqClient, blocks: BlockEntity[
 
   return blocks.map(block => {
     const result: SearchBlocksResult = { ...block };
-    const page = pageById.get(pageIdOf(block));
+    const pageId = pageIdOf(block);
+    const page = pageId === undefined ? undefined : pageById.get(pageId);
 
     // No page id, or page not found: skip context for this block
     if (page) {
@@ -132,6 +153,27 @@ export async function withPageContext(client: LogseqClient, blocks: BlockEntity[
 export async function searchBlocks(
   client: LogseqClient,
   query: string,
+  limit?: number,
+  includeContext?: boolean,
+  slimResults?: false
+): Promise<SearchBlocksResult[] | null>;
+export async function searchBlocks(
+  client: LogseqClient,
+  query: string,
+  limit: number | undefined,
+  includeContext: boolean | undefined,
+  slimResults: true
+): Promise<SlimSearchBlocksResult[] | null>;
+export async function searchBlocks(
+  client: LogseqClient,
+  query: string,
+  limit?: number,
+  includeContext?: boolean,
+  slimResults?: boolean
+): Promise<SearchBlocksResult[] | SlimSearchBlocksResult[] | null>;
+export async function searchBlocks(
+  client: LogseqClient,
+  query: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
   includeContext: boolean = false,
   slimResults: boolean = false
@@ -153,13 +195,37 @@ export async function searchBlocks(
 export async function searchBlocksWithMeta(
   client: LogseqClient,
   query: string,
+  limit?: number,
+  includeContext?: boolean,
+  slimResults?: false,
+  maxLimit?: number
+): Promise<SearchBlocksOutcome<SearchBlocksResult>>;
+export async function searchBlocksWithMeta(
+  client: LogseqClient,
+  query: string,
+  limit: number | undefined,
+  includeContext: boolean | undefined,
+  slimResults: true,
+  maxLimit?: number
+): Promise<SearchBlocksOutcome<SlimSearchBlocksResult>>;
+export async function searchBlocksWithMeta(
+  client: LogseqClient,
+  query: string,
+  limit?: number,
+  includeContext?: boolean,
+  slimResults?: boolean,
+  maxLimit?: number
+): Promise<SearchBlocksOutcome<SearchBlocksResult> | SearchBlocksOutcome<SlimSearchBlocksResult>>;
+export async function searchBlocksWithMeta(
+  client: LogseqClient,
+  query: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
   includeContext: boolean = false,
   slimResults: boolean = false,
   maxLimit: number = MAX_SEARCH_LIMIT
-): Promise<{ results: SearchBlocksResult[] | SlimSearchBlocksResult[] | null; meta: ResultMeta | null }> {
+): Promise<SearchBlocksOutcome<SearchBlocksResult> | SearchBlocksOutcome<SlimSearchBlocksResult>> {
   const { query: datalog, inputs } = DatalogQueryBuilder.searchBlocks(query);
-  const rows = await client.executeDatalogQuery<BlockEntity[][] | null>(datalog, ...inputs);
+  const rows = await client.executeDatalogQuery<Array<[BlockEntity]> | null>(datalog, ...inputs);
 
   if (!rows) {
     return { results: null, meta: null };
@@ -199,7 +265,7 @@ export async function searchBlocksWithMeta(
   }
 
   const slimmed = enriched.map(block => {
-    const slim = toSlimBlock(block, displayName(block.page)) as SlimSearchBlocksResult;
+    const slim: SlimSearchBlocksResult = toSlimBlock(block, displayName(block.page));
 
     if (block.context) {
       // Empty references / tags are left out (#42): the block is slim, so the lists add only bytes
