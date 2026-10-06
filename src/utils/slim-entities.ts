@@ -15,15 +15,6 @@ import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
 export const DEFAULT_SLIM_RESULTS = true;
 
 /**
- * The `slim_results` argument as a boolean: only an explicit boolean overrides the default.
- * No handler calls it since #60 (the schema default replaced it). It stays until
- * ADR 0010 and BR-0012, which name it, are updated.
- */
-export function wantsSlim(value: unknown): boolean {
-  return typeof value === 'boolean' ? value : DEFAULT_SLIM_RESULTS;
-}
-
-/**
  * Extract [[PageName]] references from block content
  * @param content - Block content text
  * @returns Array of page names (without brackets)
