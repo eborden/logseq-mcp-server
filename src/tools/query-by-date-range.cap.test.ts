@@ -65,6 +65,13 @@ function daysOf(counts: number[]) {
   return { pages, blocks };
 }
 
+/** The part of `data` a real query for these dates would return: the journal days in range and their blocks. */
+function between(data: { pages: any[]; blocks: any[] }, start: number, end: number) {
+  const pages = data.pages.filter(page => page['journal-day'] >= start && page['journal-day'] <= end);
+  const ids = new Set(pages.map(page => page.id));
+  return { pages, blocks: data.blocks.filter(block => ids.has(block.page.id)) };
+}
+
 function clientWith(data: { pages: unknown[]; blocks: unknown[] }, extra?: (query: string, inputs: unknown[]) => unknown) {
   const executeDatalogQuery = vi.fn(async (query: string, ...inputs: unknown[]) => {
     const other = extra?.(query, inputs);
@@ -154,10 +161,10 @@ describe('queryJournals max_blocks (#61)', () => {
       expect(result.warnings[0].message).toBe(
         'Showing 200 of 201 blocks (nested ones counted; oldest day first; the entries end at 20250103).'
       );
-      // The cut falls inside day 3: paging leads, and no raise of max_blocks is suggested
+      // The cut falls inside the last day: paging leads and reads the rest of that day, and no raise of max_blocks is suggested
       expect(result.warnings[0].howToFetchAll).toBe(
         'Call again with start_date 20250103, the same end_date (20250103) and the same max_blocks ' +
-          'to read the later days (day 20250103 repeats its kept blocks), or add a search_term.'
+          'to read the rest of day 20250103 (it repeats its kept blocks), or add a search_term.'
       );
       expect(suggestedValues(result)).toEqual([]);
     });
@@ -553,8 +560,9 @@ describe('queryJournals max_blocks (#61)', () => {
       const { message, howToFetchAll } = result.warnings[0];
       expect(message).toContain('the entries end at 20250103');
       expect(howToFetchAll).toContain(
-        'Call again with start_date 20250103, the same end_date (20250103) and the same max_blocks to read the later days (day 20250103 repeats its kept blocks), or add a search_term.'
+        'Call again with start_date 20250103, the same end_date (20250103) and the same max_blocks to read the rest of day 20250103 (it repeats its kept blocks), or add a search_term.'
       );
+      expect(howToFetchAll).not.toContain('later days');
       expect(message).not.toContain('narrowest');
       expect(message).not.toContain("can't be fetched whole");
     });
@@ -562,10 +570,12 @@ describe('queryJournals max_blocks (#61)', () => {
     it('says a day past 1000 blocks cannot be fetched whole when it is split after earlier days', async () => {
       const result = await run(daysOf([5, 1100]), range(2, { maxBlocks: 1000 }));
       expect(result.entries.map((e: any) => e.blocks.length)).toEqual([5, 995]);
-      expect(result.hasMore).toBe(true);
-      expect(result.warnings[0].howToFetchAll).toContain('Call again with start_date 20250102, the same end_date (20250102)');
-      expect(result.warnings[0].howToFetchAll).toContain('(day 20250102 repeats its kept blocks)');
+      // The last day is over the maximum and nothing comes after it: no call fetches the rest
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings[0].howToFetchAll).toBeUndefined();
       expect(result.warnings[0].message).toContain("A day is the narrowest date range, so day 20250102, with 1100 blocks, can't be fetched whole.");
+      expect(result.warnings[0].message).toContain('Add a search_term to narrow it.');
+      expect(result.warnings[0].message).not.toContain('Call again');
     });
 
     describe('advice that moves the reader forward when the first day alone fills the cap', () => {
@@ -624,9 +634,120 @@ describe('queryJournals max_blocks (#61)', () => {
         const { message, howToFetchAll } = result.warnings[0];
         expect(result.hasMore).toBe(true);
         expect(message).toContain('so no call can return it whole');
-        expect(howToFetchAll).toContain("Set max_blocks to 1000 (the maximum) to read 1000 of day 20250101's 1100 blocks");
+        expect(howToFetchAll).toContain(
+          'Set max_blocks to 1000 (the maximum) with start_date 20250101 and end_date 20250101 to read 1000 of its 1100 blocks'
+        );
         expect(howToFetchAll).toContain('may be saved to a file by the host');
         expect(suggestedValues(result)).toEqual([1000]);
+      });
+
+      it('pages past a split day over the maximum when a day comes after it', async () => {
+        const result = await run(daysOf([5, 1100, 3]), range(3, { maxBlocks: 1000 }));
+        expect(result.entries.map((e: any) => e.blocks.length)).toEqual([5, 995]);
+        expect(result.hasMore).toBe(true);
+        expect(result.warnings[0].message).toContain("day 20250102, with 1100 blocks, can't be fetched whole");
+        expect(result.warnings[0].howToFetchAll).toBe(
+          'Call again with start_date 20250103, the same end_date (20250103) and the same max_blocks for the rest of the range, ' +
+            'or add a search_term to read day 20250102 in pieces.'
+        );
+      });
+
+      it('offers a raise to the maximum for a split last day over it when the cap is below it', async () => {
+        const result = await run(daysOf([5, 1100]), range(2, { maxBlocks: 200 }));
+        expect(result.hasMore).toBe(true);
+        expect(result.warnings[0].howToFetchAll).toContain(
+          'Set max_blocks to 1000 (the maximum) with start_date 20250102 and end_date 20250102 to read 1000 of its 1100 blocks'
+        );
+      });
+
+      it('reads the rest of the last day, not later days, when the cut is inside it and it fits the cap', async () => {
+        const result = await run(daysOf([100, 150]), range(2)); // default cap of 200: 100 + 100 of the 150
+        expect(result.entries.map((e: any) => e.blocks.length)).toEqual([100, 100]);
+        const { message, howToFetchAll } = result.warnings[0];
+        expect(result.hasMore).toBe(true);
+        expect(message).not.toContain('Day 20250102');
+        expect(howToFetchAll).toBe(
+          'Call again with start_date 20250102, the same end_date (20250102) and the same max_blocks ' +
+            'to read the rest of day 20250102 (it repeats its kept blocks), or add a search_term.'
+        );
+        expect(howToFetchAll).not.toContain('later days');
+        // and that call does read the rest of the day
+        const again = await run(between(daysOf([100, 150]), 20250102, 20250102), { startDate: 20250102, endDate: 20250102 });
+        expect(blocksIn(again)).toBe(150);
+        noMeta(again);
+      });
+
+      it('reads a split middle day that is bigger than the cap but within the maximum alone, then continues', async () => {
+        const result = await run(daysOf([150, 300, 10]), range(3)); // default cap of 200: 150 + 50 of the 300
+        expect(result.entries.map((e: any) => e.blocks.length)).toEqual([150, 50]);
+        const { message, howToFetchAll } = result.warnings[0];
+        expect(result.hasMore).toBe(true);
+        expect(message).toContain('Day 20250102 holds 300 blocks, more than 200, so a query from it at this max_blocks reads only its first 200.');
+        expect(howToFetchAll).toContain('To read it whole, call again with start_date 20250102, end_date 20250102 and max_blocks 300.');
+        expect(howToFetchAll).toContain('may be saved to a file by the host');
+        expect(howToFetchAll).toContain('Then continue with start_date 20250103, the same end_date (20250103) and max_blocks 200.');
+        expect(howToFetchAll).not.toContain('later days');
+        // the day alone at that cap comes back whole
+        const alone = await run(between(daysOf([150, 300, 10]), 20250102, 20250102), { startDate: 20250102, endDate: 20250102, maxBlocks: 300 });
+        expect(blocksIn(alone)).toBe(300);
+        noMeta(alone);
+      });
+
+      describe('following howToFetchAll to the end', () => {
+        /** Makes the calls the warning names, in order, until a result has no warning or no way on. Returns every block read. */
+        async function follow(counts: number[], maxBlocks: number) {
+          const data = daysOf(counts);
+          const end = 20250100 + counts.length;
+          const seen = new Set<string>();
+          const read = (result: any) => result.entries.forEach((e: any) => e.blocks.forEach((b: any) => seen.add(b.uuid ?? b.id)));
+          let args: DateRangeOptions = { startDate: 20250101, endDate: end, maxBlocks };
+          for (let calls = 1; calls <= 60; calls++) {
+            const result = await run(between(data, args.startDate!, args.endDate!), args);
+            read(result);
+            const how: string | undefined = result.warnings?.[0]?.howToFetchAll;
+            if (!result.warnings) return { seen, calls, ended: 'whole' };
+            if (!how) return { seen, calls, ended: 'no way on' };
+            const alone = /To read it whole, call again with start_date (\d+), end_date (\d+) and max_blocks (\d+)\./.exec(how);
+            if (alone) {
+              const day = await run(between(data, Number(alone[1]), Number(alone[2])), {
+                startDate: Number(alone[1]),
+                endDate: Number(alone[2]),
+                maxBlocks: Number(alone[3])
+              });
+              expect(day.warnings, 'the day alone is whole').toBeUndefined();
+              read(day);
+              const next = /Then continue with start_date (\d+)/.exec(how);
+              if (!next) return { seen, calls: calls + 1, ended: 'whole' };
+              args = { startDate: Number(next[1]), endDate: end, maxBlocks };
+              continue;
+            }
+            const page = /Call again with start_date (\d+)/.exec(how);
+            if (!page) return { seen, calls, ended: 'raise only' };
+            args = { startDate: Number(page[1]), endDate: end, maxBlocks };
+          }
+          return { seen, calls: 60, ended: 'looped' };
+        }
+
+        it.each([
+          [[100, 150], 200],
+          [[150, 300, 10], 200],
+          [[300, 300, 300, 300], 200],
+          [[5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5], 7],
+          [[0, 120, 0, 90, 400, 3], 150],
+          [[200, 200, 200, 200, 200, 200, 200], 1000],
+          [[600, 600, 600], 1000]
+        ])('reaches every block, and ends, for days %j at max_blocks %i', async (counts, cap) => {
+          const { seen, calls, ended } = await follow(counts, cap);
+          expect(ended).toBe('whole');
+          expect(calls).toBeLessThan(60);
+          expect(seen.size).toBe(counts.reduce((sum, n) => sum + n, 0));
+        });
+
+        it('stops with no way on, not in a loop, at a last day over the maximum', async () => {
+          const { ended, calls } = await follow([5, 1100], 1000);
+          expect(ended).toBe('no way on');
+          expect(calls).toBe(1);
+        });
       });
 
       it('points at older days for last_n: the day alone first, then the older range', async () => {
