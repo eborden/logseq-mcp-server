@@ -401,9 +401,13 @@ describe('result caps (#61)', () => {
         expect(body.dateRange, label).toEqual(atMax.body.dateRange);
         expect(body.totals, label).toEqual({ blocks: total, days });
         expect(body.warnings!.map(w => w.code), label).toEqual(['blocks_truncated']);
-        // Below the maximum the warning says which value gets the rest, and it is within the maximum
+        // Below the maximum the warning leads with paging (#187), and suggests no raise past the maximum
         expect(body.hasMore, label).toBe(true);
-        expect(body.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_blocks to ${total}\\b`));
+        const how = body.warnings![0].howToFetchAll!;
+        expect(how, label).toMatch(
+          /^(Call again with start_date \d+, the same end_date \(\d+\) and the same max_blocks|To read it whole, call again with start_date \d+, end_date \d+ and max_blocks \d+\.)/
+        );
+        expect(how, label).not.toContain('Set max_blocks');
         expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
 
         // The warning names the last day kept, and a query from that day reaches everything after the cut
@@ -423,6 +427,28 @@ describe('result caps (#61)', () => {
           expect(again.some(uuid => !seen.has(uuid)), `${label}: resuming at the same cap reaches new blocks`).toBe(true);
         } else {
           expect(again, `${label}: the first day alone fills the cap, so resuming there repeats it`).toEqual(uuidsOf(body));
+        }
+
+        // The start_date the warning names is the last kept day (it repeats its kept blocks) or the day after it
+        const named = Number(/start_date (\d+)/.exec(how)![1]);
+        const nextEntry = atMax.body.entries.map(e => e.date).find(date => date > lastDay);
+        expect([lastDay, nextEntry], `${label}: the named start_date`).toContain(named);
+        if (how.startsWith('To read it whole')) {
+          // The first day alone fills the cap: the day alone, at the cap the warning names, returns it whole
+          expect(keptBefore, label).toBe(0);
+          expect(named, label).toBe(lastDay);
+          const dayCap = Number(/max_blocks (\d+)\./.exec(how)![1]);
+          const day = (await range(dayCap, { start_date: lastDay, end_date: lastDay })).body;
+          expect(uuidsOf(day), `${label}: the day alone at max_blocks ${dayCap}`).toEqual(
+            atMax.body.entries.filter(e => e.date === lastDay).flatMap(e => flatten(e.blocks))
+          );
+          expect(day.warnings, `${label}: the day alone is whole`).toBeUndefined();
+        } else {
+          // Paging from the named day reaches every block from that day on
+          const paged = (await range(MAX_DATE_RANGE_BLOCKS, { start_date: named })).body;
+          expect(uuidsOf(paged), `${label}: paging from ${named}`).toEqual(
+            atMax.body.entries.filter(e => e.date >= named).flatMap(e => flatten(e.blocks))
+          );
         }
 
         // A kept block that lost children is marked, and the warning names the marker exactly then
