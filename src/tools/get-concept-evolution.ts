@@ -195,8 +195,8 @@ export async function getConceptEvolution(
         aliasIds(aliasSet).filter(id => id !== mainPageId)
       )
     : DatalogQueryBuilder.getBlocksReferencingPage(lookupName);
-  const searchResults = await client.executeDatalogQuery(mentionsQuery, ...mentionsInputs);
-  const searchBlocks = (searchResults || []).map((r: any[]) => r[0] as BlockEntity);
+  const searchResults = await client.executeDatalogQuery<Array<[BlockEntity]> | null>(mentionsQuery, ...mentionsInputs);
+  const searchBlocks = (searchResults || []).map(r => r[0]);
 
   // Combine and deduplicate
   const allBlocks = [...(blocks || []), ...searchBlocks];
