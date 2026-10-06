@@ -5,6 +5,7 @@ import { DEFAULT_MAX_DEPTH, DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tool
 import { DEFAULT_MAX_DISTANCE, RELATIONSHIP_TYPES } from './tools/search-by-relationship.js';
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_MAX_TOPICS } from './tools/get-context-for-query.js';
 import { DATE_PRESETS } from './utils/date-presets.js';
+import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from './tools/search-blocks.js';
 import {
   DEFAULT_INCLUDE_TEMPORAL_CONTEXT,
   DEFAULT_MAX_BLOCKS,
@@ -87,9 +88,7 @@ export const searchBlocksArgs = z.object({
   limit: z
     .number()
     .optional()
-    // Literal, not DEFAULT_SEARCH_LIMIT / MAX_SEARCH_LIMIT: importing search-blocks.js here
-    // breaks the tests that mock it. src/tools/search-blocks.test.ts pins the two in step.
-    .describe('Maximum number of results to return (default: 100, max: 500)'),
+    .describe(`Maximum number of results to return (default: ${DEFAULT_SEARCH_LIMIT}, max: ${MAX_SEARCH_LIMIT})`),
   include_context: z.boolean().default(false).describe('Include semantic context (page, references, tags)'),
   slim_results: slimResultsArg,
 });

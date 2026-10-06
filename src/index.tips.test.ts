@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   getBacklinks: vi.fn(),
   getBlock: vi.fn(),
 }));
-vi.mock('./tools/search-blocks.js', () => ({ searchBlocksWithMeta: mocks.searchBlocksWithMeta }));
+vi.mock('./tools/search-blocks.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  searchBlocksWithMeta: mocks.searchBlocksWithMeta,
+}));
 vi.mock('./tools/get-page.js', () => ({ getPage: mocks.getPage }));
 vi.mock('./tools/get-backlinks.js', () => ({ getBacklinks: mocks.getBacklinks }));
 vi.mock('./tools/get-block.js', () => ({ getBlock: mocks.getBlock }));
