@@ -266,8 +266,32 @@ describe('searchByRelationship caps, what each type counts', () => {
     expect(result.totals).toEqual({ blocks: 4 });
     const warning = result.warnings.find(w => w.code === 'results_truncated')!;
     expect(warning.message).toBe(
-      "Showing 1 of 4 top-level blocks of the two pages (topic A's first, then topic B's; a kept block keeps all its children, which are not counted)."
+      "Showing 1 of 4 top-level blocks of the two pages (kept 1 from topic A and 0 from topic B, of 3 and 1; topic A's first, then topic B's; a kept block keeps all its children, which are not counted)."
     );
+  });
+
+  it('connected-within says how many kept blocks came from each topic, including when topic B drops out', async () => {
+    const fromEach = async (limit: number) => {
+      const { result } = await run('connected-within', 'plain', { treeA: 8, treeB: 5 }, limit);
+      return result.warnings.find(w => w.code === 'results_truncated')!.message;
+    };
+
+    // Below A's count: only A's blocks, B is gone
+    expect(await fromEach(5)).toContain('kept 5 from topic A and 0 from topic B, of 8 and 5');
+    // Exactly A's count: still no B
+    expect(await fromEach(8)).toContain('kept 8 from topic A and 0 from topic B, of 8 and 5');
+    // Past A's count: B is trimmed, not gone
+    expect(await fromEach(10)).toContain('kept 8 from topic A and 2 from topic B, of 8 and 5');
+    const { result } = await run('connected-within', 'plain', { treeA: 8, treeB: 5 }, 5);
+    expect(result.results.every(block => block.id < 2000)).toBe(true);
+  });
+
+  it('the Datalog types give no per-topic counts, and connected-within gives none when nothing was cut', async () => {
+    const references = await run('references', 'plain', { n: 80 });
+    expect(references.result.warnings[0].message).not.toContain('from topic A');
+
+    const whole = await run('connected-within', 'plain', { treeA: 8, treeB: 5 }, 13);
+    expect(whole.result.warnings).toEqual([]);
   });
 
   it('connected-within caps nothing when the pages are not connected', async () => {
