@@ -14,10 +14,11 @@ Generate a monthly summary by compressing the month's weekly summaries into mont
 | Period | Calendar month |
 | Output | `<graph>/pages/Monthly YYYY-MM.md` |
 | Tags | `[[Monthly Summary]]` plus one `[[Weekly YYYY-MM-DD]]` link per constituent week |
+| Source line | `source::` under the tags line: the month-shape query's roll-up (Step 6) |
 | Gist label | `- **Month**: ...` |
 | Lookback | Previous 1-2 `Monthly *` pages |
 
-`<graph>` is the graph root; get it from `logseq_get_graph_info`. Never hardcode it.
+`<graph>` is the graph root; get it from `logseq_get_graph_info` (Step 0). Never hardcode it.
 
 ## What Makes Monthly Different
 
@@ -33,6 +34,16 @@ Two further consequences of the altitude shift:
 - **Staleness becomes signal.** A TODO three days old is unremarkable. The same TODO carried across four consecutive weeks is itself worth stating.
 
 ## Workflow
+
+### Step 0: Load the LogSeq Tools and Query the Month First
+
+The journals are also files in `<graph>/journals/`, and reading files needs no setup, so a run drifts into `cat`, `head` and `cut` over them. Don't. The files lack what the query rolls up (`summary.topConcepts`, `totals`), and a file cut short with `head` or `cut` loses the end of a day without saying so. That is where meeting outcomes and hand-offs sit, and a monthly built on a cut file can get a trajectory wrong.
+
+1. If the `logseq_*` tools are deferred (listed by name, schema not loaded) or missing from your tool list, load them now with your host's tool search. One search call is the whole cost.
+2. Call `logseq_get_graph_info`. Its `path` is `<graph>`. Take the path from nowhere else, including a note, an earlier session or a CLAUDE.md.
+3. Run Step 3's month-shape query as soon as Step 1 has the month's dates, before Step 2 and before Step 3 reads the weeklies. No shell command that lists or reads `<graph>` (`ls`, `cat`, `head`, `grep`) comes before that query has returned. The `date` command in Step 1 is fine.
+
+A journal file is a fallback for a tool call that has failed, never for a tool you hadn't loaded. See "Reading the Period" in the reference.
 
 ### Step 1: Resolve the Month and Its Weeks
 
@@ -68,6 +79,8 @@ Read every `Weekly *` page in the month, plus the 1-2 most recent `Monthly *` pa
 logseq_query_by_date_range(start_date=..., end_date=..., max_blocks=200)
 ```
 
+Do the spot-check with this query, not with a `grep` over `journals/`. A `grep` returns only the lines you thought to search for, so it can miss the later entry that hands an item off and changes its trajectory. To look for one name or marker, pass it as `search_term`.
+
 For the month's overall shape, `query_by_date_range` with `include_content=false`, `max_blocks=500` and `top_concepts_limit=20` returns `summary.topConcepts` (`[{ name, count, days }]`) and one snippet per top-level block, without the blocks. A concept with a high `days` ran through the month, which makes it a candidate for a trajectory in Step 4. Check any candidate against the weeklies, because the roll-up counts links and knows nothing about salience. Skip this when the field is absent.
 
 **Keep each call small enough to be shown, and keep each to its job.** The host may not show a large result: Claude Code saves a tool result of about 50,000 characters or more to a file and shows only its first 2 KB, which leaves out the `summary` and `warnings` at the end (see `references/context-efficiency.md`). So the caps are not 1000.
@@ -81,6 +94,8 @@ Read in pages. A `blocks_truncated` warning on either call means the entries sto
 - If a result comes back saved to a file instead of shown (the host says the output is too large and names a file), don't open the file. Repeat the call with `max_blocks=100`, or one day per call. If a day still comes back saved, read it with a `search_term` as in the line above.
 
 A kept block with `childrenTruncated: true` shows only some of its children; fetch it with `get_block` and `include_children` if they matter. `totals` (`{ blocks, days }`) is range-wide: what the whole range held before the cut, not what one block lost.
+
+Keep three things from the month-shape call's first page `summary` for Step 6: `totalDays`, `totalBlocks`, and the first five `topConcepts`. They are the roll-up the page records, and the gate checks for them. If you skipped the month-shape call, make it now: the spot-check call alone doesn't cover the month.
 
 ### Step 4: Diff Against Prior Months
 
@@ -104,16 +119,24 @@ The `(N words)` note is a teaching aid. Do not write it into a real summary.
 grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <graph>/journals/YYYY_MM_*.md
 ```
 
+This `grep` reads marker state only. It doesn't replace the Step 3 queries: it can't tell you what the month held, and it shows nothing of a day that has no open item.
+
 Carry forward only genuinely open items. Apply the expired-text check from the reference with extra care at this altitude — a TODO carrying a deadline in its own words has usually come due within a month.
 
 ### Step 6: Write and Verify the Page
 
-Apply the shared output structure, then run the mandatory gate:
+Apply the shared output structure. Under the tags line, add the roll-up from Step 3:
+
+```
+source:: query_by_date_range 20250101-20250131; days 22; blocks 330; top Project Atlas 14/9, Alice 9/6
+```
+
+The range is the whole month you queried. `days` and `blocks` are `summary.totalDays` and `summary.totalBlocks` from the month-shape call's first page, and `top` is the first five `summary.topConcepts` as `name count/days` (`top none` when the field is absent). Write no `[[brackets]]` in it. Then run the mandatory gate:
 
 ```bash
 <skill-dir>/scripts/check-terseness.sh "<graph>/pages/Monthly YYYY-MM.md"
 ```
 
-It detects the monthly granularity from the filename and applies the monthly budget (12-18 words per signal, 200 words total, 10 items target / 12 max, zero em-dashes). A non-zero exit means rewrite and re-run.
+It detects the monthly granularity from the filename and applies the monthly budget (12-18 words per signal, 200 words total, 10 items target / 12 max, zero em-dashes). A non-zero exit means rewrite and re-run. The gate also fails a page with no `source::` line: it was not built from the month-shape query. Don't write the line without having run the query, and don't invent the numbers. If a tool call failed, say so in the gist, write `source:: files; <the error>` and pass `--allow-files` to the gate.
 
 The gate cannot check two things, so check them by eye: all three sections present with tab indentation, and **every signal carries a trajectory or an explicit reason it is new**. A monthly signal with no delta is a weekly-altitude detail that should have been merged or dropped.
