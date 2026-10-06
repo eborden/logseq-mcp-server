@@ -24,7 +24,10 @@ import { resolveLinkTargets } from '../utils/resolve-page.js';
  * (a link to the wrong person, a name split into a ref and a leftover surname).
  */
 
-/** Most characters `before` or `after` may hold, about 12k tokens each. A journal day or page file is well under. */
+/**
+ * Most UTF-16 code units (`string.length`) `before` or `after` may hold, about 12k
+ * tokens each. A journal day or page file is well under. An emoji counts as two.
+ */
 export const MAX_TEXT_CHARS = 50_000;
 
 /** Most distinct `[[terms]]` one call resolves. More is rejected before any LogSeq call. */
