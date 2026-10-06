@@ -267,6 +267,33 @@ export function missingFiles(expected: readonly string[], indexed: readonly stri
   return expected.filter(path => !have.has(path));
 }
 
+/** The app in front of every other window. */
+export interface FrontApp {
+  pid: number;
+  bundleId: string;
+}
+
+/**
+ * Keeps the instance from leaving the maintainer's focus on LogSeq. The app is launched directly
+ * (see `launchSpec`), which has no "open in the background" flag, and Electron activates itself.
+ * Each `tick` hands focus back to the app that was in front before the launch, but only while the
+ * instance's own process is the frontmost one: if the maintainer has moved on to something else,
+ * it leaves them there. Best effort, so a failure here never fails `start`.
+ */
+export function focusGuard(previous: FrontApp | undefined, instancePid: number, deps: InstanceDeps) {
+  return {
+    async tick(): Promise<void> {
+      if (previous === undefined || previous.pid === instancePid) return;
+      try {
+        const front = await deps.frontmostApp();
+        if (front?.pid === instancePid) await deps.activateApp(previous.bundleId);
+      } catch {
+        // best effort
+      }
+    },
+  };
+}
+
 /** A connection to an instance's API, as `start` and `status` need it. */
 export interface InstanceProbe {
   /** `logseq.App.getCurrentGraph`'s `path`, or undefined when no graph is open. */
@@ -304,6 +331,10 @@ export interface InstanceDeps {
   /** Start the process detached, its output written to `logPath` (replacing the last run's). Returns its pid. */
   spawnDetached(spec: LaunchSpec, logPath: string): Promise<number>;
   isAlive(pid: number): boolean;
+  /** The frontmost app, or undefined when it can't be read. Best effort: never throws. */
+  frontmostApp(): Promise<FrontApp | undefined>;
+  /** Bring the app with this bundle id to the front. Best effort: never throws. */
+  activateApp(bundleId: string): Promise<void>;
   commandLine(pid: number): string | undefined;
   kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
   connect(config: LogseqMCPConfig): InstanceProbe;
@@ -424,11 +455,13 @@ async function waitUntilReady(
   expectedFiles: readonly string[],
   timeoutMs: number,
   deps: InstanceDeps,
+  guard: { tick(): Promise<void> },
 ): Promise<number> {
   const probe = deps.connect({ ...instanceConfig(record.port, token), timeoutMs: 5_000 });
   const deadline = deps.now().getTime() + timeoutMs;
   let last = 'the API did not answer';
   while (deps.now().getTime() < deadline) {
+    await guard.tick();
     if (!deps.isAlive(record.pid)) {
       throw new InstanceError(`LogSeq (pid ${record.pid}) exited while starting. See ${record.logPath}.`);
     }
@@ -442,7 +475,10 @@ async function waitUntilReady(
       } else {
         const version = await probe.requireFixture();
         const missing = missingFiles(expectedFiles, await probe.indexedFiles());
-        if (missing.length === 0) return version;
+        if (missing.length === 0) {
+          await guard.tick();
+          return version;
+        }
         last = `LogSeq has not indexed ${missing.length} of ${expectedFiles.length} graph files yet`;
       }
     } catch (error) {
@@ -530,6 +566,7 @@ async function launch(
   const graphDir = await copyGraph(paths, sourceGraphDir, deps);
   await writeProfile(paths, graphDir, port, token, options.template, deps);
 
+  const previous = await deps.frontmostApp().catch(() => undefined);
   const pid = await deps.spawnDetached(spec, paths.log);
   const record: InstanceRecord = {
     pid,
@@ -547,7 +584,7 @@ async function launch(
   deps.log(`Started LogSeq (pid ${pid}) on port ${port}; waiting for the fixture graph...`);
 
   try {
-    const fixtureVersion = await waitUntilReady(record, token, expectedFiles, options.readyTimeoutMs ?? READY_TIMEOUT_MS, deps);
+    const fixtureVersion = await waitUntilReady(record, token, expectedFiles, options.readyTimeoutMs ?? READY_TIMEOUT_MS, deps, focusGuard(previous, pid, deps));
     return { ...record, fixtureVersion };
   } catch (error) {
     try {
