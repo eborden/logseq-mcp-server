@@ -709,7 +709,7 @@ describe('result caps (#61)', () => {
     // bound, and the clamp shows above the maximum; the cut at 500 is covered by the unit tests,
     // which feed the tool 600 results. The pairs below are the fixture's: see tests/fixtures/README.md
     // for the crowded topic, and the alias-sets and semantic-search suites for the others.
-    const CASES: Array<{ label: string; args: Record<string, unknown>; aliased?: boolean }> = [
+    const CASES: Array<{ label: string; args: Record<string, unknown>; aliased?: boolean; nested?: boolean }> = [
       { label: 'references', args: { topic_a: 'busy source', topic_b: 'popular topic', relationship_type: 'references' } },
       { label: 'referenced-by', args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'referenced-by' } },
       { label: 'in-pages-linking-to', args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'in-pages-linking-to' } },
@@ -731,12 +731,20 @@ describe('result caps (#61)', () => {
         label: 'connected-within, topic A with an alias (#69)',
         args: { topic_a: 'project atlas', topic_b: 'bob', relationship_type: 'connected-within', max_distance: 1 },
         aliased: true,
+        // This pair's pages have nested blocks, so the cut can fall inside a subtree (#183)
+        nested: true,
       },
     ];
 
+    interface RelationshipBlock {
+      id: number;
+      children?: RelationshipBlock[];
+      childrenTruncated?: boolean;
+    }
+
     interface RelationshipBody extends Meta {
       text: string;
-      results: Array<{ id: number }>;
+      results: RelationshipBlock[];
       resolvedAliases?: { topicA?: string[]; topicB?: string[] };
     }
 
@@ -745,14 +753,32 @@ describe('result caps (#61)', () => {
       return { text: result.content[0].text, ...(JSON.parse(result.content[0].text) as Omit<RelationshipBody, 'text'>) };
     }
 
-    const resultIds = (body: RelationshipBody) => body.results.map(block => block.id);
+    // connected-within returns the two pages' trees and counts every block in them, nested ones too (#183),
+    // so its results are compared in document order, not top-level only. The Datalog types are flat lists.
+    const isTree = (args: Record<string, unknown>) => args.relationship_type === 'connected-within';
+    const flatten = (blocks: RelationshipBlock[]): RelationshipBlock[] =>
+      blocks.flatMap(block => [block, ...flatten(block.children ?? [])]);
+    const unitCount = (body: RelationshipBody, tree: boolean) => (tree ? flatten(body.results) : body.results).length;
+    const resultIds = (body: RelationshipBody, tree: boolean) =>
+      (tree ? flatten(body.results) : body.results).map(block => block.id);
     const capWarnings = (body: RelationshipBody) => body.warnings.filter(w => w.code === 'results_truncated');
+
+    // A kept block that has fewer children than in the full result must say so, and no other may (#183)
+    function expectChildrenTruncatedMarks(full: RelationshipBlock[], kept: RelationshipBlock[], at: string): void {
+      const fullById = new Map(flatten(full).map(block => [block.id, block]));
+      for (const block of flatten(kept)) {
+        const original = fullById.get(block.id)!;
+        const lostChildren = (block.children?.length ?? 0) < (original.children?.length ?? 0);
+        expect(block.childrenTruncated === true, `${at}: block ${block.id} lost children: ${lostChildren}`).toBe(lostChildren);
+      }
+    }
 
     it.each(CASES)(
       'never returns more results than limit, keeps the same first results, and reports every cut: $label',
-      async ({ label, args, aliased }) => {
+      async ({ label, args, aliased, nested }) => {
         const full = await relationship(args, MAX_RELATIONSHIP_LIMIT);
-        const total = full.results.length;
+        const tree = isTree(args);
+        const total = unitCount(full, tree);
         expect(total, `${label} needs at least 3 results to see a cut. See tests/fixtures/README.md`).toBeGreaterThanOrEqual(3);
         expect(total, `${label} must stay under the default cap for the default to return every result`).toBeLessThanOrEqual(
           DEFAULT_RELATIONSHIP_LIMIT
@@ -761,6 +787,7 @@ describe('result caps (#61)', () => {
         expect(capWarnings(full)).toEqual([]);
         expect(full.totals).toBeUndefined();
         expect(full.hasMore).toBe(false);
+        if (nested) expect(total, `${label} needs nested blocks. See tests/fixtures/README.md`).toBeGreaterThan(full.results.length);
         if (aliased) expect(full.resolvedAliases, `${label} needs a topic with aliases`).toBeDefined();
 
         // The default and a value above the maximum are the full result, byte for byte
@@ -770,10 +797,11 @@ describe('result caps (#61)', () => {
         for (const limit of [0, 1, 2, total - 1, total, total + 1, DEFAULT_RELATIONSHIP_LIMIT]) {
           const body = await relationship(args, limit);
           const at = `${label}, limit ${limit}`;
-          expect(body.results.length, at).toBeLessThanOrEqual(MAX_RELATIONSHIP_LIMIT);
-          expect(body.results.length, at).toBe(Math.min(limit, total));
+          expect(unitCount(body, tree), at).toBeLessThanOrEqual(MAX_RELATIONSHIP_LIMIT);
+          expect(unitCount(body, tree), at).toBe(Math.min(limit, total));
           // The first results of the full list, in its order
-          expect(resultIds(body), at).toEqual(resultIds(full).slice(0, limit));
+          expect(resultIds(body, tree), at).toEqual(resultIds(full, tree).slice(0, limit));
+          if (tree) expectChildrenTruncatedMarks(full.results, body.results, at);
           // The alias group is still reported when the result is cut
           expect(body.resolvedAliases, at).toEqual(full.resolvedAliases);
 
