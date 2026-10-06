@@ -247,6 +247,13 @@ export const getCurrentContextArgs = z.object({});
  * 12k tokens each), so the input stays bounded (ADR-0011). An empty string is a
  * text, not a missing one. The cap on distinct terms (MAX_LINK_TERMS) is checked
  * by `checkLinks`, before any LogSeq call.
+ *
+ * Units: zod's `.max` counts UTF-16 code units (`string.length`), while the
+ * advertised JSON Schema `maxLength` counts code points. Text outside the Basic
+ * Multilingual Plane (emoji) takes two units per character, so about 25,000 emoji
+ * pass a validating client and are then rejected here, with a clear error and no
+ * LogSeq call. Deliberate: the cap bounds memory, which UTF-16 units measure. A
+ * test at the cap must use one-unit characters (pinned in index.check-links.test.ts).
  */
 export const checkLinksArgs = z.object({
   before: z.string().max(MAX_TEXT_CHARS).describe('Text before linking'),

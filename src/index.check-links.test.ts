@@ -88,6 +88,21 @@ describe('logseq_check_links (#146)', () => {
     });
   });
 
+  it('counts the cap in UTF-16 units: an emoji is two, so half the cap in emoji is the most', async () => {
+    await withServer([], async (mcp, calls) => {
+      const atCap = '😀'.repeat(MAX_TEXT_CHARS / 2);
+      expect((await call(mcp, { before: atCap, after: atCap })).isError).toBeFalsy();
+
+      // Fewer code points than the cap (what JSON Schema maxLength counts), more units
+      const over = `${atCap}😀`;
+      expect(Array.from(over).length).toBeLessThan(MAX_TEXT_CHARS);
+      const result = await call(mcp, { before: over, after: over });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).error).toContain("Invalid parameter 'before'");
+      expect(calls).toEqual([]);
+    });
+  });
+
   it.each(['before', 'after'])('requires %s, and takes an empty string as a text', async param => {
     await withServer([], async (mcp, calls) => {
       const missing = await call(mcp, param === 'before' ? { after: '' } : { before: '' });
