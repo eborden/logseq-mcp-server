@@ -1,7 +1,4 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { resolve } from 'path';
-import { access } from 'fs/promises';
-import { loadConfig, resolveConfigPath } from '../../src/config.js';
 import { LogseqClient } from '../../src/client.js';
 import { getPage } from '../../src/tools/get-page.js';
 import { getBacklinks, getBacklinksWithMeta } from '../../src/tools/get-backlinks.js';
@@ -12,156 +9,76 @@ import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
 import { searchByRelationship } from '../../src/tools/search-by-relationship.js';
 import { resolvePage } from '../../src/utils/resolve-page.js';
 import { AmbiguousPageError, PageNotFoundError } from '../../src/errors.js';
+import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for page-name resolution (#41).
+ * Integration tests for page-name resolution (#41), against the fixture graph.
  *
- * Read-only. Discovers a journal, an alias and a namespace leaf in whatever
- * graph is running, then checks structure only: kinds, match routes, call
- * counts, the shape of candidates and guidance. It never asserts on or prints
- * names or content from the graph; every assertion is on a boolean or a count,
- * so a failure cannot echo graph data.
- *
- * Requires LogSeq running with the HTTP API enabled, ~/.logseq-mcp/config.json,
- * and a graph with: a journal page that has content; a page that declares an
- * `alias::` nobody else declares; an alias declared by two or more pages; and a
- * namespace leaf name (`ns/leaf`) used under two or more namespaces, with no
- * page or alias of that exact name. See tests/integration/setup.md.
+ * Read-only. The cases are fixture pages (tests/fixtures/README.md, "Page resolution and
+ * aliases"): the journal Jan 6th, 2025; `atlas`, the alias only `project atlas` declares;
+ * `roadmap`, declared by `project borealis` and `project cascade`; the namespace leaf `notes`,
+ * used once, and `meetings`, used under two namespaces; and `Bob`, a page with a file.
  */
 
-const SETUP_HINT = 'See tests/integration/setup.md ("Page resolution data")';
+const JOURNAL = { day: 20250106, iso: '2025-01-06', name: 'jan 6th, 2025' };
+const UNIQUE = { stub: 'atlas', source: 'project atlas' };
+const SHARED = { stub: 'roadmap', sources: ['project borealis', 'project cascade'] };
+const LEAF = { name: 'meetings', pages: ['project atlas/meetings', 'project borealis/meetings'] };
+const UNIQUE_LEAF = { name: 'notes', page: 'project atlas/notes' };
+const EXACT = 'bob';
 
-const isoOf = (day: number) => {
-  const s = String(day);
-  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
-};
-
-describe('page resolution against a live graph', () => {
+describe('page resolution against the fixture graph', () => {
   let client: LogseqClient;
-  let queries = 0;
-  let apiCalls = 0;
-
-  /** A journal day with content, and the id of its page */
-  let journal: { day: number; pageId: number };
-  /** An alias stub declared by exactly one page, and that page's name */
-  let unique: { stub: string; source: string };
-  /** An alias stub declared by several pages */
-  let shared: { stub: string; sources: number };
-  /** A namespace leaf used under several namespaces, nothing else of that name */
-  let leaf: { name: string; pages: number };
-  /** Any page with a file (an exact-name hit) */
-  let exact: string;
+  let calls: string[];
+  let journalPageId: number;
 
   const countedCalls = async <T>(run: () => Promise<T>): Promise<{ result: T; calls: number }> => {
-    const before = apiCalls;
+    const before = calls.length;
     const result = await run();
-    return { result, calls: apiCalls - before };
+    return { result, calls: calls.length - before };
   };
 
   beforeAll(async () => {
-    const configPath = resolveConfigPath();
-    try {
-      await access(configPath);
-    } catch {
-      throw new Error(`Config file not found at ~/.logseq-mcp/config.json. ${SETUP_HINT}`);
-    }
-    client = new LogseqClient(await loadConfig(configPath));
-    try {
-      await client.callAPI('logseq.App.getCurrentGraph');
-    } catch (error) {
-      throw new Error(
-        `Cannot connect to LogSeq HTTP API: ${error instanceof Error ? error.message : 'Unknown error'}\n${SETUP_HINT}`
-      );
-    }
-
+    ({ client } = await connectFixture());
+    const rows = await client.executeDatalogQuery<Array<[number]>>(
+      '[:find ?p :in $ ?n :where [?p :block/name ?n]]', JOURNAL.name
+    );
+    journalPageId = rows[0][0];
     // Count every API call the tools under test make
-    const original = client.callAPI.bind(client);
-    client.callAPI = (async (method: string, args?: any[]) => {
-      apiCalls++;
-      if (method === 'logseq.DB.datascriptQuery') queries++;
-      return original(method, args);
-    }) as typeof client.callAPI;
-
-    const raw = (q: string) => original<any[]>('logseq.DB.datascriptQuery', [q]);
-
-    // Journal with content
-    const days = await raw(
-      `[:find ?d ?p :where [?p :block/name] [?p :block/journal-day ?d] [?b :block/page ?p]]`
-    );
-    expect(days.length, `No journal page with content found. ${SETUP_HINT}`).toBeGreaterThan(0);
-    const [day, pageId] = days[days.length >> 1];
-    journal = { day, pageId };
-
-    // Alias stubs and how many pages declare each
-    const sourcesByStub = new Map<string, string[]>();
-    const aliasRows = await raw(
-      // Only pages with a file declare a name; the other stubs of a 3+ name group point back at it (#69)
-      `[:find ?n ?sn :where [?a :block/name ?n] (not [?a :block/file]) [?p :block/alias ?a] [?p :block/file] [?p :block/name ?sn]]`
-    );
-    for (const [stub, source] of aliasRows) {
-      sourcesByStub.set(stub, [...(sourcesByStub.get(stub) ?? []), source]);
-    }
-    const stubs = [...sourcesByStub.entries()];
-    const one = stubs.find(([, sources]) => sources.length === 1);
-    const many = stubs.find(([, sources]) => sources.length > 1);
-    expect(one !== undefined, `No page with an alias that only it declares. ${SETUP_HINT}`).toBe(true);
-    expect(many !== undefined, `No alias declared by two or more pages. ${SETUP_HINT}`).toBe(true);
-    unique = { stub: one![0], source: one![1][0] };
-    shared = { stub: many![0], sources: many![1].length };
-
-    // A namespace leaf shared by several pages, with no page or alias of that name
-    const nsRows = await raw(`[:find ?n :where [?p :block/namespace ?x] [?p :block/name ?n]]`);
-    const leaves = new Map<string, number>();
-    for (const [name] of nsRows) {
-      const l = String(name).split('/').pop()!;
-      leaves.set(l, (leaves.get(l) ?? 0) + 1);
-    }
-    const taken = new Set<string>(
-      (await raw(`[:find ?n :where [?p :block/name ?n]]`)).map(([n]) => String(n))
-    );
-    const sharedLeaf = [...leaves.entries()].find(([l, count]) => count > 1 && !taken.has(l));
-    expect(sharedLeaf !== undefined, `No namespace leaf used under two or more namespaces. ${SETUP_HINT}`).toBe(true);
-    leaf = { name: sharedLeaf![0], pages: sharedLeaf![1] };
-
-    // An ordinary page with a file
-    const withFile = await raw(`[:find ?n :where [?p :block/name ?n] [?p :block/file] (not [?p :block/journal? true])]`);
-    expect(withFile.length, `No page with a file found. ${SETUP_HINT}`).toBeGreaterThan(0);
-    exact = withFile[0][0];
+    ({ calls } = recordCalls(client));
   });
 
   it('resolves an exact name with one query and no extra calls', async () => {
-    const { result, calls } = await countedCalls(() => resolvePage(client, exact.toUpperCase()));
+    const { result, calls } = await countedCalls(() => resolvePage(client, EXACT.toUpperCase()));
 
-    expect(result.kind === 'found').toBe(true);
-    expect(result.kind === 'found' && result.matchedBy === 'name').toBe(true);
+    expect(result).toMatchObject({ kind: 'found', matchedBy: 'name', name: EXACT });
     expect(calls).toBe(1);
   });
 
   describe('ISO dates', () => {
     it('resolves an ISO date to the journal page by journal-day, in one query', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, isoOf(journal.day)));
+      const { result, calls } = await countedCalls(() => resolvePage(client, JOURNAL.iso));
 
-      expect(result.kind === 'found').toBe(true);
-      if (result.kind !== 'found') return;
-      expect(result.matchedBy).toBe('journal-date');
-      expect(result.page.id === journal.pageId).toBe(true);
+      expect(result).toMatchObject({ kind: 'found', matchedBy: 'journal-date', name: JOURNAL.name });
+      expect(result.kind === 'found' && result.page.id).toBe(journalPageId);
       expect(calls).toBe(1);
     });
 
     it('returns the journal page from get_page, saying how it was found', async () => {
-      const page = await getPage(client, isoOf(journal.day), false);
+      const page = await getPage(client, JOURNAL.iso, false);
 
-      expect(page.journalDay === journal.day).toBe(true);
-      expect(page.resolvedFrom?.matchedBy).toBe('journal-date');
+      expect(page.journalDay).toBe(JOURNAL.day);
+      expect(page.resolvedFrom).toEqual({ name: JOURNAL.iso, matchedBy: 'journal-date', resolvedTo: 'Jan 6th, 2025' });
     });
 
     it('builds context and backlinks for an ISO date', async () => {
-      const context = await buildContextForTopic(client, isoOf(journal.day));
-      const backlinks = await getBacklinks(client, isoOf(journal.day));
+      const context = await buildContextForTopic(client, JOURNAL.iso);
+      const backlinks = await getBacklinks(client, JOURNAL.iso);
 
-      expect(context.mainPage.id === journal.pageId).toBe(true);
+      expect(context.mainPage.id).toBe(journalPageId);
       expect(context.resolvedFrom?.matchedBy).toBe('journal-date');
-      expect(Array.isArray(backlinks ?? [])).toBe(true);
+      // Nothing links that journal
+      expect(backlinks ?? []).toEqual([]);
     });
 
     it('reports a date with no journal as not found without a page-list call', async () => {
@@ -174,35 +91,31 @@ describe('page resolution against a live graph', () => {
 
   describe('aliases', () => {
     it('resolves an alias declared by one page to that page, in one query', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, unique.stub));
+      const { result, calls } = await countedCalls(() => resolvePage(client, UNIQUE.stub));
 
-      expect(result.kind === 'found').toBe(true);
-      if (result.kind !== 'found') return;
-      expect(result.matchedBy).toBe('alias');
-      expect(result.name === unique.source).toBe(true);
+      expect(result).toMatchObject({ kind: 'found', matchedBy: 'alias', name: UNIQUE.source });
       expect(calls).toBe(1);
     });
 
     it('returns the declaring page from get_page and build_context', async () => {
-      const page = await getPage(client, unique.stub, false);
-      const context = await buildContextForTopic(client, unique.stub);
+      const page = await getPage(client, UNIQUE.stub, false);
+      const context = await buildContextForTopic(client, UNIQUE.stub);
 
-      expect(page.name === unique.source).toBe(true);
-      expect(page.resolvedFrom?.matchedBy).toBe('alias');
-      expect(context.mainPage.name === unique.source).toBe(true);
+      expect(page.name).toBe(UNIQUE.source);
+      expect(page.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
+      expect(context.mainPage.name).toBe(UNIQUE.source);
       expect(context.resolvedFrom?.matchedBy).toBe('alias');
     });
 
     it('returns candidates, not a guess, for an alias declared by several pages', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, shared.stub));
+      const { result, calls } = await countedCalls(() => resolvePage(client, SHARED.stub));
 
       expect(result.kind).toBe('ambiguous');
       if (result.kind !== 'ambiguous') return;
-      expect(result.totalCandidates).toBe(shared.sources);
-      expect(result.candidates.length).toBe(Math.min(shared.sources, 10));
+      expect(result.totalCandidates).toBe(2);
+      expect(result.candidates.map(c => c.name).sort()).toEqual(SHARED.sources);
+      expect(result.candidates.map(c => c.originalName).sort()).toEqual(SHARED.sources);
       for (const c of result.candidates) {
-        expect(typeof c.name === 'string' && c.name.length > 0).toBe(true);
-        expect(typeof c.originalName === 'string' && c.originalName.length > 0).toBe(true);
         expect(c.matchedBy).toBe('alias');
         expect(typeof c.reason === 'string' && c.reason.length > 0).toBe(true);
       }
@@ -210,16 +123,15 @@ describe('page resolution against a live graph', () => {
     });
 
     it('throws AmbiguousPageError from get_page and get_backlinks without picking a page', async () => {
-      await expect(getPage(client, shared.stub, false)).rejects.toBeInstanceOf(AmbiguousPageError);
-      await expect(getBacklinks(client, shared.stub)).rejects.toBeInstanceOf(AmbiguousPageError);
+      await expect(getPage(client, SHARED.stub, false)).rejects.toBeInstanceOf(AmbiguousPageError);
+      await expect(getBacklinks(client, SHARED.stub)).rejects.toBeInstanceOf(AmbiguousPageError);
     });
 
     it('skips an ambiguous topic in get_context_for_query with an ambiguous_page warning', async () => {
-      const result = await getContextForQuery(client, `about [[${shared.stub}]]`);
+      const result = await getContextForQuery(client, `about [[${SHARED.stub}]]`);
       const warning = result.warnings.find(w => w.code === 'ambiguous_page');
 
-      expect(warning !== undefined).toBe(true);
-      expect(warning?.candidates?.length).toBeGreaterThan(1);
+      expect(warning?.candidates?.map(c => c.name).sort()).toEqual(SHARED.sources);
       expect(result.contexts).toEqual([]);
       expect(result.hasMore).toBe(false);
     });
@@ -227,12 +139,20 @@ describe('page resolution against a live graph', () => {
 
   describe('namespace leaves', () => {
     it('returns candidates for a leaf used under several namespaces, in two queries', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, leaf.name));
+      const { result, calls } = await countedCalls(() => resolvePage(client, LEAF.name));
 
       expect(result.kind).toBe('ambiguous');
       if (result.kind !== 'ambiguous') return;
-      expect(result.totalCandidates).toBe(leaf.pages);
+      expect(result.totalCandidates).toBe(2);
+      expect(result.candidates.map(c => c.name).sort()).toEqual(LEAF.pages);
       expect(result.candidates.every(c => c.matchedBy === 'namespace-leaf')).toBe(true);
+      expect(calls).toBe(2);
+    });
+
+    it('resolves a leaf used once to its page, in two queries', async () => {
+      const { result, calls } = await countedCalls(() => resolvePage(client, UNIQUE_LEAF.name));
+
+      expect(result).toMatchObject({ kind: 'found', matchedBy: 'namespace-leaf', name: UNIQUE_LEAF.page });
       expect(calls).toBe(2);
     });
   });
@@ -253,38 +173,39 @@ describe('page resolution against a live graph', () => {
 
     it('search_by_relationship throws for a missing topic in either position, for every relationship type', async () => {
       for (const type of ['references', 'in-pages-linking-to', 'connected-within'] as const) {
-        expect(await searchByRelationship(client, MISSING, exact, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
-        expect(await searchByRelationship(client, exact, MISSING, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
+        expect(await searchByRelationship(client, MISSING, EXACT, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
+        expect(await searchByRelationship(client, EXACT, MISSING, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
       }
     });
 
     it('get_concept_evolution, get_concept_network and search_by_relationship return candidates for a shared alias', async () => {
       const errors = [
-        await getConceptEvolution(client, shared.stub).catch(e => e),
-        await getConceptNetwork(client, shared.stub, 1).catch(e => e),
-        await searchByRelationship(client, shared.stub, exact, 'references').catch(e => e),
-        await searchByRelationship(client, exact, shared.stub, 'references').catch(e => e)
+        await getConceptEvolution(client, SHARED.stub).catch(e => e),
+        await getConceptNetwork(client, SHARED.stub, 1).catch(e => e),
+        await searchByRelationship(client, SHARED.stub, EXACT, 'references').catch(e => e),
+        await searchByRelationship(client, EXACT, SHARED.stub, 'references').catch(e => e)
       ];
       for (const error of errors) {
         expect(error instanceof AmbiguousPageError).toBe(true);
-        expect(error.totalCandidates).toBe(shared.sources);
+        expect(error.totalCandidates).toBe(2);
       }
     });
 
     it('get_backlinks, get_concept_evolution and search_by_relationship say which page an alias stood for', async () => {
-      const { meta } = await getBacklinksWithMeta(client, unique.stub);
-      const evolution = await getConceptEvolution(client, unique.stub);
-      const relationship = await searchByRelationship(client, unique.stub, exact, 'references');
+      const { meta } = await getBacklinksWithMeta(client, UNIQUE.stub);
+      const evolution = await getConceptEvolution(client, UNIQUE.stub);
+      const relationship = await searchByRelationship(client, UNIQUE.stub, EXACT, 'references');
 
-      expect(meta?.resolvedFrom?.matchedBy).toBe('alias');
-      expect(meta?.resolvedFrom?.resolvedTo.toLowerCase() === unique.source).toBe(true);
+      expect(meta?.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
       expect(evolution.resolvedFrom?.matchedBy).toBe('alias');
       expect(relationship.resolvedFrom?.topicA?.matchedBy).toBe('alias');
       expect(relationship.resolvedFrom?.topicB).toBeUndefined();
+      // `Let [[Bob]] review the room names` and `... tell [[Bob]].` on project atlas
+      expect(relationship.results).toHaveLength(2);
     });
 
     it('get_page costs one call for an exact name of a page with a file', async () => {
-      const { result, calls } = await countedCalls(() => getPage(client, exact, false));
+      const { result, calls } = await countedCalls(() => getPage(client, EXACT, false));
 
       expect(result.resolvedFrom).toBeUndefined();
       expect(calls).toBe(1);
@@ -303,6 +224,14 @@ describe('page resolution against a live graph', () => {
       expect(Array.isArray(error.suggestions) && error.suggestions.length <= 3).toBe(true);
     });
 
+    it('suggests close page names for a typo', async () => {
+      // A fuzzy match needs every letter of the name in order, so a dropped letter matches
+      const error = await getPage(client, 'projet atlas', false).catch(e => e);
+
+      expect(error instanceof PageNotFoundError).toBe(true);
+      expect(error.suggestions).toEqual(['project atlas', 'project atlas/notes', 'project atlas/meetings']);
+    });
+
     it('costs the first lookup, two queries and one getAllPages call on the not-found path', async () => {
       const { calls } = await countedCalls(() => getPage(client, 'no such page 41 probe', false).catch(() => null));
 
@@ -312,6 +241,6 @@ describe('page resolution against a live graph', () => {
   });
 
   it('made Datalog queries for its lookups', () => {
-    expect(queries).toBeGreaterThan(0);
+    expect(calls.filter(method => method === 'logseq.DB.datascriptQuery').length).toBeGreaterThan(0);
   });
 });
