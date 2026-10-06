@@ -65,6 +65,7 @@ export interface PageEntity {
    */
   alias?: IEntityID[];
   children?: (PageEntity | BlockEntity)[];
+  createdAt?: number;
   updatedAt?: number;
 }
 
