@@ -592,6 +592,58 @@ describe('getContextForQuery', () => {
       ]);
     });
 
+    describe('searches the longest keyword', () => {
+      // A small graph, in no particular order: LogSeq answers a search with the
+      // blocks whose content matches the pattern, unsorted.
+      const corpus = [
+        { id: 7, content: 'that one' },
+        { id: 3, content: 'that widgets gadget' },
+        { id: 9, content: 'Widgets, that is' },
+        { id: 1, content: 'widgets only' },
+        { id: 12, content: 'THAT WIDGETS again' },
+        { id: 5, content: 'that and that' },
+        { id: 10, content: 'widgets that gadget' }
+      ].map(block => ({ ...block, page: { id: 100 } }));
+
+      function corpusClient() {
+        const client = newClient();
+        (client.executeDatalogQuery as any).mockImplementation(async (_query: string, pattern: string) => {
+          const re = new RegExp(pattern.replace(/^\(\?i\)/, ''), 'i');
+          return corpus.filter(block => re.test(block.content)).map(block => [block]);
+        });
+        return client;
+      }
+
+      it('sends the longest keyword to LogSeq, not the first', async () => {
+        const client = corpusClient();
+        await getContextForQuery(client, 'that widgets');
+
+        expect(client.executeDatalogQuery).toHaveBeenCalledTimes(1);
+        expect((client.executeDatalogQuery as any).mock.calls[0][1]).toBe('(?i)widgets');
+      });
+
+      it('takes the first of equally long keywords', async () => {
+        const client = corpusClient();
+        await getContextForQuery(client, 'gadget widget');
+
+        expect((client.executeDatalogQuery as any).mock.calls[0][1]).toBe('(?i)gadget');
+      });
+
+      it('returns the same hits in the same order as searching the first keyword', async () => {
+        // What searching "that" (the first keyword) and filtering would give
+        const { searchBlocks } = await import('./search-blocks.js');
+        const byFirst = ((await searchBlocks(corpusClient(), 'that', Infinity)) as Array<{ id: number; content: string }>)
+          .filter(block => block.content.toLowerCase().includes('widgets'))
+          .map(block => block.id);
+
+        const result = await getContextForQuery(corpusClient(), 'that widgets', { maxSearchResults: 3 });
+
+        expect(byFirst).toEqual([12, 10, 9, 3]);
+        expect(result.searchResults!.map(block => block.id)).toEqual(byFirst.slice(0, 3));
+        expect(result.warnings[0].message).toBe('Showing 3 of 4 keyword hits.');
+      });
+    });
+
     it('keeps no hits for a negative value, and reports the cut', async () => {
       const { result } = await run(hitRows(5), { maxSearchResults: -1 });
 
