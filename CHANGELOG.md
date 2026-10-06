@@ -48,7 +48,7 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 - Infrastructure errors (LogSeq down, a bad token, a timeout) are no longer reported as "page not found" or as empty results in `get_page`, `build_context` and `get_context_for_query`. Partial results are returned with `warnings`.
 - Page lookups are case-insensitive, and pages with no blocks return an empty page rather than nothing.
-- A journal page is no longer matched twice when a block on it carries a scheduled or deadline date.
+- A journal page is no longer matched twice when a block LogSeq created on it carries `:block/journal-day` (the journal queries now require a page name). A scheduled or deadline date does not add it (#140).
 - Property names from Datalog are camelCased the same way the Editor API returns them.
 - `LOGSEQ_MCP_TIPS` rejects an unrecognised value at startup instead of leaving tips on.
 - `build_context` reports a journal page as `temporalContext: { isJournal: true, date }`, with `date` a `YYYYMMDD` number. It read the Editor API's field names from a Datalog pull, so every journal page came back as `{ isJournal: false }` with no date (#152).
