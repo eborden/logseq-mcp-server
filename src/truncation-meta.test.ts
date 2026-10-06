@@ -330,3 +330,94 @@ describe('logseq_get_concept_evolution max_entries (#61)', () => {
     expect(result.isError).toBe(true);
   });
 });
+
+describe('logseq_query_by_date_range max_blocks (#61)', () => {
+  // `n` journal days of `perDay` top-level blocks each, on made-up day numbers from 20250101
+  const dateRange = (n: number, perDay: number, args: Record<string, unknown> = {}) => {
+    const pages = Array.from({ length: n }, (_, i) => ({
+      id: i + 1,
+      name: `day ${20250101 + i}`,
+      'original-name': `Day ${20250101 + i}`,
+      'journal-day': 20250101 + i,
+      'journal?': true,
+    }));
+    const blocks = pages.flatMap(page =>
+      Array.from({ length: perDay }, (_, k) => {
+        const id = page.id * 1000 + k + 1;
+        return {
+          id,
+          uuid: `u${id}`,
+          content: `b${id}`,
+          page: { id: page.id },
+          parent: { id: page.id },
+          left: { id: k === 0 ? page.id : id - 1 },
+        };
+      })
+    );
+    const callAPI = vi.fn(async (_method: string, params: unknown[]) =>
+      String(params[0]).includes(':block/page ?page') ? blocks.map(b => [b]) : pages.map(p => [p])
+    );
+    return callTool(callAPI, 'logseq_query_by_date_range', {
+      start_date: 20250101,
+      end_date: 20250100 + n,
+      ...args,
+    });
+  };
+  const entryBlocks = (body: any) => body.entries.reduce((sum: number, e: any) => sum + e.blocks.length, 0);
+
+  it('cuts at the default 200 and reports it in the result object', async () => {
+    const result = await dateRange(3, 70);
+    const body = JSON.parse(result.content[0].text);
+
+    expect(result.isError).toBeUndefined();
+    expect(entryBlocks(body)).toBe(200);
+    expect(body).toMatchObject({ hasMore: true, totals: { blocks: 210, days: 3 } });
+    expect(body.summary).toMatchObject({ totalDays: 3, totalBlocks: 210 });
+    expect(body.warnings).toEqual([
+      {
+        code: 'blocks_truncated',
+        message: 'Showing 200 of 210 blocks (nested ones counted; oldest day first; the entries end at 20250103).',
+        howToFetchAll: 'Set max_blocks to 210 (or higher) to get all 210.',
+      },
+    ]);
+  });
+
+  it('clamps a value above 1000 and reports the maximum, with hasMore false', async () => {
+    const result = await dateRange(11, 100, { max_blocks: 5000 });
+
+    expect(result.isError).toBeUndefined();
+    const body = JSON.parse(result.content[0].text);
+    expect(entryBlocks(body)).toBe(1000);
+    expect(body.hasMore).toBe(false);
+    expect(body.warnings).toHaveLength(1);
+    expect(body.warnings[0].code).toBe('blocks_truncated');
+    expect(body.warnings[0].message).toContain('capped at its maximum of 1000 (5000 was asked for)');
+    expect(body.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('counts top-level blocks for include_content false', async () => {
+    const body = JSON.parse((await dateRange(3, 70, { include_content: false, max_blocks: 100 })).content[0].text);
+
+    expect(body.entries.reduce((sum: number, e: any) => sum + e.snippets.length, 0)).toBe(100);
+    expect(body.warnings[0].message).toContain('Showing 100 of 210 blocks (top-level only;');
+  });
+
+  it('leaves the result unchanged when every block fits', async () => {
+    const atDefault = await dateRange(4, 50);
+    const atMax = await dateRange(4, 50, { max_blocks: 1000 });
+    const above = await dateRange(4, 50, { max_blocks: 5000 });
+
+    const body = JSON.parse(atDefault.content[0].text);
+    expect(entryBlocks(body)).toBe(200);
+    expect(Object.keys(body)).not.toContain('warnings');
+    expect(Object.keys(body)).not.toContain('totals');
+    expect(atMax.content[0].text).toBe(atDefault.content[0].text);
+    expect(above.content[0].text).toBe(atDefault.content[0].text);
+  });
+
+  it('rejects a max_blocks that is not a number', async () => {
+    const result = await dateRange(2, 2, { max_blocks: 'many' });
+
+    expect(result.isError).toBe(true);
+  });
+});
