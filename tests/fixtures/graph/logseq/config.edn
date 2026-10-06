@@ -1,0 +1,24 @@
+;; Config for the logseq-mcp-server integration-test fixture graph (#86, #87).
+;; LogSeq merges this over its built-in defaults and the user's global config, so
+;; only settings that change how files are parsed or pages are named are pinned here.
+;; Repo config wins over global config, which keeps parsing the same on every machine.
+{:meta/version 1
+
+ ;; Files are markdown, under pages/ and journals/.
+ :preferred-format :markdown
+ :pages-directory "pages"
+ :journals-directory "journals"
+ :feature/enable-journals? true
+
+ ;; Journal file names (journals/2025_01_01.md) and page titles (Jan 1st, 2025).
+ :journal/file-name-format "yyyy_MM_dd"
+ :journal/page-title-format "MMM do, yyyy"
+
+ ;; Namespaced page files use "___" for "/" (pages/project atlas___notes.md).
+ :file/name-format :triple-lowbar
+
+ ;; Property values like [[x]] create pages, as in a default graph.
+ :property-pages/enabled? true
+
+ ;; The fixture README describes the folder; it is not a page of the graph.
+ :hidden ["/README.md"]}
