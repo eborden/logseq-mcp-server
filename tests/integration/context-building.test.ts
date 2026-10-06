@@ -89,11 +89,13 @@ describe('Context Building Tools Integration Tests', () => {
       expect(result.totals).toEqual({ blocks: 8, relatedPages: 0, references: 0 });
     });
 
-    // #152: temporalContext reads `mainPage.journal`, but the pulled page has `journal?`
-    it.fails('marks a journal page as a journal, with its date (fails until #152)', async () => {
+    // #152: temporalContext reads `mainPage.journal`, but the pulled page has `journal?`. This pins
+    // the current wrong value; flip it to { isJournal: true, date: 20250106 } with the fix.
+    it('reports a journal page as not a journal (#152)', async () => {
       const result = await buildContextForTopic(client, 'Jan 6th, 2025');
 
-      expect(result.temporalContext).toEqual({ isJournal: true, date: 20250106 });
+      expect(result.mainPage['journal?']).toBe(true);
+      expect(result.temporalContext).toEqual({ isJournal: false });
     });
 
     it('returns an empty context for a page with no blocks, and one block for an empty page', async () => {
@@ -132,7 +134,8 @@ describe('Context Building Tools Integration Tests', () => {
       expect(result.contexts.map(c => c.topic)).toEqual(['Bob', 'Alice']);
       expect(result.summary).toMatchObject({ totalTopics: 2, totalBlocks: 7 });
       // Each topic keeps 5 related pages, picked by id order among ties, so which ones (and how many
-      // they share) changes when LogSeq re-indexes. Count the distinct pages the contexts hold.
+      // they share) changes when LogSeq re-indexes (tests/fixtures/README.md lists this case).
+      // Count the distinct pages the contexts hold.
       const pages = new Set(result.contexts.flatMap(c => [c.mainPage.id, ...c.relatedPages.map(r => r.page.id)]));
       expect(result.contexts.map(c => c.relatedPages.length)).toEqual([5, 5]);
       expect(result.summary.totalPages).toBe(pages.size);
