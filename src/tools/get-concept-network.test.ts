@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { getConceptNetwork } from './get-concept-network.js';
 import { LogseqClient } from '../client.js';
 import { PageNotFoundError } from '../errors.js';
+import type { PageEntity } from '../types.js';
+
+/** The root page as the resolver's pull returns it: only the fields a test needs. */
+type RootPull = Pick<PageEntity, 'id' | 'name'> & Partial<PageEntity>;
 
 type Rel = 'outbound' | 'inbound';
 
@@ -21,7 +25,7 @@ function row(
  * Mock client: the root lookup (the only query with an :in input) returns
  * `root`; every batched query returns the next entry of `levels`.
  */
-function mockClient(root: unknown[] | null, levels: unknown[][][] = []) {
+function mockClient(root: RootPull | null, levels: unknown[][][] = []) {
   const queue = [...levels];
   const executeDatalogQuery = vi.fn(async (query: string) => {
     if (query.includes(':in $ ?n')) {
@@ -37,7 +41,7 @@ function mockClient(root: unknown[] | null, levels: unknown[][][] = []) {
   };
 }
 
-const rootPage = { id: 1, name: 'root page', 'original-name': 'Root Page' };
+const rootPage: RootPull = { id: 1, name: 'root page', 'original-name': 'Root Page' };
 
 describe('getConceptNetwork', () => {
   describe('depth', () => {
