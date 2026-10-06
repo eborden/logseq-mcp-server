@@ -65,6 +65,66 @@ describe('logseq_search_blocks meta block', () => {
   });
 });
 
+describe('logseq_search_blocks maximum limit (#61)', () => {
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => blockRow(i + 1));
+  const search = (n: number, args: Record<string, unknown>) =>
+    callTool(vi.fn().mockResolvedValueOnce(rows(n)), 'logseq_search_blocks', { query: 'k', ...args });
+
+  it('clamps a limit above 500 and reports the maximum, with hasMore false', async () => {
+    const result = await search(700, { limit: 1000 });
+
+    expect(result.isError).toBeUndefined();
+    const results = JSON.parse(result.content[0].text);
+    expect(Array.isArray(results)).toBe(true);
+    expect(results).toHaveLength(500);
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta).toMatchObject({ hasMore: false, totals: { matches: 700 } });
+    expect(meta.warnings).toHaveLength(1);
+    expect(meta.warnings[0].code).toBe('results_truncated');
+    expect(meta.warnings[0].message).toContain('capped at its maximum of 500 (1000 was asked for)');
+    expect(meta.warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('reports the maximum at limit 500 too', async () => {
+    const result = await search(501, { limit: 500 });
+
+    expect(JSON.parse(result.content[0].text)).toHaveLength(500);
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta.hasMore).toBe(false);
+    expect(meta.warnings[0].message).toContain('capped at its maximum of 500,');
+  });
+
+  it('never suggests a limit past the maximum', async () => {
+    const result = await search(900, {});
+
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta.hasMore).toBe(true);
+    expect(meta.warnings[0].howToFetchAll).toBe(
+      'Set limit to 500 (the maximum) to get 500 of 900. Narrow the query to see the rest.'
+    );
+  });
+
+  it('adds no warning when every match fits under a limit above the maximum', async () => {
+    const result = await search(500, { limit: 1000 });
+
+    expect(JSON.parse(result.content[0].text)).toHaveLength(500);
+    const { meta } = JSON.parse(result.content[1].text);
+    expect(meta).toMatchObject({ hasMore: false, warnings: [], totals: { matches: 500 } });
+  });
+
+  it('leaves the first content block unchanged within the maximum', async () => {
+    // Under the maximum the cap never bites: the same search at 500 or 1000 gives the same array
+    const at500 = await search(320, { limit: 500 });
+    const at1000 = await search(320, { limit: 1000 });
+    const atDefault = await search(80, {});
+
+    expect(at1000.content[0].text).toBe(at500.content[0].text);
+    expect(JSON.parse(at500.content[0].text)).toHaveLength(320);
+    expect(JSON.parse(atDefault.content[0].text)).toHaveLength(80);
+    expect(at1000.content[1].text).toBe(at500.content[1].text);
+  });
+});
+
 describe('logseq_list_pages pages_unavailable warning (#64)', () => {
   it('delivers the warning in the result object when getAllPages returns null', async () => {
     const callAPI = vi.fn().mockResolvedValueOnce(null);
