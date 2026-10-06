@@ -295,7 +295,9 @@ export interface InstanceDeps {
   /**
    * Copy the directory `from` to `to` (which does not exist yet), recursively, leaving out every
    * entry whose path relative to `from` is `excludedFromCopy`. Symbolic links are copied as the
-   * files they point at, so nothing in the copy leads back into `from`.
+   * files they point at, so nothing in the copy leads back into `from`; a link to somewhere
+   * outside `from` pulls that content in. On failure it deletes the partial copy and throws an
+   * InstanceError. The real one is `copyGraphDir` in `copy-graph.ts`.
    */
   copyDir(from: string, to: string): Promise<void>;
   isPortFree(port: number): Promise<boolean>;
