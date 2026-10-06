@@ -22,8 +22,8 @@
 import { spawn, execFileSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { createServer } from 'net';
-import { cp, mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'fs/promises';
-import { dirname, join, relative, resolve, sep } from 'path';
+import { mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'fs/promises';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { LogseqClient } from '../src/client.js';
 import { FIXTURE_SENTINEL_PAGE, requireFixtureGraph } from '../tests/integration/helpers/fixture-graph.js';
@@ -31,11 +31,11 @@ import {
   InstanceDeps,
   InstanceError,
   InstanceProbe,
-  excludedFromCopy,
   instanceStatus,
   startInstance,
   stopInstance,
 } from './logseq-instance/instance.js';
+import { copyGraphDir } from './logseq-instance/copy-graph.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE = join(here, 'logseq-instance', 'configs.edn.template');
@@ -104,14 +104,7 @@ const deps: InstanceDeps = {
       throw error;
     }
   },
-  copyDir: (from, to) =>
-    cp(from, to, {
-      recursive: true,
-      dereference: true,
-      errorOnExist: true,
-      force: false,
-      filter: src => src === from || !excludedFromCopy(relative(from, src).split(sep).join('/')),
-    }),
+  copyDir: copyGraphDir,
   isPortFree: port =>
     new Promise(resolvePort => {
       const server = createServer();
