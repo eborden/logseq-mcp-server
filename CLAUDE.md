@@ -87,7 +87,8 @@ These need the `project` scope: `gh auth refresh -s project`.
 ### Code review (required for every PR)
 1. After a PR opens, a **separate reviewer subagent** reviews it. It starts fresh, with only the PR number, the linked issue and this file.
 2. It posts **one review with inline comments** on specific lines. Each comment says what's wrong, why, and what to do. Focus on correctness, the constraints in this file, privacy, test gaps and contract changes. No nits about style the codebase doesn't enforce.
-   - Does the PR contradict an accepted ADR or business rule? If it does, it must cite the ADR or rule and include its change in the same PR (an edited rule, or a new ADR that supersedes the old one). A PR that contradicts one without that change gets a comment on the contradicting line. A PR with that change needs the maintainer's OK (see Merge policy).
+   - Does the PR add, change, supersede or retire an ADR or business rule, including an edit to its Mechanical enforcement lines? If so, say in the review body that it needs the maintainer's OK before merge, even with self-merge (see Merge policy).
+   - Does the PR contradict an accepted ADR or business rule without citing the change that allows it (a superseding ADR or an edited rule)? If so, comment on the contradicting line.
    ```bash
    gh api repos/eborden/logseq-mcp-server/pulls/<n>/reviews --input review.json
    # review.json: {"event": "COMMENT", "body": "...",
