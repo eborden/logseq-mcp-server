@@ -154,7 +154,10 @@ describe('MCP prompts (#46)', () => {
       // 1000 gets saved to a file by hosts like Claude Code, so the warning's own suggestion is ignored (#186)
       expect(text).toContain("Ignore the warning's advice to set max_blocks to 1000");
       expect(text).not.toContain('max_blocks 1000');
-      expect(text).toContain('query that day alone at max_blocks 300');
+      expect(text).toContain('query that day alone at max_blocks 300, then keep paging from the next day at max_blocks 200');
+      // the 200 in the paging line is the cap, not the default (the cut keeps the oldest days first)
+      expect(text).toContain('the cut keeps the oldest days first');
+      expect(text).not.toContain('the default of 200');
       expect(text).toContain("don't open the file or raise the cap");
       expect(text).toContain('search_term');
       expect(text).toContain('part of that day went unread');
@@ -234,7 +237,9 @@ describe('MCP prompts (#46)', () => {
       expect(text).toContain('call again with the same arguments and the start_date it gives');
       expect(text).toContain('or the day the cut fell inside, which repeats its kept blocks');
       expect(text).toContain("Ignore the warning's advice to set max_blocks to 1000");
-      expect(text).toContain('query it alone at max_blocks 300 (500 with include_content false)');
+      expect(text).toContain('query it alone at max_blocks 300 (500 with include_content false), then keep paging from the next day');
+      expect(text).toContain('until a result has no warning or you have what the step needs');
+      expect(text).toContain('Say in the gist if weeks after a cut went unread');
       expect(text).toContain("don't open the file or raise the cap");
       expect(text).toContain('read the day in pieces with a search_term');
       expect(text).toContain('part of that day went unread');
