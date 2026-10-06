@@ -77,6 +77,14 @@ interface Entry {
  *   stays a top-level page, as it did before.
  *
  * Links are read in both directions, in case a LogSeq version stores one.
+ *
+ * This relies on `getAllPages` entities carrying `alias` and `file`, which holds
+ * on LogSeq 0.10.15. If an upgrade dropped or renamed either key nothing would
+ * fail: every alias would stay a top-level page, as before #171, and a graph
+ * with no aliases looks the same, so the tool can't warn. The check is
+ * `probeListPagesNesting` in `scripts/probe-constraints.ts`: re-run it after a
+ * LogSeq upgrade, on a graph that has aliases. The fixture integration test
+ * (`tests/integration/list-pages-aliases.test.ts`) pins the behaviour in CI.
  */
 function nestAliases(pages: PageEntity[]): Entry[] {
   const byId = new Map(pages.map(page => [page.id, page]));

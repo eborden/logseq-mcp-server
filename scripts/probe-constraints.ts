@@ -398,6 +398,7 @@ async function main() {
   console.log(`${'getBlock page / parent shape'.padEnd(58)} page=${JSON.stringify(got?.page)} parent=${JSON.stringify(got?.parent)}`);
 
   await probeListPagesNull(client, dq);
+  await probeListPagesNesting(client, dq);
 }
 
 main().catch((e) => {
@@ -519,4 +520,43 @@ async function probeListPagesNull(
 
   console.log(`${'getAllPages null on this (healthy) graph?'.padEnd(58)} ${all.value === null || all.value === undefined}`);
   console.log('(the null cases need a state change: run manual probes M1 to M4, see the comment above)');
+}
+
+// ---------------------------------------------------------------------------
+// list_pages nests aliases from getAllPages (#171)
+//
+// `list_pages` reads `alias` (ids of the linked pages) and `file` off each
+// `getAllPages` entity, in `nestAliases` (src/tools/list-pages.ts). If a LogSeq
+// upgrade dropped or renamed either key, nothing would fail: every alias would
+// stay a top-level page, as before #171, and a graph with no aliases looks the
+// same, so the tool cannot warn. This probe is the check. Each count of entities
+// carrying a key must equal the Datalog count of pages with that attribute.
+// A mismatch, above all 0 against a non-zero count, means `list_pages` is not
+// nesting. A graph with no alias links reports 0 = 0, which proves nothing about
+// `alias`: run it on a graph that has aliases (the fixture does).
+//
+// Read-only. Prints counts and pass/fail only, never names.
+//
+async function probeListPagesNesting(
+  client: LogseqClient,
+  dq: (q: string, ...inputs: unknown[]) => Promise<Outcome>
+) {
+  console.log('\n== list_pages alias nesting reads alias and file from getAllPages (#171)');
+
+  let pages: any[];
+  try {
+    pages = (await client.callAPI<any[] | null>('logseq.Editor.getAllPages')) ?? [];
+  } catch (e: any) {
+    console.log(`${'getAllPages'.padEnd(58)} ERROR ${String(e?.message ?? e).slice(0, 120)}`);
+    return;
+  }
+
+  for (const [key, attribute] of [['alias', ':block/alias'], ['file', ':block/file']] as const) {
+    const withKey = pages.filter(p => p && typeof p === 'object' && key in p).length;
+    const datalog = await dq(`[:find ?p :where [?p :block/name] [?p ${attribute} ?v]]`);
+    const expected = datalog.ok ? datalog.rows : undefined;
+    const verdict =
+      expected === undefined ? 'ERROR (the Datalog count failed)' : withKey === expected ? 'PASS' : 'FAIL (list_pages does not nest)';
+    console.log(`${`getAllPages entities with ${key} / Datalog pages with ${attribute}`.padEnd(58)} ${withKey} / ${expected ?? '?'}  ${verdict}`);
+  }
 }
