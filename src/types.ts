@@ -47,6 +47,7 @@ export interface PageEntity {
   journal?: boolean;
   'journal?'?: boolean; // Logseq uses this property name
   journalDay?: number;
+  'journal-day'?: number; // Datalog pulls use kebab-case
   namespace?: IEntityID;
   /** Set when the page is backed by a file; absent on stub pages that only exist as link targets */
   file?: IEntityID;

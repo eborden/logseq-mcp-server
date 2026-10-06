@@ -194,17 +194,14 @@ export async function buildContextForTopic(
     warnings.push(...resolved.warnings);
   }
 
-  // Build temporal context if requested
+  // Build temporal context if requested. A Datalog pull spells the fields `journal?` and
+  // `journal-day`; the Editor API spells them `journal` and `journalDay`. Accept both (#152).
   let temporalContext: TopicContext['temporalContext'] | undefined;
-  if (includeTemporalContext && mainPage.journal) {
-    temporalContext = {
-      isJournal: true,
-      date: mainPage.journalDay || mainPage['journal-day']
-    };
-  } else if (includeTemporalContext) {
-    temporalContext = {
-      isJournal: false
-    };
+  if (includeTemporalContext) {
+    const isJournal = (mainPage['journal?'] ?? mainPage.journal) === true;
+    temporalContext = isJournal
+      ? { isJournal: true, date: mainPage['journal-day'] ?? mainPage.journalDay }
+      : { isJournal: false };
   }
 
   // Build summary

@@ -108,8 +108,51 @@ describe('buildContextForTopic', () => {
       expect(executeDatalogQuery.mock.calls[0].slice(1)).toEqual(['2025-01-01', 20250101]);
       expect(executeDatalogQuery.mock.calls[1].slice(1)).toEqual(['jan 1st, 2025']);
       expect(result.mainPage.id).toBe(5);
-      expect(result.temporalContext).toEqual({ isJournal: false, date: undefined });
+      expect(result.temporalContext).toEqual({ isJournal: true, date: 20250101 });
       expect(result.resolvedFrom).toEqual({ name: '2025-01-01', matchedBy: 'journal-date', resolvedTo: 'Jan 1st, 2025' });
+    });
+
+    describe('temporalContext (#152)', () => {
+      it('reads a Datalog pull: journal? and journal-day', async () => {
+        const { client } = resolvingClient([
+          [{ id: 5, name: 'jan 6th, 2025', 'journal?': true, 'journal-day': 20250106 }, 'name']
+        ]);
+
+        const result = await buildContextForTopic(client, 'Jan 6th, 2025');
+
+        expect(result.temporalContext).toEqual({ isJournal: true, date: 20250106 });
+      });
+
+      it('reads the Editor API spelling: journal and journalDay', async () => {
+        const { client } = resolvingClient([
+          [{ id: 5, name: 'jan 6th, 2025', journal: true, journalDay: 20250106 }, 'name']
+        ]);
+
+        const result = await buildContextForTopic(client, 'Jan 6th, 2025');
+
+        expect(result.temporalContext).toEqual({ isJournal: true, date: 20250106 });
+      });
+
+      it('reports a non-journal page as not a journal, with no date', async () => {
+        const { client } = resolvingClient([
+          [{ id: 7, name: 'project atlas', 'journal?': false }, 'name']
+        ]);
+
+        const result = await buildContextForTopic(client, 'Project Atlas');
+
+        expect(result.temporalContext).toEqual({ isJournal: false });
+        expect(result.temporalContext).not.toHaveProperty('date');
+      });
+
+      it('leaves temporalContext out when include_temporal_context is false', async () => {
+        const { client } = resolvingClient([
+          [{ id: 5, name: 'jan 6th, 2025', 'journal?': true, 'journal-day': 20250106 }, 'name']
+        ]);
+
+        const result = await buildContextForTopic(client, 'Jan 6th, 2025', { includeTemporalContext: false });
+
+        expect(result.temporalContext).toBeUndefined();
+      });
     });
 
     it('throws AmbiguousPageError with the candidates when a namespace leaf matches several pages', async () => {
