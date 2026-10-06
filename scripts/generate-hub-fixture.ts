@@ -5,13 +5,13 @@
  *   npx tsx scripts/generate-hub-fixture.ts --check  # exit 1 if a committed file differs
  *
  * The content comes from scripts/fixture-hub/hub-graph.ts. It deletes only the files it owns
- * (pages/hub central.md and pages/neighbour-*.md), so pages written by hand for other fixture
+ * (pages/hub central.md, pages/neighbour-*.md and any other journal that links the journal topics), so pages written by hand for other fixture
  * content are never touched. Commit the output.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { HUB_PAGE, buildHubFixture } from './fixture-hub/hub-graph.js';
+import { HUB_PAGE, JOURNAL_FILE, buildHubFixture, isHubJournal } from './fixture-hub/hub-graph.js';
 
 const graphDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'tests/fixtures/graph');
 const files = buildHubFixture();
@@ -22,6 +22,12 @@ const stale = readdirSync(join(graphDir, 'pages'))
   .filter(owned)
   .map(name => `pages/${name}`)
   .filter(path => !files.has(path));
+
+// A renamed journal would leave the old file linking the hub too. Other journals (#88's) are not ours.
+const staleJournals = readdirSync(join(graphDir, 'journals'))
+  .map(name => `journals/${name}`)
+  .filter(path => path !== JOURNAL_FILE && isHubJournal(readFileSync(join(graphDir, path), 'utf8')));
+stale.push(...staleJournals);
 
 const differing = [...files].filter(([path, content]) => {
   const full = join(graphDir, path);

@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tools/get-concept-network.js';
 import { DEFAULT_MAX_BLOCKS, DEFAULT_MAX_REFERENCES, DEFAULT_MAX_RELATED_PAGES } from './tools/build-context.js';
-import { HUB_PAGE, JOURNAL_FILE, buildHubFixture, hubFixtureCounts } from '../scripts/fixture-hub/hub-graph.js';
+import { BOTH, HUB_PAGE, IN_WITH_SECOND_BLOCK, JOURNAL_FILE, buildHubFixture, hubFixtureCounts, isHubJournal } from '../scripts/fixture-hub/hub-graph.js';
 
 // The hub fixture (#89): the committed files match their generator, the counts documented in
 // tests/fixtures/graph/README.md hold when the files are read back as a link graph, and the hub is
@@ -39,6 +39,13 @@ describe('hub fixture files', () => {
     const strays = readdirSync(join(graphDir, 'pages'))
       .filter(name => name === `${HUB_PAGE}.md` || name.startsWith('neighbour-'))
       .filter(name => !owned.has(`pages/${name}`));
+    expect(strays).toEqual([]);
+  });
+
+  it('have no second journal that links the journal topics', () => {
+    const strays = readdirSync(join(graphDir, 'journals'))
+      .map(name => `journals/${name}`)
+      .filter(path => path !== JOURNAL_FILE && isHubJournal(readFileSync(join(graphDir, path), 'utf8')));
     expect(strays).toEqual([]);
   });
 
@@ -88,6 +95,27 @@ describe('hub fixture counts', () => {
     for (const [name, links] of pages) {
       expect(links.some(l => l.startsWith('journal-topic-')), name).toBe(false);
     }
+  });
+
+  it('leave no tie at the depth-1 fanout cap', () => {
+    // The two-way pages and neighbour-in-01..N are the only pages with 2 references (hub-graph.ts).
+    expect(BOTH + IN_WITH_SECOND_BLOCK).toBe(DEFAULT_MAX_FANOUT);
+  });
+
+  it('match the numbers written in the README', () => {
+    const readme = readFileSync(join(graphDir, 'README.md'), 'utf8');
+    const row = (label: string) => readme.split('\n').find(line => line.startsWith(`| ${label}`)) ?? '';
+    expect(readme).toContain(`**${counts.neighbours} neighbours**`);
+    expect(row('Pages the hub links (outbound)')).toContain(`| ${counts.hubOutbound} `);
+    expect(row('Non-journal pages that link the hub (inbound)')).toContain(`| ${counts.hubInboundPages} `);
+    expect(row('Distinct non-journal neighbours')).toContain(`| ${counts.neighbours}`);
+    expect(row('Blocks on the hub page')).toContain(`| ${counts.hubBlocks} `);
+    expect(row('Blocks elsewhere that link the hub')).toContain(`| ${counts.hubInboundBlocks} `);
+    expect(row('Source pages of those blocks')).toContain(`| ${counts.hubInboundPages + 1} `);
+    const context = row('`build_context` on the hub');
+    expect(context).toContain(`of ${counts.hubBlocks} blocks`);
+    expect(context).toContain(`of ${counts.hubInboundBlocks} references`);
+    expect(context).toContain(`of ${counts.hubInboundPages + 1} related pages`);
   });
 
   it('exceed every default cap', () => {

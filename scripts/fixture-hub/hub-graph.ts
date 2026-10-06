@@ -19,7 +19,12 @@ export const HUB_PAGE = 'hub central';
 export const OUT_ONLY = 60;
 export const BOTH = 10;
 export const IN_ONLY = 50;
-/** `neighbour-in-01` .. `neighbour-in-NN` hold two blocks that link the hub instead of one. */
+/**
+ * `neighbour-in-01` .. `neighbour-in-NN` hold two blocks that link the hub instead of one.
+ * This makes the depth-1 selection deterministic: with the BOTH two-way pages these are the only
+ * pages with 2 references, and BOTH + IN_WITH_SECOND_BLOCK equals the default `maxFanout` (15), so
+ * there is no tie at the cap. src/fixture-hub.test.ts asserts it. Change one and the other must follow.
+ */
 export const IN_WITH_SECOND_BLOCK = 5;
 /** Pages only the neighbours link, so they sit at depth 2 from the hub. */
 export const FRINGE = 40;
@@ -29,6 +34,9 @@ export const FRINGE_PER_BOTH = 4;
 export const JOURNAL_FILE = 'journals/2024_06_17.md';
 export const JOURNAL_TITLE = 'Jun 17th, 2024';
 export const JOURNAL_TOPICS = 30;
+
+/** A journal file that links the journal topics is this fixture's, whatever its name. */
+export const isHubJournal = (content: string) => content.includes(`[[${topicName(1)}]]`);
 
 const pad = (n: number) => String(n).padStart(2, '0');
 export const outName = (n: number) => `neighbour-out-${pad(n)}`;
