@@ -85,7 +85,9 @@ export class DatalogQueryBuilder {
    *   lowercased here.
    *
    * Rows are flat pulls of `[id, uuid, content, name, original-name, left, parent, page]`.
-   * A uuid with no block, or a page with no entity, simply has no row.
+   * A page with no entity has no row. A uuid with no block may have none either, or a
+   * placeholder row: LogSeq 0.10 makes an entity for a `((uuid))` nobody has, with no `page`
+   * and content `id:: <uuid>`. `resolveBlockRefs` reads that row as missing (#138).
    * Rebuild trees from `parent` and order siblings with `left`.
    * @returns Query and inputs (`[lowercased pageNames]` when there are pages, else none)
    * @throws Error if all three lists are empty or a uuid is malformed

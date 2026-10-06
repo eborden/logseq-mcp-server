@@ -401,3 +401,87 @@ describe('resolveBlockRefs: embeds', () => {
     expect(queries).toHaveLength(2);
   });
 });
+
+// LogSeq 0.10 makes a placeholder entity for a uuid no block has: no page, content `id:: <uuid>` (#138)
+describe('resolveBlockRefs with placeholder rows for missing uuids', () => {
+  const PLACEHOLDER = uuidN(98);
+  const embedBlock = (uuid: string) => `{{embed ((${uuid}))}}`;
+
+  it('marks a ref whose target is a placeholder as missing and leaves it in place', async () => {
+    const { client, queries } = fakeRefGraph({ pages: ['Alpha'], blocks: [], placeholders: [PLACEHOLDER] });
+    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: `see ${ref(PLACEHOLDER)}` }]);
+    expect((blocks[0] as any).content).toBe(`see ${ref(PLACEHOLDER)}`);
+    expect((blocks[0] as any).resolvedContent).toBe(`see ${ref(PLACEHOLDER)}`);
+    expect((blocks[0] as any).resolvedRefs).toEqual([
+      { uuid: PLACEHOLDER, content: null, page: null, status: 'missing' }
+    ]);
+    expect(warnings).toEqual([]);
+    expect(queries).toHaveLength(1);
+  });
+
+  it('marks a block embed of a placeholder as missing and leaves it in place', async () => {
+    const { client, queries } = fakeRefGraph({ pages: ['Alpha'], blocks: [], placeholders: [PLACEHOLDER] });
+    const { blocks } = await resolveBlockRefs(client, [{ uuid: A, content: embedBlock(PLACEHOLDER) }]);
+    expect((blocks[0] as any).resolvedContent).toBe(embedBlock(PLACEHOLDER));
+    expect((blocks[0] as any).resolvedRefs).toEqual([
+      { uuid: PLACEHOLDER, embed: 'block', content: null, page: null, status: 'missing' }
+    ]);
+    expect(queries).toHaveLength(1);
+  });
+
+  it('still resolves a real block whose content is only its id:: line', async () => {
+    const { client } = fakeRefGraph({
+      pages: ['Alpha'],
+      blocks: [{ uuid: B, content: `id:: ${B}`, page: 'Alpha' }]
+    });
+    const { blocks } = await resolveBlockRefs(client, [{ uuid: A, content: `x ${ref(B)}` }]);
+    expect((blocks[0] as any).resolvedRefs).toEqual([{ uuid: B, content: '', page: 'Alpha', status: 'ok' }]);
+  });
+
+  it('keeps real targets ok next to a placeholder, and other statuses unchanged', async () => {
+    const { client } = fakeRefGraph({
+      pages: ['Alpha'],
+      blocks: [
+        { uuid: B, content: `b ${ref(C)}`, page: 'Alpha' },
+        { uuid: C, content: `c ${ref(D)}`, page: 'Alpha' },
+        { uuid: D, content: 'd', page: 'Alpha' }
+      ],
+      placeholders: [PLACEHOLDER]
+    });
+    const { blocks } = await resolveBlockRefs(client, [
+      { uuid: A, content: `${ref(PLACEHOLDER)} ${ref(B)} ${ref(A)}` }
+    ]);
+    const statuses = (blocks[0] as any).resolvedRefs.map((r: any) => [r.uuid, r.status]);
+    expect(statuses).toEqual([
+      [PLACEHOLDER, 'missing'],
+      [B, 'ok'],
+      [C, 'ok'],
+      [D, 'depth_limit'],
+      [A, 'cycle']
+    ]);
+    expect((blocks[0] as any).resolvedContent).toBe(`${ref(PLACEHOLDER)} b c ${ref(D)} ${ref(A)}`);
+  });
+
+  it('makes the same calls as a uuid with no row at all', async () => {
+    const run = async (placeholders: string[]) => {
+      const { client, queries } = fakeRefGraph({
+        pages: ['Alpha'],
+        blocks: [{ uuid: B, content: `b ${ref(PLACEHOLDER)} ${embedBlock(PLACEHOLDER)}`, page: 'Alpha' }],
+        placeholders
+      });
+      const { blocks } = await resolveBlockRefs(client, [
+        { uuid: A, content: `${ref(PLACEHOLDER)} ${ref(B)} ${embedBlock(PLACEHOLDER)}` }
+      ]);
+      return { queries, refs: (blocks[0] as any).resolvedRefs };
+    };
+    const withPlaceholder = await run([PLACEHOLDER]);
+    const withoutRow = await run([]);
+    expect(withPlaceholder.queries).toEqual(withoutRow.queries);
+    expect(withPlaceholder.queries).toHaveLength(1); // level 2 asks for nothing new
+    expect(withPlaceholder.refs).toEqual(withoutRow.refs);
+    expect(withPlaceholder.refs.filter((r: any) => r.uuid === PLACEHOLDER).map((r: any) => r.status)).toEqual([
+      'missing',
+      'missing'
+    ]);
+  });
+});
