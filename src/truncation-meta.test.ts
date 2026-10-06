@@ -292,7 +292,7 @@ describe('logseq_get_concept_evolution max_entries (#61)', () => {
     expect(body.warnings).toEqual([
       {
         code: 'entries_truncated',
-        message: 'Showing 100 of 150 mentions (oldest first, undated last).',
+        message: 'Showing 100 of 150 mentions (oldest first, undated last; the timeline ends at 20240200).',
         howToFetchAll: 'Set max_entries to 150 (or higher) to get all 150.',
       },
     ]);

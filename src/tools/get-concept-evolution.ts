@@ -11,7 +11,7 @@ import {
   resolvedAliases
 } from '../utils/alias-set.js';
 import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
-import type { ResolveRefsMeta, ResultMeta } from '../types.js';
+import type { ResolveRefsMeta, ResultMeta, ResultWarning } from '../types.js';
 
 /** Every grouping period, in the order `group_by` advertises them (#60). */
 export const GROUP_BY_PERIODS = ['day', 'week', 'month'] as const;
@@ -24,12 +24,52 @@ export const DEFAULT_MAX_ENTRIES = 100;
 /**
  * Most mentions one call returns (#61). A larger `maxEntries` is clamped to it,
  * and a cut at the maximum is reported by an `entries_truncated` warning with no
- * `howToFetchAll`: only `start_date` and `end_date` reach the rest.
+ * `howToFetchAll`. The dates reach later dated mentions only: mentions on
+ * non-journal pages pass every date filter, so no date range narrows them.
  */
 export const MAX_ENTRIES = 500;
 
-/** How to reach mentions past the maximum: no parameter fetches them. */
-const NARROWER = 'Narrow start_date and end_date to see the rest.';
+type TimelineEntry = { date: number | null; blocks: BlockEntity[] };
+
+const mentionCount = (entries: TimelineEntry[], dated: boolean) =>
+  entries.filter(e => (e.date !== null) === dated).reduce((sum, e) => sum + e.blocks.length, 0);
+
+/**
+ * The `entries_truncated` warning for a timeline cut from `full` to `kept`. Says where
+ * the timeline ends when it ends on a dated mention, so the caller can continue from
+ * there, and says what the dates can reach: the date filter keeps every block with no
+ * journal day, so they never narrow the undated mentions, which are cut first.
+ */
+function entriesTruncated(
+  full: TimelineEntry[],
+  kept: TimelineEntry[],
+  total: number,
+  shown: number,
+  requested: number
+): ResultWarning {
+  const last = kept[kept.length - 1];
+  const endsAt = last && last.date !== null ? last.date : null;
+  const datedCut = mentionCount(full, true) > mentionCount(kept, true);
+  let narrower: string;
+  if (datedCut && endsAt !== null) {
+    // One day can be split across the cut, so starting there repeats its kept blocks
+    narrower = `Set start_date to ${endsAt} for later dated mentions (that day repeats its kept blocks). Mentions on non-journal pages ignore the dates.`;
+  } else if (datedCut) {
+    narrower = 'Narrow start_date and end_date to see dated mentions. Mentions on non-journal pages ignore the dates.';
+  } else {
+    narrower = "Mentions on non-journal pages ignore start_date and end_date, so narrowing the dates can't reach the rest.";
+  }
+  return cappedTruncationWarning({
+    what: `mentions (oldest first, undated last${endsAt !== null ? `; the timeline ends at ${endsAt}` : ''})`,
+    shown,
+    total,
+    param: 'max_entries',
+    max: MAX_ENTRIES,
+    narrower,
+    requested,
+    code: 'entries_truncated'
+  });
+}
 
 export interface ConceptEvolutionOptions {
   startDate?: number;
@@ -283,16 +323,7 @@ export async function getConceptEvolution(
   const warnings = aliasSetWarnings(aliasSet);
   if (total > shownBlocks.length) {
     warnings.push(
-      cappedTruncationWarning({
-        what: 'mentions (oldest first, undated last)',
-        shown: shownBlocks.length,
-        total,
-        param: 'max_entries',
-        max: MAX_ENTRIES,
-        narrower: NARROWER,
-        requested: maxEntries,
-        code: 'entries_truncated'
-      })
+      entriesTruncated(fullTimeline, timeline, total, shownBlocks.length, maxEntries)
     );
   }
   // The total comes only with a cut, so output below the cap is unchanged

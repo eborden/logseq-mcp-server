@@ -234,4 +234,79 @@ describe('getConceptEvolution max_entries (#61)', () => {
       }
     });
   });
+
+  // The date filter keeps every block with no journal day, so dates never narrow
+  // undated mentions, and the cut drops those first
+  describe('what the dates can reach', () => {
+    it('does not promise dates help when more than 500 undated mentions are cut at the maximum', async () => {
+      const result = await getConceptEvolution(clientWith(undated(600)), 'Concept', {
+        maxEntries: 500,
+        startDate: 20240101,
+        endDate: 20241231
+      });
+      const warning = result.warnings![0];
+      expect(mentionsIn(result)).toBe(500);
+      expect(result.hasMore).toBe(false);
+      expect(warning.howToFetchAll).toBeUndefined();
+      expect(warning.message).toContain('Showing 500 of 600 mentions');
+      expect(warning.message).toContain('ignore start_date and end_date');
+      expect(warning.message).toContain("can't reach the rest");
+      expect(warning.message).not.toMatch(/see the rest|Set start_date/);
+      expect(warning.message).not.toContain('timeline ends at');
+    });
+
+    it('says the same when undated mentions are cut below the maximum and no dated one is', async () => {
+      const result = await getConceptEvolution(clientWith([...dated(2), ...undated(600)]), 'Concept', { maxEntries: 100 });
+      expect(result.warnings![0].howToFetchAll).toContain('ignore start_date and end_date');
+      expect(result.warnings![0].howToFetchAll).not.toContain('Set start_date');
+      expect(suggestedValues(result)).toEqual([500]);
+    });
+
+    it('offers dates for the dated mentions and says undated ones ignore them', async () => {
+      const result = await getConceptEvolution(clientWith(dated(600)), 'Concept', { maxEntries: 100 });
+      expect(result.warnings![0].howToFetchAll).toContain('Set start_date to 20240200 for later dated mentions');
+      expect(result.warnings![0].howToFetchAll).toContain('Mentions on non-journal pages ignore the dates');
+    });
+
+    it('offers dates without a resume day when the cap keeps no mention', async () => {
+      const result = await getConceptEvolution(clientWith(dated(600)), 'Concept', { maxEntries: 0 });
+      expect(result.warnings![0].message).not.toContain('timeline ends at');
+      expect(result.warnings![0].howToFetchAll).toContain('Narrow start_date and end_date to see dated mentions');
+    });
+  });
+
+  describe('where the timeline ends', () => {
+    it('names the last kept day in the message', async () => {
+      // dated(n) runs from 20240101 in steps of one (day numbers, not calendar dates)
+      const result = await getConceptEvolution(clientWith(dated(150)), 'Concept');
+      expect(result.warnings![0].message).toBe(
+        'Showing 100 of 150 mentions (oldest first, undated last; the timeline ends at 20240200).'
+      );
+      expect(result.timeline[result.timeline.length - 1].date).toBe(20240200);
+    });
+
+    it('names it at the maximum too, with how to resume', async () => {
+      const result = await getConceptEvolution(clientWith(dated(600)), 'Concept', { maxEntries: 500 });
+      expect(result.warnings![0].message).toContain('the timeline ends at 20240600');
+      expect(result.warnings![0].message).toContain('Set start_date to 20240600');
+      expect(result.warnings![0].message).toContain('that day repeats its kept blocks');
+    });
+
+    it('names a day that is split across the cut', async () => {
+      const sameDay = [1, 2, 3].map(id => ({ id, content: `Mention ${id}`, page: { journalDay: 20240301 } }));
+      const result = await getConceptEvolution(clientWith(sameDay), 'Concept', { maxEntries: 2 });
+      expect(result.timeline[0].blocks).toHaveLength(2);
+      expect(result.warnings![0].message).toContain('the timeline ends at 20240301');
+    });
+
+    it('names no day when the timeline ends on undated mentions', async () => {
+      const result = await getConceptEvolution(clientWith([...dated(2), ...undated(3)]), 'Concept', { maxEntries: 4 });
+      expect(result.warnings![0].message).toBe('Showing 4 of 5 mentions (oldest first, undated last).');
+    });
+
+    it('names no day when the cap keeps nothing', async () => {
+      const result = await getConceptEvolution(clientWith(dated(3)), 'Concept', { maxEntries: 0 });
+      expect(result.warnings![0].message).toBe('Showing 0 of 3 mentions (oldest first, undated last).');
+    });
+  });
 });
