@@ -279,6 +279,11 @@ export interface FrontApp {
  * Each `tick` hands focus back to the app that was in front before the launch, but only while the
  * instance's own process is the frontmost one: if the maintainer has moved on to something else,
  * it leaves them there. Best effort, so a failure here never fails `start`.
+ *
+ * It does nothing when the app in front at launch has the instance's own bundle id, which is the
+ * maintainer's own LogSeq. `open -b` resolves a bundle id through LaunchServices, which could
+ * pick the instance again or that real LogSeq, and it sends a running app a reopen event that
+ * Electron answers by showing or creating a window. The guard never sends their LogSeq anything.
  */
 export function focusGuard(previous: FrontApp | undefined, instancePid: number, deps: InstanceDeps) {
   return {
@@ -286,7 +291,7 @@ export function focusGuard(previous: FrontApp | undefined, instancePid: number, 
       if (previous === undefined || previous.pid === instancePid) return;
       try {
         const front = await deps.frontmostApp();
-        if (front?.pid === instancePid) await deps.activateApp(previous.bundleId);
+        if (front?.pid === instancePid && front.bundleId !== previous.bundleId) await deps.activateApp(previous.bundleId);
       } catch {
         // best effort
       }
