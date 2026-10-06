@@ -12,7 +12,7 @@ import {
 } from '../utils/alias-set.js';
 import { camelizeBlock, camelizeKeys } from '../utils/block-tree.js';
 import { requirePage, resolvedFromInfo, ResolvedFrom } from '../utils/resolve-page.js';
-import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning, INLINE_ITEMS, largeResultNote } from '../utils/result-meta.js';
 
 /** Source pages kept when `maxPages` is absent. */
 export const DEFAULT_MAX_PAGES = 20;
@@ -77,6 +77,23 @@ export function rankBacklinks(results: Backlink[]): Backlink[] {
 }
 
 /**
+ * The most source pages, from the top of the ranking, whose blocks still plausibly come
+ * back inline (#196): the longest prefix of `results` that holds at most `INLINE_ITEMS.blocks`
+ * blocks once each page is cut to `blockCap`. A page's cost is its linking blocks, so the
+ * count of pages depends on the per-page cap. Pure.
+ */
+function pagesThatFit(results: Backlink[], blockCap: number): number {
+  let blocks = 0;
+  let pages = 0;
+  for (const [, linking] of results) {
+    blocks += Math.min(linking.length, blockCap);
+    if (blocks > INLINE_ITEMS.blocks) break;
+    pages++;
+  }
+  return pages;
+}
+
+/**
  * Rank `results` with {@link rankBacklinks}, then cut to `maxPages` source pages and
  * `maxBlocksPerPage` blocks each (#61), keeping the first of each in that order. The
  * ranking applies whether or not a cap bites, so the order is the same at every cap value
@@ -110,14 +127,15 @@ export function capBacklinks(
       max: MAX_PAGES,
       narrower: `logseq_search_blocks with query "[[${target}]]" lists the blocks that write the link that way, on every page (not #tags or alias spellings).`,
       requested: maxPages,
-      code: 'pages_truncated'
+      code: 'pages_truncated',
+      inlineMax: pagesThatFit(results, blockCap)
     });
     // The counts are in hand, so say where the cut fell: the dropped pages link the target no more than this
     const edge = kept.length === 0 ? '' : ` The last page kept has ${blockCount(kept[kept.length - 1])}, the first dropped page has ${results[kept.length][1].length}.`;
     // Raising max_pages shows pages whose blocks may then be cut by the per-page cap
     warnings.push({ ...warning, message: `${warning.message}${edge} Blocks per page are capped separately by max_blocks_per_page.` });
   }
-  if (affected.length > 0) warnings.push(pageBlocksTruncated(affected, blockCap, maxBlocksPerPage));
+  if (affected.length > 0) warnings.push(pageBlocksTruncated(affected, blockCap, maxBlocksPerPage, kept));
 
   return {
     results: kept.map(([page, blocks]): Backlink => [page, blocks.length > blockCap ? blocks.slice(0, blockCap) : blocks]),
@@ -133,7 +151,7 @@ export function capBacklinks(
  * so there is no `howToFetchAll` and `hasMore` stays false. Reading a source page whole
  * with `logseq_get_page` gets the blocks the cap dropped either way.
  */
-function pageBlocksTruncated(affected: Backlink[], cap: number, requested: number): ResultWarning {
+function pageBlocksTruncated(affected: Backlink[], cap: number, requested: number, kept: Backlink[]): ResultWarning {
   const n = affected.length;
   const named = affected
     .slice(0, MAX_NAMED_PAGES)
@@ -151,13 +169,17 @@ function pageBlocksTruncated(affected: Backlink[], cap: number, requested: numbe
       message: `${shown} max_blocks_per_page is capped at its maximum of ${MAX_BLOCKS_PER_PAGE}${clamped}, so the rest can't be fetched in one call. ${readWhole}`
     };
   }
+  // The blocks the raise would return across every kept page, to say when that may not come back inline (#196)
+  const raiseTo = Math.min(largest, MAX_BLOCKS_PER_PAGE);
+  const afterRaise = kept.reduce((sum, [, blocks]) => sum + Math.min(blocks.length, raiseTo), 0);
+  const note = largeResultNote(afterRaise, INLINE_ITEMS.blocks);
   return {
     code: 'page_blocks_truncated',
     message: shown,
     howToFetchAll:
       largest <= MAX_BLOCKS_PER_PAGE
-        ? `Set max_blocks_per_page to ${largest} (or higher) to get every block of these pages.`
-        : `Set max_blocks_per_page to ${MAX_BLOCKS_PER_PAGE} (the maximum) to get ${MAX_BLOCKS_PER_PAGE} per page. ${readWhole}`
+        ? `Set max_blocks_per_page to ${largest} (or higher) to get every block of these pages.${note}`
+        : `Set max_blocks_per_page to ${MAX_BLOCKS_PER_PAGE} (the maximum) to get ${MAX_BLOCKS_PER_PAGE} per page.${note} ${readWhole}`
   };
 }
 

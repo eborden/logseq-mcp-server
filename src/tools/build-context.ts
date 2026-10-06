@@ -1,7 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { PageLike, BlockEntity, ResultMeta, ResultWarning } from '../types.js';
 import { blockPageId, entityId, journalDayOf, journalFlag } from '../utils/entity-fields.js';
-import { buildResultMeta, truncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, INLINE_ITEMS, truncationWarning } from '../utils/result-meta.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { resolveBlockRefs } from '../utils/resolve-refs.js';
 import { fetchBacklinks } from './get-backlinks.js';
@@ -173,13 +173,13 @@ export async function buildContextForTopic(
 
   const warnings: ResultWarning[] = [...aliasSetWarnings(aliasSet)];
   if (totals.blocks > directBlocks.length) {
-    warnings.push(truncationWarning('blocks', directBlocks.length, totals.blocks, 'max_blocks', 'blocks_truncated'));
+    warnings.push(truncationWarning('blocks', directBlocks.length, totals.blocks, 'max_blocks', 'blocks_truncated', INLINE_ITEMS.blocks));
   }
   if (totals.references > references.length) {
-    warnings.push(truncationWarning('references', references.length, totals.references, 'max_references', 'references_truncated'));
+    warnings.push(truncationWarning('references', references.length, totals.references, 'max_references', 'references_truncated', INLINE_ITEMS.references));
   }
   if (totals.relatedPages > relatedPages.length) {
-    warnings.push(truncationWarning('related pages', relatedPages.length, totals.relatedPages, 'max_related_pages', 'related_pages_truncated'));
+    warnings.push(truncationWarning('related pages', relatedPages.length, totals.relatedPages, 'max_related_pages', 'related_pages_truncated', INLINE_ITEMS.relatedPages));
   }
 
   // Opt-in (#18): one resolver pass over the blocks that are actually returned

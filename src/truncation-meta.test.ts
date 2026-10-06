@@ -455,11 +455,11 @@ describe('logseq_get_backlinks max_pages and max_blocks_per_page (#61)', () => {
         {
           code: 'pages_truncated',
           message: 'Showing 20 of 25 source pages, ranked by linking blocks (most first, ties by page name). The last page kept has 12 linking blocks, the first dropped page has 12. Blocks per page are capped separately by max_blocks_per_page.',
-          howToFetchAll: 'Set max_pages to 25 (or higher) to get all 25.',
+          howToFetchAll: 'Set max_pages to 25 (or higher) to get all 25. A result this large may be saved to a file by the host instead of shown; the server can\'t tell.',
         },
         {
           code: 'page_blocks_truncated',
-          howToFetchAll: 'Set max_blocks_per_page to 12 (or higher) to get every block of these pages.',
+          howToFetchAll: 'Set max_blocks_per_page to 12 (or higher) to get every block of these pages. A result this large may be saved to a file by the host instead of shown; the server can\'t tell.',
         },
       ],
     });

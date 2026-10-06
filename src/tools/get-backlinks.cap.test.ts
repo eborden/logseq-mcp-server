@@ -187,6 +187,22 @@ describe('get_backlinks max_pages and max_blocks_per_page (#61)', () => {
         });
       });
 
+      it('adds the large-result note only when the pages raised to would pass 200 blocks (#196)', async () => {
+        const note = "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
+        // 30 pages of 5 blocks: 200 blocks hold 40 pages, so raising to 30 (150 blocks) plausibly comes back inline
+        const fits = await run(sources(30, 5), { maxPages: 20 });
+        expect(fits.meta!.warnings[0].howToFetchAll).toBe('Set max_pages to 30 (or higher) to get all 30.');
+        // 30 pages of 10 blocks (the default per-page cap) is 300 blocks, past 200
+        const big = await run(sources(30, 10), { maxPages: 20 });
+        expect(big.meta!.warnings[0].howToFetchAll).toBe(`Set max_pages to 30 (or higher) to get all 30. ${note}`);
+        // Pages with 50 blocks each are cut to the per-page cap, so the cap sets the count
+        const capped = await run(sources(30, 50), { maxPages: 20, maxBlocksPerPage: 5 });
+        expect(capped.meta!.warnings.map(w => w.howToFetchAll)).toEqual([
+          'Set max_pages to 30 (or higher) to get all 30.',
+          `Set max_blocks_per_page to 50 (or higher) to get every block of these pages. ${note}`
+        ]);
+      });
+
       it('cuts at a custom cap, and a cap of 0 returns no pages but offers a value', async () => {
         const some = await run(sources(10), { maxPages: 4 });
         expect(pageIds(some.results)).toEqual([1, 2, 3, 4]);

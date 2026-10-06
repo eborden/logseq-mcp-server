@@ -58,8 +58,21 @@ describe('network_truncated at the maximum of max_nodes and max_fanout (#132)', 
 
       expect(result.nodes).toHaveLength(400);
       expect(result.hasMore).toBe(true);
-      expect(result.warnings[0].howToFetchAll).toBe('Set max_nodes to 500 (the maximum).');
+      expect(result.warnings[0].howToFetchAll).toBe('Set max_nodes to 500 (the maximum). A result this large may be saved to a file by the host instead of shown; the server can\'t tell.');
       expect(result.warnings[0].message).toBe('Kept 400 pages; at least 201 more connected pages were dropped.');
+    });
+
+    it('notes that a large result may be saved to a file only past about 200 nodes (#196)', async () => {
+      const note = "A result this large may be saved to a file by the host instead of shown; the server can't tell.";
+      const at200 = await getConceptNetwork(mockClient([neighbours(199)]), 'Root Page', 1, { maxNodes: 50, maxFanout: Infinity });
+      expect(at200.warnings[0].howToFetchAll).toBe('Set max_nodes to 200 (max 500).');
+
+      const at201 = await getConceptNetwork(mockClient([neighbours(200)]), 'Root Page', 1, { maxNodes: 50, maxFanout: Infinity });
+      expect(at201.warnings[0].howToFetchAll).toBe(`Set max_nodes to 201 (max 500). ${note}`);
+
+      // No cap at its maximum: the first form of the warning
+      const open = await getConceptNetwork(mockClient([neighbours(250)]), 'Root Page', 1, { maxNodes: 50, maxFanout: 99 });
+      expect(open.warnings[0].howToFetchAll).toMatch(/^Set max_nodes to \d+ \(max 500\) and\/or max_fanout higher \(max 100\), or set expand_journals to walk through journal pages\. A result this large may be saved to a file/);
     });
 
     it('below the maxima keeps the warning as it was', async () => {
