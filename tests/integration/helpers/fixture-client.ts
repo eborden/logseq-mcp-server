@@ -47,8 +47,9 @@ export async function connectFixture(): Promise<FixtureConnection> {
   } catch (error) {
     if (error instanceof FixtureGraphError) throw error;
     // Connection refused, a bad token or a timeout. The URL is a local address, never a secret.
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Cannot query the fixture graph at ${config.apiUrl}: ${reason} ${HOW_TO_RUN}`, { cause: error });
+    // Only the cause's first line: LogSeqNotRunningError's own steps are about ~/.logseq-mcp/config.json.
+    const reason = (error instanceof Error ? error.message : String(error)).split('\n')[0];
+    throw new Error(`Cannot query the fixture graph at ${config.apiUrl} (${reason}).\n${HOW_TO_RUN}`, { cause: error });
   }
   return { client, config, configPath };
 }
