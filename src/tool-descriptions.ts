@@ -43,11 +43,11 @@ export const TOOL_DESCRIPTIONS = {
 
 **Can't find:** blocks by text (logseq_search_blocks) or by numeric id. For a whole page use logseq_get_page.`,
 
-  logseq_get_backlinks: `List the pages and blocks that link to a page with [[page]] or #tag. Capped by max_pages and max_blocks_per_page: check meta.
+  logseq_get_backlinks: `List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.
 
 **Use when:** "what links to X?" or "where is X used?"
-**Can't find:** plain-text mentions with no link (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.
-**Alternatives:** logseq_build_context for the page plus related pages.`,
+**Can't find:** unlinked text mentions (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.
+**Alternatives:** logseq_build_context for related pages.`,
 
   // Search Tools (exploratory, when you don't know exactly what exists)
   logseq_search_blocks: `Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.

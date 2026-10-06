@@ -109,11 +109,11 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
       "readOnlyHint": true,
       "title": "Get Backlinks",
     },
-    "description": "List the pages and blocks that link to a page with [[page]] or #tag. Capped by max_pages and max_blocks_per_page: check meta.
+    "description": "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.
 
 **Use when:** "what links to X?" or "where is X used?"
-**Can't find:** plain-text mentions with no link (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.
-**Alternatives:** logseq_build_context for the page plus related pages.",
+**Can't find:** unlinked text mentions (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.
+**Alternatives:** logseq_build_context for related pages.",
     "inputSchema": {
       "properties": {
         "max_blocks_per_page": {
