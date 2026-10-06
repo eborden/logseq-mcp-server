@@ -148,6 +148,12 @@ describe('MCP prompts (#46)', () => {
       expect(text).toContain('Monday 2026-09-28');
       expect(text).toContain('start_date 20260928, end_date 20260930 and max_blocks 1000');
       expect(text).toContain('blocks_truncated');
+      // the warning's own start_date is the way on: the first day not shown, or the cut day itself (#174)
+      expect(text).toContain('follow its own advice: query from the start_date it gives');
+      expect(text).toContain('or the day the cut fell inside (that day repeats its kept blocks');
+      expect(text).toContain("If it says a day can't be fetched whole");
+      expect(text).toContain('part of that day went unread');
+      expect(text).not.toContain('query the days after');
       // slim output is the server default (#42), so the prompt does not pass it
       expect(text).not.toContain('slim_results');
       expect(text).toContain('not over');
@@ -213,6 +219,15 @@ describe('MCP prompts (#46)', () => {
       // the default of 200 blocks (#61) would cut a month's outline short
       expect(text).toContain('include_content false, top_concepts_limit 20 and max_blocks 1000');
       expect(text).toContain('"Monthly 2026-08"');
+    });
+
+    it("follows the truncation warning's own start_date, not the days after it (#174)", () => {
+      const text = textOf(getPrompt('monthly_summary', { month: '2026-08' }, WED) as any);
+      expect(text).toContain('blocks_truncated');
+      expect(text).toContain('follow its own start_date');
+      expect(text).toContain('or the day the cut fell inside, which repeats its kept blocks');
+      expect(text).toContain("if a day can't be fetched whole");
+      expect(text).not.toContain('days after');
     });
 
     it('reaches the newest monthly pages when list_pages is cut (#61)', () => {
