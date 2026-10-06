@@ -412,12 +412,13 @@ describe('getConceptNetwork', () => {
       expect(result.warnings[0].message).toBe('Kept 3 pages; at least 2 more connected pages were dropped.');
     });
 
-    it('shortens a deeper node that has a link to a closer page the walk did not use', async () => {
+    it('shortens a deeper node that is a root neighbour the walk only admitted at depth 3', async () => {
       const { client, executeDatalogQuery } = mockClient(rootPage, [
-        [row(1, 2, 'outbound', 3), row(1, 3, 'outbound', 1)],
+        // Root links to 2 (3 references) and 5 (1 reference); maxFanout 1 keeps only page 2
+        [row(1, 2, 'outbound', 3), row(1, 5, 'outbound', 1)],
         [row(2, 4, 'outbound', 1)],
-        // Page 4 (depth 2) links to 5; page 5 also links back to the root, which depth 3 reports
-        [row(4, 5, 'outbound', 1), row(5, 1, 'outbound', 1)]
+        // Depth 3 expands page 4 only, and finds 5 there
+        [row(4, 5, 'outbound', 1)]
       ]);
 
       const result = await getConceptNetwork(client, 'Root Page', 3, { maxFanout: 1 });
@@ -437,6 +438,8 @@ describe('getConceptNetwork', () => {
       // 3 and 20 are both at distance 1, so the lower id is `from`
       const edge = result.edges.find(e => e.from + e.to === 23)!;
       expect([edge.from, edge.to]).toEqual([3, 20]);
+      // The walk saw 20 -> 3, so with 3 as `from` the pair reads as a backlink: blocks on `to` reference `from`
+      expect([edge.type, edge.outbound, edge.inbound, edge.count]).toEqual(['backlink', 0, 1, 1]);
     });
 
     it('leaves an uncapped network as the walk labelled it', async () => {
