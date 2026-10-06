@@ -48,13 +48,16 @@ type Backlink = [PageEntity, BlockEntity[]];
 
 const blockCount = ([, blocks]: Backlink) => `${blocks.length} linking ${blocks.length === 1 ? 'block' : 'blocks'}`;
 
-const sourceName = (page: PageEntity) => String(page.originalName ?? page.name ?? page.id);
-
 /** Plain character order, so the tie-break doesn't change with the machine's locale. */
 const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The name a source page ties on: `name` is lowercase, so case never decides. */
 const blockPage = (blocks: BlockEntity[]) => blocks[0]?.page as { id?: number; name?: string } | undefined;
+/** The name a warning shows: the page's, else its first block's page (a tuple can have no page), else a neutral label. */
+const sourceName = ([page, blocks]: Backlink) => {
+  const fromBlock = blockPage(blocks) as { id?: number; name?: string; originalName?: string } | undefined;
+  return String(page?.originalName ?? page?.name ?? page?.id ?? fromBlock?.originalName ?? fromBlock?.name ?? fromBlock?.id ?? 'unknown page');
+};
 const rankName = ([page, blocks]: Backlink) => String(page?.name ?? blockPage(blocks)?.name ?? '');
 const rankId = ([page, blocks]: Backlink) => Number(page?.id ?? blockPage(blocks)?.id ?? 0);
 
@@ -134,7 +137,7 @@ function pageBlocksTruncated(affected: Backlink[], cap: number, requested: numbe
   const n = affected.length;
   const named = affected
     .slice(0, MAX_NAMED_PAGES)
-    .map(([page, blocks]) => `"${sourceName(page)}" (${blocks.length})`)
+    .map(backlink => `"${sourceName(backlink)}" (${backlink[1].length})`)
     .join(', ');
   const more = n > MAX_NAMED_PAGES ? ` and ${n - MAX_NAMED_PAGES} more` : '';
   const shown = `Showing the first ${cap} linking blocks of ${n} source ${n === 1 ? 'page' : 'pages'} with more: ${named}${more}.`;
