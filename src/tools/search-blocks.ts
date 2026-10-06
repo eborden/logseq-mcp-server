@@ -1,8 +1,21 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { BlockEntity, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
-import { buildResultMeta, truncationWarning } from '../utils/result-meta.js';
+import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
+
+/** Results returned when `limit` is absent. */
+export const DEFAULT_SEARCH_LIMIT = 100;
+
+/**
+ * Most results one MCP call returns (#61). A larger `limit` is clamped to it,
+ * like `max_nodes` on logseq_get_concept_network, and a cut at the maximum is
+ * reported by a `results_truncated` warning with no `howToFetchAll`.
+ */
+export const MAX_SEARCH_LIMIT = 500;
+
+/** How to reach matches past the maximum: no parameter fetches them. */
+const NARROWER = 'Narrow the query to see the rest.';
 
 export interface SearchBlocksResult extends BlockEntity {
   context?: {
@@ -67,6 +80,9 @@ function pulledPageToEntity(pulled: any): PageEntity {
  *
  * API calls: 1, or 2 with `includeContext` (one batched page lookup).
  *
+ * Unlike `searchBlocksWithMeta`, `limit` has no maximum here: internal callers
+ * (`get_context_for_query`'s keyword search) slice the results themselves.
+ *
  * @param client - LogseqClient instance
  * @param query - Text to search for in block content
  * @param limit - Maximum number of results to return (default: 100)
@@ -77,11 +93,11 @@ function pulledPageToEntity(pulled: any): PageEntity {
 export async function searchBlocks(
   client: LogseqClient,
   query: string,
-  limit: number = 100,
+  limit: number = DEFAULT_SEARCH_LIMIT,
   includeContext: boolean = false,
   slimResults: boolean = false
 ): Promise<SearchBlocksResult[] | SlimSearchBlocksResult[] | null> {
-  return (await searchBlocksWithMeta(client, query, limit, includeContext, slimResults)).results;
+  return (await searchBlocksWithMeta(client, query, limit, includeContext, slimResults, Infinity)).results;
 }
 
 /**
@@ -89,13 +105,19 @@ export async function searchBlocks(
  * the number of matching blocks before `limit`, and a `results_truncated`
  * warning says what `limit` to use to get them all. No extra API call: the one
  * query already returns every match. `meta` is null when the API returned null.
+ *
+ * `limit` is clamped to `maxLimit` (default `MAX_SEARCH_LIMIT`, 500; #61). The
+ * warning never suggests a value above it, and a cut at the maximum carries no
+ * `howToFetchAll`, so `hasMore` is false there (BR-0006). Results within the
+ * maximum are unchanged.
  */
 export async function searchBlocksWithMeta(
   client: LogseqClient,
   query: string,
-  limit: number = 100,
+  limit: number = DEFAULT_SEARCH_LIMIT,
   includeContext: boolean = false,
-  slimResults: boolean = false
+  slimResults: boolean = false,
+  maxLimit: number = MAX_SEARCH_LIMIT
 ): Promise<{ results: SearchBlocksResult[] | SlimSearchBlocksResult[] | null; meta: ResultMeta | null }> {
   const { query: datalog, inputs } = DatalogQueryBuilder.searchBlocks(query);
   const rows = await client.executeDatalogQuery<BlockEntity[][] | null>(datalog, ...inputs);
@@ -109,11 +131,11 @@ export async function searchBlocksWithMeta(
     .filter(block => block && typeof block.content === 'string')
     .sort(compareBlocks);
 
-  const results: SearchBlocksResult[] = matches.slice(0, Math.max(0, limit));
+  const results: SearchBlocksResult[] = matches.slice(0, Math.min(Math.max(0, limit), maxLimit));
 
   const meta = buildResultMeta(
     matches.length > results.length
-      ? [truncationWarning('matching blocks', results.length, matches.length, 'limit')]
+      ? [cappedTruncationWarning('matching blocks', results.length, matches.length, 'limit', maxLimit, NARROWER, limit)]
       : [],
     { matches: matches.length }
   );
