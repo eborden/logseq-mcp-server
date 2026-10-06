@@ -6,12 +6,13 @@ import { LogSeqAuthError, LogSeqNotRunningError } from './errors.js';
 import { FixtureGraphError } from '../tests/integration/helpers/fixture-graph.js';
 import {
   DEFAULT_APP_BUNDLE,
-  INSTANCE_TOKEN,
   InstanceDeps,
   InstanceError,
   InstanceProbe,
   LaunchSpec,
   PORT_FIRST,
+  PRIVATE_FILE_MODE,
+  TOKEN_BYTES,
   PORT_LAST,
   READY_TIMEOUT_MS,
   candidatePorts,
@@ -21,6 +22,7 @@ import {
   instanceStatus,
   isInstanceProcess,
   missingFiles,
+  newInstanceToken,
   parseInstanceRecord,
   renderConfigsEdn,
   startInstance,
@@ -37,6 +39,7 @@ const GRAPH = '/work/tree/tests/fixtures/graph';
 const SENTINEL = 'pages/logseq-mcp-fixture-sentinel.md';
 const PATHS = instancePaths(WORKTREE);
 const APP = `${DEFAULT_APP_BUNDLE}/Contents/MacOS/Logseq`;
+const TOKEN = 'made-up_Token-123';
 
 type Step = () => Promise<void>;
 
@@ -57,6 +60,9 @@ class World {
   indexed = [SENTINEL];
   fixtureVersion = 1;
   polls = 0;
+  modes = new Map<string, number | undefined>();
+  randomSeed = 1;
+  connected: string[] = [];
 
   constructor() {
     this.dirs.add(GRAPH);
@@ -83,8 +89,9 @@ class World {
         const data = this.files.get(path);
         return data === undefined ? undefined : String(data);
       },
-      writeFile: async (path, data) => {
+      writeFile: async (path, data, mode) => {
         this.files.set(path, data);
+        this.modes.set(path, mode);
       },
       mkdir: async path => {
         this.dirs.add(path);
@@ -111,7 +118,11 @@ class World {
         const process = this.processes.get(pid);
         if (process && (signal === 'SIGKILL' || !process.ignoresTerm)) this.processes.delete(pid);
       },
-      connect: () => this.probe(),
+      connect: config => {
+        this.connected.push(config.authToken);
+        return this.probe();
+      },
+      randomBytes: size => Buffer.alloc(size, this.randomSeed++),
       sleep: async ms => {
         this.clock += ms;
       },
@@ -150,6 +161,7 @@ function runningInstance(world: World, commandLine = `${APP} --user-data-dir=${P
       startedAt: '2025-01-01T00:00:00.000Z',
     }),
   );
+  world.files.set(PATHS.config, JSON.stringify({ apiUrl: 'http://127.0.0.1:12345', authToken: TOKEN }));
   return pid;
 }
 
@@ -184,26 +196,40 @@ describe('derivePort and candidatePorts', () => {
 
 describe('renderConfigsEdn', () => {
   it('fills the committed template: autostart on, localhost, the port and the token', () => {
-    const edn = renderConfigsEdn(TEMPLATE, 12345, INSTANCE_TOKEN);
+    const edn = renderConfigsEdn(TEMPLATE, 12345, TOKEN);
     expect(edn).toContain(':server/autostart true');
     expect(edn).toContain(':server/host "127.0.0.1"');
     expect(edn).toContain(':server/port 12345');
-    expect(edn).toContain(`:value "${INSTANCE_TOKEN}"`);
+    expect(edn).toContain(`:value "${TOKEN}"`);
     expect(edn).toContain(':auto-update false');
     expect(edn).toContain(':git/disable-auto-commit? true');
     expect(edn).not.toMatch(/\{\{/);
   });
 
   it('rejects a bad port, a token that would need escaping and a broken template', () => {
-    expect(() => renderConfigsEdn(TEMPLATE, 0, INSTANCE_TOKEN)).toThrow(InstanceError);
-    expect(() => renderConfigsEdn(TEMPLATE, 1.5, INSTANCE_TOKEN)).toThrow(InstanceError);
+    expect(() => renderConfigsEdn(TEMPLATE, 0, TOKEN)).toThrow(InstanceError);
+    expect(() => renderConfigsEdn(TEMPLATE, 1.5, TOKEN)).toThrow(InstanceError);
     expect(() => renderConfigsEdn(TEMPLATE, 12345, 'a"b')).toThrow(InstanceError);
-    expect(() => renderConfigsEdn('{:server/port {{port}}}', 12345, INSTANCE_TOKEN)).toThrow(/missing \{\{token\}\}/);
-    expect(() => renderConfigsEdn('{{port}} {{token}} {{host}}', 12345, INSTANCE_TOKEN)).toThrow(/unknown placeholder \{\{host\}\}/);
+    expect(() => renderConfigsEdn('{:server/port {{port}}}', 12345, TOKEN)).toThrow(/missing \{\{token\}\}/);
+    expect(() => renderConfigsEdn('{{port}} {{token}} {{host}}', 12345, TOKEN)).toThrow(/unknown placeholder \{\{host\}\}/);
   });
 
-  it('keeps the token an obviously fake value (ADR-0003)', () => {
-    expect(INSTANCE_TOKEN).toMatch(/not-a-secret/);
+  it('commits no token: the template only has the {{token}} placeholder (ADR-0003)', () => {
+    const values = [...TEMPLATE.matchAll(/:value\s+"([^"]*)"/g)].map(m => m[1]);
+    expect(values).toEqual(['{{token}}']);
+    expect(TEMPLATE).toMatch(/:server\/tokens \[\{:name "[^"]+" :value "\{\{token\}\}"\}\]/);
+  });
+});
+
+describe('newInstanceToken', () => {
+  it('encodes TOKEN_BYTES random bytes as base64url', () => {
+    expect(TOKEN_BYTES).toBe(32);
+    expect(newInstanceToken(size => Buffer.alloc(size, 0xfb))).toBe(Buffer.alloc(32, 0xfb).toString('base64url'));
+    expect(newInstanceToken(size => Buffer.alloc(size, 0xfb))).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it('refuses a random source that returns too few bytes', () => {
+    expect(() => newInstanceToken(() => Buffer.alloc(8))).toThrow(InstanceError);
   });
 });
 
@@ -244,13 +270,31 @@ describe('startInstance', () => {
 
     expect(started).toMatchObject({ pid: 4242, port, apiUrl: `http://127.0.0.1:${port}`, graphDir: GRAPH, fixtureVersion: 1 });
     expect(world.text(join(PATHS.profile, 'configs.edn'))).toContain(`:server/port ${port}`);
-    expect(JSON.parse(world.text(PATHS.config))).toEqual({ apiUrl: `http://127.0.0.1:${port}`, authToken: INSTANCE_TOKEN });
+    const config = JSON.parse(world.text(PATHS.config));
+    expect(config).toEqual({ apiUrl: `http://127.0.0.1:${port}`, authToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
+    expect(world.text(join(PATHS.profile, 'configs.edn'))).toContain(`:value "${config.authToken}"`);
+    expect(world.modes.get(PATHS.config)).toBe(PRIVATE_FILE_MODE);
+    expect(world.modes.get(join(PATHS.profile, 'configs.edn'))).toBe(PRIVATE_FILE_MODE);
+    expect(world.connected.every(token => token === config.authToken)).toBe(true);
+    expect(world.text(PATHS.record)).not.toContain(config.authToken);
     expect(parseInstanceRecord(world.text(PATHS.record), PATHS.record)).toMatchObject({ pid: 4242, port, profileDir: PATHS.profile });
 
     const leveldb = join(PATHS.profile, 'Local Storage', 'leveldb');
     expect(world.text(join(leveldb, 'CURRENT'))).toBe('MANIFEST-000001\n');
     expect(world.text(join(leveldb, '000002.log'))).toContain(`"logseq_local_${GRAPH}"`);
     expect(world.files.get(join(PATHS.home, '.logseq', 'graphs', graphCacheFileName(GRAPH)))).toBe('');
+  });
+
+  it('generates a new token on every start', async () => {
+    await start(world);
+    const first = JSON.parse(world.text(PATHS.config)).authToken;
+    await stopInstance(WORKTREE, world.deps());
+    await start(world);
+    const second = JSON.parse(world.text(PATHS.config)).authToken;
+
+    expect(second).not.toBe(first);
+    expect(world.text(join(PATHS.profile, 'configs.edn'))).toContain(`:value "${second}"`);
+    expect(world.text(join(PATHS.profile, 'configs.edn'))).not.toContain(first);
   });
 
   it('launches the app binary with only the instance profile and home', async () => {
@@ -478,11 +522,15 @@ describe('instanceStatus', () => {
       record: { pid },
       api: 'serving the fixture graph, version 1',
     });
+    expect(world.connected).toEqual([TOKEN]);
 
     const failing = world.deps({
       connect: () => ({ ...world.probe(), requireFixture: async () => Promise.reject(new FixtureGraphError('other graph.')) }),
     });
     await expect(instanceStatus(WORKTREE, failing)).resolves.toMatchObject({ api: expect.stringMatching(/^FixtureGraphError: other graph/) });
+
+    world.files.delete(PATHS.config);
+    await expect(instanceStatus(WORKTREE, world.deps())).resolves.toMatchObject({ api: expect.stringMatching(/^no token/) });
 
     world.processes.delete(pid);
     await expect(instanceStatus(WORKTREE, world.deps())).resolves.toMatchObject({ state: 'stale' });

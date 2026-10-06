@@ -676,7 +676,7 @@ npx tsx scripts/measure-output-size.ts
 # Debug Datalog query
 npx tsx scripts/test-datalog-query.ts
 
-# This worktree's own LogSeq on the fixture graph (macOS; own profile, port and test token)
+# This worktree's own LogSeq on the fixture graph (macOS; own profile, port and random API token)
 npx tsx scripts/logseq-instance.ts start
 LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npm run test:integration
 npx tsx scripts/logseq-instance.ts stop
