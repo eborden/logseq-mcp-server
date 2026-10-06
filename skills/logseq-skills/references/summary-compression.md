@@ -71,7 +71,7 @@ Every summary page carries these sections in this order. `## Unresolved` and `##
 
 ```markdown
 tags:: [[<Granularity> Summary]], <constituent page links>
-source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top <name> <count>/<days>, <name> <count>/<days>
+summary-source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top <name> <count>/<days> | <name> <count>/<days>
 
 - **<Period>**: [1-2 sentence gist]
 - ## Signals
@@ -83,7 +83,7 @@ source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top <name> <co
 	- [non-work items worth remembering, if any]
 ```
 
-The `source::` line records the roll-up (`summary.totalDays`, `summary.totalBlocks`, the first five `summary.topConcepts`) of the `logseq_query_by_date_range` call the page was built from. It has no `[[brackets]]`, so it adds no links to the graph. The sub-skill says which call to copy it from.
+The `summary-source::` line records the roll-up (`summary.totalDays`, `summary.totalBlocks`, the first five `summary.topConcepts`) of the `logseq_query_by_date_range` call the page was built from. It has no `[[brackets]]`, so it adds no links to the graph. The top concepts are `name count/days` entries separated by ` | `, so a name may hold `/` or `,`. `top none` means the query returned no `topConcepts`. On an update in place, replace the page's existing `summary-source::` line with this run's roll-up. The sub-skill says which call to copy it from.
 
 ## Formatting
 
@@ -99,7 +99,7 @@ Build every summary from `logseq_query_by_date_range`, after loading the tools a
 
 If a call did fail:
 
-- **Say so.** Put the error in the gist, write `source:: files; <the error>` where the roll-up line goes, and pass `--allow-files` to the gate.
+- **Say so.** Put the error in the gist, write `summary-source:: files; <the error>` where the roll-up line goes, and pass `--allow-files` to the gate.
 - **Read each file of the period whole, oldest first.** Don't truncate with `head`, `head -c`, `cut` or `tail`. The end of a day is where meeting outcomes and hand-offs sit, and a cut file loses them without a sign. A file too large for one read is read in line ranges (`sed -n '1,200p'`, then the next range) until its last line.
 - **Say what you couldn't read.** A day you skipped or read in part is named in the gist.
 
@@ -129,7 +129,7 @@ Do not report a summary complete until the gate passes:
 <skill-dir>/scripts/check-terseness.sh <summary path>
 ```
 
-The granularity is detected from the filename (`Weekly *` or `Monthly *`) and the matching budget above is applied. The script reports per-signal word counts, the Signals total, item count, em-dashes, and two-sentence bullets, and exits non-zero on a budget violation. It also checks the `source::` line: a page without the roll-up of a period query fails, and so does one whose range isn't the page's week or month. `--allow-files` accepts `source:: files; <error>`, for a run where a tool call failed.
+The granularity is detected from the filename (`Weekly *` or `Monthly *`) and the matching budget above is applied. The script reports per-signal word counts, the Signals total, item count, em-dashes, and two-sentence bullets, and exits non-zero on a budget violation. It also checks the `summary-source::` line: a page without the roll-up of a period query fails, and so does one whose range isn't the page's week or month. `--allow-files` accepts `summary-source:: files; <error>`, for a run where a tool call failed.
 
 **If it fails, rewrite the offending bullets and re-run.** Do not hand over a failing summary and do not explain away a violation. The two legitimate fixes are deleting the explanatory clause (almost always right) and merging two genuinely related signals. This applies when UPDATING a summary as much as when creating one: adding late-period signals to an existing page is where the budget usually breaks.
 

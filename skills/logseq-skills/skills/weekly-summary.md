@@ -14,7 +14,7 @@ Generate a weekly summary from journal entries, compressed to salient signals an
 | Period | Monday through Friday |
 | Output | `<graph>/pages/Weekly YYYY-MM-DD.md` (the Monday date) |
 | Tags | `[[Weekly Summary]]` plus one link per journal day with content |
-| Source line | `source::` under the tags line: the period query's roll-up (Step 6) |
+| Source line | `summary-source::` under the tags line: the period query's roll-up (Step 6) |
 | Gist label | `- **Week**: ...` |
 | Lookback | Previous 2-3 `Weekly *` pages |
 
@@ -96,13 +96,13 @@ This `grep` reads marker state only. It doesn't replace Step 4: it can't tell yo
 
 ### Step 6: Write and Verify the Page
 
-Apply the compression rules and output structure from the reference. Under the tags line, add the roll-up from Step 4:
+Apply the compression rules and output structure from the reference. Under the tags line, add the roll-up from Step 4. If the page already has a `summary-source::` line (an update in place, or a `source::` line from an earlier version of this skill), replace it with this run's roll-up rather than adding a second one. Keeping the old line says the page was built from a query this run never made.
 
 ```
-source:: query_by_date_range 20250106-20250110; days 5; blocks 250; top Project Atlas 12/4, Alice 9/2
+summary-source:: query_by_date_range 20250106-20250110; days 5; blocks 250; top Project Atlas 12/4 | Alice 9/2
 ```
 
-The range is the Monday and Friday you queried. `days` and `blocks` are `summary.totalDays` and `summary.totalBlocks` from the first page, and `top` is the first five `summary.topConcepts` as `name count/days` (`top none` when the field is absent). Write no `[[brackets]]` in it. Then verify the result:
+The range is the first and last day you queried (Monday to Friday, or to today for a partial week). It must lie inside the page's week, and the gate checks that. `days` and `blocks` are `summary.totalDays` and `summary.totalBlocks` from the first page, and `top` is the first five `summary.topConcepts` as `name count/days`, separated by ` | ` (copy each name as it is: a `/` or `,` in a name is fine, and a name that holds ` | ` is shortened to drop the pipe). Write no `[[brackets]]` or `#` in it, so the line adds no links. Write `top none` only when the query returned no `topConcepts` field at all; it must match what the query returned, and the gate can't check that. Then verify the result:
 
 ```bash
 awk '/^- ## Signals/{f=1;next}/^- ## Unresolved/{f=0}f&&/^\t- /{c++}END{print c}' <file>
@@ -112,10 +112,10 @@ grep -n "^- ##" <file>
 
 Signal count must be 10 or fewer, indentation must be tabs, and all three sections must be present.
 
-Then run the gate, which also checks the `source::` line:
+Then run the gate, which also checks the `summary-source::` line:
 
 ```bash
 <skill-dir>/scripts/check-terseness.sh "<graph>/pages/Weekly YYYY-MM-DD.md"
 ```
 
-A page with no `source::` line fails: it was not built from the period query. Don't write the line without having run the query, and don't invent the numbers. If a tool call failed, say so in the gist, write `source:: files; <the error>` and pass `--allow-files` to the gate.
+A page with no `summary-source::` line fails: it was not built from the period query. Don't write the line without having run the query, and don't invent the numbers. If a tool call failed, say so in the gist, write `summary-source:: files; <the error>` and pass `--allow-files` to the gate.

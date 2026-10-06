@@ -14,7 +14,7 @@ Generate a monthly summary by compressing the month's weekly summaries into mont
 | Period | Calendar month |
 | Output | `<graph>/pages/Monthly YYYY-MM.md` |
 | Tags | `[[Monthly Summary]]` plus one `[[Weekly YYYY-MM-DD]]` link per constituent week |
-| Source line | `source::` under the tags line: the month-shape query's roll-up (Step 6) |
+| Source line | `summary-source::` under the tags line: the month-shape query's roll-up (Step 6) |
 | Gist label | `- **Month**: ...` |
 | Lookback | Previous 1-2 `Monthly *` pages |
 
@@ -125,18 +125,18 @@ Carry forward only genuinely open items. Apply the expired-text check from the r
 
 ### Step 6: Write and Verify the Page
 
-Apply the shared output structure. Under the tags line, add the roll-up from Step 3:
+Apply the shared output structure. Under the tags line, add the roll-up from Step 3. If the page already has a `summary-source::` line (an update in place, or a `source::` line from an earlier version of this skill), replace it with this run's roll-up rather than adding a second one. Keeping the old line says the page was built from a query this run never made.
 
 ```
-source:: query_by_date_range 20250101-20250131; days 22; blocks 330; top Project Atlas 14/9, Alice 9/6
+summary-source:: query_by_date_range 20250101-20250131; days 22; blocks 330; top Project Atlas 14/9 | Alice 9/6
 ```
 
-The range is the whole month you queried. `days` and `blocks` are `summary.totalDays` and `summary.totalBlocks` from the month-shape call's first page, and `top` is the first five `summary.topConcepts` as `name count/days` (`top none` when the field is absent). Write no `[[brackets]]` in it. Then run the mandatory gate:
+The range is the first and last day you queried, inside the month (the whole month, or to today for a month still running). `days` and `blocks` are `summary.totalDays` and `summary.totalBlocks` from the month-shape call's first page, and `top` is the first five `summary.topConcepts` as `name count/days`, separated by ` | ` (copy each name as it is: a `/` or `,` in a name is fine, and a name that holds ` | ` is shortened to drop the pipe). Write no `[[brackets]]` or `#` in it, so the line adds no links. Write `top none` only when the query returned no `topConcepts` field at all; it must match what the query returned, and the gate can't check that. Then run the mandatory gate:
 
 ```bash
 <skill-dir>/scripts/check-terseness.sh "<graph>/pages/Monthly YYYY-MM.md"
 ```
 
-It detects the monthly granularity from the filename and applies the monthly budget (12-18 words per signal, 200 words total, 10 items target / 12 max, zero em-dashes). A non-zero exit means rewrite and re-run. The gate also fails a page with no `source::` line: it was not built from the month-shape query. Don't write the line without having run the query, and don't invent the numbers. If a tool call failed, say so in the gist, write `source:: files; <the error>` and pass `--allow-files` to the gate.
+It detects the monthly granularity from the filename and applies the monthly budget (12-18 words per signal, 200 words total, 10 items target / 12 max, zero em-dashes). A non-zero exit means rewrite and re-run. The gate also fails a page with no `summary-source::` line: it was not built from the month-shape query. Don't write the line without having run the query, and don't invent the numbers. If a tool call failed, say so in the gist, write `summary-source:: files; <the error>` and pass `--allow-files` to the gate.
 
 The gate cannot check two things, so check them by eye: all three sections present with tab indentation, and **every signal carries a trajectory or an explicit reason it is new**. A monthly signal with no delta is a weekly-altitude detail that should have been merged or dropped.
