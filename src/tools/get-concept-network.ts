@@ -16,6 +16,7 @@ import {
 export interface ConceptNetworkNode {
   id: number;
   name: string;
+  /** Fewest hops from the root along the returned edges, either link direction (#155). */
   depth: number;
 }
 
@@ -196,6 +197,7 @@ export async function getConceptNetwork(
     frontier = nextFrontier;
   }
 
+  relabelDepths(nodeMap, rootId, links);
   const nodes = Array.from(nodeMap.values());
   // Alongside `truncated`, which stays as is. `dropped` counts only the pages
   // seen at the depths that were walked, so it is a lower bound.
@@ -219,6 +221,53 @@ export async function getConceptNetwork(
     truncated,
     ...buildResultMeta(warnings)
   };
+}
+
+/**
+ * Set each node's `depth` to its shortest distance from the root over the edges
+ * the result will carry: pairs of kept nodes that link in either direction (#155).
+ *
+ * The walk labels a page with the level it was admitted at. A fanout cap can drop
+ * a direct neighbour of the root at depth 1, and the page then joins at depth 2
+ * through another page while its edge to the root is still returned, so the
+ * admission level can overstate the distance. This runs on data already fetched,
+ * so it adds no calls and leaves the node and edge sets unchanged. A page is
+ * admitted through an edge to a page one level up, so the admission level is never
+ * below the distance and every node is reachable; a node the pass somehow can't
+ * reach keeps its admission level.
+ */
+function relabelDepths(
+  nodeMap: Map<number, ConceptNetworkNode>,
+  rootId: number,
+  links: LinkCounts
+): void {
+  const adjacency = new Map<number, number[]>();
+  const connect = (a: number, b: number) => {
+    const list = adjacency.get(a);
+    if (list) list.push(b);
+    else adjacency.set(a, [b]);
+  };
+  for (const key of links.keys()) {
+    const [a, b] = key.split('>').map(Number);
+    if (!nodeMap.has(a) || !nodeMap.has(b)) continue;
+    connect(a, b);
+    connect(b, a);
+  }
+
+  const distance = new Map<number, number>([[rootId, 0]]);
+  const queue = [rootId];
+  for (let i = 0; i < queue.length; i++) {
+    const id = queue[i];
+    for (const next of adjacency.get(id) ?? []) {
+      if (distance.has(next)) continue;
+      distance.set(next, distance.get(id)! + 1);
+      queue.push(next);
+    }
+  }
+
+  for (const node of nodeMap.values()) {
+    node.depth = distance.get(node.id) ?? node.depth;
+  }
 }
 
 /** Floor to an integer >= 1; `Infinity` means uncapped. */
