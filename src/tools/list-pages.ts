@@ -1,5 +1,6 @@
 import { LogseqClient } from '../client.js';
 import { PageEntity, ResultMeta, ResultWarning } from '../types.js';
+import { journalFlag } from '../utils/entity-fields.js';
 import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 
 /** Pages returned when `limit` is absent (#61). */
@@ -161,7 +162,7 @@ export async function listPages(
   }
 
   // Journals are not listed, and take no part in alias groups
-  let entries = nestAliases(allPages.filter(p => !(p.journal || p['journal?'])));
+  let entries = nestAliases(allPages.filter(p => !journalFlag(p)));
 
   // Filter by name if specified (case-insensitive): the page's own name or any alias
   if (nameContains) {

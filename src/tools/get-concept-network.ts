@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
 import { ResultMeta, ResultWarning } from '../types.js';
+import { entityId, pageDisplayName } from '../utils/entity-fields.js';
 import { buildResultMeta } from '../utils/result-meta.js';
 import { requirePage, resolvedFrom, ResolvedFrom } from '../utils/resolve-page.js';
 import {
@@ -137,8 +138,8 @@ export async function getConceptNetwork(
   // Throws PageNotFoundError (with suggestions) or AmbiguousPageError (with candidates).
   const resolved = await requirePage(client, conceptName);
   const rootPage = resolved.page;
-  const rootId = rootPage.id || rootPage['db/id'];
-  const rootName = rootPage['original-name'] || rootPage.originalName || rootPage.name;
+  const rootId = entityId(rootPage);
+  const rootName = pageDisplayName(rootPage);
 
   if (!rootId || !rootName) {
     throw new Error(`Invalid root page data for: ${conceptName}`);

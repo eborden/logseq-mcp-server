@@ -1,6 +1,7 @@
 import { LogseqClient } from '../client.js';
 import { DatalogQueryBuilder } from '../datalog/queries.js';
-import { BlockEntity, IEntityID, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
+import { BlockEntity, PageEntity, ResultMeta, SlimBlock, SlimPage } from '../types.js';
+import { blockPageId, pageDisplayName } from '../utils/entity-fields.js';
 import { buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
 
@@ -35,29 +36,10 @@ export interface SlimSearchBlocksResult extends SlimBlock {
 }
 
 /**
- * What a block's `page` can hold at runtime. The type says `{ id }`, but a Datalog
- * pull spells the id `db/id`, and a pull that nests the page also carries its names.
- */
-type BlockPageRef = Partial<IEntityID> &
-  Partial<Pick<PageEntity, 'db/id' | 'name' | 'originalName' | 'original-name'>>;
-
-/** The page id of a block, in either spelling. Undefined when the block has no page. */
-function pageIdOf(block: BlockEntity): number | undefined {
-  // A pulled block may lack `page` altogether, whatever BlockEntity says
-  const page: BlockPageRef | undefined = block.page;
-  return page?.id ?? page?.['db/id'];
-}
-
-/**
  * What `searchBlocksWithMeta` returns: the results and their meta, or `null` for
  * both when the API answered with `null` (no matches is an empty `results`).
  */
 export type SearchBlocksOutcome<R> = { results: R[]; meta: ResultMeta } | { results: null; meta: null };
-
-/** Page name used for ordering and slim output: original casing when known. */
-function displayName(page: BlockPageRef | undefined): string {
-  return page?.['original-name'] || page?.originalName || page?.name || '';
-}
 
 /** Deterministic order: newest first (highest block id first). Ids are unique. */
 function compareBlocks(a: BlockEntity, b: BlockEntity): number {
@@ -101,7 +83,7 @@ function pulledPageToEntity(pulled: Record<string, unknown>): PageEntity {
  */
 export async function withPageContext(client: LogseqClient, blocks: BlockEntity[]): Promise<SearchBlocksResult[]> {
   const pageById = new Map<number, PageEntity>();
-  const pageIds = [...new Set(blocks.map(pageIdOf).filter((id): id is number => typeof id === 'number'))];
+  const pageIds = [...new Set(blocks.map(blockPageId).filter((id): id is number => typeof id === 'number'))];
 
   if (pageIds.length > 0) {
     const { query: pagesQuery, inputs: pagesInputs } = DatalogQueryBuilder.getPagesByIds(pageIds);
@@ -114,7 +96,7 @@ export async function withPageContext(client: LogseqClient, blocks: BlockEntity[
 
   return blocks.map(block => {
     const result: SearchBlocksResult = { ...block };
-    const pageId = pageIdOf(block);
+    const pageId = blockPageId(block);
     const page = pageId === undefined ? undefined : pageById.get(pageId);
 
     // No page id, or page not found: skip context for this block
@@ -265,7 +247,7 @@ export async function searchBlocksWithMeta(
   }
 
   const slimmed = enriched.map(block => {
-    const slim: SlimSearchBlocksResult = toSlimBlock(block, displayName(block.page));
+    const slim: SlimSearchBlocksResult = toSlimBlock(block, pageDisplayName(block.page));
 
     if (block.context) {
       // Empty references / tags are left out (#42): the block is slim, so the lists add only bytes
