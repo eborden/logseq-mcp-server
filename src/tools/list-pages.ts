@@ -88,8 +88,11 @@ export async function listPages(
     filtered = filtered.filter(p => p.name.toLowerCase().includes(lower));
   }
 
+  // A total order, so pages stay put across calls: localeCompare is 0 for some
+  // distinct names (NFC vs NFD, a zero-width space), and getAllPages order is
+  // not guaranteed, so a tie could put one name on two pages and drop the other
   const names = filtered
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => a.name.localeCompare(b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     .map(p => p.originalName || p.name);
 
   const total = names.length;
