@@ -1,5 +1,7 @@
 import type { TopicContext } from '../tools/build-context.js';
 import type { QueryContext, TopicQueryContext } from '../tools/get-context-for-query.js';
+import type { BlockEntity, PageLike } from '../types.js';
+import { entityId, originalNameOf } from './entity-fields.js';
 import { firstLineSnippet } from './snippet.js';
 
 /**
@@ -24,16 +26,14 @@ export interface CompactPage {
   originalName?: string;
 }
 
-type Loose = Record<string, any>;
-
-export function compactBlock(block: Loose): CompactBlock {
+export function compactBlock(block: Pick<BlockEntity, 'uuid' | 'content'>): CompactBlock {
   return { uuid: block.uuid, snippet: firstLineSnippet(block.content) };
 }
 
-export function compactPage(page: Loose): CompactPage {
+export function compactPage(page: PageLike): CompactPage {
   const out: CompactPage = {};
-  const id = page.id ?? page['db/id'];
-  const originalName = page.originalName ?? page['original-name'];
+  const id = entityId(page);
+  const originalName = originalNameOf(page);
   if (id !== undefined) out.id = id;
   if (page.name !== undefined) out.name = page.name;
   if (originalName !== undefined) out.originalName = originalName;

@@ -96,7 +96,7 @@ export class PropertyNotFoundError extends Error {
  * Thrown when a parameter has an invalid format.
  */
 export class InvalidParameterError extends Error {
-  constructor(paramName: string, value: any, expected: string, example?: string) {
+  constructor(paramName: string, value: unknown, expected: string, example?: string) {
     const exampleText = example ? `\nExample: ${example}` : '';
     super(
       `Invalid parameter '${paramName}': ${value}\n\n` +

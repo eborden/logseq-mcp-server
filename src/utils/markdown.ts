@@ -19,6 +19,8 @@ import { firstLineSnippet } from './snippet.js';
  * `["uuid", "<id>"]` tuples rather than blocks).
  */
 
+// Stays `any` (#62): the renderer reads result objects of every tool in both key spellings and
+// probes them with isObj first, so a narrower type would only move the casts to each read.
 export type Obj = Record<string, any>;
 
 export const isObj = (value: unknown): value is Obj =>

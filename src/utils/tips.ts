@@ -24,6 +24,8 @@ export function suggestCall(tool: string, args: Record<string, unknown>): string
   return `${tool} ${JSON.stringify(args)}`;
 }
 
+// Stays `any` (#62): tips probe the result of any tool for a few fields and fall back to
+// nothing, so the value is a loose bag by design.
 const asObject = (value: unknown): Record<string, any> | undefined =>
   value !== null && typeof value === 'object' ? (value as Record<string, any>) : undefined;
 

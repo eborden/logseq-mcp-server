@@ -1,4 +1,5 @@
-import { BlockEntity } from '../types.js';
+import { BlockEntity, PageLike } from '../types.js';
+import { entityId } from './entity-fields.js';
 
 /** One entry of `summary.topConcepts`. */
 export interface TopConcept {
@@ -44,7 +45,7 @@ export const BUILT_IN_CONCEPTS: ReadonlySet<string> = new Set([
  * Dropped: refs without a name (block refs), journal pages, and
  * {@link BUILT_IN_CONCEPTS}. Each page appears once.
  */
-export function extractConceptRefs(block: Record<string, any>): ConceptRef[] {
+export function extractConceptRefs(block: { refs?: unknown }): ConceptRef[] {
   const refs: unknown = block.refs;
   if (!Array.isArray(refs)) return [];
 
@@ -52,14 +53,15 @@ export function extractConceptRefs(block: Record<string, any>): ConceptRef[] {
   const out: ConceptRef[] = [];
   for (const ref of refs) {
     if (!ref || typeof ref !== 'object') continue;
-    const id = ref.id ?? ref['db/id'];
-    const lowerName: unknown = ref.name;
+    const page: PageLike = ref;
+    const id: unknown = entityId(page);
+    const lowerName: unknown = page.name;
     if (typeof id !== 'number' || typeof lowerName !== 'string' || lowerName === '') continue;
-    if (ref['journal?'] === true || ref['journal-day'] != null) continue;
+    if (page['journal?'] === true || page['journal-day'] != null) continue;
     if (BUILT_IN_CONCEPTS.has(lowerName)) continue;
     if (seen.has(id)) continue;
     seen.add(id);
-    const original: unknown = ref['original-name'];
+    const original: unknown = page['original-name'];
     out.push({ id, name: typeof original === 'string' && original !== '' ? original : lowerName });
   }
   return out;
