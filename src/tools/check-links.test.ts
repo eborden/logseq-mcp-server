@@ -340,6 +340,24 @@ describe('checkLinks: refs resolve', () => {
     ]);
   });
 
+  it('fails a new copy of an ambiguous ref the note already had: the new mention may mean the other page', async () => {
+    const { client } = fakeGraph([
+      { name: 'Project Borealis', aliases: ['roadmap'] },
+      { name: 'Project Cascade', aliases: ['roadmap'] },
+    ]);
+
+    const result = await checkLinks(client, '[[roadmap]] and the Roadmap', '[[roadmap]] and the [[Roadmap]]');
+
+    expect(result.ok).toBe(false);
+    expect(result.refs.ok).toBe(false);
+    // Copies are counted case-insensitively: [[Roadmap]] is a second ref to the same name
+    expect(result.refs.ambiguous.map(a => [a.term, a.preexisting])).toEqual([
+      ['Roadmap', false],
+      ['roadmap', false],
+    ]);
+    expect(result.refsPreserved.ok).toBe(true);
+  });
+
   it('warns when an ambiguous alias has more candidates than it lists', async () => {
     const { client } = fakeGraph(Array.from({ length: 12 }, (_, i) => ({ name: `p${String(i).padStart(2, '0')}`, aliases: ['x'] })));
 
