@@ -120,7 +120,9 @@ the note's does not. `unresolved-only.md` isolates check 3 by keeping the prose 
 
 `src/tools/check-links.test.ts` runs `checkLinks` on `expected/` and on each file in `negative/`
 against a fake graph built from `pages.txt`. It passes `expected/` and fails each negative case
-on the checks in the table above:
+on the checks in the table above. It also covers the bare variant: its expected result passes the
+gate, no page in the overlaid graph other than `Devon` mentions him, and its `expected/` differs from
+the base one in the `Devon` ref alone, so the two cannot drift apart:
 
 ```bash
 npx vitest run src/tools/check-links.test.ts
