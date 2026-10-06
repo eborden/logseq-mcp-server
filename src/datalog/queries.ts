@@ -255,7 +255,7 @@ export class DatalogQueryBuilder {
    * - `"journal-date"` (only when `journalDay` is given): the journal page whose
    *   `:block/journal-day` is that day. `[?page :block/name]` is required, or
    *   blocks LogSeq created in the app on a journal page match as pages (they
-   *   carry `:block/journal-day`; blocks read from a file do not, #140).
+   *   carry `:block/journal-day`; none of the fixture's file-backed blocks does, #140).
    * Rows can come from several routes, so the caller decides which one wins.
    * @param pageName - The page name or alias (any casing)
    * @param journalDay - YYYYMMDD integer when the name was an ISO date
