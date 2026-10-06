@@ -23,6 +23,7 @@ import { queryJournals } from '../src/tools/query-by-date-range.js';
 import { getBacklinks } from '../src/tools/get-backlinks.js';
 import { getConceptEvolution } from '../src/tools/get-concept-evolution.js';
 import { searchByRelationship } from '../src/tools/search-by-relationship.js';
+import { checkLinks } from '../src/tools/check-links.js';
 
 class CountingClient extends LogseqClient {
   calls = new Map<string, number>();
@@ -114,6 +115,11 @@ async function main() {
     ['search_by_relationship references (same topic twice)', () => searchByRelationship(client, subject, subject, 'references')],
     ['search_by_relationship connected-within', () => searchByRelationship(client, subject, otherSubject, 'connected-within', 1)],
     ['get_page (not found)', () => getPage(client, 'no such page 41 probe', false).catch(e => e.name)],
+    // Real pages, an alias when the graph has one, and a made-up term, all in one text
+    ['check_links (4 terms)', () => {
+      const terms = [subject, otherSubject, uniqueAlias ?? 'no such page 146 probe a', 'no such page 146 probe b'];
+      return checkLinks(client, terms.join(', '), terms.map(t => `[[${t}]]`).join(', '));
+    }],
     ...(uniqueAlias
       ? ([
           ['build_context (alias)', () => buildContextForTopic(client, uniqueAlias)],
