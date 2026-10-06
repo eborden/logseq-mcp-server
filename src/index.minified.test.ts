@@ -66,7 +66,10 @@ vi.mock('./tools/get-context-for-query.js', async importOriginal => ({
   getContextForQuery: mocks.getContextForQuery,
 }));
 vi.mock('./tools/query-by-date-range.js', () => ({ queryJournals: mocks.queryJournals }));
-vi.mock('./tools/get-concept-evolution.js', () => ({ getConceptEvolution: mocks.getConceptEvolution }));
+vi.mock('./tools/get-concept-evolution.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getConceptEvolution: mocks.getConceptEvolution,
+}));
 vi.mock('./tools/get-graph-info.js', () => ({ getGraphInfo: mocks.getGraphInfo }));
 vi.mock('./tools/get-current-context.js', () => ({ getCurrentContext: mocks.getCurrentContext }));
 vi.mock('./tools/list-pages.js', () => ({ listPages: mocks.listPages }));

@@ -13,7 +13,10 @@ import {
 import { buildResultMeta } from '../utils/result-meta.js';
 import type { ResolveRefsMeta } from '../types.js';
 
-export type GroupByPeriod = 'day' | 'week' | 'month';
+/** Every grouping period, in the order `group_by` advertises them (#60). */
+export const GROUP_BY_PERIODS = ['day', 'week', 'month'] as const;
+
+export type GroupByPeriod = (typeof GROUP_BY_PERIODS)[number];
 
 export interface ConceptEvolutionOptions {
   startDate?: number;

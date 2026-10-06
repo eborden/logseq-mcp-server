@@ -45,6 +45,7 @@ import {
   buildContextArgs,
   getBacklinksArgs,
   getBlockArgs,
+  getConceptEvolutionArgs,
   getConceptNetworkArgs,
   getContextForQueryArgs,
   getPageArgs,
@@ -152,29 +153,7 @@ const TOOLS = [
     name: 'logseq_get_concept_evolution',
     description: TOOL_DESCRIPTIONS.logseq_get_concept_evolution,
     annotations: readOnlyAnnotations('Get Concept Evolution'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        concept_name: {
-          type: 'string',
-          description: 'Concept to track (page name, alias or ISO date)',
-        },
-        start_date: {
-          type: 'number',
-          description: 'Optional start date in YYYYMMDD format',
-        },
-        end_date: {
-          type: 'number',
-          description: 'Optional end date in YYYYMMDD format',
-        },
-        group_by: {
-          type: 'string',
-          enum: ['day', 'week', 'month'],
-          description: 'Optional grouping period',
-        },
-      },
-      required: ['concept_name'],
-    },
+    inputSchema: toInputSchema(getConceptEvolutionArgs),
   },
   {
     name: 'logseq_get_graph_info',
@@ -499,12 +478,13 @@ export function createServer(client: LogseqClient, options: { tips?: boolean } =
         }
 
         case 'logseq_get_concept_evolution': {
-          const conceptName = args?.concept_name as string;
-          const options = {
-            startDate: args?.start_date as number | undefined,
-            endDate: args?.end_date as number | undefined,
-            groupBy: args?.group_by as any
-          };
+          const {
+            concept_name: conceptName,
+            start_date: startDate,
+            end_date: endDate,
+            group_by: groupBy,
+          } = parseArgs(getConceptEvolutionArgs, args);
+          const options = { startDate, endDate, groupBy };
           const result = await getConceptEvolution(client, conceptName, options);
           return {
             content: [
