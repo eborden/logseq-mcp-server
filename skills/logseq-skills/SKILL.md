@@ -54,7 +54,7 @@ Use this skill when:
 - The link / ask / skip decision table, and what counts as corroboration for a partial name
 - Anti-patterns: rewording to force a match, fragmenting a proper noun, expanding abbreviations, linking adjectival mentions
 - **ALWAYS read this alongside `skills/concept-linking.md`**
-- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; an uncorroborated partial name goes into the batched question rather than being linked or silently dropped. Identity and bracketability are separate questions, and settling the first does not settle the second: a short form sitting inside a page title cannot be bracketed at all, and a page title sitting inside a longer proper noun (`[[Kofi]] Mensah`) must not be, because it fragments the name past what the gate can see. Both want an `alias::` on the target page with the owner's consent, never an expansion of the prose. Validate with `scripts/check-link-safety.sh <before> <after> [graph-root] [page-list]` before reporting done.
+- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; an uncorroborated partial name goes into the batched question rather than being linked or silently dropped. Identity and bracketability are separate questions, and settling the first does not settle the second: a short form sitting inside a page title cannot be bracketed at all, and a page title sitting inside a longer proper noun (`[[Kofi]] Mensah`) must not be, because it fragments the name past what the gate can see. Both want an `alias::` on the target page with the owner's consent, never an expansion of the prose. Validate with `logseq_check_links(before, after)` before reporting done, and never remove a ref the note already had to make it pass.
 
 **`references/summary-compression.md`** - Compression philosophy shared by all summary granularities
 - Salience filtering, emotional markers, the hard word budget, merge-vs-drop
@@ -70,13 +70,15 @@ Use this skill when:
 - Reports per-signal word counts, totals, item count, em-dashes, two-sentence bullets, missing sections
 - Exits non-zero on violation; rewrite and re-run rather than explaining the failure away
 
-**`scripts/check-link-safety.sh`** - Mandatory validation gate for any linking pass
-- Usage: `check-link-safety.sh <before> <after> [graph-root] [page-list]`
-- Asserts stripping all `[[ ]]` from before and after leaves them byte-identical, so the pass only added brackets
-- Checks bracket balance, and resolvability against a `list_pages` listing (page *files* are a subset of pages, so without a listing that check only warns)
-- Infers the graph root from the file path when not passed one
+### Gates
+
+**`logseq_check_links(before, after)`** - Mandatory validation gate for any linking pass (a server tool, not a script)
+- Checks that stripping all `[[ ]]` from before and after leaves them identical, so the pass only added brackets
+- Checks bracket balance, that every ref resolves to exactly one page or alias (resolved in the graph, file-less pages included), and that every ref in before is still in after
 - Proves an edit was safe, never that the classification was right; a pass that links nothing passes every check
-- Exits non-zero on violation; fix the edit and re-run rather than explaining the failure away
+- `ok` is false on any violation; fix the edit and re-run rather than explaining the failure away
+
+### Other References
 
 **`references/context-builder.md`** - Detailed workflows for context building and research
 - 7 comprehensive workflows: research, tasks, stale detection, page context, graph exploration, temporal analysis, smart context building
@@ -84,7 +86,7 @@ Use this skill when:
 - Read this when user asks for research help, task management, or graph exploration
 
 **`references/mcp-tools-reference.md`** - Complete MCP tool documentation
-- All 15 LogSeq MCP tools with parameters and examples
+- All 16 LogSeq MCP tools with parameters and examples
 - Tool comparison tables and selection guidance
 - Read this when verifying tool syntax or discovering capabilities
 
@@ -147,5 +149,6 @@ Use this skill when:
 **Semantic Search (1):** search_by_relationship
 **Context Building (2):** build_context, get_context_for_query
 **Temporal Query (2):** query_by_date_range, get_concept_evolution
+**Linking (1):** check_links
 
 Load `references/mcp-tools-reference.md` for complete tool documentation.
