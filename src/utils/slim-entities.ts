@@ -1,4 +1,5 @@
-import { BlockEntity, PageEntity, SlimBlock, SlimPage } from '../types.js';
+import { BlockEntity, PageEntity, PageLike, SlimBlock, SlimPage } from '../types.js';
+import { blockPageId, journalDayOf, journalFlag, pageDisplayName } from './entity-fields.js';
 
 /**
  * Whether tools with a `slim_results` parameter slim their output when the
@@ -42,9 +43,8 @@ export function extractTags(content: string): string[] {
 export function buildPageNameMap(pages: PageEntity[]): Map<number, string> {
   const map = new Map<number, string>();
   for (const page of pages) {
-    // Use originalName to preserve casing
-    const name = page.originalName || page['original-name'] || page.name;
-    map.set(page.id, name);
+    // The original name keeps the casing
+    map.set(page.id, pageDisplayName(page));
   }
   return map;
 }
@@ -59,12 +59,7 @@ export function getPageNameFromBlock(
   block: BlockEntity,
   pageMap: Map<number, string>
 ): string {
-  if (!block.page) {
-    return '';
-  }
-
-  const pageRef = block.page as any;
-  const pageId = pageRef.id || pageRef['db/id'];
+  const pageId = blockPageId(block);
 
   if (!pageId) {
     return '';
@@ -89,7 +84,7 @@ export function isEmptyValue(value: unknown): boolean {
  * The properties of a block or page without the empty ones, or undefined when
  * none are left (#42). `status:: false` and `count:: 0` stay.
  */
-export function nonEmptyProperties(properties: Record<string, any> | undefined | null): Record<string, any> | undefined {
+export function nonEmptyProperties(properties: Record<string, unknown> | undefined | null): Record<string, unknown> | undefined {
   if (!properties) return undefined;
   const kept = Object.fromEntries(Object.entries(properties).filter(([, value]) => !isEmptyValue(value)));
   return Object.keys(kept).length > 0 ? kept : undefined;
@@ -166,10 +161,10 @@ export function toSlimBlock(block: BlockEntity, pageName: string): SlimBlock {
  * @param page - Full PageEntity
  * @returns SlimPage with essential data only
  */
-export function toSlimPage(page: PageEntity): SlimPage {
+export function toSlimPage(page: PageLike & Pick<PageEntity, 'name'>): SlimPage {
   const slim: SlimPage = {
     name: page.name,
-    originalName: page.originalName || page['original-name'] || page.name
+    originalName: pageDisplayName(page)
   };
 
   // Only include properties that have a value
@@ -179,11 +174,11 @@ export function toSlimPage(page: PageEntity): SlimPage {
   }
 
   // Only include journal metadata if it's a journal page
-  const isJournal = page['journal?'] || page.journal;
-  if (isJournal) {
+  if (journalFlag(page)) {
     slim.isJournal = true;
-    if (page.journalDay) {
-      slim.journalDate = page.journalDay;
+    const journalDay = journalDayOf(page);
+    if (journalDay) {
+      slim.journalDate = journalDay;
     }
   }
 
