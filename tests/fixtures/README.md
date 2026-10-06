@@ -209,6 +209,9 @@ lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count
   whether `hub central` is among them. For these, assert only the node count, `truncated` and the
   `network_truncated` warning (#90). A test that needs a particular fringe or topic page present must use a case
   where the cap does not bite (the `Infinity` rows).
+- **Depends on LogSeq's order.** Which 20 of the hub's 61 source pages `get_backlinks` keeps at the defaults is the order
+  LogSeq lists them in (not sorted by name, and not a ranking), so a test can't assert those names. Compare with the
+  full list (`max_pages` 100) and check the kept pages are its first ones, as `result-caps.test.ts` does.
 - **Also depends on id order, outside the hub.** `get_context_for_query` on `[[Bob]]` and `[[Alice]]` keeps 5
   related pages per topic, picked among ties, so how many the two share (and so `summary.totalPages`) changed
   between two instance starts. Assert 5 per topic and count the distinct pages from the result.
@@ -235,9 +238,9 @@ written `Row N on [[popular topic]]`, and the target has no file.
 `Set max_blocks_per_page to 12`. At `max_blocks_per_page` 12 or more the result is whole and there is no `meta`. Which of the
 two pages comes first is up to LogSeq, so assert on counts and on the blocks of each page in order, not on the page order.
 
-The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e`, which matches all but
-two of the fixture's blocks (478 of 480 before this fixture), and expects fewer than `search_blocks`' maximum of 500.
-Blocks with an `e` would put it at 492. Keep new fixture blocks without the letter, or change that test.
+The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
+`search_blocks`' maximum of 500 matches. The fixture holds 494 blocks, 478 of them with an `e` (16 without: 2 older ones and
+these 14). With an `e` in these 14 it would be 492. Keep new fixture blocks without the letter, or change that test.
 
 ## Files LogSeq writes when it opens the folder
 
