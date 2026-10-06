@@ -205,6 +205,9 @@ lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count
   whether `hub central` is among them. For these, assert only the node count, `truncated` and the
   `network_truncated` warning (#90). A test that needs a particular fringe or topic page present must use a case
   where the cap does not bite (the `Infinity` rows).
+- **Also depends on id order, outside the hub.** `get_context_for_query` on `[[Bob]]` and `[[Alice]]` keeps 5
+  related pages per topic, picked among ties, so how many the two share (and so `summary.totalPages`) changed
+  between two instance starts. Assert 5 per topic and count the distinct pages from the result.
 - **Not covered: `get_backlinks` `max_blocks_per_page` (#61).** The hub exceeds a `max_pages` cap (61 source pages),
   but no page has more than 2 blocks that link the hub. A test for the per-page cap needs a neighbour with 11 or more
   linking blocks, and this README to change with it. That page would also change the depth-1 ranking above.
