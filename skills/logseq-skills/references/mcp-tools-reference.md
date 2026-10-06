@@ -34,7 +34,7 @@ Full-text search across all blocks with optional semantic context.
 - M above 500 and `limit` below 500: `howToFetchAll` says to set `limit` to 500 (the maximum) to get 500 of M, then to narrow the query for the rest. That call returns 500 of M, not all of them
 - `limit` already at 500 (or a larger value that was clamped, which the message names): no `howToFetchAll` and `hasMore` is false, because no parameter fetches the rest. The warning is the signal. Narrow the query (a more specific phrase) to reach the older blocks
 
-**Size:** measured on made-up blocks of one short line (under 100 characters), a slim block is about 150 characters in the result, and a longer block adds its extra length, so `limit=300` is about 45,000 characters and `limit=500` about 75,000. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7). Longer blocks or `include_context=true` make it larger, so prefer a narrower query to a `limit` above about 300.
+**Size:** measured on made-up blocks of one short line (under 100 characters), so read the numbers as floors, since real blocks carry more fields and text: a slim block is about 150 characters in the result, and a longer block adds its extra length, so `limit=300` is about 45,000 characters and `limit=500` about 75,000. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7). Longer blocks or `include_context=true` make it larger, so prefer a narrower query to a `limit` above about 300.
 
 **Use when:**
 - Initial exploration ("what do I know about X?")
@@ -108,14 +108,14 @@ Find the pages that reference a specific page, with the blocks that do. Capped: 
 
 A larger value of either is clamped to its maximum, not rejected, and a fractional one is floored.
 
-**Returns:** a bare array of `[page, blocks]` pairs, one per source page. The first ones listed are kept, **not ranked**: the pages come in LogSeq's own order (by name for a page that has aliases), and each page's blocks in the order given, so a page left out is not a less relevant one. A second content block, `{ "meta": ... }`, comes only when there is something to say: a cut, an alias or ISO-date name that was resolved (`resolvedFrom`), or a page with aliases (`resolvedAliases`). An exact name that fits both caps gets one block.
+**Returns:** a bare array of `[page, blocks]` pairs, one per source page. The first ones listed are kept, **not ranked**: the pages come in LogSeq's own order (by name for a page that has aliases), and each page's blocks in the order given, so a page left out is not a less relevant one. A second content block, `{ "meta": ... }`, follows when there is a cut, a resolved alias or ISO-date name (`resolvedFrom`), a page with aliases (`resolvedAliases`) or, with next-step tips on (the default), a tip. **The block being there doesn't mean a cut:** a stock server adds one with only `meta.tips` to any non-empty result, and with tips off an uncut exact name gets one block. The signal is `meta.warnings` and `meta.totals`.
 
 **A cut result:** the meta holds `warnings`, `hasMore` and `totals: { pages, blocks }`, which count every source page and every linking block before either cap (only present with a cut):
-- `pages_truncated`: "Showing N of M source pages (the first ones listed, not ranked)". It adds that blocks per page are capped separately, and what to do next depends on M. M of 100 or fewer: `howToFetchAll` says to set `max_pages` to M. M above 100 and `max_pages` below 100: set it to 100 to get 100 of M, and the warning suggests `logseq_search_blocks` with the query `[[page name]]` for the rest (it finds blocks that write the link that way, not `#tags` or alias spellings). `max_pages` already at 100: no `howToFetchAll`, and `hasMore` stays false
-- `page_blocks_truncated`: some kept pages hold more than `max_blocks_per_page` linking blocks. It names up to 5 of those pages with their block counts (and "N more"). Below 50, `howToFetchAll` says to set `max_blocks_per_page` to the largest count, or to 50 when a page holds more. At 50 there is no `howToFetchAll`, and `hasMore` stays false; the way to read such a page whole is `logseq_get_page` with `include_children`
+- `pages_truncated`: "Showing N of M source pages (the first ones listed, not ranked)". It adds that blocks per page are capped separately, and what to do next depends on M. M of 100 or fewer: `howToFetchAll` says to set `max_pages` to M. M above 100 and `max_pages` below 100: set it to 100 to get 100 of M, and the warning suggests `logseq_search_blocks` with the query `[[page name]]` for the rest (it finds blocks that write the link that way, not `#tags` or alias spellings). `max_pages` already at 100: this warning has no `howToFetchAll`. `hasMore` comes from all the warnings together, so it can still be true when a `page_blocks_truncated` below 50 has one, and then it doesn't mean raising `max_pages` helps
+- `page_blocks_truncated`: some kept pages hold more than `max_blocks_per_page` linking blocks. It names up to 5 of those pages with their block counts (and "N more"). Below 50, `howToFetchAll` says to set `max_blocks_per_page` to the largest count, or to 50 when a page holds more. At 50 this warning has no `howToFetchAll` (and `hasMore` is false unless another warning has one); the way to read such a page whole is `logseq_get_page` with `include_children`
 - Both can appear together. Raising `max_pages` shows pages whose blocks the per-page cap may then cut, so a second warning after a raise is expected. Only the pages kept are checked for the per-page cut
 
-**Size:** measured on made-up blocks of one short line, a linking block is about 200 characters in the result, so the defaults' worst case (20 pages of 10 blocks) is about 40,000 characters, and `max_pages=100` with `max_blocks_per_page=50` could be several times the 50,000 that Claude Code saves to a file (see `context-efficiency.md` section 7). Raise to the numbers the warnings name when `totals.blocks` is a few hundred or fewer, and in smaller steps when it is larger.
+**Size:** measured on made-up blocks of one short line with few fields, a linking block is about 200 characters in the result. Real blocks carry more fields (page, parent, properties, refs), so read these as floors and the thresholds as upper bounds. So the defaults' worst case (20 pages of 10 blocks) is about 40,000 characters, and `max_pages=100` with `max_blocks_per_page=50` could be several times the 50,000 that Claude Code saves to a file (see `context-efficiency.md` section 7). Raise to the numbers the warnings name when `totals.blocks` is about 200 or fewer. Above that, raise `max_pages` to the number the warning names and leave `max_blocks_per_page` at 10, or read the one page you need with `logseq_get_page`.
 
 **Use when:**
 - Discovering connections
@@ -162,7 +162,7 @@ Find blocks by property key/value pairs.
 - `limit` (optional): Most blocks returned (default: **100**, max: **500**; a larger value is clamped to 500, not rejected)
 - `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
 
-**Returns:** a bare array of flat blocks (no `children`), sorted by page id and then block id. That order is stable but **not a ranking**, and the cut keeps the first blocks in it, so the pages listed first are the ones with the lowest ids, not the most relevant ones. The array is the whole first content block; a second content block, `{ "meta": ... }`, comes **only when `limit` cut the list**, so a result that fits has no meta.
+**Returns:** a bare array of flat blocks (no `children`), sorted by page id and then block id. That order is stable but **not a ranking**, and the cut keeps the first blocks in it, so the pages listed first are the ones with the lowest ids, not the most relevant ones. The array is the whole first content block; a second content block, `{ "meta": ... }`, follows a non-empty result when tips are on (the default), holding only `meta.tips` if nothing was cut. **The block being there doesn't mean a cut:** the signal is `meta.warnings` and `meta.totals`, which are present only when `limit` cut the list.
 
 **A cut result:** the meta holds a `results_truncated` warning ("Showing N of M matching blocks (the first ones listed, not ranked)") and `totals: { matches: M }`, the count before the cut. The query takes only a key and a value and the tool has no offset, so no other parameter narrows it or pages through it. What the warning says depends on M:
 - M of 500 or fewer: `howToFetchAll` says to set `limit` to M (or higher), and that returns all M. `hasMore` is true
@@ -171,7 +171,7 @@ Find blocks by property key/value pairs.
 
 **To count only:** pass a small `limit`. When the list is cut, `totals.matches` is the count of every matching block. When it isn't, the array holds them all.
 
-**Size:** measured on made-up blocks of one short line, a slim block is about 165 characters in the result, so `limit=100` is about 17,000 characters, `limit=250` about 41,000, `limit=300` about 50,000 and `limit=500` about 83,000. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7), and this tool can't be paged, so a `limit` above about 250 is likely to come back saved. Prefer the count from `totals.matches` to a `limit` of 500 when the question is "how many".
+**Size:** measured on made-up blocks of one short line, so read the numbers as floors (real blocks carry more fields and text): a slim block is about 165 characters in the result, so `limit=100` is about 17,000 characters, `limit=250` about 41,000, `limit=300` about 50,000 and `limit=500` about 83,000. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7), and this tool can't be paged, so a `limit` above about 250 is likely to come back saved. Prefer the count from `totals.matches` to a `limit` of 500 when the question is "how many".
 
 **Use when:**
 - Structured data queries
@@ -279,7 +279,7 @@ What the warning says next depends on M:
 
 Other warnings (`frontier_truncated`, `same_topic`) are separate and can appear alongside it; `warnings` holds them all.
 
-**Size:** the entries are full blocks (there is no `slim_results` here), about 215 characters each when the content is one short line, so `limit=50` is about 11,000 characters, `limit=200` about 43,000 and `limit=500` over 100,000. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7), so a `limit` above about 200 is likely to come back saved, and `connected-within` can be larger still because kept blocks bring their children.
+**Size:** the entries are full blocks (there is no `slim_results` here), about 215 characters each when the content is one short line, so `limit=50` is about 11,000 characters, `limit=200` about 43,000, `limit=230` about 50,000 and `limit=500` over 100,000. Real blocks carry more fields, so read these as floors. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7), so treat a `limit` above about 200 as likely to come back saved (rounded down for that reason), and `connected-within` can be larger still because kept blocks bring their children.
 
 **Relationship Types:**
 
@@ -438,12 +438,20 @@ Track how a concept appears and evolves over time.
 - `start_date` (optional): Start date in YYYYMMDD format
 - `end_date` (optional): End date in YYYYMMDD format
 - `group_by` (optional): Grouping level: 'day', 'week', 'month'
+- `max_entries` (optional): Most mentions kept in `timeline` (default: **100**, max: **500**; a larger value is clamped to 500, floored, not rejected). Dates narrow only dated mentions: a mention on a non-journal page has no date and passes every `start_date` and `end_date`, so no date range reaches it
 
 **Returns:**
 - Timeline of mentions
 - Temporal patterns and gaps
 - Journal vs. non-journal distinction
 - Chronologically sorted
+
+**A cut result:** `timeline` is cut to `max_entries` mentions, oldest first with undated (non-journal) mentions last, so the cut drops undated mentions first and then the newest dated ones. The meta fields are inside the result object (no second block, as for `search_by_relationship`): `warnings` and `hasMore` appear when a warning applies, and `totals: { mentions }`, the count before the cut, only with a cut. The `entries_truncated` warning says "Showing N of M mentions (oldest first, undated last; the timeline ends at <day>)", and what it says next:
+- M of 500 or fewer: `howToFetchAll` says to set `max_entries` to M (or higher)
+- M above 500 and `max_entries` below 500: set it to 500 (the maximum) to get 500 of M, not all
+- `max_entries` already at 500: no `howToFetchAll`, so the warning is the signal that the list is partial
+- It also says what the dates can reach: when the cut fell among dated mentions it names the `start_date` to continue from (that day repeats its kept blocks); when it fell among the undated ones, narrowing the dates can't reach the rest
+- `summary` (`totalMentions` and the rest) still counts every mention found, so it can exceed what `timeline` holds, and `groupedTimeline` is built from the kept mentions only
 
 **Use when:**
 - "How did X evolve over time?"
@@ -584,19 +592,20 @@ query_by_property (for precise matches)
 - Use `depth` and `max_depth` carefully (depth=1 usually sufficient)
 - Use `limit` on `search_blocks` to avoid overwhelming results
 
-**Caps that cut a result:** these tools keep the first results and say so. Each caps at a maximum, clamps a larger value instead of rejecting it, and reports a cut with a warning. Read the warning before you report a count or a list as complete.
+**Caps that cut a result:** these tools keep the first results in an order (see the last column) and say so. Each caps at a maximum, clamps a larger value instead of rejecting it, and reports a cut with a warning. Read the warning before you report a count or a list as complete.
 
 | Tool | Parameter (default, max) | Warning code | Where the meta is | Order of what is kept |
 |------|--------------------------|--------------|-------------------|-----------------------|
-| `search_blocks` | `limit` (100, 500) | `results_truncated` | second content block, always; `totals.matches` | newest first |
-| `get_backlinks` | `max_pages` (20, 100), `max_blocks_per_page` (10, 50) | `pages_truncated`, `page_blocks_truncated` | second content block, when cut or resolved by alias; `totals.pages`, `totals.blocks` | first listed, not ranked |
-| `query_by_property` | `limit` (100, 500) | `results_truncated` | second content block, only when cut; `totals.matches` | by page id, then block id; not ranked |
+| `search_blocks` | `limit` (100, 500) | `results_truncated` | second content block, always (`totals.matches` even when uncut) | newest first |
+| `get_backlinks` | `max_pages` (20, 100), `max_blocks_per_page` (10, 50) | `pages_truncated`, `page_blocks_truncated` | second content block, when cut, resolved by alias or date, or with a tip; `totals.pages`, `totals.blocks` only with a cut | first listed, not ranked |
+| `query_by_property` | `limit` (100, 500) | `results_truncated` | second content block (with only `tips` when uncut); `totals.matches` only with a cut | by page id, then block id; not ranked |
 | `search_by_relationship` | `limit` (50, 500) | `results_truncated` | the result object itself; `totals.blocks` | first listed, not ranked; `connected-within`: topic A's top-level blocks, then B's |
+| `get_concept_evolution` | `max_entries` (100, 500) | `entries_truncated` | the result object itself; `totals.mentions` only with a cut | oldest first, undated mentions last |
 | `query_by_date_range` | `max_blocks` (200, 1000) | `blocks_truncated` | the result object itself; `totals.blocks`, `totals.days` | oldest day first |
 
 The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them.
 
-**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). On short one-line blocks, `query_by_property` reaches that near `limit=300`, `search_blocks` near `limit=330`, `search_by_relationship` near `limit=200` and `get_backlinks` near 250 linking blocks across all pages. A `limit` at the maximum is usually too big to be shown, so narrow the query or lower the cap rather than raising it.
+**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). On short one-line blocks, `query_by_property` reaches that near `limit=300`, `search_blocks` near `limit=330`, `search_by_relationship` near `limit=200` (rounded down) and `get_backlinks` near 250 linking blocks across all pages. These are floors: real blocks are larger. A `limit` at the maximum is usually too big to be shown, so narrow the query or lower the cap rather than raising it.
 
 ### Tool Priority
 
