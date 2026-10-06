@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   getConceptEvolution: vi.fn(async () => ({ concept: 'c', timeline: [] })),
   getPageOutline: vi.fn(async () => ({ page: 'p', blocks: [] })),
   listPages: vi.fn(async () => ({ pages: [], total: 0 })),
+  getBacklinksWithMeta: vi.fn(async () => ({ results: [], meta: null })),
 }));
 
 vi.mock('./tools/search-blocks.js', async importOriginal => ({
@@ -79,6 +80,10 @@ vi.mock('./tools/get-concept-evolution.js', async importOriginal => ({
 vi.mock('./tools/get-page-outline.js', async importOriginal => ({
   ...(await importOriginal<object>()),
   getPageOutline: mocks.getPageOutline,
+}));
+vi.mock('./tools/get-backlinks.js', async importOriginal => ({
+  ...(await importOriginal<object>()),
+  getBacklinksWithMeta: mocks.getBacklinksWithMeta,
 }));
 vi.mock('./tools/list-pages.js', async importOriginal => ({
   ...(await importOriginal<object>()),
@@ -446,5 +451,25 @@ describe('logseq_get_page_outline and logseq_list_pages hand-off', () => {
     expect(await handedOff('logseq_list_pages', { limit: 5000, offset: -3 }, mocks.listPages)).toEqual([
       { nameContains: undefined, limit: 5000, offset: -3 },
     ]);
+  });
+});
+
+describe('logseq_get_backlinks hand-off', () => {
+  const backlinks = (args: Record<string, unknown>) =>
+    handedOff('logseq_get_backlinks', { page_name: 'Alice', ...args }, mocks.getBacklinksWithMeta);
+
+  it('defaults: 20 source pages and 10 blocks each', async () => {
+    expect(await backlinks({})).toEqual(['Alice', { maxPages: 20, maxBlocksPerPage: 10 }]);
+  });
+
+  it.each([
+    [{ max_pages: 7 }, { maxPages: 7, maxBlocksPerPage: 10 }],
+    [{ max_pages: 0 }, { maxPages: 0, maxBlocksPerPage: 10 }],
+    [{ max_pages: 5000 }, { maxPages: 5000, maxBlocksPerPage: 10 }],
+    [{ max_blocks_per_page: 3 }, { maxPages: 20, maxBlocksPerPage: 3 }],
+    [{ max_blocks_per_page: 0 }, { maxPages: 20, maxBlocksPerPage: 0 }],
+    [{ max_blocks_per_page: 5000 }, { maxPages: 20, maxBlocksPerPage: 5000 }],
+  ])('%j passes through as %j, for the tool to clamp', async (args, expected) => {
+    expect(await backlinks(args)).toEqual(['Alice', expected]);
   });
 });
