@@ -41,6 +41,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0022-minimum-node-22-12](0022-minimum-node-22-12.md) | Require Node 22.12 or newer | accepted |
 | [0023-mit-license](0023-mit-license.md) | License the project under MIT | accepted |
 | [0024-baseline-test-before-skill-edits](0024-baseline-test-before-skill-edits.md) | Baseline-test a skill before editing it | accepted |
+| [0025-rust-implementation-alongside-typescript](0025-rust-implementation-alongside-typescript.md) | Explore a Rust implementation alongside TypeScript, and re-scope the process docs per toolchain | proposed |
 
 ## File naming rule
 
