@@ -1,0 +1,2 @@
+- neighbour-in-26 is a made-up page. It links the hub and the hub does not link it.
+- Index: [[hub central]]

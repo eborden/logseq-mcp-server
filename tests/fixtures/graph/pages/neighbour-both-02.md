@@ -1,0 +1,3 @@
+- neighbour-both-02 is a made-up page. It links the hub and the hub links it.
+- Back to [[hub central]]
+- Related: [[fringe-05]] [[fringe-06]] [[fringe-07]] [[fringe-08]]
