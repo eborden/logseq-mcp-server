@@ -30,9 +30,9 @@ async function testDatascript() {
   }
 
   // Test 2: Query with parameter
-  console.log('\n2. Query with parameter (alex bramer):');
+  console.log('\n2. Query with parameter (alice):');
   const query2 = '[:find (pull ?p [*]) :in $ ?page-name-lower :where [?p :block/name ?page-name-lower]]';
-  const result2 = await client.callAPI<unknown[]>('logseq.DB.datascriptQuery', [query2, 'alex bramer']);
+  const result2 = await client.callAPI<unknown[]>('logseq.DB.datascriptQuery', [query2, 'alice']);
   console.log(`   Result:`, result2);
   console.log(`   Length:`, result2 ? result2.length : 0);
 }
