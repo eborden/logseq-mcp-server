@@ -1,12 +1,13 @@
-// Type-checks scripts/ and the tests listed below, which tsconfig.json leaves out
+// Type-checks scripts/ and every unit test, which tsconfig.json leaves out
 // (rootDir: src, and *.test.ts excluded). Run in CI: npx tsc -p tsconfig.scripts.json
-// Add a test file here once it type-checks; the rest of src/**/*.test.ts has known errors (#104).
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["scripts/**/*", "src/docs-format.test.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["scripts/**/*", "src/**/*.test.ts"],
+  // Temporary (#104): these two still have type errors and are being changed
+  // by #60. Fix them and delete both entries once that work has merged.
+  "exclude": ["node_modules", "dist", "src/index.test.ts", "src/index.args.search.test.ts"]
 }

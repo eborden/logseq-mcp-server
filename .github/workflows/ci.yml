@@ -37,8 +37,8 @@ jobs:
         run: npx tsc --noEmit
 
       # tsconfig.json covers src only (rootDir: src) and skips tests. This one adds
-      # scripts/ and the tests that are known to type-check (see tsconfig.scripts.json).
-      - name: Type-check scripts
+      # scripts/ and the unit tests (src/**/*.test.ts; see tsconfig.scripts.json).
+      - name: Type-check scripts and tests
         run: npx tsc -p tsconfig.scripts.json
 
       # Unit tests only. The integration tests (tests/integration, run locally
