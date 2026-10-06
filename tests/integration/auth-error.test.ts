@@ -25,7 +25,7 @@ describe('Rejected auth token Integration Tests', () => {
     const bogusToken = 'not-the-real-token';
     const client = new LogseqClient({ ...config, authToken: bogusToken });
 
-    const error = await client.callAPI('logseq.App.getCurrentGraph').catch(e => e);
+    const error = (await client.callAPI('logseq.App.getCurrentGraph').catch(e => e)) as Error;
 
     expect(error).toBeInstanceOf(LogSeqAuthError);
     expect(error.message).toContain('authToken');

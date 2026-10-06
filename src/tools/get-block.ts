@@ -23,7 +23,7 @@ export async function getBlock(
   options: { resolveRefs?: boolean } = {}
 ): Promise<BlockEntity & ResolveRefsMeta> {
   // Build arguments for API call
-  const args: any[] = [blockUuid];
+  const args: unknown[] = [blockUuid];
 
   // Add options if includeChildren is true
   if (includeChildren) {

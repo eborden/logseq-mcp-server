@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, expectTypeOf, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { LogseqClient } from './client.js';
 import { LogSeqAuthError, LogSeqNotRunningError, LogSeqTimeoutError } from './errors.js';
 import { createServer, Server } from 'http';
@@ -46,6 +46,14 @@ describe('LogseqClient', () => {
       );
     });
 
+    it('types a response nobody annotated as unknown, and one that names its shape as that shape', () => {
+      // Compile-time only (tsc -p tsconfig.scripts.json), so nothing is called: an unannotated call
+      // can't be used without narrowing (#62)
+      expectTypeOf(client.callAPI).returns.toEqualTypeOf<Promise<unknown>>();
+      expectTypeOf(client.executeDatalogQuery).returns.toEqualTypeOf<Promise<unknown>>();
+      expectTypeOf(client.callAPI<string[]>).returns.toEqualTypeOf<Promise<string[]>>();
+    });
+
     describe('timeout', () => {
       function mockAbort(name: 'TimeoutError' | 'AbortError') {
         global.fetch = vi.fn().mockRejectedValue(
@@ -86,7 +94,7 @@ describe('LogseqClient', () => {
       it('throws LogSeqTimeoutError when the request times out', async () => {
         mockAbort('TimeoutError');
 
-        const error = await client.callAPI('logseq.App.getVersion').catch(e => e);
+        const error = (await client.callAPI('logseq.App.getVersion').catch(e => e)) as Error;
 
         expect(error).toBeInstanceOf(LogSeqTimeoutError);
         expect(error).not.toBeInstanceOf(LogSeqNotRunningError);
@@ -165,7 +173,7 @@ describe('LogseqClient', () => {
         statusText: 'Unauthorized'
       }) as any;
 
-      const error = await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e);
+      const error = (await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e)) as Error;
 
       expect(error).toBeInstanceOf(LogSeqAuthError);
       expect(error).not.toBeInstanceOf(LogSeqNotRunningError);
@@ -183,7 +191,7 @@ describe('LogseqClient', () => {
         statusText: 'Unauthorized'
       }) as any;
 
-      const error = await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e);
+      const error = (await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e)) as Error;
 
       expect(error.message).not.toContain(mockConfig.authToken);
     });
@@ -195,7 +203,7 @@ describe('LogseqClient', () => {
         statusText: 'Forbidden'
       }) as any;
 
-      const error = await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e);
+      const error = (await client.callAPI('logseq.Editor.getBlock', ['block-uuid']).catch(e => e)) as Error;
 
       expect(error).not.toBeInstanceOf(LogSeqAuthError);
       expect(error.message).toBe('HTTP 403: Forbidden');

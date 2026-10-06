@@ -72,15 +72,7 @@ export interface PageEntity {
 // LogSeq API request/response types
 export interface LogseqAPIRequest {
   method: string;
-  args?: any[];
-}
-
-export interface LogseqAPIResponse<T = any> {
-  data?: T;
-  error?: {
-    message: string;
-    code?: string;
-  };
+  args?: unknown[];
 }
 
 // Configuration

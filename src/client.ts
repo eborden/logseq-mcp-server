@@ -1,4 +1,4 @@
-import { LogseqMCPConfig, LogseqAPIRequest, LogseqAPIResponse } from './types.js';
+import { LogseqMCPConfig, LogseqAPIRequest } from './types.js';
 import { LogSeqAuthError, LogSeqNotRunningError, LogSeqTimeoutError } from './errors.js';
 
 /** Default per-call timeout when `timeoutMs` is not set in the config */
@@ -19,12 +19,17 @@ export class LogseqClient {
    * Call a LogSeq API method
    * @param method - The API method to call (e.g., 'logseq.Editor.getBlock')
    * @param args - Optional array of arguments for the method
+   * @typeParam T - What the caller expects the response to be. It is a claim, not a
+   *   check: nothing here validates the response, and `unknown` is the default so a
+   *   caller that names no type gets one it must narrow. Name the shape LogSeq returns
+   *   for that method (`PageEntity | null`, `BlockEntity[]`), and read its fields through
+   *   `src/utils/entity-fields.ts`, which knows both key spellings.
    * @returns The response data from the API
    * @throws LogSeqAuthError if LogSeq rejects the auth token (HTTP 401)
    * @throws LogSeqTimeoutError if the call exceeds `timeoutMs`
    * @throws Error if the API call fails or returns an error
    */
-  async callAPI<T = any>(method: string, args: any[] = []): Promise<T> {
+  async callAPI<T = unknown>(method: string, args: unknown[] = []): Promise<T> {
     const url = `${this.config.apiUrl}/api`;
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
@@ -57,7 +62,7 @@ export class LogseqClient {
       }
 
       // Parse response - LogSeq returns data directly, not wrapped
-      const responseData = await response.json();
+      const responseData: unknown = await response.json();
 
       // Check if this is an error response (has error property)
       if (responseData && typeof responseData === 'object' && 'error' in responseData) {
@@ -76,7 +81,8 @@ export class LogseqClient {
         }
 
         // Check for network/connection errors
-        const errorCode = (error as any).code;
+        // Node's network errors carry a string `code`; a plain Error has none
+        const errorCode = (error as { code?: unknown }).code;
         if (errorCode === 'ECONNREFUSED' ||
             errorCode === 'ETIMEDOUT' ||
             errorCode === 'ENOTFOUND' ||
@@ -101,10 +107,11 @@ export class LogseqClient {
    *
    * @param query - The Datalog query string. Use `:in $ ?a ?b` for parameters.
    * @param inputs - Values bound to the `:in` variables after `$`, in order
+   * @typeParam T - What the caller expects the rows to be (a claim, as for {@link callAPI})
    * @returns The query results
    * @throws Error if the query fails
    */
-  async executeDatalogQuery<T = any>(query: string, ...inputs: unknown[]): Promise<T> {
+  async executeDatalogQuery<T = unknown>(query: string, ...inputs: unknown[]): Promise<T> {
     return this.callAPI<T>('logseq.DB.datascriptQuery', [
       query,
       ...inputs.map(value => JSON.stringify(value))

@@ -21,7 +21,7 @@ async function testQuery() {
   console.log();
 
   // Execute
-  const results = await client.executeDatalogQuery(query, ...inputs);
+  const results = await client.executeDatalogQuery<unknown[][] | null>(query, ...inputs);
   console.log(`Results length: ${results ? results.length : 'null'}`);
 
   if (results && results.length > 0) {
