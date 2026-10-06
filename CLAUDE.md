@@ -148,7 +148,7 @@ Done by whoever merges:
 - Privacy grep of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
 - `npx tsc --noEmit`
 - `npx vitest run src`
-- `npm run test:integration` against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`, the run, then `stop`; read-only). Afterwards `git status` must show no change under `tests/fixtures/graph/`: restore anything LogSeq rewrote with `git checkout -- tests/fixtures/graph` and delete `logseq/bak/`
+- `npm run test:integration` against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`, the run, then `stop`; read-only). The instance opens a copy (#151), so afterwards `git status` must still show no change under `tests/fixtures/graph/`
 - `npx tsx scripts/measure-api-calls.ts` still runs
 - A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
 
@@ -664,7 +664,7 @@ npm run build
 npx tsx scripts/logseq-instance.ts start
 npm run test:integration          # picks up .logseq-instance/config.json while the instance runs
 npx tsx scripts/logseq-instance.ts stop
-git status                        # LogSeq may rewrite fixture files; restore them, never commit them
+git status                        # sanity check: nothing under tests/fixtures/graph/ (the instance opens a copy, #151)
 
 # Verify Datalog/API constraints (read-only); the fixture reproduces all of them
 LOGSEQ_MCP_CONFIG=$PWD/.logseq-instance/config.json npx tsx scripts/probe-constraints.ts
