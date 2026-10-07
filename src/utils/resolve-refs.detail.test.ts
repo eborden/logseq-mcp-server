@@ -472,8 +472,9 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     code: 'refs_unavailable',
     message:
       `LogSeq returned no answer when looking up ${count} reference(s) (possibly no graph open or a re-index ` +
-      'in progress), so they were not resolved and are left as written. This does not mean they are missing. ' +
-      'Retry in a moment, or call logseq_get_graph_info to check which graph is open.'
+      'in progress), so they were not resolved and are left as written with status "unavailable". ' +
+      'This does not mean they are missing. Retry in a moment, or call logseq_get_graph_info to check which ' +
+      'graph is open.'
   });
   const nullClient = () => {
     const executeDatalogQuery = vi.fn(async () => null);
@@ -484,8 +485,7 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     const { client } = nullClient();
     const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: `see ${ref(B)}` }]);
     expect(annotated(blocks[0]).resolvedContent).toBe(`see ${ref(B)}`);
-    // `depth_limit` is the existing "not followed, left as written" status; BR-0007 lists no other
-    expect(annotated(blocks[0]).resolvedRefs).toEqual([{ uuid: B, content: null, page: null, status: 'depth_limit' }]);
+    expect(annotated(blocks[0]).resolvedRefs).toEqual([{ uuid: B, content: null, page: null, status: 'unavailable' }]);
     expect(warnings).toEqual([unavailable(1)]);
   });
 
@@ -516,8 +516,8 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content }]);
     expect(annotated(blocks[0]).resolvedContent).toBe(content);
     expect(annotated(blocks[0]).resolvedRefs).toEqual([
-      { uuid: B, embed: 'block', content: null, page: null, status: 'depth_limit' },
-      { embed: 'page', content: null, page: 'Some Page', status: 'depth_limit' }
+      { uuid: B, embed: 'block', content: null, page: null, status: 'unavailable' },
+      { embed: 'page', content: null, page: 'Some Page', status: 'unavailable' }
     ]);
     expect(warnings).toEqual([unavailable(2)]);
   });
@@ -533,7 +533,7 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     expect(annotated(blocks[0]).resolvedContent).toBe(`inner ${ref(C)}`);
     expect(annotated(blocks[0]).resolvedRefs).toEqual([
       { uuid: B, content: `inner ${ref(C)}`, page: 'Alpha', status: 'ok' },
-      { uuid: C, content: null, page: null, status: 'depth_limit' }
+      { uuid: C, content: null, page: null, status: 'unavailable' }
     ]);
     expect(warnings).toEqual([unavailable(1)]);
   });
@@ -551,7 +551,7 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     expect(annotated(blocks[0]).resolvedRefs).toEqual([
       { uuid: B, content: 'plain', page: 'Alpha', status: 'ok' },
       { uuid: C, content: `see ${embedBlock(B)}`, page: 'Alpha', status: 'ok' },
-      { uuid: B, embed: 'block', content: null, page: null, status: 'depth_limit' }
+      { uuid: B, embed: 'block', content: null, page: null, status: 'unavailable' }
     ]);
     expect(warnings).toEqual([unavailable(1)]);
   });
@@ -591,6 +591,33 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     // level 2 asks for C and gets null, which caches nothing. E, found at level 1, shows C again, but E was
     // already scanned, so level 3 asks for nothing: 2 queries. Without the scanned set it would be 3.
     expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps depth_limit for a ref past the depth limit and unavailable for a null-answered one (#272)', async () => {
+    // Level 1 finds B, C and E. B shows C, C shows E: no new uuid. E shows D, so level 2 asks for D and gets null.
+    // A -> B -> C -> E puts E at depth 3, past maxDepth 2; A -> E -> D reaches D, which was never looked up.
+    const executeDatalogQuery = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [{ id: 1, uuid: B, content: ref(C), page: alphaPage }],
+        [{ id: 2, uuid: C, content: ref(E), page: alphaPage }],
+        [{ id: 3, uuid: E, content: ref(D), page: alphaPage }]
+      ])
+      .mockResolvedValueOnce(null);
+    const client = { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient;
+    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: `${ref(B)} ${ref(C)} ${ref(E)}` }]);
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+    const statuses = annotated(blocks[0]).resolvedRefs!.map(r => [r.uuid, r.status]);
+    expect(statuses).toEqual([
+      [B, 'ok'], [C, 'ok'], [E, 'depth_limit'], [E, 'ok'], [D, 'unavailable']
+    ]);
+    expect(warnings.map(w => [w.code, w.message.match(/\d+/)![0]])).toEqual([
+      ['refs_depth_limit', '1'],
+      ['refs_unavailable', '1']
+    ]);
+    // The depth-limit advice names only the depth-limited entries; the unavailable ones have retry advice instead
+    expect(warnings[0].howToFetchAll).toContain('"depth_limit"');
+    expect(warnings[1]).not.toHaveProperty('howToFetchAll');
   });
 
   it('still reports a ref as missing, with no warning, when the answer is a real empty array', async () => {
