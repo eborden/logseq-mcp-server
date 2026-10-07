@@ -648,8 +648,7 @@ export async function queryJournals(
         // The query pulls each ref as a page map. Keep the concepts for the roll-up
         // and hand the tree the bare `{id}` refs the Editor API returns.
         if (!Array.isArray(block.refs)) return block;
-        const concepts = extractConceptRefs(block);
-        if (concepts.length > 0) refsByBlock.set(block.id, concepts);
+        refsByBlock.set(block.id, extractConceptRefs(block));
         return {
           ...block,
           refs: block.refs.map(ref => ({ id: entityId(ref) }))
