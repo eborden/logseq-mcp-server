@@ -92,8 +92,8 @@ function scanTokens(text: string): Token[] {
 }
 
 /** A ref's text: the content without the `id::` property line LogSeq stores in it. */
-function cleanContent(content: string | undefined): string {
-  return (content ?? '').replace(/^[ \t]*id::[ \t]*[0-9a-f-]{36}[ \t]*(\r?\n|$)/gim, '').trimEnd();
+function cleanContent(content: string): string {
+  return content.replace(/^[ \t]*id::[ \t]*[0-9a-f-]{36}[ \t]*(\r?\n|$)/gim, '').trimEnd();
 }
 
 /**
