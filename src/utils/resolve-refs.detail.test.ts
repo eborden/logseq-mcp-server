@@ -578,6 +578,21 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     expect(warnings.map(w => w.code)).toEqual(['refs_unavailable']);
   });
 
+  it('does not ask again for a null-answered ref that a ref already found shows again (#258)', async () => {
+    const executeDatalogQuery = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [{ id: 1, uuid: B, content: `${ref(E)} ${ref(C)}`, page: alphaPage }],
+        [{ id: 2, uuid: E, content: ref(C), page: alphaPage }]
+      ])
+      .mockResolvedValue(null);
+    const client = { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient;
+    await resolveBlockRefs(client, [{ uuid: A, content: `${ref(B)} ${ref(E)}` }], { maxDepth: 3 });
+    // level 2 asks for C and gets null, which caches nothing. E, found at level 1, shows C again, but E was
+    // already scanned, so level 3 asks for nothing: 2 queries. Without the scanned set it would be 3.
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+  });
+
   it('still reports a ref as missing, with no warning, when the answer is a real empty array', async () => {
     const { client } = rawClient([]);
     const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }]);
