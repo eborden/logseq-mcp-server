@@ -31,7 +31,7 @@ Everything else in ADR-0026 stays as written: scope, tools, the baseline format 
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-06
 
