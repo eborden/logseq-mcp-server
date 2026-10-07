@@ -102,6 +102,13 @@ describe('parseArgs', () => {
       throw new Error('expected parseArgs to throw');
     }
 
+    /** What zod itself says about the first issue: the text parseArgs keeps when it has no wording of its own. */
+    function zodMessage(s: z.ZodObject, args: Record<string, unknown>): string {
+      const result = s.safeParse(args);
+      if (result.success) throw new Error('expected the schema to reject the arguments');
+      return result.error.issues[0].message;
+    }
+
     it('names a failure of the whole arguments object "(arguments)" and shows the arguments', () => {
       // no field is at fault, so the issue has an empty path: the value shown is every argument, not "missing"
       const sameValues = z.object({ first: z.string(), second: z.string() }).refine(v => v.first !== v.second, 'the two must differ');
@@ -162,45 +169,70 @@ describe('parseArgs', () => {
     });
 
     it('gives no Example: line when there is no allowed value to show', () => {
-      expect(messageFor(z.object({ v: z.enum([] as never) }), { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: one of ");
+      // An empty list is degenerate and no tool has one; it is here only to cover the branch with no last value to show
+      const message = messageFor(z.object({ v: z.enum([] as never) }), { v: 5 });
+
+      expect(message).toMatch(/^Invalid parameter 'v': 5\n\nExpected: /);
+      expect(message).not.toContain('Example:');
     });
 
     it('keeps the zod message for an issue of another kind, and gives it no Example:', () => {
-      expect(messageFor(z.object({ v: z.string().min(3) }), { v: 'a' })).toBe(
-        "Invalid parameter 'v': \"a\"\n\nExpected: Too small: expected string to have >=3 characters"
-      );
+      const tooShort = z.object({ v: z.string().min(3) });
+
+      expect(messageFor(tooShort, { v: 'a' })).toBe(`Invalid parameter 'v': "a"\n\nExpected: ${zodMessage(tooShort, { v: 'a' })}`);
     });
 
     describe('a union', () => {
       it('keeps the zod message when an alternative is not a plain type, and takes the example from the first one', () => {
         const stringOrList = z.object({ v: z.union([z.string(), z.array(z.string())]) });
 
-        expect(messageFor(stringOrList, { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: Invalid input\nExample: v: \"...\"");
-        expect(messageFor(stringOrList, {})).toBe("Invalid parameter 'v': missing\n\nExpected: Invalid input\nExample: v: \"...\"");
+        expect(messageFor(stringOrList, { v: 5 })).toBe(
+          `Invalid parameter 'v': 5\n\nExpected: ${zodMessage(stringOrList, { v: 5 })}\nExample: v: "..."`
+        );
+        expect(messageFor(stringOrList, {})).toBe(
+          `Invalid parameter 'v': missing\n\nExpected: ${zodMessage(stringOrList, {})}\nExample: v: "..."`
+        );
       });
 
       it('gives no Example: line when the first alternative has no sample value', () => {
         const listOrString = z.object({ v: z.union([z.array(z.string()), z.string()]) });
 
-        expect(messageFor(listOrString, { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: Invalid input");
+        expect(messageFor(listOrString, { v: 5 })).toBe(`Invalid parameter 'v': 5\n\nExpected: ${zodMessage(listOrString, { v: 5 })}`);
       });
 
       it('keeps the zod message when an alternative fails on more than one field', () => {
         // the object alternative reports both missing fields, the first of them "expected string": it must not read as a plain string
         const stringOrPair = z.object({ v: z.union([z.string(), z.object({ a: z.string(), b: z.string() })]) });
 
-        expect(messageFor(stringOrPair, { v: {} })).toBe("Invalid parameter 'v': {}\n\nExpected: Invalid input\nExample: v: \"...\"");
-      });
-
-      it('keeps the zod message for a union of one alternative', () => {
-        expect(messageFor(z.object({ v: z.union([z.string()]) }), { v: 5 })).toBe(
-          "Invalid parameter 'v': 5\n\nExpected: Invalid input\nExample: v: \"...\""
+        expect(messageFor(stringOrPair, { v: {} })).toBe(
+          `Invalid parameter 'v': {}\n\nExpected: ${zodMessage(stringOrPair, { v: {} })}\nExample: v: "..."`
         );
       });
 
+      it('keeps the zod message for a union of one alternative', () => {
+        const single = z.object({ v: z.union([z.string()]) });
+
+        expect(messageFor(single, { v: 5 })).toBe(`Invalid parameter 'v': 5\n\nExpected: ${zodMessage(single, { v: 5 })}\nExample: v: "..."`);
+      });
+
       it('keeps the zod message, with no Example:, for a union of no alternatives', () => {
-        expect(messageFor(z.object({ v: z.union([]) }), { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: Invalid input");
-        expect(messageFor(z.object({ v: z.union([]) }), {})).toBe("Invalid parameter 'v': missing\n\nExpected: Invalid input");
+        const none = z.object({ v: z.union([]) });
+
+        expect(messageFor(none, { v: 5 })).toBe(`Invalid parameter 'v': 5\n\nExpected: ${zodMessage(none, { v: 5 })}`);
+        expect(messageFor(none, {})).toBe(`Invalid parameter 'v': missing\n\nExpected: ${zodMessage(none, {})}`);
+      });
+
+      it('never reads a custom check as a plain type, even when its issue carries an expected key', () => {
+        const custom = z.any().superRefine((value, ctx) => {
+          if (typeof value !== 'string') ctx.addIssue({ code: 'custom', expected: 'string', message: 'need a string' } as never);
+        });
+        const customOrNumber = z.object({ v: z.union([custom, z.number()]) });
+
+        // a custom issue has no kind to name, so the union keeps zod's message; read as "expected string" it would say "a string or a number"
+        expect(messageFor(customOrNumber, { v: true })).toBe(
+          `Invalid parameter 'v': true\n\nExpected: ${zodMessage(customOrNumber, { v: true })}`
+        );
+        expect(messageFor(customOrNumber, { v: true })).not.toContain('a string or a number');
       });
 
       it('lists two alternatives with "or" and no comma', () => {
