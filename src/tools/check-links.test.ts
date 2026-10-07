@@ -728,8 +728,13 @@ describe('checkLinks: warnings', () => {
 
     const result = await checkLinks(client, 'x', '[[x]]');
 
+    // How many the resolver lists is its cap, not this tool's: read it from the result
+    const { candidates, totalCandidates } = result.refs.ambiguous[0];
+    expect(candidates.length).toBeLessThan(totalCandidates);
+    expect(result.warnings).toHaveLength(1);
     const [warning] = result.warnings;
-    expect(warning.message).toContain('[[x]] is an alias of 12 pages. Showing 10');
+    expect(warning.code).toBe('candidates_truncated');
+    expect(warning.message).toContain(`[[x]] is an alias of ${totalCandidates} pages. Showing ${candidates.length}`);
     expect(warning.message).toContain('the rest');
   });
 
