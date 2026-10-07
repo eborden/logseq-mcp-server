@@ -32,6 +32,6 @@ Date: 2026-10-07
 
 ## Mechanical enforcement
 
-- test: `src/mutation-ci.test.ts` (the budget boundary, the priority order, the prefix rule, the fallback for a file with no count, the counts read from a Stryker-shaped incremental file, the summary text, and the workflow order: restore, then plan, then the step that deletes the file)
+- test: `src/mutation-ci.test.ts` (the budget boundary, the priority order, the prefix rule, the fallback for a file with no count, the counts read from a Stryker-shaped incremental file, the summary text, and the workflow order: restore, then plan, then the step that deletes the file, and the one `BASE_SHA` shared by the plan and the ratchet)
 - test: `src/mutation-ratchet.test.ts` (the warning and summary line for files left to the weekly run, by group)
 - ci: `.github/workflows/ci.yml` (the `mutation` job)

@@ -139,8 +139,8 @@ export type PlanMode = 'incremental' | 'targeted' | 'empty';
  *
  * The budget keeps the 3.0 min of spare time that ADR-0027's cap of 3 files left in its worst case, for
  * any mix of files, not only for baseline entries:
- *   (10 min timeout - 0.8 min overhead - 3.0 min spare) x 60 s / 0.29 s per mutant = 372 / 0.29 = 1,283,
- *   rounded down to 1,280, which is also the three largest files together (510 + 420 + 350)
+ *   (10 min timeout - 0.8 min overhead - 3.0 min spare) x 60 s / 0.29 s per mutant = 372 / 0.29 = 1,282.8,
+ *   rounded down to the nearest ten, 1,280, which is also the three largest files together (510 + 420 + 350)
  *   1,280 mutants x 0.29 s = 6.2 min, + 0.8 min = 7.0 min, 3.0 min spare
  * The spare is not room to spend. The counts are estimates (they come from main's file, and the PR may have
  * grown a file) and time per mutant differs by file. At the average file (6,342 / 44 = about 144 mutants)
