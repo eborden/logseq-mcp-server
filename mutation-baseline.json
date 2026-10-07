@@ -4,7 +4,7 @@
     "src/client.ts": { "score": 82.0, "ignores": 0 },
     "src/config.ts": { "score": 92.0, "ignores": 0 },
     "src/datalog/queries.ts": { "score": 94.0, "ignores": 0 },
-    "src/errors.ts": { "score": 58.0, "ignores": 0 },
+    "src/errors.ts": { "score": 100.0, "ignores": 0 },
     "src/prompts.ts": { "score": 60.0, "ignores": 0 },
     "src/resources.ts": { "score": 60.0, "ignores": 0 },
     "src/response-schemas.ts": { "score": 67.0, "ignores": 0 },
