@@ -21,7 +21,7 @@
     "src/tools/get-page.ts": { "score": 95.0, "ignores": 0 },
     "src/tools/list-pages.ts": { "score": 93.0, "ignores": 0 },
     "src/tools/query-by-date-range.ts": { "score": 84.0, "ignores": 0 },
-    "src/tools/query-by-property.ts": { "score": 83.0, "ignores": 0 },
+    "src/tools/query-by-property.ts": { "score": 95.0, "ignores": 0 },
     "src/tools/search-blocks.ts": { "score": 88.0, "ignores": 0 },
     "src/tools/search-by-relationship.ts": { "score": 85.0, "ignores": 0 },
     "src/utils/alias-set.ts": { "score": 97.0, "ignores": 0 },
