@@ -1,22 +1,25 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { getConceptEvolution } from './get-concept-evolution.js';
 import { LogseqClient } from '../client.js';
 
 /**
- * #249: `group_by: "week"` must give the same key on every host, whatever its time zone. These tests run
- * the tool under zones that have a daylight-saving change, by assigning `process.env.TZ` (Node re-reads it
- * on assignment; the unit suite runs in forked processes, where this works) and restoring it afterwards.
- * The set-up check fails loud if the zone didn't take. A `TZ` set only in the shell would not do: the
- * default `TZ` may be UTC, where the bug is hidden, and a host that can't switch zones must not pass by accident.
+ * #249: `group_by: "week"` must give the same key on every host, whatever its time zone.
+ *
+ * The checks that need no particular zone (the 20250408/20250409 pair and every day of two years) run in
+ * this process, under whatever zone the host has, so they also kill mutants under Stryker. The checks
+ * under zones with daylight saving run in a child process (`get-concept-evolution.week-tz.child.mjs`) with
+ * `TZ` in its environment. Assigning `process.env.TZ` here would not do: Stryker's vitest runner uses
+ * worker threads, whose environment is a copy, so the zone would never change and a test of it would
+ * either fail or pass by accident. The child checks that the zone took effect and fails loud if not.
  */
 
-const ZONES = ['UTC', 'America/New_York', 'Europe/Berlin', 'Australia/Sydney'] as const;
-
-const originalTz = process.env.TZ;
-afterEach(() => {
-  if (originalTz === undefined) delete process.env.TZ;
-  else process.env.TZ = originalTz;
-});
+const ZONES = ['America/New_York', 'Europe/Berlin', 'Australia/Sydney'] as const;
+const CHILD = fileURLToPath(new URL('./get-concept-evolution.week-tz.child.mjs', import.meta.url));
+// vite-node comes with vitest and runs the TypeScript source as it is (tsx is not a dependency)
+const VITE_NODE = fileURLToPath(new URL('../../node_modules/vite-node/vite-node.mjs', import.meta.url));
+const YEARS = [2024, 2025];
 
 const RESOLVED_CONCEPT = [[{ id: 100, name: 'concept', 'original-name': 'Concept' }, 'name']];
 
@@ -62,33 +65,47 @@ function daysOf(year: number): Array<{ day: number; dayOfYear: number }> {
   return days;
 }
 
-describe.each(ZONES)('getConceptEvolution week keys under TZ=%s', zone => {
-  const useZone = () => {
-    process.env.TZ = zone;
-    // Fail loud if the zone did not take: a zone with daylight saving has a different offset in January and April.
-    if (zone !== 'UTC') {
-      expect(new Date(2025, 0, 1).getTimezoneOffset()).not.toBe(new Date(2025, 3, 9).getTimezoneOffset());
-    }
-  };
+/** The week key of every day of `years`, from `floor(dayOfYear / 7) + 1`, computed without `Date`. */
+const expectedKeys = (years: number[]) =>
+  Object.fromEntries(
+    years.flatMap(year =>
+      daysOf(year).map(({ day, dayOfYear }) => [
+        day,
+        `${year}-W${(Math.floor(dayOfYear / 7) + 1).toString().padStart(2, '0')}`
+      ])
+    )
+  );
 
+describe('getConceptEvolution week keys, in the host time zone', () => {
   it('puts 20250408 in 2025-W14 and 20250409 in 2025-W15 (day 98 from 1 January starts week 15)', async () => {
-    useZone();
-
     const keys = await weekKeysOf([20250408, 20250409]);
 
     expect(keys.get(20250408)).toBe('2025-W14');
     expect(keys.get(20250409)).toBe('2025-W15');
   });
 
-  it.each([2024, 2025])('keys every day of %i as floor(dayOfYear / 7) + 1', async year => {
-    useZone();
-    const days = daysOf(year);
+  it.each(YEARS)('keys every day of %i as floor(dayOfYear / 7) + 1', async year => {
+    const keys = await weekKeysOf(daysOf(year).map(d => d.day));
 
-    const keys = await weekKeysOf(days.map(d => d.day));
-
-    const expected = new Map(
-      days.map(({ day, dayOfYear }) => [day, `${year}-W${(Math.floor(dayOfYear / 7) + 1).toString().padStart(2, '0')}`])
-    );
-    expect(keys).toEqual(expected);
+    expect(Object.fromEntries(keys)).toEqual(expectedKeys([year]));
   });
+});
+
+describe.each(ZONES)('getConceptEvolution week keys under TZ=%s (child process)', zone => {
+  it('gives the same keys as in UTC for every day of 2024 and 2025', () => {
+    const days = YEARS.flatMap(year => daysOf(year).map(d => d.day));
+
+    const child = spawnSync(process.execPath, [VITE_NODE, CHILD], {
+      env: { ...process.env, TZ: zone },
+      input: JSON.stringify(days),
+      encoding: 'utf8',
+      timeout: 60000
+    });
+
+    expect(child.stderr).toBe('');
+    expect(child.status).toBe(0);
+    const { keys } = JSON.parse(child.stdout) as { keys: Record<string, string> };
+    expect(keys).toEqual(expectedKeys(YEARS));
+    expect([keys['20250408'], keys['20250409']]).toEqual(['2025-W14', '2025-W15']);
+  }, 60000);
 });
