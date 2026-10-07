@@ -27,7 +27,7 @@ Everything else in ADR-0027 stands: one base commit per job, the audit-claim cor
 
 ## Status
 
-accepted
+superseded by 0029-mutation-cache-miss-plan-uses-the-prs-own-diff
 
 Date: 2026-10-07
 
