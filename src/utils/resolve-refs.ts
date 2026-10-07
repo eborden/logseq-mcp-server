@@ -205,7 +205,8 @@ async function fetchLevels(
       }
     }
 
-    if (blockUuids.size > 0 || descendantUuids.size > 0 || pageNames.size > 0) {
+    // A block embed's uuid is in `blockUuids` as well, so `descendantUuids` needs no test of its own
+    if (blockUuids.size > 0 || pageNames.size > 0) {
       const { query, inputs } = DatalogQueryBuilder.refTargets({
         blockUuids: [...blockUuids],
         descendantUuids: [...descendantUuids],
