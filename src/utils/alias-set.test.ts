@@ -270,9 +270,9 @@ describe('resolveAliasSetByName', () => {
     expect(await resolveAliasSetByName(fakeClient(null as unknown as unknown[]).client, 'migration')).toBeNull();
   });
 
-  it('returns null when the only member is the page itself (defensive: LogSeq sends no such row)', async () => {
-    // The alias closure never returns the start as its own member, so this row is not a real answer.
-    // It pins that a group of one is "no aliases" (null), whatever the rows hold.
+  it('returns null when the rows hold only the start page (defensive: LogSeq never sends that alone)', async () => {
+    // The start comes back as its own member only through an alias, so a self-row never arrives alone;
+    // this pins that a group of one is null.
     const { client } = fakeClient([[member(jordanRivera), member(jordanRivera)]]);
 
     expect(await resolveAliasSetByName(client, 'Jordan Rivera')).toBeNull();
