@@ -2,7 +2,8 @@
  * The decisions and the report table of the CI mutation jobs (ADR-0026, #204).
  *
  * `plan` decides what the PR `mutation` job runs, `summary` turns Stryker's JSON report
- * into the per-file table for the job summary. Neither fails a build: the gate is
+ * into the per-file table for the job summary, and `nightly` decides whether the nightly check
+ * dispatches a weekly run to reset a stale cache (#279). None fails a build: the gate is
  * scripts/mutation-ratchet.ts (#205).
  *
  * Runs on Node 24 as plain TypeScript (type stripping), so it imports `node:` modules only,
@@ -10,8 +11,9 @@
  *
  *   node scripts/mutation-ci.ts plan --cache hit|miss [--since <cache's commit>] [--fallback-since <PR base>] [--out reports/mutation/plan.json]
  *   node scripts/mutation-ci.ts summary [--plan reports/mutation/plan.json] [--report reports/mutation/mutation.json]
+ *   node scripts/mutation-ci.ts nightly --caches <caches API JSON> --runs <workflow runs API JSON>
  *
- * `plan` prints `mode=` and `mutate=` lines for $GITHUB_OUTPUT. Markdown goes to stdout from `summary`.
+ * `plan` prints `mode=` and `mutate=` lines for $GITHUB_OUTPUT, `nightly` prints `dispatch=` and `reason=`. Markdown goes to stdout from `summary`.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -447,9 +449,157 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
 }
 
 // ---------------------------------------------------------------------------
+// Nightly check (#279, ADR-0030)
+
+/**
+ * A `mutation-weekly.yml` run on main that started this long ago, or later, holds the nightly check back,
+ * so it dispatches at most one run a night (it runs every 24 hours) and never on top of a scheduled run.
+ */
+export const RECENT_RUN_HOURS = 20;
+
+export const CACHE_KEY_PREFIX = 'mutation-incremental-';
+
+/** A `mutation-weekly.yml` run on main, from the Actions API. */
+export interface WeeklyRun {
+  /** `queued`, `in_progress`, `completed`, ... Anything but `completed` is in flight. */
+  status: string;
+  /** When it started (or was created), ISO 8601. Null when the API gave neither. */
+  startedAt: string | null;
+}
+
+export interface NightlyInput {
+  /** The commit of the newest saved `mutation-incremental-*` cache on main, or null when none is saved. */
+  cacheCommit: string | null;
+  /**
+   * Main's commits after `cacheCommit`, each with the paths it changed. Null when `cacheCommit` is not in
+   * this checkout's history, so nothing since it can be read.
+   */
+  commitsSince: { sha: string; files: string[] }[] | null;
+  /** The blind-spot classification the PR plan uses (`isBlindSpot` with the config's scope). */
+  blindSpot: (path: string) => boolean;
+  runs: WeeklyRun[];
+  now: Date;
+}
+
+export interface NightlyDecision {
+  dispatch: boolean;
+  reason: string;
+}
+
+/**
+ * Whether the nightly check dispatches `mutation-weekly.yml` on main. Only when the cache is stale: none is
+ * saved, its commit isn't in main's history, or a commit on main since it changed a blind-spot input. Then
+ * every push to main takes the cache-miss path and can't save a new one (ADR-0029, Consequences), so only a
+ * weekly run resets it. Even then, not when a weekly run on main is in flight or started in the last
+ * RECENT_RUN_HOURS hours, since that run is the reset (or a failed one, retried the next night).
+ */
+export function nightlyDecision(input: NightlyInput): NightlyDecision {
+  let stale: string | null = null;
+  if (input.cacheCommit === null) stale = 'no incremental cache is saved from main';
+  else if (input.commitsSince === null) stale = `the newest cache's commit ${input.cacheCommit} is not in main's history`;
+  else {
+    // Newest first, as git log lists them.
+    const hit = input.commitsSince.find(c => c.files.some(input.blindSpot));
+    if (hit) {
+      const files = hit.files.filter(input.blindSpot);
+      stale = `commit ${hit.sha} on main changed inputs that incremental mode can't see (${files.join(', ')}) after the newest cache's commit ${input.cacheCommit}`;
+    }
+  }
+  if (stale === null) {
+    return { dispatch: false, reason: `the newest cache (commit ${input.cacheCommit}) is current: no blind-spot change on main since` };
+  }
+
+  const inFlight = input.runs.find(r => r.status !== 'completed');
+  if (inFlight) return { dispatch: false, reason: `${stale}, but a weekly run on main is ${inFlight.status}` };
+  const since = input.now.getTime() - RECENT_RUN_HOURS * 3600 * 1000;
+  // A run with no readable start time counts as recent: the ceiling holds when in doubt.
+  const recent = input.runs.find(r => {
+    const t = r.startedAt === null ? NaN : Date.parse(r.startedAt);
+    return Number.isNaN(t) || t >= since;
+  });
+  if (recent) {
+    return { dispatch: false, reason: `${stale}, but a weekly run on main started in the last ${RECENT_RUN_HOURS} hours (${recent.startedAt ?? 'unknown time'})` };
+  }
+  return { dispatch: true, reason: stale };
+}
+
+/**
+ * The commit of the newest `mutation-incremental-<sha>` cache saved on main, from the Actions caches API
+ * (`{ actions_caches: [{ key, ref, created_at }] }`). That is the one a PR's `restore-keys` falls back to.
+ * A key without a full SHA after the prefix is skipped. Null when there is none, or the shape is unknown.
+ */
+export function newestCacheCommit(doc: unknown): string | null {
+  const caches = typeof doc === 'object' && doc !== null ? (doc as { actions_caches?: unknown }).actions_caches : null;
+  if (!Array.isArray(caches)) return null;
+  let best: { sha: string; at: number } | null = null;
+  for (const c of caches as { key?: unknown; ref?: unknown; created_at?: unknown }[]) {
+    if (typeof c?.key !== 'string' || !c.key.startsWith(CACHE_KEY_PREFIX) || c.ref !== 'refs/heads/main') continue;
+    const sha = c.key.slice(CACHE_KEY_PREFIX.length);
+    const at = typeof c.created_at === 'string' ? Date.parse(c.created_at) : NaN;
+    if (!/^[0-9a-f]{40}$/.test(sha) || Number.isNaN(at)) continue;
+    if (best === null || at > best.at) best = { sha, at };
+  }
+  return best?.sha ?? null;
+}
+
+/** The runs on main from the Actions workflow-runs API (`{ workflow_runs: [...] }`). An unknown shape gives none. */
+export function weeklyRunsFromApi(doc: unknown): WeeklyRun[] {
+  const runs = typeof doc === 'object' && doc !== null ? (doc as { workflow_runs?: unknown }).workflow_runs : null;
+  if (!Array.isArray(runs)) return [];
+  return (runs as { status?: unknown; head_branch?: unknown; run_started_at?: unknown; created_at?: unknown }[])
+    .filter(r => r?.head_branch === 'main')
+    .map(r => ({
+      status: typeof r.status === 'string' ? r.status : 'unknown',
+      startedAt: typeof r.run_started_at === 'string' ? r.run_started_at : typeof r.created_at === 'string' ? r.created_at : null,
+    }));
+}
+
+/**
+ * Main's first-parent commits after `since`, newest first, from
+ * `git log --format=%x00%H --name-only ...`: each record is a NUL, the SHA, then one path per line.
+ */
+export function parseCommitLog(text: string): { sha: string; files: string[] }[] {
+  return text
+    .split('\0')
+    .slice(1)
+    .map(record => {
+      const [sha, ...files] = record.split('\n').map(l => l.trim()).filter(Boolean);
+      return { sha, files };
+    });
+}
+
+export function nightlyFromRepo(
+  opts: { caches: unknown; runs: unknown; now: Date; config: { mutate: string[] } },
+  io: Pick<PlanIo, 'git'>,
+): NightlyDecision {
+  const scope = scopeFromConfig(opts.config);
+  const cacheCommit = newestCacheCommit(opts.caches);
+  let commitsSince: { sha: string; files: string[] }[] | null = null;
+  if (cacheCommit !== null) {
+    try {
+      io.git('merge-base', '--is-ancestor', cacheCommit, 'HEAD');
+      // --no-renames lists a moved file's old path too, and --diff-merges=first-parent gives a merge commit
+      // its own files, so no blind-spot change on main's line is missed.
+      commitsSince = parseCommitLog(
+        io.git('log', '--first-parent', '--diff-merges=first-parent', '--no-renames', '--name-only', '--format=%x00%H', `${cacheCommit}..HEAD`),
+      );
+    } catch {
+      commitsSince = null;
+    }
+  }
+  return nightlyDecision({
+    cacheCommit,
+    commitsSince,
+    blindSpot: p => isBlindSpot(p, scope),
+    runs: weeklyRunsFromApi(opts.runs),
+    now: opts.now,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 
-const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+const git =(...args: string[]): string => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
@@ -595,12 +745,30 @@ function runSummary(args: string[]): void {
   console.log(renderSummary(loaded, scores));
 }
 
+function runNightly(args: string[]): void {
+  const caches = flag(args, 'caches');
+  const runs = flag(args, 'runs');
+  if (caches === undefined || runs === undefined) throw new Error('nightly needs --caches <file> --runs <file>');
+  const result = nightlyFromRepo(
+    {
+      caches: JSON.parse(readFileSync(caches, 'utf8')),
+      runs: JSON.parse(readFileSync(runs, 'utf8')),
+      now: new Date(),
+      config: JSON.parse(readFileSync('stryker.config.json', 'utf8')),
+    },
+    { git },
+  );
+  console.log(`dispatch=${result.dispatch}`);
+  console.log(`reason=${result.reason.replace(/\n/g, ' ')}`);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [command, ...rest] = process.argv.slice(2);
   if (command === 'plan') runPlan(rest);
   else if (command === 'summary') runSummary(rest);
+  else if (command === 'nightly') runNightly(rest);
   else {
-    console.error('Usage: node scripts/mutation-ci.ts plan|summary [options]');
+    console.error('Usage: node scripts/mutation-ci.ts plan|summary|nightly [options]');
     process.exit(2);
   }
 }
