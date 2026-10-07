@@ -155,11 +155,13 @@ describe('check', () => {
     const below = report({ 'src/a.ts': { killed: 89, survived: 11 }, 'src/b.ts': { killed: 4, survived: 1, disabled: ['x'] } });
 
     it('passes a file whose re-run is back at its baseline, and records that it changed the result', () => {
-      const rerun = vi.fn((): FileStats => fileStats(mutants({ killed: 90, survived: 10 })));
+      const rerun = vi.fn((_file: string, _timeoutMs: number): FileStats => fileStats(mutants({ killed: 90, survived: 10 })));
       const result = check({ report: below, baseline: base, expected: null, exists: present, rerun });
       expect(result.failures).toEqual([]);
       expect(rerun).toHaveBeenCalledTimes(1);
-      expect(rerun).toHaveBeenCalledWith('src/a.ts', DEFAULT_RERUN_BUDGET.budgetMs);
+      // The timeout is what is left of the budget on the real clock, so it can be a millisecond short.
+      expect(rerun).toHaveBeenCalledWith('src/a.ts', expect.any(Number));
+      expect(rerun.mock.calls[0][1]).toBeLessThanOrEqual(DEFAULT_RERUN_BUDGET.budgetMs);
       expect(result.reruns).toEqual([{ file: 'src/a.ts', first: 89, second: 90, baseline: 90, cleared: true }]);
     });
 
