@@ -182,7 +182,9 @@ export function checkProse(before: string, after: string): ProseCheck {
   const b = stripBrackets(after);
   if (a === b) return { ok: true };
   let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  // a and b differ, so this stops at or before the first difference: past the end of one,
+  // its character is undefined and the other's is not
+  while (a[i] === b[i]) i++;
   // Never point into the middle of a surrogate pair
   if (i > 0 && /[\uD800-\uDBFF]/.test(a[i - 1])) i--;
   return { ok: false, firstDifference: { ...position(a, i), before: excerpt(a, i), after: excerpt(b, i) } };
