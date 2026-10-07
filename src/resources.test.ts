@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from './index.js';
 import { LogseqClient } from './client.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
@@ -410,9 +410,9 @@ describe('MCP resources (#46)', () => {
         [{ id: 2, name: 'robert jones', 'original-name': 'Robert Jones', file: { id: 10 } }, 'alias'],
       ];
       const executeDatalogQuery = vi.spyOn(logseq, 'executeDatalogQuery').mockResolvedValue([] as any);
-      const handlers: any[] = [];
-      registerResources({ setRequestHandler: (_schema: unknown, handler: unknown) => handlers.push(handler) } as any, logseq);
-      const read = handlers[2];
+      const handlers = new Map<unknown, any>();
+      registerResources({ setRequestHandler: (schema: unknown, handler: unknown) => handlers.set(schema, handler) } as any, logseq);
+      const read = handlers.get(ReadResourceRequestSchema);
       const dataOf = async (uri: string) => {
         const error: any = await read({ params: { uri } }).catch((e: unknown) => e);
         return { code: error.code, data: error.data };
