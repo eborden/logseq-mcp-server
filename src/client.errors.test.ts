@@ -151,7 +151,7 @@ describe('LogseqClient.callAPI failures and answers', () => {
       answerWith({ error: 'MethodNotExist: logseq.Editor.noSuchMethod' });
 
       await expect(makeClient().callAPI('logseq.Editor.noSuchMethod')).rejects.toThrow(
-        'LogSeq API error: MethodNotExist: logseq.Editor.noSuchMethod'
+        'MethodNotExist: logseq.Editor.noSuchMethod'
       );
     });
 
@@ -183,10 +183,10 @@ describe('LogseqClient.callAPI failures and answers', () => {
       expect(await makeClient().callAPI('logseq.App.getVersion')).toBe(value);
     });
 
-    it('does not mistake a string that contains the word error for an error answer', async () => {
-      answerWith('error');
+    it('does not mistake an object that mentions error under another key for an error answer', async () => {
+      answerWith({ message: 'error', errors: ['x'] });
 
-      expect(await makeClient().callAPI('logseq.App.getVersion')).toBe('error');
+      expect(await makeClient().callAPI('logseq.App.getVersion')).toEqual({ message: 'error', errors: ['x'] });
     });
   });
 
@@ -216,13 +216,15 @@ describe('LogseqClient.callAPI failures and answers', () => {
       ['a failed Datalog query', () => answerWith({ error: 'Unknown function' }), c => c.executeDatalogQuery('[:find ?x]', 'a')]
     ];
 
-    it.each(failures)('is not in the message or stack of %s', async (_label, arrange, run) => {
+    it.each(failures)('is not in the message, stack, cause or any own property of %s', async (_label, arrange, run) => {
       arrange();
 
       const error = (await caught(run(makeClient()))) as Error;
 
       expect(error.message).not.toContain(TOKEN);
       expect(String(error.stack)).not.toContain(TOKEN);
+      expect(String(error.cause)).not.toContain(TOKEN);
+      expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(TOKEN);
     });
 
     it('is not in the message of the 401 error, which names the URL instead', async () => {
@@ -263,7 +265,7 @@ describe('LogseqClient.callAPI failures and answers', () => {
       answerWith({ error: 'Unknown function clojure.string/lower-case' });
 
       await expect(makeClient().executeDatalogQuery('[:find ?x]')).rejects.toThrow(
-        'LogSeq API error: Unknown function clojure.string/lower-case'
+        'Unknown function clojure.string/lower-case'
       );
     });
   });
