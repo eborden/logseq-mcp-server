@@ -258,7 +258,9 @@ export async function checkLinks(client: LogseqClient, before: string, after: st
 
   const { resolutions, unavailable } = await resolveLinkTargets(client, terms);
   const warnings: ResultWarning[] = [];
-  const refs: RefCheck = { ok: true, resolved: [], unresolved: [], ambiguous: [] };
+  const resolved: ResolvedRef[] = [];
+  const unresolved: string[] = [];
+  const ambiguous: AmbiguousRef[] = [];
 
   if (unavailable) {
     warnings.push({
@@ -271,9 +273,9 @@ export async function checkLinks(client: LogseqClient, before: string, after: st
     for (const term of terms) {
       const resolution = resolutions.get(keyOf(term)) ?? { kind: 'not_found' as const };
       if (resolution.kind === 'found') {
-        refs.resolved.push({ term, page: resolution.originalName, matchedBy: resolution.matchedBy === 'alias' ? 'alias' : 'name' });
+        resolved.push({ term, page: resolution.originalName, matchedBy: resolution.matchedBy === 'alias' ? 'alias' : 'name' });
       } else if (resolution.kind === 'ambiguous') {
-        refs.ambiguous.push({
+        ambiguous.push({
           term,
           candidates: resolution.candidates.map(c => c.originalName),
           totalCandidates: resolution.totalCandidates,
@@ -288,11 +290,16 @@ export async function checkLinks(client: LogseqClient, before: string, after: st
           });
         }
       } else {
-        refs.unresolved.push(term);
+        unresolved.push(term);
       }
     }
   }
-  refs.ok = !unavailable && refs.unresolved.length === 0 && refs.ambiguous.every(a => a.preexisting);
+  const refs: RefCheck = {
+    ok: !unavailable && unresolved.length === 0 && ambiguous.every(a => a.preexisting),
+    resolved,
+    unresolved,
+    ambiguous,
+  };
 
   return {
     ok: prose.ok && brackets.ok && refs.ok && refsPreserved.ok,
