@@ -1212,9 +1212,22 @@ describe.skipIf(process.platform === 'win32')('runInProcessGroup, for real', () 
     const dir = mkdtempSync(join(tmpdir(), 'group-kill-'));
     const pidFile = join(dir, 'grandchild.pid');
     let grandchild = 0;
+    // spawnSync blocks, so the timeout can't start after the shell is ready. Under load the shell may not reach the
+    // `echo` before a short timeout (#276); no PID file means the run proved nothing, so retry with a longer one.
+    const readPid = () => {
+      try {
+        return Number(readFileSync(pidFile, 'utf8').trim());
+      } catch {
+        return 0;
+      }
+    };
     try {
-      const ok = runInProcessGroup('sh', ['-c', `sleep 30 & echo $! > "${pidFile}"; wait`], 500);
-      grandchild = Number(readFileSync(pidFile, 'utf8').trim());
+      let ok = true;
+      for (const timeoutMs of [500, 1500, 3000]) {
+        ok = runInProcessGroup('sh', ['-c', `sleep 30 & echo $! > "${pidFile}"; wait`], timeoutMs);
+        grandchild = readPid();
+        if (grandchild > 1) break;
+      }
       expect(ok).toBe(false);
       expect(Number.isInteger(grandchild) && grandchild > 1).toBe(true);
       // The kill is a signal, so give the OS a moment to reap the orphan.
@@ -1224,5 +1237,5 @@ describe.skipIf(process.platform === 'win32')('runInProcessGroup, for real', () 
       if (grandchild > 1 && alive(grandchild)) process.kill(grandchild, 'SIGKILL');
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
