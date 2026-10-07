@@ -38,7 +38,7 @@
     "src/utils/parse-args.ts": { "score": 98.0, "ignores": 0 },
     "src/utils/parse-response.ts": { "score": 100.0, "ignores": 0 },
     "src/utils/resolve-page.ts": { "score": 89.0, "ignores": 0 },
-    "src/utils/resolve-refs.ts": { "score": 82.0, "ignores": 0 },
+    "src/utils/resolve-refs.ts": { "score": 93.0, "ignores": 0 },
     "src/utils/result-meta.ts": { "score": 97.0, "ignores": 0 },
     "src/utils/slim-entities.ts": { "score": 90.0, "ignores": 0 },
     "src/utils/snippet.ts": { "score": 96.0, "ignores": 0 },
