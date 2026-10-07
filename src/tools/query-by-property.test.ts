@@ -187,6 +187,66 @@ describe('queryByProperty', () => {
     });
   });
 
+  describe('rows LogSeq may send oddly', () => {
+    it('skips a row whose pulled block is null and keeps the others', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([
+        [null],
+        [pulledBlock({ id: 4, uuid: 'd' })],
+        [null],
+        [pulledBlock({ id: 3, uuid: 'c' })]
+      ]);
+
+      const result: any = await queryByProperty(mockClient, 'status', 'active');
+
+      expect(result.map((b: any) => b.uuid)).toEqual(['c', 'd']);
+    });
+
+    it('returns an empty array, not null, when every row is null', async () => {
+      executeDatalogQuery.mockResolvedValueOnce([[null], [null]]);
+
+      expect(await queryByProperty(mockClient, 'status', 'active')).toEqual([]);
+    });
+
+    it('leaves a block with no page without a page key', async () => {
+      const { page: _page, ...noPage } = pulledBlock({ id: 8, uuid: 'x' });
+      executeDatalogQuery.mockResolvedValueOnce([[noPage]]);
+
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active');
+
+      expect(block.uuid).toBe('x');
+      expect(block).not.toHaveProperty('page');
+    });
+
+    it('omits pageName from a slim block with no page', async () => {
+      const { page: _page, ...noPage } = pulledBlock({ id: 8, uuid: 'x' });
+      executeDatalogQuery.mockResolvedValueOnce([[noPage]]);
+
+      const [block]: any = await queryByProperty(mockClient, 'status', 'active', true);
+
+      expect(block.uuid).toBe('x');
+      expect(block).not.toHaveProperty('pageName');
+    });
+
+    it('sorts blocks with no page before every page, by block id', async () => {
+      const noPage = (id: number) => {
+        const { page: _page, ...rest } = pulledBlock({ id, uuid: `n${id}` });
+        return [rest];
+      };
+      executeDatalogQuery.mockResolvedValueOnce([
+        [pulledBlock({ id: 7, uuid: 'p7', page: { id: 10 } })],
+        noPage(9),
+        [pulledBlock({ id: 3, uuid: 'p3', page: { id: 10 } })],
+        noPage(4),
+        [pulledBlock({ id: 6, uuid: 'p6', page: { id: 5 } })],
+        noPage(2)
+      ]);
+
+      const result: any = await queryByProperty(mockClient, 'status', 'active');
+
+      expect(result.map((b: any) => b.uuid)).toEqual(['n2', 'n4', 'n9', 'p6', 'p3', 'p7']);
+    });
+  });
+
   describe('slim results mode', () => {
     it('returns slim blocks with the original page name', async () => {
       executeDatalogQuery.mockResolvedValueOnce([
