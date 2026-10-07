@@ -226,15 +226,18 @@ describe('resolveAliasSets', () => {
   });
 
   it('cuts a group one page over the maximum, dropping the last by name', async () => {
+    // Rows arrive last name first, and ids fall as names rise, so only the name sort decides what is cut
     const others = Array.from({ length: MAX_ALIAS_SET_SIZE }, (_, i) => [
       1,
-      { id: 100 + i, name: `n${String(i).padStart(3, '0')}`, 'original-name': `N${i}` }
-    ]);
+      { id: 200 - i, name: `n${String(i).padStart(3, '0')}`, 'original-name': `N${i}` }
+    ]).reverse();
     const set = await resolveAliasSet(fakeClient(others).client, jordan);
 
     expect(set.members).toHaveLength(MAX_ALIAS_SET_SIZE);
     expect(set.truncated).toBe(true);
-    expect(aliasNames(set)).not.toContain(`n${String(MAX_ALIAS_SET_SIZE - 1).padStart(3, '0')}`);
+    const names = aliasNames(set);
+    expect(names).not.toContain(`n${String(MAX_ALIAS_SET_SIZE - 1).padStart(3, '0')}`);
+    expect(names).toContain(`n${String(MAX_ALIAS_SET_SIZE - 2).padStart(3, '0')}`);
   });
 
   it('propagates an infrastructure error instead of reporting "no aliases"', async () => {
@@ -267,7 +270,9 @@ describe('resolveAliasSetByName', () => {
     expect(await resolveAliasSetByName(fakeClient(null as unknown as unknown[]).client, 'migration')).toBeNull();
   });
 
-  it('returns null for a page that has no aliases, though it has a row', async () => {
+  it('returns null when the only member is the page itself (defensive: LogSeq sends no such row)', async () => {
+    // The alias closure never returns the start as its own member, so this row is not a real answer.
+    // It pins that a group of one is "no aliases" (null), whatever the rows hold.
     const { client } = fakeClient([[member(jordanRivera), member(jordanRivera)]]);
 
     expect(await resolveAliasSetByName(client, 'Jordan Rivera')).toBeNull();
