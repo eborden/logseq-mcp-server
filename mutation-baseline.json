@@ -9,7 +9,7 @@
     "src/resources.ts": { "score": 100.0, "ignores": 0 },
     "src/response-schemas.ts": { "score": 95.0, "ignores": 0 },
     "src/tools/build-context.ts": { "score": 88.0, "ignores": 0 },
-    "src/tools/check-links.ts": { "score": 81.0, "ignores": 0 },
+    "src/tools/check-links.ts": { "score": 90.0, "ignores": 0 },
     "src/tools/get-backlinks.ts": { "score": 91.0, "ignores": 0 },
     "src/tools/get-block.ts": { "score": 100.0, "ignores": 0 },
     "src/tools/get-concept-evolution.ts": { "score": 81.0, "ignores": 0 },
