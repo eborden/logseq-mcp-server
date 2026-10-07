@@ -557,10 +557,30 @@ describe('mutation workflows', () => {
     const ratchet = all.filter(s => s.includes('scripts/mutation-ratchet.ts'));
     expect(ratchet).toHaveLength(1);
     expect(all[all.length - 1]).toBe(ratchet[0]);
-    expect(ratchet[0]).toMatch(/run: node scripts\/mutation-ratchet\.ts check .*--base "origin\/\$BASE_REF"/);
+    // On a PR only (BASE_REF is empty on a push), against the commit the plan used (next test).
+    expect(ratchet[0]).toMatch(/run: node scripts\/mutation-ratchet\.ts check \$\{BASE_REF:\+--base "\$BASE_SHA"\}/);
     // A JSON array, so a label name with a comma in it can't pass for two (parseLabels).
     expect(ratchet[0]).toMatch(/PR_LABELS: \$\{\{ toJSON\(github\.event\.pull_request\.labels\.\*\.name\) \}\}/);
     expect(ratchet[0]).not.toMatch(/continue-on-error|\bif:/);
+  });
+
+  // #223: two different bases (the PR base commit for the plan, a merge-base for the ratchet) can name different
+  // commits when the base has moved. One job-level input feeds both.
+  it('the plan and the ratchet use the same base commit, from one job-level BASE_SHA', () => {
+    const defs = [...mutationJob.matchAll(/^ {6}BASE_SHA: (.+)$/gm)];
+    expect(defs).toHaveLength(1);
+    expect(mutationJob).toMatch(/\n    env:\n(?: {6}#.*\n)*      BASE_SHA: /);
+    expect(defs[0][1]).toBe('${{ github.event.pull_request.base.sha || github.event.before }}');
+    // No other step spells the PR base out again: the definition and the cache key are the only two.
+    expect(mutationJob.match(/pull_request\.base\.sha/g)).toHaveLength(2);
+    const all = steps(mutationJob);
+    const planStep = all.find(s => s.includes('mutation-ci.ts plan'));
+    const ratchet = all.find(s => s.includes('mutation-ratchet.ts'));
+    expect(planStep).toBeDefined();
+    expect(planStep!.match(/--fallback-since "\$BASE_SHA"/g)).toHaveLength(2); // the hit and the miss call
+    expect(planStep).not.toMatch(/^ +BASE_SHA:/m);
+    expect(ratchet).toMatch(/--base "\$BASE_SHA"/);
+    expect(ratchet).not.toMatch(/origin\/|merge-base/);
   });
 
   it('a label change re-runs the pull request checks, so the label can excuse a lowered score', () => {

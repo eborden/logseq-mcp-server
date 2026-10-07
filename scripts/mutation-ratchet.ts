@@ -12,7 +12,7 @@
  *
  *   node scripts/mutation-ratchet.ts [check] [--report reports/mutation/mutation.json]
  *        [--baseline mutation-baseline.json] [--plan reports/mutation/plan.json]
- *        [--base <git rev>] [--labels '["a","b"]'|a,b] [--no-rerun] [--max-reruns 3] [--rerun-budget-seconds 240]
+ *        [--base <the commit the PR is based on, the one scripts/mutation-ci.ts plans against>] [--labels '["a","b"]'|a,b] [--no-rerun] [--max-reruns 3] [--rerun-budget-seconds 240]
  *   node scripts/mutation-ratchet.ts --update --report <run1.json> --report <run2.json> [--init]
  *   node scripts/mutation-ratchet.ts --update --weekly --report <weekly full run's report>
  *
@@ -715,9 +715,11 @@ function runCheck(args: string[]): number {
   // The base comparison is cheap, so it runs first and its failures are in the log before any re-run starts.
   let compare: CompareResult | null = null;
   if (baseRev) {
-    const mergeBase = git('merge-base', 'HEAD', baseRev).trim();
+    // The commit as given, not its merge-base with HEAD: scripts/mutation-ci.ts reads the PR base's baseline
+    // at the same commit (ci.yml passes one BASE_SHA to both), and a moved base would make the two differ (#223).
+    const baseCommit = git('rev-parse', '--verify', `${baseRev}^{commit}`).trim();
     compare = compareToBase({
-      base: measuredScope(p => gitShow(mergeBase, p)),
+      base: measuredScope(p => gitShow(baseCommit, p)),
       head: measuredScope(p => (existsSync(p) ? readFileSync(p, 'utf8') : null)),
       exists: existsSync,
       labeled,

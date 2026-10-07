@@ -77,6 +77,11 @@ jobs:
     name: Mutation testing
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # The one base commit of this job: the plan reads the PR base's baseline at it and the ratchet
+      # compares the baseline and the mutated scope with it (#223). The PR base, or on a push the
+      # commit before it (the ratchet only compares on a PR).
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
     steps:
       # Full history: the plan diffs against the commit the restored cache was saved from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,7 +110,6 @@ jobs:
         id: plan
         env:
           MATCHED_KEY: ${{ steps.cache.outputs.cache-matched-key }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -n "$MATCHED_KEY" ]; then
             node scripts/mutation-ci.ts plan --cache hit --since "${MATCHED_KEY#mutation-incremental-}" --fallback-since "$BASE_SHA" >> "$GITHUB_OUTPUT"
@@ -152,10 +156,11 @@ jobs:
           retention-days: 30
 
       # The gate (ADR-0026). It compares the report with mutation-baseline.json and, on a PR, the
-      # baseline and the mutated scope with the base branch's copy. A file below its baseline is
-      # re-run once from a fresh sandbox before it fails. Labels and the base go in through env:.
+      # baseline and the mutated scope with the copy at BASE_SHA, the same commit the plan used. A file
+      # below its baseline is re-run once from a fresh sandbox before it fails. Labels and the base go
+      # in through env:.
       - name: Ratchet
         env:
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           BASE_REF: ${{ github.base_ref }}
-        run: node scripts/mutation-ratchet.ts check ${BASE_REF:+--base "origin/$BASE_REF"}
+        run: node scripts/mutation-ratchet.ts check ${BASE_REF:+--base "$BASE_SHA"}
