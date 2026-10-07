@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   BASELINE_LABEL,
   DEFAULT_RERUN_BUDGET,
@@ -899,5 +902,37 @@ describe('leftToWeeklyNotice', () => {
     );
     expect(failing).toContain('Fail: 1 problem(s)');
     expect(failing).toContain('1 changed baseline entries were not mutated');
+  });
+});
+
+// `detached` is not among Node's documented spawnSync options. It works because the option reaches libuv, and the
+// fakes above can't tell if a Node major stops honouring it: `kill(-pid)` would then hit ESRCH, which is swallowed,
+// and the orphaned workers would be back with every test still green. So once, for real, on POSIX (CI is ubuntu).
+describe.skipIf(process.platform === 'win32')('runInProcessGroup, for real', () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it("kills the command's own children when it times out, not just the command", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'group-kill-'));
+    const pidFile = join(dir, 'grandchild.pid');
+    let grandchild = 0;
+    try {
+      const ok = runInProcessGroup('sh', ['-c', `sleep 30 & echo $! > "${pidFile}"; wait`], 500);
+      grandchild = Number(readFileSync(pidFile, 'utf8').trim());
+      expect(ok).toBe(false);
+      expect(Number.isInteger(grandchild) && grandchild > 1).toBe(true);
+      // The kill is a signal, so give the OS a moment to reap the orphan.
+      for (let i = 0; i < 50 && alive(grandchild); i++) await new Promise(r => setTimeout(r, 20));
+      expect(alive(grandchild)).toBe(false);
+    } finally {
+      if (grandchild > 1 && alive(grandchild)) process.kill(grandchild, 'SIGKILL');
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
