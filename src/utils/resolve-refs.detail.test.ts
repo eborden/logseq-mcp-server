@@ -596,6 +596,8 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
   it('keeps depth_limit for a ref past the depth limit and unavailable for a null-answered one (#272)', async () => {
     // Level 1 finds B, C and E. B shows C, C shows E: no new uuid. E shows D, so level 2 asks for D and gets null.
     // A -> B -> C -> E puts E at depth 3, past maxDepth 2; A -> E -> D reaches D, which was never looked up.
+    // D is also both: depth 3 via A -> C -> E -> D (past the limit) and depth 2 via A -> E -> D. Both copies read
+    // `unavailable`, so checking depth before the null answer would fail this test.
     const executeDatalogQuery = vi
       .fn()
       .mockResolvedValueOnce([

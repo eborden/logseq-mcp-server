@@ -334,7 +334,9 @@ class Renderer {
     }
     if (this.store.unavailable.has(`${token.kind}:${token.key}`)) {
       // Checked before depth: it was asked for and got no answer. Not `missing`, which claims the target
-      // does not exist, and not `depth_limit`, whose advice (fetch it with get_block) would not help (#272)
+      // does not exist, and not `depth_limit`, whose advice (fetch it with get_block) would not help (#272).
+      // Safe at any depth: a key enters `store.unavailable` only when a level within maxDepth asked for it, so
+      // a copy past the limit always has a shallower twin that also reads `unavailable`, and a retry fixes both.
       entry.status = 'unavailable';
       this.unavailableRefs.add(pathKey);
       return token.raw;
