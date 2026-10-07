@@ -252,7 +252,8 @@ export async function checkLinks(client: LogseqClient, before: string, after: st
   const refsAfter = keyCounts(after);
   const preexisting = (term: string) => {
     const was = refsBefore.get(keyOf(term)) ?? 0;
-    return was > 0 && (refsAfter.get(keyOf(term)) ?? 0) <= was;
+    // `term` is in `after`, so its count there is at least 1: `<= was` already means `was >= 1`
+    return (refsAfter.get(keyOf(term)) ?? 0) <= was;
   };
 
   const { resolutions, unavailable } = await resolveLinkTargets(client, terms);
