@@ -432,7 +432,7 @@ describe('plan', () => {
         plan({ ...miss, changed: ['src/utils/new.test.ts'], added: ['src/utils/new.test.ts'], readTest: () => "import { x } from './snippet.js';", mutantCounts: () => ({}) }),
         null,
       );
-      expect(text).toContain("The files are the PR's own changes against its base");
+      expect(text).toContain("The files are this change's own, against `BASE_SHA` (the PR base, or the commit before a push), not everything changed since the cached results were saved.");
       expect(text).toContain('1 test file(s) are new in this PR, so the files they import were not mutated for them');
     });
 
@@ -811,6 +811,19 @@ describe('planFromRepo', () => {
       });
       const result = run(io);
       expect(result).toMatchObject({ mode: 'targeted', mutate: raised, fromBaseline: raised, estimatedMutants: 8 * 140, leftToWeekly: [] });
+    });
+
+    // --no-renames lists a moved test as an add and a delete. The add is exempt, so the delete must still pull in
+    // what the old file imported, read at the PR base, or a rename that drops assertions would escape.
+    it('mutates what a renamed test imported: the deleted path is read at the PR base while the new path is only added', () => {
+      const { io } = fakeIo({
+        commits: ['cache111', 'base111'],
+        diff: { cache111: [...drift, 'src/tools/old.test.ts', 'src/tools/new.test.ts'], base111: ['src/tools/old.test.ts', 'src/tools/new.test.ts'] },
+        added: { base111: ['src/tools/new.test.ts'] },
+        files: { 'src/tools/new.test.ts': '', 'src/tools/range.ts': '', [INCREMENTAL]: sizes(counts) },
+        old: { 'base111:src/tools/old.test.ts': "import { a } from './range.js';" },
+      });
+      expect(run(io)).toMatchObject({ mode: 'targeted', fromTests: ['src/tools/range.ts'], addedTests: ['src/tools/new.test.ts'], mutate: ['src/tools/range.ts'] });
     });
 
     it('is the same list as before when the cache is the PR base, or there is no cache', () => {
