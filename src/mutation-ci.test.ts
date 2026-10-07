@@ -562,6 +562,8 @@ describe('mutation workflows', () => {
     // A JSON array, so a label name with a comma in it can't pass for two (parseLabels).
     expect(ratchet[0]).toMatch(/PR_LABELS: \$\{\{ toJSON\(github\.event\.pull_request\.labels\.\*\.name\) \}\}/);
     expect(ratchet[0]).not.toMatch(/continue-on-error|\bif:/);
+    // The head commit for the "left to the weekly run" annotation (#223), through env: like the other event data.
+    expect(ratchet[0]).toMatch(/PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
   });
 
   // #223: two different bases (the PR base commit for the plan, a merge-base for the ratchet) can name different
