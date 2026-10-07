@@ -176,7 +176,7 @@ function blockMatcher(searchTerm: string, aliasSet: AliasSet | null): (block: Bl
   return block => {
     const content = (block.content ?? '').toLowerCase();
     if (content.includes(term) || wholeWord?.test(content)) return true;
-    return (block.refs ?? []).some(ref => ref?.id !== undefined && pageIds.has(ref.id));
+    return (block.refs ?? []).some(ref => ref.id !== undefined && pageIds.has(ref.id));
   };
 }
 
