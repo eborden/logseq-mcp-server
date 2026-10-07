@@ -208,7 +208,7 @@ function isValidDateFormat(date: number): boolean {
   return true;
 }
 
-const isGiven = (value: unknown): boolean => value !== undefined && value !== null;
+const isGiven = <T>(value: T): value is NonNullable<T> => value !== undefined && value !== null;
 
 /**
  * The one validation path for choosing a range. Exactly one of three groups must be
@@ -242,7 +242,7 @@ function resolveSelection(selection: DateRangeSelection, now: Date): ResolvedSel
   }
 
   if (isGiven(lastN)) {
-    if (typeof lastN !== 'number' || !Number.isInteger(lastN) || lastN < 1) {
+    if (!Number.isInteger(lastN) || lastN < 1) {
       throw new InvalidParameterError(
         'last_n',
         String(lastN),
