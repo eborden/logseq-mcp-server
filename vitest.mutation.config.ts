@@ -39,6 +39,8 @@ export default mergeConfig(
         // The tests of the CI mutation job itself: they read the workflows, stryker.config.json and
         // scripts/mutation-ci.ts, none of which is mutated, and incremental mode can't see edits to them.
         'src/mutation-ci.test.ts',
+        // Throwaway: leaves a test file out of the mutation runs.
+        'src/tools/get-block.test.ts',
       ],
     },
   }),
