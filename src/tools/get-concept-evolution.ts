@@ -51,7 +51,7 @@ function entriesTruncated(
   requested: number
 ): ResultWarning {
   const last = kept[kept.length - 1];
-  const endsAt = last && last.date !== null ? last.date : null;
+  const endsAt = last?.date ?? null;
   const datedCut = mentionCount(full, true) > mentionCount(kept, true);
   let narrower: string;
   if (datedCut && endsAt !== null) {
