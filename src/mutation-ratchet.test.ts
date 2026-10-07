@@ -15,11 +15,13 @@ import {
   isBareReason,
   parseBaseline,
   renderCheck,
+  runInProcessGroup,
   scoreOf,
   updateBaseline,
   type Baseline,
   type FileStats,
   type MeasuredScope,
+  type ProcessGroupIo,
   type Report,
   type ReportMutant,
 } from '../scripts/mutation-ratchet.js';
@@ -796,5 +798,66 @@ describe('--update arguments', () => {
     expect(run({ init: true, baseline: null })).not.toThrow();
     expect(run({ init: true, baseline: baseline({}) })).not.toThrow();
     expect(run({ init: true })).toThrow('first baseline only');
+  });
+});
+
+// #223, from the #217 review: the re-run's timeout has to stop Stryker and its workers, not only `npx`.
+describe('runInProcessGroup', () => {
+  type Spawned = ReturnType<ProcessGroupIo['spawnSync']>;
+  function fakeIo(result: Spawned, killError?: Error) {
+    const spawnSync = vi.fn<ProcessGroupIo['spawnSync']>(() => result);
+    const kill = vi.fn<ProcessGroupIo['kill']>(() => {
+      if (killError) throw killError;
+    });
+    return { io: { spawnSync, kill } satisfies ProcessGroupIo, spawnSync, kill };
+  }
+
+  it('spawns the command detached, so it leads its own process group, with the timeout and a SIGKILL', () => {
+    const { io, spawnSync } = fakeIo({ pid: 4242, status: 0 });
+    runInProcessGroup('npx', ['stryker', 'run', 'cfg.json'], 90_000, io);
+    expect(spawnSync).toHaveBeenCalledWith('npx', ['stryker', 'run', 'cfg.json'], {
+      stdio: ['ignore', 'inherit', 'inherit'],
+      detached: true,
+      timeout: 90_000,
+      killSignal: 'SIGKILL',
+    });
+  });
+
+  it('kills the whole process group, by negative pid, when the run times out', () => {
+    const timedOut = Object.assign(new Error('spawnSync npx ETIMEDOUT'), { code: 'ETIMEDOUT' });
+    const { io, kill } = fakeIo({ pid: 4242, status: null, error: timedOut });
+    expect(runInProcessGroup('npx', [], 1000, io)).toBe(false);
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(kill).toHaveBeenCalledWith(-4242, 'SIGKILL');
+  });
+
+  it('kills the group when the command exits non-zero, since its children may outlive it', () => {
+    const { io, kill } = fakeIo({ pid: 4242, status: 1 });
+    expect(runInProcessGroup('npx', [], 1000, io)).toBe(false);
+    expect(kill).toHaveBeenCalledWith(-4242, 'SIGKILL');
+  });
+
+  it('kills the group when the command was killed by a signal (no status)', () => {
+    const { io, kill } = fakeIo({ pid: 4242, status: null });
+    expect(runInProcessGroup('npx', [], 1000, io)).toBe(false);
+    expect(kill).toHaveBeenCalledWith(-4242, 'SIGKILL');
+  });
+
+  it('leaves a clean run alone and reports success', () => {
+    const { io, kill } = fakeIo({ pid: 4242, status: 0 });
+    expect(runInProcessGroup('npx', [], 1000, io)).toBe(true);
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('signals nothing when the command never started (no pid)', () => {
+    const { io, kill } = fakeIo({ status: null, error: new Error('spawnSync npx ENOENT') });
+    expect(runInProcessGroup('npx', [], 1000, io)).toBe(false);
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('is not undone by a group that is already gone', () => {
+    const gone = Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+    const { io } = fakeIo({ pid: 4242, status: 1 }, gone);
+    expect(runInProcessGroup('npx', [], 1000, io)).toBe(false);
   });
 });
