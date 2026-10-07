@@ -306,7 +306,8 @@ class Renderer {
         message:
           `LogSeq returned no answer when looking up ${this.unavailableRefs.size} reference(s) ` +
           '(possibly no graph open or a re-index in progress), so they were not resolved and are ' +
-          'left as written. This does not mean they are missing. Retry in a moment.'
+          'left as written. This does not mean they are missing. Retry in a moment, ' +
+          'or call logseq_get_graph_info to check which graph is open.'
       });
     }
     return warnings;

@@ -473,7 +473,7 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     message:
       `LogSeq returned no answer when looking up ${count} reference(s) (possibly no graph open or a re-index ` +
       'in progress), so they were not resolved and are left as written. This does not mean they are missing. ' +
-      'Retry in a moment.'
+      'Retry in a moment, or call logseq_get_graph_info to check which graph is open.'
   });
   const nullClient = () => {
     const executeDatalogQuery = vi.fn(async () => null);
@@ -556,13 +556,26 @@ describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
     expect(warnings).toEqual([unavailable(1)]);
   });
 
-  it('asks once for refs shared between blocks, and not again after a null answer', async () => {
+  it('asks once for refs shared between blocks', async () => {
     const { client, executeDatalogQuery } = nullClient();
     await resolveBlockRefs(client, [
       { uuid: A, content: ref(B) },
       { uuid: D, content: ref(B) }
     ]);
     expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not ask again after a null answer, however many levels are left', async () => {
+    const executeDatalogQuery = vi
+      .fn()
+      .mockResolvedValueOnce([[{ id: 1, uuid: B, content: `inner ${ref(C)}`, page: alphaPage }]])
+      .mockResolvedValue(null);
+    const client = { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient;
+    const { warnings } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }], { maxDepth: 3 });
+    // level 1 finds B, level 2 asks for the C inside it and gets null, and level 3 has nothing new to ask
+    // for, so C is not asked for again: 2 queries, not 3
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+    expect(warnings.map(w => w.code)).toEqual(['refs_unavailable']);
   });
 
   it('still reports a ref as missing, with no warning, when the answer is a real empty array', async () => {
