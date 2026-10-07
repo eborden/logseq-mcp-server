@@ -22,7 +22,8 @@
     "!src/index.ts",
     "!src/tool-descriptions.ts",
     "!src/instructions.ts",
-    "!src/version.ts"
+    "!src/version.ts",
+    "!src/utils/snippet.ts"
   ],
   "tempDirName": ".stryker-tmp",
   "ignorePatterns": [".claude", ".logseq-instance", ".serena", ".stryker-tmp", "reports"]
