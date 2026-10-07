@@ -35,7 +35,7 @@
     "src/utils/markdown-context.ts": { "score": 88.0, "ignores": 0 },
     "src/utils/markdown.ts": { "score": 90.0, "ignores": 0 },
     "src/utils/param-aliases.ts": { "score": 88.0, "ignores": 0 },
-    "src/utils/parse-args.ts": { "score": 78.0, "ignores": 0 },
+    "src/utils/parse-args.ts": { "score": 98.0, "ignores": 0 },
     "src/utils/parse-response.ts": { "score": 100.0, "ignores": 0 },
     "src/utils/resolve-page.ts": { "score": 89.0, "ignores": 0 },
     "src/utils/resolve-refs.ts": { "score": 82.0, "ignores": 0 },
