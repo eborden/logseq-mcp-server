@@ -393,14 +393,12 @@ class Renderer {
     total: number
   ): string {
     if (total <= shown) return '';
-    const key = `embed:${info.key}`;
-    if (!this.warnings.has(key)) {
-      this.warnings.set(key, {
-        code: 'embed_truncated',
-        message: `Embed of ${info.what} shows ${shown} of ${total} ${info.unit}.`,
-        howToFetchAll: info.fetch
-      });
-    }
+    // The same key always carries the same warning, so setting it again changes nothing
+    this.warnings.set(`embed:${info.key}`, {
+      code: 'embed_truncated',
+      message: `Embed of ${info.what} shows ${shown} of ${total} ${info.unit}.`,
+      howToFetchAll: info.fetch
+    });
     return `\n[... ${total - shown} more ${info.unit} not shown]`;
   }
 }
