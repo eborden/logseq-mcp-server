@@ -379,7 +379,9 @@ describe('getCurrentPage: page or block, told apart by its name', () => {
   it('takes an object with no name for a block, and one with a name for a page', () => {
     expect(accepts(responses.pageOrBlock, editorBlock)).toBe(true);
     expect(accepts(responses.pageOrBlock, editorPage)).toBe(true);
-    // a named object is checked as a page, which wants an id
+    // a bare page (id and name, no uuid) is a good page but would be a bad block
+    expect(accepts(responses.pageOrBlock, { id: 1, name: 'alice' })).toBe(true);
+    // a named object with no id is a bad page (and a bad block too)
     expect(accepts(responses.pageOrBlock, { name: 'alice' })).toBe(false);
     // a block with no name is checked as a block, so one with no uuid is a bad block
     const { uuid: _uuid, ...blockWithoutUuid } = editorBlock;
@@ -392,10 +394,20 @@ describe('getCurrentPage: page or block, told apart by its name', () => {
     expect(accepts(responses.pageOrBlock, { id: 1, uuid: 'u', name: undefined })).toBe(true);
   });
 
-  it('checks a named object as a page even when it also looks like a block', () => {
-    // as a page this has no id; as a block it would pass
+  it('checks a named object as a page even when it is a valid block', () => {
+    const blockWithBadName = { ...editorBlock, name: 7 };
+
+    // as a block this passes (name is not a block field); as a page the name must be text
+    expect(accepts(blockSchema, blockWithBadName)).toBe(true);
+    const error = catchError(() => parseResponse(responses.pageOrBlock, blockWithBadName, 'logseq.Editor.getCurrentPage'));
+    expect(error.path).toBe('name');
+    expect(error.problem).toMatch(/expected string/);
+  });
+
+  it('checks a named object with no id as a bad page, whatever else it carries', () => {
     expect(accepts(responses.pageOrBlock, { ...editorBlock, id: undefined, name: 'alice' })).toBe(false);
-    expect(accepts(responses.pageOrBlock, { uuid: 'u', content: 'x', name: 'alice' })).toBe(false);
+    const error = catchError(() => parseResponse(responses.pageOrBlock, { uuid: 'u', content: 'x', name: 'alice' }, 'm'));
+    expect(error.path).toBe('id');
   });
 
   it('rejects an array, text, a number and a boolean as a whole, saying an object was expected', () => {
