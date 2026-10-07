@@ -161,6 +161,82 @@ describe('resolveAliasSets', () => {
     expect(aliasSetWarnings(set)).toEqual([]);
   });
 
+  it('keeps the start page alone when LogSeq answers null for the query', async () => {
+    const { client, executeDatalogQuery } = fakeClient(null as unknown as unknown[]);
+
+    const set = await resolveAliasSet(client, jordan);
+
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+    expect(aliasIds(set)).toEqual([1]);
+  });
+
+  it('skips a member row whose page carries no id', async () => {
+    const ghost = { name: 'ghost', 'original-name': 'Ghost' };
+    const { client } = fakeClient([[1, member(jordan)], [1, ghost], [1, member(jordanRivera)]]);
+
+    const set = await resolveAliasSet(client, jordan);
+
+    expect(set.members).toEqual([
+      { id: 1, name: 'jordan', originalName: 'Jordan' },
+      { id: 2, name: 'jordan rivera', originalName: 'Jordan Rivera' }
+    ]);
+  });
+
+  it('makes no query for a page that has alias links but no id to start from', async () => {
+    const ghost = { name: 'ghost', 'original-name': 'Ghost', alias: [{ id: 2 }] };
+    const { client, executeDatalogQuery } = fakeClient([[1, member(jordan)]]);
+
+    const sets = await resolveAliasSets(client, [ghost]);
+
+    expect(executeDatalogQuery).not.toHaveBeenCalled();
+    expect(sets).toEqual([{ members: [], truncated: false }]);
+  });
+
+  it('queries the pages that have an id and alias links when an id-less page comes first', async () => {
+    const ghost = { name: 'ghost', 'original-name': 'Ghost', alias: [{ id: 3 }] };
+    const { client, executeDatalogQuery } = fakeClient([[1, member(jordan)], [1, member(jordanRivera)]]);
+
+    const [a, b] = await resolveAliasSets(client, [ghost, jordan]);
+
+    const [query] = executeDatalogQuery.mock.calls[0] as unknown as [string];
+    expect(query).toContain('[(ground [1]) [?start ...]]');
+    expect(a.members).toEqual([]);
+    expect(aliasIds(b)).toEqual([1, 2]);
+  });
+
+  it('breaks a tie between members of the same name by id, whatever the row order', async () => {
+    const twin = (id: number) => ({ id, name: 'twin', 'original-name': 'Twin' });
+    const { client } = fakeClient([[1, twin(8)], [1, twin(6)], [1, twin(7)]]);
+
+    const set = await resolveAliasSet(client, jordan);
+
+    expect(aliasIds(set)).toEqual([1, 6, 7, 8]);
+  });
+
+  it('keeps a group of exactly the maximum whole and untruncated', async () => {
+    const others = Array.from({ length: MAX_ALIAS_SET_SIZE - 1 }, (_, i) => [
+      1,
+      { id: 100 + i, name: `n${String(i).padStart(3, '0')}`, 'original-name': `N${i}` }
+    ]);
+    const set = await resolveAliasSet(fakeClient(others).client, jordan);
+
+    expect(set.members).toHaveLength(MAX_ALIAS_SET_SIZE);
+    expect(set.truncated).toBe(false);
+    expect(aliasSetWarnings(set)).toEqual([]);
+  });
+
+  it('cuts a group one page over the maximum, dropping the last by name', async () => {
+    const others = Array.from({ length: MAX_ALIAS_SET_SIZE }, (_, i) => [
+      1,
+      { id: 100 + i, name: `n${String(i).padStart(3, '0')}`, 'original-name': `N${i}` }
+    ]);
+    const set = await resolveAliasSet(fakeClient(others).client, jordan);
+
+    expect(set.members).toHaveLength(MAX_ALIAS_SET_SIZE);
+    expect(set.truncated).toBe(true);
+    expect(aliasNames(set)).not.toContain(`n${String(MAX_ALIAS_SET_SIZE - 1).padStart(3, '0')}`);
+  });
+
   it('propagates an infrastructure error instead of reporting "no aliases"', async () => {
     const { client } = fakeClient(async () => {
       throw new LogSeqTimeoutError('http://127.0.0.1:12315', 30000);
@@ -183,8 +259,50 @@ describe('resolveAliasSetByName', () => {
     expect(set && aliasNames(set)).toEqual(['jordan rivera', 'jordan']);
   });
 
-  it('returns null when the text names no page or a page without aliases', async () => {
+  it('returns null when the text names no page', async () => {
     expect(await resolveAliasSetByName(fakeClient([]).client, 'migration')).toBeNull();
+  });
+
+  it('returns null when the query answers null', async () => {
+    expect(await resolveAliasSetByName(fakeClient(null as unknown as unknown[]).client, 'migration')).toBeNull();
+  });
+
+  it('returns null for a page that has no aliases, though it has a row', async () => {
+    const { client } = fakeClient([[member(jordanRivera), member(jordanRivera)]]);
+
+    expect(await resolveAliasSetByName(client, 'Jordan Rivera')).toBeNull();
+  });
+
+  it('returns null when no row starts from a page with an id, even if a member has one', async () => {
+    const ghost = { name: 'ghost', 'original-name': 'Ghost' };
+    const { client } = fakeClient([[ghost, member(jordan)]]);
+
+    expect(await resolveAliasSetByName(client, 'ghost')).toBeNull();
+  });
+
+  it('starts from the first row whose page has an id', async () => {
+    const ghost = { name: 'ghost', 'original-name': 'Ghost' };
+    const { client } = fakeClient([
+      [ghost, member(jordan)],
+      [member(jordanRivera), member(jordan)],
+      [member(jordanRivera), member(jordanRivera)]
+    ]);
+
+    const set = await resolveAliasSetByName(client, 'Jordan Rivera');
+
+    expect(set?.members.map(m => m.id)).toEqual([2, 1]);
+  });
+
+  it('leaves a member without an id out of the group', async () => {
+    const ghost = { name: 'ghost', 'original-name': 'Ghost' };
+    const { client } = fakeClient([
+      [member(jordanRivera), ghost],
+      [member(jordanRivera), member(jordan)]
+    ]);
+
+    const set = await resolveAliasSetByName(client, 'Jordan Rivera');
+
+    expect(set?.members.map(m => m.id)).toEqual([2, 1]);
   });
 });
 
@@ -193,5 +311,69 @@ describe('singleAliasSet', () => {
     expect(singleAliasSet({ 'db/id': 3, name: 'Bob', originalName: 'Bob' }).members).toEqual([
       { id: 3, name: 'bob', originalName: 'Bob' }
     ]);
+  });
+
+  it('holds nothing for a page without an id', () => {
+    expect(singleAliasSet({ name: 'ghost', 'original-name': 'Ghost' })).toEqual({ members: [], truncated: false });
+  });
+});
+
+describe('resolvedAliases', () => {
+  it('sorts names that differ only in accents the same way whatever order they arrive in', () => {
+    const accented = { id: 1, name: 'café', originalName: 'Café' };
+    const plain = { id: 2, name: 'cafe', originalName: 'Cafe' };
+    const set = { members: [accented, plain], truncated: false };
+
+    expect(resolvedAliases(set)).toEqual({ resolvedAliases: ['Cafe', 'Café'] });
+    expect(resolvedAliases({ members: [plain, accented], truncated: false })).toEqual({
+      resolvedAliases: ['Cafe', 'Café']
+    });
+  });
+
+  it('does not reorder the set it reads', () => {
+    const set = {
+      members: [
+        { id: 1, name: 'zed', originalName: 'Zed' },
+        { id: 2, name: 'amy', originalName: 'Amy' }
+      ],
+      truncated: false
+    };
+
+    expect(resolvedAliases(set)).toEqual({ resolvedAliases: ['Amy', 'Zed'] });
+    expect(aliasNames(set)).toEqual(['zed', 'amy']);
+  });
+});
+
+describe('aliasSetWarnings', () => {
+  const member1 = { id: 1, name: 'jordan', originalName: 'Jordan' };
+
+  it('says which page the cut group belongs to and what was kept', () => {
+    const [warning] = aliasSetWarnings({ members: [member1], truncated: true });
+
+    expect(warning).toEqual({
+      code: 'alias_set_truncated',
+      message:
+        'The alias group of "Jordan" has more than 50 pages; ' +
+        'only the page itself and 49 aliases were used, so references written under ' +
+        'the other names are missing. The maximum cannot be raised.'
+    });
+  });
+
+  it('gives one warning per cut set and none for the others', () => {
+    const other = { id: 5, name: 'alice', originalName: 'Alice' };
+
+    const warnings = aliasSetWarnings(
+      { members: [member1], truncated: true },
+      { members: [other], truncated: false },
+      { members: [other], truncated: true }
+    );
+
+    expect(warnings.map(w => w.message.match(/"([^"]*)"/)?.[1])).toEqual(['Jordan', 'Alice']);
+  });
+
+  it('names no page when a cut set somehow holds none, rather than printing "undefined"', () => {
+    const [warning] = aliasSetWarnings({ members: [], truncated: true });
+
+    expect(warning.message).toMatch(/^The alias group of "" has more than 50 pages;/);
   });
 });
