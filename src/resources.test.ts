@@ -7,7 +7,7 @@ import { LogseqClient } from './client.js';
 import { SERVER_INSTRUCTIONS } from './instructions.js';
 import { TOOL_DESCRIPTIONS } from './tool-descriptions.js';
 import { listPrompts } from './prompts.js';
-import { GUIDE_URI, MAX_PAGE_CHARS, PAGE_URI_TEMPLATE, buildGuide } from './resources.js';
+import { GUIDE_URI, MAX_PAGE_CHARS, PAGE_URI_TEMPLATE, buildGuide, registerResources } from './resources.js';
 
 const RESOURCE_NOT_FOUND = -32002;
 
@@ -292,6 +292,156 @@ describe('MCP resources (#46)', () => {
     }
   });
 
+  describe('listings and errors, pinned exactly (mutation-hardening, #206)', () => {
+    it('resources/list returns the guide entry with its name, title and description', async () => {
+      const { mcp } = await connect();
+      try {
+        expect((await mcp.listResources()).resources).toEqual([
+          {
+            uri: 'logseq://guide',
+            name: 'guide',
+            title: 'LogSeq reading guide',
+            description: "How to read this server's results, which tool to start with, and an index of tools and prompts.",
+            mimeType: 'text/markdown',
+          },
+        ]);
+      } finally {
+        await mcp.close();
+      }
+    });
+
+    it('resources/templates/list returns the page template with its name, title and description', async () => {
+      const { mcp } = await connect();
+      try {
+        expect((await mcp.listResourceTemplates()).resourceTemplates).toEqual([
+          {
+            uriTemplate: 'logseq://page/{name}',
+            name: 'page',
+            title: 'LogSeq page',
+            description:
+              'One page and its blocks as Markdown text. The name is case-insensitive and may be an alias or an ISO date (2025-01-01) for a journal.',
+            mimeType: 'text/markdown',
+          },
+        ]);
+      } finally {
+        await mcp.close();
+      }
+    });
+
+    it('names the resources it has when a URI is unknown, and says which URI it was', async () => {
+      const { mcp } = await connect();
+      try {
+        for (const uri of ['logseq://nothing', 'logseq://page', 'logseq://pages/x', 'logseq://guide/extra']) {
+          await expect(mcp.readResource({ uri }), uri).rejects.toMatchObject({
+            code: RESOURCE_NOT_FOUND,
+            message: expect.stringContaining(`Unknown resource ${JSON.stringify(uri)}. Available: logseq://guide, logseq://page/{name}.`),
+          });
+        }
+      } finally {
+        await mcp.close();
+      }
+    });
+
+    it('says what to do for each bad page name', async () => {
+      const { mcp } = await connect();
+      try {
+        await expect(mcp.readResource({ uri: 'logseq://page/' })).rejects.toMatchObject({
+          code: ErrorCode.InvalidParams,
+          message: expect.stringContaining(`No page name in logseq://page/. Use logseq://page/{name}.`),
+        });
+        await expect(mcp.readResource({ uri: 'logseq://page/%20%20' })).rejects.toMatchObject({
+          code: ErrorCode.InvalidParams,
+          message: expect.stringContaining(`No page name in logseq://page/%20%20. Use logseq://page/{name}.`),
+        });
+        await expect(mcp.readResource({ uri: 'logseq://page/%E0%A4%A' })).rejects.toMatchObject({
+          code: ErrorCode.InvalidParams,
+          message: expect.stringContaining(`Invalid page name encoding in logseq://page/%E0%A4%A. URL-encode the page name.`),
+        });
+        await expect(mcp.readResource({ uri: `logseq://page/${'a'.repeat(201)}` })).rejects.toMatchObject({
+          code: ErrorCode.InvalidParams,
+          message: expect.stringContaining(`Page name is 201 characters; the limit is 200.`),
+        });
+      } finally {
+        await mcp.close();
+      }
+    });
+
+    it('accepts a name of exactly 200 characters, counted after trimming', async () => {
+      const { mcp, callAPI } = await connect();
+      try {
+        const name = 'a'.repeat(200);
+        // the page does not exist: reaching the lookup and failing as "not found" proves the length passed
+        await expect(mcp.readResource({ uri: `logseq://page/%20${name}%20` })).rejects.toMatchObject({ code: RESOURCE_NOT_FOUND });
+        expect(callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', [name]);
+      } finally {
+        await mcp.close();
+      }
+    });
+
+    it('trims the decoded name before looking the page up', async () => {
+      const { mcp, callAPI } = await connect(method => (method === 'logseq.Editor.getPage' ? { ...aliceEntity } : []));
+      try {
+        await mcp.readResource({ uri: 'logseq://page/%20Alice%20' });
+        expect(callAPI).toHaveBeenCalledWith('logseq.Editor.getPage', ['Alice']);
+        expect(callAPI).not.toHaveBeenCalledWith('logseq.Editor.getPage', [' Alice ']);
+      } finally {
+        await mcp.close();
+      }
+    });
+
+    it('returns the URI as given, and uses the decoded name as the title when the page has none', async () => {
+      const { mcp } = await connect(method => (method === 'logseq.Editor.getPage' ? { id: 1, name: 'project atlas', file: { id: 5 } } : []));
+      try {
+        const result = await mcp.readResource({ uri: 'logseq://page/project%20atlas' });
+        expect(result.contents[0]).toMatchObject({ uri: 'logseq://page/project%20atlas', mimeType: 'text/markdown' });
+        expect(textOf(result).startsWith('# project atlas\n')).toBe(true);
+      } finally {
+        await mcp.close();
+      }
+    });
+
+    it('carries the URI in the data of each resource error', async () => {
+      // The client side drops `data`, so call the registered handler as the server would.
+      const logseq = new LogseqClient({ apiUrl: 'http://localhost:12315', authToken: 'test-token-123' });
+      vi.spyOn(logseq, 'callAPI').mockResolvedValue(null as any);
+      const stub = { id: 3, name: 'bob', 'original-name': 'Bob' };
+      const sources = [
+        [{ id: 1, name: 'robert smith', 'original-name': 'Robert Smith', file: { id: 9 } }, 'alias'],
+        [{ id: 2, name: 'robert jones', 'original-name': 'Robert Jones', file: { id: 10 } }, 'alias'],
+      ];
+      const executeDatalogQuery = vi.spyOn(logseq, 'executeDatalogQuery').mockResolvedValue([] as any);
+      const handlers: any[] = [];
+      registerResources({ setRequestHandler: (_schema: unknown, handler: unknown) => handlers.push(handler) } as any, logseq);
+      const read = handlers[2];
+      const dataOf = async (uri: string) => {
+        const error: any = await read({ params: { uri } }).catch((e: unknown) => e);
+        return { code: error.code, data: error.data };
+      };
+
+      expect(await dataOf('logseq://nothing')).toEqual({ code: RESOURCE_NOT_FOUND, data: { uri: 'logseq://nothing' } });
+      expect(await dataOf('logseq://page/No%20Such%20Page')).toEqual({
+        code: RESOURCE_NOT_FOUND,
+        data: { uri: 'logseq://page/No%20Such%20Page' },
+      });
+      executeDatalogQuery.mockResolvedValue([[stub, 'name'], ...sources] as any);
+      expect(await dataOf('logseq://page/Bob')).toEqual({ code: ErrorCode.InvalidParams, data: { uri: 'logseq://page/Bob' } });
+    });
+
+    it('reports a LogSeq outage as an internal error, not as invalid params or not found', async () => {
+      const { mcp } = await connect(() => {
+        throw new Error('connect ECONNREFUSED 127.0.0.1:12315');
+      });
+      try {
+        const error: any = await mcp.readResource({ uri: 'logseq://page/Alice' }).catch(e => e);
+        expect(error.code).toBe(ErrorCode.InternalError);
+        expect(error.code).not.toBe(ErrorCode.InvalidParams);
+        expect(error.code).not.toBe(RESOURCE_NOT_FOUND);
+      } finally {
+        await mcp.close();
+      }
+    });
+  });
+
   it('only reads: no write method is ever called on LogSeq', async () => {
     const { mcp, callAPI } = await connect(method => (method === 'logseq.Editor.getPage' ? { ...aliceEntity } : []));
     try {
@@ -302,6 +452,49 @@ describe('MCP resources (#46)', () => {
       }
     } finally {
       await mcp.close();
+    }
+  });
+});
+
+describe('buildGuide layout (mutation-hardening, #206)', () => {
+  // Built inside each test, from the real imports, so nothing here runs at collection time.
+  const indexLines = (entries: [string, string][]) => entries.map(([name, text]) => `- ${name}: ${text}`);
+
+  it('is the instructions, then a tool index of first lines, a prompt index and the resource list', () => {
+    const tools = Object.entries(TOOL_DESCRIPTIONS).map(([name, description]) => [name, description.split('\n')[0].trim()] as [string, string]);
+    const prompts = listPrompts().map(p => [p.name, p.description ?? ''] as [string, string]);
+    expect(buildGuide()).toBe(
+      [
+        '# LogSeq MCP guide',
+        '',
+        SERVER_INSTRUCTIONS,
+        '',
+        '## Tools',
+        '',
+        ...indexLines(tools),
+        '',
+        '## Prompts',
+        '',
+        ...indexLines(prompts),
+        '',
+        '## Resources',
+        '',
+        '- logseq://guide: this guide',
+        '- logseq://page/{name}: one page as text (URL-encode the name; aliases and ISO dates work)',
+        '',
+      ].join('\n')
+    );
+  });
+
+  it('keeps only the trimmed first line of a tool description in the index', () => {
+    const descriptions = TOOL_DESCRIPTIONS as Record<string, string>;
+    descriptions.logseq_padded_example = '  First line of the example.  \n\n**Use when:** later detail';
+    try {
+      const lines = buildGuide().split('\n');
+      expect(lines).toContain('- logseq_padded_example: First line of the example.');
+      expect(buildGuide()).not.toContain('later detail');
+    } finally {
+      delete descriptions.logseq_padded_example;
     }
   });
 });
