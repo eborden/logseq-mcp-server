@@ -79,7 +79,9 @@ export const hasAliases = (set: AliasSet): boolean => set.members.length > 1;
 export function resolvedAliases(set: AliasSet): ResolvedAliases {
   if (!hasAliases(set)) return {};
   const names = set.members.map(member => member.originalName);
-  return { resolvedAliases: names.sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }) || a.localeCompare(b)) };
+  // One comparison pinned to `en`: names that differ only in accents or case
+  // still order the same on any host, whatever the process locale.
+  return { resolvedAliases: names.sort((a, b) => a.localeCompare(b, 'en')) };
 }
 
 /** The `alias_set_truncated` warning for each set that was cut, empty otherwise. */
