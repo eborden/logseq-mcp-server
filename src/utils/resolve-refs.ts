@@ -150,10 +150,8 @@ function visibleTexts(store: RefStore, token: Token, limit: number): string[] {
 
 function walkDescendants(root: Row, childrenOf: Map<number, Row[]>, levels: number): EmbedMember[] {
   const members: EmbedMember[] = [];
-  const visited = new Set<number>();
+  // No visited set: the rows come from one `:find`, so each appears once with one parent, and `levels` bounds it
   const walk = (row: Row, depth: number) => {
-    if (visited.has(row.id)) return;
-    visited.add(row.id);
     members.push({ row, depth });
     if (depth >= levels) return;
     const children = childrenOf.get(row.id) ?? [];
