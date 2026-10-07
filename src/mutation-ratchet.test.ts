@@ -7,6 +7,7 @@ import {
   DEFAULT_RERUN_BUDGET,
   NEW_FILE_FLOOR,
   STRYKER_DEFAULT_REASON,
+  changedSourceGate,
   check,
   checkUpdateArgs,
   compareToBase,
@@ -17,11 +18,13 @@ import {
   formatBaseline,
   isBareReason,
   leftToWeeklyNotice,
+  listWeeklyRuns,
   parseBaseline,
   renderCheck,
   runInProcessGroup,
   scoreOf,
   updateBaseline,
+  weeklyRunCovers,
   type Baseline,
   type CheckResult,
   type FileStats,
@@ -29,6 +32,7 @@ import {
   type ProcessGroupIo,
   type Report,
   type ReportMutant,
+  type WeeklyRun,
 } from '../scripts/mutation-ratchet.js';
 
 // The ratchet of ADR-0026 (#205). Every report and baseline below is made up: file names are
@@ -935,6 +939,146 @@ describe('leftToWeeklyNotice', () => {
       leftGroups: { changedSources: ['src/a.ts'], fromTests: [], fromBaseline: [] },
     });
     expect(text).toContain('1 file(s) (1 changed source) were not mutated');
+  });
+});
+
+// ADR-0028, #239: a changed source the mutant budget left out fails the ratchet, unless a successful weekly run
+// exists for the PR's head commit. The one network call is passed in, so every case here is a fake.
+describe('changedSourceGate', () => {
+  const sha = 'a'.repeat(40);
+  const other = 'b'.repeat(40);
+  const run = (over: Partial<WeeklyRun>): WeeklyRun => ({ head_sha: other, display_title: 'Full mutation run ', conclusion: 'success', ...over });
+  const gate = (runs: WeeklyRun[] | Error, over: { changedSources?: string[]; headSha?: string | undefined } = {}) => {
+    const listRuns = vi.fn(async () => {
+      if (runs instanceof Error) throw runs;
+      return runs;
+    });
+    const result = changedSourceGate({ changedSources: ['src/a.ts', 'src/b.ts'], headSha: sha, listRuns, ...over });
+    return { result, listRuns };
+  };
+
+  it('fails, naming the files and the command to run, when no weekly run exists', async () => {
+    const { result, listRuns } = gate([]);
+    const failure = await result;
+    expect(listRuns).toHaveBeenCalledTimes(1);
+    expect(failure).toMatchObject({ kind: 'changed-source-unchecked', file: null });
+    expect(failure?.message).toContain('2 changed source file(s) were not mutated');
+    expect(failure?.message).toContain('`src/a.ts`, `src/b.ts`');
+    expect(failure?.message).toContain(`Run mutation-weekly.yml on ${sha}`);
+    expect(failure?.message).toContain('then re-run this job');
+  });
+
+  it('fails when the only run is for another commit', async () => {
+    const { result } = gate([run({ head_sha: other, display_title: `Full mutation run ${other}` })]);
+    expect(await result).toMatchObject({ kind: 'changed-source-unchecked' });
+  });
+
+  it('fails when the run for the head commit did not succeed', async () => {
+    for (const conclusion of ['failure', 'cancelled', null]) {
+      const { result } = gate([run({ head_sha: sha, conclusion }), run({ display_title: `Full mutation run ${sha}`, conclusion })]);
+      expect(await result, String(conclusion)).toMatchObject({ kind: 'changed-source-unchecked' });
+    }
+  });
+
+  it('passes on a successful run started from the head commit (its head_sha)', async () => {
+    const { result } = gate([run({ head_sha: other }), run({ head_sha: sha })]);
+    expect(await result).toBeNull();
+  });
+
+  it('passes on a successful run started with the head SHA in "ref" (its title), though its head_sha is the branch tip', async () => {
+    const { result } = gate([run({ head_sha: other, display_title: `Full mutation run ${sha}` })]);
+    expect(await result).toBeNull();
+  });
+
+  it('makes no call and passes when only test imports and baseline entries were left out (no changed source)', async () => {
+    const { result, listRuns } = gate([], { changedSources: [] });
+    expect(await result).toBeNull();
+    expect(listRuns).not.toHaveBeenCalled();
+  });
+
+  it('makes no call and passes outside a pull request (no head commit), where the warning is all there is', async () => {
+    for (const headSha of [undefined, '']) {
+      const { result, listRuns } = gate([], { headSha });
+      expect(await result).toBeNull();
+      expect(listRuns).not.toHaveBeenCalled();
+    }
+  });
+
+  it('fails, without a call, when the head commit is not a full SHA, since a run for it can not be looked up', async () => {
+    for (const headSha of ['abc123', 'A'.repeat(40), `${sha}\n::error::boom`]) {
+      const { result, listRuns } = gate([run({ head_sha: headSha })], { headSha });
+      expect(await result, headSha).toMatchObject({ kind: 'changed-source-unchecked' });
+      expect(listRuns).not.toHaveBeenCalled();
+    }
+  });
+
+  it('fails when the look-up itself fails, and says why, so a missing answer is not a pass', async () => {
+    const { result } = gate(new Error('the GitHub API answered 403; the job needs `actions: read`'));
+    const failure = await result;
+    expect(failure?.kind).toBe('changed-source-unchecked');
+    expect(failure?.message).toContain('Looking up the mutation-weekly.yml runs failed (the GitHub API answered 403');
+    expect(failure?.message).toContain(`Run mutation-weekly.yml on ${sha}`);
+  });
+
+  it('shows in the ratchet output as a failure, with the count', () => {
+    const failure = { kind: 'changed-source-unchecked' as const, file: null, message: 'two files are unchecked' };
+    const text = renderCheck({ failures: [failure], raisable: [], reruns: [], checked: 0 }, null, { expected: [], labeled: false });
+    expect(text).toContain('Fail: 1 problem(s)');
+    expect(text).toContain('two files are unchecked');
+  });
+});
+
+describe('weeklyRunCovers', () => {
+  const sha = 'c'.repeat(40);
+  it('wants a success, on the head_sha or named in the title', () => {
+    expect(weeklyRunCovers([], sha)).toBe(false);
+    expect(weeklyRunCovers([{ head_sha: sha, conclusion: 'success' }], sha)).toBe(true);
+    expect(weeklyRunCovers([{ head_sha: 'x', display_title: null, conclusion: 'success' }], sha)).toBe(false);
+    expect(weeklyRunCovers([{ head_sha: 'x', display_title: `Full mutation run ${sha}`, conclusion: 'success' }], sha)).toBe(true);
+    expect(weeklyRunCovers([{ head_sha: sha, display_title: `Full mutation run ${sha}`, conclusion: 'failure' }], sha)).toBe(false);
+  });
+});
+
+describe('listWeeklyRuns', () => {
+  const env = { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'secret-token-value', GITHUB_API_URL: 'https://api.example.test' };
+  const respond = (status: number, body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
+
+  it('asks the Actions API for the successful runs of the weekly workflow, with the token as a header', async () => {
+    const fetchMock = respond(200, { workflow_runs: [{ head_sha: 'a', conclusion: 'success' }] });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      expect(await listWeeklyRuns(env)).toEqual([{ head_sha: 'a', conclusion: 'success' }]);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+      expect(url).toBe('https://api.example.test/repos/owner/repo/actions/workflows/mutation-weekly.yml/runs?status=success&per_page=100');
+      expect(init.headers.Authorization).toBe('Bearer secret-token-value');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('throws without the repository or token, and on an error status, never putting the token in the message', async () => {
+    await expect(listWeeklyRuns({ GITHUB_REPOSITORY: 'owner/repo' })).rejects.toThrow('GITHUB_TOKEN are needed');
+    vi.stubGlobal('fetch', respond(403, { message: 'Resource not accessible' }));
+    try {
+      const error = await listWeeklyRuns(env).then(
+        () => null,
+        (e: Error) => e,
+      );
+      expect(error?.message).toContain('answered 403');
+      expect(error?.message).toContain('actions: read');
+      expect(error?.message).not.toContain('secret-token-value');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('gives no runs for a body that has none', async () => {
+    vi.stubGlobal('fetch', respond(200, {}));
+    try {
+      expect(await listWeeklyRuns(env)).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

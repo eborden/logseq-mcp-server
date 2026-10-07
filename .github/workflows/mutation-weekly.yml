@@ -1,12 +1,17 @@
 name: Mutation testing (full run)
 
+# The `ref` input goes in the run's title, because a run started with a SHA in "ref" has the branch
+# it was started from as its head_sha. The PR mutation job (scripts/mutation-ratchet.ts) matches that
+# title against the PR's head commit to find a successful run for it (ADR-0028).
+run-name: Full mutation run ${{ inputs.ref }}
+
 # A full cold mutation run of the unit suite (ADR-0026, #204, #205), weekly and on demand. It never
 # blocks a PR and it is the only job besides a push to main that saves Stryker's incremental
 # file, which resets any drift in the cache the PR job restores. It fails when any file is below
 # its score in mutation-baseline.json (scripts/mutation-ratchet.ts), which is the backstop for what
 # the PR job's cache can't see. A failing check still saves the cache and uploads the report.
 #
-# By hand (Actions tab, "Run workflow") it runs against any commit: put a SHA in "ref". The
+# By hand (Actions tab, "Run workflow") it runs against any commit: put the full SHA in "ref". The
 # baseline work needs three runs on one main SHA, so a repeat run on the same ref is fine
 # (its cache save then finds the key taken and skips). A run never restores a cache, so each
 # one starts cold.
