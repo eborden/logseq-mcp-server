@@ -348,6 +348,29 @@ describe('resolvedAliases', () => {
     expect(resolvedAliases(setOf([...expected].reverse()))).toEqual({ resolvedAliases: expected });
   });
 
+  it('compares every pair in the en locale, so the order does not depend on the process locale', () => {
+    // A test cannot change the default locale of a running process, so check
+    // the comparator's calls: each one must name `en` itself.
+    const localeCompare = vi.spyOn(String.prototype, 'localeCompare');
+    try {
+      const set = {
+        members: ['côte', 'coté', 'Café', 'Cafe'].map((originalName, i) => ({
+          id: i + 1,
+          name: originalName.toLowerCase(),
+          originalName
+        })),
+        truncated: false
+      };
+
+      resolvedAliases(set);
+
+      expect(localeCompare).toHaveBeenCalled();
+      for (const call of localeCompare.mock.calls) expect(call[1]).toBe('en');
+    } finally {
+      localeCompare.mockRestore();
+    }
+  });
+
   it('does not reorder the set it reads', () => {
     const set = {
       members: [
