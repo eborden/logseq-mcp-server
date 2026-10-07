@@ -59,6 +59,17 @@ describe('queryByPropertyWithMeta caps', () => {
       expect(meta).toBeNull();
     });
 
+    it('returns full blocks, with ids and a page, when slimResults is left out', async () => {
+      const { client } = clientWith(2);
+
+      const { results } = await queryByPropertyWithMeta(client, 'status', 'active');
+
+      expect(results).toEqual([
+        expect.objectContaining({ id: 1, page: { id: 10, name: 'page 10', originalName: 'Page 10' } }),
+        expect.objectContaining({ id: 2, page: { id: 10, name: 'page 10', originalName: 'Page 10' } })
+      ]);
+    });
+
     it('returns the same array as before the cap existed', async () => {
       const { client } = clientWith(30);
 
