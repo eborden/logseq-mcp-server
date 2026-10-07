@@ -67,16 +67,18 @@ jobs:
   #
   # Stryker's incremental mode can't see an edit to the left-out sources, the test helpers,
   # snapshots, fixtures, the lockfile or the configs. When a PR changes one (or there is no
-  # cache), scripts/mutation-ci.ts takes the cache-miss path: it mutates only the changed files,
-  # the files the changed tests import and the files whose baseline entry changed, in that order,
-  # and never starts a cold full run. It takes files first-fit while the estimated mutants fit
-  # MUTANT_BUDGET (see scripts/mutation-ci.ts, ADR-0028), sizing each file from the restored
-  # incremental file, and leaves the rest to the weekly run, named in the summary: run
-  # mutation-weekly.yml by hand on the PR's head commit. A changed source left out fails the
-  # ratchet until a run of it on that commit has succeeded, and a re-run of this job then passes.
-  # The plan step reads the restored file, so it runs before the step that drops it. After such a
-  # change lands on main the cache stays old until the weekly run, which resets it (run it by hand
-  # to do it sooner).
+  # cache), scripts/mutation-ci.ts takes the cache-miss path: it mutates only the files the PR
+  # itself changed (against its base, not against the commit the restored cache is from: that can
+  # be many commits behind), the files the changed tests import (not for a test the PR adds) and
+  # the files whose baseline entry changed, in that order, and never starts a cold full run. It
+  # takes files first-fit while the estimated mutants fit MUTANT_BUDGET (see
+  # scripts/mutation-ci.ts, ADR-0028, ADR-0029), sizing each file from the restored incremental
+  # file, and leaves the rest to the weekly run, named in the summary. A changed source left out
+  # fails the ratchet until a run of mutation-weekly.yml by hand on the PR's head commit has
+  # succeeded, and a re-run of this job then passes. A test import or baseline entry left out is
+  # only a warning, covered by the scheduled weekly run. The plan step reads the restored file, so
+  # it runs before the step that drops it. After a blind-spot change lands on main the cache stays
+  # old until the weekly run, which resets it (run it by hand on main to do it sooner).
   mutation:
     name: Mutation testing
     runs-on: ubuntu-latest
