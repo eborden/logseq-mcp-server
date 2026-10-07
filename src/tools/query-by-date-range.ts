@@ -662,7 +662,7 @@ export async function queryJournals(
   // text that is not such a page. After the journal queries, so it never delays them.
   const aliasSet =
     searchTerm && journals.length > 0 ? await resolveAliasSetByName(client, searchTerm) : null;
-  const matchesSearch = blockMatcher(searchTerm ?? '', aliasSet);
+  const matchesSearch = searchTerm ? blockMatcher(searchTerm, aliasSet) : null;
   const allEntries: DateRangeResult['entries'] = [];
   let totalBlocks = 0;
 
@@ -671,10 +671,7 @@ export async function queryJournals(
     const blocks = treesByPage.get(page.id)!;
 
     // Filter top-level blocks by search term if provided
-    let filteredBlocks = blocks;
-    if (searchTerm) {
-      filteredBlocks = filteredBlocks.filter(matchesSearch);
-    }
+    const filteredBlocks = matchesSearch ? blocks.filter(matchesSearch) : blocks;
 
     if (filteredBlocks.length > 0 || !searchTerm) {
       allEntries.push({
