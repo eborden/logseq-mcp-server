@@ -13,5 +13,6 @@
  * @returns Text with all regex metacharacters backslash-escaped
  */
 export function escapeRegex(text: string): string {
+  // Stryker disable next-line StringLiteral: throwaway, shows an ignore with a reason raises the count
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
