@@ -272,17 +272,33 @@ describe('plan', () => {
         baselineChanged: ['src/x-baseline.ts'],
         mutantCounts: () => ({ ...sized(files, 400), 'src/x-baseline.ts': 10 }),
       });
-      // 3 x 400 = 1,200 fits, the fourth would make 1,600.
-      expect(result.mutate).toEqual(files.slice(0, 3));
-      expect(result.leftToWeekly).toEqual([files[3], files[4], 'src/x-baseline.ts']);
-      expect(result.leftToWeeklyByGroup).toEqual({ changedSources: [files[3], files[4]], fromTests: [], fromBaseline: ['src/x-baseline.ts'] });
+      // 3 x 400 = 1,200 fits, the fourth would make 1,600. The 10-mutant baseline entry still fits after them.
+      expect(result.mutate).toEqual([...files.slice(0, 3), 'src/x-baseline.ts']);
+      expect(result.estimatedMutants).toBe(1210);
+      expect(result.leftToWeekly).toEqual([files[3], files[4]]);
+      expect(result.leftToWeeklyByGroup).toEqual({ changedSources: [files[3], files[4]], fromTests: [], fromBaseline: [] });
     });
 
-    it('stops at the first file that does not fit, even when a later, smaller one would', () => {
+    it('skips a file that does not fit and still takes a smaller one after it (first-fit)', () => {
       const [a, b, c] = names(3);
       const result = plan({ ...miss, changed: [a, b, c], mutantCounts: () => ({ [a]: 1000, [b]: 500, [c]: 5 }) });
-      expect(result.mutate).toEqual([a]);
-      expect(result.leftToWeekly).toEqual([b, c]);
+      expect(result.mutate).toEqual([a, c]);
+      expect(result.estimatedMutants).toBe(1005);
+      expect(result.leftToWeekly).toEqual([b]);
+    });
+
+    it('keeps the higher group first: a skipped changed source does not stop the test imports and baseline entries after it', () => {
+      const result = plan({
+        ...miss,
+        changed: ['src/c-big.ts', 'src/c-small.ts', 'src/t.test.ts'],
+        readTest: () => "import { x } from './imported.js';",
+        baselineChanged: ['src/baseline.ts', 'src/baseline-big.ts'],
+        mutantCounts: () => ({ 'src/c-big.ts': 1200, 'src/c-small.ts': 100, 'src/imported.ts': 200, 'src/baseline.ts': 50, 'src/baseline-big.ts': 400 }),
+      });
+      // After c-big (1,200) neither c-small (100) nor imported (200) nor baseline-big (400) fits, and baseline (50) does.
+      expect(result.mutate).toEqual(['src/baseline.ts', 'src/c-big.ts']);
+      expect(result.estimatedMutants).toBe(1250);
+      expect(result.leftToWeekly).toEqual(['src/c-small.ts', 'src/imported.ts', 'src/baseline-big.ts']);
     });
 
     it('counts a file once, in its highest group', () => {
@@ -312,12 +328,12 @@ describe('plan', () => {
       expect(result.changedSources).toEqual([big]);
     });
 
-    it('is empty, and says so, when even the first file is over the budget', () => {
+    it('is empty, and says so, when no file due for mutation fits the budget', () => {
       const result = plan({ ...miss, changed: ['src/m00.ts'], mutantCounts: () => ({ 'src/m00.ts': MUTANT_BUDGET + 1 }) });
       expect(result).toMatchObject({ mode: 'empty', mutate: [], estimatedMutants: 0, leftToWeekly: ['src/m00.ts'] });
       const text = renderSummary(result, null);
       expect(text).toContain('Nothing was checked, and this is not a pass.');
-      expect(text).toContain('over the mutant budget');
+      expect(text).toContain('no file due for mutation fits the mutant budget');
       expect(text).not.toContain('none changed in the baseline');
     });
 
@@ -386,7 +402,7 @@ describe('plan', () => {
         changed: [files[0], files[1], files[2], 'src/m09.test.ts'],
         readTest: () => "import { x } from './m03.js';",
         baselineChanged: ['src/b00.ts'],
-        mutantCounts: () => ({ ...sized(files, 500), 'src/b00.ts': 50 }),
+        mutantCounts: () => ({ ...sized(files, 500), 'src/b00.ts': 500 }),
       });
       const text = renderSummary(result, null);
       expect(text).toContain(`Mutated 2 file(s), an estimated 1000 of ${MUTANT_BUDGET} mutants: 2 changed, 0 from baseline changes, 0 imported by changed tests.`);

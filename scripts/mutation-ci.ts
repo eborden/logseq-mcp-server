@@ -235,8 +235,9 @@ export function noPlan(mode: PlanMode, reasons: string[]): Plan {
  * Otherwise the cache-miss path: only the files a PR touches, never a cold full run (ADR-0026). The files
  * are taken in priority order (changed sources, files the changed tests import, changed baseline entries;
  * sorted by path within a group, each file once, in its highest group) while their estimated mutants fit
- * MUTANT_BUDGET. The first file that doesn't fit ends the set, so what is mutated is a prefix of that
- * order, and every file after it is named in `leftToWeekly` for the weekly full run (ADR-0028).
+ * MUTANT_BUDGET (first-fit). A file that doesn't fit is skipped and the walk goes on, so a smaller file
+ * after it can still be taken, and a higher group always has the first claim. Every skipped file is named
+ * in `leftToWeekly` for the weekly full run (ADR-0028).
  */
 export function plan(input: PlanInput): Plan {
   const { scope, changed } = input;
@@ -280,13 +281,11 @@ export function plan(input: PlanInput): Plan {
   const taken = emptyGroups();
   const left = emptyGroups();
   let used = 0;
-  let full = false;
   for (const { file, group } of ordered) {
-    if (!full && used + estimate(file) <= MUTANT_BUDGET) {
+    if (used + estimate(file) <= MUTANT_BUDGET) {
       used += estimate(file);
       taken[group].push(file);
     } else {
-      full = true;
       left[group].push(file);
     }
   }
@@ -356,7 +355,7 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
       if (plan.mode === 'empty') {
         out.push(
           plan.leftToWeekly.length > 0
-            ? '**No source file was mutated: the first file due for mutation is over the mutant budget (below).**'
+            ? '**No source file was mutated: no file due for mutation fits the mutant budget (below).**'
             : '**No source file to mutate: no changed source file, none changed in the baseline, and no mutated file imported by a changed test.**',
           'Nothing was checked, and this is not a pass.',
           '',
@@ -382,7 +381,7 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
           ['Changed baseline entries', plan.leftToWeeklyByGroup.fromBaseline],
         ];
         out.push(
-          `**The mutants these ${plan.leftToWeekly.length} file(s) would add pass the budget of ${MUTANT_BUDGET} (estimated ${plan.estimatedMutants} used), so this run did not mutate them.** The job has 10 minutes, so it takes the changed sources first, then the files the changed tests import, then the changed baseline entries, and stops at the first that doesn't fit. A change that wide (a re-baseline after a Stryker upgrade, or the first baseline) is checked by the weekly full run (\`mutation-weekly.yml\`), not by this job. Run it by hand on this PR's head commit (Actions tab, "Run workflow", put the commit SHA in "ref") before merging. These files are unchecked until then:`,
+          `**The mutants these ${plan.leftToWeekly.length} file(s) would add pass the budget of ${MUTANT_BUDGET} (estimated ${plan.estimatedMutants} used), so this run did not mutate them.** The job has 10 minutes, so it takes the changed sources first, then the files the changed tests import, then the changed baseline entries, and skips a file that doesn't fit, keeping on with the smaller ones after it. A change that wide (a re-baseline after a Stryker upgrade, or the first baseline) is checked by the weekly full run (\`mutation-weekly.yml\`), not by this job. Run it by hand on this PR's head commit (Actions tab, "Run workflow", put the commit SHA in "ref") before merging. These files are unchecked until then:`,
           '',
         );
         for (const [name, files] of groups) {
