@@ -15,3 +15,8 @@
 export function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/** Throwaway: undoes escapeRegex. Nothing tests it, so its mutants have no coverage. */
+export function unescapeRegex(text: string): string {
+  return text.replace(/\\([.*+?^${}()|[\]\\])/g, '$1');
+}
