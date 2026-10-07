@@ -208,13 +208,12 @@ describe('resolveBlockRefs: page embeds', () => {
     ]);
   });
 
-  it('expands a page embedded inside another page embed, and a self-embed is a cycle named as written', async () => {
+  it('expands a page embedded inside another page embed', async () => {
     const { client } = fakeRefGraph({
-      pages: ['Outer', 'Inner', 'Alpha'],
+      pages: ['Outer', 'Inner'],
       blocks: [
         { uuid: B, content: embedPage('Inner'), page: 'Outer' },
-        { uuid: C, content: 'inner top', page: 'Inner' },
-        { uuid: D, content: embedPage('Alpha'), page: 'Alpha' }
+        { uuid: C, content: 'inner top', page: 'Inner' }
       ]
     });
     const nested = await resolveBlockRefs(client, [{ uuid: A, content: embedPage('Outer') }]);
@@ -223,12 +222,20 @@ describe('resolveBlockRefs: page embeds', () => {
       ['Outer', 'ok'],
       ['Inner', 'ok']
     ]);
+  });
 
+  it('marks a self-embedding page a cycle named as written, and fetches the page once', async () => {
+    const { client, queries } = fakeRefGraph({
+      pages: ['Alpha'],
+      blocks: [{ uuid: D, content: embedPage('alpha'), page: 'Alpha' }] // written in lower case
+    });
     const cycle = await resolveBlockRefs(client, [{ uuid: A, content: embedPage('Alpha') }], { maxDepth: 4 });
     expect(annotated(cycle.blocks[0]).resolvedRefs).toEqual([
-      { embed: 'page', content: `- ${embedPage('Alpha')}`, page: 'Alpha', status: 'ok' },
-      { embed: 'page', content: null, page: 'Alpha', status: 'cycle' }
+      { embed: 'page', content: `- ${embedPage('alpha')}`, page: 'Alpha', status: 'ok' }, // the stored name
+      { embed: 'page', content: null, page: 'alpha', status: 'cycle' } // the name as written
     ]);
+    // The same page is never asked for again at a deeper level
+    expect(queries).toHaveLength(1);
   });
 });
 
