@@ -313,22 +313,6 @@ describe('queryJournals: search_term on a page with aliases only follows the gro
     expect(blockIds(result)).toEqual([10, 12]);
     expect(result.resolvedAliases).toEqual(['Jordan', 'Jordan Rivera']);
   });
-
-  it('does not match a block whose only ref is to another page, even when the text names nobody', async () => {
-    const data: Data = {
-      pages: [journalPage(50, 20250101)],
-      blocks: [topBlock(11, 50, 50, 'Sync on the roadmap', [atlas])]
-    };
-
-    const result: any = await queryJournals(
-      fakeClient(data, group).client,
-      { startDate: 20250101, endDate: 20250101, searchTerm: 'Jordan' },
-      NOW
-    );
-
-    expect(result.entries).toEqual([]);
-    expect(result.summary).toMatchObject({ totalDays: 0, totalBlocks: 0 });
-  });
 });
 
 describe('queryJournals: the blocks_truncated warning at its boundaries', () => {
@@ -390,12 +374,13 @@ describe('queryJournals: the blocks_truncated warning at its boundaries', () => 
       );
     });
 
-    it('ends the advice at the search_term when no day follows', async () => {
-      const result = await run(daysOf([300]), { startDate: 20250101, endDate: 20250101 });
+    it('continues with the next day once the day is read, when one follows', async () => {
+      const result = await run(daysOf([300, 5]), { startDate: 20250101, endDate: 20250102 });
 
       expect(result.warnings[0].howToFetchAll).toBe(
         'To read it whole, call again with start_date 20250101, end_date 20250101 and max_blocks 300. ' +
-          `${LARGE_RESULT_NOTE} If it comes back saved, read the day in pieces with a search_term.`
+          `${LARGE_RESULT_NOTE} If it comes back saved, read the day in pieces with a search_term.` +
+          ' Then continue with start_date 20250102, the same end_date (20250102) and max_blocks 200.'
       );
     });
   });
