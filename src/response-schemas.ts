@@ -288,6 +288,11 @@ export const responses = {
   searchRows: rows(z.object({ id: z.number(), content: z.unknown() }).nullable()),
   /** A list of blocks that must all be whole */
   blockList: z.array(blockSchema),
+  /**
+   * A list of keyword-search hits: whole blocks whose `content` is text. `searchBlocksWithMeta`
+   * keeps only rows with string content before it checks them here, so the type can say it.
+   */
+  searchHitList: z.array(blockSchema.extend({ content: z.string() })),
   /** `[page, via]`: the resolver's first query. `via` is `name` (or absent), `alias` or `journal-date` */
   resolverRows: rows(pulledPageSchema, z.string().optional()),
   /** `[page, via, name]`: link targets, one row per name and route */
@@ -311,6 +316,8 @@ export type EditorPage = z.infer<typeof editorPageSchema>;
 export type PulledPage = z.infer<typeof pulledPageSchema>;
 export type PageLike = z.infer<typeof pageLikeSchema>;
 export type WireBlock = z.infer<typeof blockSchema>;
+/** A block with text content, as a keyword-search hit always is */
+export type SearchHitBlock = WireBlock & { content: string };
 export type GraphInfo = z.infer<typeof graphInfoSchema>;
 export type RefTarget = z.infer<typeof refTargetSchema>;
 export type OutlineRow = z.infer<typeof outlineBlockSchema>;
