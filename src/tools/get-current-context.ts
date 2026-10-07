@@ -79,7 +79,9 @@ export async function getCurrentContext(client: LogseqClient): Promise<CurrentCo
   const allBlocks = [...(focused ? [focused] : []), ...selectedBlocks];
 
   // Page names by id: the open page is already known; resolve the rest in one pull.
-  const pageNames = new Map<number, string>();
+  // Keyed `number | undefined` so a block with no page can look itself up: the pull loop below
+  // never stores `undefined`, so that lookup always misses.
+  const pageNames = new Map<number | undefined, string>();
   if (pageEntity) {
     pageNames.set(pageEntity.id, pageDisplayName(pageEntity));
   }
@@ -102,16 +104,13 @@ export async function getCurrentContext(client: LogseqClient): Promise<CurrentCo
     }
   }
 
-  const slim = (block: BlockEntity): SlimBlock => {
-    const id = pageIdOf(block);
-    return toSlimBlock(withFetchedChildren(block), id !== undefined ? pageNames.get(id) ?? '' : '');
-  };
+  const slim = (block: BlockEntity): SlimBlock =>
+    toSlimBlock(withFetchedChildren(block), pageNames.get(pageIdOf(block)) ?? '');
 
   // Page: the open one, else the page of the block being looked at.
   let page: SlimPage | null = pageEntity ? toSlimPage(pageEntity) : null;
   if (!page && allBlocks.length > 0) {
-    const id = pageIdOf(allBlocks[0]);
-    const name = id !== undefined ? pageNames.get(id) : undefined;
+    const name = pageNames.get(pageIdOf(allBlocks[0]));
     if (name) {
       page = { name: name.toLowerCase(), originalName: name };
     }
