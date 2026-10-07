@@ -9,13 +9,13 @@
 
 ## Decision
 
-**The cache-miss set is capped.** Past `MAX_BASELINE_FILES` (8, in `scripts/mutation-ci.ts`) changed baseline entries, a cache-miss PR run does not mutate those entries. It mutates the changed source files plus the source files imported by changed tests, as before. Eight entries, at a cold file's 1 to 1.5 minutes, fit the 10-minute job. With 8 or fewer, the run behaves as ADR-0026 says: every changed entry is mutated. So ADR-0026's "plus every source file whose entry changed in `mutation-baseline.json`" becomes "plus those entries, when 8 or fewer changed". This keeps "never a cold full run on a PR".
+**The cache-miss set is capped.** Past a small cap, `MAX_BASELINE_FILES` in `scripts/mutation-ci.ts` (8 when this was written), changed baseline entries are not mutated by a cache-miss PR run. It still mutates the changed source files plus the source files imported by changed tests, as before. Those two sets are not capped, as under ADR-0026. With `MAX_BASELINE_FILES` or fewer changed entries, the run behaves as ADR-0026 says: every changed entry is mutated. So ADR-0026's "plus every source file whose entry changed in `mutation-baseline.json`" becomes "plus those entries, when no more than `MAX_BASELINE_FILES` changed". The point is that a re-baseline no longer starts a cold full run. The value is a constant chosen as an estimate, from a cold file taking about 1 to 1.5 minutes on a loaded laptop, and it is to be checked against a measured cold run on a CI runner.
 
 - **The entries it left out are named, never silent.** The plan records them (`leftToWeekly`: changed entries in scope that still exist and that no changed source or test brought in anyway). The job summary says how many entries changed, that this run did not mutate the listed files, and lists them. The ratchet also emits a `::warning title=Mutation testing::` annotation, so a green check doesn't hide it, and a line in its own summary section. The text tells the author to run `mutation-weekly.yml` by hand on the PR's head commit (the SHA in "ref") before merging.
 - **They wait for the weekly full run.** That run, which ADR-0026 already defines as the backstop, checks them against the baseline. The warning never fails the job, so a re-baseline PR goes green with its files unchecked until someone runs the weekly job. The advice to run it first is not enforced.
 - **Nothing left to mutate is not a pass.** When the cap leaves an empty set, the mode is `empty` and the summary says nothing was checked. The ratchet still runs its base comparison (the `mutation-baseline-change` label check). It expects only the planned files in a targeted run, so the files left out are not "missing rows".
 
-**One base commit per job.** The `mutation` job resolves `BASE_SHA` once: `HEAD^1` on a pull request (the base tip the checked-out merge commit was built on, so it holds when `main` moves after the PR event) and the event's `before` commit on a push. The plan reads the base's baseline at it, and the ratchet takes it as `--base`, a commit used as given, with no merge-base lookup. They can no longer disagree about what the PR changed.
+**One base commit per job.** The `mutation` job resolves `BASE_SHA` once: `HEAD^1` on a pull request (the base tip the checked-out merge commit was built on, so it holds when `main` moves after the PR event) and the event's `before` commit on a push. The plan reads the base's baseline at it. On a pull request the ratchet takes it as `--base`, a commit used as given, with no merge-base lookup, so the two can no longer disagree about what the PR changed. On a push the ratchet gets no `--base` and makes no base comparison, so the `before` commit feeds the plan only.
 
 **The audit claim is corrected.** Stryker adds one `npm audit` finding, the dev-only `typed-rest-client` one, accepted on #210. Every other row of ADR-0026's vetting table stands.
 
@@ -25,8 +25,8 @@ Everything else in ADR-0026 stays as written: scope, tools, the baseline format 
 
 - A re-baseline or first-baseline PR runs in minutes instead of failing its timeout, and still says which entries it did not check.
 - The check for those entries moves from the PR to a manual run of the weekly job. If nobody runs it, a lowered score in one of them is found by the next scheduled weekly run, after the merge. The warning and the summary are the only prompt.
-- A PR that changes 9 baseline entries by hand, not as a re-baseline, is capped the same way. That is rare, and its files are named.
-- The constant is a judgement from a per-file cost measured on a laptop. If a real runner is slower, lowering it is a code change, not a new ADR.
+- A PR that changes just over the cap in baseline entries by hand, not as a re-baseline, is capped the same way. That is rare, and its files are named.
+- The constant is an estimate, not a measured fit, and the ADR is worded around the constant, not its value. Retuning `MAX_BASELINE_FILES` after a measured cold run on a runner is a code change and doesn't contradict this ADR.
 - ADR-0026 keeps its original statements, with its status line pointing here. A reader needs both documents.
 
 ## Status
@@ -37,5 +37,5 @@ Date: 2026-10-06
 
 ## Mechanical enforcement
 
-- test: `src/mutation-ci.test.ts` (the cap at 8 and 9, the entries left out, the summary text and the one `BASE_SHA` shared by the plan and the ratchet)
+- test: `src/mutation-ci.test.ts` (the cap boundary, the entries left out, the summary text and the one `BASE_SHA` shared by the plan and the ratchet)
 - ci: `.github/workflows/ci.yml` (the `mutation` job)
