@@ -23,8 +23,8 @@ import { responses, type RefTarget } from '../response-schemas.js';
  * and so on. Refs deeper than `maxDepth` are left as written (`depth_limit`).
  *
  * A `null` answer (BR-0011, #260): when LogSeq answers a level's query with `null`, its refs were never
- * looked up. They stay as written with status `depth_limit` (not `missing`), and a `refs_unavailable`
- * warning says so. A real empty answer still means `missing`.
+ * looked up. They stay as written with status `unavailable` (not `missing`, #272), and a `refs_unavailable`
+ * warning counts them. A real empty answer still means `missing`.
  *
  * Cycles: the set of uuids "being expanded" is tracked per path, not shared
  * across siblings. Two siblings that reference the same block both resolve; only
@@ -308,7 +308,7 @@ class Renderer {
         message:
           `LogSeq returned no answer when looking up ${this.unavailableRefs.size} reference(s) ` +
           '(possibly no graph open or a re-index in progress), so they were not resolved and are ' +
-          'left as written. This does not mean they are missing. Retry in a moment, ' +
+          'left as written with status "unavailable". This does not mean they are missing. Retry in a moment, ' +
           'or call logseq_get_graph_info to check which graph is open.'
       });
     }
@@ -333,9 +333,9 @@ class Renderer {
       return token.raw;
     }
     if (this.store.unavailable.has(`${token.kind}:${token.key}`)) {
-      // Not followed and left as written, which `depth_limit` already says. Not `missing`: that claims the
-      // target does not exist, and BR-0007 lists no other status. The `refs_unavailable` warning says why.
-      entry.status = 'depth_limit';
+      // Checked before depth: it was asked for and got no answer. Not `missing`, which claims the target
+      // does not exist, and not `depth_limit`, whose advice (fetch it with get_block) would not help (#272)
+      entry.status = 'unavailable';
       this.unavailableRefs.add(pathKey);
       return token.raw;
     }

@@ -15,7 +15,7 @@ import { connectFixture } from './helpers/fixture-client.js';
  * exist are in fixture-only/resolve-refs-missing.test.ts.
  */
 
-const STATUSES = ['ok', 'missing', 'depth_limit', 'cycle'];
+const STATUSES = ['ok', 'missing', 'depth_limit', 'cycle', 'unavailable'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SYNTHETIC_MISSING = '00000000-0000-4000-8000-000000000001';
 const PAGE = 'block refs';
