@@ -68,12 +68,13 @@ jobs:
   # Stryker's incremental mode can't see an edit to the left-out sources, the test helpers,
   # snapshots, fixtures, the lockfile or the configs. When a PR changes one (or there is no
   # cache), scripts/mutation-ci.ts takes the cache-miss path: it mutates only the changed files,
-  # the files whose baseline entry changed and the files the changed tests import, and never
-  # starts a cold full run. When more baseline entries changed than MAX_BASELINE_FILES allows (see
-  # scripts/mutation-ci.ts; a re-baseline, the first baseline) it leaves those files to the weekly
-  # run and names them in the summary: run
-  # mutation-weekly.yml by hand on the PR's head commit. After such a change lands on main the
-  # cache stays old until the weekly run, which resets it (run it by hand to do it sooner).
+  # the files the changed tests import and the files whose baseline entry changed, in that order,
+  # and never starts a cold full run. It stops when the estimated mutants would pass MUTANT_BUDGET
+  # (see scripts/mutation-ci.ts, ADR-0028), sizing each file from the restored incremental file
+  # and leaving the rest to the weekly run, named in the summary: run mutation-weekly.yml by hand
+  # on the PR's head commit. The plan step reads the restored file, so it runs before the
+  # step that drops it. After such a change lands on main the cache stays old until the weekly
+  # run, which resets it (run it by hand to do it sooner).
   mutation:
     name: Mutation testing
     runs-on: ubuntu-latest
