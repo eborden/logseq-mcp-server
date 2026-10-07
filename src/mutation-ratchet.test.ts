@@ -1,10 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   BASELINE_LABEL,
+  DEFAULT_RERUN_BUDGET,
   NEW_FILE_FLOOR,
   STRYKER_DEFAULT_REASON,
   check,
+  checkUpdateArgs,
   compareToBase,
+  hasBaselineLabel,
+  parseLabels,
   extractStringList,
   fileStats,
   formatBaseline,
@@ -155,7 +159,7 @@ describe('check', () => {
       const result = check({ report: below, baseline: base, expected: null, exists: present, rerun });
       expect(result.failures).toEqual([]);
       expect(rerun).toHaveBeenCalledTimes(1);
-      expect(rerun).toHaveBeenCalledWith('src/a.ts');
+      expect(rerun).toHaveBeenCalledWith('src/a.ts', DEFAULT_RERUN_BUDGET.budgetMs);
       expect(result.reruns).toEqual([{ file: 'src/a.ts', first: 89, second: 90, baseline: 90, cleared: true }]);
     });
 
@@ -595,5 +599,200 @@ describe('the summary', () => {
     const text = renderCheck(clean, { failures: [], changes: ['the globs changed'] }, { expected: null, labeled: true });
     expect(text).toContain("maintainer's OK");
     expect(text).toContain('the globs changed');
+  });
+});
+
+describe('the re-run budget', () => {
+  // Three files below their baseline, of 100, 200 and 300 mutants, each about a point under 90.
+  const spec = (n: number): Spec => ({ killed: Math.floor(n * 0.89), survived: n - Math.floor(n * 0.89) });
+  const below = report({ 'src/big.ts': spec(300), 'src/small.ts': spec(100), 'src/mid.ts': spec(200) });
+  const entries = baseline({ 'src/big.ts': [90, 0], 'src/small.ts': [90, 0], 'src/mid.ts': [90, 0] });
+  const clear = () => fileStats(mutants({ killed: 95, survived: 5 }));
+
+  it('prints every failure before the first re-run starts, and lists a waiting file as below its baseline', () => {
+    const order: string[] = [];
+    const result = check({
+      report: report({ 'src/a.ts': { killed: 90, survived: 10, disabled: [undefined] }, 'src/small.ts': spec(100) }),
+      baseline: baseline({ 'src/a.ts': [90, 5], 'src/small.ts': [90, 0] }),
+      expected: null,
+      exists: present,
+      beforeRerun: failures => order.push(`before:${failures.map(f => `${f.kind}:${f.file}`).join(',')}`),
+      rerun: file => {
+        order.push(`rerun:${file}`);
+        return clear();
+      },
+    });
+    expect(order).toEqual(['before:bare-disable:src/a.ts,below-baseline:src/small.ts', 'rerun:src/small.ts']);
+    expect(result.failures.map(f => f.kind)).toEqual(['bare-disable']);
+  });
+
+  it('does not call beforeRerun when no file is below its baseline', () => {
+    const before = vi.fn();
+    check({
+      report: report({ 'src/a.ts': { killed: 95, survived: 5 } }),
+      baseline: baseline({ 'src/a.ts': [90, 0] }),
+      expected: null,
+      exists: present,
+      beforeRerun: before,
+      rerun: clear,
+    });
+    expect(before).not.toHaveBeenCalled();
+  });
+
+  it('re-runs the smallest files first', () => {
+    const order: string[] = [];
+    check({ report: below, baseline: entries, expected: null, exists: present, rerun: file => (order.push(file), clear()) });
+    expect(order).toEqual(['src/small.ts', 'src/mid.ts', 'src/big.ts']);
+  });
+
+  it('stops at the cap, and a file it did not re-run fails and says so', () => {
+    const rerun = vi.fn(clear);
+    const result = check({ report: below, baseline: entries, expected: null, exists: present, rerun, rerunBudget: { maxReruns: 2, budgetMs: 1e9 } });
+    expect(rerun).toHaveBeenCalledTimes(2);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ kind: 'below-baseline', file: 'src/big.ts' });
+    expect(result.failures[0].message).toContain('not re-run (at most 2 files are re-run)');
+    expect(result.failures[0].message).toContain('counts as below');
+    expect(result.reruns.find(r => r.file === 'src/big.ts')).toMatchObject({ skipped: 'at most 2 files are re-run', cleared: false, second: null });
+  });
+
+  it('stops when the time budget is spent, and gives each re-run what is left as its timeout', () => {
+    let clock = 0;
+    const timeouts: number[] = [];
+    const result = check({
+      report: below,
+      baseline: entries,
+      expected: null,
+      exists: present,
+      rerunBudget: { maxReruns: 10, budgetMs: 100_000, now: () => clock },
+      rerun: (_file, timeoutMs) => {
+        timeouts.push(timeoutMs);
+        clock += 60_000; // each re-run takes a minute
+        return clear();
+      },
+    });
+    expect(timeouts).toEqual([100_000, 40_000]);
+    expect(result.failures.map(f => f.file)).toEqual(['src/big.ts']);
+    expect(result.failures[0].message).toContain('the re-run time budget is spent');
+  });
+
+  it('fails a re-run that ran out of time with its own message', () => {
+    const result = check({ report: below, baseline: entries, expected: null, exists: present, rerun: () => null, rerunBudget: { maxReruns: 1, budgetMs: 1e9 } });
+    expect(result.failures.find(f => f.file === 'src/small.ts')?.message).toContain('the re-run did not produce a score (it failed or ran out of time)');
+  });
+
+  it('says in the summary which files were not re-run', () => {
+    const result = check({ report: below, baseline: entries, expected: null, exists: present, rerun: clear, rerunBudget: { maxReruns: 2, budgetMs: 1e9 } });
+    const text = renderCheck(result, null, { expected: null, labeled: false });
+    expect(text).toContain('Re-runs from a fresh sandbox: 2, which changed the result for 2. 1 file(s) were not re-run');
+    expect(text).toContain('not run (at most 2 files are re-run)');
+  });
+});
+
+describe('a new baseline entry under the floor', () => {
+  const scope = (files: Record<string, [number, number]> | null): MeasuredScope => ({
+    baseline: files === null ? null : baseline(files),
+    mutate: ['src/**/*.ts'],
+    exclude: ['src/x.test.ts'],
+  });
+  const compare = (head: Record<string, [number, number]> | null, labeled = false, base: Record<string, [number, number]> | null = { 'src/a.ts': [90, 0] }) =>
+    compareToBase({ base: scope(base), head: scope(head), exists: present, labeled });
+
+  it('fails without the label, and says why', () => {
+    const result = compare({ 'src/a.ts': [90, 0], 'src/new.ts': [30, 0] });
+    expect(result.failures.map(f => [f.kind, f.file])).toEqual([['new-entry-under-floor', 'src/new.ts']]);
+    expect(result.failures[0].message).toContain('src/new.ts is a new baseline entry at 30.0%, under the 80% floor for a new file');
+    expect(result.failures[0].message).toContain(BASELINE_LABEL);
+  });
+
+  it('passes with the label, and still lists it for the maintainer', () => {
+    const result = compare({ 'src/a.ts': [90, 0], 'src/new.ts': [30, 0] }, true);
+    expect(result.failures).toEqual([]);
+    expect(result.changes).toEqual(['src/new.ts is a new baseline entry at 30.0%, under the 80% floor for a new file']);
+  });
+
+  it('passes a new entry at or over the floor', () => {
+    expect(compare({ 'src/a.ts': [90, 0], 'src/at.ts': [NEW_FILE_FLOOR, 0], 'src/over.ts': [99.9, 0] }).failures).toEqual([]);
+    expect(compare({ 'src/a.ts': [90, 0], 'src/under.ts': [NEW_FILE_FLOOR - 0.1, 0] }).failures).toHaveLength(1);
+  });
+
+  it('does not flag the first baseline (the base has none), which may record files under the floor', () => {
+    expect(compare({ 'src/a.ts': [90, 0], 'src/weak.ts': [30, 0] }, false, null).failures).toEqual([]);
+  });
+
+  it('does not flag an existing entry that is under the floor and unchanged', () => {
+    expect(compare({ 'src/weak.ts': [30, 0] }, false, { 'src/weak.ts': [30, 0] }).failures).toEqual([]);
+  });
+
+  it('catches code moved into a new file under the floor, while the old entry going is allowed', () => {
+    const result = compareToBase({ base: scope({ 'src/old.ts': [90, 0] }), head: scope({ 'src/moved.ts': [40, 0] }), exists: p => p !== 'src/old.ts', labeled: false });
+    expect(result.failures.map(f => [f.kind, f.file])).toEqual([['new-entry-under-floor', 'src/moved.ts']]);
+  });
+});
+
+describe('PR labels', () => {
+  it('reads a JSON array and a comma list', () => {
+    expect(parseLabels('["task","mutation-baseline-change"]')).toEqual(['task', 'mutation-baseline-change']);
+    expect(parseLabels('task, mutation-baseline-change')).toEqual(['task', 'mutation-baseline-change']);
+    expect(parseLabels('[]')).toEqual([]);
+    expect(parseLabels(undefined)).toEqual([]);
+    expect(parseLabels('')).toEqual([]);
+  });
+
+  it('counts the label only when a whole name matches', () => {
+    expect(hasBaselineLabel(parseLabels('["mutation-baseline-change"]'))).toBe(true);
+    expect(hasBaselineLabel(parseLabels('["mutation-baseline-change-2"]'))).toBe(false);
+    expect(hasBaselineLabel(parseLabels('["not-mutation-baseline-change"]'))).toBe(false);
+    expect(hasBaselineLabel(parseLabels('["Mutation-Baseline-Change"]'))).toBe(false);
+    expect(hasBaselineLabel(parseLabels('mutation-baseline-change-2'))).toBe(false);
+  });
+
+  it('keeps a label name with a comma in it as one name, in the JSON form', () => {
+    const labels = parseLabels('["x,mutation-baseline-change"]');
+    expect(labels).toEqual(['x,mutation-baseline-change']);
+    expect(hasBaselineLabel(labels)).toBe(false);
+  });
+
+  it('treats the "null" a push event gives as no label, and rejects malformed JSON', () => {
+    expect(hasBaselineLabel(parseLabels('null'))).toBe(false);
+    expect(() => parseLabels('["a"')).toThrow('not a valid JSON array');
+  });
+});
+
+describe('--update arguments', () => {
+  const files: Record<string, string> = { 'a.json': '{"run":1}', 'b.json': '{"run":2}', 'copy-of-a.json': '{"run":1}' };
+  const io = { resolvePath: (p: string) => `/work/${p.replace(/^\.\//, '')}`, read: (p: string) => files[p.replace(/^\.\//, '')] ?? '' };
+  const full = baseline({ 'src/a.ts': [90, 0] });
+  const run = (over: Partial<Parameters<typeof checkUpdateArgs>[0]>) => () =>
+    checkUpdateArgs({ reportPaths: ['a.json', 'b.json'], weekly: false, init: false, baseline: full, ...over }, io);
+
+  it('accepts the lower of two runs, and one report that is the weekly run', () => {
+    expect(run({})).not.toThrow();
+    expect(run({ reportPaths: ['a.json'], weekly: true })).not.toThrow();
+  });
+
+  it('refuses a single report without --weekly, and no report at all', () => {
+    expect(run({ reportPaths: ['a.json'] })).toThrow('never a single local run');
+    expect(run({ reportPaths: [] })).toThrow('needs --report');
+  });
+
+  it('refuses --weekly with more than one report', () => {
+    expect(run({ weekly: true })).toThrow('single --report');
+  });
+
+  it('refuses the same report twice, by path, however it is spelled', () => {
+    expect(run({ reportPaths: ['a.json', 'a.json'] })).toThrow('same report twice');
+    expect(run({ reportPaths: ['a.json', './a.json'] })).toThrow('same report twice');
+    expect(run({ reportPaths: ['a.json', 'a.json'], weekly: true })).toThrow('same report twice');
+  });
+
+  it('refuses two copies of one run, by content', () => {
+    expect(run({ reportPaths: ['a.json', 'copy-of-a.json'] })).toThrow('same content');
+  });
+
+  it('allows --init for the first baseline, and refuses it when the baseline has entries', () => {
+    expect(run({ init: true, baseline: null })).not.toThrow();
+    expect(run({ init: true, baseline: baseline({}) })).not.toThrow();
+    expect(run({ init: true })).toThrow('first baseline only');
   });
 });
