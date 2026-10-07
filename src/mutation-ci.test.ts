@@ -189,18 +189,18 @@ describe('plan', () => {
   describe('the cap on baseline-driven files (#223)', () => {
     const entries = (n: number) => Array.from({ length: n }, (_, i) => `src/m${String(i).padStart(2, '0')}.ts`);
 
-    it('is 8', () => {
-      expect(MAX_BASELINE_FILES).toBe(8);
+    it('is 3, which keeps the four largest files inside the job timeout (#231)', () => {
+      expect(MAX_BASELINE_FILES).toBe(3);
     });
 
     it('mutates every changed baseline entry at the cap, as before', () => {
       const result = plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES) });
-      expect(result).toMatchObject({ mode: 'targeted', mutate: entries(MAX_BASELINE_FILES), fromBaseline: entries(MAX_BASELINE_FILES), baselineChanged: 8, leftToWeekly: [] });
+      expect(result).toMatchObject({ mode: 'targeted', mutate: entries(MAX_BASELINE_FILES), fromBaseline: entries(MAX_BASELINE_FILES), baselineChanged: MAX_BASELINE_FILES, leftToWeekly: [] });
     });
 
     it('leaves the baseline entries to the weekly run one over the cap, and lists them', () => {
       const result = plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES + 1) });
-      expect(result).toMatchObject({ mode: 'empty', mutate: [], fromBaseline: [], baselineChanged: 9, leftToWeekly: entries(9) });
+      expect(result).toMatchObject({ mode: 'empty', mutate: [], fromBaseline: [], baselineChanged: MAX_BASELINE_FILES + 1, leftToWeekly: entries(MAX_BASELINE_FILES + 1) });
     });
 
     it('still mutates the changed sources and the files the changed tests import, when capped', () => {
@@ -208,7 +208,7 @@ describe('plan', () => {
         ...base,
         cacheUsable: false,
         changed: ['vitest.config.ts', 'src/utils/snippet.ts', 'src/utils/compact.test.ts'],
-        baselineChanged: entries(12),
+        baselineChanged: entries(MAX_BASELINE_FILES + 9),
         readTest: () => "import { x } from './compact.js';",
       });
       expect(result).toMatchObject({
@@ -217,26 +217,26 @@ describe('plan', () => {
         changedSources: ['src/utils/snippet.ts'],
         fromBaseline: [],
         fromTests: ['src/utils/compact.ts'],
-        baselineChanged: 12,
-        leftToWeekly: entries(12),
+        baselineChanged: MAX_BASELINE_FILES + 9,
+        leftToWeekly: entries(MAX_BASELINE_FILES + 9),
       });
     });
 
     it('does not list a capped entry as left out when a changed source brings it in anyway', () => {
-      const result = plan({ ...base, cacheUsable: false, changed: ['src/m00.ts'], baselineChanged: entries(10) });
+      const result = plan({ ...base, cacheUsable: false, changed: ['src/m00.ts'], baselineChanged: entries(MAX_BASELINE_FILES + 2) });
       expect(result.mutate).toEqual(['src/m00.ts']);
-      expect(result.leftToWeekly).toEqual(entries(10).slice(1));
-      expect(result.baselineChanged).toBe(10);
+      expect(result.leftToWeekly).toEqual(entries(MAX_BASELINE_FILES + 2).slice(1));
+      expect(result.baselineChanged).toBe(MAX_BASELINE_FILES + 2);
     });
 
     it('counts only entries that exist and are mutated, and each once', () => {
       const result = plan({
         ...base,
         cacheUsable: false,
-        baselineChanged: [...entries(8), ...entries(8), 'src/tool-args.ts', 'src/gone.ts'],
+        baselineChanged: [...entries(MAX_BASELINE_FILES), ...entries(MAX_BASELINE_FILES), 'src/tool-args.ts', 'src/gone.ts'],
         exists: p => p !== 'src/gone.ts',
       });
-      expect(result).toMatchObject({ mode: 'targeted', baselineChanged: 8, leftToWeekly: [] });
+      expect(result).toMatchObject({ mode: 'targeted', baselineChanged: MAX_BASELINE_FILES, leftToWeekly: [] });
     });
 
     it('does not apply on the incremental path', () => {
@@ -244,26 +244,27 @@ describe('plan', () => {
     });
 
     it('says in the summary which entries were left out and that the weekly run checks them', () => {
-      const result = plan({ ...base, cacheUsable: false, changed: ['src/utils/snippet.ts'], baselineChanged: entries(9) });
+      const over = MAX_BASELINE_FILES + 1;
+      const result = plan({ ...base, cacheUsable: false, changed: ['src/utils/snippet.ts'], baselineChanged: entries(over) });
       const text = renderSummary(result, null);
-      expect(text).toContain('9 baseline entries changed, over the cap of 8');
-      expect(text).toContain('the 9 below');
+      expect(text).toContain(`${over} baseline entries changed, over the cap of ${MAX_BASELINE_FILES}`);
+      expect(text).toContain(`the ${over} below`);
       expect(text).toContain('weekly full run (`mutation-weekly.yml`)');
       expect(text).toContain('head commit');
       expect(text).toContain('unchecked until then');
-      for (const f of entries(9)) expect(text).toContain(`- \`${f}\``);
+      for (const f of entries(over)) expect(text).toContain(`- \`${f}\``);
       expect(text).toContain('Mutated 1 file(s)');
     });
 
     it('says so, and is not a pass, when the cap leaves nothing to mutate', () => {
-      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(9) }), null);
+      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES + 1) }), null);
       expect(text).toContain('over the cap');
       expect(text).toContain('Nothing was checked, and this is not a pass.');
       expect(text).not.toContain('none changed in the baseline');
     });
 
     it('says nothing about a cap when it did not bite', () => {
-      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(3) }), null);
+      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES) }), null);
       expect(text).not.toContain('over the cap');
       expect(text).not.toContain('weekly');
     });

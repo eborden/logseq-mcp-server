@@ -122,11 +122,26 @@ export type PlanMode = 'incremental' | 'targeted' | 'empty';
 
 /**
  * The most baseline entries a PR may change before the cache-miss path stops mutating them (ADR-0026: a
- * PR never starts a cold full run, and the job has 10 minutes). A cold file takes about 1 to 1.5 minutes,
- * so a handful fits and a re-baseline (a Stryker upgrade changes every entry) does not. Over this, the
- * files are left to the weekly full run (#223).
+ * PR never starts a cold full run, and the job has 10 minutes). Over this, the files are left to the
+ * weekly full run (#223).
+ *
+ * Measured on the CI runner (#231), from five cold full runs of 44 files and about 6.1k mutants
+ * (`mutation-weekly.yml`, Oct 2026). Stryker took 19.1, 19.5, 24.4, 28.4 and 29.6 minutes, dry run
+ * included: 0.43 to 0.67 minutes per file on average, 0.19 to 0.29 seconds per mutant. Runners vary
+ * by 50% for the same commit, so the slowest run sets the bound. The job's own overhead (checkout,
+ * npm ci, plan, upload, ratchet) is 11 to 20 seconds.
+ *
+ * Files differ a lot in size, and the cap can't choose which ones changed. The four largest files
+ * hold 510, 420, 350 and 350 mutants. At 0.29 s each, the cap's worst case is:
+ *   3 files: 1,280 mutants, 6.2 min, + 0.3 min overhead = 6.5 min, about 3.5 min spare for the changed
+ *            sources and test imports that are not capped
+ *   4 files: 1,630 mutants, 7.9 min, + 0.3 min = 8.2 min, under 2 min spare
+ *   5 files: 1,953 mutants, 9.5 min, + 0.3 min = 9.8 min, no room left
+ * So 3. At the average file (0.67 min) 8 files would fit; the largest 8 (2,787 mutants, 13.5 min) do
+ * not, and the old figure of 1 to 1.5 minutes per file was a laptop estimate. Re-measure after the
+ * mutated scope or the runner changes much.
  */
-export const MAX_BASELINE_FILES = 8;
+export const MAX_BASELINE_FILES = 3;
 
 export interface Plan {
   mode: PlanMode;
