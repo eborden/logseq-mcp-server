@@ -31,7 +31,7 @@ Everything else in ADR-0026 stays as written: scope, tools, the baseline format 
 
 ## Status
 
-accepted
+superseded by 0028-cap-mutation-cache-miss-set-by-mutant-budget
 
 Date: 2026-10-06
 
