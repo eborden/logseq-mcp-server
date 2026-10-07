@@ -331,9 +331,13 @@ export function planFromRepo(
         return null;
       }
     };
+    // The entries this PR changed, so against the PR base. Against the cache's commit every entry that
+    // main changed (or all of them, when the cache predates the baseline) would be mutated again, and a
+    // cache-miss run would turn into a cold full run (#205).
+    const baselineRef = opts.fallbackSince !== '' && isCommit(opts.fallbackSince) ? opts.fallbackSince : since;
     let before: string | null = null;
     try {
-      before = io.git('show', `${since}:mutation-baseline.json`);
+      before = io.git('show', `${baselineRef}:mutation-baseline.json`);
     } catch {
       /* the file is new */
     }
