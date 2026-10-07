@@ -1297,6 +1297,69 @@ describe('mutation workflows', () => {
     });
   });
 
+  // #288, ADR-0026 "Pruning and strengthening": the prune report needs a run with the bail off, which is too slow
+  // for a laptop. It runs by hand only, reads with contents: read, and leaves the cache, the ratchet and the
+  // baseline alone.
+  describe('the prune report run', () => {
+    const prune = read('mutation-prune.yml');
+    /** The workflow without its comment lines, which name what it must not do. */
+    const code = prune.split('\n').filter(l => !/^\s*#/.test(l)).join('\n');
+
+    it('can only be started by hand, and reads with contents: read alone', () => {
+      expect(prune).toMatch(/\non:\n  workflow_dispatch:\n/);
+      expect(prune.slice(prune.indexOf('\non:'), prune.indexOf('\npermissions:'))).not.toMatch(
+        /\n  (?:push|pull_request|pull_request_target|schedule|workflow_run|workflow_call|repository_dispatch|issue_comment):/,
+      );
+      expect(prune.slice(0, prune.indexOf('\njobs:'))).toMatch(/\npermissions:\n  contents: read\n$/);
+      expect(prune).not.toMatch(/\n {4}permissions:/);
+      expect(prune).not.toMatch(/: write\b/);
+    });
+
+    it('runs the full scope with --disableBail from the CLI, then the prune report on its JSON report', () => {
+      const all = steps(prune);
+      const stryker = all.filter(s => s.includes('npx stryker'));
+      expect(stryker).toHaveLength(1);
+      expect(runBlocks(stryker[0]).map(b => b.trim())).toEqual(['npx stryker run --disableBail']);
+      // The flag only: the config is the weekly run's, which keeps the bail on.
+      expect((config as { disableBail?: boolean }).disableBail).toBeUndefined();
+      expect(prune).not.toMatch(/--mutate|--incremental|--force/);
+      const report = all.findIndex(s => s.includes('scripts/mutation-prune-report.ts'));
+      expect(report).toBeGreaterThan(all.indexOf(stryker[0]));
+      expect(all[report]).toContain('--report reports/mutation/mutation.json');
+      expect(prune).toMatch(/\n    timeout-minutes: (\d+)\n/);
+      expect(Number(/\n    timeout-minutes: (\d+)\n/.exec(prune)![1])).toBeGreaterThan(2.2 * 120);
+    });
+
+    it('writes the Markdown to the job summary and uploads both reports under its own name', () => {
+      const all = steps(prune);
+      const summary = all.find(s => s.includes('GITHUB_STEP_SUMMARY')) as string;
+      expect(summary).toContain('cat reports/mutation/prune-report.md >> "$GITHUB_STEP_SUMMARY"');
+      const upload = all.find(s => s.includes('actions/upload-artifact@')) as string;
+      expect(upload).toMatch(/if: always\(\)/);
+      for (const path of ['reports/mutation/mutation.json', 'reports/mutation/prune-report.json', 'reports/mutation/prune-report.md']) {
+        expect(upload).toContain(path);
+      }
+      // Not the weekly name, which the PR job's ratchet takes as proof that a weekly run checked the commit.
+      expect(upload).toContain('name: mutation-prune-${{ steps.commit.outputs.sha }}');
+      expect(upload).not.toContain(weeklyArtifactName(''));
+    });
+
+    it('never touches the incremental cache, the ratchet or the baseline', () => {
+      expect(code).not.toMatch(/actions\/cache/);
+      expect(code).not.toMatch(/mutation-ratchet\.ts|mutation-baseline\.json/);
+      expect(code).not.toMatch(/git (?:push|commit)|gh /);
+    });
+
+    it('interpolates no input or event field in a run block, and pins every action by SHA', () => {
+      const blocks = runBlocks(prune);
+      expect(blocks.length).toBeGreaterThan(0);
+      for (const block of blocks) expect(block).not.toMatch(UNTRUSTED_EXPRESSION);
+      const refs = [...prune.matchAll(/uses: (\S+)/g)].map(m => m[1]);
+      expect(refs.length).toBeGreaterThan(0);
+      for (const ref of refs) expect(ref, ref).toMatch(/@[0-9a-f]{40}$/);
+    });
+  });
+
   it('pins every action by a full commit SHA', () => {
     for (const text of [mutationJob, weekly]) {
       const refs = [...text.matchAll(/uses: (\S+)/g)].map(m => m[1]);
