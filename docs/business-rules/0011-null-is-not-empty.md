@@ -12,8 +12,9 @@ An absent answer and an empty answer mean different things to the caller. Report
 
 test: `src/tools/list-pages.test.ts`
 test: `src/truncation-meta.test.ts`
+test: `src/utils/resolve-refs.detail.test.ts`
 
-Both pin the `pages_unavailable` warning for `null` and the absence of a warning for a real `[]`. Other tools that read `null` as "none" have no test yet; the reviewer applies the rule to them.
+The first two pin the `pages_unavailable` warning for `null` and the absence of a warning for a real `[]`. The third pins the same split for `resolve_refs`: a `null` ref lookup gives a `refs_unavailable` warning and no `missing` refs, and a real `[]` still gives `missing`. Other tools that read `null` as "none" have no test yet; the reviewer applies the rule to them.
 reviewer: A tool that maps a `null` API response to an empty result adds a warning that says the data was unavailable.
 
 ## Changelog
@@ -22,3 +23,4 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 |---|---|---|
 | 2026-10-05 | Introduced as a pinned probe for `getAllPages` returning `null`. | #68 |
 | 2026-10-05 | `pages_unavailable` warning added to `list_pages`. | #71 |
+| 2026-10-07 | Mechanical enforcement: added a `test:` line for `resolve_refs`, which now warns `refs_unavailable` on a `null` lookup. No change to the rule's text. | #265 |
