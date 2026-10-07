@@ -60,7 +60,8 @@ export interface DateRangeSummary {
 
 /**
  * `hasMore` / `warnings` are present only when `resolve_refs` is on, an alias warning
- * applies, or `maxBlocks` cut the entries. `totals` ({ blocks, days }: what there was
+ * applies, `maxBlocks` cut the entries, or LogSeq answered a query with `null`
+ * (`journals_unavailable`, `blocks_unavailable`: BR-0011, #269). `totals` ({ blocks, days }: what there was
  * before the cut) comes only with a cut. `dateRange` is the range queried, not where
  * the cut left the entries: the `blocks_truncated` warning says where they end.
  * `totals.blocks` counts in the cap's unit (nested blocks too in full and slim output),
@@ -482,15 +483,48 @@ function snippetOf(block: BlockEntity): string {
     : firstLine;
 }
 
+/**
+ * The journal pages a query finds, or `null` when LogSeq answered `null`. `null` is not `[]` (BR-0011, #269):
+ * an empty array is a range with no journals, `null` is no answer at all.
+ */
 async function fetchPages(
   client: LogseqClient,
   { query, inputs }: { query: string; inputs: unknown[] }
-): Promise<PageEntity[]> {
+): Promise<PageEntity[] | null> {
   const rows = await queryParsed(client, responses.nullablePageRows, query, ...inputs);
-  return (rows || [])
+  if (rows === null) return null;
+  return rows
     .map(row => row[0])
     .filter(page => page != null)
     .map(page => camelizeKeys<PageEntity>(page));
+}
+
+/**
+ * No howToFetchAll on either warning: no parameter fetches what LogSeq did not answer (like `pages_unavailable`,
+ * #64), so `hasMore` is unaffected. The retry advice is in the message.
+ */
+const RETRY_ADVICE =
+  'Retry in a moment, or call logseq_get_graph_info to check which graph is open.';
+
+function journalsUnavailable(): ResultWarning {
+  return {
+    code: 'journals_unavailable',
+    message:
+      'LogSeq returned no answer when looking up journal pages (possibly no graph open or a re-index ' +
+      'in progress), so the empty result may not mean there are no journals in this range. ' +
+      RETRY_ADVICE
+  };
+}
+
+function blocksUnavailable(pageCount: number): ResultWarning {
+  return {
+    code: 'blocks_unavailable',
+    message:
+      `LogSeq returned no answer when looking up the blocks on ${pageCount} journal page(s) (possibly no graph ` +
+      'open or a re-index in progress), so their blocks are missing from this result. This does not ' +
+      'mean the days are empty. ' +
+      RETRY_ADVICE
+  };
 }
 
 /**
@@ -569,8 +603,10 @@ export async function queryJournals(
   }
   const selection = resolveSelection(options, now);
 
-  // Query 1: journal pages (may be empty), in the order entries are returned
+  // Query 1: journal pages (may be empty), in the order entries are returned. A `null` answer is not
+  // an empty one (BR-0011, #269): it reads as no journals here, and a warning says it was no answer.
   let journals: PageEntity[];
+  let unavailable: ResultWarning[] = [];
   let rangeStart: number;
   let rangeEnd: number;
 
@@ -578,11 +614,15 @@ export async function queryJournals(
     rangeStart = selection.start;
     rangeEnd = selection.end;
     const pagesQuery = DatalogQueryBuilder.getJournalPagesInRange(rangeStart, rangeEnd);
-    journals = await fetchPages(client, pagesQuery);
+    const found = await fetchPages(client, pagesQuery);
+    if (found === null) unavailable = [journalsUnavailable()];
+    journals = found ?? [];
     journals.sort((a, b) => (a.journalDay || 0) - (b.journalDay || 0));
   } else {
     const pagesQuery = DatalogQueryBuilder.getJournalPagesUpTo(selection.latest);
-    const all = await fetchPages(client, pagesQuery);
+    const found = await fetchPages(client, pagesQuery);
+    if (found === null) unavailable = [journalsUnavailable()];
+    const all = found ?? [];
     all.sort((a, b) => (b.journalDay || 0) - (a.journalDay || 0));
     journals = all.slice(0, selection.count);
     // Journals are unique per day, so every page between the oldest and newest
@@ -598,7 +638,9 @@ export async function queryJournals(
   if (journals.length > 0) {
     const blocksQuery = DatalogQueryBuilder.getJournalBlocksInRange(rangeStart, rangeEnd);
     const blockRows = await queryParsed(client, responses.nullableBlockRows, blocksQuery.query, ...blocksQuery.inputs);
-    const flatBlocks = (blockRows || [])
+    // `null` here would otherwise show journal pages that exist with no blocks, as if the days were empty
+    if (blockRows === null) unavailable = [blocksUnavailable(journals.length)];
+    const flatBlocks = (blockRows ?? [])
       .map(row => row[0])
       .filter(block => block != null)
       .map(block => {
@@ -659,7 +701,7 @@ export async function queryJournals(
 
   // Which names the search covered (#69); absent unless the term named a page with aliases
   const aliasCoverage: ResolvedAliases = aliasSet ? resolvedAliases(aliasSet) : {};
-  const warnings: ResultWarning[] = aliasSet ? aliasSetWarnings(aliasSet) : [];
+  const warnings: ResultWarning[] = [...(aliasSet ? aliasSetWarnings(aliasSet) : []), ...unavailable];
   if (cut) {
     warnings.push(
       blocksTruncated(cut, cap, {
