@@ -704,10 +704,12 @@ describe('getContextForQuery', () => {
     it.each(['what', 'when', 'where', 'were', 'does', 'could', 'should', 'would', 'with', 'about'])(
       'does not search for the stop word "%s", so a block without it is still a hit',
       async word => {
-        const { client, result } = await searchFor(`${word} gadgets`, 'a note on gadgets');
+        // "gear" is no longer than any stop word here, and a tie goes to the first keyword: a stop word
+        // that leaked through would be the one searched
+        const { client, result } = await searchFor(`${word} gear`, 'a note on gear');
 
         expect(result.searchResults!.map(block => block.id)).toEqual([1]);
-        expect((client.executeDatalogQuery as any).mock.calls[0][1]).toBe('(?i)gadgets');
+        expect((client.executeDatalogQuery as any).mock.calls[0][1]).toBe('(?i)gear');
       }
     );
 
