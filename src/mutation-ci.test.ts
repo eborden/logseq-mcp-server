@@ -17,6 +17,7 @@ import {
   type PlanInput,
   type PlanIo,
 } from '../scripts/mutation-ci.js';
+import { WEEKLY_ARTIFACT_RETENTION_DAYS, weeklyArtifactName } from '../scripts/mutation-ratchet.js';
 
 // The decisions of the CI mutation job (ADR-0026, #204): what it mutates, when it must not trust the
 // cache, and how its table counts ignores. All paths and tests below are made up except the config,
@@ -883,11 +884,21 @@ describe('mutation workflows', () => {
     expect(ci.slice(ci.indexOf('\njobs:')).match(/\n {4}permissions:/g)).toHaveLength(1);
   });
 
-  it('the weekly run puts its "ref" input in its title, which is where the ratchet finds a run for a SHA', () => {
-    expect(weekly).toMatch(/\nrun-name: .*\$\{\{ inputs\.ref \}\}/);
-    expect(weekly).toMatch(/\n {6}ref:\n/);
-    // The checkout takes that same input, so the title names the commit that was mutated.
-    expect(weekly).toMatch(/ref: \$\{\{ inputs\.ref \}\}/);
+  it('the weekly report artifact is named for the commit it checked out, and kept as long as the gate says', () => {
+    const all = steps(weekly);
+    const checkout = all.find(s => s.includes('actions/checkout@'));
+    expect(checkout).toMatch(/ref: \$\{\{ inputs\.ref \}\}/);
+    // The name comes from `git rev-parse HEAD` after that checkout, not from the ref input as typed.
+    const resolve = all.find(s => s.includes('id: commit'));
+    expect(resolve).toMatch(/SHA="\$\(git rev-parse HEAD\)"/);
+    expect(resolve).toMatch(/echo "sha=\$SHA" >> "\$GITHUB_OUTPUT"/);
+    expect(all.indexOf(checkout as string)).toBeLessThan(all.indexOf(resolve as string));
+    const upload = all.find(s => s.includes('actions/upload-artifact@')) as string;
+    expect(upload).toContain(`name: ${weeklyArtifactName('${{ steps.commit.outputs.sha }}')}`);
+    expect(upload).toMatch(/if: always\(\)/);
+    expect(upload).toContain(`retention-days: ${WEEKLY_ARTIFACT_RETENTION_DAYS}`);
+    // The name the gate asks for is that name, for a full SHA.
+    expect(weeklyArtifactName('a'.repeat(40))).toBe(`mutation-report-${'a'.repeat(40)}`);
   });
 
   it('a label change re-runs the pull request checks, so the label can excuse a lowered score', () => {

@@ -18,13 +18,14 @@ import {
   formatBaseline,
   isBareReason,
   leftToWeeklyNotice,
-  listWeeklyRuns,
+  githubRunLookup,
+  isSuccessfulWeeklyRun,
   parseBaseline,
   renderCheck,
   runInProcessGroup,
   scoreOf,
   updateBaseline,
-  weeklyRunCovers,
+  weeklyArtifactName,
   type Baseline,
   type CheckResult,
   type FileStats,
@@ -32,7 +33,8 @@ import {
   type ProcessGroupIo,
   type Report,
   type ReportMutant,
-  type WeeklyRun,
+  type WeeklyArtifact,
+  type WeeklyRunInfo,
 } from '../scripts/mutation-ratchet.js';
 
 // The ratchet of ADR-0026 (#205). Every report and baseline below is made up: file names are
@@ -943,81 +945,140 @@ describe('leftToWeeklyNotice', () => {
 });
 
 // ADR-0028, #239: a changed source the mutant budget left out fails the ratchet, unless a successful weekly run
-// exists for the PR's head commit. The one network call is passed in, so every case here is a fake.
+// uploaded the report artifact named for the PR's head commit. The Actions API reads are passed in, so every case
+// here is a fake: a store of artifacts by name and of runs by id, which, like the real API, filters by exact name.
 describe('changedSourceGate', () => {
   const sha = 'a'.repeat(40);
   const other = 'b'.repeat(40);
-  const run = (over: Partial<WeeklyRun>): WeeklyRun => ({ head_sha: other, display_title: 'Full mutation run ', conclusion: 'success', ...over });
-  const gate = (runs: WeeklyRun[] | Error, over: { changedSources?: string[]; headSha?: string | undefined } = {}) => {
-    const listRuns = vi.fn(async () => {
-      if (runs instanceof Error) throw runs;
-      return runs;
+  const WEEKLY = '.github/workflows/mutation-weekly.yml';
+  type Store = { artifacts?: Array<WeeklyArtifact>; runs?: Record<number, WeeklyRunInfo | null> };
+  const gate = (store: Store | Error, over: { changedSources?: string[]; headSha?: string | undefined } = {}) => {
+    const artifacts = vi.fn(async (name: string) => {
+      if (store instanceof Error) throw store;
+      return (store.artifacts ?? []).filter(a => a.name === name);
     });
-    const result = changedSourceGate({ changedSources: ['src/a.ts', 'src/b.ts'], headSha: sha, listRuns, ...over });
-    return { result, listRuns };
+    const run = vi.fn(async (id: number) => (store instanceof Error ? null : (store.runs?.[id] ?? null)));
+    const result = changedSourceGate({ changedSources: ['src/a.ts', 'src/b.ts'], headSha: sha, lookup: { artifacts, run }, ...over });
+    return { result, artifacts, run };
   };
+  const artifact = (over: Partial<WeeklyArtifact> = {}): WeeklyArtifact => ({ name: weeklyArtifactName(sha), expired: false, workflow_run: { id: 1 }, ...over });
+  const success: WeeklyRunInfo = { path: WEEKLY, conclusion: 'success' };
 
-  it('fails, naming the files and the command to run, when no weekly run exists', async () => {
-    const { result, listRuns } = gate([]);
+  it('looks for the artifact the weekly job names for exactly the head commit', async () => {
+    expect(weeklyArtifactName(sha)).toBe(`mutation-report-${sha}`);
+    const { result, artifacts } = gate({ artifacts: [artifact()], runs: { 1: success } });
+    expect(await result).toBeNull();
+    expect(artifacts).toHaveBeenCalledWith(`mutation-report-${sha}`);
+  });
+
+  it('fails, naming the files, the artifact and the command to run, when no artifact exists', async () => {
+    const { result, run } = gate({});
     const failure = await result;
-    expect(listRuns).toHaveBeenCalledTimes(1);
     expect(failure).toMatchObject({ kind: 'changed-source-unchecked', file: null });
     expect(failure?.message).toContain('2 changed source file(s) were not mutated');
     expect(failure?.message).toContain('`src/a.ts`, `src/b.ts`');
+    expect(failure?.message).toContain(`\`mutation-report-${sha}\``);
     expect(failure?.message).toContain(`Run mutation-weekly.yml on ${sha}`);
     expect(failure?.message).toContain('then re-run this job');
+    expect(failure?.message).not.toContain('expired');
+    expect(run).not.toHaveBeenCalled();
   });
 
-  it('fails when the only run is for another commit', async () => {
-    const { result } = gate([run({ head_sha: other, display_title: `Full mutation run ${other}` })]);
+  // Hole 1: a weekly run started from the PR's branch with another commit in "ref". Its head_sha is the PR head,
+  // and the report it uploaded is named for the commit it really checked out.
+  it('fails for a run started from the PR branch with another ref, whose head_sha is the PR head', async () => {
+    const { result } = gate({
+      artifacts: [{ name: weeklyArtifactName(other), expired: false, workflow_run: { id: 7, head_sha: sha } as { id: number } }],
+      runs: { 7: { ...success, head_sha: sha } as WeeklyRunInfo },
+    });
     expect(await result).toMatchObject({ kind: 'changed-source-unchecked' });
   });
 
-  it('fails when the run for the head commit did not succeed', async () => {
+  // Hole 2: a "ref" that only contains the SHA ("main # <sha>"), which a title match would accept.
+  it('fails for a run whose ref string contains the head SHA but checked out something else', async () => {
+    const { result } = gate({ artifacts: [{ name: weeklyArtifactName(other), expired: false, workflow_run: { id: 8 } }], runs: { 8: success } });
+    expect(await result).toMatchObject({ kind: 'changed-source-unchecked' });
+  });
+
+  it('fails for an artifact whose name only starts with the head SHA', async () => {
+    const { result } = gate({ artifacts: [artifact({ name: `${weeklyArtifactName(sha)}-extra` })], runs: { 1: success } });
+    expect(await result).toMatchObject({ kind: 'changed-source-unchecked' });
+  });
+
+  it('fails when the artifact expired, and says to repeat the run because they are kept 90 days', async () => {
+    const { result, run } = gate({ artifacts: [artifact({ expired: true })], runs: { 1: success } });
+    const failure = await result;
+    expect(failure?.kind).toBe('changed-source-unchecked');
+    expect(failure?.message).toContain('its artifact expired (they are kept 90 days), so the run has to be repeated');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('passes on a fresh artifact even when an older one for the same commit expired', async () => {
+    const { result } = gate({ artifacts: [artifact({ expired: true, workflow_run: { id: 1 } }), artifact({ workflow_run: { id: 2 } })], runs: { 1: success, 2: success } });
+    expect(await result).toBeNull();
+  });
+
+  it('fails when the artifact came from another workflow', async () => {
+    const { result } = gate({ artifacts: [artifact()], runs: { 1: { path: '.github/workflows/ci.yml', conclusion: 'success' } } });
+    expect(await result).toMatchObject({ kind: 'changed-source-unchecked' });
+    const lookalike = gate({ artifacts: [artifact()], runs: { 1: { path: '.github/workflows/mutation-weekly.yml.bak', conclusion: 'success' } } });
+    expect(await lookalike.result).toMatchObject({ kind: 'changed-source-unchecked' });
+  });
+
+  it('fails when the run did not succeed, or can not be read, or the artifact names no run', async () => {
     for (const conclusion of ['failure', 'cancelled', null]) {
-      const { result } = gate([run({ head_sha: sha, conclusion }), run({ display_title: `Full mutation run ${sha}`, conclusion })]);
+      const { result } = gate({ artifacts: [artifact()], runs: { 1: { path: WEEKLY, conclusion } } });
       expect(await result, String(conclusion)).toMatchObject({ kind: 'changed-source-unchecked' });
     }
+    expect(await gate({ artifacts: [artifact()], runs: { 1: null } }).result).toMatchObject({ kind: 'changed-source-unchecked' });
+    expect(await gate({ artifacts: [artifact({ workflow_run: null })], runs: { 1: success } }).result).toMatchObject({ kind: 'changed-source-unchecked' });
   });
 
-  it('passes on a successful run started from the head commit (its head_sha)', async () => {
-    const { result } = gate([run({ head_sha: other }), run({ head_sha: sha })]);
+  it('accepts a run path that the API gives with its ref (path@ref)', async () => {
+    const { result } = gate({ artifacts: [artifact()], runs: { 1: { path: `${WEEKLY}@refs/heads/main`, conclusion: 'success' } } });
     expect(await result).toBeNull();
   });
 
-  it('passes on a successful run started with the head SHA in "ref" (its title), though its head_sha is the branch tip', async () => {
-    const { result } = gate([run({ head_sha: other, display_title: `Full mutation run ${sha}` })]);
+  it('passes on a successful run of the weekly workflow that uploaded the head commit\'s report', async () => {
+    const { result, run } = gate({ artifacts: [artifact()], runs: { 1: success } });
     expect(await result).toBeNull();
+    expect(run).toHaveBeenCalledWith(1);
   });
 
   it('makes no call and passes when only test imports and baseline entries were left out (no changed source)', async () => {
-    const { result, listRuns } = gate([], { changedSources: [] });
+    const { result, artifacts, run } = gate({}, { changedSources: [] });
     expect(await result).toBeNull();
-    expect(listRuns).not.toHaveBeenCalled();
+    expect(artifacts).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
   });
 
   it('makes no call and passes outside a pull request (no head commit), where the warning is all there is', async () => {
     for (const headSha of [undefined, '']) {
-      const { result, listRuns } = gate([], { headSha });
+      const { result, artifacts } = gate({}, { headSha });
       expect(await result).toBeNull();
-      expect(listRuns).not.toHaveBeenCalled();
+      expect(artifacts).not.toHaveBeenCalled();
     }
   });
 
-  it('fails, without a call, when the head commit is not a full SHA, since a run for it can not be looked up', async () => {
+  it('fails, without a call, when the head commit is not a full SHA, since an artifact for it can not be looked up', async () => {
     for (const headSha of ['abc123', 'A'.repeat(40), `${sha}\n::error::boom`]) {
-      const { result, listRuns } = gate([run({ head_sha: headSha })], { headSha });
+      const { result, artifacts } = gate({ artifacts: [artifact({ name: weeklyArtifactName(headSha) })], runs: { 1: success } }, { headSha });
       expect(await result, headSha).toMatchObject({ kind: 'changed-source-unchecked' });
-      expect(listRuns).not.toHaveBeenCalled();
+      expect(artifacts).not.toHaveBeenCalled();
     }
   });
 
-  it('fails when the look-up itself fails, and says why, so a missing answer is not a pass', async () => {
-    const { result } = gate(new Error('the GitHub API answered 403; the job needs `actions: read`'));
-    const failure = await result;
+  it('fails when a look-up fails, and says why, so a missing answer is not a pass', async () => {
+    const failure = await gate(new Error('the GitHub API answered 403; the job needs `actions: read`')).result;
     expect(failure?.kind).toBe('changed-source-unchecked');
-    expect(failure?.message).toContain('Looking up the mutation-weekly.yml runs failed (the GitHub API answered 403');
+    expect(failure?.message).toContain('failed (the GitHub API answered 403');
     expect(failure?.message).toContain(`Run mutation-weekly.yml on ${sha}`);
+    const runFails = changedSourceGate({
+      changedSources: ['src/a.ts'],
+      headSha: sha,
+      lookup: { artifacts: async () => [artifact()], run: async () => Promise.reject(new Error('boom')) },
+    });
+    expect((await runFails)?.message).toContain('failed (boom)');
   });
 
   it('shows in the ratchet output as a failure, with the count', () => {
@@ -1028,57 +1089,66 @@ describe('changedSourceGate', () => {
   });
 });
 
-describe('weeklyRunCovers', () => {
-  const sha = 'c'.repeat(40);
-  it('wants a success, on the head_sha or named in the title', () => {
-    expect(weeklyRunCovers([], sha)).toBe(false);
-    expect(weeklyRunCovers([{ head_sha: sha, conclusion: 'success' }], sha)).toBe(true);
-    expect(weeklyRunCovers([{ head_sha: 'x', display_title: null, conclusion: 'success' }], sha)).toBe(false);
-    expect(weeklyRunCovers([{ head_sha: 'x', display_title: `Full mutation run ${sha}`, conclusion: 'success' }], sha)).toBe(true);
-    expect(weeklyRunCovers([{ head_sha: sha, display_title: `Full mutation run ${sha}`, conclusion: 'failure' }], sha)).toBe(false);
+describe('isSuccessfulWeeklyRun', () => {
+  it('wants a success of the weekly workflow file', () => {
+    expect(isSuccessfulWeeklyRun(null)).toBe(false);
+    expect(isSuccessfulWeeklyRun({ conclusion: 'success' })).toBe(false);
+    expect(isSuccessfulWeeklyRun({ path: '.github/workflows/mutation-weekly.yml', conclusion: 'success' })).toBe(true);
+    expect(isSuccessfulWeeklyRun({ path: '.github/workflows/mutation-weekly.yml', conclusion: 'failure' })).toBe(false);
+    expect(isSuccessfulWeeklyRun({ path: '.github/workflows/ci.yml', conclusion: 'success' })).toBe(false);
   });
 });
 
-describe('listWeeklyRuns', () => {
+describe('githubRunLookup', () => {
   const env = { GITHUB_REPOSITORY: 'owner/repo', GITHUB_TOKEN: 'secret-token-value', GITHUB_API_URL: 'https://api.example.test' };
   const respond = (status: number, body: unknown) => vi.fn(async () => new Response(JSON.stringify(body), { status }));
-
-  it('asks the Actions API for the successful runs of the weekly workflow, with the token as a header', async () => {
-    const fetchMock = respond(200, { workflow_runs: [{ head_sha: 'a', conclusion: 'success' }] });
-    vi.stubGlobal('fetch', fetchMock);
+  const withFetch = async (mock: ReturnType<typeof respond>, body: () => Promise<void>) => {
+    vi.stubGlobal('fetch', mock);
     try {
-      expect(await listWeeklyRuns(env)).toEqual([{ head_sha: 'a', conclusion: 'success' }]);
-      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
-      expect(url).toBe('https://api.example.test/repos/owner/repo/actions/workflows/mutation-weekly.yml/runs?status=success&per_page=100');
-      expect(init.headers.Authorization).toBe('Bearer secret-token-value');
+      await body();
     } finally {
       vi.unstubAllGlobals();
     }
+  };
+
+  it('asks for the artifacts of one exact name, with the token as a header, and reads one run by id', async () => {
+    const artifacts = [{ name: 'mutation-report-abc', expired: false, workflow_run: { id: 5 } }];
+    const mock = respond(200, { artifacts });
+    await withFetch(mock, async () => {
+      expect(await githubRunLookup(env).artifacts('mutation-report-abc')).toEqual(artifacts);
+      const [url, init] = mock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+      expect(url).toBe('https://api.example.test/repos/owner/repo/actions/artifacts?name=mutation-report-abc&per_page=100');
+      expect(init.headers.Authorization).toBe('Bearer secret-token-value');
+    });
+    const runMock = respond(200, { path: '.github/workflows/mutation-weekly.yml', conclusion: 'success' });
+    await withFetch(runMock, async () => {
+      expect(await githubRunLookup(env).run(5)).toMatchObject({ conclusion: 'success' });
+      expect((runMock.mock.calls[0] as unknown as [string])[0]).toBe('https://api.example.test/repos/owner/repo/actions/runs/5');
+    });
   });
 
   it('throws without the repository or token, and on an error status, never putting the token in the message', async () => {
-    await expect(listWeeklyRuns({ GITHUB_REPOSITORY: 'owner/repo' })).rejects.toThrow('GITHUB_TOKEN are needed');
-    vi.stubGlobal('fetch', respond(403, { message: 'Resource not accessible' }));
-    try {
-      const error = await listWeeklyRuns(env).then(
-        () => null,
-        (e: Error) => e,
-      );
+    await expect(githubRunLookup({ GITHUB_REPOSITORY: 'owner/repo' }).artifacts('x')).rejects.toThrow('GITHUB_TOKEN are needed');
+    await withFetch(respond(403, { message: 'Resource not accessible' }), async () => {
+      const error = await githubRunLookup(env)
+        .artifacts('x')
+        .then(
+          () => null,
+          (e: Error) => e,
+        );
       expect(error?.message).toContain('answered 403');
       expect(error?.message).toContain('actions: read');
       expect(error?.message).not.toContain('secret-token-value');
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    });
   });
 
-  it('gives no runs for a body that has none', async () => {
-    vi.stubGlobal('fetch', respond(200, {}));
-    try {
-      expect(await listWeeklyRuns(env)).toEqual([]);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it('gives no artifacts for a body that has none, and no run for a 404', async () => {
+    await withFetch(respond(200, {}), async () => {
+      expect(await githubRunLookup(env).artifacts('x')).toEqual([]);
+    });
+    await withFetch(respond(404, { message: 'Not Found' }), async () => {
+      expect(await githubRunLookup(env).run(9)).toBeNull();
+    });
   });
 });
 
