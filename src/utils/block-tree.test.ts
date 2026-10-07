@@ -63,9 +63,16 @@ describe('orderSiblings', () => {
   });
 
   it('takes a sibling with no left as the head of the chain', () => {
-    const siblings = [{ id: 9, left: { id: 4 } }, { id: 4 }];
+    // the head has the higher id, so only the head rule puts it first
+    const siblings = [{ id: 4, left: { id: 9 } }, { id: 9 }];
 
-    expect(orderSiblings(siblings).map(s => s.id)).toEqual([4, 9]);
+    expect(orderSiblings(siblings).map(s => s.id)).toEqual([9, 4]);
+  });
+
+  it('outputs a row that comes twice once, with its chain, rather than twice', () => {
+    const siblings = [{ id: 2 }, { id: 2 }, { id: 3, left: { id: 2 } }];
+
+    expect(orderSiblings(siblings).map(s => s.id)).toEqual([2, 3]);
   });
 
   it('takes a sibling whose left is outside the list as a head, even when its id is not the lowest', () => {
