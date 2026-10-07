@@ -11,6 +11,16 @@
  * own. Without `disableBail`, Stryker stops at the first failing test, so `killedBy` holds one test
  * and the counts overstate redundancy: the report says so at the top when the run had the bail on.
  *
+ * Stryker sets `killedBy` only on a Killed mutant. A Timeout or RuntimeError mutant also counts as
+ * detected in the score, but names no killer, so a test that alone makes one time out has no sole
+ * kill. Such a test stays a candidate, but the report counts the Timeout and RuntimeError mutants it
+ * covers (`coversTimeouts`), shows them in its row, keeps it out of "Kill nothing" and lists it
+ * under "Check before pruning": deleting it may lower the file's score.
+ *
+ * A row is one test id, which the vitest runner builds as `<file>#<full name>`, so two tests in one
+ * file with the same full name (an `it.each` title with no `%s`, a copied title) are one row, with
+ * their counts added together.
+ *
  * Never a candidate, each with its reason in the output. All three are read from files, so a new
  * guard is excluded without editing this script:
  * - a test file named in a `test:` line of the Mechanical enforcement section of any ADR or business
@@ -45,6 +55,7 @@ export const MUTATION_CONFIG = 'vitest.mutation.config.ts';
 // Report
 
 export interface PruneMutant {
+  status?: string;
   killedBy?: string[];
   coveredBy?: string[];
 }
@@ -197,6 +208,8 @@ export interface TestRow {
   soleKills: number;
   /** Mutants whose coveredBy holds this test. */
   covers: number;
+  /** Covered mutants with status Timeout or RuntimeError: detected, with no killer named. */
+  coversTimeouts: number;
   status: 'candidate' | 'sole-killer' | 'excluded';
   /** Why it is excluded; empty unless status is excluded. */
   reasons: string[];
@@ -217,8 +230,10 @@ export interface PruneReport {
     tests: number;
     killedMutants: number;
     candidates: number;
-    /** Candidates that kill no mutant at all. */
+    /** Candidates that kill no mutant at all and cover no Timeout or RuntimeError mutant. */
     killNothing: number;
+    /** Candidates that cover a Timeout or RuntimeError mutant. */
+    coverTimeouts: number;
     soleKillers: number;
     excluded: number;
   };
@@ -229,6 +244,7 @@ export function pruneReport(report: PruneInputReport, exclusions: Exclusions): P
   const kills = new Map<string, number>();
   const sole = new Map<string, number>();
   const covers = new Map<string, number>();
+  const timeouts = new Map<string, number>();
   const bump = (map: Map<string, number>, id: string) => map.set(id, (map.get(id) ?? 0) + 1);
   let killedMutants = 0;
   for (const { mutants } of Object.values(report.files)) {
@@ -237,7 +253,11 @@ export function pruneReport(report: PruneInputReport, exclusions: Exclusions): P
       if (killers.length > 0) killedMutants++;
       for (const id of killers) bump(kills, id);
       if (killers.length === 1) bump(sole, killers[0]);
-      for (const id of new Set(mutant.coveredBy ?? [])) bump(covers, id);
+      const detectedUnnamed = mutant.status === 'Timeout' || mutant.status === 'RuntimeError';
+      for (const id of new Set(mutant.coveredBy ?? [])) {
+        bump(covers, id);
+        if (detectedUnnamed) bump(timeouts, id);
+      }
     }
   }
 
@@ -254,6 +274,7 @@ export function pruneReport(report: PruneInputReport, exclusions: Exclusions): P
           kills: kills.get(test.id) ?? 0,
           soleKills,
           covers: covers.get(test.id) ?? 0,
+          coversTimeouts: timeouts.get(test.id) ?? 0,
           status: reasons.length > 0 ? 'excluded' : soleKills > 0 ? 'sole-killer' : 'candidate',
           reasons,
         };
@@ -269,7 +290,8 @@ export function pruneReport(report: PruneInputReport, exclusions: Exclusions): P
       tests: all.length,
       killedMutants,
       candidates: all.filter(t => t.status === 'candidate').length,
-      killNothing: all.filter(t => t.status === 'candidate' && t.kills === 0).length,
+      killNothing: all.filter(t => t.status === 'candidate' && t.kills === 0 && t.coversTimeouts === 0).length,
+      coverTimeouts: all.filter(t => t.status === 'candidate' && t.coversTimeouts > 0).length,
       soleKillers: all.filter(t => t.status === 'sole-killer').length,
       excluded: all.filter(t => t.status === 'excluded').length,
     },
@@ -295,10 +317,13 @@ export function renderMarkdown(result: PruneReport): string {
   out.push(
     'A candidate is a test that is the sole killer of no mutant (ADR-0026). This report only lists: every removal is a human decision, in its own pruning PR.',
     '',
+    'A row is a unique full name in its file: two tests in one file with the same name are one row, with their counts added. "Timeouts" counts covered mutants that timed out or hit a runtime error, which Stryker counts as detected but names no killer for: deleting such a candidate may lower the score.',
+    '',
     '| | Tests |',
     '|---|---:|',
     `| Candidates | ${t.candidates} |`,
     `| Candidates that kill nothing | ${t.killNothing} |`,
+    `| Candidates that cover a timeout or runtime error | ${t.coverTimeouts} |`,
     `| Sole killers | ${t.soleKillers} |`,
     `| Excluded | ${t.excluded} |`,
     `| All, in ${t.testFiles} test files | ${t.tests} |`,
@@ -309,12 +334,17 @@ export function renderMarkdown(result: PruneReport): string {
   for (const f of result.files) {
     const candidates = f.tests.filter(r => r.status === 'candidate');
     if (candidates.length === 0) continue;
-    out.push('', `### ${f.file}`, '', `${f.candidates} candidates of ${f.tests.length} tests.`, '', '| Test | Kills | Covers |', '|---|---:|---:|');
-    for (const r of candidates) out.push(`| ${cell(r.name)} | ${r.kills} | ${r.covers} |`);
-    const nothing = candidates.filter(r => r.kills === 0);
+    out.push('', `### ${f.file}`, '', `${f.candidates} candidates of ${f.tests.length} tests.`, '', '| Test | Kills | Covers | Timeouts |', '|---|---:|---:|---:|');
+    for (const r of candidates) out.push(`| ${cell(r.name)} | ${r.kills} | ${r.covers} | ${r.coversTimeouts} |`);
+    const nothing = candidates.filter(r => r.kills === 0 && r.coversTimeouts === 0);
     if (nothing.length > 0) {
       out.push('', 'Kill nothing:');
       for (const r of nothing) out.push(`- ${cell(r.name)}${r.covers === 0 ? ' (covers no mutant)' : ''}`);
+    }
+    const check = candidates.filter(r => r.coversTimeouts > 0);
+    if (check.length > 0) {
+      out.push('', 'Check before pruning (may be the only test that detects a timeout or runtime error):');
+      for (const r of check) out.push(`- ${cell(r.name)} (covers ${r.coversTimeouts} timeout or runtime-error mutants)`);
     }
   }
 
