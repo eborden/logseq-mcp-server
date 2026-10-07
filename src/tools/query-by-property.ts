@@ -87,7 +87,7 @@ export async function queryByPropertyWithMeta(
     .filter(pulled => pulled != null)
     .map(pulled => {
       const block = camelizeBlock(pulled);
-      if (block.page && typeof block.page === 'object') {
+      if (block.page) {
         block.page = camelizeKeys(block.page);
       }
       return block;
