@@ -664,7 +664,8 @@ export interface LeftGroups {
  * out. It never fails the job: `changedSourceGate` does that for the changed sources, and a test import or a
  * baseline entry left out is only this warning, so a re-baseline goes green. `groups` names how many of the
  * files are changed sources, files imported by changed tests and baseline entries. `headSha` is the PR's
- * head commit, shown only when it is a full SHA.
+ * head commit, shown only when it is a full SHA. A run of the weekly workflow before merging is asked for only
+ * when a changed source is among the files (or `groups` is absent, so nothing says otherwise): see ADR-0029.
  */
 export function leftToWeeklyNotice(
   leftToWeekly: readonly string[],
@@ -684,9 +685,18 @@ export function leftToWeeklyNotice(
     : [];
   const parts = named.filter(([count]) => count !== 0).map(([count, one, many]) => `${count} ${count === 1 ? one : many}`);
   const detail = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+  // A changed source fails the job until a weekly run covers it (changedSourceGate), so only then is a run before
+  // merging required. A test import or baseline entry is left to the scheduled weekly run (ADR-0029).
+  const needsRun = groups === undefined || groups.changedSources.length > 0;
+  if (needsRun) {
+    return {
+      annotation: `::warning title=Mutation testing::${n} file(s)${detail} over the mutant budget left to mutation-weekly.yml; run it on ${commit} before merging`,
+      line: `**${n} file(s)${detail} were not mutated on this PR, over the mutant budget, and are unchecked until the weekly full run covers them.** Run \`mutation-weekly.yml\` on ${commit} before merging (Actions tab, "Run workflow", the full SHA in "ref"). The job summary lists the files by group.`,
+    };
+  }
   return {
-    annotation: `::warning title=Mutation testing::${n} file(s)${detail} over the mutant budget left to mutation-weekly.yml; run it on ${commit} before merging`,
-    line: `**${n} file(s)${detail} were not mutated on this PR, over the mutant budget, and are unchecked until the weekly full run covers them.** Run \`mutation-weekly.yml\` on ${commit} before merging (Actions tab, "Run workflow", the full SHA in "ref"). The job summary lists the files by group.`,
+    annotation: `::warning title=Mutation testing::${n} file(s)${detail} over the mutant budget left to the scheduled weekly run; no run is needed before merging`,
+    line: `**${n} file(s)${detail} were not mutated on this PR, over the mutant budget, and are unchecked until the scheduled weekly full run covers them.** No changed source is among them, so no run of \`mutation-weekly.yml\` is needed before merging. The job summary lists the files by group.`,
   };
 }
 

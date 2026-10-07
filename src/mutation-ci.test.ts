@@ -417,6 +417,25 @@ describe('plan', () => {
       expect(text).toContain('Changed baseline entries (1):\n\n- `src/b00.ts`');
     });
 
+    it('asks for a weekly run before merging only when a changed source was left out (#277)', () => {
+      const [a, b] = names(2);
+      const source = renderSummary(plan({ ...miss, changed: [a, b], mutantCounts: () => ({ [a]: 1000, [b]: 1000 }) }), null);
+      expect(source).toContain('before merging');
+      expect(source).not.toContain('no run is needed before merging');
+      const baselineOnly = renderSummary(plan({ ...miss, changed: [], baselineChanged: [a, b], mutantCounts: () => ({ [a]: 1000, [b]: 1000 }) }), null);
+      expect(baselineOnly).toContain('No changed source is on this list, so no run is needed before merging');
+      expect(baselineOnly).not.toContain('Run it by hand');
+    });
+
+    it("says it mutated the PR's own files, and names the new tests whose imports were not used (#277)", () => {
+      const text = renderSummary(
+        plan({ ...miss, changed: ['src/utils/new.test.ts'], added: ['src/utils/new.test.ts'], readTest: () => "import { x } from './snippet.js';", mutantCounts: () => ({}) }),
+        null,
+      );
+      expect(text).toContain("The files are the PR's own changes against its base");
+      expect(text).toContain('1 test file(s) are new in this PR, so the files they import were not mutated for them');
+    });
+
     it('leaves out a group heading with no files, and says nothing about the budget when everything fit', () => {
       const [a, b] = names(2);
       const left = renderSummary(plan({ ...miss, changed: [a, b], mutantCounts: () => ({ [a]: 1000, [b]: 1000 }) }), null);
@@ -545,7 +564,7 @@ describe('chooseBase', () => {
 
 describe('planFromRepo', () => {
   /** A fake repository: the commits it knows, what `git diff` lists since each, and the files at HEAD. */
-  function fakeIo(opts: { commits: string[]; diff?: Record<string, string[]>; files?: Record<string, string>; old?: Record<string, string> }) {
+  function fakeIo(opts: { commits: string[]; diff?: Record<string, string[]>; added?: Record<string, string[]>; files?: Record<string, string>; old?: Record<string, string> }) {
     const calls: string[][] = [];
     const files = opts.files ?? {};
     const io: PlanIo = {
@@ -555,7 +574,7 @@ describe('planFromRepo', () => {
           if (opts.commits.some(c => args[2] === `${c}^{commit}`)) return '';
           throw new Error('unknown revision');
         }
-        if (args[0] === 'diff') return (opts.diff?.[args[args.length - 2]] ?? []).join('\n');
+        if (args[0] === 'diff') return ((args.includes('--diff-filter=A') ? opts.added : opts.diff)?.[args[args.length - 2]] ?? []).join('\n');
         if (args[0] === 'show') {
           const old = opts.old?.[args[1]];
           if (old === undefined) throw new Error('path does not exist');
@@ -629,7 +648,7 @@ describe('planFromRepo', () => {
     const { io } = fakeIo({
       commits: ['cache111', 'base111'],
       // A blind-spot file changed, so the cache can't be trusted and the cache-miss path runs.
-      diff: { cache111: ['vitest.config.ts', 'mutation-baseline.json'] },
+      diff: { cache111: ['vitest.config.ts', 'mutation-baseline.json'], base111: ['mutation-baseline.json'] },
       files: {
         'mutation-baseline.json': baseline({ 'src/a.ts': entry(92), 'src/b.ts': entry(80), 'src/c.ts': entry(70) }),
         'src/a.ts': '',
@@ -700,6 +719,110 @@ describe('planFromRepo', () => {
       const read = vi.spyOn(io, 'read');
       expect(planFromRepo({ cache: 'hit', since: 'cache111', fallbackSince: 'base111', config: withIncremental }, io).mode).toBe('incremental');
       expect(read).not.toHaveBeenCalled();
+    });
+  });
+
+  // #277, ADR-0029. The cache is restored from the newest commit that saved one, which can be many commits behind
+  // the PR's base (a blind-spot change on main stops every push after it from saving). The cache's validity reads
+  // the long diff; the files to mutate read only the PR's own.
+  describe("the PR's own files, not what main changed since the cache (#277)", () => {
+    const INCREMENTAL = 'reports/mutation/stryker-incremental.json';
+    const withIncremental = { ...config, incrementalFile: INCREMENTAL };
+    const sizes = (counts: Record<string, number>) =>
+      JSON.stringify({ files: Object.fromEntries(Object.entries(counts).map(([f, n]) => [f, { mutants: Array.from({ length: n }, () => ({})) }])) });
+    const baseline = (scores: Record<string, number>) => JSON.stringify({ stryker: '10.0.0', files: Object.fromEntries(Object.entries(scores).map(([f, s]) => [f, { score: s, ignores: 0 }])) });
+    const run = (io: PlanIo) => planFromRepo({ cache: 'hit', since: 'cache111', fallbackSince: 'base111', config: withIncremental }, io);
+    // main changed, since the cache was saved: a blind-spot helper, two sources and a test over the big files.
+    const drift = ['src/tools/child.mjs', 'src/tools/evolution.ts', 'src/utils/alias.ts', 'src/tools/evolution.detail.test.ts'];
+    const counts = { 'src/tools/evolution.ts': 200, 'src/utils/alias.ts': 130, 'src/client.ts': 70, 'src/datalog/queries.ts': 360, 'src/tools/prop.ts': 45, 'src/tools/range.ts': 510, 'src/utils/refs.ts': 425 };
+
+    it('mutates the one source a PR changed, not the two sources main changed since the cache (a source-only PR)', () => {
+      const { io } = fakeIo({
+        commits: ['cache111', 'base111'],
+        diff: { cache111: [...drift, 'src/tools/prop.ts'], base111: ['src/tools/prop.ts'] },
+        files: { 'src/tools/prop.ts': '', 'src/tools/evolution.ts': '', 'src/utils/alias.ts': '', [INCREMENTAL]: sizes(counts) },
+      });
+      const result = run(io);
+      expect(result).toMatchObject({ mode: 'targeted', mutate: ['src/tools/prop.ts'], changedSources: ['src/tools/prop.ts'], estimatedMutants: 45, leftToWeekly: [] });
+      // The blind spot is still read from the long diff: it is why the cache is not trusted.
+      expect(result.reasons.join(' ')).toContain('src/tools/child.mjs');
+    });
+
+    it('still fails a left-out changed source: the budget and the groups are unchanged (ADR-0028)', () => {
+      const big = { 'src/tools/prop.ts': 700, 'src/tools/range.ts': 700 };
+      const { io } = fakeIo({
+        commits: ['cache111', 'base111'],
+        diff: { cache111: [...drift, ...Object.keys(big)], base111: Object.keys(big) },
+        files: { 'src/tools/prop.ts': '', 'src/tools/range.ts': '', [INCREMENTAL]: sizes(big) },
+      });
+      expect(run(io).leftToWeeklyByGroup).toEqual({ changedSources: ['src/tools/range.ts'], fromTests: [], fromBaseline: [] });
+    });
+
+    it('does not mutate what a new test imports, but does mutate the baseline entry it raises (a test-and-raise PR)', () => {
+      const { io } = fakeIo({
+        commits: ['cache111', 'base111'],
+        diff: {
+          cache111: [...drift, 'src/tools/range.detail.test.ts', 'mutation-baseline.json'],
+          base111: ['src/tools/range.detail.test.ts', 'mutation-baseline.json'],
+        },
+        added: { base111: ['src/tools/range.detail.test.ts'] },
+        files: {
+          'src/tools/range.detail.test.ts': "import { a } from './range.js'; import { b } from '../client.js'; import { c } from '../datalog/queries.js'; import { d } from '../utils/refs.js';",
+          'mutation-baseline.json': baseline({ 'src/tools/range.ts': 96 }),
+          'src/tools/range.ts': '',
+          'src/client.ts': '',
+          'src/datalog/queries.ts': '',
+          'src/utils/refs.ts': '',
+          [INCREMENTAL]: sizes(counts),
+        },
+        old: { 'base111:mutation-baseline.json': baseline({ 'src/tools/range.ts': 95 }) },
+      });
+      const result = run(io);
+      expect(result).toMatchObject({
+        mode: 'targeted',
+        mutate: ['src/tools/range.ts'],
+        fromBaseline: ['src/tools/range.ts'],
+        fromTests: [],
+        addedTests: ['src/tools/range.detail.test.ts'],
+        estimatedMutants: 510,
+        leftToWeekly: [],
+      });
+    });
+
+    it('still mutates what an edited test imports', () => {
+      const { io } = fakeIo({
+        commits: ['cache111', 'base111'],
+        diff: { cache111: [...drift, 'src/tools/range.detail.test.ts'], base111: ['src/tools/range.detail.test.ts'] },
+        added: { base111: [] },
+        files: { 'src/tools/range.detail.test.ts': "import { a } from './range.js';", 'src/tools/range.ts': '', [INCREMENTAL]: sizes(counts) },
+      });
+      expect(run(io)).toMatchObject({ mutate: ['src/tools/range.ts'], fromTests: ['src/tools/range.ts'], addedTests: [] });
+    });
+
+    it('fits eight baseline raises that touch no source, which the old plan could not once main had drifted', () => {
+      const raised = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts', 'src/f.ts', 'src/g.ts', 'src/h.ts'];
+      const sized = { ...counts, ...Object.fromEntries(raised.map(f => [f, 140])) };
+      const scores = (n: number) => baseline(Object.fromEntries(raised.map(f => [f, n])));
+      const { io } = fakeIo({
+        commits: ['cache111', 'base111'],
+        diff: { cache111: [...drift, 'mutation-baseline.json'], base111: ['mutation-baseline.json'] },
+        files: { 'mutation-baseline.json': scores(97), 'src/tools/evolution.ts': '', 'src/utils/alias.ts': '', ...Object.fromEntries(raised.map(f => [f, ''])), [INCREMENTAL]: sizes(sized) },
+        old: { 'base111:mutation-baseline.json': scores(95) },
+      });
+      const result = run(io);
+      expect(result).toMatchObject({ mode: 'targeted', mutate: raised, fromBaseline: raised, estimatedMutants: 8 * 140, leftToWeekly: [] });
+    });
+
+    it('is the same list as before when the cache is the PR base, or there is no cache', () => {
+      const { io, calls } = fakeIo({
+        commits: ['base111'],
+        diff: { base111: ['vitest.config.ts', 'src/tools/prop.ts'] },
+        files: { 'src/tools/prop.ts': '' },
+      });
+      const result = planFromRepo({ cache: 'miss', since: '', fallbackSince: 'base111', config }, io);
+      expect(result).toMatchObject({ mutate: ['src/tools/prop.ts'] });
+      // One diff for the paths, one for the added ones: no second long diff.
+      expect(calls.filter(c => c[0] === 'diff' && !c.includes('--diff-filter=A'))).toHaveLength(1);
     });
   });
 

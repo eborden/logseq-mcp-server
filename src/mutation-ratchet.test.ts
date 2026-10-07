@@ -907,6 +907,21 @@ describe('leftToWeeklyNotice', () => {
     expect(tests?.annotation).toContain('(1 imported by changed tests)');
   });
 
+  // ADR-0029, #277: only a changed source needs a weekly run before merging, because only that fails the job.
+  it('asks for a weekly run before merging only when a changed source is among the files', () => {
+    const tests = leftToWeeklyNotice(['src/t.ts'], sha, { changedSources: [], fromTests: ['src/t.ts'], fromBaseline: [] });
+    const baseline = leftToWeeklyNotice(['src/b.ts'], sha, { changedSources: [], fromTests: [], fromBaseline: ['src/b.ts'] });
+    for (const notice of [tests, baseline]) {
+      expect(notice?.annotation).toContain('left to the scheduled weekly run; no run is needed before merging');
+      expect(notice?.annotation).not.toContain('run it on');
+      expect(notice?.line).toContain('no run of `mutation-weekly.yml` is needed before merging');
+      expect(notice?.line).not.toContain(sha);
+    }
+    const source = leftToWeeklyNotice(['src/a.ts', 'src/t.ts'], sha, { changedSources: ['src/a.ts'], fromTests: ['src/t.ts'], fromBaseline: [] });
+    expect(source?.annotation).toContain(`run it on ${sha} before merging`);
+    expect(source?.line).toContain(`Run \`mutation-weekly.yml\` on ${sha} before merging`);
+  });
+
   it('pluralises a group label by its count: one entry or source, two or more of them', () => {
     const one = leftToWeeklyNotice(['src/a.ts', 'src/b.ts'], sha, { changedSources: ['src/a.ts'], fromTests: [], fromBaseline: ['src/b.ts'] });
     expect(one?.annotation).toContain('(1 changed source, 1 baseline entry)');
