@@ -26,7 +26,7 @@
     "src/tools/search-by-relationship.ts": { "score": 85.0, "ignores": 0 },
     "src/utils/alias-set.ts": { "score": 81.0, "ignores": 0 },
     "src/utils/block-budget.ts": { "score": 100.0, "ignores": 0 },
-    "src/utils/block-tree.ts": { "score": 69.0, "ignores": 0 },
+    "src/utils/block-tree.ts": { "score": 96.0, "ignores": 0 },
     "src/utils/compact.ts": { "score": 86.0, "ignores": 0 },
     "src/utils/date-presets.ts": { "score": 97.0, "ignores": 0 },
     "src/utils/date-utils.ts": { "score": 90.0, "ignores": 0 },
