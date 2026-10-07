@@ -867,7 +867,7 @@ describe('runInProcessGroup', () => {
   });
 });
 
-// #223: a capped PR goes green, so the unchecked files have to show outside the job summary too.
+// #223, #239: a PR with files over the mutant budget goes green, so the unchecked files have to show outside the job summary too.
 describe('leftToWeeklyNotice', () => {
   const sha = 'a'.repeat(40);
   const clean: CheckResult = { failures: [], raisable: [], reruns: [], checked: 0 };
@@ -879,20 +879,31 @@ describe('leftToWeeklyNotice', () => {
 
   it('makes a warning annotation naming the count, the weekly workflow and the head commit', () => {
     const notice = leftToWeeklyNotice(['src/a.ts', 'src/b.ts', 'src/c.ts'], sha);
-    expect(notice?.annotation).toBe(`::warning title=Mutation testing::3 baseline entries left to mutation-weekly.yml; run it on ${sha} before merging`);
+    expect(notice?.annotation).toBe(`::warning title=Mutation testing::3 file(s) over the mutant budget left to mutation-weekly.yml; run it on ${sha} before merging`);
     expect(notice?.annotation).not.toContain('\n');
   });
 
   it("says 'this PR's head commit' when the SHA is missing or is not a full hex SHA, so nothing odd reaches the annotation", () => {
     for (const bad of [undefined, '', 'abc123', 'x'.repeat(40), `${sha}\n::error::boom`]) {
       const notice = leftToWeeklyNotice(['src/a.ts'], bad);
-      expect(notice?.annotation).toBe("::warning title=Mutation testing::1 baseline entries left to mutation-weekly.yml; run it on this PR's head commit before merging");
+      expect(notice?.annotation).toBe("::warning title=Mutation testing::1 file(s) over the mutant budget left to mutation-weekly.yml; run it on this PR's head commit before merging");
     }
+  });
+
+  it('names how many of the files are changed sources, test imports and baseline entries, leaving out empty groups', () => {
+    const groups = { changedSources: ['src/a.ts'], fromTests: [], fromBaseline: ['src/b.ts', 'src/c.ts'] };
+    const notice = leftToWeeklyNotice(['src/a.ts', 'src/b.ts', 'src/c.ts'], sha, groups);
+    expect(notice?.annotation).toBe(
+      `::warning title=Mutation testing::3 file(s) (1 changed source, 2 baseline) over the mutant budget left to mutation-weekly.yml; run it on ${sha} before merging`,
+    );
+    expect(notice?.line).toContain('3 file(s) (1 changed source, 2 baseline) were not mutated on this PR');
+    const tests = leftToWeeklyNotice(['src/t.ts'], sha, { changedSources: [], fromTests: ['src/t.ts'], fromBaseline: [] });
+    expect(tests?.annotation).toContain('(1 imported by changed tests)');
   });
 
   it("adds a line to the ratchet's own section, whether it passes or not, and names no file", () => {
     const passing = renderCheck(clean, null, { expected: [], labeled: false, leftToWeekly: ['src/a.ts', 'src/b.ts'], headSha: sha });
-    expect(passing).toContain('2 changed baseline entries were not mutated on this PR');
+    expect(passing).toContain('2 file(s) were not mutated on this PR, over the mutant budget');
     expect(passing).toContain(`Run \`mutation-weekly.yml\` on ${sha} before merging`);
     expect(passing).not.toContain('src/a.ts');
     const failing = renderCheck(
@@ -901,7 +912,17 @@ describe('leftToWeeklyNotice', () => {
       { expected: [], labeled: false, leftToWeekly: ['src/a.ts'] },
     );
     expect(failing).toContain('Fail: 1 problem(s)');
-    expect(failing).toContain('1 changed baseline entries were not mutated');
+    expect(failing).toContain('1 file(s) were not mutated');
+  });
+
+  it('passes the groups of the plan through to the line', () => {
+    const text = renderCheck(clean, null, {
+      expected: [],
+      labeled: false,
+      leftToWeekly: ['src/a.ts'],
+      leftGroups: { changedSources: ['src/a.ts'], fromTests: [], fromBaseline: [] },
+    });
+    expect(text).toContain('1 file(s) (1 changed source) were not mutated');
   });
 });
 

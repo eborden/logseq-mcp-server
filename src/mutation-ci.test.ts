@@ -1,13 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import {
   changedBaselineFiles,
   chooseBase,
+  FALLBACK_MUTANTS,
   fileScores,
   importedSources,
   inMutateScope,
   isBlindSpot,
-  MAX_BASELINE_FILES,
+  MUTANT_BUDGET,
+  mutantCountsFromIncremental,
   plan,
   planFromRepo,
   renderSummary,
@@ -150,12 +152,13 @@ describe('plan', () => {
       changed: ['src/utils/snippet.test.ts', 'src/utils/snippet.ts'],
       baselineChanged: ['src/tools/get-page.ts', 'src/tool-args.ts'],
       readTest: () => "import { x } from './snippet.js';\nimport { y } from './compact.js';",
+      mutantCounts: () => ({ 'src/utils/snippet.ts': 100, 'src/utils/compact.ts': 100, 'src/tools/get-page.ts': 100 }),
     });
     expect(result.mutate).toEqual(['src/tools/get-page.ts', 'src/utils/compact.ts', 'src/utils/snippet.ts']);
     expect(result).toMatchObject({
       changedSources: ['src/utils/snippet.ts'],
       fromBaseline: ['src/tools/get-page.ts'],
-      fromTests: ['src/utils/compact.ts', 'src/utils/snippet.ts'],
+      fromTests: ['src/utils/compact.ts'],
     });
   });
 
@@ -186,87 +189,271 @@ describe('plan', () => {
     expect(renderSummary(result, null)).toContain('not a pass');
   });
 
-  describe('the cap on baseline-driven files (#223)', () => {
-    const entries = (n: number) => Array.from({ length: n }, (_, i) => `src/m${String(i).padStart(2, '0')}.ts`);
+  describe('the mutant budget on the cache-miss set (ADR-0028, #239)', () => {
+    /** `n` made-up source files, m00.ts, m01.ts, ... in path order. */
+    const names = (n: number, prefix = 'm') => Array.from({ length: n }, (_, i) => `src/${prefix}${String(i).padStart(2, '0')}.ts`);
+    /** Counts for the given files, each `size` mutants. */
+    const sized = (files: string[], size: number) => Object.fromEntries(files.map(f => [f, size]));
+    const miss = { ...base, cacheUsable: false };
 
-    it('is 3, which keeps the four largest files inside the job timeout (#231)', () => {
-      expect(MAX_BASELINE_FILES).toBe(3);
+    it('is #231\'s three largest files, and the spare time the old cap of 3 left, worked out from the measurements', () => {
+      expect(MUTANT_BUDGET).toBe(1280);
+      expect(510 + 420 + 350).toBe(MUTANT_BUDGET);
+      // (timeout - overhead - spare) x 60 s / slowest seconds per mutant, rounded down to ten.
+      const minutes = 10 - (0.3 + 0.5) - 3.0;
+      expect(Math.floor((minutes * 60) / 0.29 / 10) * 10).toBe(MUTANT_BUDGET);
+      // Run time at the budget, plus overhead, stays 3 minutes short of the timeout.
+      expect((MUTANT_BUDGET * 0.29) / 60 + 0.8).toBeCloseTo(7.0, 1);
     });
 
-    it('mutates every changed baseline entry at the cap, as before', () => {
-      const result = plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES) });
-      expect(result).toMatchObject({ mode: 'targeted', mutate: entries(MAX_BASELINE_FILES), fromBaseline: entries(MAX_BASELINE_FILES), baselineChanged: MAX_BASELINE_FILES, leftToWeekly: [] });
+    it('sizes an unknown file at the largest measured file, so two fit and a third does not', () => {
+      expect(FALLBACK_MUTANTS).toBe(510);
+      expect(FALLBACK_MUTANTS * 2).toBeLessThanOrEqual(MUTANT_BUDGET);
+      expect(FALLBACK_MUTANTS * 3).toBeGreaterThan(MUTANT_BUDGET);
     });
 
-    it('leaves the baseline entries to the weekly run one over the cap, and lists them', () => {
-      const result = plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES + 1) });
-      expect(result).toMatchObject({ mode: 'empty', mutate: [], fromBaseline: [], baselineChanged: MAX_BASELINE_FILES + 1, leftToWeekly: entries(MAX_BASELINE_FILES + 1) });
-    });
-
-    it('still mutates the changed sources and the files the changed tests import, when capped', () => {
+    it('behaves as before when everything fits: every file, from all three groups, is mutated', () => {
       const result = plan({
-        ...base,
-        cacheUsable: false,
-        changed: ['vitest.config.ts', 'src/utils/snippet.ts', 'src/utils/compact.test.ts'],
-        baselineChanged: entries(MAX_BASELINE_FILES + 9),
-        readTest: () => "import { x } from './compact.js';",
+        ...miss,
+        changed: ['src/utils/snippet.ts', 'src/utils/snippet.test.ts'],
+        baselineChanged: ['src/tools/get-page.ts'],
+        readTest: () => "import { y } from './compact.js';",
+        mutantCounts: () => ({ 'src/utils/snippet.ts': 100, 'src/utils/compact.ts': 100, 'src/tools/get-page.ts': 100 }),
       });
       expect(result).toMatchObject({
         mode: 'targeted',
-        mutate: ['src/utils/compact.ts', 'src/utils/snippet.ts'],
+        mutate: ['src/tools/get-page.ts', 'src/utils/compact.ts', 'src/utils/snippet.ts'],
         changedSources: ['src/utils/snippet.ts'],
-        fromBaseline: [],
         fromTests: ['src/utils/compact.ts'],
-        baselineChanged: MAX_BASELINE_FILES + 9,
-        leftToWeekly: entries(MAX_BASELINE_FILES + 9),
+        fromBaseline: ['src/tools/get-page.ts'],
+        baselineChanged: 1,
+        leftToWeekly: [],
+        leftToWeeklyByGroup: { changedSources: [], fromTests: [], fromBaseline: [] },
+        estimatedMutants: 300,
+        estimatedByFallback: [],
       });
     });
 
-    it('does not list a capped entry as left out when a changed source brings it in anyway', () => {
-      const result = plan({ ...base, cacheUsable: false, changed: ['src/m00.ts'], baselineChanged: entries(MAX_BASELINE_FILES + 2) });
-      expect(result.mutate).toEqual(['src/m00.ts']);
-      expect(result.leftToWeekly).toEqual(entries(MAX_BASELINE_FILES + 2).slice(1));
-      expect(result.baselineChanged).toBe(MAX_BASELINE_FILES + 2);
+    it('mutates files that add up to exactly the budget, and leaves the next one out', () => {
+      const [a, b, c] = names(3);
+      const exact = plan({ ...miss, baselineChanged: [a, b], mutantCounts: () => ({ [a]: 1000, [b]: MUTANT_BUDGET - 1000 }) });
+      expect(exact).toMatchObject({ mode: 'targeted', mutate: [a, b], estimatedMutants: MUTANT_BUDGET, leftToWeekly: [] });
+      const over = plan({ ...miss, baselineChanged: [a, b, c], mutantCounts: () => ({ [a]: 1000, [b]: MUTANT_BUDGET - 1000, [c]: 1 }) });
+      expect(over).toMatchObject({ mutate: [a, b], estimatedMutants: MUTANT_BUDGET, leftToWeekly: [c] });
+      const oneOver = plan({ ...miss, baselineChanged: [a, b], mutantCounts: () => ({ [a]: 1000, [b]: MUTANT_BUDGET - 999 }) });
+      expect(oneOver).toMatchObject({ mutate: [a], estimatedMutants: 1000, leftToWeekly: [b] });
     });
 
-    it('counts only entries that exist and are mutated, and each once', () => {
+    it('fills the budget in priority order: changed sources, then test imports, then baseline entries', () => {
+      // Path order is the reverse of priority order here, so a path sort alone would get this wrong.
       const result = plan({
-        ...base,
-        cacheUsable: false,
-        baselineChanged: [...entries(MAX_BASELINE_FILES), ...entries(MAX_BASELINE_FILES), 'src/tool-args.ts', 'src/gone.ts'],
-        exists: p => p !== 'src/gone.ts',
+        ...miss,
+        changed: ['src/z-changed.ts', 'src/y-test.test.ts'],
+        baselineChanged: ['src/a-baseline.ts'],
+        readTest: () => "import { x } from './m-imported.js';",
+        mutantCounts: () => ({ 'src/z-changed.ts': 600, 'src/m-imported.ts': 600, 'src/a-baseline.ts': 600 }),
       });
-      expect(result).toMatchObject({ mode: 'targeted', baselineChanged: MAX_BASELINE_FILES, leftToWeekly: [] });
+      expect(result.mutate).toEqual(['src/m-imported.ts', 'src/z-changed.ts']);
+      expect(result).toMatchObject({
+        changedSources: ['src/z-changed.ts'],
+        fromTests: ['src/m-imported.ts'],
+        fromBaseline: [],
+        leftToWeekly: ['src/a-baseline.ts'],
+        leftToWeeklyByGroup: { changedSources: [], fromTests: [], fromBaseline: ['src/a-baseline.ts'] },
+        estimatedMutants: 1200,
+      });
     });
 
-    it('does not apply on the incremental path', () => {
-      expect(plan({ ...base, baselineChanged: entries(20) })).toMatchObject({ mode: 'incremental', leftToWeekly: [] });
+    it('takes changed sources in path order inside a group, and lists the ones that miss out by group', () => {
+      const files = names(5);
+      const result = plan({
+        ...miss,
+        changed: [...files].reverse(),
+        baselineChanged: ['src/x-baseline.ts'],
+        mutantCounts: () => ({ ...sized(files, 400), 'src/x-baseline.ts': 10 }),
+      });
+      // 3 x 400 = 1,200 fits, the fourth would make 1,600.
+      expect(result.mutate).toEqual(files.slice(0, 3));
+      expect(result.leftToWeekly).toEqual([files[3], files[4], 'src/x-baseline.ts']);
+      expect(result.leftToWeeklyByGroup).toEqual({ changedSources: [files[3], files[4]], fromTests: [], fromBaseline: ['src/x-baseline.ts'] });
     });
 
-    it('says in the summary which entries were left out and that the weekly run checks them', () => {
-      const over = MAX_BASELINE_FILES + 1;
-      const result = plan({ ...base, cacheUsable: false, changed: ['src/utils/snippet.ts'], baselineChanged: entries(over) });
+    it('stops at the first file that does not fit, even when a later, smaller one would', () => {
+      const [a, b, c] = names(3);
+      const result = plan({ ...miss, changed: [a, b, c], mutantCounts: () => ({ [a]: 1000, [b]: 500, [c]: 5 }) });
+      expect(result.mutate).toEqual([a]);
+      expect(result.leftToWeekly).toEqual([b, c]);
+    });
+
+    it('counts a file once, in its highest group', () => {
+      const result = plan({
+        ...miss,
+        changed: ['src/m00.ts', 'src/m00.test.ts'],
+        baselineChanged: ['src/m00.ts', 'src/m01.ts'],
+        readTest: () => "import { x } from './m00.js';\nimport { y } from './m01.js';",
+        mutantCounts: () => ({ 'src/m00.ts': 700, 'src/m01.ts': 700 }),
+      });
+      expect(result).toMatchObject({
+        mutate: ['src/m00.ts'],
+        changedSources: ['src/m00.ts'],
+        fromTests: [],
+        fromBaseline: [],
+        baselineChanged: 2,
+        estimatedMutants: 700,
+        leftToWeekly: ['src/m01.ts'],
+        leftToWeeklyByGroup: { changedSources: [], fromTests: ['src/m01.ts'], fromBaseline: [] },
+      });
+    });
+
+    it('leaves a changed source to the weekly run when the files before it use the budget up', () => {
+      const [big, small] = names(2);
+      const result = plan({ ...miss, changed: [big, small], mutantCounts: () => ({ [big]: 1200, [small]: 100 }) });
+      expect(result.leftToWeeklyByGroup.changedSources).toEqual([small]);
+      expect(result.changedSources).toEqual([big]);
+    });
+
+    it('is empty, and says so, when even the first file is over the budget', () => {
+      const result = plan({ ...miss, changed: ['src/m00.ts'], mutantCounts: () => ({ 'src/m00.ts': MUTANT_BUDGET + 1 }) });
+      expect(result).toMatchObject({ mode: 'empty', mutate: [], estimatedMutants: 0, leftToWeekly: ['src/m00.ts'] });
       const text = renderSummary(result, null);
-      expect(text).toContain(`${over} baseline entries changed, over the cap of ${MAX_BASELINE_FILES}`);
-      expect(text).toContain(`the ${over} below`);
-      expect(text).toContain('weekly full run (`mutation-weekly.yml`)');
-      expect(text).toContain('head commit');
-      expect(text).toContain('unchecked until then');
-      for (const f of entries(over)) expect(text).toContain(`- \`${f}\``);
-      expect(text).toContain('Mutated 1 file(s)');
-    });
-
-    it('says so, and is not a pass, when the cap leaves nothing to mutate', () => {
-      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES + 1) }), null);
-      expect(text).toContain('over the cap');
       expect(text).toContain('Nothing was checked, and this is not a pass.');
+      expect(text).toContain('over the mutant budget');
       expect(text).not.toContain('none changed in the baseline');
     });
 
-    it('says nothing about a cap when it did not bite', () => {
-      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES) }), null);
-      expect(text).not.toContain('over the cap');
-      expect(text).not.toContain('weekly');
+    describe('when a file has no count', () => {
+      it('sizes it at the fallback: two unknown files fit and the third goes to the weekly run', () => {
+        const files = names(3);
+        const result = plan({ ...miss, changed: files, mutantCounts: () => ({}) });
+        expect(result.mutate).toEqual(files.slice(0, 2));
+        expect(result).toMatchObject({ estimatedMutants: 2 * FALLBACK_MUTANTS, leftToWeekly: [files[2]], estimatedByFallback: files });
+      });
+
+      it('does the same with no counts at all (no cache restored)', () => {
+        const files = names(3);
+        const result = plan({ ...miss, changed: files });
+        expect(result.mutate).toEqual(files.slice(0, 2));
+        expect(result.estimatedByFallback).toEqual(files);
+      });
+
+      it('uses the count for a known file and the fallback for a new one, side by side', () => {
+        const [known, added] = names(2);
+        const result = plan({ ...miss, changed: [known, added], mutantCounts: () => ({ [known]: 300 }) });
+        expect(result).toMatchObject({ mutate: [known, added], estimatedMutants: 300 + FALLBACK_MUTANTS, estimatedByFallback: [added] });
+      });
+
+      it('treats a count of 0 as a count, not as unknown', () => {
+        const [empty] = names(1);
+        const result = plan({ ...miss, changed: [empty], mutantCounts: () => ({ [empty]: 0 }) });
+        expect(result).toMatchObject({ estimatedMutants: 0, estimatedByFallback: [] });
+      });
+
+      it('names the files sized by the fallback in the summary', () => {
+        const [known, added] = names(2);
+        const text = renderSummary(plan({ ...miss, changed: [known, added], mutantCounts: () => ({ [known]: 300 }) }), null);
+        expect(text).toContain(`1 file(s) had no mutant count in the cached results (new, or no cache) and were each sized at ${FALLBACK_MUTANTS} mutants: \`${added}\``);
+      });
+    });
+
+    it('reads the counts only on the cache-miss path', () => {
+      let reads = 0;
+      const counts = () => {
+        reads += 1;
+        return {};
+      };
+      expect(plan({ ...base, changed: ['src/utils/snippet.ts'], baselineChanged: names(20), mutantCounts: counts })).toMatchObject({ mode: 'incremental', leftToWeekly: [] });
+      expect(plan({ ...miss, changed: [], mutantCounts: counts }).mode).toBe('empty');
+      expect(reads).toBe(0);
+      plan({ ...miss, changed: ['src/utils/snippet.ts'], mutantCounts: counts });
+      expect(reads).toBe(1);
+    });
+
+    it('counts only entries that exist and are mutated, and each once', () => {
+      const [a] = names(1);
+      const result = plan({
+        ...miss,
+        baselineChanged: [a, a, 'src/tool-args.ts', 'src/gone.ts'],
+        exists: p => p !== 'src/gone.ts',
+        mutantCounts: () => ({ [a]: 10 }),
+      });
+      expect(result).toMatchObject({ mode: 'targeted', mutate: [a], baselineChanged: 1, leftToWeekly: [] });
+    });
+
+    it('says in the summary the estimate, the budget, and which files were left out, by group', () => {
+      const files = names(4);
+      const result = plan({
+        ...miss,
+        changed: [files[0], files[1], files[2], 'src/m09.test.ts'],
+        readTest: () => "import { x } from './m03.js';",
+        baselineChanged: ['src/b00.ts'],
+        mutantCounts: () => ({ ...sized(files, 500), 'src/b00.ts': 50 }),
+      });
+      const text = renderSummary(result, null);
+      expect(text).toContain(`Mutated 2 file(s), an estimated 1000 of ${MUTANT_BUDGET} mutants: 2 changed, 0 from baseline changes, 0 imported by changed tests.`);
+      expect(text).toContain(`these 3 file(s) would add pass the budget of ${MUTANT_BUDGET} (estimated 1000 used), so this run did not mutate them`);
+      expect(text).toContain('changed sources first, then the files the changed tests import, then the changed baseline entries');
+      expect(text).toContain('weekly full run (`mutation-weekly.yml`)');
+      expect(text).toContain('head commit');
+      expect(text).toContain('unchecked until then');
+      expect(text).toContain('Changed sources (1):\n\n- `src/m02.ts`');
+      expect(text).toContain('Imported by changed tests (1):\n\n- `src/m03.ts`');
+      expect(text).toContain('Changed baseline entries (1):\n\n- `src/b00.ts`');
+    });
+
+    it('leaves out a group heading with no files, and says nothing about the budget when everything fit', () => {
+      const [a, b] = names(2);
+      const left = renderSummary(plan({ ...miss, changed: [a, b], mutantCounts: () => ({ [a]: 1000, [b]: 1000 }) }), null);
+      expect(left).toContain('Changed sources (1):');
+      expect(left).not.toContain('Imported by changed tests (');
+      expect(left).not.toContain('Changed baseline entries (');
+      const fit = renderSummary(plan({ ...miss, changed: [a, b], mutantCounts: () => ({ [a]: 10, [b]: 10 }) }), null);
+      expect(fit).not.toContain('did not mutate them');
+      expect(fit).not.toContain('weekly');
+    });
+  });
+
+  describe('mutantCountsFromIncremental', () => {
+    // The shape Stryker writes to stryker-incremental.json: the mutation-testing report (schema 2) with the
+    // file sources and mutants, plus `testFiles`. Made-up paths and sources.
+    const mutant = (id: string, status: string) => ({
+      id,
+      mutatorName: 'ConditionalExpression',
+      replacement: 'true',
+      status,
+      location: { start: { line: 1, column: 1 }, end: { line: 1, column: 5 } },
+      coveredBy: ['0'],
+      killedBy: status === 'Killed' ? ['0'] : undefined,
+      testsCompleted: 1,
+    });
+    const incremental = {
+      schemaVersion: '2',
+      thresholds: { high: 80, low: 60 },
+      files: {
+        'src/a.ts': { language: 'typescript', source: 'export const a = 1;', mutants: [mutant('0', 'Killed'), mutant('1', 'Survived'), mutant('2', 'Ignored')] },
+        'src/b.ts': { language: 'typescript', source: 'export const b = 2;', mutants: [] },
+      },
+      testFiles: { 'src/a.test.ts': { source: '', tests: [{ id: '0', name: 'a works' }] } },
+    };
+
+    it('counts every mutant of each file, Ignored ones included, and a file with none as 0', () => {
+      expect(mutantCountsFromIncremental(incremental)).toEqual({ 'src/a.ts': 3, 'src/b.ts': 0 });
+    });
+
+    it.each([null, undefined, 'text', 7, [], {}, { files: null }, { files: 'x' }, { files: { 'src/a.ts': null } }, { files: { 'src/a.ts': { mutants: 'x' } } }])(
+      'gives no counts for a file of another shape (%j)',
+      doc => {
+        expect(mutantCountsFromIncremental(doc)).toEqual({});
+      },
+    );
+
+    it('skips the entry that is malformed and keeps the rest', () => {
+      const doc = { files: { 'src/a.ts': { mutants: [{}, {}] }, 'src/b.ts': { mutants: 'x' }, 'src/c.ts': 5 } };
+      expect(mutantCountsFromIncremental(doc)).toEqual({ 'src/a.ts': 2 });
+    });
+
+    it('feeds the plan: a known file takes its count, a file the cache lacks takes the fallback', () => {
+      const result = plan({ ...base, cacheUsable: false, changed: ['src/a.ts', 'src/new.ts'], mutantCounts: () => mutantCountsFromIncremental(incremental) });
+      expect(result).toMatchObject({ estimatedMutants: 3 + FALLBACK_MUTANTS, estimatedByFallback: ['src/new.ts'] });
     });
   });
 });
@@ -441,17 +628,62 @@ describe('planFromRepo', () => {
     expect(result.mutate).toEqual(['src/a.ts']);
   });
 
-  it('caps the baseline entries of a re-baseline PR, so it is not a cold full run (#223)', () => {
-    const names = Array.from({ length: 12 }, (_, i) => `src/m${i}.ts`);
+  describe('the mutant budget on a re-baseline PR (ADR-0028)', () => {
+    const names = Array.from({ length: 12 }, (_, i) => `src/m${String(i).padStart(2, '0')}.ts`);
     const baseline = (score: number) => JSON.stringify({ stryker: '10.0.0', files: Object.fromEntries(names.map(n => [n, { score, ignores: 0 }])) });
-    const { io } = fakeIo({
-      commits: ['base111'],
-      diff: { base111: ['package-lock.json', 'mutation-baseline.json'] },
-      files: { 'mutation-baseline.json': baseline(91), ...Object.fromEntries(names.map(n => [n, ''])) },
-      old: { 'base111:mutation-baseline.json': baseline(90) },
+    const INCREMENTAL = 'reports/mutation/stryker-incremental.json';
+    const withIncremental = { ...config, incrementalFile: INCREMENTAL };
+    /** A Stryker incremental file: the report format, `size` mutants for each file. */
+    const incrementalOf = (size: number) =>
+      JSON.stringify({
+        schemaVersion: '2',
+        thresholds: { high: 80, low: 60 },
+        files: Object.fromEntries(names.map(n => [n, { language: 'typescript', source: '', mutants: Array.from({ length: size }, (_, i) => ({ id: String(i), status: 'Killed' })) }])),
+        testFiles: {},
+      });
+    const reBaseline = (extra: Record<string, string> = {}) =>
+      fakeIo({
+        commits: ['base111'],
+        diff: { base111: ['package-lock.json', 'mutation-baseline.json'] },
+        files: { 'mutation-baseline.json': baseline(91), ...Object.fromEntries(names.map(n => [n, ''])), ...extra },
+        old: { 'base111:mutation-baseline.json': baseline(90) },
+      });
+
+    it("mutates the first files that fit by the restored file's counts, and leaves the rest to the weekly run", () => {
+      const { io } = reBaseline({ [INCREMENTAL]: incrementalOf(300) });
+      const result = planFromRepo({ cache: 'hit', since: 'gone222', fallbackSince: 'base111', config: withIncremental }, io);
+      // 4 x 300 = 1,200 fits in 1,280, a fifth would not.
+      expect(result).toMatchObject({
+        mode: 'targeted',
+        mutate: names.slice(0, 4),
+        fromBaseline: names.slice(0, 4),
+        baselineChanged: 12,
+        estimatedMutants: 1200,
+        estimatedByFallback: [],
+        leftToWeekly: names.slice(4),
+      });
     });
-    const result = planFromRepo({ cache: 'miss', since: '', fallbackSince: 'base111', config }, io);
-    expect(result).toMatchObject({ mode: 'empty', mutate: [], baselineChanged: 12, leftToWeekly: [...names].sort() });
+
+    it('sizes every file at the fallback when no incremental file was restored', () => {
+      const { io } = reBaseline();
+      const result = planFromRepo({ cache: 'miss', since: '', fallbackSince: 'base111', config: withIncremental }, io);
+      expect(result).toMatchObject({ mutate: names.slice(0, 2), estimatedMutants: 2 * FALLBACK_MUTANTS, leftToWeekly: names.slice(2) });
+      expect(result.estimatedByFallback).toEqual(names);
+    });
+
+    it('does the same when the config names no incremental file, or the file does not parse', () => {
+      const missing = planFromRepo({ cache: 'miss', since: '', fallbackSince: 'base111', config }, reBaseline({ [INCREMENTAL]: incrementalOf(1) }).io);
+      expect(missing.mutate).toEqual(names.slice(0, 2));
+      const broken = planFromRepo({ cache: 'miss', since: '', fallbackSince: 'base111', config: withIncremental }, reBaseline({ [INCREMENTAL]: '{"files": ' }).io);
+      expect(broken.mutate).toEqual(names.slice(0, 2));
+    });
+
+    it('does not read the incremental file when the cache is trusted', () => {
+      const { io } = fakeIo({ commits: ['cache111'], diff: { cache111: ['src/utils/snippet.ts'] }, files: { 'src/utils/snippet.ts': '', [INCREMENTAL]: incrementalOf(1) } });
+      const read = vi.spyOn(io, 'read');
+      expect(planFromRepo({ cache: 'hit', since: 'cache111', fallbackSince: 'base111', config: withIncremental }, io).mode).toBe('incremental');
+      expect(read).not.toHaveBeenCalled();
+    });
   });
 
   it('says nothing was checked when no commit to diff against exists', () => {
@@ -593,6 +825,29 @@ describe('mutation workflows', () => {
     expect(planStep).not.toMatch(/^ +BASE_SHA:/m);
     expect(ratchet).toMatch(/--base "\$BASE_SHA"/);
     expect(ratchet).not.toMatch(/origin\/|merge-base/);
+  });
+
+  // ADR-0028, #239: the plan sizes the cache-miss run from the restored incremental file's per-file mutant
+  // counts, and the targeted step deletes that file so no result from main is reused. The plan has to run
+  // after the restore and before the delete, on the path stryker.config.json names.
+  it('the plan reads the restored incremental file before the targeted run drops it', () => {
+    const all = steps(mutationJob);
+    const incrementalFile = (config as { incrementalFile?: string }).incrementalFile;
+    expect(incrementalFile).toBe('reports/mutation/stryker-incremental.json');
+    const restore = all.findIndex(s => s.includes('actions/cache/restore@'));
+    const planIdx = all.findIndex(s => s.includes('mutation-ci.ts plan'));
+    const drop = all.findIndex(s => /\brm -f\b/.test(s) && s.includes(incrementalFile as string));
+    expect(restore).toBeGreaterThanOrEqual(0);
+    expect(drop).toBeGreaterThanOrEqual(0);
+    expect(restore).toBeLessThan(planIdx);
+    expect(planIdx).toBeLessThan(drop);
+    // The file the cache restores is the file the config names, which the plan reads and the targeted step drops.
+    expect(all[restore]).toContain(`path: ${incrementalFile}`);
+    expect(all[planIdx]).not.toMatch(/\brm\b/);
+    // Only the targeted step drops it, and it does so before Stryker starts.
+    expect(all.filter(s => /\brm -f\b/.test(s))).toHaveLength(1);
+    expect(all[drop]).toMatch(/if: steps\.plan\.outputs\.mode == 'targeted'/);
+    expect(all[drop].indexOf('rm -f')).toBeLessThan(all[drop].indexOf('npx stryker run'));
   });
 
   it('a label change re-runs the pull request checks, so the label can excuse a lowered score', () => {
