@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   CACHE_KEY_PREFIX,
   changedBaselineFiles,
@@ -14,7 +17,6 @@ import {
   newestCacheCommit,
   nightlyDecision,
   nightlyFromRepo,
-  parseCommitLog,
   plan,
   planFromRepo,
   RECENT_RUN_HOURS,
@@ -863,34 +865,27 @@ describe('nightlyDecision', () => {
   const old = { status: 'completed', startedAt: '2026-10-05T03:17:00Z' }; // 50 hours before now
   const base = { cacheCommit: sha('a'), blindSpot, runs: [old], now };
 
-  it('does not dispatch when no commit since the cache changed a blind-spot input', () => {
-    const d = nightlyDecision({ ...base, commitsSince: [{ sha: sha('b'), files: ['src/utils/snippet.ts', 'src/utils/snippet.test.ts', 'README.md'] }] });
+  it('does not dispatch when main differs from the cache in no blind-spot input', () => {
+    const d = nightlyDecision({ ...base, changedSince: ['src/utils/snippet.ts', 'src/utils/snippet.test.ts', 'README.md'] });
     expect(d.dispatch).toBe(false);
     expect(d.reason).toContain('is current');
-    expect(nightlyDecision({ ...base, commitsSince: [] }).dispatch).toBe(false);
+    expect(nightlyDecision({ ...base, changedSince: [] }).dispatch).toBe(false);
   });
 
-  it('dispatches when a commit since the cache changed a blind-spot input, and names the newest one', () => {
-    const d = nightlyDecision({
-      ...base,
-      commitsSince: [
-        { sha: sha('c'), files: ['src/utils/snippet.ts'] },
-        { sha: sha('b'), files: ['src/helpers/child.mjs', 'README.md'] },
-        { sha: sha('9'), files: ['package-lock.json'] },
-      ],
-    });
-    expect(d).toEqual({ dispatch: true, reason: expect.stringContaining(`commit ${sha('b')}`) });
-    expect(d.reason).toContain('src/helpers/child.mjs');
+  it('dispatches when main differs from the cache in a blind-spot input, and names those inputs', () => {
+    const d = nightlyDecision({ ...base, changedSince: ['src/utils/snippet.ts', 'src/helpers/child.mjs', 'README.md', 'package-lock.json'] });
+    expect(d.dispatch).toBe(true);
+    expect(d.reason).toContain(`since the newest cache's commit ${sha('a')}: src/helpers/child.mjs, package-lock.json`);
     expect(d.reason).not.toContain('README.md');
   });
 
-  it('dispatches when no cache is saved, or its commit is not in main history', () => {
-    expect(nightlyDecision({ ...base, cacheCommit: null, commitsSince: null })).toMatchObject({ dispatch: true, reason: 'no incremental cache is saved from main' });
-    expect(nightlyDecision({ ...base, commitsSince: null }).reason).toContain("not in main's history");
+  it("dispatches when no cache is saved, or its commit is not in main's history", () => {
+    expect(nightlyDecision({ ...base, cacheCommit: null, changedSince: null })).toMatchObject({ dispatch: true, reason: 'no incremental cache is saved from main' });
+    expect(nightlyDecision({ ...base, changedSince: null }).reason).toContain("not in main's history");
   });
 
   it('does not dispatch a stale cache while a weekly run on main is in flight', () => {
-    const stale = { ...base, cacheCommit: null, commitsSince: null };
+    const stale = { ...base, cacheCommit: null, changedSince: null };
     for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
       const d = nightlyDecision({ ...stale, runs: [{ status, startedAt: '2026-10-01T00:00:00Z' }, old] });
       expect(d.dispatch, status).toBe(false);
@@ -900,7 +895,7 @@ describe('nightlyDecision', () => {
 
   it('does not dispatch a stale cache when a weekly run on main started in the last 20 hours', () => {
     expect(RECENT_RUN_HOURS).toBe(20);
-    const stale = { ...base, cacheCommit: null, commitsSince: null };
+    const stale = { ...base, cacheCommit: null, changedSince: null };
     const at = (hoursAgo: number) => ({ status: 'completed', startedAt: new Date(now.getTime() - hoursAgo * 3600_000).toISOString() });
     expect(nightlyDecision({ ...stale, runs: [at(19.9)] }).dispatch).toBe(false);
     expect(nightlyDecision({ ...stale, runs: [at(20)] }).dispatch).toBe(false);
@@ -922,7 +917,6 @@ describe('nightlyDecision', () => {
     };
     expect(newestCacheCommit(doc)).toBe(sha('b'));
     expect(newestCacheCommit({ actions_caches: [] })).toBeNull();
-    expect(newestCacheCommit(null)).toBeNull();
     expect(CACHE_KEY_PREFIX).toBe('mutation-incremental-');
   });
 
@@ -938,20 +932,24 @@ describe('nightlyDecision', () => {
       { status: 'in_progress', startedAt: '2026-10-07T01:00:00Z' },
       { status: 'queued', startedAt: '2026-10-07T02:00:00Z' },
     ]);
-    expect(weeklyRunsFromApi({})).toEqual([]);
+    expect(weeklyRunsFromApi({ workflow_runs: [] })).toEqual([]);
   });
 
-  it('parses git log records of a SHA and its paths', () => {
-    expect(parseCommitLog(`\0${sha('c')}\n\nsrc/a.ts\nREADME.md\n\0${sha('b')}\n\n`)).toEqual([
-      { sha: sha('c'), files: ['src/a.ts', 'README.md'] },
-      { sha: sha('b'), files: [] },
-    ]);
-    expect(parseCommitLog('')).toEqual([]);
+  // Read as "no caches" or "no runs", an unreadable response would dispatch, and would again on every night
+  // it recurred, since the 20-hour guard reads the same list. So the check fails and dispatches nothing.
+  it('fails closed on a caches or runs response of another shape', () => {
+    for (const doc of [null, {}, { actions_caches: null }, { total_count: 0 }, []]) {
+      expect(() => newestCacheCommit(doc), JSON.stringify(doc)).toThrow('no actions_caches array');
+    }
+    for (const doc of [null, {}, { workflow_runs: {} }, { message: 'Not Found' }, []]) {
+      expect(() => weeklyRunsFromApi(doc), JSON.stringify(doc)).toThrow('no workflow_runs array');
+    }
   });
 
   describe('nightlyFromRepo', () => {
     const caches = { actions_caches: [{ key: `mutation-incremental-${sha('a')}`, ref: 'refs/heads/main', created_at: '2026-10-01T00:00:00Z' }] };
-    const io = (log: string, ancestor = true) => {
+    const noRuns = { workflow_runs: [] };
+    const io = (diff: string[], ancestor = true) => {
       const calls: string[][] = [];
       return {
         calls,
@@ -962,36 +960,72 @@ describe('nightlyDecision', () => {
               if (ancestor) return '';
               throw new Error('not an ancestor');
             }
-            if (args[0] === 'log') return log;
+            if (args[0] === 'diff') return diff.join('\n');
             throw new Error(`unexpected git ${args.join(' ')}`);
           },
         },
       };
     };
 
-    it("walks main's first-parent line from the cache's commit, with each merge's own files", () => {
-      const { io: fake, calls } = io(`\0${sha('b')}\n\nvitest.config.ts\n`);
-      const d = nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, fake);
+    it('diffs the tree from the cache\'s commit to HEAD, as the PR plan does', () => {
+      const { io: fake, calls } = io(['vitest.config.ts', 'README.md']);
+      const d = nightlyFromRepo({ caches, runs: noRuns, now, config }, fake);
       expect(d.dispatch).toBe(true);
-      expect(d.reason).toContain('vitest.config.ts');
+      expect(d.reason).toContain(': vitest.config.ts');
       expect(calls).toEqual([
         ['merge-base', '--is-ancestor', sha('a'), 'HEAD'],
-        ['log', '--first-parent', '--diff-merges=first-parent', '--no-renames', '--name-only', '--format=%x00%H', `${sha('a')}..HEAD`],
+        ['diff', '--name-only', '--no-renames', sha('a'), 'HEAD'],
       ]);
     });
 
     it("classifies with the config's scope, so a left-out source is a blind spot", () => {
-      const { io: fake } = io(`\0${sha('b')}\n\nsrc/types.ts\n`);
-      expect(nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, fake).dispatch).toBe(true);
-      const { io: current } = io(`\0${sha('b')}\n\nsrc/client.ts\n`);
-      expect(nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, current).dispatch).toBe(false);
+      expect(nightlyFromRepo({ caches, runs: noRuns, now, config }, io(['src/types.ts']).io).dispatch).toBe(true);
+      expect(nightlyFromRepo({ caches, runs: noRuns, now, config }, io(['src/client.ts']).io).dispatch).toBe(false);
     });
 
     it("treats a cache commit outside main's history as stale, and makes no git call without a cache", () => {
-      expect(nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, io('', false).io).reason).toContain("not in main's history");
-      const { io: fake, calls } = io('');
-      expect(nightlyFromRepo({ caches: { actions_caches: [] }, runs: { workflow_runs: [] }, now, config }, fake).dispatch).toBe(true);
+      const off = io([], false);
+      expect(nightlyFromRepo({ caches, runs: noRuns, now, config }, off.io).reason).toContain("not in main's history");
+      expect(off.calls.some(c => c[0] === 'diff')).toBe(false);
+      const { io: fake, calls } = io([]);
+      expect(nightlyFromRepo({ caches: { actions_caches: [] }, runs: noRuns, now, config }, fake).dispatch).toBe(true);
       expect(calls).toEqual([]);
+    });
+
+    it('throws before any git call on a runs response of another shape', () => {
+      const { io: fake, calls } = io(['vitest.config.ts']);
+      expect(() => nightlyFromRepo({ caches, runs: { message: 'Bad credentials' }, now, config }, fake)).toThrow('no workflow_runs array');
+      expect(calls).toEqual([]);
+    });
+
+    // A real repository: a blind-spot change that main reverted since the cache leaves the tree as the cache
+    // saw it, so the plan trusts the cache and the check must not dispatch.
+    it('does not dispatch for a blind-spot change that main reverted since the cache', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'nightly-'));
+      try {
+        const run = (...args: string[]) =>
+          execFileSync('git', ['-c', 'user.name=Alice', '-c', 'user.email=alice@example.com', '-c', 'commit.gpgsign=false', ...args], {
+            cwd: dir,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+        run('init', '-q');
+        writeFileSync(join(dir, 'vitest.config.ts'), 'export default {};\n');
+        run('add', '.');
+        run('commit', '-q', '-m', 'cache');
+        const cache = run('rev-parse', 'HEAD').trim();
+        writeFileSync(join(dir, 'vitest.config.ts'), 'export default { a: 1 };\n');
+        run('commit', '-q', '-am', 'blind-spot change');
+        run('revert', '--no-edit', 'HEAD');
+        const repoIo = { git: (...args: string[]) => run(...args) };
+        const savedAt = { actions_caches: [{ key: `mutation-incremental-${cache}`, ref: 'refs/heads/main', created_at: '2026-10-01T00:00:00Z' }] };
+        expect(nightlyFromRepo({ caches: savedAt, runs: noRuns, now, config }, repoIo)).toMatchObject({ dispatch: false });
+        // Without the revert the same change is stale.
+        run('reset', '-q', '--hard', 'HEAD~1');
+        expect(nightlyFromRepo({ caches: savedAt, runs: noRuns, now, config }, repoIo)).toMatchObject({ dispatch: true });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 });
@@ -1238,7 +1272,10 @@ describe('mutation workflows', () => {
     it('decides with scripts/mutation-ci.ts nightly and dispatches mutation-weekly.yml on main only when it says so', () => {
       expect(check).toContain('ref: main');
       expect(check).toContain('fetch-depth: 0');
-      expect(check).toMatch(/actions\/caches\?key=mutation-incremental-&ref=refs\/heads\/main&/);
+      // newestCacheCommit picks from page 1 only, so page 1 must hold the newest: the API sorts by
+      // last_accessed_at unless told otherwise.
+      expect(check).toContain('actions/caches?key=mutation-incremental-&ref=refs/heads/main&sort=created_at&direction=desc&per_page=100"');
+      expect(check.match(/actions\/caches\?/g)).toHaveLength(1);
       expect(check).toMatch(/actions\/workflows\/mutation-weekly\.yml\/runs\?branch=main&/);
       expect(check).toMatch(/node scripts\/mutation-ci\.ts nightly --caches "\$RUNNER_TEMP\/caches\.json" --runs "\$RUNNER_TEMP\/runs\.json"/);
       expect(check).toContain('dispatch: ${{ steps.decide.outputs.dispatch }}');

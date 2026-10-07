@@ -471,10 +471,11 @@ export interface NightlyInput {
   /** The commit of the newest saved `mutation-incremental-*` cache on main, or null when none is saved. */
   cacheCommit: string | null;
   /**
-   * Main's commits after `cacheCommit`, each with the paths it changed. Null when `cacheCommit` is not in
-   * this checkout's history, so nothing since it can be read.
+   * The paths main's HEAD differs in from `cacheCommit`, the same tree diff the PR plan reads
+   * (`planFromRepo`), so a blind-spot change that was reverted since is no change. Null when `cacheCommit`
+   * is not in main's history.
    */
-  commitsSince: { sha: string; files: string[] }[] | null;
+  changedSince: string[] | null;
   /** The blind-spot classification the PR plan uses (`isBlindSpot` with the config's scope). */
   blindSpot: (path: string) => boolean;
   runs: WeeklyRun[];
@@ -488,7 +489,7 @@ export interface NightlyDecision {
 
 /**
  * Whether the nightly check dispatches `mutation-weekly.yml` on main. Only when the cache is stale: none is
- * saved, its commit isn't in main's history, or a commit on main since it changed a blind-spot input. Then
+ * saved, its commit isn't in main's history, or main differs from it in a blind-spot input. Then
  * every push to main takes the cache-miss path and can't save a new one (ADR-0029, Consequences), so only a
  * weekly run resets it. Even then, not when a weekly run on main is in flight or started in the last
  * RECENT_RUN_HOURS hours, since that run is the reset (or a failed one, retried the next night).
@@ -496,13 +497,11 @@ export interface NightlyDecision {
 export function nightlyDecision(input: NightlyInput): NightlyDecision {
   let stale: string | null = null;
   if (input.cacheCommit === null) stale = 'no incremental cache is saved from main';
-  else if (input.commitsSince === null) stale = `the newest cache's commit ${input.cacheCommit} is not in main's history`;
+  else if (input.changedSince === null) stale = `the newest cache's commit ${input.cacheCommit} is not in main's history`;
   else {
-    // Newest first, as git log lists them.
-    const hit = input.commitsSince.find(c => c.files.some(input.blindSpot));
-    if (hit) {
-      const files = hit.files.filter(input.blindSpot);
-      stale = `commit ${hit.sha} on main changed inputs that incremental mode can't see (${files.join(', ')}) after the newest cache's commit ${input.cacheCommit}`;
+    const blind = input.changedSince.filter(input.blindSpot);
+    if (blind.length > 0) {
+      stale = `main changed inputs that incremental mode can't see since the newest cache's commit ${input.cacheCommit}: ${blind.join(', ')}`;
     }
   }
   if (stale === null) {
@@ -526,11 +525,12 @@ export function nightlyDecision(input: NightlyInput): NightlyDecision {
 /**
  * The commit of the newest `mutation-incremental-<sha>` cache saved on main, from the Actions caches API
  * (`{ actions_caches: [{ key, ref, created_at }] }`). That is the one a PR's `restore-keys` falls back to.
- * A key without a full SHA after the prefix is skipped. Null when there is none, or the shape is unknown.
+ * A key without a full SHA after the prefix is skipped. Null when there is none. A response without an
+ * `actions_caches` array throws, so the check job fails and dispatches nothing.
  */
 export function newestCacheCommit(doc: unknown): string | null {
   const caches = typeof doc === 'object' && doc !== null ? (doc as { actions_caches?: unknown }).actions_caches : null;
-  if (!Array.isArray(caches)) return null;
+  if (!Array.isArray(caches)) throw new Error('the caches API response has no actions_caches array');
   let best: { sha: string; at: number } | null = null;
   for (const c of caches as { key?: unknown; ref?: unknown; created_at?: unknown }[]) {
     if (typeof c?.key !== 'string' || !c.key.startsWith(CACHE_KEY_PREFIX) || c.ref !== 'refs/heads/main') continue;
@@ -542,10 +542,13 @@ export function newestCacheCommit(doc: unknown): string | null {
   return best?.sha ?? null;
 }
 
-/** The runs on main from the Actions workflow-runs API (`{ workflow_runs: [...] }`). An unknown shape gives none. */
+/**
+ * The runs on main from the Actions workflow-runs API (`{ workflow_runs: [...] }`). A response without a
+ * `workflow_runs` array throws: read as "no runs", it would lift the ceiling on every night it recurs.
+ */
 export function weeklyRunsFromApi(doc: unknown): WeeklyRun[] {
   const runs = typeof doc === 'object' && doc !== null ? (doc as { workflow_runs?: unknown }).workflow_runs : null;
-  if (!Array.isArray(runs)) return [];
+  if (!Array.isArray(runs)) throw new Error('the workflow runs API response has no workflow_runs array');
   return (runs as { status?: unknown; head_branch?: unknown; run_started_at?: unknown; created_at?: unknown }[])
     .filter(r => r?.head_branch === 'main')
     .map(r => ({
@@ -554,44 +557,31 @@ export function weeklyRunsFromApi(doc: unknown): WeeklyRun[] {
     }));
 }
 
-/**
- * Main's first-parent commits after `since`, newest first, from
- * `git log --format=%x00%H --name-only ...`: each record is a NUL, the SHA, then one path per line.
- */
-export function parseCommitLog(text: string): { sha: string; files: string[] }[] {
-  return text
-    .split('\0')
-    .slice(1)
-    .map(record => {
-      const [sha, ...files] = record.split('\n').map(l => l.trim()).filter(Boolean);
-      return { sha, files };
-    });
-}
-
 export function nightlyFromRepo(
   opts: { caches: unknown; runs: unknown; now: Date; config: { mutate: string[] } },
   io: Pick<PlanIo, 'git'>,
 ): NightlyDecision {
   const scope = scopeFromConfig(opts.config);
   const cacheCommit = newestCacheCommit(opts.caches);
-  let commitsSince: { sha: string; files: string[] }[] | null = null;
-  if (cacheCommit !== null) {
+  const runs = weeklyRunsFromApi(opts.runs);
+  const onMain = (rev: string) => {
     try {
-      io.git('merge-base', '--is-ancestor', cacheCommit, 'HEAD');
-      // --no-renames lists a moved file's old path too, and --diff-merges=first-parent gives a merge commit
-      // its own files, so no blind-spot change on main's line is missed.
-      commitsSince = parseCommitLog(
-        io.git('log', '--first-parent', '--diff-merges=first-parent', '--no-renames', '--name-only', '--format=%x00%H', `${cacheCommit}..HEAD`),
-      );
+      io.git('merge-base', '--is-ancestor', rev, 'HEAD');
+      return true;
     } catch {
-      commitsSince = null;
+      return false;
     }
-  }
+  };
+  // The diff the PR plan reads (planFromRepo). --no-renames lists a moved file's old path too.
+  const changedSince =
+    cacheCommit !== null && onMain(cacheCommit)
+      ? io.git('diff', '--name-only', '--no-renames', cacheCommit, 'HEAD').split('\n').filter(Boolean)
+      : null;
   return nightlyDecision({
     cacheCommit,
-    commitsSince,
+    changedSince,
     blindSpot: p => isBlindSpot(p, scope),
-    runs: weeklyRunsFromApi(opts.runs),
+    runs,
     now: opts.now,
   });
 }
@@ -599,7 +589,7 @@ export function nightlyFromRepo(
 // ---------------------------------------------------------------------------
 // CLI
 
-const git =(...args: string[]): string => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
