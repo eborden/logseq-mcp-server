@@ -167,6 +167,48 @@ describe('pruneReport', () => {
     expect(result.files.find(f => f.file === 'src/z.test.ts')!.reasons).toEqual([]);
   });
 
+  // Stryker names no killer for a Timeout or RuntimeError mutant, though both count as detected.
+  it('flags a candidate that covers a timeout or runtime-error mutant, and keeps it out of "Kill nothing"', () => {
+    const report: PruneInputReport = {
+      config: { disableBail: true },
+      files: {
+        'src/a.ts': {
+          mutants: [
+            { status: 'Timeout', coveredBy: ['h1', 'h2'] },
+            { status: 'RuntimeError', coveredBy: ['h1'] },
+            { status: 'Survived', coveredBy: ['h2', 'h3'] },
+          ],
+        },
+      },
+      testFiles: {
+        'src/h.test.ts': {
+          tests: [
+            { id: 'h1', name: 'h may hang the loop' },
+            { id: 'h2', name: 'h may hang it too' },
+            { id: 'h3', name: 'h covers a survivor' },
+          ],
+        },
+      },
+    };
+    const result = pruneReport(report, exclusions);
+    expect(result.files[0].tests.map(t => [t.id, t.status, t.kills, t.coversTimeouts])).toEqual([
+      ['h1', 'candidate', 0, 2],
+      ['h2', 'candidate', 0, 1],
+      ['h3', 'candidate', 0, 0],
+    ]);
+    expect(result.totals).toMatchObject({ candidates: 3, killNothing: 1, coverTimeouts: 2, killedMutants: 0 });
+    const markdown = renderMarkdown(result);
+    expect(markdown).toContain('| h may hang the loop | 0 | 2 | 2 |');
+    expect(markdown).toContain('Kill nothing:\n- h covers a survivor\n');
+    expect(markdown).toContain(
+      [
+        'Check before pruning (may be the only test that detects a timeout or runtime error):',
+        '- h may hang the loop (covers 2 timeout or runtime-error mutants)',
+        '- h may hang it too (covers 1 timeout or runtime-error mutants)',
+      ].join('\n'),
+    );
+  });
+
   it('totals the tests, and reads disableBail from the report', () => {
     expect(result.totals).toEqual({
       testFiles: 3,
@@ -174,6 +216,7 @@ describe('pruneReport', () => {
       killedMutants: 6,
       candidates: 3,
       killNothing: 2,
+      coverTimeouts: 0,
       soleKillers: 1,
       excluded: 3,
     });
@@ -192,11 +235,11 @@ describe('renderMarkdown', () => {
         '',
         '3 candidates of 5 tests.',
         '',
-        '| Test | Kills | Covers |',
-        '|---|---:|---:|',
-        '| z \\| shares every kill | 4 | 5 |',
-        '| z covers but never fails | 0 | 2 |',
-        '| z covers nothing | 0 | 0 |',
+        '| Test | Kills | Covers | Timeouts |',
+        '|---|---:|---:|---:|',
+        '| z \\| shares every kill | 4 | 5 | 0 |',
+        '| z covers but never fails | 0 | 2 | 0 |',
+        '| z covers nothing | 0 | 0 | 0 |',
         '',
         'Kill nothing:',
         '- z covers but never fails',
@@ -220,6 +263,10 @@ describe('renderMarkdown', () => {
     expect(markdown).toContain('| src/z.test.ts | z: output pinned across the rewrite matches | 1 | 0 |');
   });
 
+  it('says a row is one full name, so two tests with the same name in a file are one row', () => {
+    expect(markdown).toContain('A row is a unique full name in its file: two tests in one file with the same name are one row');
+  });
+
   it('warns when the run had the bail on, and only then', () => {
     expect(markdown).not.toMatch(/Not a `disableBail` run/);
     expect(renderMarkdown(pruneReport({ ...REPORT, config: { disableBail: false } }, exclusions))).toMatch(/Not a `disableBail` run/);
@@ -227,7 +274,7 @@ describe('renderMarkdown', () => {
 
   it('keeps a test name with a line break or a backtick in one cell', () => {
     const report: PruneInputReport = { files: {}, testFiles: { 'src/x.test.ts': { tests: [{ id: 'a', name: 'a\n  `b`' }] } } };
-    expect(renderMarkdown(pruneReport(report, exclusions))).toContain('| a \\`b\\` | 0 | 0 |');
+    expect(renderMarkdown(pruneReport(report, exclusions))).toContain('| a \\`b\\` | 0 | 0 | 0 |');
   });
 
   it('holds test names and counts, never test source (BR-0001)', () => {
