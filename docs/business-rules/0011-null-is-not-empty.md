@@ -13,8 +13,9 @@ An absent answer and an empty answer mean different things to the caller. Report
 test: `src/tools/list-pages.test.ts`
 test: `src/truncation-meta.test.ts`
 test: `src/utils/resolve-refs.detail.test.ts`
+test: `src/tools/query-by-date-range.test.ts`
 
-The first two pin the `pages_unavailable` warning for `null` and the absence of a warning for a real `[]`. The third pins the same split for `resolve_refs`: a `null` ref lookup gives a `refs_unavailable` warning and no `missing` refs, and a real `[]` still gives `missing`. Other tools that read `null` as "none" have no test yet; the reviewer applies the rule to them.
+The first two pin the `pages_unavailable` warning for `null` and the absence of a warning for a real `[]`. The third pins the same split for `resolve_refs`: a `null` ref lookup gives a `refs_unavailable` warning and no `missing` refs, and a real `[]` still gives `missing`. The fourth pins it for `query_by_date_range`: a `null` journal-page answer gives a `journals_unavailable` warning, a `null` block answer gives `blocks_unavailable`, and a real `[]` gives neither. Other tools that read `null` as "none" have no test yet; the reviewer applies the rule to them.
 reviewer: A tool that maps a `null` API response to an empty result adds a warning that says the data was unavailable.
 
 ## Changelog
