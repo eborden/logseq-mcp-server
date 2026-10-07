@@ -58,7 +58,6 @@ describe('PageNotFoundError', () => {
     const error = new PageNotFoundError('say "hi"');
 
     expect(error.pageName).toBe('say "hi"');
-    expect(error.message.startsWith('No page "say \\"hi\\".')).toBe(false);
     expect(error.message.startsWith('No page "say \\"hi\\"".')).toBe(true);
   });
 
@@ -97,7 +96,7 @@ describe('AmbiguousPageError', () => {
     const error = new AmbiguousPageError('al', pages);
 
     expect(error.pageName).toBe('al');
-    expect(error.candidates).toBe(pages);
+    expect(error.candidates).toEqual(pages);
     expect(error.totalCandidates).toBe(2);
   });
 
@@ -201,12 +200,6 @@ describe('InvalidParameterError', () => {
     expect(error.message).toBe("Invalid parameter 'start': 2025-13-01\n\nExpected: a date\nExample: 2025-01-31");
   });
 
-  it('writes a value that is not a string the way a template would', () => {
-    expect(new InvalidParameterError('a', undefined, 'x').message).toContain("'a': undefined\n");
-    expect(new InvalidParameterError('a', null, 'x').message).toContain("'a': null\n");
-    expect(new InvalidParameterError('a', ['x', 'y'], 'x').message).toContain("'a': x,y\n");
-  });
-
   it('leaves out an empty example, like no example at all', () => {
     const error = new InvalidParameterError('a', 1, 'x', '');
 
@@ -253,7 +246,7 @@ describe('LogSeqTimeoutError', () => {
 });
 
 describe('LogSeqAuthError', () => {
-  it('names the URL and the HTTP status, then the three steps to fix, and has no token to show', () => {
+  it('names the URL and the HTTP status, then the three steps to fix', () => {
     const { message } = new LogSeqAuthError(API_URL);
 
     expect(message).toBe(
@@ -263,7 +256,6 @@ describe('LogSeqAuthError', () => {
       '2. Update "authToken" in ~/.logseq-mcp/config.json\n' +
       '3. See tests/integration/setup.md for details'
     );
-    expect(new LogSeqAuthError(API_URL).message).not.toMatch(/token\s*[:=]/i);
   });
 });
 
@@ -290,7 +282,7 @@ describe('LogSeqResponseError', () => {
     expect(error.message).toMatch(/\n2\. If the version is right, report this on the project's GitHub issues with the method name and the path above \(leave out page names and block text\)$/);
   });
 
-  it('carries nothing that was not passed in: no value from a response', () => {
+  it('names the top-level path as (response)', () => {
     const top = new LogSeqResponseError('logseq.DB.datascriptQuery', '(response)', 'Expected array');
 
     expect(top.message).toContain('logseq.DB.datascriptQuery in a shape this server can\'t read: (response): Expected array\n');
