@@ -77,11 +77,6 @@ jobs:
     name: Mutation testing
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # The one base commit of this job: the plan reads the PR base's baseline at it and the ratchet
-      # compares the baseline and the mutated scope with it (#223). The PR base, or on a push the
-      # commit before it (the ratchet only compares on a PR).
-      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
     steps:
       # Full history: the plan diffs against the commit the restored cache was saved from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -94,6 +89,24 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # The one base commit of this job (#223): the plan reads the base's baseline at it and the ratchet
+      # compares the baseline and the mutated scope with it. On a PR it is the first parent of the
+      # merge commit that was checked out, so it is the base tip this HEAD was built on even when
+      # main moved after the PR event (the event's base SHA is stale then, and a labeled or
+      # unlabeled re-run would count main's own baseline edits as the PR's). On a push it is the
+      # commit before it (the ratchet only compares on a PR).
+      - name: Resolve the base commit
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            BASE_SHA="$(git rev-parse HEAD^1)"
+          else
+            BASE_SHA="$BEFORE"
+          fi
+          echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
 
       # Restore only. The key names the commit the PR is based on, and restore-keys falls back to
       # the newest file saved from main.

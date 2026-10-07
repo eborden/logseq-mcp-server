@@ -565,19 +565,28 @@ describe('mutation workflows', () => {
   });
 
   // #223: two different bases (the PR base commit for the plan, a merge-base for the ratchet) can name different
-  // commits when the base has moved. One job-level input feeds both.
-  it('the plan and the ratchet use the same base commit, from one job-level BASE_SHA', () => {
-    const defs = [...mutationJob.matchAll(/^ {6}BASE_SHA: (.+)$/gm)];
-    expect(defs).toHaveLength(1);
-    expect(mutationJob).toMatch(/\n    env:\n(?: {6}#.*\n)*      BASE_SHA: /);
-    expect(defs[0][1]).toBe('${{ github.event.pull_request.base.sha || github.event.before }}');
-    // No other step spells the PR base out again: the definition and the cache key are the only two.
-    expect(mutationJob.match(/pull_request\.base\.sha/g)).toHaveLength(2);
+  // commits when the base has moved. One value, resolved in one early step, feeds both.
+  it('the plan and the ratchet use the same base commit, resolved once in an early step', () => {
     const all = steps(mutationJob);
-    const planStep = all.find(s => s.includes('mutation-ci.ts plan'));
-    const ratchet = all.find(s => s.includes('mutation-ratchet.ts'));
-    expect(planStep).toBeDefined();
-    expect(planStep!.match(/--fallback-since "\$BASE_SHA"/g)).toHaveLength(2); // the hit and the miss call
+    const resolve = all.findIndex(s => s.includes('name: Resolve the base commit'));
+    const planIdx = all.findIndex(s => s.includes('mutation-ci.ts plan'));
+    const ratchetIdx = all.findIndex(s => s.includes('mutation-ratchet.ts'));
+    expect(resolve).toBeGreaterThanOrEqual(0);
+    // Written to $GITHUB_ENV before the plan and the ratchet read it.
+    expect(resolve).toBeLessThan(planIdx);
+    expect(resolve).toBeLessThan(ratchetIdx);
+    // On a PR: the first parent of the checked-out merge commit, the base tip HEAD was built on (the event's
+    // base.sha goes stale when main moves). On a push: the commit before it. Event data goes in through env:.
+    expect(all[resolve]).toMatch(/BASE_SHA="\$\(git rev-parse HEAD\^1\)"/);
+    expect(all[resolve]).toMatch(/BASE_SHA="\$BEFORE"/);
+    expect(all[resolve]).toMatch(/BEFORE: \$\{\{ github\.event\.before \}\}/);
+    expect(all[resolve]).toMatch(/echo "BASE_SHA=\$BASE_SHA" >> "\$GITHUB_ENV"/);
+    // Nothing else defines BASE_SHA, and the event's base.sha is left to the cache key.
+    expect(mutationJob.match(/^ +BASE_SHA: /gm)).toBeNull();
+    expect(mutationJob.match(/pull_request\.base\.sha/g)).toHaveLength(1);
+    const planStep = all[planIdx];
+    const ratchet = all[ratchetIdx];
+    expect(planStep.match(/--fallback-since "\$BASE_SHA"/g)).toHaveLength(2); // the hit and the miss call
     expect(planStep).not.toMatch(/^ +BASE_SHA:/m);
     expect(ratchet).toMatch(/--base "\$BASE_SHA"/);
     expect(ratchet).not.toMatch(/origin\/|merge-base/);
