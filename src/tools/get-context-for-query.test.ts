@@ -682,4 +682,174 @@ describe('getContextForQuery', () => {
       expect(client.executeDatalogQuery).not.toHaveBeenCalled();
     });
   });
+
+  describe('which words are searched', () => {
+    function newClient() {
+      return {
+        config: { apiUrl: 'http://test', authToken: 'test' },
+        callAPI: vi.fn(),
+        executeDatalogQuery: vi.fn()
+      } as unknown as LogseqClient;
+    }
+
+    /** One search answer: a block holding `content`, id 1. */
+    async function searchFor(query: string, content: string) {
+      const client = newClient();
+      (client.executeDatalogQuery as any).mockResolvedValueOnce([[{ id: 1, uuid: 'u', content, page: { id: 100 } }]]);
+      const result = await getContextForQuery(client, query);
+      return { client, result };
+    }
+
+    // Words of four letters or more that the filter has to drop by name: a shorter one is dropped by its length anyway.
+    it.each(['what', 'when', 'where', 'were', 'does', 'could', 'should', 'would', 'with', 'about'])(
+      'does not search for the stop word "%s", so a block without it is still a hit',
+      async word => {
+        const { client, result } = await searchFor(`${word} gadgets`, 'a note on gadgets');
+
+        expect(result.searchResults!.map(block => block.id)).toEqual([1]);
+        expect((client.executeDatalogQuery as any).mock.calls[0][1]).toBe('(?i)gadgets');
+      }
+    );
+
+    it('drops a stop word whatever its case', async () => {
+      const { result } = await searchFor('About SHOULD gadgets', 'a note on gadgets');
+
+      expect(result.searchResults!.map(block => block.id)).toEqual([1]);
+    });
+
+    it('does not search for a word of three letters, so a block without it is still a hit', async () => {
+      const { result } = await searchFor('cat gadgets', 'a note on gadgets');
+
+      expect(result.searchResults!.map(block => block.id)).toEqual([1]);
+    });
+
+    it('searches for a word of four letters', async () => {
+      const { result } = await searchFor('cats gadgets', 'a note on gadgets');
+
+      expect(result.searchResults).toEqual([]);
+    });
+
+    it('uses only the first three keywords, so a block missing a fourth is still a hit', async () => {
+      const { result } = await searchFor('alpha beta gamma delta', 'alpha, beta and gamma');
+
+      expect(result.searchResults!.map(block => block.id)).toEqual([1]);
+    });
+  });
+
+  describe('summary', () => {
+    function newClient() {
+      return {
+        config: { apiUrl: 'http://test', authToken: 'test' },
+        callAPI: vi.fn(),
+        executeDatalogQuery: vi.fn()
+      } as unknown as LogseqClient;
+    }
+
+    const sourcePage = (id: number, name: string) => ({ id, name, originalName: name });
+    const backlink = (page: ReturnType<typeof sourcePage>, blockId: number) =>
+      [page, [{ id: blockId, uuid: 'u', content: `see [[x]] ${blockId}`, page }]] as const;
+
+    it('counts the blocks of every topic, and each page once across topics', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce([[{ id: 10, uuid: 'u', content: 'a1' }], [{ id: 11, uuid: 'u', content: 'a2' }]])
+        .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])
+        .mockResolvedValueOnce([
+          [{ id: 20, uuid: 'u', content: 'b1' }],
+          [{ id: 21, uuid: 'u', content: 'b2' }],
+          [{ id: 22, uuid: 'u', content: 'b3' }]
+        ]);
+      (client.callAPI as any)
+        // alpha is linked from page 5; beta from page 5 again, from page 1 (alpha itself) and from page 6
+        .mockResolvedValueOnce([backlink(sourcePage(5, 'gamma'), 50)])
+        .mockResolvedValueOnce([
+          backlink(sourcePage(5, 'gamma'), 51),
+          backlink(sourcePage(1, 'alpha'), 52),
+          backlink(sourcePage(6, 'delta'), 53)
+        ]);
+
+      const result = await getContextForQuery(client, 'Compare [[Alpha]] and [[Beta]]');
+
+      expect(result.contexts.map(c => c.relatedPages.map(rp => rp.page.id))).toEqual([[5], [5, 1, 6]]);
+      // pages 1, 2, 5 and 6: the main pages and the related ones, with 5 and 1 not counted twice
+      expect(result.summary).toEqual({ totalTopics: 2, totalBlocks: 5, totalPages: 4 });
+    });
+
+    it('counts the keyword hits as the blocks, and no topics or pages, when nothing was extracted', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any).mockResolvedValueOnce(
+        [1, 2].map(id => [{ id, uuid: 'u', content: `widgets ${id}`, page: { id: 100 + id } }])
+      );
+
+      const result = await getContextForQuery(client, 'about widgets');
+
+      expect(result.summary).toEqual({ totalTopics: 0, totalBlocks: 2, totalPages: 0 });
+    });
+
+    it('counts no blocks for a search with no hit', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any).mockResolvedValueOnce([]);
+
+      const result = await getContextForQuery(client, 'about widgets');
+
+      expect(result.summary).toEqual({ totalTopics: 0, totalBlocks: 0, totalPages: 0 });
+    });
+  });
+
+  describe('topic limits', () => {
+    function newClient() {
+      return {
+        config: { apiUrl: 'http://test', authToken: 'test' },
+        callAPI: vi.fn().mockResolvedValue([]),
+        executeDatalogQuery: vi.fn()
+      } as unknown as LogseqClient;
+    }
+
+    it('uses every topic, with no warning, when there are exactly maxTopics of them', async () => {
+      const client = newClient();
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([[{ id: 2, name: 'beta', properties: {} }]])
+        .mockResolvedValueOnce([]);
+
+      const result = await getContextForQuery(client, 'See [[Alpha]] and [[Beta]]', { maxTopics: 2 });
+
+      expect(result.contexts.map(c => c.topic)).toEqual(['Alpha', 'Beta']);
+      expect(result.warnings).toEqual([]);
+      expect(result.hasMore).toBe(false);
+    });
+
+    it('says in full which caps a topic hit, with the counts to raise them to', async () => {
+      const client = newClient();
+      // 13 blocks (cap 10), and 12 references from 6 pages (caps 10 and 5)
+      const blocks = Array.from({ length: 13 }, (_, i) => [{ id: 100 + i, uuid: 'u', content: `b${i}` }]);
+      const linked = Array.from({ length: 6 }, (_, i) => {
+        const page = { id: 200 + i, name: `source ${i}`, originalName: `Source ${i}` };
+        return [
+          page,
+          [0, 1].map(j => ({ id: 300 + i * 2 + j, uuid: 'u', content: `ref ${i} ${j}`, page }))
+        ];
+      });
+      (client.executeDatalogQuery as any)
+        .mockResolvedValueOnce([[{ id: 1, name: 'alpha', properties: {} }]])
+        .mockResolvedValueOnce(blocks);
+      (client.callAPI as any).mockResolvedValue(linked);
+
+      const result = await getContextForQuery(client, 'About [[Alpha]]');
+
+      expect(result.warnings).toEqual([
+        {
+          code: 'topic_truncated',
+          topic: 'Alpha',
+          message:
+            'Context for "Alpha" is capped: showing 10/13 blocks, 10/12 references, 5/6 related pages.',
+          howToFetchAll:
+            'Call logseq_build_context with topic_name "Alpha" and raise max_blocks (13), max_references (12) and max_related_pages (6).'
+        }
+      ]);
+      expect(result.hasMore).toBe(true);
+    });
+  });
 });
