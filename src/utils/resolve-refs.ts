@@ -363,7 +363,8 @@ class Renderer {
     } else if (token.kind === 'block_embed') {
       const row = target as Row;
       entry.page = pageNameOf(row);
-      const members = this.store.trees.get(token.key) ?? [{ row, depth: 0 }];
+      // Set for every found block embed at the level that scanned it (a `null` answer returned above)
+      const members = this.store.trees.get(token.key)!;
       const shown = members.slice(0, this.embedLimit);
       text = shown
         .map(({ row: member, depth: memberDepth }) => {
