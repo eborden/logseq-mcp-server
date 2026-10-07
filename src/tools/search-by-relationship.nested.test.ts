@@ -238,7 +238,7 @@ describe('connected-within counts nested blocks', () => {
   });
 });
 
-describe('connected-within below the cap is unchanged', () => {
+describe('connected-within below the cap: output pinned across the nested count (#183)', () => {
   it('returns the two trees as they came, byte for byte, with no marker and no totals', async () => {
     const { a, b } = eightBlocks();
     const expected = JSON.stringify([...a, ...b]);
@@ -280,7 +280,7 @@ describe('connected-within below the cap is unchanged', () => {
   });
 });
 
-describe('the other relationship types are unchanged', () => {
+describe('the other relationship types: output pinned across the nested count (#183)', () => {
   /** The data query returns `rows` blocks, some with children; every other query is the resolver */
   const datalog = (type: 'references' | 'referenced-by' | 'in-pages-linking-to', rows: BlockEntity[], limit: number) => {
     const executeDatalogQuery = vi.fn(async (query: string, ...inputs: unknown[]) => {
