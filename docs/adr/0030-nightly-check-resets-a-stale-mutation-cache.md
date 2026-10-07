@@ -25,7 +25,7 @@ We add `.github/workflows/mutation-nightly.yml`, which runs once a day (05:47 UT
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-07
 
