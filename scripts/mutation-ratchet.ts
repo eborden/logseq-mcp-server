@@ -12,7 +12,7 @@
  *
  *   node scripts/mutation-ratchet.ts [check] [--report reports/mutation/mutation.json]
  *        [--baseline mutation-baseline.json] [--plan reports/mutation/plan.json]
- *        [--base <git rev>] [--labels a,b] [--no-rerun]
+ *        [--base <git rev>] [--labels '["a","b"]'|a,b] [--no-rerun] [--max-reruns 3] [--rerun-budget-seconds 240]
  *   node scripts/mutation-ratchet.ts --update --report <run1.json> --report <run2.json> [--init]
  *   node scripts/mutation-ratchet.ts --update --weekly --report <weekly full run's report>
  *
@@ -21,6 +21,8 @@
  */
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 /** A new file must reach this score before its entry can be added (ADR-0026, "New files"). */
@@ -162,6 +164,7 @@ export type FailureKind =
   | 'no-report-row'
   | 'file-deleted'
   | 'baseline-lowered'
+  | 'new-entry-under-floor'
   | 'scope-changed';
 
 export interface Failure {
@@ -174,12 +177,25 @@ export interface Rerun {
   file: string;
   /** Score of the run that was below the baseline. */
   first: number | null;
-  /** Score of the single re-run from a fresh sandbox, or null when it couldn't run. */
+  /** Score of the single re-run from a fresh sandbox, or null when it couldn't run or wasn't run. */
   second: number | null;
   baseline: number;
   /** True when the re-run cleared the file. */
   cleared: boolean;
+  /** Why the file was not re-run (the budget was spent), when it wasn't. It counts as still below. */
+  skipped?: string;
 }
+
+/** What the re-runs may cost. They run inside the PR job's 10-minute budget, after Stryker's own step. */
+export interface RerunBudget {
+  /** At most this many files are re-run. */
+  maxReruns: number;
+  /** Total milliseconds for all re-runs. Each gets what is left, as its own timeout. */
+  budgetMs: number;
+  now?: () => number;
+}
+
+export const DEFAULT_RERUN_BUDGET: RerunBudget = { maxReruns: 3, budgetMs: 4 * 60 * 1000 };
 
 export interface CheckInput {
   report: Report;
@@ -191,8 +207,17 @@ export interface CheckInput {
   expected: string[] | null;
   /** True when a path exists in the checkout. */
   exists: (path: string) => boolean;
-  /** Re-runs one file once from a fresh sandbox. Omit to skip the re-run. Returns the new stats, or null on failure. */
-  rerun?: (file: string) => FileStats | null;
+  /**
+   * Re-runs one file once from a fresh sandbox, giving up after `timeoutMs`. Omit to skip the re-run.
+   * Returns the new stats, or null when it failed or ran out of time.
+   */
+  rerun?: (file: string, timeoutMs: number) => FileStats | null;
+  rerunBudget?: RerunBudget;
+  /**
+   * Called once, before the first re-run starts, with every failure found so far (a file waiting for
+   * its re-run is listed as below its baseline). A re-run that hangs then still leaves the cause in the log.
+   */
+  beforeRerun?: (failures: Failure[]) => void;
 }
 
 export interface CheckResult {
@@ -204,6 +229,8 @@ export interface CheckResult {
   checked: number;
 }
 
+const ADD_TESTS = 'Add or strengthen tests for the survivors in the report.';
+
 const fmt = (n: number | null) => (n === null ? 'n/a' : `${n.toFixed(1)}%`);
 
 export function check(input: CheckInput): CheckResult {
@@ -211,6 +238,7 @@ export function check(input: CheckInput): CheckResult {
   const failures: Failure[] = [];
   const raisable: CheckResult['raisable'] = [];
   const reruns: Rerun[] = [];
+  const pending: Array<{ file: string; scored: number; first: number; baseline: number; message: string }> = [];
   const stats = reportStats(report);
   let checked = 0;
 
@@ -240,24 +268,9 @@ export function check(input: CheckInput): CheckResult {
     if (s.score !== null) {
       checked += 1;
       if (s.score < entry.score) {
-        const second = input.rerun ? input.rerun(file) : undefined;
-        if (second !== undefined) {
-          const cleared = second !== null && second.score !== null && second.score >= entry.score;
-          reruns.push({ file, first: s.score, second: second?.score ?? null, baseline: entry.score, cleared });
-          if (!cleared) {
-            failures.push({
-              kind: 'below-baseline',
-              file,
-              message: `${file} scores ${fmt(s.score)}, below its baseline ${fmt(entry.score)}${second?.score == null ? ' (the re-run did not produce a score)' : `, and ${fmt(second.score)} again on a re-run from a fresh sandbox`}. Add or strengthen tests for the survivors in the report.`,
-            });
-          }
-        } else {
-          failures.push({
-            kind: 'below-baseline',
-            file,
-            message: `${file} scores ${fmt(s.score)}, below its baseline ${fmt(entry.score)}. Add or strengthen tests for the survivors in the report.`,
-          });
-        }
+        const message = `${file} scores ${fmt(s.score)}, below its baseline ${fmt(entry.score)}`;
+        if (input.rerun) pending.push({ file, scored: s.scored, first: s.score, baseline: entry.score, message });
+        else failures.push({ kind: 'below-baseline', file, message: `${message}. ${ADD_TESTS}` });
       } else if (Math.floor(s.score) > entry.score) {
         // A whole point more: what `--update` would raise it to (it rounds down to a whole point).
         raisable.push({ file, score: s.score, baseline: entry.score });
@@ -286,6 +299,41 @@ export function check(input: CheckInput): CheckResult {
         message: `${file} is in mutation-baseline.json but the report has no row for it. It may have been taken out of the \`mutate\` globs in stryker.config.json, which needs the ${BASELINE_LABEL} label and the maintainer's OK.`,
       });
     }
+  }
+
+  if (pending.length > 0 && input.rerun) {
+    input.beforeRerun?.([
+      ...failures,
+      ...pending.map((p): Failure => ({ kind: 'below-baseline', file: p.file, message: `${p.message}. Re-running it once from a fresh sandbox before this fails.` })),
+    ]);
+    const budget = input.rerunBudget ?? DEFAULT_RERUN_BUDGET;
+    const now = budget.now ?? Date.now;
+    const started = now();
+    // The smallest files first: they are cheapest, so more of them fit in the budget.
+    pending.sort((a, b) => a.scored - b.scored || a.file.localeCompare(b.file));
+    pending.forEach((p, i) => {
+      const left = budget.budgetMs - (now() - started);
+      const skipped = i >= budget.maxReruns ? `at most ${budget.maxReruns} files are re-run` : left <= 0 ? 'the re-run time budget is spent' : undefined;
+      if (skipped !== undefined) {
+        reruns.push({ file: p.file, first: p.first, second: null, baseline: p.baseline, cleared: false, skipped });
+        failures.push({
+          kind: 'below-baseline',
+          file: p.file,
+          message: `${p.message}, and was not re-run (${skipped}), so it counts as below. Re-run the job, or ${ADD_TESTS.charAt(0).toLowerCase()}${ADD_TESTS.slice(1)}`,
+        });
+        return;
+      }
+      const second = input.rerun?.(p.file, left) ?? null;
+      const cleared = second !== null && second.score !== null && second.score >= p.baseline;
+      reruns.push({ file: p.file, first: p.first, second: second?.score ?? null, baseline: p.baseline, cleared });
+      if (!cleared) {
+        failures.push({
+          kind: 'below-baseline',
+          file: p.file,
+          message: `${p.message}${second?.score == null ? ', and the re-run did not produce a score (it failed or ran out of time)' : `, and ${fmt(second.score)} again on a re-run from a fresh sandbox`}. ${ADD_TESTS}`,
+        });
+      }
+    });
   }
 
   return { failures, raisable, reruns, checked };
@@ -324,8 +372,9 @@ const sameList = (a: string[] | null, b: string[] | null, ordered: boolean) => {
 };
 
 /**
- * A lowered `score`, a removed entry (for a file that still exists), an edit to the `mutate` globs
- * or an edit to the exclusion list, against the base branch, fails unless the PR has the label.
+ * A lowered `score`, a removed entry (for a file that still exists), a new entry under the new-file
+ * floor, an edit to the `mutate` globs or an edit to the exclusion list, against the base branch,
+ * fails unless the PR has the label.
  * An `ignores` increase is allowed: the baseline diff shows it.
  */
 export function compareToBase(input: CompareInput): CompareResult {
@@ -340,6 +389,20 @@ export function compareToBase(input: CompareInput): CompareResult {
       }
     } else if (after.score < before.score) {
       changes.push({ kind: 'baseline-lowered', file, text: `${file}: baseline score lowered from ${before.score.toFixed(1)}% to ${after.score.toFixed(1)}%` });
+    }
+  }
+  // A new entry is held to the new-file floor here too, or an author could add a weak file by writing
+  // its real score in the baseline (ADR-0026, "New files"). Moved or renamed code that lands under the
+  // floor can use the label. Nothing is flagged when the base has no baseline (the PR that adds it).
+  if (base.baseline !== null) {
+    for (const [file, after] of Object.entries(head.baseline?.files ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+      if (base.baseline.files[file] === undefined && after.score < NEW_FILE_FLOOR) {
+        changes.push({
+          kind: 'new-entry-under-floor',
+          file,
+          text: `${file} is a new baseline entry at ${after.score.toFixed(1)}%, under the ${NEW_FILE_FLOOR}% floor for a new file`,
+        });
+      }
     }
   }
   if (!sameList(base.mutate, head.mutate, true)) {
@@ -487,12 +550,13 @@ export function renderCheck(
   }
   if (result.reruns.length > 0) {
     const changed = result.reruns.filter(r => r.cleared).length;
+    const skipped = result.reruns.filter(r => r.skipped !== undefined).length;
     out.push(
-      `Re-runs from a fresh sandbox: ${result.reruns.length}, which changed the result for ${changed}.`,
+      `Re-runs from a fresh sandbox: ${result.reruns.length - skipped}, which changed the result for ${changed}.${skipped > 0 ? ` ${skipped} file(s) were not re-run because the re-run budget was spent, and count as below their baseline.` : ''}`,
       '',
       '| File | First run | Re-run | Baseline |',
       '|---|---:|---:|---:|',
-      ...result.reruns.map(r => `| \`${r.file}\` | ${fmt(r.first)} | ${fmt(r.second)} | ${fmt(r.baseline)} |`),
+      ...result.reruns.map(r => `| \`${r.file}\` | ${fmt(r.first)} | ${r.skipped !== undefined ? `not run (${r.skipped})` : fmt(r.second)} | ${fmt(r.baseline)} |`),
       '',
     );
   }
@@ -505,6 +569,70 @@ export function renderCheck(
     );
   }
   return out.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Arguments
+
+/**
+ * The PR's label names. A JSON array (what the workflow passes, so a label name containing a comma
+ * can't pass for two) or, for a hand run, a comma list. Names are compared whole, never as substrings.
+ */
+export function parseLabels(value: string | undefined): string[] {
+  const text = (value ?? '').trim();
+  if (text === '') return [];
+  if (text.startsWith('[')) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error('the PR labels are not a valid JSON array');
+    }
+    if (!Array.isArray(parsed)) throw new Error('the PR labels are not a valid JSON array');
+    return parsed.filter((l): l is string => typeof l === 'string');
+  }
+  return text.split(',').map(l => l.trim());
+}
+
+export const hasBaselineLabel = (labels: string[]) => labels.includes(BASELINE_LABEL);
+
+export interface UpdateArgs {
+  reportPaths: string[];
+  /** The one report is the weekly full run's. The script can't check it, so it is the author's word. */
+  weekly: boolean;
+  init: boolean;
+  /** The baseline on disk, or null when there is none. */
+  baseline: Baseline | null;
+}
+
+export interface UpdateArgsIo {
+  resolvePath: (path: string) => string;
+  read: (path: string) => string;
+}
+
+/**
+ * The rules that keep `--update` from reading a single run: a lone report needs `--weekly`, the
+ * same report twice is one run (by path or by content, which would give a spread of 0), and `--init`
+ * is for the first baseline only. Throws a message naming the rule.
+ */
+export function checkUpdateArgs(args: UpdateArgs, io: UpdateArgsIo): void {
+  const { reportPaths, weekly, init, baseline } = args;
+  if (reportPaths.length === 0) throw new Error('--update needs --report <file>, twice, or once with --weekly');
+  const resolved = reportPaths.map(io.resolvePath);
+  if (new Set(resolved).size !== resolved.length) {
+    throw new Error('--update was given the same report twice, which is one run, not the lower of two');
+  }
+  const hashes = reportPaths.map(p => createHash('sha256').update(io.read(p)).digest('hex'));
+  if (new Set(hashes).size !== hashes.length) {
+    throw new Error('--update was given two reports with the same content, which is one run copied, not the lower of two');
+  }
+  if (weekly && reportPaths.length !== 1) throw new Error('--weekly names the one report of the weekly full run; give it a single --report');
+  if (reportPaths.length === 1 && !weekly) {
+    throw new Error(
+      "--update reads the weekly full run's report (--weekly --report <file>) or the lower of two runs (--report a --report b), never a single local run, which can be a lucky one",
+    );
+  }
+  if (init && baseline !== null && Object.keys(baseline.files).length > 0) throw new Error('--init is for the first baseline only');
 }
 
 // ---------------------------------------------------------------------------
@@ -543,7 +671,7 @@ function measuredScope(read: (path: string) => string | null): MeasuredScope {
 }
 
 /** Re-runs one file from a fresh sandbox: no incremental file, its own report. */
-function rerunFile(file: string): FileStats | null {
+function rerunFile(file: string, timeoutMs: number): FileStats | null {
   const config = JSON.parse(readFileSync('stryker.config.json', 'utf8')) as Record<string, unknown>;
   const reportPath = 'reports/mutation/rerun.json';
   mkdirSync('reports/mutation', { recursive: true });
@@ -560,7 +688,7 @@ function rerunFile(file: string): FileStats | null {
     }),
   );
   try {
-    execFileSync('npx', ['stryker', 'run', rerunConfig], { stdio: ['ignore', 'inherit', 'inherit'] });
+    execFileSync('npx', ['stryker', 'run', rerunConfig], { stdio: ['ignore', 'inherit', 'inherit'], timeout: Math.max(1000, timeoutMs), killSignal: 'SIGKILL' });
     const row = (JSON.parse(readFileSync(reportPath, 'utf8')) as Report).files[file];
     return row ? fileStats(row.mutants) : null;
   } catch {
@@ -572,24 +700,19 @@ function runCheck(args: string[]): number {
   const reportPath = flag(args, 'report') ?? 'reports/mutation/mutation.json';
   const baselinePath = flag(args, 'baseline') ?? 'mutation-baseline.json';
   const planPath = flag(args, 'plan') ?? 'reports/mutation/plan.json';
-  const labels = (flag(args, 'labels') ?? process.env.PR_LABELS ?? '').split(',').map(l => l.trim());
-  const labeled = labels.includes(BASELINE_LABEL);
+  const labeled = hasBaselineLabel(parseLabels(flag(args, 'labels') ?? process.env.PR_LABELS));
   const baseRev = flag(args, 'base');
+  const budget: RerunBudget = {
+    maxReruns: Number(flag(args, 'max-reruns') ?? DEFAULT_RERUN_BUDGET.maxReruns),
+    budgetMs: Number(flag(args, 'rerun-budget-seconds') ?? DEFAULT_RERUN_BUDGET.budgetMs / 1000) * 1000,
+  };
+  if (!Number.isFinite(budget.maxReruns) || !Number.isFinite(budget.budgetMs)) throw new Error('--max-reruns and --rerun-budget-seconds take numbers');
 
   const baseline = parseBaseline(readFileSync(baselinePath, 'utf8'));
   const plan: { mode?: string; mutate?: string[] } | null = existsSync(planPath) ? JSON.parse(readFileSync(planPath, 'utf8')) : null;
   const expected = plan?.mode === 'targeted' ? (plan.mutate ?? []) : plan?.mode === 'empty' ? [] : null;
 
-  let result: CheckResult = { failures: [], raisable: [], reruns: [], checked: 0 };
-  if (expected !== null && expected.length === 0) {
-    // Nothing was mutated (a cache-miss run with no source file to check). Say so; the base comparison still runs.
-  } else if (!existsSync(reportPath)) {
-    result.failures.push({ kind: 'no-report-row', file: null, message: `No Stryker report at ${reportPath}, so no score was checked.` });
-  } else {
-    const report = JSON.parse(readFileSync(reportPath, 'utf8')) as Report;
-    result = check({ report, baseline, expected, exists: existsSync, rerun: has(args, 'no-rerun') ? undefined : rerunFile });
-  }
-
+  // The base comparison is cheap, so it runs first and its failures are in the log before any re-run starts.
   let compare: CompareResult | null = null;
   if (baseRev) {
     const mergeBase = git('merge-base', 'HEAD', baseRev).trim();
@@ -598,6 +721,27 @@ function runCheck(args: string[]): number {
       head: measuredScope(p => (existsSync(p) ? readFileSync(p, 'utf8') : null)),
       exists: existsSync,
       labeled,
+    });
+  }
+
+  let result: CheckResult = { failures: [], raisable: [], reruns: [], checked: 0 };
+  if (expected !== null && expected.length === 0) {
+    // Nothing was mutated (a cache-miss run with no source file to check). Say so; the base comparison still ran.
+  } else if (!existsSync(reportPath)) {
+    result.failures.push({ kind: 'no-report-row', file: null, message: `No Stryker report at ${reportPath}, so no score was checked.` });
+  } else {
+    const report = JSON.parse(readFileSync(reportPath, 'utf8')) as Report;
+    result = check({
+      report,
+      baseline,
+      expected,
+      exists: existsSync,
+      rerun: has(args, 'no-rerun') ? undefined : rerunFile,
+      rerunBudget: budget,
+      beforeRerun: failures => {
+        console.log(renderCheck({ failures, raisable: [], reruns: [], checked: 0 }, compare, { expected, labeled }));
+        console.log(`Re-running the files below their baseline (at most ${budget.maxReruns}, ${Math.round(budget.budgetMs / 1000)} s in all)...`);
+      },
     });
   }
 
@@ -610,15 +754,9 @@ function runCheck(args: string[]): number {
 function runUpdate(args: string[]): number {
   const reportPaths = flagValues(args, 'report');
   const baselinePath = flag(args, 'baseline') ?? 'mutation-baseline.json';
-  if (reportPaths.length === 0) throw new Error('--update needs --report <file>, twice, or once with --weekly');
-  if (reportPaths.length === 1 && !has(args, 'weekly')) {
-    throw new Error(
-      '--update reads the weekly full run\'s report (--weekly --report <file>) or the lower of two runs (--report a --report b), never a single local run, which can be a lucky one',
-    );
-  }
   const baseline = existsSync(baselinePath) ? parseBaseline(readFileSync(baselinePath, 'utf8')) : null;
   const init = has(args, 'init');
-  if (init && baseline !== null && Object.keys(baseline.files).length > 0) throw new Error('--init is for the first baseline only');
+  checkUpdateArgs({ reportPaths, weekly: has(args, 'weekly'), init, baseline }, { resolvePath: p => resolve(p), read: p => readFileSync(p, 'utf8') });
   const { baseline: updated, notes } = updateBaseline({
     baseline,
     reports: reportPaths.map(p => JSON.parse(readFileSync(p, 'utf8')) as Report),
