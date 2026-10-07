@@ -894,11 +894,23 @@ describe('leftToWeeklyNotice', () => {
     const groups = { changedSources: ['src/a.ts'], fromTests: [], fromBaseline: ['src/b.ts', 'src/c.ts'] };
     const notice = leftToWeeklyNotice(['src/a.ts', 'src/b.ts', 'src/c.ts'], sha, groups);
     expect(notice?.annotation).toBe(
-      `::warning title=Mutation testing::3 file(s) (1 changed source, 2 baseline) over the mutant budget left to mutation-weekly.yml; run it on ${sha} before merging`,
+      `::warning title=Mutation testing::3 file(s) (1 changed source, 2 baseline entries) over the mutant budget left to mutation-weekly.yml; run it on ${sha} before merging`,
     );
-    expect(notice?.line).toContain('3 file(s) (1 changed source, 2 baseline) were not mutated on this PR');
+    expect(notice?.line).toContain('3 file(s) (1 changed source, 2 baseline entries) were not mutated on this PR');
     const tests = leftToWeeklyNotice(['src/t.ts'], sha, { changedSources: [], fromTests: ['src/t.ts'], fromBaseline: [] });
     expect(tests?.annotation).toContain('(1 imported by changed tests)');
+  });
+
+  it('pluralises a group label by its count: one entry or source, two or more of them', () => {
+    const one = leftToWeeklyNotice(['src/a.ts', 'src/b.ts'], sha, { changedSources: ['src/a.ts'], fromTests: [], fromBaseline: ['src/b.ts'] });
+    expect(one?.annotation).toContain('(1 changed source, 1 baseline entry)');
+    const two = leftToWeeklyNotice(['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'], sha, {
+      changedSources: ['src/a.ts', 'src/b.ts'],
+      fromTests: ['src/c.ts', 'src/d.ts'],
+      fromBaseline: [],
+    });
+    expect(two?.annotation).toContain('4 file(s) (2 changed sources, 2 imported by changed tests)');
+    expect(two?.line).toContain('(2 changed sources, 2 imported by changed tests)');
   });
 
   it("adds a line to the ratchet's own section, whether it passes or not, and names no file", () => {

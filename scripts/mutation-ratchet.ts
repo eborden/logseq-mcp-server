@@ -551,14 +551,15 @@ export function leftToWeeklyNotice(
   if (leftToWeekly.length === 0) return null;
   const n = leftToWeekly.length;
   const commit = headSha !== undefined && /^[0-9a-f]{40}$/.test(headSha) ? headSha : "this PR's head commit";
-  const named: [number, string][] = groups
+  // [count, singular, plural]: the label follows the count ("1 changed source", "2 changed sources").
+  const named: [number, string, string][] = groups
     ? [
-        [groups.changedSources.length, 'changed source'],
-        [groups.fromTests.length, 'imported by changed tests'],
-        [groups.fromBaseline.length, 'baseline'],
+        [groups.changedSources.length, 'changed source', 'changed sources'],
+        [groups.fromTests.length, 'imported by changed tests', 'imported by changed tests'],
+        [groups.fromBaseline.length, 'baseline entry', 'baseline entries'],
       ]
     : [];
-  const parts = named.filter(([count]) => count !== 0).map(([count, name]) => `${count} ${name}`);
+  const parts = named.filter(([count]) => count !== 0).map(([count, one, many]) => `${count} ${count === 1 ? one : many}`);
   const detail = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   return {
     annotation: `::warning title=Mutation testing::${n} file(s)${detail} over the mutant budget left to mutation-weekly.yml; run it on ${commit} before merging`,
