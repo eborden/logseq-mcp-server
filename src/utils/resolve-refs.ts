@@ -188,10 +188,10 @@ async function fetchLevels(
       visited.push(token);
 
       if (token.kind === 'page_embed') {
-        if (!store.pages.has(token.key)) {
-          pageNames.add(token.key);
-          asked.push(token);
-        }
+        // Scanned once, so never in `store.pages` yet. `scanned` stays: a `null` answer caches nothing,
+        // and only `scanned` stops the next level asking again (#260)
+        pageNames.add(token.key);
+        asked.push(token);
         continue;
       }
       const cached = store.blocks.get(token.key);
