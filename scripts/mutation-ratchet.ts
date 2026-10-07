@@ -568,9 +568,6 @@ export function isSuccessfulWeeklyRun(run: WeeklyRunInfo | null): boolean {
   return run?.conclusion === 'success' && (path === `.github/workflows/${WEEKLY_WORKFLOW}` || path.startsWith(`.github/workflows/${WEEKLY_WORKFLOW}@`));
 }
 
-/** The most artifacts of one name whose runs the gate looks at. A name holds one per run on that commit, a handful. */
-const MAX_ARTIFACTS_CHECKED = 10;
-
 /**
  * The failure for changed source files the plan left out because they passed the mutant budget, or null.
  * A changed source that no mutation run checked on its own PR would pass unchecked, so this fails the
@@ -602,14 +599,14 @@ export async function changedSourceGate(opts: {
     return failure(`${lead} The PR's head commit is not a full SHA, so a weekly run for it can't be looked up. ${fix("this PR's head commit")}`);
   }
   const name = weeklyArtifactName(headSha);
-  let expired = 0;
+  let onlyExpired = false;
   try {
+    // Every unexpired artifact of that exact name is checked, so a failed run beside a successful one can't hide it.
+    // The name filter gives one artifact per run of the weekly workflow on that commit, which is few.
     const found = (await opts.lookup.artifacts(name)).filter(a => a.name === name);
-    for (const artifact of found.slice(0, MAX_ARTIFACTS_CHECKED)) {
-      if (artifact.expired) {
-        expired += 1;
-        continue;
-      }
+    const fresh = found.filter(a => !a.expired);
+    onlyExpired = found.length > 0 && fresh.length === 0;
+    for (const artifact of fresh) {
       const id = artifact.workflow_run?.id;
       if (typeof id !== 'number') continue;
       if (isSuccessfulWeeklyRun(await opts.lookup.run(id))) return null;
@@ -619,7 +616,7 @@ export async function changedSourceGate(opts: {
     return failure(`${lead} Looking up the ${WEEKLY_WORKFLOW} report for ${headSha} failed (${why}), so this can't be told from a missing run. ${fix(headSha)}`);
   }
   const gone =
-    expired > 0 ? ` A report for it exists but its artifact expired (they are kept ${WEEKLY_ARTIFACT_RETENTION_DAYS} days), so the run has to be repeated.` : '';
+    onlyExpired ? ` A report for it exists but its artifact expired (they are kept ${WEEKLY_ARTIFACT_RETENTION_DAYS} days), so the run has to be repeated.` : '';
   return failure(`${lead} No successful ${WEEKLY_WORKFLOW} run has uploaded \`${name}\`.${gone} ${fix(headSha)}`);
 }
 
