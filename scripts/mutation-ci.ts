@@ -116,36 +116,75 @@ export interface PlanInput {
   exists: (path: string) => boolean;
   /** Source files whose `mutation-baseline.json` entry changed. */
   baselineChanged: string[];
+  /**
+   * Mutants per file, from the restored incremental file (see `mutantCountsFromIncremental`). Called only
+   * on the cache-miss path, which is the only one that uses it. Absent means no counts at all.
+   */
+  mutantCounts?: () => Record<string, number>;
 }
 
 export type PlanMode = 'incremental' | 'targeted' | 'empty';
 
 /**
- * The most baseline entries a PR may change before the cache-miss path stops mutating them (ADR-0026: a
- * PR never starts a cold full run, and the job has 10 minutes). Over this, the files are left to the
- * weekly full run (#223).
+ * The most mutants a cache-miss PR run may be estimated to test (ADR-0028). A PR never starts a cold full
+ * run and the job has 10 minutes (ADR-0026), so the whole targeted set (changed sources, files the changed
+ * tests import, changed baseline entries) is filled in that order until the next file would pass this.
+ * Whatever doesn't fit is left to the weekly full run (#223, #239).
  *
- * Measured on the CI runner (#231), from five cold full runs of 44 files and about 6.1k mutants
- * (`mutation-weekly.yml`, Oct 2026). Stryker took 19.1, 19.5, 24.4, 28.4 and 29.6 minutes, dry run
- * included: 0.43 to 0.67 minutes per file on average, 0.19 to 0.29 seconds per mutant. Runners vary
- * by 50% for the same commit, so the slowest run sets the bound. The job's own overhead (checkout,
- * npm ci, plan, upload, ratchet) is 11 to 20 seconds.
+ * Measured on the CI runner (#231), from five cold full runs of 44 files and 6,342 to 6,345 mutants, about
+ * 6.1k of them tested (`mutation-weekly.yml`, Oct 2026). Stryker took 19.1 to 29.6 minutes, dry run
+ * included: 0.19 to 0.29 seconds per tested mutant. Runners vary by 50% for the same commit, so the
+ * slowest run (0.29 s) sets the bound. The job's own overhead is 0.3 min (checkout, npm ci, plan, upload,
+ * ratchet: 11 to 20 s) and the targeted run's own dry run 0.5 min (0.3 to 0.5 measured): 0.8 min together.
  *
- * Files differ a lot in size, and the cap can't choose which ones changed. The four largest files
- * hold 510, 420, 350 and 350 mutants. At 0.29 s each, plus 0.3 min of job overhead and the targeted
- * run's own dry run (0.3 to 0.5 min, taken as 0.5), the cap's worst case is:
- *   3 files: 1,280 mutants, 6.2 min, + 0.8 min = 7.0 min, about 3 min spare
- *   4 files: 1,630 mutants, 7.9 min, + 0.8 min = 8.7 min, about 1.3 min spare
- *   5 files: 1,953 mutants, 9.5 min, + 0.8 min = 10.3 min, over the timeout
- * So 3. At the average file (0.67 min) 8 files would fit; the largest 8 (2,787 mutants, 14.3 min) do
- * not, and the old figure of 1 to 1.5 minutes per file was a laptop estimate.
+ * The budget keeps the 3.0 min of spare time that ADR-0027's cap of 3 files left in its worst case, for
+ * any mix of files, not only for baseline entries:
+ *   (10 min timeout - 0.8 min overhead - 3.0 min spare) x 60 s / 0.29 s per mutant = 372 / 0.29 = 1,283,
+ *   rounded down to 1,280, which is also the three largest files together (510 + 420 + 350)
+ *   1,280 mutants x 0.29 s = 6.2 min, + 0.8 min = 7.0 min, 3.0 min spare
+ * The spare is not room to spend. The counts are estimates (they come from main's file, and the PR may have
+ * grown a file) and time per mutant differs by file. At the average file (6,342 / 44 = about 144 mutants)
+ * the budget covers about 9 files, where the cap of 3 covered 3 whatever their size and left the changed
+ * sources and test imports uncapped.
  *
- * The limit: 3 min spare is roughly 600 mutants (3 min at 0.29 s), about one large file. The changed
- * sources and the files the changed tests import are not capped, so a PR that changes those as well
- * can still exceed the timeout. A cap by mutant count would bound that, and is a possible follow-up.
  * Re-measure after the mutated scope or the runner changes much.
  */
-export const MAX_BASELINE_FILES = 3;
+export const MUTANT_BUDGET = 1280;
+
+/**
+ * The size assumed for a file the restored incremental file has no count for (no cache, or a file added
+ * since): 510 mutants, the largest file measured in #231. A new file is as likely to be big as any, and
+ * assuming small could pass the timeout. So the budget holds two unknown files (1,020 mutants), not a third
+ * (1,530 over 1,280). With no cache at all every file is unknown, and a PR gets two of them.
+ */
+export const FALLBACK_MUTANTS = 510;
+
+/**
+ * The incremental file's per-file mutant counts: the length of `files[path].mutants`, Ignored ones included
+ * (a count over the ~6.1k tested of ~6.3k, so about 4% high, the safe side). Stryker writes that file in the
+ * mutation-testing report format. A file that doesn't parse or has another shape gives no counts, and every
+ * file then takes FALLBACK_MUTANTS: this is a size estimate, not a result, so the fallback is the answer.
+ */
+export function mutantCountsFromIncremental(doc: unknown): Record<string, number> {
+  const files = typeof doc === 'object' && doc !== null ? (doc as { files?: unknown }).files : null;
+  if (typeof files !== 'object' || files === null) return {};
+  const counts: Record<string, number> = {};
+  for (const [path, entry] of Object.entries(files)) {
+    const mutants = typeof entry === 'object' && entry !== null ? (entry as { mutants?: unknown }).mutants : null;
+    if (Array.isArray(mutants)) counts[path] = mutants.length;
+  }
+  return counts;
+}
+
+/** The three groups of the cache-miss set, highest priority first. */
+export interface Groups<T> {
+  /** Source files the PR changed. */
+  changedSources: T;
+  /** Source files the changed tests import. */
+  fromTests: T;
+  /** Source files whose `mutation-baseline.json` entry changed. */
+  fromBaseline: T;
+}
 
 export interface Plan {
   mode: PlanMode;
@@ -153,24 +192,51 @@ export interface Plan {
   mutate: string[];
   /** Why the cache-miss path was taken, or [] for `incremental`. */
   reasons: string[];
+  /** The mutated files by group. A file sits in the highest group that names it, so the three add up to `mutate`. */
   changedSources: string[];
-  /** Files mutated because their baseline entry changed. Empty when the cap (MAX_BASELINE_FILES) was hit. */
   fromBaseline: string[];
   fromTests: string[];
-  /** How many source files had a changed baseline entry, before the cap. */
+  /** How many source files had a changed baseline entry, before the budget. */
   baselineChanged: number;
   /**
-   * Source files with a changed baseline entry that this run did not mutate, because more than
-   * MAX_BASELINE_FILES entries changed. The weekly full run checks them. Empty when the cap did not bite.
+   * Files due for mutation that did not fit MUTANT_BUDGET, in priority order. The weekly full run checks
+   * them. Empty when everything fit, and on the incremental path.
    */
   leftToWeekly: string[];
+  /** The same files by group. */
+  leftToWeeklyByGroup: Groups<string[]>;
+  /** The estimated mutants of `mutate`, never over MUTANT_BUDGET. */
+  estimatedMutants: number;
+  /** The files, among those due for mutation, that had no count and were sized at FALLBACK_MUTANTS. */
+  estimatedByFallback: string[];
+}
+
+const emptyGroups = (): Groups<string[]> => ({ changedSources: [], fromTests: [], fromBaseline: [] });
+
+/** A plan that mutates nothing, and says why. */
+export function noPlan(mode: PlanMode, reasons: string[]): Plan {
+  return {
+    mode,
+    mutate: [],
+    reasons,
+    changedSources: [],
+    fromBaseline: [],
+    fromTests: [],
+    baselineChanged: 0,
+    leftToWeekly: [],
+    leftToWeeklyByGroup: emptyGroups(),
+    estimatedMutants: 0,
+    estimatedByFallback: [],
+  };
 }
 
 /**
  * Whole scope, incrementally, when a usable cache exists and nothing it can't see changed.
- * Otherwise the cache-miss path: only the files a PR touches, never a cold full run (ADR-0026). When more
- * than MAX_BASELINE_FILES baseline entries changed, those files are not mutated (the changed sources and
- * the files the changed tests import still are) and are named in `leftToWeekly` for the weekly full run.
+ * Otherwise the cache-miss path: only the files a PR touches, never a cold full run (ADR-0026). The files
+ * are taken in priority order (changed sources, files the changed tests import, changed baseline entries;
+ * sorted by path within a group, each file once, in its highest group) while their estimated mutants fit
+ * MUTANT_BUDGET. The first file that doesn't fit ends the set, so what is mutated is a prefix of that
+ * order, and every file after it is named in `leftToWeekly` for the weekly full run (ADR-0028).
  */
 export function plan(input: PlanInput): Plan {
   const { scope, changed } = input;
@@ -179,34 +245,64 @@ export function plan(input: PlanInput): Plan {
   if (!input.cacheUsable) reasons.push(input.cacheNote ?? 'no usable incremental cache');
   if (blind.length > 0) reasons.push(`changed inputs that incremental mode can't see: ${blind.join(', ')}`);
 
-  if (reasons.length === 0) {
-    return { mode: 'incremental', mutate: [], reasons, changedSources: [], fromBaseline: [], fromTests: [], baselineChanged: 0, leftToWeekly: [] };
-  }
+  if (reasons.length === 0) return noPlan('incremental', reasons);
 
   const alive = (p: string) => !input.deleted.includes(p) && input.exists(p);
   const changedSources = changed.filter(p => inMutateScope(p, scope) && alive(p)).sort();
   const baselineEntries = [...new Set(input.baselineChanged.filter(p => inMutateScope(p, scope) && alive(p)))].sort();
-  const capped = baselineEntries.length > MAX_BASELINE_FILES;
-  const fromBaseline = capped ? [] : baselineEntries;
-  const fromTests = changed
-    .filter(isUnitTest)
-    .flatMap(p => {
-      const source = input.readTest(p);
-      return source === null ? [] : importedSources(p, source, scope, input.exists);
-    })
-    .sort();
-  const mutate = [...new Set([...changedSources, ...fromBaseline, ...fromTests])].sort();
-  // A capped entry that a changed source or test brings in anyway is mutated, so it isn't left out.
-  const leftToWeekly = capped ? baselineEntries.filter(p => !mutate.includes(p)) : [];
+  const testImports = [
+    ...new Set(
+      changed.filter(isUnitTest).flatMap(p => {
+        const source = input.readTest(p);
+        return source === null ? [] : importedSources(p, source, scope, input.exists);
+      }),
+    ),
+  ].sort();
+
+  // One list in priority order, each file once, in the highest group that names it.
+  const seen = new Set<string>();
+  const ordered: { file: string; group: keyof Groups<unknown> }[] = [];
+  const queue = (files: string[], group: keyof Groups<unknown>) => {
+    for (const file of files) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      ordered.push({ file, group });
+    }
+  };
+  queue(changedSources, 'changedSources');
+  queue(testImports, 'fromTests');
+  queue(baselineEntries, 'fromBaseline');
+
+  const counts = ordered.length > 0 ? (input.mutantCounts?.() ?? {}) : {};
+  const estimatedByFallback = ordered.filter(({ file }) => counts[file] === undefined).map(({ file }) => file);
+  const estimate = (file: string) => counts[file] ?? FALLBACK_MUTANTS;
+
+  const taken = emptyGroups();
+  const left = emptyGroups();
+  let used = 0;
+  let full = false;
+  for (const { file, group } of ordered) {
+    if (!full && used + estimate(file) <= MUTANT_BUDGET) {
+      used += estimate(file);
+      taken[group].push(file);
+    } else {
+      full = true;
+      left[group].push(file);
+    }
+  }
+  const mutate = [...taken.changedSources, ...taken.fromTests, ...taken.fromBaseline].sort();
   return {
     mode: mutate.length === 0 ? 'empty' : 'targeted',
     mutate,
     reasons,
-    changedSources,
-    fromBaseline,
-    fromTests: [...new Set(fromTests)],
+    changedSources: taken.changedSources,
+    fromTests: taken.fromTests,
+    fromBaseline: taken.fromBaseline,
     baselineChanged: baselineEntries.length,
-    leftToWeekly,
+    leftToWeekly: [...left.changedSources, ...left.fromTests, ...left.fromBaseline],
+    leftToWeeklyByGroup: left,
+    estimatedMutants: used,
+    estimatedByFallback,
   };
 }
 
@@ -260,26 +356,39 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
       if (plan.mode === 'empty') {
         out.push(
           plan.leftToWeekly.length > 0
-            ? '**No source file to mutate: no changed source file, no mutated file imported by a changed test, and the changed baseline entries are over the cap (below).**'
+            ? '**No source file was mutated: the first file due for mutation is over the mutant budget (below).**'
             : '**No source file to mutate: no changed source file, none changed in the baseline, and no mutated file imported by a changed test.**',
           'Nothing was checked, and this is not a pass.',
           '',
         );
       } else {
         out.push(
-          `Mutated ${plan.mutate.length} file(s): ${plan.changedSources.length} changed, ${plan.fromBaseline.length} from baseline changes, ${plan.fromTests.length} imported by changed tests.`,
+          `Mutated ${plan.mutate.length} file(s), an estimated ${plan.estimatedMutants} of ${MUTANT_BUDGET} mutants: ${plan.changedSources.length} changed, ${plan.fromBaseline.length} from baseline changes, ${plan.fromTests.length} imported by changed tests.`,
           '',
           ...plan.mutate.map(f => `- \`${f}\``),
           '',
         );
       }
-      if (plan.leftToWeekly.length > 0) {
+      if (plan.estimatedByFallback.length > 0) {
         out.push(
-          `**${plan.baselineChanged} baseline entries changed, over the cap of ${MAX_BASELINE_FILES}, so this run did not mutate the ${plan.leftToWeekly.length} below.** A change that wide (a re-baseline after a Stryker upgrade, or the first baseline) is checked by the weekly full run (\`mutation-weekly.yml\`), not by this job. Run it by hand on this PR's head commit (Actions tab, "Run workflow", put the commit SHA in "ref") before merging. These files are unchecked until then:`,
-          '',
-          ...plan.leftToWeekly.map(f => `- \`${f}\``),
+          `${plan.estimatedByFallback.length} file(s) had no mutant count in the cached results (new, or no cache) and were each sized at ${FALLBACK_MUTANTS} mutants: ${plan.estimatedByFallback.map(f => `\`${f}\``).join(', ')}.`,
           '',
         );
+      }
+      if (plan.leftToWeekly.length > 0) {
+        const groups: [string, string[]][] = [
+          ['Changed sources', plan.leftToWeeklyByGroup.changedSources],
+          ['Imported by changed tests', plan.leftToWeeklyByGroup.fromTests],
+          ['Changed baseline entries', plan.leftToWeeklyByGroup.fromBaseline],
+        ];
+        out.push(
+          `**The mutants these ${plan.leftToWeekly.length} file(s) would add pass the budget of ${MUTANT_BUDGET} (estimated ${plan.estimatedMutants} used), so this run did not mutate them.** The job has 10 minutes, so it takes the changed sources first, then the files the changed tests import, then the changed baseline entries, and stops at the first that doesn't fit. A change that wide (a re-baseline after a Stryker upgrade, or the first baseline) is checked by the weekly full run (\`mutation-weekly.yml\`), not by this job. Run it by hand on this PR's head commit (Actions tab, "Run workflow", put the commit SHA in "ref") before merging. These files are unchecked until then:`,
+          '',
+        );
+        for (const [name, files] of groups) {
+          if (files.length === 0) continue;
+          out.push(`${name} (${files.length}):`, '', ...files.map(f => `- \`${f}\``), '');
+        }
       }
     }
   }
@@ -350,7 +459,7 @@ export interface PlanIo {
 }
 
 export function planFromRepo(
-  opts: { cache: 'hit' | 'miss'; since: string; fallbackSince: string; config: { mutate: string[] } },
+  opts: { cache: 'hit' | 'miss'; since: string; fallbackSince: string; config: { mutate: string[]; incrementalFile?: string } },
   io: PlanIo,
 ): Plan {
   const scope = scopeFromConfig(opts.config);
@@ -365,16 +474,7 @@ export function planFromRepo(
   const base = chooseBase({ cache: opts.cache, since: opts.since, fallbackSince: opts.fallbackSince, lastResort: 'HEAD~1', isCommit });
   const since = base.since;
   if (since === null) {
-    return {
-      mode: 'empty',
-      mutate: [],
-      reasons: [base.note ?? 'no commit to diff against was found'],
-      changedSources: [],
-      fromBaseline: [],
-      fromTests: [],
-      baselineChanged: 0,
-      leftToWeekly: [],
-    };
+    return noPlan('empty', [base.note ?? 'no commit to diff against was found']);
   }
   // --no-renames: a rename lists the old path too, so a moved blind-spot file is still seen.
   const changed = io.git('diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);
@@ -408,7 +508,19 @@ export function planFromRepo(
     }
     baselineChanged = changedBaselineFiles(parse(before), parse(io.exists('mutation-baseline.json') ? io.read('mutation-baseline.json') : null));
   }
-  return plan({ cacheUsable: base.cacheUsable, cacheNote: base.note, changed, deleted, scope, readTest, exists: io.exists, baselineChanged });
+  // Read here, before the job drops the restored file on the cache-miss path. Its results are not reused
+  // then, but its per-file mutant counts size the run (ADR-0028). No file, or one that doesn't parse, gives
+  // no counts, and the plan sizes every file at FALLBACK_MUTANTS.
+  const incrementalFile = opts.config.incrementalFile;
+  const mutantCounts = (): Record<string, number> => {
+    if (incrementalFile === undefined || !io.exists(incrementalFile)) return {};
+    try {
+      return mutantCountsFromIncremental(JSON.parse(io.read(incrementalFile)));
+    } catch {
+      return {};
+    }
+  };
+  return plan({ cacheUsable: base.cacheUsable, cacheNote: base.note, changed, deleted, scope, readTest, exists: io.exists, baselineChanged, mutantCounts });
 }
 
 function runPlan(args: string[]): void {

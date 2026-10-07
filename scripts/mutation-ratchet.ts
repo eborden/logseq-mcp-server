@@ -528,30 +528,52 @@ export function updateBaseline(input: UpdateInput): UpdateResult {
 // ---------------------------------------------------------------------------
 // Markdown
 
+/** How many files the plan left out, per group (the `leftToWeeklyByGroup` of scripts/mutation-ci.ts). */
+export interface LeftGroups {
+  changedSources: readonly string[];
+  fromTests: readonly string[];
+  fromBaseline: readonly string[];
+}
+
 /**
- * What to say when the plan left baseline entries to the weekly full run (#223): a GitHub `::warning`
- * annotation (shown on the PR's checks page, so a green check doesn't hide it) and a Markdown line for
- * the ratchet's own section of the summary. Null when nothing was left out. It never fails the job: a
- * re-baseline PR is meant to go green. `headSha` is the PR's head commit, shown only when it is a full SHA.
+ * What to say when the plan left files to the weekly full run because they passed the mutant budget
+ * (#223, #239): a GitHub `::warning` annotation (shown on the PR's checks page, so a green check doesn't
+ * hide it) and a Markdown line for the ratchet's own section of the summary. Null when nothing was left
+ * out. It never fails the job: a PR that changes a lot is meant to go green. `groups` names how many of the
+ * files are changed sources, files imported by changed tests and baseline entries. `headSha` is the PR's
+ * head commit, shown only when it is a full SHA.
  */
-export function leftToWeeklyNotice(leftToWeekly: readonly string[], headSha?: string): { annotation: string; line: string } | null {
+export function leftToWeeklyNotice(
+  leftToWeekly: readonly string[],
+  headSha?: string,
+  groups?: LeftGroups,
+): { annotation: string; line: string } | null {
   if (leftToWeekly.length === 0) return null;
   const n = leftToWeekly.length;
   const commit = headSha !== undefined && /^[0-9a-f]{40}$/.test(headSha) ? headSha : "this PR's head commit";
+  const named: [number, string][] = groups
+    ? [
+        [groups.changedSources.length, 'changed source'],
+        [groups.fromTests.length, 'imported by changed tests'],
+        [groups.fromBaseline.length, 'baseline'],
+      ]
+    : [];
+  const parts = named.filter(([count]) => count !== 0).map(([count, name]) => `${count} ${name}`);
+  const detail = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   return {
-    annotation: `::warning title=Mutation testing::${n} baseline entries left to mutation-weekly.yml; run it on ${commit} before merging`,
-    line: `**${n} changed baseline entries were not mutated on this PR and are unchecked until the weekly full run covers them.** Run \`mutation-weekly.yml\` on ${commit} before merging (Actions tab, "Run workflow", the SHA in "ref"). The job summary lists the files.`,
+    annotation: `::warning title=Mutation testing::${n} file(s)${detail} over the mutant budget left to mutation-weekly.yml; run it on ${commit} before merging`,
+    line: `**${n} file(s)${detail} were not mutated on this PR, over the mutant budget, and are unchecked until the weekly full run covers them.** Run \`mutation-weekly.yml\` on ${commit} before merging (Actions tab, "Run workflow", the SHA in "ref"). The job summary lists the files by group.`,
   };
 }
 
 export function renderCheck(
   result: CheckResult,
   compare: CompareResult | null,
-  opts: { expected: string[] | null; labeled: boolean; leftToWeekly?: readonly string[]; headSha?: string },
+  opts: { expected: string[] | null; labeled: boolean; leftToWeekly?: readonly string[]; leftGroups?: LeftGroups; headSha?: string },
 ): string {
   const failures = [...result.failures, ...(compare?.failures ?? [])];
   const out: string[] = ['## Mutation ratchet', ''];
-  const notice = leftToWeeklyNotice(opts.leftToWeekly ?? [], opts.headSha);
+  const notice = leftToWeeklyNotice(opts.leftToWeekly ?? [], opts.headSha, opts.leftGroups);
   if (notice) out.push(notice.line, '');
   if (failures.length === 0) {
     out.push(
@@ -762,9 +784,10 @@ function runCheck(args: string[]): number {
   if (!Number.isFinite(budget.maxReruns) || !Number.isFinite(budget.budgetMs)) throw new Error('--max-reruns and --rerun-budget-seconds take numbers');
 
   const baseline = parseBaseline(readFileSync(baselinePath, 'utf8'));
-  const plan: { mode?: string; mutate?: string[]; leftToWeekly?: string[] } | null = existsSync(planPath) ? JSON.parse(readFileSync(planPath, 'utf8')) : null;
+  const plan: { mode?: string; mutate?: string[]; leftToWeekly?: string[]; leftToWeeklyByGroup?: LeftGroups } | null = existsSync(planPath) ? JSON.parse(readFileSync(planPath, 'utf8')) : null;
   const expected = plan?.mode === 'targeted' ? (plan.mutate ?? []) : plan?.mode === 'empty' ? [] : null;
   const leftToWeekly = plan?.leftToWeekly ?? [];
+  const leftGroups = plan?.leftToWeeklyByGroup;
   const headSha = process.env.PR_HEAD_SHA;
 
   // The base comparison is cheap, so it runs first and its failures are in the log before any re-run starts.
@@ -796,16 +819,16 @@ function runCheck(args: string[]): number {
       rerun: has(args, 'no-rerun') ? undefined : rerunFile,
       rerunBudget: budget,
       beforeRerun: failures => {
-        console.log(renderCheck({ failures, raisable: [], reruns: [], checked: 0 }, compare, { expected, labeled, leftToWeekly, headSha }));
+        console.log(renderCheck({ failures, raisable: [], reruns: [], checked: 0 }, compare, { expected, labeled, leftToWeekly, leftGroups, headSha }));
         console.log(`Re-running the files below their baseline (at most ${budget.maxReruns}, ${Math.round(budget.budgetMs / 1000)} s in all)...`);
       },
     });
   }
 
-  const markdown = renderCheck(result, compare, { expected, labeled, leftToWeekly, headSha });
+  const markdown = renderCheck(result, compare, { expected, labeled, leftToWeekly, leftGroups, headSha });
   console.log(markdown);
   // An annotation on the PR's checks page, since a green check hides the summary. It doesn't fail the job.
-  const notice = leftToWeeklyNotice(leftToWeekly, headSha);
+  const notice = leftToWeeklyNotice(leftToWeekly, headSha, leftGroups);
   if (notice) console.log(notice.annotation);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
   return result.failures.length + (compare?.failures.length ?? 0) > 0 ? 1 : 0;
