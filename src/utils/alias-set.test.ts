@@ -4,6 +4,7 @@ import {
   aliasIds,
   aliasNames,
   aliasSetWarnings,
+  compareAliasNames,
   hasAliasLinks,
   hasAliases,
   resolveAliasSet,
@@ -320,6 +321,30 @@ describe('singleAliasSet', () => {
 
   it('holds nothing for a page without an id', () => {
     expect(singleAliasSet({ name: 'ghost', 'original-name': 'Ghost' })).toEqual({ members: [], truncated: false });
+  });
+});
+
+describe('compareAliasNames', () => {
+  const nfc = 'Café';
+  const nfd = 'Café';
+
+  it('breaks an en tie by code unit, with the same sign both ways', () => {
+    expect(nfc.localeCompare(nfd, 'en')).toBe(0);
+    expect(compareAliasNames(nfd, nfc)).toBeLessThan(0);
+    expect(compareAliasNames(nfc, nfd)).toBeGreaterThan(0);
+  });
+
+  it('is 0 for identical names', () => {
+    expect(compareAliasNames(nfc, nfc)).toBe(0);
+    expect(compareAliasNames('Jordan', 'Jordan')).toBe(0);
+  });
+
+  it('orders pairs that en separates by en, not by code unit', () => {
+    // Code-unit order puts 'B' (66) before 'b' (98); en puts 'b' first.
+    expect(Math.sign(compareAliasNames('b', 'B'))).toBe(Math.sign('b'.localeCompare('B', 'en')));
+    expect(compareAliasNames('b', 'B')).toBeLessThan(0);
+    expect(compareAliasNames('B', 'b')).toBeGreaterThan(0);
+    expect(compareAliasNames('Zed', 'amy')).toBeGreaterThan(0);
   });
 });
 
