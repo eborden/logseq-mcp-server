@@ -114,7 +114,7 @@ We adopt mutation testing on the unit suite with StrykerJS, and a per-file ratch
 
 ## Status
 
-accepted
+superseded by 0027-cap-mutation-cache-miss-set
 
 Date: 2026-10-06
 
