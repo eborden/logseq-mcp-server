@@ -43,7 +43,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0024-baseline-test-before-skill-edits](0024-baseline-test-before-skill-edits.md) | Baseline-test a skill before editing it | accepted |
 | [0025-rust-implementation-alongside-typescript](0025-rust-implementation-alongside-typescript.md) | Explore a Rust implementation alongside TypeScript, and re-scope the process docs per toolchain | accepted |
 | [0026-mutation-testing-ratchet](0026-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the unit suite | superseded by 0027-cap-mutation-cache-miss-set |
-| [0027-cap-mutation-cache-miss-set](0027-cap-mutation-cache-miss-set.md) | Cap the mutation job's cache-miss set and correct its audit claim | proposed |
+| [0027-cap-mutation-cache-miss-set](0027-cap-mutation-cache-miss-set.md) | Cap the mutation job's cache-miss set and correct its audit claim | accepted |
 
 ## File naming rule
 
