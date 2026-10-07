@@ -80,6 +80,28 @@ describe('query_by_date_range search_term across an alias group (#69)', () => {
     expect(ids(result)).toEqual([10, 11, 12, 14, 15]);
   });
 
+  it('matches the term itself only as written, not through case folding in the whole-word match', async () => {
+    // "Sam" (id 4) declares `alias:: Samuel` (id 5). U+017F (long s) folds to "s" under the `iu` flags only.
+    const group = [
+      { id: 4, name: 'sam', 'original-name': 'Sam' },
+      { id: 5, name: 'samuel', 'original-name': 'Samuel' }
+    ];
+    const blocks = [block(16, 50, 'Notes on \u017Fam'), block(17, 51, 'Notes on sam'), block(18, 52, 'Notes on \u017Famuel')];
+    const executeDatalogQuery = vi.fn(async (query: string, ...inputs: unknown[]) => {
+      if (query.includes('?alias-mid')) {
+        const start = group.find(p => p.name === inputs[0]);
+        return start ? group.map(p => [start, p]) : [];
+      }
+      if (query.includes(':block/page ?page')) return blocks.map(b => [b]);
+      return PAGES.map(p => [p]);
+    });
+    const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+    const result = await queryJournals(client, { ...range, searchTerm: 'Sam' });
+
+    expect(ids(result)).toEqual([17, 18]); // 18 through the other name's whole-word match; never 16
+  });
+
   it('gives the same blocks for the alias and the canonical name', async () => {
     const byName = await queryJournals(fakeClient().client, { ...range, searchTerm: 'Jordan' });
     const byAlias = await queryJournals(fakeClient().client, { ...range, searchTerm: 'Jordan Rivera' });
