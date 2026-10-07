@@ -123,12 +123,12 @@ function getWeekIdentifier(date: number): string {
   const month = parseInt(str.substring(4, 6));
   const day = parseInt(str.substring(6, 8));
 
-  // Simple week calculation (not ISO week)
-  const startOfYear = new Date(parseInt(year), 0, 1);
-  const currentDate = new Date(parseInt(year), month - 1, day);
-  const dayOfYear = Math.floor(
-    (currentDate.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24)
-  );
+  // Simple week calculation (not ISO week). Both dates are UTC midnights, so the difference is a whole
+  // number of days in every time zone; local-time dates are an hour short after a daylight-saving change
+  // and the floor would put a week's first day in the previous week (#249).
+  const startOfYear = Date.UTC(parseInt(year), 0, 1);
+  const currentDate = Date.UTC(parseInt(year), month - 1, day);
+  const dayOfYear = Math.floor((currentDate - startOfYear) / (1000 * 60 * 60 * 24));
   const weekNum = Math.floor(dayOfYear / 7) + 1;
 
   return `${year}-W${weekNum.toString().padStart(2, '0')}`;
