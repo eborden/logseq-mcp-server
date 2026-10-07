@@ -667,7 +667,8 @@ export async function queryJournals(
   let totalBlocks = 0;
 
   for (const page of journals) {
-    const blocks = treesByPage.get(page.id) || [];
+    // buildBlockTrees registers every journal page, so a page with no blocks has []
+    const blocks = treesByPage.get(page.id)!;
 
     // Filter top-level blocks by search term if provided
     let filteredBlocks = blocks;
