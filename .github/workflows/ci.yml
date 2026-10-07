@@ -69,8 +69,10 @@ jobs:
   # snapshots, fixtures, the lockfile or the configs. When a PR changes one (or there is no
   # cache), scripts/mutation-ci.ts takes the cache-miss path: it mutates only the changed files,
   # the files whose baseline entry changed and the files the changed tests import, and never
-  # starts a cold full run. After such a change lands on main the cache stays old until the weekly
-  # run, which resets it (run mutation-weekly.yml by hand to do it sooner).
+  # starts a cold full run. When more than 8 baseline entries changed (a re-baseline, the first
+  # baseline) it leaves those files to the weekly run and names them in the summary: run
+  # mutation-weekly.yml by hand on the PR's head commit. After such a change lands on main the
+  # cache stays old until the weekly run, which resets it (run it by hand to do it sooner).
   mutation:
     name: Mutation testing
     runs-on: ubuntu-latest
