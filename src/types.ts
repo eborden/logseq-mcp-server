@@ -129,7 +129,9 @@ export interface SlimPage {
 /**
  * - `ok`: found; its text is in `resolvedContent`
  * - `missing`: no such block or page (deleted?); the reference is left as written
- * - `depth_limit`: not followed, because it sits deeper than the depth limit
+ * - `depth_limit`: not followed, because it sits deeper than the depth limit. Also what a ref gets when
+ *   LogSeq answered its lookup with `null` (#260, BR-0011): left as written, never `missing`. The
+ *   `refs_unavailable` warning says which of the two happened.
  * - `cycle`: not followed, because it is already being expanded on this path
  */
 export type RefStatus = 'ok' | 'missing' | 'depth_limit' | 'cycle';

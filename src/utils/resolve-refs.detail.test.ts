@@ -446,17 +446,6 @@ describe('resolveBlockRefs: rows as LogSeq may answer them', () => {
     expect(annotated(blocks[0]).resolvedRefs).toEqual([{ uuid: B, content: 'quoted', page: 'Alpha', status: 'ok' }]);
   });
 
-  // A known bug (#260): a null answer is not an empty one (BR-0011), but today every ref comes back
-  // `missing` with no warning. Flip this test with the fix.
-  it('reads a null answer as no rows, so every ref is missing and nothing warns (#260)', async () => {
-    const executeDatalogQuery = vi.fn(async () => null);
-    const client = { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient;
-    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: `see ${ref(B)}` }]);
-    expect(annotated(blocks[0]).resolvedContent).toBe(`see ${ref(B)}`);
-    expect(annotated(blocks[0]).resolvedRefs).toEqual([{ uuid: B, content: null, page: null, status: 'missing' }]);
-    expect(warnings).toEqual([]);
-  });
-
   it('skips a row with no uuid', async () => {
     const { client } = rawClient([{ id: 9, name: 'stray', 'original-name': 'Stray' }, blockRow(B)]);
     const { blocks } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }]);
@@ -474,5 +463,112 @@ describe('resolveBlockRefs: rows as LogSeq may answer them', () => {
     const { client } = rawClient([blockRow(B, { page: { id: 1000 } })]);
     const { blocks } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }]);
     expect(annotated(blocks[0]).resolvedRefs).toEqual([{ uuid: B, content: 'quoted', page: null, status: 'ok' }]);
+  });
+});
+
+// BR-0011: a null answer is not an empty one (#260). A real [] still means the targets do not exist.
+describe('resolveBlockRefs: a null answer from the ref lookup (#260)', () => {
+  const unavailable = (count: number) => ({
+    code: 'refs_unavailable',
+    message:
+      `LogSeq returned no answer when looking up ${count} reference(s) (possibly no graph open or a re-index ` +
+      'in progress), so they were not resolved and are left as written. This does not mean they are missing. ' +
+      'Retry in a moment.'
+  });
+  const nullClient = () => {
+    const executeDatalogQuery = vi.fn(async () => null);
+    return { client: { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient, executeDatalogQuery };
+  };
+
+  it('does not report a ref as missing, and warns that the lookup had no answer', async () => {
+    const { client } = nullClient();
+    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: `see ${ref(B)}` }]);
+    expect(annotated(blocks[0]).resolvedContent).toBe(`see ${ref(B)}`);
+    // `depth_limit` is the existing "not followed, left as written" status; BR-0007 lists no other
+    expect(annotated(blocks[0]).resolvedRefs).toEqual([{ uuid: B, content: null, page: null, status: 'depth_limit' }]);
+    expect(warnings).toEqual([unavailable(1)]);
+  });
+
+  it('carries no howToFetchAll, so it does not claim a parameter fetches the rest', async () => {
+    const { client } = nullClient();
+    const { warnings } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }]);
+    expect(warnings[0]).not.toHaveProperty('howToFetchAll');
+  });
+
+  it('does not add the depth-limit warning, since depth is not why the refs were not followed', async () => {
+    const { client } = nullClient();
+    const { warnings } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }]);
+    expect(warnings.map(w => w.code)).toEqual(['refs_unavailable']);
+  });
+
+  it('counts each distinct ref once, however often it appears or in how many blocks', async () => {
+    const { client } = nullClient();
+    const { warnings } = await resolveBlockRefs(client, [
+      { uuid: A, content: `${ref(B)} and ${ref(B)} and ${ref(C)}` },
+      { uuid: D, content: ref(B) }
+    ]);
+    expect(warnings).toEqual([unavailable(2)]);
+  });
+
+  it('leaves block embeds and page embeds as written, with the same status and warning', async () => {
+    const { client } = nullClient();
+    const content = `${embedBlock(B)} ${embedPage('Some Page')}`;
+    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content }]);
+    expect(annotated(blocks[0]).resolvedContent).toBe(content);
+    expect(annotated(blocks[0]).resolvedRefs).toEqual([
+      { uuid: B, embed: 'block', content: null, page: null, status: 'depth_limit' },
+      { embed: 'page', content: null, page: 'Some Page', status: 'depth_limit' }
+    ]);
+    expect(warnings).toEqual([unavailable(2)]);
+  });
+
+  it('keeps what an earlier level found when only a later level has no answer', async () => {
+    const executeDatalogQuery = vi
+      .fn()
+      .mockResolvedValueOnce([[{ id: 1, uuid: B, content: `inner ${ref(C)}`, page: alphaPage }]])
+      .mockResolvedValueOnce(null);
+    const client = { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient;
+    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }]);
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(2);
+    expect(annotated(blocks[0]).resolvedContent).toBe(`inner ${ref(C)}`);
+    expect(annotated(blocks[0]).resolvedRefs).toEqual([
+      { uuid: B, content: `inner ${ref(C)}`, page: 'Alpha', status: 'ok' },
+      { uuid: C, content: null, page: null, status: 'depth_limit' }
+    ]);
+    expect(warnings).toEqual([unavailable(1)]);
+  });
+
+  it('does not show half an embed when its block was fetched earlier but its children got no answer', async () => {
+    const executeDatalogQuery = vi
+      .fn()
+      .mockResolvedValueOnce([
+        [{ id: 1, uuid: B, content: 'plain', page: alphaPage }],
+        [{ id: 2, uuid: C, content: `see ${embedBlock(B)}`, page: alphaPage }]
+      ])
+      .mockResolvedValueOnce(null);
+    const client = { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient;
+    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: `${ref(B)} ${ref(C)}` }]);
+    expect(annotated(blocks[0]).resolvedRefs).toEqual([
+      { uuid: B, content: 'plain', page: 'Alpha', status: 'ok' },
+      { uuid: C, content: `see ${embedBlock(B)}`, page: 'Alpha', status: 'ok' },
+      { uuid: B, embed: 'block', content: null, page: null, status: 'depth_limit' }
+    ]);
+    expect(warnings).toEqual([unavailable(1)]);
+  });
+
+  it('asks once for refs shared between blocks, and not again after a null answer', async () => {
+    const { client, executeDatalogQuery } = nullClient();
+    await resolveBlockRefs(client, [
+      { uuid: A, content: ref(B) },
+      { uuid: D, content: ref(B) }
+    ]);
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reports a ref as missing, with no warning, when the answer is a real empty array', async () => {
+    const { client } = rawClient([]);
+    const { blocks, warnings } = await resolveBlockRefs(client, [{ uuid: A, content: ref(B) }]);
+    expect(annotated(blocks[0]).resolvedRefs).toEqual([{ uuid: B, content: null, page: null, status: 'missing' }]);
+    expect(warnings).toEqual([]);
   });
 });

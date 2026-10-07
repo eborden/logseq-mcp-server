@@ -22,6 +22,10 @@ import { responses, type RefTarget } from '../response-schemas.js';
  * Depth: a ref in the returned block is level 1, a ref inside its target level 2,
  * and so on. Refs deeper than `maxDepth` are left as written (`depth_limit`).
  *
+ * A `null` answer (BR-0011, #260): when LogSeq answers a level's query with `null`, its refs were never
+ * looked up. They stay as written with status `depth_limit` (not `missing`), and a `refs_unavailable`
+ * warning says so. A real empty answer still means `missing`.
+ *
  * Cycles: the set of uuids "being expanded" is tracked per path, not shared
  * across siblings. Two siblings that reference the same block both resolve; only
  * a ref back to a block already on the current path is a `cycle`.
@@ -125,6 +129,11 @@ class RefStore {
   blocks = new Map<string, Row | null>();
   trees = new Map<string, EmbedMember[]>();
   pages = new Map<string, PageEmbed>();
+  /**
+   * `<kind>:<key>` of every token whose lookup got a `null` answer (#260). Not found is a different
+   * thing: that is a `null` in `blocks`, or a page with no entity. These were never looked up.
+   */
+  unavailable = new Set<string>();
 }
 
 /** Contents a token makes visible, which are the next level's refs to look for. */
@@ -169,6 +178,8 @@ async function fetchLevels(
     const descendantUuids = new Set<string>();
     const pageNames = new Set<string>();
     const visited: Token[] = [];
+    // The tokens this level's query answers for, so a `null` answer can be pinned on them
+    const asked: Token[] = [];
 
     for (const token of texts.flatMap(scanTokens)) {
       const identity = `${token.kind}:${token.key}`;
@@ -177,15 +188,22 @@ async function fetchLevels(
       visited.push(token);
 
       if (token.kind === 'page_embed') {
-        if (!store.pages.has(token.key)) pageNames.add(token.key);
+        if (!store.pages.has(token.key)) {
+          pageNames.add(token.key);
+          asked.push(token);
+        }
         continue;
       }
       const cached = store.blocks.get(token.key);
       if (cached === null) continue;
-      if (cached === undefined) blockUuids.add(token.key);
+      if (cached === undefined) {
+        blockUuids.add(token.key);
+        asked.push(token);
+      }
       if (token.kind === 'block_embed' && !store.trees.has(token.key)) {
         descendantUuids.add(token.key);
         blockUuids.add(token.key);
+        if (cached !== undefined) asked.push(token);
       }
     }
 
@@ -195,10 +213,14 @@ async function fetchLevels(
         descendantUuids: [...descendantUuids],
         pageNames: [...pageNames]
       });
-      const rows = ((await queryParsed(client, responses.refTargetRows, query, ...inputs)) || [])
-        .map(row => row[0])
-        .filter(row => row != null);
-      ingest(store, rows, blockUuids, descendantUuids, pageNames);
+      const answer = await queryParsed(client, responses.refTargetRows, query, ...inputs);
+      if (answer === null) {
+        // `null` is not `[]` (BR-0011, #260): the targets were not looked up, so none of them is "missing"
+        for (const token of asked) store.unavailable.add(`${token.kind}:${token.key}`);
+      } else {
+        const rows = answer.map(row => row[0]).filter(row => row != null);
+        ingest(store, rows, blockUuids, descendantUuids, pageNames);
+      }
     }
 
     texts = visited.flatMap(token => visibleTexts(store, token, embedLimit));
@@ -248,6 +270,7 @@ function ingest(
 class Renderer {
   private warnings = new Map<string, ResultWarning>();
   private depthLimited = new Set<string>();
+  private unavailableRefs = new Set<string>();
 
   constructor(
     private store: RefStore,
@@ -276,6 +299,16 @@ class Renderer {
           'or logseq_get_page (its page).'
       });
     }
+    if (this.unavailableRefs.size > 0) {
+      // No howToFetchAll: no parameter fetches what LogSeq did not answer (like `pages_unavailable`)
+      warnings.push({
+        code: 'refs_unavailable',
+        message:
+          `LogSeq returned no answer when looking up ${this.unavailableRefs.size} reference(s) ` +
+          '(possibly no graph open or a re-index in progress), so they were not resolved and are ' +
+          'left as written. This does not mean they are missing. Retry in a moment.'
+      });
+    }
     return warnings;
   }
 
@@ -294,6 +327,13 @@ class Renderer {
     if (path.includes(pathKey)) {
       entry.status = 'cycle';
       if (!isPage) entry.page = pageNameOf(this.store.blocks.get(token.key));
+      return token.raw;
+    }
+    if (this.store.unavailable.has(`${token.kind}:${token.key}`)) {
+      // Not followed and left as written, which `depth_limit` already says. Not `missing`: that claims the
+      // target does not exist, and BR-0007 lists no other status. The `refs_unavailable` warning says why.
+      entry.status = 'depth_limit';
+      this.unavailableRefs.add(pathKey);
       return token.raw;
     }
     const target = isPage ? this.store.pages.get(token.key) : this.store.blocks.get(token.key);
