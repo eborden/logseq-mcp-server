@@ -203,6 +203,18 @@ describe('block schema', () => {
     expect(accepts(blockSchema, { ...pulledBlock, content: 42 })).toBe(false);
     expect(accepts(blockSchema, { ...pulledBlock, content: null })).toBe(false);
   });
+
+  it('requires text content in a keyword-search hit, which a plain block list does not', () => {
+    const { content: _content, ...withoutContent } = pulledBlock;
+
+    expect(accepts(responses.searchHitList, [pulledBlock])).toBe(true);
+    // a block with no content is whole as far as blockList goes, so only searchHitList rejects it
+    expect(accepts(responses.blockList, [withoutContent])).toBe(true);
+    expect(accepts(responses.searchHitList, [withoutContent])).toBe(false);
+
+    const error = catchError(() => parseResponse(responses.searchHitList, [{ ...pulledBlock, content: 42 }], 'm'));
+    expect(error.path).toBe('[0].content');
+  });
 });
 
 describe('a tolerant reader: keys the schemas do not name', () => {
