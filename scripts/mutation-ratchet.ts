@@ -19,7 +19,7 @@
  * `check` prints Markdown (and appends it to $GITHUB_STEP_SUMMARY) and exits 1 on any failure.
  * `--update` only raises scores (see `updateBaseline`).
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -670,6 +670,41 @@ function measuredScope(read: (path: string) => string | null): MeasuredScope {
   };
 }
 
+/** What `runInProcessGroup` needs from the OS. Faked in tests. */
+export interface ProcessGroupIo {
+  /** `spawnSync`, narrowed to what the helper reads from the result. */
+  spawnSync(
+    command: string,
+    args: string[],
+    options: { stdio: ['ignore', 'inherit', 'inherit']; detached: true; timeout: number; killSignal: 'SIGKILL' },
+  ): { pid?: number; status: number | null; error?: Error };
+  /** `process.kill`. A negative pid signals the whole process group. */
+  kill(pid: number, signal: 'SIGKILL'): void;
+}
+
+const realProcessGroupIo: ProcessGroupIo = { spawnSync, kill: (pid, signal) => process.kill(pid, signal) };
+
+/**
+ * Runs a command to completion and returns true when it exited 0 inside `timeoutMs`.
+ *
+ * The child is spawned `detached`, so it leads its own process group, and when it times out or fails the
+ * whole group is killed (`kill(-pid)`), not just the child. `spawnSync`'s own timeout signals only the
+ * child, and `npx` is a thin parent of the Stryker process and its vitest workers: killing `npx` alone
+ * left them running until the job ended (#223, from the #217 review). A successful run is not swept.
+ */
+export function runInProcessGroup(command: string, args: string[], timeoutMs: number, io: ProcessGroupIo = realProcessGroupIo): boolean {
+  const result = io.spawnSync(command, args, { stdio: ['ignore', 'inherit', 'inherit'], detached: true, timeout: timeoutMs, killSignal: 'SIGKILL' });
+  const ok = result.error === undefined && result.status === 0;
+  if (!ok && result.pid !== undefined) {
+    try {
+      io.kill(-result.pid, 'SIGKILL');
+    } catch {
+      // The group is already gone (ESRCH): nothing left to kill.
+    }
+  }
+  return ok;
+}
+
 /** Re-runs one file from a fresh sandbox: no incremental file, its own report. */
 function rerunFile(file: string, timeoutMs: number): FileStats | null {
   const config = JSON.parse(readFileSync('stryker.config.json', 'utf8')) as Record<string, unknown>;
@@ -688,7 +723,7 @@ function rerunFile(file: string, timeoutMs: number): FileStats | null {
     }),
   );
   try {
-    execFileSync('npx', ['stryker', 'run', rerunConfig], { stdio: ['ignore', 'inherit', 'inherit'], timeout: Math.max(1000, timeoutMs), killSignal: 'SIGKILL' });
+    if (!runInProcessGroup('npx', ['stryker', 'run', rerunConfig], Math.max(1000, timeoutMs))) return null;
     const row = (JSON.parse(readFileSync(reportPath, 'utf8')) as Report).files[file];
     return row ? fileStats(row.mutants) : null;
   } catch {
