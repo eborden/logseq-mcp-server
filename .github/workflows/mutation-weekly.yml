@@ -67,7 +67,7 @@ jobs:
       - name: Ratchet
         id: ratchet
         continue-on-error: true
-        run: node scripts/mutation-ratchet.ts check
+        run: node scripts/mutation-ratchet.ts check --max-reruns 10 --rerun-budget-seconds 3600
 
       - name: Job summary
         if: always()

@@ -461,7 +461,8 @@ describe('mutation workflows', () => {
     expect(ratchet).toHaveLength(1);
     expect(all[all.length - 1]).toBe(ratchet[0]);
     expect(ratchet[0]).toMatch(/run: node scripts\/mutation-ratchet\.ts check .*--base "origin\/\$BASE_REF"/);
-    expect(ratchet[0]).toMatch(/PR_LABELS: \$\{\{ join\(github\.event\.pull_request\.labels\.\*\.name, ','\) \}\}/);
+    // A JSON array, so a label name with a comma in it can't pass for two (parseLabels).
+    expect(ratchet[0]).toMatch(/PR_LABELS: \$\{\{ toJSON\(github\.event\.pull_request\.labels\.\*\.name\) \}\}/);
     expect(ratchet[0]).not.toMatch(/continue-on-error|\bif:/);
   });
 
