@@ -42,7 +42,7 @@
     "src/utils/result-meta.ts": { "score": 97.0, "ignores": 0 },
     "src/utils/slim-entities.ts": { "score": 90.0, "ignores": 0 },
     "src/utils/snippet.ts": { "score": 96.0, "ignores": 0 },
-    "src/utils/tips.ts": { "score": 73.0, "ignores": 0 },
+    "src/utils/tips.ts": { "score": 95.0, "ignores": 0 },
     "src/utils/top-concepts.ts": { "score": 92.0, "ignores": 0 }
   }
 }
