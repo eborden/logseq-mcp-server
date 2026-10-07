@@ -24,8 +24,7 @@ export const NO_PAGE_OPEN_MESSAGE =
 
 /** Blocks arrive with `page` as a bare `{id}` (or `{'db/id'}` from Datalog). */
 function pageIdOf(block: BlockEntity): number | undefined {
-  const id = blockPageId(block);
-  return typeof id === 'number' ? id : undefined;
+  return blockPageId(block);
 }
 
 /**
@@ -52,9 +51,7 @@ function withFetchedChildren(block: BlockEntity): BlockEntity {
       typeof child === 'object' && child !== null && !Array.isArray(child) &&
       typeof (child as BlockEntity).content === 'string'
   );
-  return fetched.length > 0
-    ? { ...rest, children: fetched.map(withFetchedChildren) }
-    : (rest as BlockEntity);
+  return { ...rest, children: fetched.map(withFetchedChildren) };
 }
 
 /**
