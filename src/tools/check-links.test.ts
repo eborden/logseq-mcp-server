@@ -749,3 +749,106 @@ describe('checkLinks: warnings', () => {
     expect(warning.message).toContain('not the same as missing pages');
   });
 });
+
+// ---------------------------------------------------------------- characterization (#246)
+
+/**
+ * The result of `checkProse` as it was before #246 removed its redundant guards,
+ * rebuilt here from scratch: the loop with both length guards, the `i > 0`
+ * surrogate check, and plain position and excerpt code. The seeded fuzz below
+ * compares the live function against it, so removing a guard can't change an
+ * output unnoticed.
+ */
+function referenceProse(before: string, after: string) {
+  const strip = (t: string) => t.replace(/\[\[([^\[\]\n]+)\]\]/g, '$1');
+  const a = strip(before);
+  const b = strip(after);
+  if (a === b) return { ok: true };
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (i > 0 && /[\uD800-\uDBFF]/.test(a[i - 1])) i--;
+  const around = (t: string) => {
+    const start = t.lastIndexOf('\n', i - 1) + 1;
+    const end = t.indexOf('\n', i);
+    const head = Array.from(t.slice(start, i));
+    const tail = Array.from(t.slice(i, end === -1 ? undefined : end));
+    const left = head.length > 30 ? `...${head.slice(-30).join('')}` : head.join('');
+    const right = tail.length > 50 ? `${tail.slice(0, 50).join('')}...` : tail.join('');
+    return left + right;
+  };
+  const upto = a.slice(0, i);
+  return {
+    ok: false,
+    firstDifference: {
+      line: upto.split('\n').length,
+      column: Array.from(upto.slice(upto.lastIndexOf('\n') + 1)).length + 1,
+      before: around(a),
+      after: around(b),
+    },
+  };
+}
+
+/** mulberry32: a small seeded generator, so a failure reproduces. */
+function seeded(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe('checkProse: output pinned across the guard removal (#246)', () => {
+  const PIECES = ['a', 'b', 'x', ' ', '\n', '[[', ']]', '[', ']', '[[p]]', '😀', '😁', '\uD83D', '\uDE00', 'é', '.'];
+
+  const tricky: Array<[string, string]> = [
+    ['', ''],
+    ['', 'a'],
+    ['a', ''],
+    ['abc', 'abc'],
+    ['abc', 'abcd'],
+    ['abcd', 'abc'],
+    ['abc', 'abd'],
+    ['\n', ''],
+    ['a\n', 'a'],
+    ['\nb', '\nc'],
+    ['[[a]]', 'a'],
+    ['[[a]]b', 'ab'],
+    ['[[a]]b', 'ac'],
+    ['[a', '[b'],
+    ['a]]', 'a]'],
+    ['😀', '😁'],
+    ['😀', '\uD83D'],
+    ['\uD83D', '😀'],
+    ['x😀', 'x😁'],
+    ['\uD83D', '\uD83E'],
+    ['\uDE00', '\uDE01'],
+    ['\uD83Dx', '\uD83Dy'],
+  ];
+
+  it.each(tricky)('matches the reference on %j vs %j', (before, after) => {
+    expect(checkProse(before, after)).toEqual(referenceProse(before, after));
+  });
+
+  it('matches the reference on 20000 seeded random pairs, including prefixes and extensions', () => {
+    const rand = seeded(246);
+    const text = () => Array.from({ length: Math.floor(rand() * 9) }, () => PIECES[Math.floor(rand() * PIECES.length)]).join('');
+    for (let n = 0; n < 20000; n++) {
+      const before = text();
+      const kind = n % 4;
+      // Unrelated, a prefix of the other, an extension of it, or one edit away
+      const after =
+        kind === 0
+          ? text()
+          : kind === 1
+            ? before.slice(0, Math.floor(rand() * (before.length + 1)))
+            : kind === 2
+              ? before + text()
+              : before.replace(/./s, c => c + text());
+      expect(checkProse(before, after), JSON.stringify([before, after])).toEqual(referenceProse(before, after));
+      expect(checkProse(after, before), JSON.stringify([after, before])).toEqual(referenceProse(after, before));
+    }
+  });
+});
