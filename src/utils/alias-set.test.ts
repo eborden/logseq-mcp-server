@@ -335,6 +335,19 @@ describe('resolvedAliases', () => {
     });
   });
 
+  it('orders ties, accent variants and case variants in one fixed order whatever order they arrive in', () => {
+    const names = ['Zed', 'côte', 'Amy-b', 'CAFÉ', 'coté', 'Cafe', 'amy b', 'café', 'Amy', 'CAFE', 'cafe', 'Café', 'amy'];
+    const expected = ['amy', 'Amy', 'amy b', 'Amy-b', 'cafe', 'Cafe', 'CAFE', 'café', 'Café', 'CAFÉ', 'coté', 'côte', 'Zed'];
+    const setOf = (originalNames: string[]) => ({
+      members: originalNames.map((originalName, i) => ({ id: i + 1, name: originalName.toLowerCase(), originalName })),
+      truncated: false
+    });
+
+    expect(resolvedAliases(setOf(names))).toEqual({ resolvedAliases: expected });
+    expect(resolvedAliases(setOf([...names].reverse()))).toEqual({ resolvedAliases: expected });
+    expect(resolvedAliases(setOf([...expected].reverse()))).toEqual({ resolvedAliases: expected });
+  });
+
   it('does not reorder the set it reads', () => {
     const set = {
       members: [
