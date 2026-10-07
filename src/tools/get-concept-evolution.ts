@@ -203,18 +203,15 @@ export async function getConceptEvolution(
   );
 
   // Filter by date range
-  let filteredBlocks = uniqueBlocks;
-  if (startDate || endDate) {
-    filteredBlocks = uniqueBlocks.filter(block => {
-      // The page is camelCase (HTTP API) or kebab-case (Datalog); journalDayOf reads both
-      const blockDate = journalDayOf(block.page) || undefined;
-      if (!blockDate) return true; // Keep non-journal blocks
+  const filteredBlocks = uniqueBlocks.filter(block => {
+    // The page is camelCase (HTTP API) or kebab-case (Datalog); journalDayOf reads both
+    const blockDate = journalDayOf(block.page) || undefined;
+    if (blockDate === undefined) return true; // Keep non-journal blocks
 
-      if (startDate && blockDate < startDate) return false;
-      if (endDate && blockDate > endDate) return false;
-      return true;
-    });
-  }
+    if (startDate && blockDate < startDate) return false;
+    if (endDate && blockDate > endDate) return false;
+    return true;
+  });
 
   // Mentions there are before the cap (#61): the summary and the warning count them all
   const total = filteredBlocks.length;
