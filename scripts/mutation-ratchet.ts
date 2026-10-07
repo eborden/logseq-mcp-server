@@ -528,13 +528,31 @@ export function updateBaseline(input: UpdateInput): UpdateResult {
 // ---------------------------------------------------------------------------
 // Markdown
 
+/**
+ * What to say when the plan left baseline entries to the weekly full run (#223): a GitHub `::warning`
+ * annotation (shown on the PR's checks page, so a green check doesn't hide it) and a Markdown line for
+ * the ratchet's own section of the summary. Null when nothing was left out. It never fails the job: a
+ * re-baseline PR is meant to go green. `headSha` is the PR's head commit, shown only when it is a full SHA.
+ */
+export function leftToWeeklyNotice(leftToWeekly: readonly string[], headSha?: string): { annotation: string; line: string } | null {
+  if (leftToWeekly.length === 0) return null;
+  const n = leftToWeekly.length;
+  const commit = headSha !== undefined && /^[0-9a-f]{40}$/.test(headSha) ? headSha : "this PR's head commit";
+  return {
+    annotation: `::warning title=Mutation testing::${n} baseline entries left to mutation-weekly.yml; run it on ${commit} before merging`,
+    line: `**${n} changed baseline entries were not mutated on this PR and are unchecked until the weekly full run covers them.** Run \`mutation-weekly.yml\` on ${commit} before merging (Actions tab, "Run workflow", the SHA in "ref"). The job summary lists the files.`,
+  };
+}
+
 export function renderCheck(
   result: CheckResult,
   compare: CompareResult | null,
-  opts: { expected: string[] | null; labeled: boolean },
+  opts: { expected: string[] | null; labeled: boolean; leftToWeekly?: readonly string[]; headSha?: string },
 ): string {
   const failures = [...result.failures, ...(compare?.failures ?? [])];
   const out: string[] = ['## Mutation ratchet', ''];
+  const notice = leftToWeeklyNotice(opts.leftToWeekly ?? [], opts.headSha);
+  if (notice) out.push(notice.line, '');
   if (failures.length === 0) {
     out.push(
       opts.expected !== null && opts.expected.length === 0
@@ -744,8 +762,10 @@ function runCheck(args: string[]): number {
   if (!Number.isFinite(budget.maxReruns) || !Number.isFinite(budget.budgetMs)) throw new Error('--max-reruns and --rerun-budget-seconds take numbers');
 
   const baseline = parseBaseline(readFileSync(baselinePath, 'utf8'));
-  const plan: { mode?: string; mutate?: string[] } | null = existsSync(planPath) ? JSON.parse(readFileSync(planPath, 'utf8')) : null;
+  const plan: { mode?: string; mutate?: string[]; leftToWeekly?: string[] } | null = existsSync(planPath) ? JSON.parse(readFileSync(planPath, 'utf8')) : null;
   const expected = plan?.mode === 'targeted' ? (plan.mutate ?? []) : plan?.mode === 'empty' ? [] : null;
+  const leftToWeekly = plan?.leftToWeekly ?? [];
+  const headSha = process.env.PR_HEAD_SHA;
 
   // The base comparison is cheap, so it runs first and its failures are in the log before any re-run starts.
   let compare: CompareResult | null = null;
@@ -776,14 +796,17 @@ function runCheck(args: string[]): number {
       rerun: has(args, 'no-rerun') ? undefined : rerunFile,
       rerunBudget: budget,
       beforeRerun: failures => {
-        console.log(renderCheck({ failures, raisable: [], reruns: [], checked: 0 }, compare, { expected, labeled }));
+        console.log(renderCheck({ failures, raisable: [], reruns: [], checked: 0 }, compare, { expected, labeled, leftToWeekly, headSha }));
         console.log(`Re-running the files below their baseline (at most ${budget.maxReruns}, ${Math.round(budget.budgetMs / 1000)} s in all)...`);
       },
     });
   }
 
-  const markdown = renderCheck(result, compare, { expected, labeled });
+  const markdown = renderCheck(result, compare, { expected, labeled, leftToWeekly, headSha });
   console.log(markdown);
+  // An annotation on the PR's checks page, since a green check hides the summary. It doesn't fail the job.
+  const notice = leftToWeeklyNotice(leftToWeekly, headSha);
+  if (notice) console.log(notice.annotation);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
   return result.failures.length + (compare?.failures.length ?? 0) > 0 ? 1 : 0;
 }

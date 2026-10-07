@@ -13,12 +13,14 @@ import {
   fileStats,
   formatBaseline,
   isBareReason,
+  leftToWeeklyNotice,
   parseBaseline,
   renderCheck,
   runInProcessGroup,
   scoreOf,
   updateBaseline,
   type Baseline,
+  type CheckResult,
   type FileStats,
   type MeasuredScope,
   type ProcessGroupIo,
@@ -859,5 +861,43 @@ describe('runInProcessGroup', () => {
     const gone = Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
     const { io } = fakeIo({ pid: 4242, status: 1 }, gone);
     expect(runInProcessGroup('npx', [], 1000, io)).toBe(false);
+  });
+});
+
+// #223: a capped PR goes green, so the unchecked files have to show outside the job summary too.
+describe('leftToWeeklyNotice', () => {
+  const sha = 'a'.repeat(40);
+  const clean: CheckResult = { failures: [], raisable: [], reruns: [], checked: 0 };
+
+  it('is null when nothing was left to the weekly run', () => {
+    expect(leftToWeeklyNotice([], sha)).toBeNull();
+    expect(renderCheck(clean, null, { expected: [], labeled: false, leftToWeekly: [] })).not.toContain('weekly');
+  });
+
+  it('makes a warning annotation naming the count, the weekly workflow and the head commit', () => {
+    const notice = leftToWeeklyNotice(['src/a.ts', 'src/b.ts', 'src/c.ts'], sha);
+    expect(notice?.annotation).toBe(`::warning title=Mutation testing::3 baseline entries left to mutation-weekly.yml; run it on ${sha} before merging`);
+    expect(notice?.annotation).not.toContain('\n');
+  });
+
+  it("says 'this PR's head commit' when the SHA is missing or is not a full hex SHA, so nothing odd reaches the annotation", () => {
+    for (const bad of [undefined, '', 'abc123', 'x'.repeat(40), `${sha}\n::error::boom`]) {
+      const notice = leftToWeeklyNotice(['src/a.ts'], bad);
+      expect(notice?.annotation).toBe("::warning title=Mutation testing::1 baseline entries left to mutation-weekly.yml; run it on this PR's head commit before merging");
+    }
+  });
+
+  it("adds a line to the ratchet's own section, whether it passes or not, and names no file", () => {
+    const passing = renderCheck(clean, null, { expected: [], labeled: false, leftToWeekly: ['src/a.ts', 'src/b.ts'], headSha: sha });
+    expect(passing).toContain('2 changed baseline entries were not mutated on this PR');
+    expect(passing).toContain(`Run \`mutation-weekly.yml\` on ${sha} before merging`);
+    expect(passing).not.toContain('src/a.ts');
+    const failing = renderCheck(
+      { ...clean, failures: [{ kind: 'below-baseline', file: 'src/z.ts', message: 'src/z.ts is low' }] },
+      null,
+      { expected: [], labeled: false, leftToWeekly: ['src/a.ts'] },
+    );
+    expect(failing).toContain('Fail: 1 problem(s)');
+    expect(failing).toContain('1 changed baseline entries were not mutated');
   });
 });
