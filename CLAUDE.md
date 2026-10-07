@@ -161,7 +161,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 Done by whoever merges:
 - CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` and `vitest run src` on Node 22 and 24 on every PR and push to `main`. It must be green. `engines.node` is `>=22.12.0`, the floor of the dev toolchain (vite 7). The integration tests and measure script stay local.
 - The `Mutation testing` job (ADR-0026) is green. The `mutation-baseline-change` label is on the PR only when it lowers a score in `mutation-baseline.json` or edits the `mutate` globs or the exclusion list in `vitest.mutation.config.ts`, and that needs the maintainer's OK first.
-- When the `Mutation testing` job reports files left to the weekly run (a `::warning`, or a failure for a changed source: ADR-0028), run `mutation-weekly.yml` on the PR's head commit (full SHA in "ref") before merging, and re-run the mutation job if it failed.
+- Run `mutation-weekly.yml` on the PR's head commit (full SHA in "ref") before merging only when the `Mutation testing` job fails because a changed source was left out of its run (ADR-0028), then re-run the job. A `::warning` for a test import or a baseline entry left to the weekly run needs no run: the scheduled weekly run covers it (ADR-0029).
 - Privacy grep of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
 - `npx tsc --noEmit`
 - `npx vitest run src`
