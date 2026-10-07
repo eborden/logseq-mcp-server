@@ -105,10 +105,24 @@ export interface PlanInput {
   cacheUsable: boolean;
   /** Why the cache can't be used, when it can't. Defaults to "no usable incremental cache". */
   cacheNote?: string | null;
-  /** Paths changed since the commit the cache (or the PR base) is from, deleted ones included. */
+  /**
+   * Paths changed since the commit the cache (or the PR base) is from, deleted ones included. They decide
+   * whether the cache can be trusted (a blind-spot input among them), and nothing else when `prChanged` is given.
+   */
   changed: string[];
   /** Paths among `changed` that no longer exist at HEAD. */
   deleted: string[];
+  /**
+   * Paths the PR itself changed, against its base (#277, ADR-0029). The files to mutate come from these, not from `changed`:
+   * the cache is often a few commits behind `main`, and what `main` changed since was checked on its own PR.
+   * Defaults to `changed`, which is the same list when the cache's commit is the PR base.
+   */
+  prChanged?: string[];
+  /**
+   * Paths among `prChanged` that did not exist at the PR base. A new test file can only kill more mutants, never
+   * fewer, so the files it imports are not mutated for it (#277, ADR-0029). A baseline entry it raises still is.
+   */
+  added?: string[];
   scope: MutateScope;
   /** Source text of a changed test file, at HEAD or (for a deleted one) at the old commit. */
   readTest: (path: string) => string | null;
@@ -198,6 +212,8 @@ export interface Plan {
   fromTests: string[];
   /** How many source files had a changed baseline entry, before the budget. */
   baselineChanged: number;
+  /** Test files the PR added. Their imports did not pick files for mutation (#277, ADR-0029). */
+  addedTests: string[];
   /**
    * Files due for mutation that did not fit MUTANT_BUDGET, in priority order. The weekly full run checks
    * them. Empty when everything fit, and on the incremental path.
@@ -223,6 +239,7 @@ export function noPlan(mode: PlanMode, reasons: string[]): Plan {
     fromBaseline: [],
     fromTests: [],
     baselineChanged: 0,
+    addedTests: [],
     leftToWeekly: [],
     leftToWeeklyByGroup: emptyGroups(),
     estimatedMutants: 0,
@@ -241,7 +258,11 @@ export function noPlan(mode: PlanMode, reasons: string[]): Plan {
  */
 export function plan(input: PlanInput): Plan {
   const { scope, changed } = input;
-  const blind = changed.filter(p => isBlindSpot(p, scope));
+  const own = input.prChanged ?? changed;
+  const added = new Set(input.added ?? []);
+  // The cache's validity depends on everything since its commit, and the PR's own paths too (the two lists
+  // overlap, or the PR base is not on the cache's history).
+  const blind = [...new Set([...changed, ...own])].filter(p => isBlindSpot(p, scope));
   const reasons: string[] = [];
   if (!input.cacheUsable) reasons.push(input.cacheNote ?? 'no usable incremental cache');
   if (blind.length > 0) reasons.push(`changed inputs that incremental mode can't see: ${blind.join(', ')}`);
@@ -249,11 +270,12 @@ export function plan(input: PlanInput): Plan {
   if (reasons.length === 0) return noPlan('incremental', reasons);
 
   const alive = (p: string) => !input.deleted.includes(p) && input.exists(p);
-  const changedSources = changed.filter(p => inMutateScope(p, scope) && alive(p)).sort();
+  const changedSources = own.filter(p => inMutateScope(p, scope) && alive(p)).sort();
   const baselineEntries = [...new Set(input.baselineChanged.filter(p => inMutateScope(p, scope) && alive(p)))].sort();
+  const addedTests = own.filter(p => isUnitTest(p) && added.has(p) && alive(p)).sort();
   const testImports = [
     ...new Set(
-      changed.filter(isUnitTest).flatMap(p => {
+      own.filter(p => isUnitTest(p) && !added.has(p)).flatMap(p => {
         const source = input.readTest(p);
         return source === null ? [] : importedSources(p, source, scope, input.exists);
       }),
@@ -298,6 +320,7 @@ export function plan(input: PlanInput): Plan {
     fromTests: taken.fromTests,
     fromBaseline: taken.fromBaseline,
     baselineChanged: baselineEntries.length,
+    addedTests,
     leftToWeekly: [...left.changedSources, ...left.fromTests, ...left.fromBaseline],
     leftToWeeklyByGroup: left,
     estimatedMutants: used,
@@ -351,7 +374,12 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
     if (plan.mode === 'incremental') {
       out.push('Mode: incremental run of the whole mutated scope, reusing the cached results from `main`.', '');
     } else {
-      out.push(`Mode: cache-miss path. ${plan.reasons.join('; ')}.`, '');
+      out.push(
+        `Mode: cache-miss path. ${plan.reasons.join('; ')}.`,
+        '',
+        "The files are the PR's own changes against its base, not what `main` changed since the cached results were saved.",
+        '',
+      );
       if (plan.mode === 'empty') {
         out.push(
           plan.leftToWeekly.length > 0
@@ -368,6 +396,12 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
           '',
         );
       }
+      if (plan.addedTests.length > 0) {
+        out.push(
+          `${plan.addedTests.length} test file(s) are new in this PR, so the files they import were not mutated for them: a new test can only kill more mutants, never fewer. A baseline entry they raise is still mutated. Mutating what a changed test imports applies to a test the PR edited or deleted.`,
+          '',
+        );
+      }
       if (plan.estimatedByFallback.length > 0) {
         out.push(
           `${plan.estimatedByFallback.length} file(s) had no mutant count in the cached results (new, or no cache) and were each sized at ${FALLBACK_MUTANTS} mutants: ${plan.estimatedByFallback.map(f => `\`${f}\``).join(', ')}.`,
@@ -380,8 +414,12 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
           ['Imported by changed tests', plan.leftToWeeklyByGroup.fromTests],
           ['Changed baseline entries', plan.leftToWeeklyByGroup.fromBaseline],
         ];
+        const next =
+          plan.leftToWeeklyByGroup.changedSources.length > 0
+            ? `Run it by hand on this PR's head commit (Actions tab, "Run workflow", put the full commit SHA in "ref") before merging. A changed source on this list fails the ratchet until that run succeeds: re-run this job after it. These files are unchecked until then:`
+            : `No changed source is on this list, so no run is needed before merging: the scheduled weekly run checks these files. They are unchecked until then:`;
         out.push(
-          `**The mutants these ${plan.leftToWeekly.length} file(s) would add pass the budget of ${MUTANT_BUDGET} (estimated ${plan.estimatedMutants} used), so this run did not mutate them.** The job has 10 minutes, so it takes the changed sources first, then the files the changed tests import, then the changed baseline entries, and skips a file that doesn't fit, keeping on with the smaller ones after it. A change that wide (a re-baseline after a Stryker upgrade, or the first baseline) is checked by the weekly full run (\`mutation-weekly.yml\`), not by this job. Run it by hand on this PR's head commit (Actions tab, "Run workflow", put the full commit SHA in "ref") before merging. A changed source on this list fails the ratchet until that run succeeds: re-run this job after it. These files are unchecked until then:`,
+          `**The mutants these ${plan.leftToWeekly.length} file(s) would add pass the budget of ${MUTANT_BUDGET} (estimated ${plan.estimatedMutants} used), so this run did not mutate them.** The job has 10 minutes, so it takes the changed sources first, then the files the changed tests import, then the changed baseline entries, and skips a file that doesn't fit, keeping on with the smaller ones after it. A change that wide (a re-baseline after a Stryker upgrade, or the first baseline) is checked by the weekly full run (\`mutation-weekly.yml\`), not by this job. ${next}`,
           '',
         );
         for (const [name, files] of groups) {
@@ -476,18 +514,26 @@ export function planFromRepo(
     return noPlan('empty', [base.note ?? 'no commit to diff against was found']);
   }
   // --no-renames: a rename lists the old path too, so a moved blind-spot file is still seen.
-  const changed = io.git('diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);
-  const deleted = changed.filter(p => !io.exists(p));
+  const diffNames = (from: string, ...extra: string[]) =>
+    io.git('diff', '--name-only', '--no-renames', ...extra, from, 'HEAD').split('\n').filter(Boolean);
+  const changed = diffNames(since);
+  // What the PR itself changed, against its base. The restored cache can be many commits behind main, and what
+  // main changed since was checked on its own PR, so only the cache's validity reads the long diff above and
+  // the files to mutate come from this one (#277, ADR-0029). With no usable PR base, or the same commit, it is `changed`.
+  const ownBase = opts.fallbackSince !== '' && isCommit(opts.fallbackSince) ? opts.fallbackSince : since;
+  const prChanged = ownBase === since ? changed : diffNames(ownBase);
+  const added = diffNames(ownBase, '--diff-filter=A');
+  const deleted = [...new Set([...changed, ...prChanged])].filter(p => !io.exists(p));
   const readTest = (p: string): string | null => {
     if (io.exists(p)) return io.read(p);
     try {
-      return io.git('show', `${since}:${p}`);
+      return io.git('show', `${ownBase}:${p}`);
     } catch {
       return null;
     }
   };
   let baselineChanged: string[] = [];
-  if (changed.includes('mutation-baseline.json')) {
+  if (prChanged.includes('mutation-baseline.json')) {
     const parse = (text: string | null): unknown => {
       try {
         return text === null ? null : JSON.parse(text);
@@ -498,10 +544,9 @@ export function planFromRepo(
     // The entries this PR changed, so against the PR base. Against the cache's commit every entry that
     // main changed (or all of them, when the cache predates the baseline) would be mutated again, and a
     // cache-miss run would turn into a cold full run (#205).
-    const baselineRef = opts.fallbackSince !== '' && isCommit(opts.fallbackSince) ? opts.fallbackSince : since;
     let before: string | null = null;
     try {
-      before = io.git('show', `${baselineRef}:mutation-baseline.json`);
+      before = io.git('show', `${ownBase}:mutation-baseline.json`);
     } catch {
       /* the file is new */
     }
@@ -519,7 +564,7 @@ export function planFromRepo(
       return {};
     }
   };
-  return plan({ cacheUsable: base.cacheUsable, cacheNote: base.note, changed, deleted, scope, readTest, exists: io.exists, baselineChanged, mutantCounts });
+  return plan({ cacheUsable: base.cacheUsable, cacheNote: base.note, changed, prChanged, added, deleted, scope, readTest, exists: io.exists, baselineChanged, mutantCounts });
 }
 
 function runPlan(args: string[]): void {
