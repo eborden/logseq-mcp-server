@@ -90,6 +90,126 @@ describe('parseArgs', () => {
     expect(() => parseArgs(union, { value: ['x'] })).toThrow(/'value': \["x"\].*a string, a number or a boolean, not an array/s);
     expect(() => parseArgs(union, { value: NaN })).toThrow(/'value': NaN.*a string, a number or a boolean, not NaN/s);
   });
+
+  describe('the error text, in full', () => {
+    function messageFor<S extends z.ZodObject>(s: S, args: Record<string, unknown>): string {
+      try {
+        parseArgs(s, args);
+      } catch (error) {
+        expect(error).toBeInstanceOf(InvalidParameterError);
+        return (error as InvalidParameterError).message;
+      }
+      throw new Error('expected parseArgs to throw');
+    }
+
+    it('names a failure of the whole arguments object "(arguments)" and shows the arguments', () => {
+      // no field is at fault, so the issue has an empty path: the value shown is every argument, not "missing"
+      const sameValues = z.object({ first: z.string(), second: z.string() }).refine(v => v.first !== v.second, 'the two must differ');
+
+      expect(messageFor(sameValues, { first: 'x', second: 'x' })).toBe(
+        'Invalid parameter \'(arguments)\': {"first":"x","second":"x"}\n\nExpected: the two must differ'
+      );
+    });
+
+    it('names a nested field by its path, and shows the top-level value it sits in', () => {
+      const nested = z.object({ filter: z.object({ name: z.string() }) });
+
+      expect(messageFor(nested, { filter: {} })).toBe(
+        'Invalid parameter \'filter.name\': {}\n\nExpected: a string (required)\nExample: filter.name: "..."'
+      );
+    });
+
+    it('names an array element by its index', () => {
+      const list = z.object({ names: z.array(z.string()) });
+
+      expect(messageFor(list, { names: ['a', 2] })).toBe(
+        'Invalid parameter \'names.1\': ["a",2]\n\nExpected: a string, not a number\nExample: names.1: "..."'
+      );
+    });
+
+    it('says what a value is: an array, an object, a function or a number', () => {
+      expect(messageFor(z.object({ v: z.string() }), { v: [] })).toContain('Expected: a string, not an array\n');
+      expect(messageFor(z.object({ v: z.number() }), { v: { a: 1 } })).toContain('Expected: a number, not an object\n');
+      expect(messageFor(z.object({ v: z.number() }), { v: () => 1 })).toContain('Expected: a number, not a function\n');
+      expect(messageFor(z.object({ v: z.boolean() }), { v: 1 })).toContain('Expected: true or false, not a number\n');
+    });
+
+    it('shows Infinity as Infinity, since JSON would show null', () => {
+      expect(messageFor(z.object({ v: z.number() }), { v: Infinity })).toBe(
+        "Invalid parameter 'v': Infinity\n\nExpected: a number, not Infinity\nExample: v: 5"
+      );
+    });
+
+    it('says an integer is expected, with an integer for the example', () => {
+      expect(messageFor(z.object({ v: z.int() }), { v: 1.5 })).toBe(
+        "Invalid parameter 'v': 1.5\n\nExpected: an integer, not a number\nExample: v: 5"
+      );
+    });
+
+    it('gives no Example: line for a type with no sample value', () => {
+      expect(messageFor(z.object({ v: z.array(z.string()) }), { v: 5 })).toBe(
+        "Invalid parameter 'v': 5\n\nExpected: an array, not a number"
+      );
+      expect(messageFor(z.object({ v: z.object({ a: z.string() }) }), { v: 5 })).toBe(
+        "Invalid parameter 'v': 5\n\nExpected: an object, not a number"
+      );
+    });
+
+    it('lists a single allowed value, and gives it as the example', () => {
+      expect(messageFor(z.object({ v: z.literal(1) }), { v: 2 })).toBe(
+        "Invalid parameter 'v': 2\n\nExpected: one of 1\nExample: v: 1"
+      );
+    });
+
+    it('gives no Example: line when there is no allowed value to show', () => {
+      expect(messageFor(z.object({ v: z.enum([] as never) }), { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: one of ");
+    });
+
+    it('keeps the zod message for an issue of another kind, and gives it no Example:', () => {
+      expect(messageFor(z.object({ v: z.string().min(3) }), { v: 'a' })).toBe(
+        "Invalid parameter 'v': \"a\"\n\nExpected: Too small: expected string to have >=3 characters"
+      );
+    });
+
+    describe('a union', () => {
+      it('keeps the zod message when an alternative is not a plain type, and takes the example from the first one', () => {
+        const stringOrList = z.object({ v: z.union([z.string(), z.array(z.string())]) });
+
+        expect(messageFor(stringOrList, { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: Invalid input\nExample: v: \"...\"");
+        expect(messageFor(stringOrList, {})).toBe("Invalid parameter 'v': missing\n\nExpected: Invalid input\nExample: v: \"...\"");
+      });
+
+      it('gives no Example: line when the first alternative has no sample value', () => {
+        const listOrString = z.object({ v: z.union([z.array(z.string()), z.string()]) });
+
+        expect(messageFor(listOrString, { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: Invalid input");
+      });
+
+      it('keeps the zod message when an alternative fails on more than one field', () => {
+        // the object alternative reports both missing fields, the first of them "expected string": it must not read as a plain string
+        const stringOrPair = z.object({ v: z.union([z.string(), z.object({ a: z.string(), b: z.string() })]) });
+
+        expect(messageFor(stringOrPair, { v: {} })).toBe("Invalid parameter 'v': {}\n\nExpected: Invalid input\nExample: v: \"...\"");
+      });
+
+      it('keeps the zod message for a union of one alternative', () => {
+        expect(messageFor(z.object({ v: z.union([z.string()]) }), { v: 5 })).toBe(
+          "Invalid parameter 'v': 5\n\nExpected: Invalid input\nExample: v: \"...\""
+        );
+      });
+
+      it('keeps the zod message, with no Example:, for a union of no alternatives', () => {
+        expect(messageFor(z.object({ v: z.union([]) }), { v: 5 })).toBe("Invalid parameter 'v': 5\n\nExpected: Invalid input");
+        expect(messageFor(z.object({ v: z.union([]) }), {})).toBe("Invalid parameter 'v': missing\n\nExpected: Invalid input");
+      });
+
+      it('lists two alternatives with "or" and no comma', () => {
+        expect(messageFor(z.object({ v: z.union([z.string(), z.number()]) }), { v: ['x'] })).toBe(
+          "Invalid parameter 'v': [\"x\"]\n\nExpected: a string or a number, not an array\nExample: v: \"...\""
+        );
+      });
+    });
+  });
 });
 
 describe('toInputSchema', () => {
@@ -104,5 +224,24 @@ describe('toInputSchema', () => {
       },
       required: ['page_name'],
     });
+  });
+
+  it('refuses a schema that rejects unknown fields, since validating clients would then reject the aliases', () => {
+    expect(() => toInputSchema(z.strictObject({ page_name: z.string() }))).toThrow(
+      'toInputSchema needs a zod object schema that ignores unknown fields'
+    );
+  });
+
+  it('refuses a schema that is not a plain object schema', () => {
+    // .meta() overrides keys of the generated JSON Schema, which is the way to make a zod object come out as another type
+    const notAnObject = z.object({ page_name: z.string() }).meta({ type: 'array' } as never);
+    const noProperties = z.object({ page_name: z.string() }).meta({ properties: undefined } as never);
+
+    expect(() => toInputSchema(notAnObject)).toThrow('toInputSchema needs a zod object schema that ignores unknown fields');
+    expect(() => toInputSchema(noProperties)).toThrow('toInputSchema needs a zod object schema that ignores unknown fields');
+  });
+
+  it('accepts a schema with no fields', () => {
+    expect(toInputSchema(z.object({}))).toEqual({ type: 'object', properties: {} });
   });
 });
