@@ -165,7 +165,8 @@ export type FailureKind =
   | 'file-deleted'
   | 'baseline-lowered'
   | 'new-entry-under-floor'
-  | 'scope-changed';
+  | 'scope-changed'
+  | 'changed-source-unchecked';
 
 export interface Failure {
   kind: FailureKind;
@@ -526,6 +527,79 @@ export function updateBaseline(input: UpdateInput): UpdateResult {
 }
 
 // ---------------------------------------------------------------------------
+// Changed sources left to the weekly run (ADR-0028, #239)
+
+/** The fields of a `mutation-weekly.yml` run, as the Actions API lists it, that the gate reads. */
+export interface WeeklyRun {
+  /** The commit the workflow file ran from: the branch tip it was started on, not the `ref` input. */
+  head_sha: string;
+  /** The run's title. `run-name` in mutation-weekly.yml puts the `ref` input in it, so it holds the SHA checked out. */
+  display_title?: string | null;
+  conclusion: string | null;
+}
+
+/**
+ * True when a successful `mutation-weekly.yml` run covers the commit. A run started from a branch with
+ * an empty `ref` checks out its own `head_sha`. A run started with a SHA in `ref` has the branch it was
+ * started from as `head_sha`, so that SHA is matched in the title (`run-name` in the workflow). The weekly
+ * run fails when a file is below its baseline, so `success` means every file passed.
+ */
+export function weeklyRunCovers(runs: readonly WeeklyRun[], sha: string): boolean {
+  return runs.some(r => r.conclusion === 'success' && (r.head_sha === sha || (r.display_title ?? '').includes(sha)));
+}
+
+/**
+ * The failure for changed source files the plan left out because they passed the mutant budget, or null.
+ * A changed source that no mutation run checked on its own PR would pass unchecked, so this fails the
+ * ratchet unless a successful weekly run exists for the PR's head commit. After someone runs it, re-running
+ * the job turns it green. Files imported by changed tests and baseline entries are not gated (they stay
+ * the `::warning`). It makes no call when no changed source was left out, and none outside a PR (no
+ * `headSha`: a push to main has nothing to wait for). A lookup that fails is a failure too, since an
+ * unchecked file must not pass for want of an answer. `listRuns` is the one network call, passed in.
+ */
+export async function changedSourceGate(opts: {
+  changedSources: readonly string[];
+  headSha: string | undefined;
+  listRuns: () => Promise<readonly WeeklyRun[]>;
+}): Promise<Failure | null> {
+  const { changedSources, headSha } = opts;
+  if (changedSources.length === 0 || headSha === undefined || headSha === '') return null;
+  const files = changedSources.map(f => `\`${f}\``).join(', ');
+  const lead = `${changedSources.length} changed source file(s) were not mutated on this PR, since they pass the mutant budget: ${files}.`;
+  const fix = (sha: string) => `Run mutation-weekly.yml on ${sha} (Actions tab, "Run workflow", the full SHA in "ref"), then re-run this job.`;
+  if (!/^[0-9a-f]{40}$/.test(headSha)) {
+    return { kind: 'changed-source-unchecked', file: null, message: `${lead} The PR's head commit is not a full SHA, so a weekly run for it can't be looked up. ${fix("this PR's head commit")}` };
+  }
+  let runs: readonly WeeklyRun[];
+  try {
+    runs = await opts.listRuns();
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    return { kind: 'changed-source-unchecked', file: null, message: `${lead} Looking up the mutation-weekly.yml runs failed (${why}), so this can't be told from a missing run. ${fix(headSha)}` };
+  }
+  if (weeklyRunCovers(runs, headSha)) return null;
+  return { kind: 'changed-source-unchecked', file: null, message: `${lead} No successful mutation-weekly.yml run exists for ${headSha}. ${fix(headSha)}` };
+}
+
+/**
+ * The successful runs of `mutation-weekly.yml`, newest first, from the Actions API (one page of 100, which
+ * holds many weeks of runs). Needs `actions: read` on GITHUB_TOKEN. The token is only sent as a header and
+ * is never in a message.
+ */
+export async function listWeeklyRuns(env: Record<string, string | undefined>): Promise<WeeklyRun[]> {
+  const repo = env.GITHUB_REPOSITORY;
+  const token = env.GITHUB_TOKEN;
+  if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are needed');
+  const api = env.GITHUB_API_URL || 'https://api.github.com';
+  const response = await fetch(`${api}/repos/${repo}/actions/workflows/mutation-weekly.yml/runs?status=success&per_page=100`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
+  });
+  if (!response.ok) throw new Error(`the GitHub API answered ${response.status}; the job needs \`actions: read\``);
+  const body = (await response.json()) as { workflow_runs?: unknown };
+  return Array.isArray(body.workflow_runs) ? (body.workflow_runs as WeeklyRun[]) : [];
+}
+
+// ---------------------------------------------------------------------------
 // Markdown
 
 /** How many files the plan left out, per group (the `leftToWeeklyByGroup` of scripts/mutation-ci.ts). */
@@ -539,7 +613,8 @@ export interface LeftGroups {
  * What to say when the plan left files to the weekly full run because they passed the mutant budget
  * (#223, #239): a GitHub `::warning` annotation (shown on the PR's checks page, so a green check doesn't
  * hide it) and a Markdown line for the ratchet's own section of the summary. Null when nothing was left
- * out. It never fails the job: a PR that changes a lot is meant to go green. `groups` names how many of the
+ * out. It never fails the job: `changedSourceGate` does that for the changed sources, and a test import or a
+ * baseline entry left out is only this warning, so a re-baseline goes green. `groups` names how many of the
  * files are changed sources, files imported by changed tests and baseline entries. `headSha` is the PR's
  * head commit, shown only when it is a full SHA.
  */
@@ -563,7 +638,7 @@ export function leftToWeeklyNotice(
   const detail = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   return {
     annotation: `::warning title=Mutation testing::${n} file(s)${detail} over the mutant budget left to mutation-weekly.yml; run it on ${commit} before merging`,
-    line: `**${n} file(s)${detail} were not mutated on this PR, over the mutant budget, and are unchecked until the weekly full run covers them.** Run \`mutation-weekly.yml\` on ${commit} before merging (Actions tab, "Run workflow", the SHA in "ref"). The job summary lists the files by group.`,
+    line: `**${n} file(s)${detail} were not mutated on this PR, over the mutant budget, and are unchecked until the weekly full run covers them.** Run \`mutation-weekly.yml\` on ${commit} before merging (Actions tab, "Run workflow", the full SHA in "ref"). The job summary lists the files by group.`,
   };
 }
 
@@ -772,7 +847,7 @@ function rerunFile(file: string, timeoutMs: number): FileStats | null {
   }
 }
 
-function runCheck(args: string[]): number {
+async function runCheck(args: string[]): Promise<number> {
   const reportPath = flag(args, 'report') ?? 'reports/mutation/mutation.json';
   const baselinePath = flag(args, 'baseline') ?? 'mutation-baseline.json';
   const planPath = flag(args, 'plan') ?? 'reports/mutation/plan.json';
@@ -790,6 +865,12 @@ function runCheck(args: string[]): number {
   const leftToWeekly = plan?.leftToWeekly ?? [];
   const leftGroups = plan?.leftToWeeklyByGroup;
   const headSha = process.env.PR_HEAD_SHA;
+  // A changed source the budget left out fails unless a weekly run covers the head commit (ADR-0028).
+  const gateFailure = await changedSourceGate({
+    changedSources: leftGroups?.changedSources ?? [],
+    headSha,
+    listRuns: () => listWeeklyRuns(process.env),
+  });
 
   // The base comparison is cheap, so it runs first and its failures are in the log before any re-run starts.
   let compare: CompareResult | null = null;
@@ -826,6 +907,7 @@ function runCheck(args: string[]): number {
     });
   }
 
+  if (gateFailure) result.failures.push(gateFailure);
   const markdown = renderCheck(result, compare, { expected, labeled, leftToWeekly, leftGroups, headSha });
   console.log(markdown);
   // An annotation on the PR's checks page, since a green check hides the summary. It doesn't fail the job.
@@ -853,10 +935,11 @@ function runUpdate(args: string[]): number {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2).filter(a => a !== 'check');
-  try {
-    process.exit(has(args, 'update') ? runUpdate(args) : runCheck(args));
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(2);
-  }
+  (async () => (has(args, 'update') ? runUpdate(args) : await runCheck(args)))().then(
+    code => process.exit(code),
+    (error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(2);
+    },
+  );
 }

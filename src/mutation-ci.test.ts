@@ -866,6 +866,30 @@ describe('mutation workflows', () => {
     expect(all[drop].indexOf('rm -f')).toBeLessThan(all[drop].indexOf('npx stryker run'));
   });
 
+  // ADR-0028, #239: a changed source left out by the budget fails the ratchet until a weekly run succeeded on the
+  // head commit. The look-up reads the Actions API, so the job needs actions: read and nothing more, and the
+  // weekly run has to leave the commit it checked out where the look-up can find it.
+  it('the mutation job reads Actions runs (actions: read) with the token given to the ratchet step only, and no more', () => {
+    const jobHead = mutationJob.slice(0, mutationJob.indexOf('\n    steps:'));
+    expect(jobHead).toMatch(/\n    permissions:\n      contents: read\n      actions: read$/);
+    expect(jobHead.match(/^ {6}\w[\w-]*: \w+$/gm)).toEqual(['      contents: read', '      actions: read']);
+    const all = steps(mutationJob);
+    const withToken = all.filter(s => /^ +GITHUB_TOKEN:/m.test(s));
+    expect(withToken).toHaveLength(1);
+    expect(withToken[0]).toContain('scripts/mutation-ratchet.ts');
+    expect(withToken[0]).toMatch(/GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
+    // The other jobs keep the workflow's contents: read.
+    expect(ci.slice(0, ci.indexOf('\njobs:'))).toMatch(/\npermissions:\n  contents: read\n/);
+    expect(ci.slice(ci.indexOf('\njobs:')).match(/\n {4}permissions:/g)).toHaveLength(1);
+  });
+
+  it('the weekly run puts its "ref" input in its title, which is where the ratchet finds a run for a SHA', () => {
+    expect(weekly).toMatch(/\nrun-name: .*\$\{\{ inputs\.ref \}\}/);
+    expect(weekly).toMatch(/\n {6}ref:\n/);
+    // The checkout takes that same input, so the title names the commit that was mutated.
+    expect(weekly).toMatch(/ref: \$\{\{ inputs\.ref \}\}/);
+  });
+
   it('a label change re-runs the pull request checks, so the label can excuse a lowered score', () => {
     expect(ci).toMatch(/pull_request:\n(?:\s+#.*\n)*\s+types: \[[^\]]*\blabeled\b[^\]]*\bunlabeled\b[^\]]*\]/);
   });

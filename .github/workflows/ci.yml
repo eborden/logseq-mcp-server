@@ -69,16 +69,23 @@ jobs:
   # snapshots, fixtures, the lockfile or the configs. When a PR changes one (or there is no
   # cache), scripts/mutation-ci.ts takes the cache-miss path: it mutates only the changed files,
   # the files the changed tests import and the files whose baseline entry changed, in that order,
-  # and never starts a cold full run. It stops when the estimated mutants would pass MUTANT_BUDGET
-  # (see scripts/mutation-ci.ts, ADR-0028), sizing each file from the restored incremental file
-  # and leaving the rest to the weekly run, named in the summary: run mutation-weekly.yml by hand
-  # on the PR's head commit. The plan step reads the restored file, so it runs before the
-  # step that drops it. After such a change lands on main the cache stays old until the weekly
-  # run, which resets it (run it by hand to do it sooner).
+  # and never starts a cold full run. It takes files first-fit while the estimated mutants fit
+  # MUTANT_BUDGET (see scripts/mutation-ci.ts, ADR-0028), sizing each file from the restored
+  # incremental file, and leaves the rest to the weekly run, named in the summary: run
+  # mutation-weekly.yml by hand on the PR's head commit. A changed source left out fails the
+  # ratchet until a run of it on that commit has succeeded, and a re-run of this job then passes.
+  # The plan step reads the restored file, so it runs before the step that drops it. After such a
+  # change lands on main the cache stays old until the weekly run, which resets it (run it by hand
+  # to do it sooner).
   mutation:
     name: Mutation testing
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # actions: read, for the ratchet's look-up of a successful mutation-weekly.yml run on the PR's
+    # head commit (ADR-0028). Setting permissions here replaces the workflow's, so contents is repeated.
+    permissions:
+      contents: read
+      actions: read
     steps:
       # Full history: the plan diffs against the commit the restored cache was saved from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,10 +180,12 @@ jobs:
       # The gate (ADR-0026). It compares the report with mutation-baseline.json and, on a PR, the
       # baseline and the mutated scope with the copy at BASE_SHA, the same commit the plan used. A file
       # below its baseline is re-run once from a fresh sandbox before it fails. Labels and the base go
-      # in through env:.
+      # in through env:. GITHUB_TOKEN (actions: read) is for the look-up of a weekly run on the head
+      # commit, which a changed source left out of this run needs.
       - name: Ratchet
         env:
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           BASE_REF: ${{ github.base_ref }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/mutation-ratchet.ts check ${BASE_REF:+--base "$BASE_SHA"}
