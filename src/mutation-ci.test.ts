@@ -1200,6 +1200,66 @@ describe('mutation workflows', () => {
     expect(last).toMatch(/exit 1/);
   });
 
+  // #279, ADR-0030: the nightly check runs once a day, reads with actions: read, and only its dispatch job can
+  // write, with actions: write alone, to start mutation-weekly.yml on main and nothing else.
+  describe('the nightly cache check', () => {
+    const nightly = read('mutation-nightly.yml');
+    const job = (name: string) => {
+      const start = nightly.indexOf(`\n  ${name}:\n`);
+      const next = nightly.slice(start + 1).search(/\n {2}\w[\w-]*:\n/);
+      return next < 0 ? nightly.slice(start) : nightly.slice(start, start + 1 + next);
+    };
+    const check = job('check');
+    const dispatch = job('dispatch');
+    const permissionsOf = (text: string) => {
+      const m = /\n {4}permissions:\n((?: {6}.*\n)+)/.exec(text);
+      return m ? m[1].trim().split('\n').map(l => l.trim()) : null;
+    };
+
+    it('runs once a day on a schedule, after the weekly run starts, and by hand', () => {
+      expect(nightly).toMatch(/\non:\n  schedule:\n    - cron: '47 5 \* \* \*'\n  workflow_dispatch:\n\n/);
+      // One run a day plus RECENT_RUN_HOURS (20) under 24: a stale cache is retried the next night, never twice in one.
+      expect(RECENT_RUN_HOURS).toBeLessThan(24);
+      // Monday's scheduled weekly run starts before the check, so the check sees it and holds back.
+      const weeklyCron = /cron: '(\d+) (\d+) \* \* 1'/.exec(weekly);
+      expect(weeklyCron).not.toBeNull();
+      expect(Number(weeklyCron![2]) * 60 + Number(weeklyCron![1])).toBeLessThan(5 * 60 + 47);
+      expect(nightly).toMatch(/\nconcurrency:\n  group: mutation-nightly\n  cancel-in-progress: false\n/);
+    });
+
+    it('reads with contents: read and actions: read, and only the dispatch job writes, with actions: write alone', () => {
+      expect(nightly.slice(0, nightly.indexOf('\njobs:'))).toMatch(/\npermissions:\n  contents: read\n\n/);
+      expect(nightly.match(/\n {4}permissions:/g)).toHaveLength(2);
+      expect(permissionsOf(check)).toEqual(['contents: read', 'actions: read']);
+      expect(permissionsOf(dispatch)).toEqual(['actions: write']);
+      expect(nightly.match(/: write\b/g)).toHaveLength(1);
+    });
+
+    it('decides with scripts/mutation-ci.ts nightly and dispatches mutation-weekly.yml on main only when it says so', () => {
+      expect(check).toContain('ref: main');
+      expect(check).toContain('fetch-depth: 0');
+      expect(check).toMatch(/actions\/caches\?key=mutation-incremental-&ref=refs\/heads\/main&/);
+      expect(check).toMatch(/actions\/workflows\/mutation-weekly\.yml\/runs\?branch=main&/);
+      expect(check).toMatch(/node scripts\/mutation-ci\.ts nightly --caches "\$RUNNER_TEMP\/caches\.json" --runs "\$RUNNER_TEMP\/runs\.json"/);
+      expect(check).toContain('dispatch: ${{ steps.decide.outputs.dispatch }}');
+      expect(check).not.toMatch(/gh workflow run|npx stryker/);
+      expect(dispatch).toMatch(/\n    needs: check\n    if: needs\.check\.outputs\.dispatch == 'true'\n/);
+      const runs = runBlocks(dispatch).map(b => b.trim());
+      expect(runs).toEqual(['gh workflow run mutation-weekly.yml --repo "$GITHUB_REPOSITORY" --ref main']);
+      expect(dispatch).not.toMatch(/actions\/checkout/);
+      expect(nightly.match(/gh workflow run/g)).toHaveLength(1);
+    });
+
+    it('interpolates no input or event field in a run block, and pins every action by SHA', () => {
+      const blocks = runBlocks(nightly);
+      expect(blocks.length).toBeGreaterThan(0);
+      for (const block of blocks) expect(block).not.toMatch(UNTRUSTED_EXPRESSION);
+      const refs = [...nightly.matchAll(/uses: (\S+)/g)].map(m => m[1]);
+      expect(refs.length).toBeGreaterThan(0);
+      for (const ref of refs) expect(ref, ref).toMatch(/@[0-9a-f]{40}$/);
+    });
+  });
+
   it('pins every action by a full commit SHA', () => {
     for (const text of [mutationJob, weekly]) {
       const refs = [...text.matchAll(/uses: (\S+)/g)].map(m => m[1]);
