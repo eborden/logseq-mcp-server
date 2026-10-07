@@ -5,7 +5,7 @@ import { blockPageId, pageDisplayName } from '../utils/entity-fields.js';
 import { blocksInlineMax, buildResultMeta, cappedTruncationWarning } from '../utils/result-meta.js';
 import { toSlimBlock, toSlimPage } from '../utils/slim-entities.js';
 import { DATALOG_METHOD, parseResponse, queryParsed } from '../utils/parse-response.js';
-import { responses } from '../response-schemas.js';
+import { responses, type SearchHitBlock } from '../response-schemas.js';
 
 /** Results returned when `limit` is absent. */
 export const DEFAULT_SEARCH_LIMIT = 100;
@@ -21,6 +21,8 @@ export const MAX_SEARCH_LIMIT = 500;
 const NARROWER = 'Narrow the query to see the rest.';
 
 export interface SearchBlocksResult extends BlockEntity {
+  /** Always text: a row with no string content is skipped before it becomes a result */
+  content: string;
   context?: {
     page: PageEntity;
     references: string[];
@@ -83,7 +85,7 @@ function pulledPageToEntity(pulled: PulledPage): PageEntity {
  *
  * API calls: 1, or 0 when no block has a page id.
  */
-export async function withPageContext(client: LogseqClient, blocks: BlockEntity[]): Promise<SearchBlocksResult[]> {
+export async function withPageContext(client: LogseqClient, blocks: SearchHitBlock[]): Promise<SearchBlocksResult[]> {
   const pageById = new Map<number, PageEntity>();
   const pageIds = [...new Set(blocks.map(blockPageId).filter((id): id is number => typeof id === 'number'))];
 
@@ -105,8 +107,8 @@ export async function withPageContext(client: LogseqClient, blocks: BlockEntity[
     if (page) {
       result.context = {
         page,
-        references: Array.from((block.content ?? '').matchAll(/\[\[([^\]]+)\]\]/g), m => m[1]),
-        tags: Array.from((block.content ?? '').matchAll(/#([^\s#]+)/g), m => m[1])
+        references: Array.from(block.content.matchAll(/\[\[([^\]]+)\]\]/g), m => m[1]),
+        tags: Array.from(block.content.matchAll(/#([^\s#]+)/g), m => m[1])
       };
     }
 
@@ -220,7 +222,7 @@ export async function searchBlocksWithMeta(
   const searchable = rows
     .map(row => row[0])
     .filter((block): block is NonNullable<typeof block> => block != null && typeof block.content === 'string');
-  const matches: BlockEntity[] = parseResponse(responses.blockList, searchable, DATALOG_METHOD).sort(compareBlocks);
+  const matches: SearchHitBlock[] = parseResponse(responses.searchHitList, searchable, DATALOG_METHOD).sort(compareBlocks);
 
   const results: SearchBlocksResult[] = matches.slice(0, Math.min(Math.max(0, limit), maxLimit));
 
