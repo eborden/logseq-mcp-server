@@ -309,6 +309,115 @@ describe('responses', () => {
   });
 });
 
+describe('a property map is an object, and nothing else', () => {
+  it('rejects properties that are an array, null, text or a number, on a page and on a block', () => {
+    for (const bad of [[], ['role'], null, 'role:: designer', 7, true]) {
+      expect(accepts(pulledPageSchema, { ...pulledPage, properties: bad }), JSON.stringify(bad)).toBe(false);
+      expect(accepts(editorPageSchema, { ...editorPage, properties: bad }), JSON.stringify(bad)).toBe(false);
+      expect(accepts(blockSchema, { ...pulledBlock, properties: bad }), JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('accepts an empty map, since a page or block with no properties has one', () => {
+    expect(accepts(pulledPageSchema, { ...pulledPage, properties: {} })).toBe(true);
+    expect(accepts(blockSchema, { ...pulledBlock, properties: {} })).toBe(true);
+  });
+
+  it('checks the text-values map of a pulled page the same way', () => {
+    expect(accepts(pulledPageSchema, { ...pulledPage, 'properties-text-values': [] })).toBe(false);
+    expect(accepts(pulledPageSchema, { ...pulledPage, 'properties-text-values': null })).toBe(false);
+    expect(accepts(pulledPageSchema, { ...pulledPage, 'properties-text-values': { role: 'designer' } })).toBe(true);
+  });
+
+  it('says what was expected, naming the field and not the value', () => {
+    const error = catchError(() => parseResponse(blockSchema, { ...pulledBlock, properties: ['a-private-value'] }, 'm'));
+
+    expect(error.path).toBe('properties');
+    expect(error.problem).toBe('expected an object');
+    expect(error.message).not.toContain('a-private-value');
+  });
+});
+
+describe('outline rows', () => {
+  const outlineBlock = { id: 5, uuid: '00000000-0000-4000-8000-000000000005', content: 'a block', left: { id: 4 }, parent: { id: 3 } };
+
+  it('reads a block with an id, or with only db/id, which an older LogSeq sends', () => {
+    const { id: _id, ...withoutId } = outlineBlock;
+
+    expect(accepts(responses.outlineRows, [[outlineBlock]])).toBe(true);
+    expect(accepts(responses.outlineRows, [[{ ...withoutId, 'db/id': 5 }]])).toBe(true);
+    expect(accepts(responses.outlineRows, [[{ ...outlineBlock, 'db/id': 5 }]])).toBe(true);
+  });
+
+  it('rejects a block with neither id nor db/id, and says so', () => {
+    const { id: _id, ...withoutId } = outlineBlock;
+
+    expect(accepts(responses.outlineRows, [[withoutId]])).toBe(false);
+    const error = catchError(() => parseResponse(responses.outlineRows, [[withoutId]], 'logseq.DB.datascriptQuery'));
+    expect(error.path).toBe('[0][0]');
+    expect(error.problem).toBe('a block needs an id');
+  });
+
+  it('wants a uuid, and reads a missing content, a bare-number parent and no left', () => {
+    const { uuid: _uuid, ...withoutUuid } = outlineBlock;
+    const { content: _content, left: _left, ...bare } = outlineBlock;
+
+    expect(accepts(responses.outlineRows, [[withoutUuid]])).toBe(false);
+    expect(accepts(responses.outlineRows, [[bare]])).toBe(true);
+    expect(accepts(responses.outlineRows, [[{ ...outlineBlock, parent: 3 }]])).toBe(true);
+    expect(accepts(responses.outlineRows, [[{ ...outlineBlock, parent: 'three' }]])).toBe(false);
+  });
+
+  it('skips a null cell, and does not take null for the rows as a row', () => {
+    expect(accepts(responses.outlineRows, [[null]])).toBe(true);
+    expect(accepts(responses.outlineRows, null)).toBe(true);
+    expect(accepts(responses.outlineRows, [null])).toBe(false);
+  });
+});
+
+describe('getCurrentPage: page or block, told apart by its name', () => {
+  it('takes an object with no name for a block, and one with a name for a page', () => {
+    expect(accepts(responses.pageOrBlock, editorBlock)).toBe(true);
+    expect(accepts(responses.pageOrBlock, editorPage)).toBe(true);
+    // a named object is checked as a page, which wants an id
+    expect(accepts(responses.pageOrBlock, { name: 'alice' })).toBe(false);
+    // a block with no name is checked as a block, so one with no uuid is a bad block
+    const { uuid: _uuid, ...blockWithoutUuid } = editorBlock;
+    expect(accepts(responses.pageOrBlock, blockWithoutUuid)).toBe(false);
+  });
+
+  it('checks an object whose name key is undefined as a block, not a page', () => {
+    // JSON has no undefined, but the test the tool applies is `name !== undefined`
+    expect(accepts(responses.pageOrBlock, { ...editorBlock, name: undefined })).toBe(true);
+    expect(accepts(responses.pageOrBlock, { id: 1, uuid: 'u', name: undefined })).toBe(true);
+  });
+
+  it('checks a named object as a page even when it also looks like a block', () => {
+    // as a page this has no id; as a block it would pass
+    expect(accepts(responses.pageOrBlock, { ...editorBlock, id: undefined, name: 'alice' })).toBe(false);
+    expect(accepts(responses.pageOrBlock, { uuid: 'u', content: 'x', name: 'alice' })).toBe(false);
+  });
+
+  it('rejects an array, text, a number and a boolean as a whole, saying an object was expected', () => {
+    for (const bad of [[], [editorBlock], 'text', 7, true]) {
+      const error = catchError(() => parseResponse(responses.pageOrBlock, bad, 'logseq.Editor.getCurrentPage'));
+
+      expect(error.path, JSON.stringify(bad)).toBe('(response)');
+      expect(error.problem, JSON.stringify(bad)).toBe('expected an object');
+    }
+  });
+
+  it('reports the first problem with its own message and path, for a page and for a block', () => {
+    const badPage = catchError(() => parseResponse(responses.pageOrBlock, { ...editorPage, id: 'ninety' }, 'm'));
+    const badBlock = catchError(() => parseResponse(responses.pageOrBlock, { ...editorBlock, content: 7 }, 'm'));
+
+    expect(badPage.path).toBe('id');
+    expect(badPage.problem).toMatch(/expected number/);
+    expect(badBlock.path).toBe('content');
+    expect(badBlock.problem).toMatch(/expected string/);
+  });
+});
+
 describe('what a failure says', () => {
   it('names the method, where in the answer it went wrong, and what was expected', () => {
     const answer = [{ ...editorPage }, { ...editorPage, id: 'ninety' }];
