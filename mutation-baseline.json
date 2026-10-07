@@ -14,7 +14,7 @@
     "src/tools/get-block.ts": { "score": 100.0, "ignores": 0 },
     "src/tools/get-concept-evolution.ts": { "score": 81.0, "ignores": 0 },
     "src/tools/get-concept-network.ts": { "score": 89.0, "ignores": 0 },
-    "src/tools/get-context-for-query.ts": { "score": 70.0, "ignores": 0 },
+    "src/tools/get-context-for-query.ts": { "score": 85.0, "ignores": 0 },
     "src/tools/get-current-context.ts": { "score": 80.0, "ignores": 0 },
     "src/tools/get-graph-info.ts": { "score": 100.0, "ignores": 0 },
     "src/tools/get-page-outline.ts": { "score": 86.0, "ignores": 0 },
