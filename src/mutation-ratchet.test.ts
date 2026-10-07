@@ -2,11 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   BASELINE_LABEL,
   NEW_FILE_FLOOR,
+  STRYKER_DEFAULT_REASON,
   check,
   compareToBase,
   extractStringList,
   fileStats,
   formatBaseline,
+  isBareReason,
   parseBaseline,
   renderCheck,
   scoreOf,
@@ -79,6 +81,14 @@ describe('file score', () => {
     const s = fileStats(mutants({ killed: 4, disabled: ['equivalent mutant', undefined, '  '] }));
     expect(s.ignores).toBe(3);
     expect(s.bareDisableLines).toEqual([11, 12]);
+  });
+
+  it("treats the text Stryker 10 fills in for a disable with no reason as bare", () => {
+    // Seen in a CI report: `// Stryker disable next-line StringLiteral` gets this statusReason, not an empty one.
+    const s = fileStats(mutants({ killed: 4, disabled: [STRYKER_DEFAULT_REASON, 'a real reason', `  ${STRYKER_DEFAULT_REASON} `] }));
+    expect(s.ignores).toBe(3);
+    expect(s.bareDisableLines).toEqual([10, 12]);
+    expect(isBareReason('Ignored using a comment, because it is equivalent')).toBe(false);
   });
 });
 

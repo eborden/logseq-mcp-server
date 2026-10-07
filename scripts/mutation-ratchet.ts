@@ -65,8 +65,20 @@ export interface FileStats {
   score: number | null;
   /** Mutants silenced by a `Stryker disable` comment: Ignored with `static` not true. */
   ignores: number;
-  /** Source lines of disables that have no written reason (empty `statusReason`). */
+  /** Source lines of disables that have no written reason (`isBareReason`). */
   bareDisableLines: Array<number | null>;
+}
+
+/**
+ * What Stryker 10 puts in `statusReason` for `// Stryker disable next-line <mutator>` with no `: reason`.
+ * The ADR expected an empty one, but a CI run (#205) showed Stryker fills in this text instead.
+ */
+export const STRYKER_DEFAULT_REASON = 'Ignored using a comment';
+
+/** True for a disable that has no written reason: nothing, blank, or Stryker's own default text. */
+export function isBareReason(reason: string | undefined): boolean {
+  const text = (reason ?? '').trim();
+  return text === '' || text === STRYKER_DEFAULT_REASON;
 }
 
 /** Timeouts count as killed, no-coverage as survived, ignored mutants are out of both (ADR-0026). */
@@ -86,7 +98,7 @@ export function fileStats(mutants: ReportMutant[]): FileStats {
     scored,
     score: scored === 0 ? null : scoreOf(killed + timeout, scored),
     ignores: disabled.length,
-    bareDisableLines: disabled.filter(m => (m.statusReason ?? '').trim() === '').map(m => m.location?.start?.line ?? null),
+    bareDisableLines: disabled.filter(m => isBareReason(m.statusReason)).map(m => m.location?.start?.line ?? null),
   };
 }
 
