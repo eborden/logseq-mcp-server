@@ -25,3 +25,4 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 | 2026-10-05 | Introduced as a pinned probe for `getAllPages` returning `null`. | #68 |
 | 2026-10-05 | `pages_unavailable` warning added to `list_pages`. | #71 |
 | 2026-10-07 | Mechanical enforcement: added a `test:` line for `resolve_refs` (`refs_unavailable` on a `null` lookup), and reworded the enforcement paragraph that describes the test lines ("Both pin" became "The first two pin ... The third pins ..."). The Statement is unchanged. | #265 |
+| 2026-10-07 | Mechanical enforcement: added a `test:` line for `query_by_date_range` (`journals_unavailable` and `blocks_unavailable` on a `null` answer), and added a sentence describing it to the enforcement paragraph. The Statement is unchanged. | #284 |
