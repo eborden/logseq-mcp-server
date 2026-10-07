@@ -241,6 +241,113 @@ describe('getCurrentContext', () => {
     expect(methods).not.toContain('logseq.Editor.getEditingBlockSelection');
   });
 
+  it.each([
+    'logseq.Editor.getCurrentPage',
+    'logseq.Editor.getCurrentBlock',
+    'logseq.Editor.getSelectedBlocks'
+  ])('calls %s with no arguments', async method => {
+    mockEditor({ page: PAGE });
+
+    await getCurrentContext(client);
+
+    expect(callAPI).toHaveBeenCalledWith(method, []);
+  });
+
+  it('reads an entity with a name as the open page, whatever else it carries', async () => {
+    // What makes it a page is its name. It carries a uuid and a page key, as a block does,
+    // and is still not the block the user zoomed into.
+    mockEditor({ page: { ...PAGE, page: { id: 5 } } });
+
+    const result = await getCurrentContext(client);
+
+    expect(result.page).toEqual({ name: 'my page', originalName: 'My Page' });
+    expect(result).not.toHaveProperty('focusedBlock');
+    expect(executeDatalogQuery).not.toHaveBeenCalled();
+  });
+
+  it('takes the page of the first selected block when nothing is open or focused', async () => {
+    mockEditor({
+      selected: [
+        block({ uuid: 's1', page: { id: 20 } }),
+        block({ uuid: 's2', page: { id: 30 } })
+      ]
+    });
+    executeDatalogQuery.mockResolvedValue([
+      [{ 'db/id': 20, name: 'bob notes', 'original-name': 'Bob Notes' }],
+      [{ 'db/id': 30, name: 'inbox', 'original-name': 'Inbox' }]
+    ]);
+
+    const result = await getCurrentContext(client);
+
+    expect(result.page).toEqual({ name: 'bob notes', originalName: 'Bob Notes' });
+    expect(result.message).toBeUndefined();
+    expect(result).not.toHaveProperty('focusedBlock');
+    expect(result.selectedBlocks?.map(b => b.pageName)).toEqual(['Bob Notes', 'Inbox']);
+  });
+
+  it('makes no Datalog call and sets no page name for a block that carries no page', async () => {
+    const { page: _page, ...orphan } = block();
+    mockEditor({ page: PAGE, block: orphan });
+
+    const result = await getCurrentContext(client);
+
+    expect(executeDatalogQuery).not.toHaveBeenCalled();
+    expect(result.focusedBlock).toMatchObject({ uuid: 'block-uuid-1' });
+    expect(result.focusedBlock).not.toHaveProperty('pageName');
+    expect(result.page).toEqual({ name: 'my page', originalName: 'My Page' });
+  });
+
+  it('gives no page when the only block carries no page and nothing is open', async () => {
+    const { page: _page, ...orphan } = block();
+    mockEditor({ block: orphan });
+
+    const result = await getCurrentContext(client);
+
+    expect(executeDatalogQuery).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      page: null,
+      message: NO_PAGE_OPEN_MESSAGE,
+      focusedBlock: { uuid: 'block-uuid-1', content: 'Talking to [[Alice]] about #atlas', tags: ['atlas'], pageRefs: ['Alice'] }
+    });
+  });
+
+  it('keeps only the children that are block entities, whatever else the array holds', async () => {
+    mockEditor({
+      page: PAGE,
+      block: block({
+        children: [
+          ['uuid', 'child-uuid-1'],
+          null,
+          'child-uuid-2',
+          7,
+          block({ uuid: 'child-3', content: 'kept' })
+        ]
+      })
+    });
+
+    const result = await getCurrentContext(client);
+
+    expect(result.focusedBlock?.children?.map(c => c.uuid)).toEqual(['child-3']);
+  });
+
+  it('drops a child object that has no text content, as it is not a block entity', async () => {
+    // Pins today's rule: a child counts as a block entity only when its content is a string.
+    mockEditor({
+      page: PAGE,
+      block: block({
+        children: [
+          { id: 201, uuid: 'child-no-content' },
+          { id: 202, uuid: 'child-numeric-content', content: 5 },
+          block({ uuid: 'child-kept', content: 'kept' })
+        ]
+      })
+    });
+
+    const result = await getCurrentContext(client);
+
+    expect(result.focusedBlock?.children?.map(c => c.uuid)).toEqual(['child-kept']);
+  });
+
   it('propagates a LogSeqNotRunningError', async () => {
     callAPI.mockRejectedValue(new LogSeqNotRunningError('http://localhost:12315'));
 
