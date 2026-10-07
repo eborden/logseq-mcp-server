@@ -166,10 +166,11 @@ export interface DateRangeOptions extends DateRangeSelection {
  */
 function blockMatcher(searchTerm: string, aliasSet: AliasSet | null): (block: BlockEntity) => boolean {
   const term = searchTerm.toLowerCase();
-  const otherNames = (aliasSet ? aliasNames(aliasSet) : []).filter(name => name !== term.trim());
+  // The group holds the term's own name too; `includes` below already matches it anywhere
+  const groupNames = aliasSet ? aliasNames(aliasSet) : [];
   const wholeWord =
-    otherNames.length > 0
-      ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${otherNames.map(escapeRegex).join('|')})(?![\\p{L}\\p{N}])`, 'iu')
+    groupNames.length > 0
+      ? new RegExp(`(?<![\\p{L}\\p{N}])(?:${groupNames.map(escapeRegex).join('|')})(?![\\p{L}\\p{N}])`, 'iu')
       : null;
   const pageIds = new Set(aliasSet ? aliasIds(aliasSet) : []);
   return block => {
