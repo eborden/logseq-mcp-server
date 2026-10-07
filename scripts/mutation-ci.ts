@@ -120,6 +120,14 @@ export interface PlanInput {
 
 export type PlanMode = 'incremental' | 'targeted' | 'empty';
 
+/**
+ * The most baseline entries a PR may change before the cache-miss path stops mutating them (ADR-0026: a
+ * PR never starts a cold full run, and the job has 10 minutes). A cold file takes about 1 to 1.5 minutes,
+ * so a handful fits and a re-baseline (a Stryker upgrade changes every entry) does not. Over this, the
+ * files are left to the weekly full run (#223).
+ */
+export const MAX_BASELINE_FILES = 8;
+
 export interface Plan {
   mode: PlanMode;
   /** For `targeted`: the files passed to --mutate. Empty otherwise. */
@@ -127,13 +135,23 @@ export interface Plan {
   /** Why the cache-miss path was taken, or [] for `incremental`. */
   reasons: string[];
   changedSources: string[];
+  /** Files mutated because their baseline entry changed. Empty when the cap (MAX_BASELINE_FILES) was hit. */
   fromBaseline: string[];
   fromTests: string[];
+  /** How many source files had a changed baseline entry, before the cap. */
+  baselineChanged: number;
+  /**
+   * Source files with a changed baseline entry that this run did not mutate, because more than
+   * MAX_BASELINE_FILES entries changed. The weekly full run checks them. Empty when the cap did not bite.
+   */
+  leftToWeekly: string[];
 }
 
 /**
  * Whole scope, incrementally, when a usable cache exists and nothing it can't see changed.
- * Otherwise the cache-miss path: only the files a PR touches, never a cold full run (ADR-0026).
+ * Otherwise the cache-miss path: only the files a PR touches, never a cold full run (ADR-0026). When more
+ * than MAX_BASELINE_FILES baseline entries changed, those files are not mutated (the changed sources and
+ * the files the changed tests import still are) and are named in `leftToWeekly` for the weekly full run.
  */
 export function plan(input: PlanInput): Plan {
   const { scope, changed } = input;
@@ -142,11 +160,15 @@ export function plan(input: PlanInput): Plan {
   if (!input.cacheUsable) reasons.push(input.cacheNote ?? 'no usable incremental cache');
   if (blind.length > 0) reasons.push(`changed inputs that incremental mode can't see: ${blind.join(', ')}`);
 
-  if (reasons.length === 0) return { mode: 'incremental', mutate: [], reasons, changedSources: [], fromBaseline: [], fromTests: [] };
+  if (reasons.length === 0) {
+    return { mode: 'incremental', mutate: [], reasons, changedSources: [], fromBaseline: [], fromTests: [], baselineChanged: 0, leftToWeekly: [] };
+  }
 
   const alive = (p: string) => !input.deleted.includes(p) && input.exists(p);
   const changedSources = changed.filter(p => inMutateScope(p, scope) && alive(p)).sort();
-  const fromBaseline = input.baselineChanged.filter(p => inMutateScope(p, scope) && alive(p)).sort();
+  const baselineEntries = [...new Set(input.baselineChanged.filter(p => inMutateScope(p, scope) && alive(p)))].sort();
+  const capped = baselineEntries.length > MAX_BASELINE_FILES;
+  const fromBaseline = capped ? [] : baselineEntries;
   const fromTests = changed
     .filter(isUnitTest)
     .flatMap(p => {
@@ -155,13 +177,17 @@ export function plan(input: PlanInput): Plan {
     })
     .sort();
   const mutate = [...new Set([...changedSources, ...fromBaseline, ...fromTests])].sort();
+  // A capped entry that a changed source or test brings in anyway is mutated, so it isn't left out.
+  const leftToWeekly = capped ? baselineEntries.filter(p => !mutate.includes(p)) : [];
   return {
     mode: mutate.length === 0 ? 'empty' : 'targeted',
     mutate,
     reasons,
     changedSources,
-    fromBaseline: [...new Set(fromBaseline)],
+    fromBaseline,
     fromTests: [...new Set(fromTests)],
+    baselineChanged: baselineEntries.length,
+    leftToWeekly,
   };
 }
 
@@ -214,7 +240,10 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
       out.push(`Mode: cache-miss path. ${plan.reasons.join('; ')}.`, '');
       if (plan.mode === 'empty') {
         out.push(
-          '**No source file to mutate: no changed source file, none changed in the baseline, and no mutated file imported by a changed test.** Nothing was checked, and this is not a pass.',
+          plan.leftToWeekly.length > 0
+            ? '**No source file to mutate: no changed source file, no mutated file imported by a changed test, and the changed baseline entries are over the cap (below).**'
+            : '**No source file to mutate: no changed source file, none changed in the baseline, and no mutated file imported by a changed test.**',
+          'Nothing was checked, and this is not a pass.',
           '',
         );
       } else {
@@ -222,6 +251,14 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
           `Mutated ${plan.mutate.length} file(s): ${plan.changedSources.length} changed, ${plan.fromBaseline.length} from baseline changes, ${plan.fromTests.length} imported by changed tests.`,
           '',
           ...plan.mutate.map(f => `- \`${f}\``),
+          '',
+        );
+      }
+      if (plan.leftToWeekly.length > 0) {
+        out.push(
+          `**${plan.baselineChanged} baseline entries changed, over the cap of ${MAX_BASELINE_FILES}, so this run did not mutate the ${plan.leftToWeekly.length} below.** A change that wide (a re-baseline after a Stryker upgrade, or the first baseline) is checked by the weekly full run (\`mutation-weekly.yml\`), not by this job. Run it by hand on this PR's head commit (Actions tab, "Run workflow", put the commit SHA in "ref") before merging. These files are unchecked until then:`,
+          '',
+          ...plan.leftToWeekly.map(f => `- \`${f}\``),
           '',
         );
       }
@@ -309,7 +346,16 @@ export function planFromRepo(
   const base = chooseBase({ cache: opts.cache, since: opts.since, fallbackSince: opts.fallbackSince, lastResort: 'HEAD~1', isCommit });
   const since = base.since;
   if (since === null) {
-    return { mode: 'empty', mutate: [], reasons: [base.note ?? 'no commit to diff against was found'], changedSources: [], fromBaseline: [], fromTests: [] };
+    return {
+      mode: 'empty',
+      mutate: [],
+      reasons: [base.note ?? 'no commit to diff against was found'],
+      changedSources: [],
+      fromBaseline: [],
+      fromTests: [],
+      baselineChanged: 0,
+      leftToWeekly: [],
+    };
   }
   // --no-renames: a rename lists the old path too, so a moved blind-spot file is still seen.
   const changed = io.git('diff', '--name-only', '--no-renames', since, 'HEAD').split('\n').filter(Boolean);

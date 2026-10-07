@@ -7,6 +7,7 @@ import {
   importedSources,
   inMutateScope,
   isBlindSpot,
+  MAX_BASELINE_FILES,
   plan,
   planFromRepo,
   renderSummary,
@@ -184,6 +185,89 @@ describe('plan', () => {
     expect(result).toMatchObject({ mode: 'empty', mutate: [] });
     expect(renderSummary(result, null)).toContain('not a pass');
   });
+
+  describe('the cap on baseline-driven files (#223)', () => {
+    const entries = (n: number) => Array.from({ length: n }, (_, i) => `src/m${String(i).padStart(2, '0')}.ts`);
+
+    it('is 8', () => {
+      expect(MAX_BASELINE_FILES).toBe(8);
+    });
+
+    it('mutates every changed baseline entry at the cap, as before', () => {
+      const result = plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES) });
+      expect(result).toMatchObject({ mode: 'targeted', mutate: entries(MAX_BASELINE_FILES), fromBaseline: entries(MAX_BASELINE_FILES), baselineChanged: 8, leftToWeekly: [] });
+    });
+
+    it('leaves the baseline entries to the weekly run one over the cap, and lists them', () => {
+      const result = plan({ ...base, cacheUsable: false, baselineChanged: entries(MAX_BASELINE_FILES + 1) });
+      expect(result).toMatchObject({ mode: 'empty', mutate: [], fromBaseline: [], baselineChanged: 9, leftToWeekly: entries(9) });
+    });
+
+    it('still mutates the changed sources and the files the changed tests import, when capped', () => {
+      const result = plan({
+        ...base,
+        cacheUsable: false,
+        changed: ['vitest.config.ts', 'src/utils/snippet.ts', 'src/utils/compact.test.ts'],
+        baselineChanged: entries(12),
+        readTest: () => "import { x } from './compact.js';",
+      });
+      expect(result).toMatchObject({
+        mode: 'targeted',
+        mutate: ['src/utils/compact.ts', 'src/utils/snippet.ts'],
+        changedSources: ['src/utils/snippet.ts'],
+        fromBaseline: [],
+        fromTests: ['src/utils/compact.ts'],
+        baselineChanged: 12,
+        leftToWeekly: entries(12),
+      });
+    });
+
+    it('does not list a capped entry as left out when a changed source brings it in anyway', () => {
+      const result = plan({ ...base, cacheUsable: false, changed: ['src/m00.ts'], baselineChanged: entries(10) });
+      expect(result.mutate).toEqual(['src/m00.ts']);
+      expect(result.leftToWeekly).toEqual(entries(10).slice(1));
+      expect(result.baselineChanged).toBe(10);
+    });
+
+    it('counts only entries that exist and are mutated, and each once', () => {
+      const result = plan({
+        ...base,
+        cacheUsable: false,
+        baselineChanged: [...entries(8), ...entries(8), 'src/tool-args.ts', 'src/gone.ts'],
+        exists: p => p !== 'src/gone.ts',
+      });
+      expect(result).toMatchObject({ mode: 'targeted', baselineChanged: 8, leftToWeekly: [] });
+    });
+
+    it('does not apply on the incremental path', () => {
+      expect(plan({ ...base, baselineChanged: entries(20) })).toMatchObject({ mode: 'incremental', leftToWeekly: [] });
+    });
+
+    it('says in the summary which entries were left out and that the weekly run checks them', () => {
+      const result = plan({ ...base, cacheUsable: false, changed: ['src/utils/snippet.ts'], baselineChanged: entries(9) });
+      const text = renderSummary(result, null);
+      expect(text).toContain('9 baseline entries changed, over the cap of 8');
+      expect(text).toContain('the 9 below');
+      expect(text).toContain('weekly full run (`mutation-weekly.yml`)');
+      expect(text).toContain('head commit');
+      expect(text).toContain('unchecked until then');
+      for (const f of entries(9)) expect(text).toContain(`- \`${f}\``);
+      expect(text).toContain('Mutated 1 file(s)');
+    });
+
+    it('says so, and is not a pass, when the cap leaves nothing to mutate', () => {
+      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(9) }), null);
+      expect(text).toContain('over the cap');
+      expect(text).toContain('Nothing was checked, and this is not a pass.');
+      expect(text).not.toContain('none changed in the baseline');
+    });
+
+    it('says nothing about a cap when it did not bite', () => {
+      const text = renderSummary(plan({ ...base, cacheUsable: false, baselineChanged: entries(3) }), null);
+      expect(text).not.toContain('over the cap');
+      expect(text).not.toContain('weekly');
+    });
+  });
 });
 
 describe('fileScores', () => {
@@ -354,6 +438,19 @@ describe('planFromRepo', () => {
     expect(result.mode).toBe('targeted');
     expect(result.fromBaseline).toEqual(['src/a.ts']);
     expect(result.mutate).toEqual(['src/a.ts']);
+  });
+
+  it('caps the baseline entries of a re-baseline PR, so it is not a cold full run (#223)', () => {
+    const names = Array.from({ length: 12 }, (_, i) => `src/m${i}.ts`);
+    const baseline = (score: number) => JSON.stringify({ stryker: '10.0.0', files: Object.fromEntries(names.map(n => [n, { score, ignores: 0 }])) });
+    const { io } = fakeIo({
+      commits: ['base111'],
+      diff: { base111: ['package-lock.json', 'mutation-baseline.json'] },
+      files: { 'mutation-baseline.json': baseline(91), ...Object.fromEntries(names.map(n => [n, ''])) },
+      old: { 'base111:mutation-baseline.json': baseline(90) },
+    });
+    const result = planFromRepo({ cache: 'miss', since: '', fallbackSince: 'base111', config }, io);
+    expect(result).toMatchObject({ mode: 'empty', mutate: [], baselineChanged: 12, leftToWeekly: [...names].sort() });
   });
 
   it('says nothing was checked when no commit to diff against exists', () => {
