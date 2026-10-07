@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { queryByDateRange } from './query-by-date-range.js';
+import { queryByDateRange, queryJournals } from './query-by-date-range.js';
 import { LogseqClient } from '../client.js';
 
 // Datalog pull `[*]` shapes: kebab-case keys, refs as `{id}`, no children/level.
@@ -264,13 +264,100 @@ describe('queryByDateRange', () => {
       expect(result.summary).toMatchObject({ totalDays: 0, totalBlocks: 0 });
     });
 
-    it('should treat a null Datalog result as empty', async () => {
+    it('should report a real empty answer without a warning', async () => {
+      const executeDatalogQuery = vi.fn().mockResolvedValue([]);
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      const result = await queryByDateRange(client, 20990101, 20990102);
+
+      expect(result).not.toHaveProperty('warnings');
+      expect(result).not.toHaveProperty('hasMore');
+    });
+
+    // BR-0011: a null answer is not an empty one (#269)
+    it('should warn, not report no journals, when the page query answers null', async () => {
       const executeDatalogQuery = vi.fn().mockResolvedValue(null);
       const client = { executeDatalogQuery } as unknown as LogseqClient;
 
       const result = await queryByDateRange(client, 20990101, 20990102);
 
-      expect(result.entries).toHaveLength(0);
+      expect(result.entries).toEqual([]);
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings).toEqual([
+        {
+          code: 'journals_unavailable',
+          message:
+            'LogSeq returned no answer when looking up journal pages (possibly no graph open or a re-index ' +
+            'in progress), so the empty result may not mean there are no journals in this range. ' +
+            'Retry in a moment, or call logseq_get_graph_info to check which graph is open.'
+        }
+      ]);
+      // no howToFetchAll: no parameter fetches what LogSeq did not answer
+      expect(result.warnings![0]).not.toHaveProperty('howToFetchAll');
+      // nothing to look blocks up on, so the block query is not sent
+      expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it('should warn on a null page answer for lastN too, and in slim and outline output', async () => {
+      const executeDatalogQuery = vi.fn().mockResolvedValue(null);
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+      const now = new Date(2026, 0, 15);
+
+      for (const extra of [{}, { slimResults: false, includeContent: false }, { slimResults: true }]) {
+        const result = await queryJournals(client, { lastN: 3, ...extra }, now);
+        expect(result.entries).toEqual([]);
+        expect(result.warnings?.map(w => w.code)).toEqual(['journals_unavailable']);
+      }
+    });
+
+    it('should warn, not show journals with no blocks, when the block query answers null', async () => {
+      const executeDatalogQuery = vi
+        .fn()
+        .mockResolvedValueOnce([[journalPage(1, 20250101, 'Day One')], [journalPage(2, 20250102, 'Day Two')]])
+        .mockResolvedValueOnce(null);
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      const result = await queryByDateRange(client, 20250101, 20250102);
+
+      // the pages are real, so they are listed; their blocks are what is unknown
+      expect(result.entries.map(e => e.date)).toEqual([20250101, 20250102]);
+      expect(result.hasMore).toBe(false);
+      expect(result.warnings).toEqual([
+        {
+          code: 'blocks_unavailable',
+          message:
+            'LogSeq returned no answer when looking up the blocks on 2 journal page(s) (possibly no graph ' +
+            'open or a re-index in progress), so their blocks are missing from this result. This does not ' +
+            'mean the days are empty. Retry in a moment, or call logseq_get_graph_info to check which graph is open.'
+        }
+      ]);
+      expect(result.warnings![0]).not.toHaveProperty('howToFetchAll');
+    });
+
+    it('should keep the blocks_unavailable warning next to a resolve_refs result', async () => {
+      const executeDatalogQuery = vi
+        .fn()
+        .mockResolvedValueOnce([[journalPage(1, 20250101, 'Day One')]])
+        .mockResolvedValueOnce(null);
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      const result = await queryJournals(client, { startDate: 20250101, endDate: 20250101, resolveRefs: true });
+
+      expect(result.warnings?.map(w => w.code)).toEqual(['blocks_unavailable']);
+    });
+
+    it('should not warn when the block query answers a real empty array', async () => {
+      const executeDatalogQuery = vi
+        .fn()
+        .mockResolvedValueOnce([[journalPage(1, 20250101, 'Day One')]])
+        .mockResolvedValueOnce([]);
+      const client = { executeDatalogQuery } as unknown as LogseqClient;
+
+      const result = await queryByDateRange(client, 20250101, 20250101);
+
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].blocks).toEqual([]);
+      expect(result).not.toHaveProperty('warnings');
     });
   });
 
