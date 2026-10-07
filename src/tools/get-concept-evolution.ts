@@ -236,7 +236,6 @@ export async function getConceptEvolution(
   const fullTimeline = Array.from(timelineMap.entries())
     .map(([date, blocks]) => ({ date, blocks }))
     .sort((a, b) => {
-      if (a.date === null && b.date === null) return 0;
       if (a.date === null) return 1;
       if (b.date === null) return -1;
       return a.date - b.date;
