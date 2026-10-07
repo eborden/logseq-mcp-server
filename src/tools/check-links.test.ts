@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { checkLinks, checkRefsPreserved, MAX_LINK_TERMS } from './check-links.js';
+import { checkLinks, checkProse, checkRefsPreserved, MAX_LINK_TERMS } from './check-links.js';
 import { LogseqClient } from '../client.js';
 import { InvalidParameterError, LogSeqNotRunningError } from '../errors.js';
 
@@ -577,5 +577,170 @@ describe('checkLinks: refs preserved (a tightening over the script)', () => {
     expect(result.refsPreserved).toEqual({ ok: true, removed: [] });
     expect(result.prose.ok).toBe(false);
     expect(result.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------- excerpts, order and limits
+
+describe('checkProse: the excerpt around the first difference', () => {
+  it('stops at the end of the line when more lines follow', () => {
+    const result = checkProse('cat sat\nnext line', 'cat hat\nnext line');
+
+    expect(result.firstDifference).toEqual({ line: 1, column: 5, before: 'cat sat', after: 'cat hat' });
+  });
+
+  it('keeps the whole line when the difference is the newline that ends it', () => {
+    // Index 3 is the `\n` in before: the excerpt is the line that newline ends, not the one after it
+    const result = checkProse('abc\ndef', 'abc');
+
+    expect(result.firstDifference).toEqual({ line: 1, column: 4, before: 'abc', after: 'abc' });
+  });
+
+  it('starts the excerpt at the line start when the difference is on a later line', () => {
+    const result = checkProse('one\ntwo three', 'one\ntwo THREE');
+
+    expect(result.firstDifference).toEqual({ line: 2, column: 5, before: 'two three', after: 'two THREE' });
+  });
+
+  it('adds no ellipsis to a stretch before the difference of exactly 30 characters', () => {
+    const lead = 'x'.repeat(30);
+    const result = checkProse(`${lead}A`, `${lead}B`);
+
+    expect(result.firstDifference).toEqual({ line: 1, column: 31, before: `${lead}A`, after: `${lead}B` });
+  });
+
+  it('cuts at 31 characters before the difference, keeping 30 behind an ellipsis', () => {
+    const result = checkProse(`${'x'.repeat(31)}A`, `${'x'.repeat(31)}B`);
+
+    expect(result.firstDifference).toMatchObject({ before: `...${'x'.repeat(30)}A`, after: `...${'x'.repeat(30)}B` });
+  });
+
+  it('adds no ellipsis to a stretch from the difference on of exactly 50 characters', () => {
+    const tail = 'y'.repeat(49);
+    const result = checkProse(`A${tail}`, `B${tail}`);
+
+    expect(result.firstDifference).toMatchObject({ before: `A${tail}`, after: `B${tail}` });
+  });
+
+  it('cuts at 51 characters from the difference on, keeping 50 before an ellipsis', () => {
+    const tail = 'y'.repeat(50);
+    const result = checkProse(`A${tail}`, `B${tail}`);
+
+    expect(result.firstDifference).toMatchObject({ before: `A${tail.slice(1)}...`, after: `B${tail.slice(1)}...` });
+  });
+});
+
+describe('checkRefsPreserved: the order of removed refs', () => {
+  it('lists removed refs sorted by term, whatever order before had them in', () => {
+    const result = checkRefsPreserved('[[Bob]] [[Carol]] [[Alice]]', 'Bob Carol Alice');
+
+    expect(result.removed.map(r => r.term)).toEqual(['Alice', 'Bob', 'Carol']);
+  });
+
+  it('sorts by UTF-16 code unit, so a capital comes before a lowercase letter', () => {
+    const result = checkRefsPreserved('[[alice]] [[Bob]]', 'alice Bob');
+
+    expect(result.removed.map(r => r.term)).toEqual(['Bob', 'alice']);
+  });
+});
+
+describe('checkLinks: the order of terms', () => {
+  it('checks and lists the terms sorted, whatever order after has them in', async () => {
+    const { client, executeDatalogQuery } = fakeGraph([{ name: 'Alice' }, { name: 'Bob' }, { name: 'Carol' }]);
+
+    const result = await checkLinks(client, 'Bob Carol Alice', '[[Bob]] [[Carol]] [[Alice]]');
+
+    expect(result.refs.resolved.map(r => r.term)).toEqual(['Alice', 'Bob', 'Carol']);
+    expect(executeDatalogQuery.mock.calls[0][1]).toEqual(['alice', 'bob', 'carol']);
+  });
+
+  it('sorts by UTF-16 code unit, so a capital comes before a lowercase letter', async () => {
+    const { client, executeDatalogQuery } = fakeGraph([{ name: 'Bob' }, { name: 'alice' }]);
+
+    const result = await checkLinks(client, 'alice Bob', '[[alice]] [[Bob]]');
+
+    expect(result.refs.resolved.map(r => r.term)).toEqual(['Bob', 'alice']);
+    expect(executeDatalogQuery.mock.calls[0][1]).toEqual(['bob', 'alice']);
+  });
+
+  it('lists unresolved terms sorted too', async () => {
+    const { client } = fakeGraph([]);
+
+    const result = await checkLinks(client, 'zed amy kim', '[[zed]] [[amy]] [[kim]]');
+
+    expect(result.refs.unresolved).toEqual(['amy', 'kim', 'zed']);
+  });
+
+  it('sorts a long list that was written in a scrambled order', async () => {
+    const names = Array.from({ length: 70 }, (_, i) => `page ${String(i).padStart(2, '0')}`);
+    const { client, executeDatalogQuery } = fakeGraph(names.map(name => ({ name })));
+    // 29 is coprime to 70, so this visits every name once, out of order
+    const scrambled = names.map((_, i) => names[(i * 29) % 70]);
+
+    const result = await checkLinks(client, scrambled.join(' '), scrambled.map(n => `[[${n}]]`).join(' '));
+
+    expect(result.refs.resolved.map(r => r.term)).toEqual(names);
+    expect(executeDatalogQuery.mock.calls[0][1]).toEqual(names);
+  });
+});
+
+describe('checkLinks: the term limit and its message', () => {
+  it(`accepts exactly ${MAX_LINK_TERMS} distinct terms`, async () => {
+    const names = Array.from({ length: MAX_LINK_TERMS }, (_, i) => `t${i}`);
+    const { client, executeDatalogQuery } = fakeGraph(names.map(name => ({ name })));
+
+    const result = await checkLinks(client, names.join(' '), names.map(n => `[[${n}]]`).join(' '));
+
+    expect(result.ok).toBe(true);
+    expect(result.totals).toMatchObject({ terms: MAX_LINK_TERMS });
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it('says which parameter is over, by how many distinct terms, and the limit', async () => {
+    const { client } = people();
+    const after = Array.from({ length: MAX_LINK_TERMS + 1 }, (_, i) => `[[t${i}]]`).join(' ');
+
+    const error = await checkLinks(client, '', after).catch(e => e);
+
+    expect(error).toBeInstanceOf(InvalidParameterError);
+    expect(error.message).toContain("'after'");
+    expect(error.message).toContain(`${MAX_LINK_TERMS + 1} distinct [[terms]]`);
+    expect(error.message).toContain(`at most ${MAX_LINK_TERMS} distinct [[terms]]`);
+  });
+});
+
+describe('checkLinks: warnings', () => {
+  it('warns of nothing when an ambiguous alias lists every candidate', async () => {
+    const { client } = fakeGraph([
+      { name: 'Project Borealis', aliases: ['roadmap'] },
+      { name: 'Project Cascade', aliases: ['roadmap'] },
+    ]);
+
+    const result = await checkLinks(client, 'the roadmap', 'the [[roadmap]]');
+
+    expect(result.refs.ambiguous[0]).toMatchObject({ totalCandidates: 2 });
+    expect(result.refs.ambiguous[0].candidates).toHaveLength(2);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('names the term, the total and the number listed when a candidate list is cut', async () => {
+    const { client } = fakeGraph(Array.from({ length: 12 }, (_, i) => ({ name: `p${String(i).padStart(2, '0')}`, aliases: ['x'] })));
+
+    const result = await checkLinks(client, 'x', '[[x]]');
+
+    const [warning] = result.warnings;
+    expect(warning.message).toContain('[[x]] is an alias of 12 pages. Showing 10');
+    expect(warning.message).toContain('the rest');
+  });
+
+  it('says how many terms went unchecked, and that this is not the same as missing pages', async () => {
+    const executeDatalogQuery = vi.fn(async () => null);
+    const client = { executeDatalogQuery, callAPI: vi.fn() } as unknown as LogseqClient;
+
+    const result = await checkLinks(client, 'Alice Bob', '[[Alice]] [[Bob]]');
+
+    const [warning] = result.warnings;
+    expect(warning.message).toContain('no answer for the 2 [[terms]]');
+    expect(warning.message).toContain('not the same as missing pages');
   });
 });
