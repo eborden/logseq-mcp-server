@@ -240,22 +240,18 @@ export async function getConceptEvolution(
 
   // Cap the mentions (#61) in timeline order: oldest first, undated last. The
   // timeline and the grouping keep the first `cap` of them. At or below the cap
-  // nothing changes.
+  // the loop keeps every block in its order, so nothing changes.
   const cap = Math.min(Math.max(0, Math.floor(maxEntries)), MAX_ENTRIES);
-  let timeline = fullTimeline;
-  let shownBlocks = filteredBlocks;
-  if (total > cap) {
-    let room = cap;
-    timeline = [];
-    for (const { date, blocks } of fullTimeline) {
-      if (room === 0) break;
-      const taken = blocks.slice(0, room);
-      timeline.push({ date, blocks: taken });
-      room -= taken.length;
-    }
-    const kept = new Set(timeline.flatMap(entry => entry.blocks));
-    shownBlocks = filteredBlocks.filter(block => kept.has(block));
+  let room = cap;
+  const timeline: TimelineEntry[] = [];
+  for (const { date, blocks } of fullTimeline) {
+    if (room === 0) break;
+    const taken = blocks.slice(0, room);
+    timeline.push({ date, blocks: taken });
+    room -= taken.length;
   }
+  const kept = new Set(timeline.flatMap(entry => entry.blocks));
+  const shownBlocks = filteredBlocks.filter(block => kept.has(block));
 
   // Group by period if requested
   let groupedTimeline: Map<string, BlockEntity[]> | undefined;
