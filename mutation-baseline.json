@@ -1,7 +1,7 @@
 {
   "stryker": "10.0.0",
   "files": {
-    "src/client.ts": { "score": 82.0, "ignores": 0 },
+    "src/client.ts": { "score": 100.0, "ignores": 0 },
     "src/config.ts": { "score": 92.0, "ignores": 0 },
     "src/datalog/queries.ts": { "score": 94.0, "ignores": 0 },
     "src/errors.ts": { "score": 100.0, "ignores": 0 },
