@@ -288,7 +288,7 @@ describe('queryByDateRange', () => {
           code: 'journals_unavailable',
           message:
             'LogSeq returned no answer when looking up journal pages (possibly no graph open or a re-index ' +
-            'in progress), so the empty result may not mean there are no journals in this range. ' +
+            'in progress), so the empty result may not mean there are no journals to show. ' +
             'Retry in a moment, or call logseq_get_graph_info to check which graph is open.'
         }
       ]);
@@ -327,11 +327,27 @@ describe('queryByDateRange', () => {
           code: 'blocks_unavailable',
           message:
             'LogSeq returned no answer when looking up the blocks on 2 journal page(s) (possibly no graph ' +
-            'open or a re-index in progress), so their blocks are missing from this result. This does not ' +
-            'mean the days are empty. Retry in a moment, or call logseq_get_graph_info to check which graph is open.'
+            'open or a re-index in progress), so their blocks are missing from this result (with a search term, ' +
+            'those days are left out). This does not mean the days are empty. Retry in a moment, or call logseq_get_graph_info to check which graph is open.'
         }
       ]);
       expect(result.warnings![0]).not.toHaveProperty('howToFetchAll');
+    });
+
+    it('should warn when a null blocks answer leaves a search_term with no days to show', async () => {
+      const executeDatalogQuery = vi
+        .fn()
+        .mockResolvedValueOnce([[journalPage(1, 20250101, 'Day One')], [journalPage(2, 20250102, 'Day Two')]])
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue([]); // the search term's alias lookup
+
+      const result = await queryByDateRange(({ executeDatalogQuery } as unknown as LogseqClient), 20250101, 20250102, 'atlas');
+
+      // every day is dropped, since no block could match; the warning is what says why
+      expect(result.entries).toEqual([]);
+      expect(result.summary).toMatchObject({ totalDays: 0, totalBlocks: 0 });
+      expect(result.warnings?.map(w => w.code)).toEqual(['blocks_unavailable']);
+      expect(result.warnings![0].message).toContain('with a search term, those days are left out');
     });
 
     it('should keep the blocks_unavailable warning next to a resolve_refs result', async () => {

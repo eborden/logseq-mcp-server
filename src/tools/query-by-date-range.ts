@@ -511,7 +511,7 @@ function journalsUnavailable(): ResultWarning {
     code: 'journals_unavailable',
     message:
       'LogSeq returned no answer when looking up journal pages (possibly no graph open or a re-index ' +
-      'in progress), so the empty result may not mean there are no journals in this range. ' +
+      'in progress), so the empty result may not mean there are no journals to show. ' +
       RETRY_ADVICE
   };
 }
@@ -521,8 +521,8 @@ function blocksUnavailable(pageCount: number): ResultWarning {
     code: 'blocks_unavailable',
     message:
       `LogSeq returned no answer when looking up the blocks on ${pageCount} journal page(s) (possibly no graph ` +
-      'open or a re-index in progress), so their blocks are missing from this result. This does not ' +
-      'mean the days are empty. ' +
+      'open or a re-index in progress), so their blocks are missing from this result (with a search term, ' +
+      'those days are left out). This does not mean the days are empty. ' +
       RETRY_ADVICE
   };
 }
