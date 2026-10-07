@@ -348,6 +348,35 @@ describe('resolvedAliases', () => {
     expect(resolvedAliases(setOf([...expected].reverse()))).toEqual({ resolvedAliases: expected });
   });
 
+  it('orders names that collate equal under en the same way whatever order they arrive in', () => {
+    // Each pair is two distinct strings that `en` collation treats as equal, so
+    // only the code-unit tie-break fixes their order.
+    const nfc = 'Caf\u00e9';
+    const nfd = 'Cafe\u0301';
+    const softHyphen = 'Jor\u00addan';
+    const joiner = 'Jor\u200ddan';
+    const plain = 'Jordan';
+    const pairs = [
+      [nfc, nfd],
+      [plain, softHyphen],
+      [plain, joiner]
+    ];
+    const setOf = (originalNames: string[]) => ({
+      members: originalNames.map((originalName, i) => ({ id: i + 1, name: originalName.toLowerCase(), originalName })),
+      truncated: false
+    });
+
+    for (const [a, b] of pairs) {
+      expect(a.localeCompare(b, 'en')).toBe(0);
+      expect(a).not.toBe(b);
+      expect(resolvedAliases(setOf([a, b]))).toEqual(resolvedAliases(setOf([b, a])));
+    }
+    expect(resolvedAliases(setOf([nfd, nfc]))).toEqual({ resolvedAliases: [nfd, nfc] });
+    expect(resolvedAliases(setOf([softHyphen, plain, joiner]))).toEqual(
+      resolvedAliases(setOf([joiner, softHyphen, plain]))
+    );
+  });
+
   it('compares every pair in the en locale, so the order does not depend on the process locale', () => {
     // A test cannot change the default locale of a running process, so check
     // the comparator's calls: each one must name `en` itself.

@@ -80,8 +80,10 @@ export function resolvedAliases(set: AliasSet): ResolvedAliases {
   if (!hasAliases(set)) return {};
   const names = set.members.map(member => member.originalName);
   // One comparison pinned to `en`: names that differ only in accents or case
-  // still order the same on any host, whatever the process locale.
-  return { resolvedAliases: names.sort((a, b) => a.localeCompare(b, 'en')) };
+  // still order the same on any host, whatever the process locale. Names `en`
+  // collation ties (NFC and NFD forms, a soft hyphen or zero-width joiner)
+  // fall back to code-unit order, so the order never follows arrival order.
+  return { resolvedAliases: names.sort((a, b) => a.localeCompare(b, 'en') || (a < b ? -1 : a > b ? 1 : 0)) };
 }
 
 /** The `alias_set_truncated` warning for each set that was cut, empty otherwise. */
