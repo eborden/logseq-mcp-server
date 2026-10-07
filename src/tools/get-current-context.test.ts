@@ -311,6 +311,28 @@ describe('getCurrentContext', () => {
     });
   });
 
+  it('does not hand a pulled page with no id to a block that carries no page (#240)', async () => {
+    // The pull answers a row with no id (pulledPageSchema allows it). If it were stored
+    // under the key `undefined`, the focused block, which has no page, would read it back.
+    const { page: _page, ...orphan } = block();
+    mockEditor({
+      block: orphan,
+      selected: [block({ uuid: 's1', page: { id: 20 } })]
+    });
+    executeDatalogQuery.mockResolvedValue([
+      [{ name: 'bob notes', 'original-name': 'Bob Notes' }]
+    ]);
+
+    const result = await getCurrentContext(client);
+
+    expect(executeDatalogQuery).toHaveBeenCalledTimes(1);
+    expect(result.page).toBeNull();
+    expect(result.message).toBe(NO_PAGE_OPEN_MESSAGE);
+    expect(result.focusedBlock).not.toHaveProperty('pageName');
+    expect(result.selectedBlocks).toHaveLength(1);
+    expect(result.selectedBlocks?.[0]).not.toHaveProperty('pageName');
+  });
+
   it('keeps only the children that are block entities, whatever else the array holds', async () => {
     mockEditor({
       page: PAGE,
