@@ -78,13 +78,16 @@ const tokenRegex = () =>
   );
 
 function toToken(raw: string, blockEmbed?: string, pageEmbed?: string, ref?: string): Token {
+  // Only a page embed's `target` is read; for a uuid it is the key itself
   if (blockEmbed) {
-    return { kind: 'block_embed', raw, target: blockEmbed.toLowerCase(), key: blockEmbed.toLowerCase() };
+    const key = blockEmbed.toLowerCase();
+    return { kind: 'block_embed', raw, target: key, key };
   }
   if (pageEmbed) {
     return { kind: 'page_embed', raw, target: pageEmbed.trim(), key: pageEmbed.trim().toLowerCase() };
   }
-  return { kind: 'ref', raw, target: ref!.toLowerCase(), key: ref!.toLowerCase() };
+  const key = ref!.toLowerCase();
+  return { kind: 'ref', raw, target: key, key };
 }
 
 function scanTokens(text: string): Token[] {
