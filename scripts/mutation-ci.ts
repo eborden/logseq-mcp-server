@@ -377,7 +377,7 @@ export function renderSummary(plan: Plan | null, scores: FileScore[] | null): st
       out.push(
         `Mode: cache-miss path. ${plan.reasons.join('; ')}.`,
         '',
-        "The files are the PR's own changes against its base, not what `main` changed since the cached results were saved.",
+        "The files are this change's own, against `BASE_SHA` (the PR base, or the commit before a push), not everything changed since the cached results were saved.",
         '',
       );
       if (plan.mode === 'empty') {
