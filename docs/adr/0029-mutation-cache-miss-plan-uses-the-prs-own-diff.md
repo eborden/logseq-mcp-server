@@ -30,7 +30,7 @@ This ADR replaces ADR-0028's plan inputs and its advice to the author, and ADR-0
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-07
 

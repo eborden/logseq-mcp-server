@@ -45,7 +45,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0026-mutation-testing-ratchet](0026-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the unit suite | superseded by 0027-cap-mutation-cache-miss-set |
 | [0027-cap-mutation-cache-miss-set](0027-cap-mutation-cache-miss-set.md) | Cap the mutation job's cache-miss set and correct its audit claim | superseded by 0028-cap-mutation-cache-miss-set-by-mutant-budget |
 | [0028-cap-mutation-cache-miss-set-by-mutant-budget](0028-cap-mutation-cache-miss-set-by-mutant-budget.md) | Cap the mutation job's cache-miss set by an estimated mutant budget | superseded by 0029-mutation-cache-miss-plan-uses-the-prs-own-diff |
-| [0029-mutation-cache-miss-plan-uses-the-prs-own-diff](0029-mutation-cache-miss-plan-uses-the-prs-own-diff.md) | Plan the mutation cache-miss run from the PR's own diff, and ask for a weekly run only for a left-out changed source | proposed |
+| [0029-mutation-cache-miss-plan-uses-the-prs-own-diff](0029-mutation-cache-miss-plan-uses-the-prs-own-diff.md) | Plan the mutation cache-miss run from the PR's own diff, and ask for a weekly run only for a left-out changed source | accepted |
 
 ## File naming rule
 
