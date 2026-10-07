@@ -70,6 +70,11 @@ export const aliasNames = (set: AliasSet): string[] => set.members.map(member =>
 /** True when the set holds more than the page asked about. */
 export const hasAliases = (set: AliasSet): boolean => set.members.length > 1;
 
+/** Order two alias names by `en` collation, then by code unit when `en` ties them. */
+export function compareAliasNames(a: string, b: string): number {
+  return a.localeCompare(b, 'en') || (a < b ? -1 : a > b ? 1 : 0);
+}
+
 /**
  * `resolvedAliases` for a result: the original-case names the tool covered,
  * sorted so asking by either name of the group reports the same list (a
@@ -83,7 +88,7 @@ export function resolvedAliases(set: AliasSet): ResolvedAliases {
   // still order the same on any host, whatever the process locale. Names `en`
   // collation ties (NFC and NFD forms, a soft hyphen or zero-width joiner)
   // fall back to code-unit order, so the order never follows arrival order.
-  return { resolvedAliases: names.sort((a, b) => a.localeCompare(b, 'en') || (a < b ? -1 : a > b ? 1 : 0)) };
+  return { resolvedAliases: names.sort(compareAliasNames) };
 }
 
 /** The `alias_set_truncated` warning for each set that was cut, empty otherwise. */
