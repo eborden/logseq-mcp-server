@@ -218,13 +218,13 @@ describe('buildTips', () => {
         expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'atlas' });
       });
 
-      it('counts tags from context.tags, tags and pageRefs together', () => {
-        const result = [
-          { pageName: J, context: { tags: ['atlas'] } },
-          { pageName: J, pageRefs: ['atlas'] },
-          { pageName: J, tags: ['Alice'] },
-        ];
-        const tips = buildTips('logseq_search_blocks', { query: 'x' }, result);
+      it.each([
+        ['tags', { tags: ['atlas'] }],
+        ['pageRefs', { pageRefs: ['atlas'] }],
+        ['context.tags', { context: { tags: ['atlas'] } }],
+      ])('counts a mention from %s alone', (_label, mention) => {
+        // The block's page is of unknown kind, so ignoring the source would suggest that page instead
+        const tips = buildTips('logseq_search_blocks', { query: 'x' }, [{ pageName: J, ...mention }]);
         expect(argsOf(tips, 'logseq_build_context')).toEqual({ topic_name: 'atlas' });
       });
 
