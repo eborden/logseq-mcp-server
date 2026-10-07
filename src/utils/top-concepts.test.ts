@@ -179,12 +179,12 @@ describe('rollUpTopConcepts', () => {
   });
 
   it('breaks a tie on count by days, highest first', () => {
-    // both have 2 blocks; Bob is first seen but on one day, Alice on two
+    // both have 2 blocks; Alice is first seen and sorts first by name, but sits on one day, Bob on two
     const refs = new Map<number, ConceptRef[]>([
-      [1, [concept(2, 'Bob')]],
-      [2, [concept(2, 'Bob')]],
-      [3, [concept(1, 'Alice')]],
-      [4, [concept(1, 'Alice')]]
+      [1, [concept(1, 'Alice')]],
+      [2, [concept(1, 'Alice')]],
+      [3, [concept(2, 'Bob')]],
+      [4, [concept(2, 'Bob')]]
     ]);
     const entries = [
       { date: 20250101, blocks: [blk(1), blk(2), blk(3)] },
@@ -192,16 +192,16 @@ describe('rollUpTopConcepts', () => {
     ];
 
     expect(rollUpTopConcepts(entries, refs, 10)).toEqual([
-      { name: 'Alice', count: 2, days: 2 },
-      { name: 'Bob', count: 2, days: 1 }
+      { name: 'Bob', count: 2, days: 2 },
+      { name: 'Alice', count: 2, days: 1 }
     ]);
   });
 
   it('breaks a tie on count and days by name, ignoring case', () => {
-    // first seen: carol, Bob, alice, so neither the first-seen order nor its reverse is the answer
+    // first seen: Bob, carol, alice, so neither that order nor its reverse (alice, carol, Bob) is the answer
     const refs = new Map<number, ConceptRef[]>([
-      [1, [concept(1, 'carol')]],
-      [2, [concept(2, 'Bob')]],
+      [1, [concept(1, 'Bob')]],
+      [2, [concept(2, 'carol')]],
       [3, [concept(3, 'alice')]]
     ]);
     const entries = [{ date: 20250101, blocks: [blk(1), blk(2), blk(3)] }];
