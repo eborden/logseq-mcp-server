@@ -12,7 +12,7 @@
     "src/tools/check-links.ts": { "score": 90.0, "ignores": 0 },
     "src/tools/get-backlinks.ts": { "score": 91.0, "ignores": 0 },
     "src/tools/get-block.ts": { "score": 100.0, "ignores": 0 },
-    "src/tools/get-concept-evolution.ts": { "score": 81.0, "ignores": 0 },
+    "src/tools/get-concept-evolution.ts": { "score": 96.0, "ignores": 0 },
     "src/tools/get-concept-network.ts": { "score": 89.0, "ignores": 0 },
     "src/tools/get-context-for-query.ts": { "score": 85.0, "ignores": 0 },
     "src/tools/get-current-context.ts": { "score": 91.0, "ignores": 0 },
