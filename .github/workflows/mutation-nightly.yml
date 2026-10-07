@@ -4,14 +4,15 @@ name: Mutation testing (nightly cache check)
 # blind-spot change lands on main, every push takes the cache-miss path and can't save the cache,
 # so every PR plans against an old one until a weekly run on main saves a new one (ADR-0029).
 #
-# The check reads the newest saved mutation-incremental-* cache on main and main's commits since,
-# and asks `node scripts/mutation-ci.ts nightly` (nightlyDecision) whether to dispatch
-# mutation-weekly.yml on main. It dispatches only when one of those commits changed a blind-spot
-# input (or no cache is saved), and never while a weekly run on main is in flight or started in the
-# last 20 hours. Most nights the cache is current and nothing runs.
+# The check reads the newest saved mutation-incremental-* cache on main and asks
+# `node scripts/mutation-ci.ts nightly` (nightlyDecision) whether to dispatch mutation-weekly.yml on
+# main. It dispatches only when main differs from the cache's commit in a blind-spot input (the
+# tree diff the PR plan reads) or no cache is saved, and never while a weekly run on main is in
+# flight or started in the last 20 hours. Most nights the cache is current and nothing runs. An API
+# response it can't read fails the job, so nothing is dispatched.
 #
 # It runs after the Monday weekly run's start (03:17), so on Mondays that run holds it back. By hand
-# (Actions tab, "Run workflow") it makes the same check, with the same guard.
+# (Actions tab, "Run workflow") it makes the same check, with the same 20-hour guard.
 on:
   schedule:
     - cron: '47 5 * * *'
@@ -36,7 +37,7 @@ jobs:
     outputs:
       dispatch: ${{ steps.decide.outputs.dispatch }}
     steps:
-      # Main's full history, to walk its commits since the cache's commit.
+      # Main's full history, to check the cache's commit is on it and diff from it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
