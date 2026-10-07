@@ -838,7 +838,9 @@ describe('checkProse: output pinned across the guard removal (#246)', () => {
     for (let n = 0; n < 20000; n++) {
       const before = text();
       const kind = n % 4;
-      // Unrelated, a prefix of the other, an extension of it, or one edit away
+      // Unrelated, a prefix of the other, an extension of it, or text inserted at a random
+      // position (the start and end included; it may split a surrogate pair)
+      const at = Math.floor(rand() * (before.length + 1));
       const after =
         kind === 0
           ? text()
@@ -846,7 +848,7 @@ describe('checkProse: output pinned across the guard removal (#246)', () => {
             ? before.slice(0, Math.floor(rand() * (before.length + 1)))
             : kind === 2
               ? before + text()
-              : before.replace(/./s, c => c + text());
+              : before.slice(0, at) + text() + before.slice(at);
       expect(checkProse(before, after), JSON.stringify([before, after])).toEqual(referenceProse(before, after));
       expect(checkProse(after, before), JSON.stringify([after, before])).toEqual(referenceProse(after, before));
     }
