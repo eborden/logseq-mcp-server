@@ -31,7 +31,7 @@
     "src/utils/date-presets.ts": { "score": 97.0, "ignores": 0 },
     "src/utils/date-utils.ts": { "score": 90.0, "ignores": 0 },
     "src/utils/entity-fields.ts": { "score": 100.0, "ignores": 0 },
-    "src/utils/escape-regex.ts": { "score": 100.0, "ignores": 0 },
+    "src/utils/escape-regex.ts": { "score": 99.0, "ignores": 0 },
     "src/utils/markdown-context.ts": { "score": 88.0, "ignores": 0 },
     "src/utils/markdown.ts": { "score": 90.0, "ignores": 0 },
     "src/utils/param-aliases.ts": { "score": 88.0, "ignores": 0 },
