@@ -50,7 +50,6 @@ function rejectUnknownArguments(def: PromptDefinition, args: Record<string, stri
   if (unknown.length > 0) {
     invalid(
       `Prompt ${JSON.stringify(def.name)} has no argument ${unknown.map(k => JSON.stringify(k)).join(', ')}. ` +
-      // Stryker disable next-line StringLiteral: no prompt declares two arguments or none, so the ', ' separator and the '(none)' fallback can't be reached with the prompts registered today
       `Arguments: ${[...known].join(', ') || '(none)'}.`
     );
   }
@@ -84,7 +83,6 @@ function parseDay(text: string): Date | null {
   if (!match) return null;
   const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
   const date = new Date(year, month - 1, day);
-  // Stryker disable next-line ConditionalExpression: the month and day checks are redundant with the others. A month outside 1-12 moves the year, and a day past the month's end moves the month and fails the day check, so neither can be false while the other two are true
   const real = date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
   return real ? date : null;
 }
@@ -129,7 +127,6 @@ export function resolveWeek(week: string | undefined, now: Date): WeekRange {
     invalid(`The week of ${iso(monday)} has not started yet. Use "this", "last", or a date in a past or current week.`);
   }
   const friday = shiftDays(monday, 4);
-  // Stryker disable next-line EqualityOperator: on a Friday `today` and `friday` are the same day, so > and >= give the same end
   const end = friday.getTime() > today.getTime() ? today : friday;
   return {
     monday: iso(monday),
@@ -167,7 +164,6 @@ export function resolveMonth(month: string | undefined, now: Date): MonthRange {
     invalid(`${iso(first).slice(0, 7)} has not started yet. Use "this", "last", or a past or current month.`);
   }
   const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
-  // Stryker disable next-line EqualityOperator: on a month's last day `today` and `last` are the same day, so > and >= give the same end
   const end = last.getTime() > today.getTime() ? today : last;
   return {
     month: iso(first).slice(0, 7),

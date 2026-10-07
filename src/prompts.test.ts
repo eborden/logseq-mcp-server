@@ -293,6 +293,9 @@ function expectInvalidParams(fn: () => unknown, message: string): void {
 const linesOf = (name: string, args: Record<string, string>, now: Date): string[] =>
   textOf(getPrompt(name, args, now) as any).split('\n');
 
+// The shared rules and closing lines below are pinned word for word, on purpose (#206): they are
+// the prose that no other test covers, and the mutation baseline counts on it. Reword a prompt, and
+// update the matching line here. The limits (12 items, word counts, the headings) are the contract.
 const READ_ONLY_LINE = 'The logseq_* tools only read. Show the result here; write it into the graph only if I ask and you have file access.';
 const skillLine = (skill: string) => `If the logseq-skills skill is available, follow its ${skill} workflow instead of the steps below.`;
 
