@@ -334,6 +334,28 @@ describe('planFromRepo', () => {
     expect(planFromRepo({ cache: 'miss', since: '', fallbackSince: 'base111', config }, io)).toMatchObject({ mutate: ['src/a.ts'], fromBaseline: ['src/a.ts'] });
   });
 
+  it("takes the baseline entries a PR changed against the PR base, not the cache's commit, which can predate the baseline", () => {
+    const entry = (score: number) => ({ score, ignores: 0 });
+    const baseline = (files: Record<string, { score: number; ignores: number }>) => JSON.stringify({ stryker: '10.0.0', files });
+    const { io } = fakeIo({
+      commits: ['cache111', 'base111'],
+      // A blind-spot file changed, so the cache can't be trusted and the cache-miss path runs.
+      diff: { cache111: ['vitest.config.ts', 'mutation-baseline.json'] },
+      files: {
+        'mutation-baseline.json': baseline({ 'src/a.ts': entry(92), 'src/b.ts': entry(80), 'src/c.ts': entry(70) }),
+        'src/a.ts': '',
+        'src/b.ts': '',
+        'src/c.ts': '',
+      },
+      // The cache is older than the baseline (no file there), and the PR base differs from HEAD in a.ts only.
+      old: { 'base111:mutation-baseline.json': baseline({ 'src/a.ts': entry(90), 'src/b.ts': entry(80), 'src/c.ts': entry(70) }) },
+    });
+    const result = planFromRepo({ cache: 'hit', since: 'cache111', fallbackSince: 'base111', config }, io);
+    expect(result.mode).toBe('targeted');
+    expect(result.fromBaseline).toEqual(['src/a.ts']);
+    expect(result.mutate).toEqual(['src/a.ts']);
+  });
+
   it('says nothing was checked when no commit to diff against exists', () => {
     const { io, calls } = fakeIo({ commits: [] });
     const result = planFromRepo({ cache: 'hit', since: 'gone222', fallbackSince: '0'.repeat(40), config }, io);
