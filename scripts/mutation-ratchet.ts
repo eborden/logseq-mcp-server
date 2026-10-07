@@ -529,74 +529,125 @@ export function updateBaseline(input: UpdateInput): UpdateResult {
 // ---------------------------------------------------------------------------
 // Changed sources left to the weekly run (ADR-0028, #239)
 
-/** The fields of a `mutation-weekly.yml` run, as the Actions API lists it, that the gate reads. */
-export interface WeeklyRun {
-  /** The commit the workflow file ran from: the branch tip it was started on, not the `ref` input. */
-  head_sha: string;
-  /** The run's title. `run-name` in mutation-weekly.yml puts the `ref` input in it, so it holds the SHA checked out. */
-  display_title?: string | null;
-  conclusion: string | null;
+/** The workflow whose runs can clear the gate. */
+export const WEEKLY_WORKFLOW = 'mutation-weekly.yml';
+
+/** `retention-days` of the report artifact in mutation-weekly.yml (a test keeps the two equal). */
+export const WEEKLY_ARTIFACT_RETENTION_DAYS = 90;
+
+/** The name the weekly job gives its report: `mutation-report-` and the commit it checked out (`git rev-parse HEAD`). */
+export const weeklyArtifactName = (sha: string): string => `mutation-report-${sha}`;
+
+/** The fields of an artifact in `GET /repos/{repo}/actions/artifacts` that the gate reads. */
+export interface WeeklyArtifact {
+  name: string;
+  expired: boolean;
+  /** The run that uploaded it. The artifact doesn't say which workflow that was. */
+  workflow_run?: { id: number; /** Not read: where the workflow file ran from, not what it mutated. */ head_sha?: string } | null;
 }
 
-/**
- * True when a successful `mutation-weekly.yml` run covers the commit. A run started from a branch with
- * an empty `ref` checks out its own `head_sha`. A run started with a SHA in `ref` has the branch it was
- * started from as `head_sha`, so that SHA is matched in the title (`run-name` in the workflow). The weekly
- * run fails when a file is below its baseline, so `success` means every file passed.
- */
-export function weeklyRunCovers(runs: readonly WeeklyRun[], sha: string): boolean {
-  return runs.some(r => r.conclusion === 'success' && (r.head_sha === sha || (r.display_title ?? '').includes(sha)));
+/** The fields of a run in `GET /repos/{repo}/actions/runs/{id}` that the gate reads. */
+export interface WeeklyRunInfo {
+  /** The workflow file, as `.github/workflows/mutation-weekly.yml`. */
+  path?: string | null;
+  conclusion: string | null;
+  /** Not read: where the workflow file ran from, not what it mutated. */
+  head_sha?: string;
 }
+
+/** The two reads of the Actions API the gate needs, passed in so tests can fake them. */
+export interface RunLookup {
+  /** Artifacts with exactly this name, newest first. */
+  artifacts(name: string): Promise<readonly WeeklyArtifact[]>;
+  run(id: number): Promise<WeeklyRunInfo | null>;
+}
+
+/** True when the run is one of mutation-weekly.yml and it succeeded. The weekly job's last step fails when a file is below its baseline. */
+export function isSuccessfulWeeklyRun(run: WeeklyRunInfo | null): boolean {
+  const path = run?.path ?? '';
+  return run?.conclusion === 'success' && (path === `.github/workflows/${WEEKLY_WORKFLOW}` || path.startsWith(`.github/workflows/${WEEKLY_WORKFLOW}@`));
+}
+
+/** The most artifacts of one name whose runs the gate looks at. A name holds one per run on that commit, a handful. */
+const MAX_ARTIFACTS_CHECKED = 10;
 
 /**
  * The failure for changed source files the plan left out because they passed the mutant budget, or null.
  * A changed source that no mutation run checked on its own PR would pass unchecked, so this fails the
- * ratchet unless a successful weekly run exists for the PR's head commit. After someone runs it, re-running
- * the job turns it green. Files imported by changed tests and baseline entries are not gated (they stay
- * the `::warning`). It makes no call when no changed source was left out, and none outside a PR (no
- * `headSha`: a push to main has nothing to wait for). A lookup that fails is a failure too, since an
- * unchecked file must not pass for want of an answer. `listRuns` is the one network call, passed in.
+ * ratchet unless a successful `mutation-weekly.yml` run exists for the PR's head commit. After someone runs it,
+ * re-running the job turns it green. Files imported by changed tests and baseline entries are not gated (they
+ * stay the `::warning`). It makes no call when no changed source was left out, and none outside a PR (no
+ * `headSha`: a push to main has nothing to wait for). A look-up that fails is a failure too, since an
+ * unchecked file must not pass for want of an answer.
+ *
+ * "A run for the head commit" is the report artifact the weekly job uploads, named `mutation-report-` and
+ * the commit it checked out (`git rev-parse HEAD`, so the commit of its `ref` input, whichever branch it
+ * was started from). That name is the proof of what was mutated. The artifact must not have expired, and
+ * the run that uploaded it must be a successful run of mutation-weekly.yml (the artifact doesn't say which
+ * workflow made it, so the run is read). A run's `head_sha` or title would match a run that checked out
+ * other code.
  */
 export async function changedSourceGate(opts: {
   changedSources: readonly string[];
   headSha: string | undefined;
-  listRuns: () => Promise<readonly WeeklyRun[]>;
+  lookup: RunLookup;
 }): Promise<Failure | null> {
   const { changedSources, headSha } = opts;
   if (changedSources.length === 0 || headSha === undefined || headSha === '') return null;
   const files = changedSources.map(f => `\`${f}\``).join(', ');
   const lead = `${changedSources.length} changed source file(s) were not mutated on this PR, since they pass the mutant budget: ${files}.`;
-  const fix = (sha: string) => `Run mutation-weekly.yml on ${sha} (Actions tab, "Run workflow", the full SHA in "ref"), then re-run this job.`;
+  const fix = (sha: string) => `Run ${WEEKLY_WORKFLOW} on ${sha} (Actions tab, "Run workflow", the full SHA in "ref"), then re-run this job.`;
+  const failure = (message: string): Failure => ({ kind: 'changed-source-unchecked', file: null, message });
   if (!/^[0-9a-f]{40}$/.test(headSha)) {
-    return { kind: 'changed-source-unchecked', file: null, message: `${lead} The PR's head commit is not a full SHA, so a weekly run for it can't be looked up. ${fix("this PR's head commit")}` };
+    return failure(`${lead} The PR's head commit is not a full SHA, so a weekly run for it can't be looked up. ${fix("this PR's head commit")}`);
   }
-  let runs: readonly WeeklyRun[];
+  const name = weeklyArtifactName(headSha);
+  let expired = 0;
   try {
-    runs = await opts.listRuns();
+    const found = (await opts.lookup.artifacts(name)).filter(a => a.name === name);
+    for (const artifact of found.slice(0, MAX_ARTIFACTS_CHECKED)) {
+      if (artifact.expired) {
+        expired += 1;
+        continue;
+      }
+      const id = artifact.workflow_run?.id;
+      if (typeof id !== 'number') continue;
+      if (isSuccessfulWeeklyRun(await opts.lookup.run(id))) return null;
+    }
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
-    return { kind: 'changed-source-unchecked', file: null, message: `${lead} Looking up the mutation-weekly.yml runs failed (${why}), so this can't be told from a missing run. ${fix(headSha)}` };
+    return failure(`${lead} Looking up the ${WEEKLY_WORKFLOW} report for ${headSha} failed (${why}), so this can't be told from a missing run. ${fix(headSha)}`);
   }
-  if (weeklyRunCovers(runs, headSha)) return null;
-  return { kind: 'changed-source-unchecked', file: null, message: `${lead} No successful mutation-weekly.yml run exists for ${headSha}. ${fix(headSha)}` };
+  const gone =
+    expired > 0 ? ` A report for it exists but its artifact expired (they are kept ${WEEKLY_ARTIFACT_RETENTION_DAYS} days), so the run has to be repeated.` : '';
+  return failure(`${lead} No successful ${WEEKLY_WORKFLOW} run has uploaded \`${name}\`.${gone} ${fix(headSha)}`);
 }
 
-/**
- * The successful runs of `mutation-weekly.yml`, newest first, from the Actions API (one page of 100, which
- * holds many weeks of runs). Needs `actions: read` on GITHUB_TOKEN. The token is only sent as a header and
- * is never in a message.
- */
-export async function listWeeklyRuns(env: Record<string, string | undefined>): Promise<WeeklyRun[]> {
+/** A GET against the GitHub API with the job's token as a header. The token is never in a message. */
+async function githubGet(env: Record<string, string | undefined>, path: string): Promise<unknown> {
   const repo = env.GITHUB_REPOSITORY;
   const token = env.GITHUB_TOKEN;
   if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are needed');
   const api = env.GITHUB_API_URL || 'https://api.github.com';
-  const response = await fetch(`${api}/repos/${repo}/actions/workflows/mutation-weekly.yml/runs?status=success&per_page=100`, {
+  const response = await fetch(`${api}/repos/${repo}/${path}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
   });
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error(`the GitHub API answered ${response.status}; the job needs \`actions: read\``);
-  const body = (await response.json()) as { workflow_runs?: unknown };
-  return Array.isArray(body.workflow_runs) ? (body.workflow_runs as WeeklyRun[]) : [];
+  return response.json();
+}
+
+/** The gate's reads of the Actions API (`actions: read` on GITHUB_TOKEN). The name filter is exact, so one page holds them all. */
+export function githubRunLookup(env: Record<string, string | undefined>): RunLookup {
+  return {
+    async artifacts(name) {
+      const body = (await githubGet(env, `actions/artifacts?name=${encodeURIComponent(name)}&per_page=100`)) as { artifacts?: unknown } | null;
+      return Array.isArray(body?.artifacts) ? (body.artifacts as WeeklyArtifact[]) : [];
+    },
+    async run(id) {
+      return (await githubGet(env, `actions/runs/${id}`)) as WeeklyRunInfo | null;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -869,7 +920,7 @@ async function runCheck(args: string[]): Promise<number> {
   const gateFailure = await changedSourceGate({
     changedSources: leftGroups?.changedSources ?? [],
     headSha,
-    listRuns: () => listWeeklyRuns(process.env),
+    lookup: githubRunLookup(process.env),
   });
 
   // The base comparison is cheap, so it runs first and its failures are in the log before any re-run starts.
