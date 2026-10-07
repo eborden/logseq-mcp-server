@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import {
+  CACHE_KEY_PREFIX,
   changedBaselineFiles,
   chooseBase,
   FALLBACK_MUTANTS,
@@ -10,10 +11,16 @@ import {
   isBlindSpot,
   MUTANT_BUDGET,
   mutantCountsFromIncremental,
+  newestCacheCommit,
+  nightlyDecision,
+  nightlyFromRepo,
+  parseCommitLog,
   plan,
   planFromRepo,
+  RECENT_RUN_HOURS,
   renderSummary,
   scopeFromConfig,
+  weeklyRunsFromApi,
   type PlanInput,
   type PlanIo,
 } from '../scripts/mutation-ci.js';
@@ -844,6 +851,148 @@ describe('planFromRepo', () => {
     const result = planFromRepo({ cache: 'hit', since: 'gone222', fallbackSince: '0'.repeat(40), config }, io);
     expect(result).toMatchObject({ mode: 'empty', mutate: [], reasons: ['no commit to diff against was found'] });
     expect(calls.some(c => c[0] === 'diff')).toBe(false);
+  });
+});
+
+// #279, ADR-0030: the nightly check dispatches a weekly run only when the newest saved cache is stale, and
+// at most one a night.
+describe('nightlyDecision', () => {
+  const sha = (c: string) => c.repeat(40);
+  const now = new Date('2026-10-07T05:47:00Z');
+  const blindSpot = (p: string) => isBlindSpot(p, scope);
+  const old = { status: 'completed', startedAt: '2026-10-05T03:17:00Z' }; // 50 hours before now
+  const base = { cacheCommit: sha('a'), blindSpot, runs: [old], now };
+
+  it('does not dispatch when no commit since the cache changed a blind-spot input', () => {
+    const d = nightlyDecision({ ...base, commitsSince: [{ sha: sha('b'), files: ['src/utils/snippet.ts', 'src/utils/snippet.test.ts', 'README.md'] }] });
+    expect(d.dispatch).toBe(false);
+    expect(d.reason).toContain('is current');
+    expect(nightlyDecision({ ...base, commitsSince: [] }).dispatch).toBe(false);
+  });
+
+  it('dispatches when a commit since the cache changed a blind-spot input, and names the newest one', () => {
+    const d = nightlyDecision({
+      ...base,
+      commitsSince: [
+        { sha: sha('c'), files: ['src/utils/snippet.ts'] },
+        { sha: sha('b'), files: ['src/helpers/child.mjs', 'README.md'] },
+        { sha: sha('9'), files: ['package-lock.json'] },
+      ],
+    });
+    expect(d).toEqual({ dispatch: true, reason: expect.stringContaining(`commit ${sha('b')}`) });
+    expect(d.reason).toContain('src/helpers/child.mjs');
+    expect(d.reason).not.toContain('README.md');
+  });
+
+  it('dispatches when no cache is saved, or its commit is not in main history', () => {
+    expect(nightlyDecision({ ...base, cacheCommit: null, commitsSince: null })).toMatchObject({ dispatch: true, reason: 'no incremental cache is saved from main' });
+    expect(nightlyDecision({ ...base, commitsSince: null }).reason).toContain("not in main's history");
+  });
+
+  it('does not dispatch a stale cache while a weekly run on main is in flight', () => {
+    const stale = { ...base, cacheCommit: null, commitsSince: null };
+    for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
+      const d = nightlyDecision({ ...stale, runs: [{ status, startedAt: '2026-10-01T00:00:00Z' }, old] });
+      expect(d.dispatch, status).toBe(false);
+      expect(d.reason).toContain(`is ${status}`);
+    }
+  });
+
+  it('does not dispatch a stale cache when a weekly run on main started in the last 20 hours', () => {
+    expect(RECENT_RUN_HOURS).toBe(20);
+    const stale = { ...base, cacheCommit: null, commitsSince: null };
+    const at = (hoursAgo: number) => ({ status: 'completed', startedAt: new Date(now.getTime() - hoursAgo * 3600_000).toISOString() });
+    expect(nightlyDecision({ ...stale, runs: [at(19.9)] }).dispatch).toBe(false);
+    expect(nightlyDecision({ ...stale, runs: [at(20)] }).dispatch).toBe(false);
+    expect(nightlyDecision({ ...stale, runs: [at(20.1)] }).dispatch).toBe(true);
+    // A run whose start time can't be read holds the check back.
+    expect(nightlyDecision({ ...stale, runs: [{ status: 'completed', startedAt: null }] }).dispatch).toBe(false);
+    expect(nightlyDecision({ ...stale, runs: [] }).dispatch).toBe(true);
+  });
+
+  it('reads the newest main cache from the caches API, skipping other keys, refs and short SHAs', () => {
+    const doc = {
+      actions_caches: [
+        { key: `mutation-incremental-${sha('a')}`, ref: 'refs/heads/main', created_at: '2026-10-01T00:00:00Z' },
+        { key: `mutation-incremental-${sha('b')}`, ref: 'refs/heads/main', created_at: '2026-10-03T00:00:00Z' },
+        { key: `mutation-incremental-${sha('c')}`, ref: 'refs/pull/9/merge', created_at: '2026-10-04T00:00:00Z' },
+        { key: 'mutation-incremental-abc', ref: 'refs/heads/main', created_at: '2026-10-05T00:00:00Z' },
+        { key: `node-cache-${sha('d')}`, ref: 'refs/heads/main', created_at: '2026-10-06T00:00:00Z' },
+      ],
+    };
+    expect(newestCacheCommit(doc)).toBe(sha('b'));
+    expect(newestCacheCommit({ actions_caches: [] })).toBeNull();
+    expect(newestCacheCommit(null)).toBeNull();
+    expect(CACHE_KEY_PREFIX).toBe('mutation-incremental-');
+  });
+
+  it('reads the runs on main from the workflow-runs API', () => {
+    const doc = {
+      workflow_runs: [
+        { status: 'in_progress', head_branch: 'main', run_started_at: '2026-10-07T01:00:00Z', created_at: '2026-10-07T00:59:00Z' },
+        { status: 'queued', head_branch: 'main', created_at: '2026-10-07T02:00:00Z' },
+        { status: 'completed', head_branch: 'task/x', run_started_at: '2026-10-07T03:00:00Z' },
+      ],
+    };
+    expect(weeklyRunsFromApi(doc)).toEqual([
+      { status: 'in_progress', startedAt: '2026-10-07T01:00:00Z' },
+      { status: 'queued', startedAt: '2026-10-07T02:00:00Z' },
+    ]);
+    expect(weeklyRunsFromApi({})).toEqual([]);
+  });
+
+  it('parses git log records of a SHA and its paths', () => {
+    expect(parseCommitLog(`\0${sha('c')}\n\nsrc/a.ts\nREADME.md\n\0${sha('b')}\n\n`)).toEqual([
+      { sha: sha('c'), files: ['src/a.ts', 'README.md'] },
+      { sha: sha('b'), files: [] },
+    ]);
+    expect(parseCommitLog('')).toEqual([]);
+  });
+
+  describe('nightlyFromRepo', () => {
+    const caches = { actions_caches: [{ key: `mutation-incremental-${sha('a')}`, ref: 'refs/heads/main', created_at: '2026-10-01T00:00:00Z' }] };
+    const io = (log: string, ancestor = true) => {
+      const calls: string[][] = [];
+      return {
+        calls,
+        io: {
+          git: (...args: string[]) => {
+            calls.push(args);
+            if (args[0] === 'merge-base') {
+              if (ancestor) return '';
+              throw new Error('not an ancestor');
+            }
+            if (args[0] === 'log') return log;
+            throw new Error(`unexpected git ${args.join(' ')}`);
+          },
+        },
+      };
+    };
+
+    it("walks main's first-parent line from the cache's commit, with each merge's own files", () => {
+      const { io: fake, calls } = io(`\0${sha('b')}\n\nvitest.config.ts\n`);
+      const d = nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, fake);
+      expect(d.dispatch).toBe(true);
+      expect(d.reason).toContain('vitest.config.ts');
+      expect(calls).toEqual([
+        ['merge-base', '--is-ancestor', sha('a'), 'HEAD'],
+        ['log', '--first-parent', '--diff-merges=first-parent', '--no-renames', '--name-only', '--format=%x00%H', `${sha('a')}..HEAD`],
+      ]);
+    });
+
+    it("classifies with the config's scope, so a left-out source is a blind spot", () => {
+      const { io: fake } = io(`\0${sha('b')}\n\nsrc/types.ts\n`);
+      expect(nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, fake).dispatch).toBe(true);
+      const { io: current } = io(`\0${sha('b')}\n\nsrc/client.ts\n`);
+      expect(nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, current).dispatch).toBe(false);
+    });
+
+    it("treats a cache commit outside main's history as stale, and makes no git call without a cache", () => {
+      expect(nightlyFromRepo({ caches, runs: { workflow_runs: [] }, now, config }, io('', false).io).reason).toContain("not in main's history");
+      const { io: fake, calls } = io('');
+      expect(nightlyFromRepo({ caches: { actions_caches: [] }, runs: { workflow_runs: [] }, now, config }, fake).dispatch).toBe(true);
+      expect(calls).toEqual([]);
+    });
   });
 });
 
