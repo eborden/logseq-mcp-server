@@ -132,14 +132,18 @@ export type PlanMode = 'incremental' | 'targeted' | 'empty';
  * npm ci, plan, upload, ratchet) is 11 to 20 seconds.
  *
  * Files differ a lot in size, and the cap can't choose which ones changed. The four largest files
- * hold 510, 420, 350 and 350 mutants. At 0.29 s each, the cap's worst case is:
- *   3 files: 1,280 mutants, 6.2 min, + 0.3 min overhead = 6.5 min, about 3.5 min spare for the changed
- *            sources and test imports that are not capped
- *   4 files: 1,630 mutants, 7.9 min, + 0.3 min = 8.2 min, under 2 min spare
- *   5 files: 1,953 mutants, 9.5 min, + 0.3 min = 9.8 min, no room left
- * So 3. At the average file (0.67 min) 8 files would fit; the largest 8 (2,787 mutants, 13.5 min) do
- * not, and the old figure of 1 to 1.5 minutes per file was a laptop estimate. Re-measure after the
- * mutated scope or the runner changes much.
+ * hold 510, 420, 350 and 350 mutants. At 0.29 s each, plus 0.3 min of job overhead and the targeted
+ * run's own dry run (0.3 to 0.5 min, taken as 0.5), the cap's worst case is:
+ *   3 files: 1,280 mutants, 6.2 min, + 0.8 min = 7.0 min, about 3 min spare
+ *   4 files: 1,630 mutants, 7.9 min, + 0.8 min = 8.7 min, about 1.3 min spare
+ *   5 files: 1,953 mutants, 9.5 min, + 0.8 min = 10.3 min, over the timeout
+ * So 3. At the average file (0.67 min) 8 files would fit; the largest 8 (2,787 mutants, 14.3 min) do
+ * not, and the old figure of 1 to 1.5 minutes per file was a laptop estimate.
+ *
+ * The limit: 3 min spare is roughly 600 mutants (3 min at 0.29 s), about one large file. The changed
+ * sources and the files the changed tests import are not capped, so a PR that changes those as well
+ * can still exceed the timeout. A cap by mutant count would bound that, and is a possible follow-up.
+ * Re-measure after the mutated scope or the runner changes much.
  */
 export const MAX_BASELINE_FILES = 3;
 
