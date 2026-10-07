@@ -1018,6 +1018,34 @@ describe('changedSourceGate', () => {
     expect(await result).toBeNull();
   });
 
+  it('passes when the first artifact\'s run failed and a later one\'s run succeeded, checking the runs in order', async () => {
+    const { result, run } = gate({
+      artifacts: [artifact({ workflow_run: { id: 1 } }), artifact({ workflow_run: { id: 2 } })],
+      runs: { 1: { path: WEEKLY, conclusion: 'failure' }, 2: success },
+    });
+    expect(await result).toBeNull();
+    expect(run.mock.calls.map(c => c[0])).toEqual([1, 2]);
+  });
+
+  it('checks every unexpired artifact, however many there are, and fails when none of their runs succeeded', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => artifact({ workflow_run: { id: i + 1 } }));
+    const runs = Object.fromEntries(many.map((_, i) => [i + 1, { path: WEEKLY, conclusion: i === 24 ? 'success' : 'failure' }]));
+    const last = gate({ artifacts: many, runs });
+    expect(await last.result).toBeNull();
+    expect(last.run).toHaveBeenCalledTimes(25);
+    const none = gate({ artifacts: many, runs: Object.fromEntries(many.map((_, i) => [i + 1, { path: WEEKLY, conclusion: 'failure' }])) });
+    expect(await none.result).toMatchObject({ kind: 'changed-source-unchecked' });
+    expect(none.run).toHaveBeenCalledTimes(25);
+  });
+
+  it('does not blame expiry when an unexpired artifact exists and its run failed', async () => {
+    const { result } = gate({
+      artifacts: [artifact({ expired: true, workflow_run: { id: 1 } }), artifact({ workflow_run: { id: 2 } })],
+      runs: { 1: success, 2: { path: WEEKLY, conclusion: 'failure' } },
+    });
+    expect((await result)?.message).not.toContain('expired');
+  });
+
   it('fails when the artifact came from another workflow', async () => {
     const { result } = gate({ artifacts: [artifact()], runs: { 1: { path: '.github/workflows/ci.yml', conclusion: 'success' } } });
     expect(await result).toMatchObject({ kind: 'changed-source-unchecked' });
