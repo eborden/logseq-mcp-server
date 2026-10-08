@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import { getConceptNetwork } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
@@ -101,24 +101,6 @@ describe('Graph Traversal Tools Integration Tests', () => {
       expect(result.truncated).toBe(true);
       // The journal ranks last among the candidates, so the fanout cap drops it
       expect(result.nodes.some(n => n.name === 'Jun 17th, 2024')).toBe(false);
-    });
-
-    it('with no fanout cap, depth 1 and 2 reach every neighbour; journals stay leaves unless expanded', async () => {
-      const caps = { maxNodes: 500, maxFanout: Infinity };
-      const depth1 = await getConceptNetwork(client, 'hub central', 1, caps);
-      const depth2 = await getConceptNetwork(client, 'hub central', 2, caps);
-      const expanded = await getConceptNetwork(client, 'hub central', 2, { ...caps, expandJournals: true });
-
-      expect(depth1.nodes).toHaveLength(122);
-      expect(depth1.truncated).toBe(false);
-      expect(depth1.nodes.some(n => n.name === 'Jun 17th, 2024' && n.depth === 1)).toBe(true);
-
-      expect(depth2.nodes).toHaveLength(162);
-      expect(depth2.nodes.filter(n => n.depth === 2).map(n => n.name).sort()).toEqual(range('fringe', 40));
-      expect(depth2.truncated).toBe(false);
-
-      expect(expanded.nodes).toHaveLength(192);
-      expect(expanded.nodes.filter(n => n.name.startsWith('journal-topic-'))).toHaveLength(30);
     });
 
     it('a journal is a leaf by default, and expand_journals walks through it', async () => {

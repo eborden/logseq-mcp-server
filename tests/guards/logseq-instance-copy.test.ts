@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { copyGraphDir } from '../scripts/logseq-instance/copy-graph.js';
-import { InstanceError } from '../scripts/logseq-instance/instance.js';
+import { copyGraphDir } from '../../scripts/logseq-instance/copy-graph.js';
+import { InstanceError } from '../../scripts/logseq-instance/instance.js';
 
 // The real graph copy behind `start` (#151), on a temporary folder. The fake-fs tests in
 // logseq-instance.test.ts reimplement copyDir, so only this file checks the fs.cp wiring.

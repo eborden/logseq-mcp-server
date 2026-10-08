@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 // it reports a summary done. Besides the terseness budget it checks the page's `summary-source::` line, which records
 // the roll-up of the logseq_query_by_date_range call the page was built from, so a summary written from
 // journal files alone fails the workflow's own check. All pages below are made up.
-const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'logseq-skills', 'scripts', 'check-terseness.sh');
+const script = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills', 'logseq-skills', 'scripts', 'check-terseness.sh');
 
 const WEEKLY_SOURCE = 'summary-source:: query_by_date_range 20250106-20250110; days 5; blocks 250; top Project Atlas 12/4 | Alice 9/2';
 const WEEKLY_TAGS =

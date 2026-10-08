@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { formatMb, formatMs, formatSummary, parsePsRssBytes, summarize } from '../scripts/measure-footprint/stats.js';
-import { probeServer } from '../scripts/measure-footprint/probe.js';
+import { formatMb, formatMs, formatSummary, parsePsRssBytes, summarize } from '../../scripts/measure-footprint/stats.js';
+import { probeServer } from '../../scripts/measure-footprint/probe.js';
 
 /** The start-up and footprint measurement (#126): the arithmetic, and the probe against a stand-in server. */
 describe('summarize', () => {

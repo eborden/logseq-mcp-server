@@ -1,39 +1,30 @@
-// Start-up, memory and install size of the Rust server against the Node one (#126, #122).
+// Start-up, memory and size of the Rust server (#126, #122; the Node comparison was dropped with the TypeScript
+// server, #356).
 //
 //   cd rust && cargo build --release --locked      # once; the script does not build the binary
 //   npx tsx scripts/measure-footprint.ts [--runs 7] [--rust-binary <path>] [--settle-ms 500]
 //
-// For each server it prints aggregates only (median, then min and max over the runs):
+// It prints aggregates only (median, then min and max over the runs):
 //   - cold start: process spawn to the first `initialize` response
 //   - resident memory: idle after the handshake, and after one logseq_get_page_outline call
-//   - size: the Rust release binary, against Node's own binary plus the built `dist/` and its
-//     production `node_modules` (staged in a temp dir with `npm ci --omit=dev`, nothing in the
-//     repo is touched)
+//   - size: the release binary
 //
-// Both servers talk to the parity harness's stub LogSeq (scripts/parity/stub-logseq.ts) on a
-// random local port with a fresh token, through a temp LOGSEQ_MCP_CONFIG and an empty temp home,
-// answering the harness's made-up Project Atlas page. It never contacts port 12315 and never
-// reads ~/.logseq-mcp/config.json (BR-0001). Memory is read with `ps`, so macOS or Linux only.
+// The server talks to the parity harness's stub LogSeq (scripts/parity/stub-logseq.ts) on a random local port with a
+// fresh token, through a temp LOGSEQ_MCP_CONFIG and an empty temp home, answering the harness's made-up Project Atlas
+// page. It never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Memory is read with `ps`,
+// so macOS or Linux only.
 //
-// The first run of each server is a warm-up and is reported apart, so first-launch costs (on
-// macOS, the OS's check of a binary it has not seen; page-cache effects) stay out of the medians. The runs alternate between
-// the servers, and the order flips every other run, so a drift in machine load hits both alike.
-import { execFile } from 'node:child_process';
-import { cp, lstat, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+// The first run is a warm-up and is reported apart, so first-launch costs (on macOS, the OS's check of a binary it
+// has not seen; page-cache effects) stay out of the medians.
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
 import { sandboxedEnv } from './parity/harness.js';
 import { REPO_ROOT } from './parity/server-command.js';
 import { startStubLogseq, type StubLogseq } from './parity/stub-logseq.js';
 import { probeServer, type ProbeResult, type ServerProcess } from './measure-footprint/probe.js';
 import { formatMb, formatMs, formatSummary, summarize } from './measure-footprint/stats.js';
-
-const execFileAsync = promisify(execFile);
-
-/** Longest `npm ci` or `tsc` may take before the script gives up; each takes well under a minute normally. */
-const STAGE_TIMEOUT_MS = 5 * 60 * 1000;
 
 const USAGE = 'usage: npx tsx scripts/measure-footprint.ts [--runs <n>] [--rust-binary <path>] [--settle-ms <ms>]';
 
@@ -62,35 +53,6 @@ function parseOptions(argv: string[]): Options {
   return options;
 }
 
-/** Sum of the sizes of every file under a folder (apparent size, symlinks not followed). */
-async function treeBytes(dir: string): Promise<number> {
-  let total = 0;
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) total += await treeBytes(path);
-    else if (entry.isFile()) total += (await lstat(path)).size;
-  }
-  return total;
-}
-
-/**
- * The Node server as a package would install it: the repo's `package.json` and lockfile, the
- * production dependencies only, and `dist/` built by the repo's own tsc.
- */
-async function stageNodeServer(dir: string): Promise<{ dist: number; modules: number }> {
-  await cp(join(REPO_ROOT, 'package.json'), join(dir, 'package.json'));
-  await cp(join(REPO_ROOT, 'package-lock.json'), join(dir, 'package-lock.json'));
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  // Bounded: npm ci reaches the registry, and a stalled connection would otherwise hang the script
-  await execFileAsync(npm, ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: dir, maxBuffer: 1 << 24, timeout: STAGE_TIMEOUT_MS });
-  await execFileAsync(process.execPath, [join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', join(REPO_ROOT, 'tsconfig.json'), '--outDir', join(dir, 'dist')], {
-    cwd: REPO_ROOT,
-    maxBuffer: 1 << 24,
-    timeout: STAGE_TIMEOUT_MS
-  });
-  return { dist: await treeBytes(join(dir, 'dist')), modules: await treeBytes(join(dir, 'node_modules')) };
-}
-
 interface Series {
   first: ProbeResult;
   runs: ProbeResult[];
@@ -116,10 +78,6 @@ async function main(): Promise<void> {
   try {
     const live = await startStubLogseq();
     stub = live;
-    console.log('staging the Node server (npm ci --omit=dev, tsc) ...');
-    const nodeDir = join(work, 'node-server');
-    await mkdir(nodeDir);
-    const nodeSize = await stageNodeServer(nodeDir);
 
     const configPath = join(work, 'config.json');
     const home = join(work, 'home');
@@ -127,10 +85,7 @@ async function main(): Promise<void> {
     await writeFile(configPath, JSON.stringify({ apiUrl: live.apiUrl, authToken: live.authToken }));
     const env = sandboxedEnv(configPath, home);
 
-    const servers: Record<'rust' | 'node', ServerProcess> = {
-      rust: { command: options.rustBinary, args: [], env, cwd: work },
-      node: { command: process.execPath, args: [join(nodeDir, 'dist', 'index.js')], env, cwd: work }
-    };
+    const server: ServerProcess = { command: options.rustBinary, args: [], env, cwd: work };
     const outline = getPageOutlineCases[0];
     // `stub.load` clears the stub's failure log, so look at it before every load and after every
     // probe: a call the stub could not answer in any run, at start-up or during the tool call, fails the script.
@@ -138,7 +93,7 @@ async function main(): Promise<void> {
       const failures = live.failures();
       if (failures.length > 0) throw new Error(`the stub LogSeq saw ${failures.length} call(s) it had no answer for ${what}`);
     };
-    const measure = async (server: ServerProcess) => {
+    const measure = async () => {
       const result = await probeServer({
         server,
         call: { name: outline.tool, arguments: outline.arguments },
@@ -152,25 +107,14 @@ async function main(): Promise<void> {
       return result;
     };
 
-    const results: Record<'rust' | 'node', ProbeResult[]> = { rust: [], node: [] };
-    for (let run = 0; run <= options.runs; run++) {
-      // The order flips on odd runs, so neither server always follows the other
-      const order = run % 2 === 0 ? (['rust', 'node'] as const) : (['node', 'rust'] as const);
-      for (const which of order) results[which].push(await measure(servers[which]));
-    }
+    const results: ProbeResult[] = [];
+    for (let run = 0; run <= options.runs; run++) results.push(await measure());
 
-    console.log(`\nnode ${process.version}, ${process.platform}-${process.arch}, ${options.runs} runs per server, ${options.settleMs} ms settle before each memory reading\n`);
-    report('Rust release binary', { first: results.rust[0], runs: results.rust.slice(1) });
-    console.log('');
-    report('Node server (node dist/index.js)', { first: results.node[0], runs: results.node.slice(1) });
+    console.log(`\nnode ${process.version} (harness), ${process.platform}-${process.arch}, ${options.runs} runs, ${options.settleMs} ms settle before each memory reading\n`);
+    report('Rust server', { first: results[0], runs: results.slice(1) });
 
-    const rustBinary = (await stat(options.rustBinary)).size;
-    const nodeBinary = (await stat(process.execPath)).size;
     console.log('\nsize on disk (apparent bytes)');
-    console.log(`  Rust:  binary ${formatMb(rustBinary)}`);
-    console.log(
-      `  Node:  node ${formatMb(nodeBinary)} + dist ${formatMb(nodeSize.dist)} + production node_modules ${formatMb(nodeSize.modules)} = ${formatMb(nodeBinary + nodeSize.dist + nodeSize.modules)}`
-    );
+    console.log(`  Rust:  binary ${formatMb((await stat(options.rustBinary)).size)}`);
   } finally {
     await stub?.close();
     await rm(work, { recursive: true, force: true });

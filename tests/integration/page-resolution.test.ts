@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
-import { buildContextForTopic, getBacklinks, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, getContextForQuery, getPage, searchByRelationship } from './helpers/tools.js';
-import { resolvePage } from '../../src/utils/resolve-page.js';
-import { AmbiguousPageError, PageNotFoundError } from '../../src/errors.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
+import { buildContextForTopic, getBacklinks, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, getContextForQuery, getPage, getPageOutline, searchByRelationship } from './helpers/tools.js';
+import { AmbiguousPageError, PageNotFoundError } from './helpers/errors.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 
 /**
  * Integration tests for page-name resolution (#41), against the fixture graph.
  *
- * Read-only. The cases are fixture pages (tests/fixtures/README.md, "Page resolution and
+ * Read-only. The resolver has no tool of its own, so its cases run through `get_page_outline`, which costs the
+ * resolver's calls plus one query for the blocks when the page is found (CLAUDE.md, "Current Implementation
+ * Status"); an ambiguous or missing name costs the resolver's calls alone. The cases are fixture pages (tests/fixtures/README.md, "Page resolution and
  * aliases"): the journal Jan 6th, 2025; `atlas`, the alias only `project atlas` declares;
  * `roadmap`, declared by `project borealis` and `project cascade`; the namespace leaf `notes`,
  * used once, and `meetings`, used under two namespaces; and `Bob`, a page with a file.
@@ -43,19 +44,20 @@ describe('page resolution against the fixture graph', () => {
   });
 
   it('resolves an exact name with one query and no extra calls', async () => {
-    const { result, calls } = await countedCalls(() => resolvePage(client, EXACT.toUpperCase()));
+    const { result, calls } = await countedCalls(() => getPageOutline(client, EXACT.toUpperCase()));
 
-    expect(result).toMatchObject({ kind: 'found', matchedBy: 'name', name: EXACT });
-    expect(calls).toBe(1);
+    expect(result.page).toBe('Bob');
+    expect(result.resolvedFrom).toBeUndefined();
+    // The resolver's one query, then the outline's
+    expect(calls).toBe(2);
   });
 
   describe('ISO dates', () => {
     it('resolves an ISO date to the journal page by journal-day, in one query', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, JOURNAL.iso));
+      const { result, calls } = await countedCalls(() => getPageOutline(client, JOURNAL.iso));
 
-      expect(result).toMatchObject({ kind: 'found', matchedBy: 'journal-date', name: JOURNAL.name });
-      expect(result.kind === 'found' && result.page.id).toBe(journalPageId);
-      expect(calls).toBe(1);
+      expect(result.resolvedFrom).toEqual({ name: JOURNAL.iso, matchedBy: 'journal-date', resolvedTo: 'Jan 6th, 2025' });
+      expect(calls).toBe(2);
     });
 
     it('returns the journal page from get_page, saying how it was found', async () => {
@@ -76,19 +78,20 @@ describe('page resolution against the fixture graph', () => {
     });
 
     it('reports a date with no journal as not found without a page-list call', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, '1999-01-01'));
+      const { result, calls } = await countedCalls(() => getPageOutline(client, '1999-01-01').catch(e => e));
 
-      expect(result.kind).toBe('not_found');
+      expect(result).toBeInstanceOf(PageNotFoundError);
       expect(calls).toBe(1);
     });
   });
 
   describe('aliases', () => {
     it('resolves an alias declared by one page to that page, in one query', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, UNIQUE.stub));
+      const { result, calls } = await countedCalls(() => getPageOutline(client, UNIQUE.stub));
 
-      expect(result).toMatchObject({ kind: 'found', matchedBy: 'alias', name: UNIQUE.source });
-      expect(calls).toBe(1);
+      expect(result.page).toBe('project atlas');
+      expect(result.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
+      expect(calls).toBe(2);
     });
 
     it('returns the declaring page from get_page and build_context', async () => {
@@ -102,17 +105,18 @@ describe('page resolution against the fixture graph', () => {
     });
 
     it('returns candidates, not a guess, for an alias declared by several pages', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, SHARED.stub));
+      const { result, calls } = await countedCalls(() => getPageOutline(client, SHARED.stub).catch(e => e));
 
-      expect(result.kind).toBe('ambiguous');
-      if (result.kind !== 'ambiguous') return;
-      expect(result.totalCandidates).toBe(2);
-      expect(result.candidates.map(c => c.name).sort()).toEqual(SHARED.sources);
-      expect(result.candidates.map(c => c.originalName).sort()).toEqual(SHARED.sources);
-      for (const c of result.candidates) {
+      expect(result).toBeInstanceOf(AmbiguousPageError);
+      const error = result as AmbiguousPageError;
+      expect(error.totalCandidates).toBe(2);
+      expect(error.candidates.map(c => c.name).sort()).toEqual(SHARED.sources);
+      expect(error.candidates.map(c => c.originalName).sort()).toEqual(SHARED.sources);
+      for (const c of error.candidates) {
         expect(c.matchedBy).toBe('alias');
         expect(typeof c.reason === 'string' && c.reason.length > 0).toBe(true);
       }
+      // The resolver's one query, and no outline query: there is no page to outline
       expect(calls).toBe(1);
     });
 
@@ -133,21 +137,23 @@ describe('page resolution against the fixture graph', () => {
 
   describe('namespace leaves', () => {
     it('returns candidates for a leaf used under several namespaces, in two queries', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, LEAF.name));
+      const { result, calls } = await countedCalls(() => getPageOutline(client, LEAF.name).catch(e => e));
 
-      expect(result.kind).toBe('ambiguous');
-      if (result.kind !== 'ambiguous') return;
-      expect(result.totalCandidates).toBe(2);
-      expect(result.candidates.map(c => c.name).sort()).toEqual(LEAF.pages);
-      expect(result.candidates.every(c => c.matchedBy === 'namespace-leaf')).toBe(true);
+      expect(result).toBeInstanceOf(AmbiguousPageError);
+      const error = result as AmbiguousPageError;
+      expect(error.totalCandidates).toBe(2);
+      expect(error.candidates.map(c => c.name).sort()).toEqual(LEAF.pages);
+      expect(error.candidates.every(c => c.matchedBy === 'namespace-leaf')).toBe(true);
       expect(calls).toBe(2);
     });
 
     it('resolves a leaf used once to its page, in two queries', async () => {
-      const { result, calls } = await countedCalls(() => resolvePage(client, UNIQUE_LEAF.name));
+      const { result, calls } = await countedCalls(() => getPageOutline(client, UNIQUE_LEAF.name));
 
-      expect(result).toMatchObject({ kind: 'found', matchedBy: 'namespace-leaf', name: UNIQUE_LEAF.page });
-      expect(calls).toBe(2);
+      expect(result.page).toBe('project atlas/notes');
+      expect(result.resolvedFrom).toMatchObject({ name: UNIQUE_LEAF.name, matchedBy: 'namespace-leaf', resolvedTo: UNIQUE_LEAF.page });
+      // The resolver's two queries, then the outline's
+      expect(calls).toBe(3);
     });
   });
 

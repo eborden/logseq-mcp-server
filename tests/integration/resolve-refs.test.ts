@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import { getBlock, getPage } from './helpers/tools.js';
-import { resolveBlockRefs } from '../../src/utils/resolve-refs.js';
-import { BlockEntity, ResolvedRef } from '../../src/types.js';
+import type { BlockEntity, ResolvedRef } from './helpers/types.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -12,11 +11,15 @@ import { connectFixture } from './helpers/fixture-client.js';
  * every target: `...02` is a plain block, `...03` a ref to it, `...04` a ref to `...03`, and so
  * on (tests/fixtures/README.md, "Block refs and embeds"). Refs and embeds of blocks that do not
  * exist are in fixture-only/resolve-refs-missing.test.ts.
+ *
+ * The TypeScript version of this suite also called the resolver directly (`resolveBlockRefs`) for a uuid that
+ * does not exist and for a batched block-and-page embed. The Rust server has no such entry point; its
+ * behaviours are held by fixture-only/resolve-refs-missing.test.ts (a missing target), the "every case" test
+ * below (block and page embeds) and rust/tests/resolve_refs_calls.rs (one batched query per level).
  */
 
 const STATUSES = ['ok', 'missing', 'depth_limit', 'cycle', 'unavailable'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const SYNTHETIC_MISSING = '00000000-0000-4000-8000-000000000001';
 const PAGE = 'block refs';
 const uuid = (nn: string) => `0088f1a0-0000-4000-8000-0000000000${nn}`;
 /** A plain ref to `...02` */
@@ -102,33 +105,6 @@ describe('resolve_refs against the fixture graph', () => {
     // The ref three levels deep stops at the default depth of 2
     expect(page.warnings!.map(w => w.code)).toEqual(['refs_depth_limit']);
     expect(page.hasMore).toBe(true);
-  });
-
-  it('a uuid that does not exist comes back missing, in place, without erroring', async () => {
-    const content = `gone ((${SYNTHETIC_MISSING}))`;
-    const { blocks } = await resolveBlockRefs(client, [{ uuid: SYNTHETIC_MISSING.replace(/1$/, '2'), content }]);
-    expect((blocks[0] as any).resolvedContent === content).toBe(true);
-    expect((blocks[0] as any).resolvedRefs.map((r: ResolvedRef) => r.status)).toEqual(['missing']);
-  });
-
-  it('block and page embeds of real targets resolve in one batched query', async () => {
-    // A page embed resolves to the page's blocks; Bob's hold no refs, so nothing nests further
-    const pageName = 'Bob';
-    const spy = vi.spyOn(client, 'callAPI');
-    try {
-      const { blocks, warnings } = await resolveBlockRefs(
-        client,
-        [{ uuid: SYNTHETIC_MISSING.replace(/1$/, '3'), content: `{{embed ((${okRef.uuid}))}} {{embed [[${pageName}]]}}` }],
-        { maxDepth: 1 }
-      );
-      expect(spy.mock.calls.length).toBe(1);
-      const refs: ResolvedRef[] = (blocks[0] as any).resolvedRefs;
-      expect(refs.map(r => r.embed).sort()).toEqual(['block', 'page']);
-      expect(refs.map(r => [r.embed, r.status, r.page])).toEqual([['block', 'ok', PAGE], ['page', 'ok', 'Bob']]);
-      expect(warnings).toEqual([]);
-    } finally {
-      spy.mockRestore();
-    }
   });
 
   it('resolves every case on the page as tests/fixtures/README.md lists it', async () => {

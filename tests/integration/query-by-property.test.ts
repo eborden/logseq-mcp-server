@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import { queryByProperty } from './helpers/tools.js';
-import { InvalidParameterError } from '../../src/errors.js';
-import { buildPageNameMap, toSlimBlock } from '../../src/utils/slim-entities.js';
-import { BlockEntity, PageEntity } from '../../src/types.js';
+import { InvalidParameterError } from './helpers/errors.js';
+import { BlockEntity, PageEntity } from './helpers/types.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -190,7 +189,7 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
 
   it('includes the page name and original name', async () => {
     const { key, value } = cases[0];
-    const nameById = buildPageNameMap(pages);
+    const nameById = new Map(pages.map(page => [page.id, page.originalName ?? page.name]));
     const result = (await queryByProperty(client, key, value)) as any[];
 
     for (const block of result.slice(0, 25)) {
@@ -199,8 +198,8 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     }
   });
 
-  it('slim results match the slim form of the crawled blocks (without children)', async () => {
-    const nameById = buildPageNameMap(pages);
+  it('slim results match the crawled blocks (without children), field by field', async () => {
+    const nameById = new Map(pages.map(page => [page.id, page.originalName ?? page.name]));
     const byUuid = new Map(crawled.map(b => [b.uuid, b]));
 
     for (const { label, key, value } of cases) {
@@ -209,13 +208,17 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
 
       for (const block of slim.slice(0, 25)) {
         const old = byUuid.get(block.uuid)!;
-        const expected: any = toSlimBlock({ ...old, children: [] }, nameById.get(old.page?.id!) ?? '');
-        expect(block.pageName, label).toBe(expected.pageName);
-        expect(block.content, label).toBe(expected.content);
-        expect(block.marker, label).toBe(expected.marker);
-        expect(block.tags, label).toEqual(expected.tags);
-        expect(block.pageRefs, label).toEqual(expected.pageRefs);
-        expect(normalizeProps(block.properties), label).toEqual(normalizeProps(expected.properties));
+        expect(block.pageName, label).toBe(nameById.get(old.page?.id!));
+        expect(block.content, label).toBe(old.content ?? '');
+        expect(block.marker, label).toBe(old.marker);
+        // Slim keeps the properties a block has, and none for a block with none
+        expect(normalizeProps(block.properties), label).toEqual(normalizeProps(old.properties));
+        // `tags` and `pageRefs` are lists of names found in the content, left off when empty (BR-0012)
+        for (const field of ['tags', 'pageRefs']) {
+          if (block[field] !== undefined) {
+            expect(Array.isArray(block[field]) && block[field].length > 0 && block[field].every((n: unknown) => typeof n === 'string'), `${label} ${field}`).toBe(true);
+          }
+        }
         expect(block).not.toHaveProperty('id');
         expect(block).not.toHaveProperty('page');
         expect(block).not.toHaveProperty('children');

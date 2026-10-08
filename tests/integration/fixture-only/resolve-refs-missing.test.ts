@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { LogseqClient } from '../../../src/client.js';
-import { DatalogQueryBuilder } from '../../../src/datalog/queries.js';
+import { LogseqClient } from '../../../scripts/lib/logseq-api.js';
 import { getBlock, getPage } from '../helpers/tools.js';
-import { ResolvedRef } from '../../../src/types.js';
+import type { ResolvedRef } from '../helpers/types.js';
+import { uuidLiteral } from '../helpers/page-queries.js';
 import { connectFixture } from '../helpers/fixture-client.js';
 
 /**
@@ -58,8 +58,11 @@ describe('resolve_refs on missing targets in the fixture graph (#138)', () => {
   });
 
   it('the fixture still has the placeholder rows this guards against', async () => {
-    const { query, inputs } = DatalogQueryBuilder.refTargets({ blockUuids: [DEAD, BEEF] });
-    const rows = ((await client.executeDatalogQuery<Array<[any]>>(query, ...inputs)) ?? []).map(row => row[0]);
+    // A uuid is matched with a `#uuid` literal, never a string (CLAUDE.md, constraint 7)
+    const query = `[:find (pull ?e [:db/id :block/uuid :block/content :block/name :block/original-name
+                              {:block/page [:db/id :block/name :block/original-name]}])
+                   :where [(ground [${uuidLiteral(DEAD)} ${uuidLiteral(BEEF)}]) [?u ...]] [?e :block/uuid ?u]]`;
+    const rows = ((await client.executeDatalogQuery<Array<[any]>>(query)) ?? []).map(row => row[0]);
     expect(rows.map(row => row.uuid).sort()).toEqual([BEEF, DEAD]);
     expect(rows.every(row => row.page === undefined && row.name === undefined)).toBe(true);
   });

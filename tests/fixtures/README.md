@@ -23,7 +23,7 @@ applies `:hidden` on only one of its two load paths (`load-new-repo-to-db!`, use
 (`:file/node-node-path`) to `remove-hidden-files`, so it keeps the file. The README then showed up as a page
 `readme`, plus a tag page for every issue number written with a `#`, and page counts depended on which way
 the folder was opened (#139). Moving the file out removed the difference, so `config.edn` no longer lists it.
-`src/fixture-graph.test.ts` checks that the graph folder holds only `pages/`, `journals/` and `logseq/`, and
+`tests/guards/fixture-graph.test.ts` checks that the graph folder holds only `pages/`, `journals/` and `logseq/`, and
 that `pages/` and `journals/` hold only `.md` files. Put any new notes about the fixture here, not in `graph/`.
 
 Page counts are the same however the folder is opened. Tests need not allow for a `readme` page or for
@@ -157,7 +157,7 @@ npx tsx scripts/generate-hub-fixture.ts          # rewrite the files
 npx tsx scripts/generate-hub-fixture.ts --check  # exit 1 if a committed file differs
 ```
 
-`scripts/fixture-hub/hub-graph.ts` holds the shape and the counts. `src/fixture-hub.test.ts` fails if
+`scripts/fixture-hub/hub-graph.ts` holds the shape and the counts. `tests/guards/fixture-hub.test.ts` fails if
 the committed files differ from it, or if the numbers below stop holding when the files are read back.
 Change the generator, regenerate, and update this section together.
 

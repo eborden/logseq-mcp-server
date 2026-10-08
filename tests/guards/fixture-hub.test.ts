@@ -2,15 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES } from './tools/get-concept-network.js';
-import { DEFAULT_MAX_BLOCKS, DEFAULT_MAX_REFERENCES, DEFAULT_MAX_RELATED_PAGES } from './tools/build-context.js';
-import { BOTH, HUB_PAGE, IN_WITH_SECOND_BLOCK, JOURNAL_FILE, buildHubFixture, hubFixtureCounts, isHubJournal } from '../scripts/fixture-hub/hub-graph.js';
+import { DEFAULT_MAX_BLOCKS, DEFAULT_MAX_FANOUT, DEFAULT_MAX_NODES, DEFAULT_MAX_REFERENCES, DEFAULT_MAX_RELATED_PAGES } from '../integration/helpers/caps.js';
+import { BOTH, HUB_PAGE, IN_WITH_SECOND_BLOCK, JOURNAL_FILE, buildHubFixture, hubFixtureCounts, isHubJournal } from '../../scripts/fixture-hub/hub-graph.js';
 
 // The hub fixture (#89): the committed files match their generator, the counts documented in
 // tests/fixtures/README.md hold when the files are read back as a link graph, and the hub is
 // big enough to pass every default cap.
 
-const graphDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'tests/fixtures/graph');
+const graphDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures/graph');
 
 /** page name -> the names it links, one entry per block holding a link, read back from the committed files. */
 function readLinks(dir: 'pages' | 'journals'): Map<string, string[]> {

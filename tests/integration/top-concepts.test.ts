@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
-import { DatalogQueryBuilder } from '../../src/datalog/queries.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
+import { getPageQuery } from './helpers/page-queries.js';
 import { queryJournals } from './helpers/tools.js';
-import { BUILT_IN_CONCEPTS, DateRangeResult, TopConcept } from '../../src/tools/query-by-date-range.js';
-import { BlockEntity } from '../../src/types.js';
+import { BUILT_IN_CONCEPTS } from './helpers/caps.js';
+import type { BlockEntity, DateRangeResult, TopConcept } from './helpers/types.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -53,7 +53,7 @@ describe('query_by_date_range: summary.topConcepts', () => {
   });
 
   async function pageIdOf(name: string): Promise<number | undefined> {
-    const { query, inputs } = DatalogQueryBuilder.getPage(name);
+    const { query, inputs } = getPageQuery(name);
     const rows = await client.executeDatalogQuery<Array<[any]>>(query, ...inputs);
     const page = rows?.[0]?.[0];
     return page?.id ?? page?.['db/id'];
@@ -97,7 +97,7 @@ describe('query_by_date_range: summary.topConcepts', () => {
   it('contains no journal pages', async () => {
     const lookups = await Promise.all(
       concepts.map(async c => {
-        const { query, inputs } = DatalogQueryBuilder.getPage(c.name);
+        const { query, inputs } = getPageQuery(c.name);
         const rows = await client.executeDatalogQuery<Array<[any]>>(query, ...inputs);
         const page = rows?.[0]?.[0];
         return page != null && page['journal?'] !== true && page['journal-day'] == null;

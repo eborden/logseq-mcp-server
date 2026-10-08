@@ -1,5 +1,5 @@
 import { connectFixture } from './helpers/fixture-client.js';
-import { isRust, requireRustBinary } from './helpers/server-kind.js';
+import { requireRustBinary } from './helpers/rust-binary.js';
 
 /**
  * Global setup for `npm run test:integration` (#90). Runs once, before any suite, and stops the
@@ -13,6 +13,6 @@ import { isRust, requireRustBinary } from './helpers/server-kind.js';
  */
 export default async function setup(): Promise<void> {
   await connectFixture();
-  // LOGSEQ_MCP_SERVER=rust runs the suites against the Rust server (#352): stop here if it isn't built
-  if (isRust()) requireRustBinary();
+  // The suites run against the Rust server (#352, #356): stop here if it isn't built
+  requireRustBinary();
 }

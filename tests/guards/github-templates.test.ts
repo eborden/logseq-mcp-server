@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 // and docs/architecture-foundations.md. The templates are the source of truth for what an
 // issue or PR body holds, so a heading that goes missing or a dead link fails here.
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
 
 // Headings an agent or reviewer relies on, in each template.

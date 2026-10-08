@@ -1,20 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { LogseqClient } from '../../src/client.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import { searchBlocksWithMeta } from './helpers/tools.js';
-import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from '../../src/tools/search-blocks.js';
-import { DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS } from '../../src/tools/get-context-for-query.js';
-import { DEFAULT_LIST_PAGES_LIMIT, MAX_LIST_PAGES_LIMIT } from '../../src/tools/list-pages.js';
-import { DEFAULT_MAX_ENTRIES, MAX_ENTRIES } from '../../src/tools/get-concept-evolution.js';
-import { DEFAULT_DATE_RANGE_MAX_BLOCKS, MAX_DATE_RANGE_BLOCKS } from '../../src/tools/query-by-date-range.js';
 import {
+  DEFAULT_DATE_RANGE_MAX_BLOCKS,
+  DEFAULT_LIST_PAGES_LIMIT,
   DEFAULT_MAX_BLOCKS_PER_PAGE,
+  DEFAULT_MAX_ENTRIES,
   DEFAULT_MAX_PAGES,
+  DEFAULT_MAX_SEARCH_RESULTS,
+  DEFAULT_PROPERTY_LIMIT,
+  DEFAULT_RELATIONSHIP_LIMIT,
+  DEFAULT_SEARCH_LIMIT,
   MAX_BLOCKS_PER_PAGE,
+  MAX_DATE_RANGE_BLOCKS,
+  MAX_ENTRIES,
+  MAX_LIST_PAGES_LIMIT,
   MAX_PAGES,
-} from '../../src/tools/get-backlinks.js';
-import { DEFAULT_PROPERTY_LIMIT, MAX_PROPERTY_LIMIT } from '../../src/tools/query-by-property.js';
-import { DEFAULT_RELATIONSHIP_LIMIT, MAX_RELATIONSHIP_LIMIT } from '../../src/tools/search-by-relationship.js';
+  MAX_PROPERTY_LIMIT,
+  MAX_RELATIONSHIP_LIMIT,
+  MAX_SEARCH_LIMIT,
+  MAX_SEARCH_RESULTS,
+} from './helpers/caps.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.js';
 import { connectMcp } from './helpers/server-under-test.js';
 
@@ -25,9 +32,9 @@ import { connectMcp } from './helpers/server-under-test.js';
  *
  * Against the fixture graph. Read-only. Its ~494 blocks (478 of them with the letter e) are fewer than
  * search_blocks' maximum of 500, so through MCP only the cut below the maximum
- * and the clamp can be seen; the cut at the maximum runs through
- * searchBlocksWithMeta with a lower maxLimit, the same code with a smaller
- * bound. The keyword `neighbour` matches 190 blocks (the hub fixture), past
+ * and the clamp can be seen; the cut at the maximum is covered by the Rust unit tests, which feed the tool
+ * 600 matches (#356 dropped the integration test that lowered the maximum, which only a direct call to the
+ * TypeScript function could do). The keyword `neighbour` matches 190 blocks (the hub fixture), past
  * get_context_for_query's maximum of 100. list_pages needs more than 200
  * non-journal pages, which the hub fixture's pages supply. Assertions on page
  * names compare booleans or counts, so a failure prints no names from the graph.
@@ -138,21 +145,6 @@ describe('result caps (#61)', () => {
       expect(atMax.meta).toMatchObject({ hasMore: false, warnings: [], totals: { matches } });
       expect(above.text).toBe(atMax.text);
       expect(above.meta).toEqual(atMax.meta);
-    });
-
-    it('a cut at the maximum is a warning with nothing to raise', async () => {
-      // The fixture has fewer blocks than 500, so a lower bound stands in for it
-      const max = 100;
-      for (const limit of [max, 1000]) {
-        const { results, meta } = await searchBlocksWithMeta(client, QUERY, limit, false, false, max);
-
-        expect(results, `limit ${limit}`).toHaveLength(max);
-        expect(meta!.hasMore).toBe(false);
-        expect(meta!.warnings).toHaveLength(1);
-        expect(meta!.warnings[0].code).toBe('results_truncated');
-        expect(meta!.warnings[0].message).toContain(`maximum of ${max}`);
-        expect(meta!.warnings[0].howToFetchAll).toBeUndefined();
-      }
     });
   });
 

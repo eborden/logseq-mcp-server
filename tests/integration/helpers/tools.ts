@@ -1,68 +1,22 @@
-import { isDeepStrictEqual } from 'util';
 import { afterAll } from 'vitest';
-import type { LogseqClient } from '../../../src/client.js';
-import {
-  AmbiguousPageError,
-  BlockNotFoundError,
-  InvalidParameterError,
-  PageNotFoundError,
-} from '../../../src/errors.js';
-import { ambiguousPageResult } from '../../../src/utils/resolve-page.js';
-import { buildContextForTopic as tsBuildContextForTopic } from '../../../src/tools/build-context.js';
-import { checkLinks as tsCheckLinks } from '../../../src/tools/check-links.js';
-import {
-  getBacklinks as tsGetBacklinks,
-  getBacklinksWithMeta as tsGetBacklinksWithMeta,
-} from '../../../src/tools/get-backlinks.js';
-import { getBlock as tsGetBlock } from '../../../src/tools/get-block.js';
-import { getConceptEvolution as tsGetConceptEvolution } from '../../../src/tools/get-concept-evolution.js';
-import {
-  getConceptNetwork as tsGetConceptNetwork,
-  MAX_FANOUT_LIMIT,
-  MAX_NODES_LIMIT,
-} from '../../../src/tools/get-concept-network.js';
-import { getContextForQuery as tsGetContextForQuery } from '../../../src/tools/get-context-for-query.js';
-import { getCurrentContext as tsGetCurrentContext } from '../../../src/tools/get-current-context.js';
-import { getGraphInfo as tsGetGraphInfo } from '../../../src/tools/get-graph-info.js';
-import { getPage as tsGetPage } from '../../../src/tools/get-page.js';
-import { listPages as tsListPages } from '../../../src/tools/list-pages.js';
-import { queryByDateRange as tsQueryByDateRange, queryJournals as tsQueryJournals } from '../../../src/tools/query-by-date-range.js';
-import {
-  queryByProperty as tsQueryByProperty,
-  queryByPropertyWithMeta as tsQueryByPropertyWithMeta,
-} from '../../../src/tools/query-by-property.js';
-import {
-  MAX_SEARCH_LIMIT,
-  searchBlocks as tsSearchBlocks,
-  searchBlocksWithMeta as tsSearchBlocksWithMeta,
-} from '../../../src/tools/search-blocks.js';
-import { searchByRelationship as tsSearchByRelationship } from '../../../src/tools/search-by-relationship.js';
-import { closeSessions, isRust, recordFallback, rustSession } from './server-under-test.js';
+import type { LogseqClient } from '../../../scripts/lib/logseq-api.js';
+import { AmbiguousPageError, BlockNotFoundError, InvalidParameterError, PageNotFoundError } from './errors.js';
+import type { Json } from './types.js';
+import { closeSessions, rustSession } from './server-under-test.js';
 
 /**
- * The tool functions the integration suites call (#352), with the signatures and results of the
- * ones in `src/tools/`. With the TypeScript server (the default) each one is the function itself.
- * With `LOGSEQ_MCP_SERVER=rust` each one calls the same tool through MCP on the Rust server and
- * returns what the TypeScript function would have: the first content block as JSON, with the
- * `meta` block of a bare-array tool read back as the second part. An error result becomes a thrown
- * error of the class the TypeScript function throws (the message is the server's own), and the
- * ambiguous-name result becomes an `AmbiguousPageError`.
+ * The tools as functions, for the integration suites (#352, #356). Each calls the tool through MCP on the Rust
+ * server and returns what its result holds: the first content block as JSON, with the `meta` block of a
+ * bare-array tool read back as the second part. An error result becomes a thrown error of the class in
+ * `./errors.ts` (the message is the server's own), and the ambiguous-name result becomes an `AmbiguousPageError`.
  *
- * Each function maps its positional arguments to the tool's, and sends the default a direct call
- * has where the tool's default differs (`slim_results` is false for a direct call, true for the
- * tool: BR-0012). The `client` is only the route to LogSeq: see `server-under-test.ts`.
- *
- * What the Rust server cannot take through MCP stays on TypeScript in both modes: a limit that
- * only a direct call can lower (`searchBlocksWithMeta` with a `maxLimit`) or lift
- * (`getConceptNetwork` past the tool's `max_nodes`, `max_fanout` and depth of 3, `searchBlocks` past its
- * `limit` maximum), and `maxFrontier` and
- * `hitPages`. `src/tools/*` internals such as the resolver have no tool, so a suite that tests them
- * runs them as before.
+ * Each function maps its positional arguments to the tool's, and sends the default a direct call had in the
+ * TypeScript server where the tool's differs (`slim_results` is false here, true for the tool: BR-0012), so the
+ * suites that read full entities keep reading them. The `client` is only the route to LogSeq: see
+ * `server-under-test.ts`.
  */
 
 afterAll(closeSessions);
-
-type Json = any;
 
 /** The tool's first content block as JSON, and its `meta` block when it sends one. */
 interface ToolOutput {
@@ -74,7 +28,7 @@ interface ToolOutput {
 const compact = <T extends Record<string, unknown>>(args: T): Record<string, unknown> => {
   for (const [key, value] of Object.entries(args)) {
     if (typeof value === 'number' && !Number.isFinite(value)) {
-      throw new Error(`${key} is ${value}, which a tool argument can't be; keep the direct call on TypeScript (see this file's header).`);
+      throw new Error(`${key} is ${value}, which a tool argument can't be.`);
     }
   }
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
@@ -83,59 +37,29 @@ const compact = <T extends Record<string, unknown>>(args: T): Record<string, unk
 /** The server's words for a page that wasn't found, split into the name and the closest names. */
 const NOT_FOUND = /^No page ("(?:[^"\\]|\\.)*")\.(?: Closest: (.*?)\.)? Try logseq_search_blocks/s;
 
-/**
- * The error a TypeScript function throws for a tool's error message. A class with a constructor
- * that takes what the message holds is built with it, and its message must be the server's, byte
- * for byte, or this throws: a difference in the words is a difference in the server.
- */
+/** The error a tool's error message stands for. */
 function errorFor(message: string): Error {
-  const sameWords = (error: Error): Error => {
-    if (error.message !== message) {
-      throw new Error(`The error message differs from the TypeScript class's.\nserver: ${message}\nTypeScript: ${error.message}`);
-    }
-    return error;
-  };
   if (message.startsWith('No page "')) {
     const found = message.match(NOT_FOUND);
     if (!found) throw new Error(`Unrecognised "no page" message: ${message}`);
     const [, quoted, closest] = found;
-    return sameWords(new PageNotFoundError(JSON.parse(quoted) as string, closest ? closest.split(', ') : []));
+    return new PageNotFoundError(JSON.parse(quoted) as string, closest ? closest.split(', ') : [], message);
   }
   const block = message.match(/^Block not found: "(.*)"\n\nTip: /s);
-  if (block) return sameWords(new BlockNotFoundError(block[1]));
-  if (message.startsWith("Invalid parameter '")) {
-    // Its constructor takes the parts the message was built from, so the class is applied to the message
-    const error = new Error(message);
-    Object.setPrototypeOf(error, InvalidParameterError.prototype);
-    error.name = 'InvalidParameterError';
-    return error;
-  }
+  if (block) return new BlockNotFoundError(block[1], message);
+  if (message.startsWith("Invalid parameter '")) return new InvalidParameterError(message);
   return new Error(message);
 }
 
-/**
- * The `AmbiguousPageError` for the ambiguous-name result, which a tool returns instead of failing.
- * The error is TypeScript's own, so what the server sent (the `ambiguous_page` warning, a
- * `candidates_truncated` note, `hasMore`, `totals`) is held to what TypeScript builds from the same
- * candidates, or this throws.
- */
+/** The `AmbiguousPageError` for the ambiguous-name result, which a tool returns instead of failing. */
 function ambiguousError(value: Json): AmbiguousPageError {
-  const error = new AmbiguousPageError(value.pageName, value.candidates, value.totalCandidates);
-  const expected = JSON.parse(JSON.stringify(ambiguousPageResult(error)));
-  if (!isDeepStrictEqual(value, expected)) {
-    throw new Error(
-      `The ambiguous-name result differs from the TypeScript server's.\nserver: ${JSON.stringify(value)}\nTypeScript: ${JSON.stringify(expected)}`
-    );
+  if (typeof value.pageName !== 'string' || typeof value.totalCandidates !== 'number') {
+    throw new Error(`The ambiguous-name result is not the shape the suites read: ${JSON.stringify(value).slice(0, 200)}`);
   }
-  return error;
+  return new AmbiguousPageError(value.pageName, value.candidates, value.totalCandidates, value);
 }
 
-async function callTool(
-  client: LogseqClient,
-  name: string,
-  args: Record<string, unknown>,
-  now?: Date
-): Promise<ToolOutput> {
+async function callTool(client: LogseqClient, name: string, args: Record<string, unknown>, now?: Date): Promise<ToolOutput> {
   const mcp = await rustSession(client, { tips: false, now });
   const result = (await mcp.callTool({ name, arguments: compact(args) }, undefined, { timeout: 170_000 })) as {
     content: Array<{ type: string; text: string }>;
@@ -151,233 +75,270 @@ async function callTool(
   return { value, meta: second === undefined ? null : (JSON.parse(second) as { meta: Json }).meta };
 }
 
-/** A function that is the TypeScript one, or in Rust mode the one given. */
-function either<F extends (...args: any[]) => Promise<any>>(ts: F, rust: (...args: Parameters<F>) => Promise<unknown>): F {
-  return ((...args: Parameters<F>) => (isRust() ? rust(...args) : ts(...args))) as F;
+export async function getPage(
+  client: LogseqClient,
+  pageName: string,
+  includeChildren?: boolean,
+  options?: { resolveRefs?: boolean }
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_get_page', {
+      page_name: pageName,
+      include_children: includeChildren,
+      resolve_refs: options?.resolveRefs,
+    })
+  ).value;
 }
 
-export const getPage = either(tsGetPage, async (client, pageName, includeChildren, options) =>
-  (await callTool(client, 'logseq_get_page', {
-    page_name: pageName,
-    include_children: includeChildren,
-    resolve_refs: options?.resolveRefs,
-  })).value
-);
+export async function getPageOutline(client: LogseqClient, pageName: string): Promise<Json> {
+  return (await callTool(client, 'logseq_get_page_outline', { page_name: pageName })).value;
+}
 
-export const getBacklinksWithMeta = either(tsGetBacklinksWithMeta, async (client, pageName, caps) => {
+export async function getBacklinksWithMeta(
+  client: LogseqClient,
+  pageName: string,
+  caps?: { maxPages?: number; maxBlocksPerPage?: number }
+): Promise<{ results: Json; meta: Json }> {
   const { value, meta } = await callTool(client, 'logseq_get_backlinks', {
     page_name: pageName,
     max_pages: caps?.maxPages,
     max_blocks_per_page: caps?.maxBlocksPerPage,
   });
   return { results: value, meta };
-});
+}
 
-export const getBacklinks = either(tsGetBacklinks, async (client, pageName, caps) =>
-  (await getBacklinksWithMeta(client, pageName, caps)).results
-);
+export async function getBacklinks(
+  client: LogseqClient,
+  pageName: string,
+  caps?: { maxPages?: number; maxBlocksPerPage?: number }
+): Promise<Json> {
+  return (await getBacklinksWithMeta(client, pageName, caps)).results;
+}
 
-export const getBlock = either(tsGetBlock, async (client, blockUuid, includeChildren, options) =>
-  (await callTool(client, 'logseq_get_block', {
-    block_uuid: blockUuid,
-    include_children: includeChildren,
-    resolve_refs: options?.resolveRefs,
-  })).value
-);
+export async function getBlock(
+  client: LogseqClient,
+  blockUuid: string,
+  includeChildren?: boolean,
+  options?: { resolveRefs?: boolean }
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_get_block', {
+      block_uuid: blockUuid,
+      include_children: includeChildren,
+      resolve_refs: options?.resolveRefs,
+    })
+  ).value;
+}
 
-// A direct call defaults to full results, the tool to slim (BR-0012), so each call says which
-const searchBlocksOverMcp = async (
+// A direct call defaulted to full results, the tool to slim (BR-0012), so each call says which
+export async function searchBlocksWithMeta(
   client: LogseqClient,
   query: string,
   limit?: number,
   includeContext?: boolean,
   slimResults?: boolean
-): Promise<ToolOutput> =>
-  callTool(client, 'logseq_search_blocks', {
+): Promise<{ results: Json; meta: Json }> {
+  const { value, meta } = await callTool(client, 'logseq_search_blocks', {
     query,
     limit,
     include_context: includeContext ?? false,
     slim_results: slimResults ?? false,
   });
+  return { results: value, meta };
+}
 
-export const searchBlocksWithMeta = ((
-  client: LogseqClient,
-  query: string,
-  limit?: number,
-  includeContext?: boolean,
-  slimResults?: boolean,
-  maxLimit?: number
-) => {
-  // The tool's maximum is fixed; only a direct call can lower it (the cut at the maximum, result-caps)
-  if (isRust() && maxLimit !== undefined && maxLimit !== MAX_SEARCH_LIMIT) {
-    recordFallback('searchBlocksWithMeta', `maxLimit ${maxLimit}, which only a direct call can set`);
-  }
-  if (!isRust() || (maxLimit !== undefined && maxLimit !== MAX_SEARCH_LIMIT)) {
-    return tsSearchBlocksWithMeta(client, query, limit, includeContext, slimResults as false, maxLimit);
-  }
-  return searchBlocksOverMcp(client, query, limit, includeContext, slimResults).then(({ value, meta }) => ({
-    results: value,
-    meta,
-  }));
-}) as typeof tsSearchBlocksWithMeta;
-
-export const searchBlocks = ((
+export async function searchBlocks(
   client: LogseqClient,
   query: string,
   limit?: number,
   includeContext?: boolean,
   slimResults?: boolean
-) => {
-  // A direct call has no maximum (`searchBlocks` lifts it); the tool clamps `limit` to MAX_SEARCH_LIMIT
-  if (isRust() && limit !== undefined && limit > MAX_SEARCH_LIMIT) {
-    recordFallback('searchBlocks', `limit ${limit} is past the tool's maximum of ${MAX_SEARCH_LIMIT}`);
-  }
-  if (!isRust() || (limit !== undefined && limit > MAX_SEARCH_LIMIT)) {
-    return tsSearchBlocks(client, query, limit, includeContext, slimResults as false);
-  }
-  return searchBlocksOverMcp(client, query, limit, includeContext, slimResults).then(({ value }) => value);
-}) as typeof tsSearchBlocks;
+): Promise<Json> {
+  return (await searchBlocksWithMeta(client, query, limit, includeContext, slimResults)).results;
+}
 
-export const queryByPropertyWithMeta = either(
-  tsQueryByPropertyWithMeta,
-  async (client, propertyName, propertyValue, slimResults, limit) => {
-    const { value, meta } = await callTool(client, 'logseq_query_by_property', {
-      property_key: propertyName,
-      property_value: propertyValue,
-      slim_results: slimResults ?? false,
-      limit,
-    });
-    return { results: value, meta };
-  }
-);
+export async function queryByPropertyWithMeta(
+  client: LogseqClient,
+  propertyName: string,
+  propertyValue: string,
+  slimResults?: boolean,
+  limit?: number
+): Promise<{ results: Json; meta: Json }> {
+  const { value, meta } = await callTool(client, 'logseq_query_by_property', {
+    property_key: propertyName,
+    property_value: propertyValue,
+    slim_results: slimResults ?? false,
+    limit,
+  });
+  return { results: value, meta };
+}
 
-export const queryByProperty = either(tsQueryByProperty, async (client, propertyName, propertyValue, slimResults, limit) =>
-  (await queryByPropertyWithMeta(client, propertyName, propertyValue, slimResults, limit)).results
-);
+export async function queryByProperty(
+  client: LogseqClient,
+  propertyName: string,
+  propertyValue: string,
+  slimResults?: boolean,
+  limit?: number
+): Promise<Json> {
+  return (await queryByPropertyWithMeta(client, propertyName, propertyValue, slimResults, limit)).results;
+}
 
-/** The deepest walk the tool does: its handler runs `getConceptNetwork` with `Math.min(max_depth, 3)` (src/index.ts) */
-const TOOL_MAX_DEPTH = 3;
-
-export const getConceptNetwork = ((
+export async function getConceptNetwork(
   client: LogseqClient,
   conceptName: string,
   maxDepth?: number,
-  options: Parameters<typeof tsGetConceptNetwork>[3] = {}
-) => {
-  // The tool caps `max_nodes`, `max_fanout` and the depth; only a direct call can lift them (the walk with no fanout cap)
-  const { maxNodes, maxFanout } = options;
-  const beyondTool = (value: number | undefined, max: number) => value !== undefined && !(value <= max);
-  const beyond =
-    beyondTool(maxNodes, MAX_NODES_LIMIT) || beyondTool(maxFanout, MAX_FANOUT_LIMIT) || beyondTool(maxDepth, TOOL_MAX_DEPTH);
-  if (isRust() && beyond) recordFallback('getConceptNetwork', 'maxNodes, maxFanout or maxDepth past the tool\'s maximum');
-  if (!isRust() || beyond) {
-    return tsGetConceptNetwork(client, conceptName, maxDepth, options);
-  }
-  return callTool(client, 'logseq_get_concept_network', {
-    concept_name: conceptName,
-    max_depth: maxDepth,
-    max_nodes: maxNodes,
-    max_fanout: maxFanout,
-    expand_journals: options.expandJournals,
-  }).then(({ value }) => value);
-}) as typeof tsGetConceptNetwork;
+  options: { maxNodes?: number; maxFanout?: number; expandJournals?: boolean } = {}
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_get_concept_network', {
+      concept_name: conceptName,
+      max_depth: maxDepth,
+      max_nodes: options.maxNodes,
+      max_fanout: options.maxFanout,
+      expand_journals: options.expandJournals,
+    })
+  ).value;
+}
 
-export const searchByRelationship = ((
+export async function searchByRelationship(
   client: LogseqClient,
   topicA: string,
   topicB: string,
-  relationshipType: Parameters<typeof tsSearchByRelationship>[3],
+  relationshipType: 'references' | 'in-pages-linking-to' | 'connected-within',
   maxDistance?: number,
-  options: Parameters<typeof tsSearchByRelationship>[5] = {}
-) => {
-  if (isRust() && options.maxFrontier !== undefined) recordFallback('searchByRelationship', 'maxFrontier, which the tool has no argument for');
-  if (!isRust() || options.maxFrontier !== undefined) {
-    return tsSearchByRelationship(client, topicA, topicB, relationshipType, maxDistance, options);
+  options: { limit?: number } = {}
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_search_by_relationship', {
+      topic_a: topicA,
+      topic_b: topicB,
+      relationship_type: relationshipType,
+      max_distance: maxDistance,
+      limit: options.limit,
+    })
+  ).value;
+}
+
+export async function buildContextForTopic(
+  client: LogseqClient,
+  topicName: string,
+  options?: {
+    maxBlocks?: number;
+    maxRelatedPages?: number;
+    maxReferences?: number;
+    includeTemporalContext?: boolean;
+    resolveRefs?: boolean;
   }
-  return callTool(client, 'logseq_search_by_relationship', {
-    topic_a: topicA,
-    topic_b: topicB,
-    relationship_type: relationshipType,
-    max_distance: maxDistance,
-    limit: options.limit,
-  }).then(({ value }) => value);
-}) as typeof tsSearchByRelationship;
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_build_context', {
+      topic_name: topicName,
+      max_blocks: options?.maxBlocks,
+      max_related_pages: options?.maxRelatedPages,
+      max_references: options?.maxReferences,
+      include_temporal_context: options?.includeTemporalContext,
+      resolve_refs: options?.resolveRefs,
+    })
+  ).value;
+}
 
-export const buildContextForTopic = either(tsBuildContextForTopic, async (client, topicName, options) =>
-  (await callTool(client, 'logseq_build_context', {
-    topic_name: topicName,
-    max_blocks: options?.maxBlocks,
-    max_related_pages: options?.maxRelatedPages,
-    max_references: options?.maxReferences,
-    include_temporal_context: options?.includeTemporalContext,
-    resolve_refs: options?.resolveRefs,
-  })).value
-);
-
-export const getContextForQuery = ((
+export async function getContextForQuery(
   client: LogseqClient,
   query: string,
-  options: Parameters<typeof tsGetContextForQuery>[2] = {}
-) => {
-  // `hitPages` names the page of each hit for Markdown; the JSON tool leaves it off
-  if (isRust() && options.hitPages) recordFallback('getContextForQuery', 'hitPages, which the JSON tool leaves off');
-  if (!isRust() || options.hitPages) return tsGetContextForQuery(client, query, options);
-  return callTool(client, 'logseq_get_context_for_query', {
-    query,
-    max_topics: options.maxTopics,
-    max_search_results: options.maxSearchResults,
-  }).then(({ value }) => value);
-}) as typeof tsGetContextForQuery;
+  options: { maxTopics?: number; maxSearchResults?: number } = {}
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_get_context_for_query', {
+      query,
+      max_topics: options.maxTopics,
+      max_search_results: options.maxSearchResults,
+    })
+  ).value;
+}
 
-export const queryJournals = either(tsQueryJournals, async (client, options, now) =>
-  (await callTool(
-    client,
-    'logseq_query_by_date_range',
-    {
-      start_date: options.startDate,
-      end_date: options.endDate,
-      last_n: options.lastN,
-      preset: options.preset,
-      search_term: options.searchTerm,
-      slim_results: options.slimResults ?? false,
-      include_content: options.includeContent,
-      top_concepts_limit: options.topConceptsLimit,
-      resolve_refs: options.resolveRefs,
-      max_blocks: options.maxBlocks,
-    },
-    now
-  )).value
-);
+export interface JournalQuery {
+  startDate?: number;
+  endDate?: number;
+  lastN?: number;
+  preset?: string;
+  searchTerm?: string;
+  slimResults?: boolean;
+  includeContent?: boolean;
+  topConceptsLimit?: number;
+  resolveRefs?: boolean;
+  maxBlocks?: number;
+}
 
-export const queryByDateRange = either(tsQueryByDateRange, async (client, startDate, endDate, searchTerm, slimResults) =>
-  queryJournals(client, { startDate, endDate, searchTerm, slimResults })
-);
+/** `now` fixes the server's clock (`LOGSEQ_MCP_NOW`), which only a debug build honours. */
+export async function queryJournals(client: LogseqClient, options: JournalQuery, now?: Date): Promise<Json> {
+  return (
+    await callTool(
+      client,
+      'logseq_query_by_date_range',
+      {
+        start_date: options.startDate,
+        end_date: options.endDate,
+        last_n: options.lastN,
+        preset: options.preset,
+        search_term: options.searchTerm,
+        slim_results: options.slimResults ?? false,
+        include_content: options.includeContent,
+        top_concepts_limit: options.topConceptsLimit,
+        resolve_refs: options.resolveRefs,
+        max_blocks: options.maxBlocks,
+      },
+      now
+    )
+  ).value;
+}
 
-export const getConceptEvolution = either(tsGetConceptEvolution, async (client, conceptName, options) =>
-  (await callTool(client, 'logseq_get_concept_evolution', {
-    concept_name: conceptName,
-    start_date: options?.startDate,
-    end_date: options?.endDate,
-    group_by: options?.groupBy,
-    max_entries: options?.maxEntries,
-  })).value
-);
+export async function queryByDateRange(
+  client: LogseqClient,
+  startDate: number,
+  endDate: number,
+  searchTerm?: string,
+  slimResults?: boolean
+): Promise<Json> {
+  return queryJournals(client, { startDate, endDate, searchTerm, slimResults });
+}
 
-export const getGraphInfo = either(tsGetGraphInfo, async client => (await callTool(client, 'logseq_get_graph_info', {})).value);
+export async function getConceptEvolution(
+  client: LogseqClient,
+  conceptName: string,
+  options?: { startDate?: number; endDate?: number; groupBy?: string; maxEntries?: number }
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_get_concept_evolution', {
+      concept_name: conceptName,
+      start_date: options?.startDate,
+      end_date: options?.endDate,
+      group_by: options?.groupBy,
+      max_entries: options?.maxEntries,
+    })
+  ).value;
+}
 
-export const getCurrentContext = either(
-  tsGetCurrentContext,
-  async client => (await callTool(client, 'logseq_get_current_context', {})).value
-);
+export async function getGraphInfo(client: LogseqClient): Promise<Json> {
+  return (await callTool(client, 'logseq_get_graph_info', {})).value;
+}
 
-export const listPages = either(tsListPages, async (client, options) =>
-  (await callTool(client, 'logseq_list_pages', {
-    name_contains: options?.nameContains,
-    limit: options?.limit,
-    offset: options?.offset,
-  })).value
-);
+export async function getCurrentContext(client: LogseqClient): Promise<Json> {
+  return (await callTool(client, 'logseq_get_current_context', {})).value;
+}
 
-export const checkLinks = either(tsCheckLinks, async (client, before, after) =>
-  (await callTool(client, 'logseq_check_links', { before, after })).value
-);
+export async function listPages(
+  client: LogseqClient,
+  options?: { nameContains?: string; limit?: number; offset?: number }
+): Promise<Json> {
+  return (
+    await callTool(client, 'logseq_list_pages', {
+      name_contains: options?.nameContains,
+      limit: options?.limit,
+      offset: options?.offset,
+    })
+  ).value;
+}
+
+export async function checkLinks(client: LogseqClient, before: string, after: string): Promise<Json> {
+  return (await callTool(client, 'logseq_check_links', { before, after })).value;
+}

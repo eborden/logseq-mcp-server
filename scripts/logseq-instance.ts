@@ -25,7 +25,7 @@ import { createServer } from 'net';
 import { mkdir, open, readFile, readdir, realpath, rm, stat, writeFile } from 'fs/promises';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { LogseqClient } from '../src/client.js';
+import { LogseqClient } from './lib/logseq-api.js';
 import { FIXTURE_SENTINEL_PAGE, requireFixtureGraph } from '../tests/integration/helpers/fixture-graph.js';
 import {
   InstanceDeps,

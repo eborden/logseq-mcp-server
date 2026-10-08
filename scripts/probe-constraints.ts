@@ -8,8 +8,7 @@
  * graph (#90): with neither, or with a config on port 12315, it stops before any network call. The fixture reproduces every
  * constraint; row counts differ from the real-graph numbers in CLAUDE.md.
  */
-import { loadConfig } from '../src/config.js';
-import { LogseqClient } from '../src/client.js';
+import { loadConfig, LogseqClient } from './lib/logseq-api.js';
 import { assertNotPersonalLogseq, resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
 
 type Outcome = { ok: boolean; rows?: number; value?: unknown; error?: string };

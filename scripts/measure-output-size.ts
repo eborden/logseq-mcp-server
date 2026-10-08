@@ -2,7 +2,7 @@
  * Print the size of tool output, slim (default) vs full (`slim_results: false`).
  * Evidence for the size claims in the slim-by-default PR (#42).
  *
- * Calls go through the real MCP server (in memory), so the output is what a client
+ * Calls go through the Rust server over MCP stdio, so the output is what a client
  * receives: every content block, minified JSON, tips and meta included.
  *
  * Prints labels and byte counts only. It never prints block content or page names,
@@ -11,13 +11,12 @@
  * percentages and not verbatim.
  *
  * Usage: npx tsx scripts/measure-output-size.ts [pageName]
- * Requires LogSeq running with the HTTP API enabled. Read-only.
+ * Requires LogSeq running with the HTTP API enabled, and the Rust debug build (`cd rust && cargo build`).
+ * Read-only. With no LOGSEQ_MCP_CONFIG it reads the real graph on purpose: the counts are a real-graph baseline.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig, resolveConfigPath } from '../src/config.js';
-import { LogseqClient } from '../src/client.js';
-import { createServer } from '../src/index.js';
+import { loadConfig, LogseqClient, resolveConfigPath } from './lib/logseq-api.js';
+import { connectMcpToApi } from './lib/rust-server.js';
 
 type Args = Record<string, unknown>;
 
@@ -67,10 +66,8 @@ async function main() {
   const topPair = [...pairCounts.entries()].sort((a, b) => b[1] - a[1])[0];
   const [propKey, propValue] = topPair ? (JSON.parse(topPair[0]) as [string, string]) : [undefined, undefined];
 
-  const server = createServer(logseq, { tips: true });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const mcp = new Client({ name: 'measure-output-size', version: '1.0.0' }, { capabilities: {} });
-  await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+  // The server talks to LogSeq itself, with the same URL and token (a home of its own: no other config to find)
+  const mcp: Client = await connectMcpToApi({ apiUrl: config.apiUrl, authToken: config.authToken }, { tips: true });
 
   const slimCases: Array<[string, string, Args]> = [
     ['search_blocks (limit 50)', 'logseq_search_blocks', { query: subject.slice(0, 4), limit: 50 }],

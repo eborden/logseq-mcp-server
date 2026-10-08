@@ -1,5 +1,5 @@
-import { LogseqClient } from '../../../src/client.js';
-import { DatalogQueryBuilder } from '../../../src/datalog/queries.js';
+import { LogseqClient } from '../../../scripts/lib/logseq-api.js';
+import { getPageQuery } from './page-queries.js';
 
 /**
  * Guard for the fixture graph in tests/fixtures/graph (#87).
@@ -56,7 +56,7 @@ function readFixtureVersion(properties: unknown): number | undefined {
  *   or has a different version than `FIXTURE_VERSION`
  */
 export async function requireFixtureGraph(client: LogseqClient): Promise<number> {
-  const { query, inputs } = DatalogQueryBuilder.getPage(FIXTURE_SENTINEL_PAGE);
+  const { query, inputs } = getPageQuery(FIXTURE_SENTINEL_PAGE);
   const rows = await client.executeDatalogQuery<unknown[][] | null>(query, ...inputs);
   const page = rows?.[0]?.[0] as { properties?: unknown } | undefined;
 

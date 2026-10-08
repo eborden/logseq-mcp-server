@@ -1,7 +1,5 @@
 import { access } from 'fs/promises';
-import { loadConfig } from '../../../src/config.js';
-import { LogseqClient } from '../../../src/client.js';
-import { LogseqMCPConfig } from '../../../src/types.js';
+import { loadConfig, LogseqClient, LogseqMCPConfig } from '../../../scripts/lib/logseq-api.js';
 import { FixtureGraphError, requireFixtureGraph } from './fixture-graph.js';
 import { assertNotPersonalLogseq, FixtureConfigError, HOW_TO_RUN, resolveFixtureConfigPath } from './instance-config.js';
 
