@@ -128,6 +128,8 @@ const TWO_LEVELS = walk(ATLAS, [
       row(20, DAVE, 'outbound', 2),
       row(20, CAROL, 'outbound', 1),
       row(21, BOB, 'outbound', 1),
+      // Bob's link to Carol, reported again from Carol's side: the count is set, never added
+      row(21, BOB, 'inbound', 1),
       row(21, ERIN, 'inbound', 1),
       row(20, ATLAS, 'outbound', 2)
     ]
