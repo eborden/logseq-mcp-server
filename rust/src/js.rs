@@ -144,11 +144,20 @@ fn array_index(key: &str) -> Option<u32> {
 }
 
 // PARITY(#299): copies `localeCompare`, which orders candidate pages by the host's locale and ICU, so the
-// TypeScript order differs from machine to machine (suspected TS bug: sort by a fixed order) — drop if
-// Rust becomes the only server.
+// TypeScript order differs from machine to machine (suspected TS bug: sort by a fixed order). It copies
+// ICU's root collation except for Han, which differs on purpose (accepted, see below) — drop if Rust becomes the
+// only server.
 /// The order `a.localeCompare(b)` gives in Node's default (root) collation: the Unicode Collation
 /// Algorithm with CLDR's root data, which is what `icu_collator` runs. Node 24 (ICU 78) and the
 /// crate's data are both CLDR 48.
+///
+/// The data is the same CLDR root except for Han, which differs on purpose (the maintainer accepted
+/// it, #299): ICU4C orders ideographs by radical and stroke across every block, so U+3400 comes
+/// before U+65E5, where `icu_collator`'s compiled data gives them implicit weights in code point
+/// order, block after block. Ideographs inside the original block U+4E00..U+9FA5 mostly agree
+/// (code point order there follows radical and stroke, with exceptions); a pair that crosses into an
+/// extension block, the compatibility ideographs or U+9FA6 and up can differ. ICU4X has no supported
+/// setting for it (`-u-co-unihan` gives the same order). No other difference is known.
 ///
 /// ICU compares in layers. First the letters, digits and symbols as a sequence, ignoring accents
 /// and case; then the accents; then the case. Across kinds of character the order is white space,
@@ -297,13 +306,26 @@ mod tests {
 
     #[test]
     fn locale_compare_orders_inside_a_script_as_icu_does() {
-        // Hangul, then kana, then Han (which root collation takes in code point order).
+        // Hangul, then kana, then Han. These ideographs sit in the original block, where the radical-stroke order
+        // Node uses and the code point order `icu_collator` uses happen to agree.
         assert_pairwise_in_order(&["\u{d55c}\u{ae00}", "\u{304b}\u{306a}", "\u{4e2d}", "\u{4e2d}\u{6587}", "\u{65e5}", "\u{65e5}\u{672c}", "\u{65e5}\u{672c}\u{8a9e}", "\u{6c49}\u{5b57}", "\u{6f22}\u{5b57}"]);
         // the case and accent layers still apply after the letters: a, ä, then "a-α" (a hyphen sorts before letters)
         assert_pairwise_in_order(&[
             "a", "\u{e4}", "a-\u{3b1}", "aether", "\u{c6}ther", "alpha", "Alpha", "alpha ", "Alpha2", "o", "\u{f8}", "\u{d8}", "p", "\u{df}",
             "strasse", "Strasse", "Stra\u{df}e", "\u{3b1}", "\u{3b1}lpha",
         ]);
+    }
+
+    #[test]
+    fn locale_compare_orders_han_across_blocks_by_code_point_unlike_node() {
+        // KNOWN DIFFERENCE from Node 24 (#299): ICU4C's root puts Han in radical-stroke order across blocks, so
+        // `"\u{3400}".localeCompare("\u{65e5}")` is -1 there. `icu_collator`'s compiled root data orders by code
+        // point block after block (URO, then Extension A, ...), so Rust says 1. Pinned so a change shows up, and
+        // is to be flipped if the radical-stroke order ever lands.
+        assert_eq!(locale_compare("\u{3400}", "\u{65e5}"), Ordering::Greater); // Node: Less
+        assert_eq!(locale_compare("\u{20000}", "\u{65e5}"), Ordering::Greater); // Node: Less
+        assert_eq!(locale_compare("\u{f900}", "\u{3400}"), Ordering::Less); // Node: Greater
+        assert_eq!(locale_compare("\u{9fa5}", "\u{9fa6}"), Ordering::Less); // Node: Greater
     }
 
     #[test]

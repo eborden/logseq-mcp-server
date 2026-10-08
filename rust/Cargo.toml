@@ -37,7 +37,9 @@ icu_properties = { version = "2.2", default-features = false, features = ["compi
 # before Cyrillic, `ß` as `ss`, ...). Same ICU4X release line as the two above (unicode-org/icu4x, Unicode-3.0
 # license, actively released: 2.3.1 as of Oct 2026) and built on the icu_normalizer, icu_properties and
 # icu_provider already locked, so the new builds are icu_collator and its data crate. Its data ships in the
-# binary (the PR records the size). The CLDR 48 root data is the one in Node 24's ICU 78.
+# binary (the PR records the size). The data is CLDR 48 root, as in Node 24's ICU 78, except for Han: ICU4X
+# orders ideographs by block (code point) and Node by radical and stroke. The maintainer accepted that
+# difference (#299, `js::locale_compare`).
 icu_collator = { version = "2.3", default-features = false, features = ["compiled_data"] }
 
 # The local calendar day (`localtime_r`), which `new Date()`'s local components give the TypeScript
