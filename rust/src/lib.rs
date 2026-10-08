@@ -7,4 +7,5 @@ pub mod client;
 pub mod config;
 pub mod edn;
 pub mod env;
+pub mod js;
 pub mod server;
