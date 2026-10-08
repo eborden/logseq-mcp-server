@@ -32,4 +32,4 @@ test: `tests/integration/alias-sets.test.ts`
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #57 |
-| 2026-10-08 | Mechanical enforcement: the resolver and the per-tool alias tests are the Rust crate's and the integration suite's, with the TypeScript server's removal. Statement unchanged. | #369 |
+| 2026-10-08 | Mechanical enforcement: the resolver and the per-tool alias tests are the Rust crate's and the integration suite's, with the TypeScript server's removal. Statement unchanged. | #370 |

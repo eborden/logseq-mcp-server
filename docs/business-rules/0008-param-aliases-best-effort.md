@@ -19,4 +19,4 @@ Tests pin that a conflicting alias and canonical value is refused, that the alia
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #56 |
-| 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. | #369 |
+| 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. | #370 |

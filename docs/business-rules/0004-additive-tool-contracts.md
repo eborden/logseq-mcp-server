@@ -22,4 +22,4 @@ reviewer: A diff of `scripts/parity/expected/tool-list.json` only adds optional 
 |---|---|---|
 | 2026-10-05 | Introduced as a hard rule in the foundations doc. | #38 |
 | 2026-10-05 | Tool-list snapshot added as the mechanism. | #47 |
-| 2026-10-08 | Mechanical enforcement: the tool-list snapshot of the TypeScript server is replaced by the recorded tool list, which the parity harness compares by meaning (ADR-0031). Statement unchanged. | #369 |
+| 2026-10-08 | Mechanical enforcement: the tool-list snapshot of the TypeScript server is replaced by the recorded tool list, which the parity harness compares by meaning (ADR-0031). Statement unchanged. | #370 |

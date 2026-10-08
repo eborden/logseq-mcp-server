@@ -25,4 +25,4 @@ reviewer: A new `catch` re-throws infrastructure errors and never maps an error 
 |---|---|---|
 | 2026-10-05 | Introduced in `build_context` and `get_context_for_query`. | #29 |
 | 2026-10-05 | Extended to `get_page` and its page lookups. | #35 |
-| 2026-10-08 | Mechanical enforcement: the tests moved to the Rust server's call-count tests and the integration suite with the TypeScript server's removal. Statement unchanged. | #369 |
+| 2026-10-08 | Mechanical enforcement: the tests moved to the Rust server's call-count tests and the integration suite with the TypeScript server's removal. Statement unchanged. | #370 |

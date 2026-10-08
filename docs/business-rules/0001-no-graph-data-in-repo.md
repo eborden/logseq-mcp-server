@@ -32,4 +32,4 @@ Real names can't be listed in a repo check without publishing them. A local hook
 | 2026-10-05 | Restated as a hard rule in the foundations doc. | #38 |
 | 2026-10-05 | Enforcement: the tracked raw-output test replaces `none-yet: #95`, the reviewer step stays as the fallback, and the local hook is tracked as `none-yet: #98`. | #99, #103 |
 | 2026-10-06 | Rationale only: the integration tests and the probe no longer read the personal graph, so it names the paths that still can. Statement unchanged. | #158 |
-| 2026-10-08 | Mechanical enforcement: the test that checks tracked raw-output files moved from `src/` to `tests/guards/` with the TypeScript server's removal. Statement unchanged. | #369 |
+| 2026-10-08 | Mechanical enforcement: the test that checks tracked raw-output files moved from `src/` to `tests/guards/` with the TypeScript server's removal. Statement unchanged. | #370 |
