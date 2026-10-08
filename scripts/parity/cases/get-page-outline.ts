@@ -55,7 +55,8 @@ const pulled = ({ id, name, originalName, file, journalDay }: Page) => ({
 
 interface Block {
   id: number;
-  parent: number;
+  /** Absent: the row has no `parent` at all */
+  parent?: number;
   left: number;
   content?: string;
   /** Send `parent` as a bare number, which the outline accepts as well as `{ id }` */
@@ -68,7 +69,7 @@ const row = ({ id, parent, left, content, bareParent }: Block) => [
     uuid: uuid(id),
     ...(content === undefined ? {} : { content }),
     left: { id: left },
-    parent: bareParent ? parent : { id: parent }
+    ...(parent === undefined ? {} : { parent: bareParent ? parent : { id: parent } })
   }
 ];
 
@@ -186,6 +187,52 @@ export const getPageOutlineCases: ParityCase[] = [
       [query(RESOLVE_BY_NAME, ['"project atlas/log"'], [[pulled(ATLAS_LOG), 'name']])],
       [query(outlineQuery(ATLAS_LOG.id), [], LOG_BLOCKS.map(row))]
     ]
+  },
+  {
+    // A null cell is skipped, a row with no parent is neither a top-level block nor a child
+    name: 'null cell and a row with no parent',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: 'Alice' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"alice"'], [[pulled(ALICE), 'name']])],
+      [
+        query(outlineQuery(ALICE.id), [], [
+          [null],
+          row({ id: 401, parent: 40, left: 40, content: 'Alice works on [[Project Atlas]]' }),
+          row({ id: 402, left: 401, content: 'A row LogSeq sent without a parent' }),
+          row({ id: 403, parent: 401, left: 401, content: 'Since 2025' })
+        ])
+      ]
+    ]
+  },
+  {
+    // 411 and 412 point at each other and 413 at a block that isn't there: the chain from 413
+    // comes first, then the blocks no chain reached, by id
+    name: 'broken and cyclic left chain',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: 'Alice Notes' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"alice notes"'], [[pulled(ALICE_NOTES), 'name']])],
+      [
+        query(
+          outlineQuery(ALICE_NOTES.id),
+          [],
+          [
+            row({ id: 411, parent: 41, left: 412, content: 'Cycle one' }),
+            row({ id: 412, parent: 41, left: 411, content: 'Cycle two' }),
+            row({ id: 414, parent: 41, left: 413, content: 'After the orphan' }),
+            row({ id: 413, parent: 41, left: 999, content: 'Left of a missing block' })
+          ]
+        )
+      ]
+    ]
+  },
+  {
+    // An error from LogSeq is an error result, not an empty outline (BR-0003)
+    name: 'LogSeq error from the resolver',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: 'Bob' },
+    steps: [[query(RESOLVE_BY_NAME, ['"bob"'], { error: 'Query timed out' })]]
   },
   {
     name: 'bad argument',
