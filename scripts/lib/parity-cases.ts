@@ -1,8 +1,11 @@
 // The parity cases, for the Node tooling that reuses one (the measure scripts). The cases and their golden results
 // live in rust/tests/data/parity/*.json and nowhere else (#379): the cargo test (rust/tests/parity.rs) holds the server
 // to them, and `PARITY_RECORD=1 cargo test --test parity_record -- --nocapture` records them. This file only reads them.
-// It is not the contract's judge: `sameResult` and `sameCalls` tell a measure script that the server it timed did what
-// the case says, so a number is never for a call that failed.
+// It is not the contract's judge, and nothing may use it as a check: `resultMismatches` and `callMismatches` are a loose
+// sanity check for the measure scripts, so a number is never for a call that failed. They are looser than the cargo
+// comparator (rust/tests/parity_support/compare.rs): a JSON text is read as JSON and keys are sorted at every depth,
+// so a differently keyed text or a differently laid out one is the same, the closest names of a missing page are
+// compared as text, and the calls are compared in any order. The contract is held by `cargo test` alone.
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
