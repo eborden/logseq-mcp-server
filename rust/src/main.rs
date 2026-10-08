@@ -1,7 +1,8 @@
 use std::process::ExitCode;
 
 use logseq_mcp_server::client::LogseqClient;
-use logseq_mcp_server::config::{CONFIG_PATH_ENV, load_config, resolve_config_path};
+use logseq_mcp_server::config::load_config;
+use logseq_mcp_server::env::Env;
 use logseq_mcp_server::server::LogseqServer;
 use rmcp::ServiceExt;
 
@@ -18,11 +19,12 @@ async fn main() -> ExitCode {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // ~/.logseq-mcp/config.json, or the file LOGSEQ_MCP_CONFIG names
-    // home_dir falls back to the passwd entry when HOME is unset, as Node's os.homedir() does.
-    let home = std::env::home_dir();
-    let config_path = resolve_config_path(std::env::var(CONFIG_PATH_ENV).ok().as_deref(), home.as_deref())?;
-    let config = load_config(&config_path)?;
+    // ~/.logseq-mcp/config.json, or the file LOGSEQ_MCP_CONFIG names; LOGSEQ_MCP_TIPS checked too
+    let env = Env::from_process()?;
+    let config = load_config(env.config_path.as_path())?;
+    // No tool has tips yet. Resolving them still rejects a bad LOGSEQ_MCP_TIPS at startup (above),
+    // as the TypeScript server does.
+    let _tips_enabled = env.tips.tips_enabled(config.tips);
 
     let server = LogseqServer::new(LogseqClient::new(&config));
     let running = server.serve(rmcp::transport::stdio()).await?;
