@@ -251,7 +251,16 @@ mod tests {
         let ours = tools::list().into_iter().find(|tool| tool.name == get_page_outline::NAME).unwrap();
         assert_eq!(outline["inputSchema"], serde_json::to_value(&ours).unwrap()["inputSchema"]);
         for tool in tools {
-            assert_eq!(tool["annotations"]["readOnlyHint"], true, "{}", tool["name"]);
+            let name = tool["name"].as_str().unwrap();
+            let annotations = &tool["annotations"];
+            // BR-0002: every tool is read-only, titled, non-destructive and closed-world; all but the tool that reads
+            // what the person has open in LogSeq (its answer changes between calls) are idempotent
+            assert_eq!(annotations["readOnlyHint"], true, "{name}");
+            assert_eq!(annotations["destructiveHint"], false, "{name}");
+            assert_eq!(annotations["openWorldHint"], false, "{name}");
+            assert_eq!(annotations["idempotentHint"], name != "logseq_get_current_context", "{name}");
+            assert!(tool["title"].as_str().is_some_and(|title| !title.is_empty()), "{name} has a title");
+            assert_eq!(tool["title"], annotations["title"], "{name}: the title and the annotation's title agree");
         }
     }
 
