@@ -126,6 +126,10 @@ const expectedMessage: z.core.$ZodErrorMap = issue => {
     }
     case 'invalid_value':
       return `one of ${issue.values.map(v => JSON.stringify(v)).join(', ')}`;
+    case 'too_small':
+      // A count below its `.min()` (#293). Other origins (string length, arrays) keep zod's message
+      if (issue.origin !== 'number' || !issue.inclusive) return undefined;
+      return `at least ${issue.minimum}`;
     case 'invalid_union': {
       const kinds = unionKinds(issue);
       if (kinds === undefined) return undefined;
@@ -173,6 +177,9 @@ function exampleFor(param: string, issue: z.core.$ZodIssue): string | undefined 
   if (issue.code === 'invalid_type') {
     const sample = EXAMPLE_VALUE[issue.expected];
     return sample === undefined ? undefined : `${param}: ${sample}`;
+  }
+  if (issue.code === 'too_small' && issue.origin === 'number' && issue.inclusive) {
+    return `${param}: ${issue.minimum}`;
   }
   if (issue.code === 'invalid_union') {
     // The first alternative's sample: `property_value: "..."`
