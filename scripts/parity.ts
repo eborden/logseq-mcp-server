@@ -21,13 +21,16 @@
 // The expected files are the golden results of the Rust server. They were recorded from the TypeScript server, and
 // a re-record is a decision (#299 changes some on purpose), so --record-from-rust is guarded: it takes no command
 // (this checkout's debug build only, which also honours the test clock), no --tested-tools-only, no --real-clock, and
-// refuses to run when CI is set. It ships with a reviewed diff of the JSON.
+// refuses to run when CI is set. It writes a file only when a case or a tool changed in meaning (the closest names of a
+// missing page by the ADR-0032 rules, `tools/list` by `compareToolLists`), and keeps the recorded bytes of every entry that
+// did not, so its diff is the change and not the Rust schema's spelling. It ships with a reviewed diff of the JSON.
 //
 // Exit code 0 when everything matches (for --self-check: when both halves behave), 1 otherwise.
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CASE_GROUPS, allCases, expectedFileOf, type CaseGroup } from './parity/case-groups.js';
-import { checkWrongLists, compareResult, perturbCases, runParity, type ParityReport, type ToolResult } from './parity/harness.js';
+import { checkWrongLists, compareResultBySuggestionRules, perturbCases, runParity, type ParityCase, type ParityReport, type ToolResult } from './parity/harness.js';
+import { candidatesOf } from './parity/suggestion-rules.js';
 import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
 import { parseCommandLine } from './parity/command-line.js';
 import { withoutClockCases } from './parity/clock-cases.js';
@@ -55,23 +58,48 @@ async function readJson<T>(file: string): Promise<T | undefined> {
   }
 }
 
-/** What a re-record changes in the expected file, case by case, before it is written. */
-function printChanges(previous: Record<string, ToolResult> | undefined, next: Record<string, ToolResult>): void {
+/**
+ * What a re-record changes in a group's expected file, case by case, before it is written. Returns the results to
+ * write, or undefined when nothing changed: a case whose result is the same by `compareResult` keeps its recorded
+ * bytes, so a re-record's diff holds changes of meaning and nothing else (#356).
+ */
+function printChanges(
+  previous: Record<string, ToolResult> | undefined,
+  next: Record<string, ToolResult>,
+  cases: readonly ParityCase[]
+): Record<string, ToolResult> | undefined {
   if (!previous) {
     console.log('no expected file yet; every case is new');
-    return;
+    return next;
   }
   let changed = 0;
-  for (const name of new Set([...Object.keys(previous), ...Object.keys(next)])) {
+  const toWrite: Record<string, ToolResult> = {};
+  for (const name of Object.keys(next)) {
     const before = previous[name];
-    const after = next[name];
-    const lines = !before ? ['new case'] : !after ? ['case removed'] : compareResult(before, after);
+    // The closest names of a missing page are held to the rules of ADR-0032, not to bytes: a list the rules accept is no change
+    const candidates = candidatesOf(cases.find(c => c.name === name)?.steps ?? []);
+    const lines = !before ? ['new case'] : compareResultBySuggestionRules(before, next[name], candidates);
+    toWrite[name] = lines.length === 0 ? before : next[name];
     if (lines.length === 0) continue;
     changed++;
     console.log(`changed: ${name}`);
     for (const line of lines) console.log(`  - ${line}`);
   }
-  console.log(changed === 0 ? 'no case changed' : `${changed} case(s) changed; review the JSON diff before committing`);
+  for (const name of Object.keys(previous)) {
+    if (name in next) continue;
+    changed++;
+    console.log(`changed: ${name}\n  - case removed`);
+  }
+  console.log(changed === 0 ? 'no case changed; the file is left as it is' : `${changed} case(s) changed; review the JSON diff before committing`);
+  return changed === 0 ? undefined : toWrite;
+}
+
+/** The recorded tool list with the entries that changed in meaning replaced, so unchanged ones keep their bytes. */
+function mergeToolLists(previous: ProjectedTool[], next: ProjectedTool[]): ProjectedTool[] {
+  return next.map(tool => {
+    const before = previous.find(candidate => candidate.name === tool.name);
+    return before && compareToolLists([before], [tool]).length === 0 ? before : tool;
+  });
 }
 
 /** Each group's recorded results, merged: case names are unique across groups. */
@@ -96,20 +124,27 @@ async function main(): Promise<number> {
     const report = await runParity({ server, cases, ...suggestions });
     print('record', report);
     if (report.failures.length > 0) return 1;
+    // A file is written only when something in it changed in meaning (#356), so a re-record's diff is never the Rust
+    // schema's spelling or key order over hundreds of lines; an entry that is the same by meaning keeps its bytes.
+    const writes: Array<{ file: string; value: unknown; what: string }> = [];
     for (const group of CASE_GROUPS) {
       const results = Object.fromEntries(group.cases.map(c => [c.name, report.results[c.name]]));
-      printChanges(await readJson(expectedFileOf(group)), results);
+      const toWrite = printChanges(await readJson(expectedFileOf(group)), results, group.cases);
+      if (toWrite) writes.push({ file: expectedFileOf(group), value: toWrite, what: `${Object.keys(toWrite).length} results` });
     }
     const previousTools = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
     const toolChanges = previousTools ? compareToolLists(previousTools, report.toolList ?? []) : ['no recorded tool list yet'];
     for (const line of toolChanges) console.log(`tools/list changed: ${line}`);
-    for (const group of CASE_GROUPS) {
-      const results = Object.fromEntries(group.cases.map(c => [c.name, report.results[c.name]]));
-      await writeFile(expectedFileOf(group), `${JSON.stringify(results, null, 2)}\n`);
-      console.log(`wrote ${Object.keys(results).length} results to ${expectedFileOf(group)}`);
+    if (toolChanges.length === 0) console.log('tools/list: no change in meaning; the file is left as it is');
+    else {
+      const merged = previousTools ? mergeToolLists(previousTools, report.toolList ?? []) : (report.toolList ?? []);
+      writes.push({ file: EXPECTED_TOOL_LIST_FILE, value: merged, what: `${merged.length} tools` });
     }
-    await writeFile(EXPECTED_TOOL_LIST_FILE, `${JSON.stringify(report.toolList, null, 2)}\n`);
-    console.log(`wrote ${report.toolList?.length ?? 0} tools to ${EXPECTED_TOOL_LIST_FILE}`);
+    for (const { file, value, what } of writes) {
+      await writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
+      console.log(`wrote ${what} to ${file}`);
+    }
+    if (writes.length === 0) console.log('nothing to write');
     return 0;
   }
 
