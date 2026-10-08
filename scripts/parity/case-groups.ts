@@ -2,7 +2,7 @@
 // under scripts/parity/expected/, so a tool's re-record touches only its own JSON (#306). Case names
 // are unique across every group (runParity refuses a duplicate).
 import { join } from 'node:path';
-import { buildContextCases } from './cases/build-context.js';
+import { checkLinksCases } from './cases/check-links.js';
 import { getBacklinksCases } from './cases/get-backlinks.js';
 import { getBlockCases } from './cases/get-block.js';
 import { getConceptEvolutionCases } from './cases/get-concept-evolution.js';
@@ -19,6 +19,7 @@ import { pageResourceCases } from './cases/page-resource.js';
 import { queryByPropertyCases } from './cases/query-by-property.js';
 import { resolveRefsCases } from './cases/resolve-refs.js';
 import { searchBlocksCases } from './cases/search-blocks.js';
+import { searchByRelationshipCases } from './cases/search-by-relationship.js';
 import type { ParityCase } from './harness.js';
 import { REPO_ROOT } from './ts-server.js';
 
@@ -29,7 +30,7 @@ export interface CaseGroup {
 }
 
 export const CASE_GROUPS: CaseGroup[] = [
-  { name: 'build-context', cases: buildContextCases },
+  { name: 'check-links', cases: checkLinksCases },
   { name: 'get-backlinks', cases: getBacklinksCases },
   { name: 'get-block', cases: getBlockCases },
   { name: 'get-concept-evolution', cases: getConceptEvolutionCases },
@@ -45,7 +46,8 @@ export const CASE_GROUPS: CaseGroup[] = [
   { name: 'page-resource', cases: pageResourceCases },
   { name: 'query-by-property', cases: queryByPropertyCases },
   { name: 'resolve-refs', cases: resolveRefsCases },
-  { name: 'search-blocks', cases: searchBlocksCases }
+  { name: 'search-blocks', cases: searchBlocksCases },
+  { name: 'search-by-relationship', cases: searchByRelationshipCases }
 ];
 
 /** Where a group's results, recorded from the TypeScript server, are kept. */
