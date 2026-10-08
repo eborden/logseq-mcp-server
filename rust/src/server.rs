@@ -147,7 +147,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_returns_the_outline_tool() {
+    async fn tools_list_returns_every_tool_read_only() {
         let responses = exchange(&closed_port_url().await, &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
@@ -155,10 +155,13 @@ mod tests {
         ])
         .await;
         let tools = responses[1]["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], get_page_outline::NAME);
-        assert_eq!(tools[0]["inputSchema"], serde_json::to_value(&tools::list()[0]).unwrap()["inputSchema"]);
-        assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
+        assert_eq!(tools.len(), tools::list().len());
+        let outline = tools.iter().find(|tool| tool["name"] == get_page_outline::NAME).expect("the outline tool is listed");
+        let ours = tools::list().into_iter().find(|tool| tool.name == get_page_outline::NAME).unwrap();
+        assert_eq!(outline["inputSchema"], serde_json::to_value(&ours).unwrap()["inputSchema"]);
+        for tool in tools {
+            assert_eq!(tool["annotations"]["readOnlyHint"], true, "{}", tool["name"]);
+        }
     }
 
     #[tokio::test]
