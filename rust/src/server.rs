@@ -7,8 +7,8 @@
 use std::sync::{Arc, LazyLock};
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListResourceTemplatesResult, ListResourcesResult,
-    ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, GetPromptRequestParams, GetPromptResponse, Implementation,
+    ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
@@ -16,6 +16,8 @@ use serde_json::Value;
 
 use crate::client::LogseqClient;
 use crate::dates::Clock;
+use crate::instructions::SERVER_INSTRUCTIONS;
+use crate::prompts;
 use crate::resources;
 use crate::tool::{error_result, into_result};
 use crate::tools;
@@ -28,10 +30,6 @@ pub static SERVER_VERSION: LazyLock<String> = LazyLock::new(|| {
     let package: Value = serde_json::from_str(include_str!("../../package.json")).expect("package.json is JSON");
     package["version"].as_str().expect("package.json has a version").to_owned()
 });
-
-/// Server `instructions`. A placeholder until more tools land: the TypeScript text
-/// (`src/instructions.ts`) names tools this server doesn't have yet.
-pub const SERVER_INSTRUCTIONS: &str = "Rust spike of the LogSeq MCP server (read-only). Available tools: logseq_get_graph_info (which graph is open), logseq_list_pages (page names), logseq_search_blocks (keyword search) and logseq_get_page_outline (a page's top-level blocks).";
 
 #[derive(Clone)]
 pub struct LogseqServer {
@@ -63,7 +61,7 @@ impl LogseqServer {
 
 impl ServerHandler for LogseqServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_prompts().enable_resources().build())
             .with_server_info(Implementation::new(SERVER_NAME, SERVER_VERSION.as_str()))
             .with_instructions(SERVER_INSTRUCTIONS)
     }
@@ -74,6 +72,22 @@ impl ServerHandler for LogseqServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         Ok(ListToolsResult::with_all_items(tools::list()))
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        Ok(ListPromptsResult::with_all_items(prompts::list()))
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResponse, ErrorData> {
+        Ok(prompts::get(&request.name, request.arguments.as_ref(), self.clock.today())?.into())
     }
 
     async fn list_resources(
@@ -177,6 +191,50 @@ mod tests {
         assert_eq!(result["instructions"], SERVER_INSTRUCTIONS);
         assert_eq!(result["protocolVersion"], "2025-06-18");
         assert!(result["capabilities"]["tools"].is_object());
+        assert!(result["capabilities"]["prompts"].is_object());
+        assert!(result["capabilities"]["resources"].is_object());
+    }
+
+    #[tokio::test]
+    async fn prompts_are_listed_and_got_and_a_bad_request_is_invalid_params() {
+        let responses = exchange(&closed_port_url().await, &[
+            initialize(),
+            serde_json::from_str(INITIALIZED).unwrap(),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "prompts/list"}),
+            json!({"jsonrpc": "2.0", "id": 3, "method": "prompts/get", "params": {"name": "continue_on", "arguments": {"topic": "project atlas"}}}),
+            json!({"jsonrpc": "2.0", "id": 4, "method": "prompts/get", "params": {"name": "continue_on"}}),
+            json!({"jsonrpc": "2.0", "id": 5, "method": "prompts/get", "params": {"name": "continue_on", "arguments": {"topic": 5}}}),
+        ])
+        .await;
+        let names: Vec<&str> = responses[1]["result"]["prompts"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["weekly_summary", "monthly_summary", "continue_on", "what_do_i_know", "prioritize_tasks"]);
+        let got = &responses[2]["result"];
+        assert_eq!(got["messages"][0]["role"], "user");
+        assert!(got["messages"][0]["content"]["text"].as_str().unwrap().starts_with("Help me continue where I left off on \"project atlas\""));
+        assert!(got.get("resultType").is_none(), "the TypeScript server sends no resultType: {got}");
+        assert_eq!(responses[3]["error"]["code"], -32602);
+        assert_eq!(responses[3]["error"]["message"], r#"MCP error -32602: Prompt "continue_on" needs a non-empty "topic" argument."#);
+        assert_eq!(responses[4]["error"]["code"], -32602);
+    }
+
+    #[tokio::test]
+    async fn the_guide_is_listed_and_read() {
+        let responses = exchange(&closed_port_url().await, &[
+            initialize(),
+            serde_json::from_str(INITIALIZED).unwrap(),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
+            json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {"uri": "logseq://guide"}}),
+            json!({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": "logseq://nope"}}),
+        ])
+        .await;
+        assert_eq!(responses[1]["result"]["resources"][0]["uri"], "logseq://guide");
+        let guide = &responses[2]["result"]["contents"][0];
+        assert_eq!((guide["uri"].as_str(), guide["mimeType"].as_str()), (Some("logseq://guide"), Some("text/markdown")));
+        assert!(guide["text"].as_str().unwrap().starts_with("# LogSeq MCP guide\n\nRead-only access to a LogSeq graph."));
+        assert_eq!(
+            responses[3]["error"]["message"],
+            r#"MCP error -32002: Unknown resource "logseq://nope". Available: logseq://guide, logseq://page/{name}."#
+        );
     }
 
     #[tokio::test]
