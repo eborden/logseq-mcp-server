@@ -9,6 +9,7 @@ import { getGraphInfoCases } from './cases/get-graph-info.js';
 import { getPageCases } from './cases/get-page.js';
 import { getPageOutlineCases } from './cases/get-page-outline.js';
 import { listPagesCases } from './cases/list-pages.js';
+import { queryByDateRangeCases } from './cases/query-by-date-range.js';
 import { queryByPropertyCases } from './cases/query-by-property.js';
 import { resolveRefsCases } from './cases/resolve-refs.js';
 import { searchBlocksCases } from './cases/search-blocks.js';
@@ -29,6 +30,7 @@ export const CASE_GROUPS: CaseGroup[] = [
   { name: 'get-page', cases: getPageCases },
   { name: 'get-page-outline', cases: getPageOutlineCases },
   { name: 'list-pages', cases: listPagesCases },
+  { name: 'query-by-date-range', cases: queryByDateRangeCases },
   { name: 'query-by-property', cases: queryByPropertyCases },
   { name: 'resolve-refs', cases: resolveRefsCases },
   { name: 'search-blocks', cases: searchBlocksCases }
