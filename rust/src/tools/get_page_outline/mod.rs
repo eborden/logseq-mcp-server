@@ -14,7 +14,7 @@ mod queries;
 mod tips;
 mod wire;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
@@ -22,6 +22,7 @@ use serde::ser::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
+use crate::block_tree::order_siblings;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
@@ -161,50 +162,6 @@ struct Top<'a> {
     block: &'a OutlineBlock,
 }
 
-// PARITY(#299): drops a sibling that shares an id with one already placed, though the doc says nothing is
-// dropped (suspected TS bug) — drop if Rust becomes the only server.
-/// `orderSiblings`: siblings in page order, by following the `:block/left` chain.
-///
-/// The first sibling's `left` is the parent (or the page), which is not itself a sibling, so it
-/// is the head of the chain; each following sibling's `left` is the previous one. Blocks the
-/// chain can't reach (a corrupt graph, or a cycle) are appended in id order so nothing is
-/// dropped. Two siblings with one `left`: the first listed follows it. Two with one id: the
-/// first one the order reaches is kept.
-fn order_siblings(siblings: Vec<Top<'_>>) -> Vec<Top<'_>> {
-    if siblings.len() < 2 {
-        return siblings;
-    }
-    let ids: HashSet<i64> = siblings.iter().map(|sibling| sibling.id).collect();
-    let mut by_left: HashMap<i64, usize> = HashMap::new();
-    let mut heads: Vec<usize> = Vec::new();
-    for (i, sibling) in siblings.iter().enumerate() {
-        match sibling.left {
-            Some(left) if ids.contains(&left) => {
-                by_left.entry(left).or_insert(i);
-            }
-            _ => heads.push(i),
-        }
-    }
-    heads.sort_by_key(|&i| siblings[i].id); // a stable sort, as `Array.prototype.sort` is
-
-    let mut order: Vec<usize> = Vec::with_capacity(siblings.len());
-    let mut seen: HashSet<i64> = HashSet::new();
-    for head in heads {
-        let mut current = Some(head);
-        while let Some(i) = current.filter(|&i| !seen.contains(&siblings[i].id)) {
-            seen.insert(siblings[i].id);
-            order.push(i);
-            current = by_left.get(&siblings[i].id).copied();
-        }
-    }
-    let mut rest: Vec<usize> = (0..siblings.len()).collect();
-    rest.sort_by_key(|&i| siblings[i].id);
-    order.extend(rest.into_iter().filter(|&i| !seen.contains(&siblings[i].id)));
-
-    let mut slots: Vec<Option<Top<'_>>> = siblings.into_iter().map(Some).collect();
-    order.into_iter().map(|i| slots[i].take().expect("each sibling is placed once")).collect()
-}
-
 /// The outline of the blocks the query pulled for `page_id`.
 ///
 /// Top-level blocks hang off the page; every other row is a child of one of them. A `null` cell
@@ -223,7 +180,7 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
         }
     }
 
-    let ordered = order_siblings(top);
+    let ordered = order_siblings(top, |top| top.id, |top| top.left);
     let total = ordered.len();
     let shown = &ordered[..total.min(MAX_OUTLINE_BLOCKS)];
 
