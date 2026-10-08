@@ -99,8 +99,8 @@ struct Request {
 fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
     let read = Arguments::new(arguments);
     let concept_name = read.required_string("concept_name")?;
-    let start_date = read.optional_whole("start_date")?;
-    let end_date = read.optional_whole("end_date")?;
+    let start_date = read.optional_whole("start_date", "start_date: 20251115")?;
+    let end_date = read.optional_whole("end_date", "end_date: 20251120")?;
     let group_by = read.optional_enum("group_by", GROUP_BY_VALUES)?.and_then(GroupBy::from_word);
     let max_entries = read.count_or("max_entries", 0, DEFAULT_MAX_ENTRIES)?;
     Ok(Request { concept_name, options: Options { start_date, end_date, group_by, max_entries } })
@@ -387,7 +387,7 @@ mod tests {
         // a date is a whole number, which the tool does no range check on; a fraction is no date
         assert!(read_args(args(json!({"concept_name": "a", "end_date": 2})).as_ref()).is_ok());
         let error = read_args(args(json!({"concept_name": "a", "end_date": 2.5})).as_ref()).unwrap_err();
-        assert_eq!(error.to_string(), "Invalid parameter 'end_date': 2.5\n\nExpected: an integer, not a fraction\nExample: end_date: 5");
+        assert_eq!(error.to_string(), "Invalid parameter 'end_date': 2.5\n\nExpected: an integer, not a fraction\nExample: end_date: 20251120");
         let error = read_args(args(json!({"concept_name": "a", "group_by": "year", "max_entries": -1})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'group_by': \"year\""), "{error}");
         let error = read_args(args(json!({"concept_name": "a", "max_entries": -1})).as_ref()).unwrap_err();
