@@ -1,7 +1,9 @@
 // The differential parity harness (#124, ADR-0025 Decision 2). It runs a server command over
 // stdio, points it at the stub LogSeq through a temporary LOGSEQ_MCP_CONFIG, and checks three
 // things against what the TypeScript server does:
-//   1. `tools/list`, against the ADR-0016 snapshot in src/__snapshots__/tool-list.test.ts.snap;
+//   1. `tools/list`, by meaning (#292, tool-list-compare.ts) against the one recorded from the
+//      TypeScript server, which must itself match the ADR-0016 snapshot in
+//      src/__snapshots__/tool-list.test.ts.snap byte for byte;
 //   2. each case's tool result, byte for byte as the TypeScript server serialized it (ADR-0009);
 //   3. the LogSeq calls and their inputs: the steps of a case in order, the calls within a step
 //      (ones the TypeScript code makes concurrently) as a set.
@@ -12,6 +14,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { format } from '@vitest/pretty-format';
+import { compareToolLists, type ProjectedTool } from './tool-list-compare.js';
 import { toolListForSnapshot } from './tool-list-projection.js';
 import { DATASCRIPT_QUERY, normalizeQuery, startStubLogseq, type CannedCall, type LogseqCall } from './stub-logseq.js';
 
@@ -52,6 +55,11 @@ export interface ParityOptions {
   cases: ParityCase[];
   /** Expected result per case name, as recorded from the TypeScript server. Omit to record. */
   expected?: Record<string, ToolResult>;
+  /**
+   * The tools/list recorded from the TypeScript server, in the snapshot's shape. The server's list
+   * is compared with it by meaning. Omit to record: the list must then match the snapshot exactly.
+   */
+  expectedToolList?: ProjectedTool[];
   /** The vitest snapshot file holding the tools/list snapshot */
   snapshotFile: string;
   /** Milliseconds to wait for each MCP request */
@@ -62,6 +70,8 @@ export interface ParityReport {
   failures: string[];
   /** What the server returned for each case, to record as the expected file */
   results: Record<string, ToolResult>;
+  /** The server's tools/list in the snapshot's shape, to record as the expected tool list */
+  toolList?: ProjectedTool[];
   /** The server's stderr, to explain a failure (everything the stub serves is synthetic) */
   stderr: string;
 }
@@ -232,12 +242,14 @@ export function sandboxedEnv(configPath: string, home: string): Record<string, s
 
 /**
  * Run every case against one server process and report what differs. With no `expected` the
- * results are only collected (record mode); the calls and tools/list are still checked.
+ * results are only collected (record mode); the calls and tools/list are still checked, the list
+ * against the snapshot byte for byte when there is no `expectedToolList`.
  */
 export async function runParity(options: ParityOptions): Promise<ParityReport> {
-  const { server, cases, expected, snapshotFile, timeoutMs = 30000 } = options;
+  const { server, cases, expected, expectedToolList, snapshotFile, timeoutMs = 30000 } = options;
   const failures: string[] = [];
   const results: Record<string, ToolResult> = {};
+  let toolList: ProjectedTool[] | undefined;
   let stderr = '';
 
   const names = new Set<string>();
@@ -270,9 +282,20 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     await client.connect(transport, { timeout: timeoutMs });
 
     const tools = (await client.listTools(undefined, { timeout: timeoutMs })).tools;
+    // As plain JSON, the way it is recorded
+    toolList = JSON.parse(JSON.stringify(toolListForSnapshot(tools))) as ProjectedTool[];
     const snapshot = readSnapshotEntry(await readFile(snapshotFile, 'utf8'), TOOL_LIST_SNAPSHOT_KEY);
-    const listed = serializeLikeVitest(toolListForSnapshot(tools));
-    if (listed !== snapshot) failures.push(`tools/list differs from the snapshot, ${firstDifference(snapshot, listed)}`);
+    if (expectedToolList) {
+      // The reference must be the list the snapshot guards; the server needs only to mean the same
+      const recorded = serializeLikeVitest(expectedToolList);
+      if (recorded !== snapshot) {
+        failures.push(`the recorded tools/list differs from the snapshot; re-record it, ${firstDifference(snapshot, recorded)}`);
+      }
+      for (const f of compareToolLists(expectedToolList, toolList)) failures.push(`tools/list differs in meaning, ${f}`);
+    } else {
+      const listed = serializeLikeVitest(toolListForSnapshot(tools));
+      if (listed !== snapshot) failures.push(`tools/list differs from the snapshot, ${firstDifference(snapshot, listed)}`);
+    }
     for (const f of stub.failures()) failures.push(`startup: stub: ${f}`);
     if (stub.calls().length > 0) failures.push(`startup and tools/list made ${stub.calls().length} LogSeq call(s); expected none`);
 
@@ -307,7 +330,7 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     await stub.close();
     await rm(dir, { recursive: true, force: true });
   }
-  return { failures, results, stderr };
+  return { failures, results, toolList, stderr };
 }
 
 /**
