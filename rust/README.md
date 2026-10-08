@@ -33,7 +33,7 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 | `src/resolve_refs/`, `src/output_format.rs` | `((uuid))` refs and `{{embed}}`s resolved in returned blocks, one batched query per nesting level (BR-0007; `resolve-refs.ts`), with the ref and embed patterns written out since the crate has no regex engine; and the `format` parameter, `json` or `markdown` |
 | `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (messages word for word as `src/errors.ts`), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
 | `src/fuzzy.rs` | fuzzysort 3.1.0's `go`, ported step for step, because the closest names are in an error message compared byte for byte. Tested against the library's own output (`tests/data/fuzzysort-oracle.json`) |
-| `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and an approximation of `localeCompare` |
+| `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and `localeCompare` (ICU root collation, from `icu_collator`) |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
 
 ## Parity-only code
