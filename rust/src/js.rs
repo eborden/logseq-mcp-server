@@ -172,6 +172,11 @@ fn collation_keys(text: &str) -> Vec<CollationKey> {
     let nfd = DecomposingNormalizer::new_nfd().normalize(text);
     let mut keys: Vec<CollationKey> = Vec::new();
     for c in nfd.chars() {
+        // PARITY(#299): ICU skips default-ignorable characters (zero-width space and joiners, soft hyphen, BOM)
+        // when it compares, so two names that differ only by one collate as equal — drop if Rust becomes the only server.
+        if matches!(c, '\u{ad}' | '\u{34f}' | '\u{200b}'..='\u{200f}' | '\u{2060}'..='\u{2064}' | '\u{feff}') {
+            continue;
+        }
         if ('\u{300}'..='\u{36f}').contains(&c) {
             if let Some(last) = keys.last_mut() {
                 last.accents.push(c);
@@ -278,6 +283,14 @@ mod tests {
                 assert_eq!(locale_compare(a, b), i.cmp(&j), "{a:?} against {b:?}");
             }
         }
+    }
+
+    #[test]
+    fn locale_compare_ignores_zero_width_characters_as_icu_does() {
+        assert_eq!(locale_compare("cafe\u{200b}", "cafe"), Ordering::Equal);
+        assert_eq!(locale_compare("ca\u{ad}fe", "cafe"), Ordering::Equal);
+        assert_eq!(locale_compare("cafe\u{200b}", "caf\u{e9}"), Ordering::Less);
+        assert_eq!(locale_compare("a\u{feff}b", "ab"), Ordering::Equal);
     }
 
     #[test]
