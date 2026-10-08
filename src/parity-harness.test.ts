@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
@@ -132,6 +132,18 @@ describe('the parity cases', () => {
       expect(Object.keys(expected).sort(), group.name).toEqual(group.cases.map(c => c.name).sort());
     }
     expect(new Set(allCases().map(c => c.name)).size).toBe(allCases().length);
+  });
+
+  it('are all registered: every cases file and every expected file has a group', async () => {
+    const stems = async (dir: string, extension: string) =>
+      (await readdir(join(REPO_ROOT, 'scripts', 'parity', dir)))
+        .filter(file => file.endsWith(extension))
+        .map(file => file.slice(0, -extension.length))
+        .sort();
+    const groups = CASE_GROUPS.map(group => group.name).sort();
+    expect(await stems('cases', '.ts'), 'a file in scripts/parity/cases is not in CASE_GROUPS').toEqual(groups);
+    // tool-list.json is the recorded tools/list, not a group's results
+    expect((await stems('expected', '.json')).filter(stem => stem !== 'tool-list'), 'a file in scripts/parity/expected is not in CASE_GROUPS').toEqual(groups);
   });
 
   it('read the tools/list snapshot that src/tool-list.test.ts writes', async () => {
