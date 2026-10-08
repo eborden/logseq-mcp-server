@@ -6,7 +6,10 @@
 //!
 //! The block is the entity LogSeq sent, key order and spelling included (BR-0004); with
 //! `resolve_refs` it gains `resolvedContent` and `resolvedRefs` where it holds a ref, and `hasMore`
-//! and `warnings` last. `format: "markdown"` is not written yet (#310).
+//! and `warnings` last.
+//!
+//! With `format: "markdown"` the block and the children fetched are rendered by `crate::markdown`
+//! into one text block, with its warnings and `hasMore` in a footer. The calls are the same.
 
 mod wire;
 
@@ -19,7 +22,8 @@ use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::js;
-use crate::output_format::{OutputFormat, require_json};
+use crate::markdown::{FooterMeta, render_block, with_footer};
+use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve_refs::{resolve_block_refs, with_meta};
 use crate::tool::{input_schema, read_only_annotations, success_result};
@@ -71,8 +75,10 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let args = read_args(arguments.as_ref())?;
-    require_json(args.format)?;
     let block = get_block(client, &args.block_uuid, args.include_children, args.resolve_refs).await?;
+    if args.format == Some(OutputFormat::Markdown) {
+        return Ok(success_result(vec![ContentBlock::text(with_footer(render_block(&block), &FooterMeta::of_result(&block, &[])))]));
+    }
     Ok(success_result(vec![ContentBlock::text(js::json_stringify(&block))]))
 }
 
