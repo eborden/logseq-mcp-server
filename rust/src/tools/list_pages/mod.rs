@@ -16,8 +16,8 @@ use std::collections::HashMap;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::args::Arguments;
 use crate::client::LogseqClient;
@@ -25,7 +25,7 @@ use crate::errors::ToolError;
 use crate::js;
 use crate::meta::ResultWarning;
 use crate::tips::tips_content;
-use crate::tool::{input_schema, read_only_annotations, success_result, with_empty_required};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result, with_empty_required};
 use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, capped_truncation_warning};
 
 use self::tips::list_pages_tips;
@@ -98,9 +98,10 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
 
 /// One page of the list (#171). `aliases` holds the other names of the page, in original casing
 /// and name order, and is left out when there are none.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ListedPage {
     pub name: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
 }
 
@@ -115,30 +116,32 @@ pub struct ListPagesResult {
     pub warning: Option<ResultWarning>,
 }
 
+/// The completeness keys that come with a warning, the one warning in a list.
+#[derive(Serialize)]
+struct Completeness<'a> {
+    #[serde(rename = "hasMore")]
+    has_more: bool,
+    warnings: [&'a ResultWarning; 1],
+}
+
+/// A result as written, in BR-0013's order: how many pages there were (`total`), then `hasMore` and `warnings` when
+/// a warning applies, then the `pages`.
+#[derive(Serialize)]
+struct ListPagesOutput<'a> {
+    total: usize,
+    #[serde(flatten)]
+    completeness: Option<Completeness<'a>>,
+    pages: &'a [ListedPage],
+}
+
 impl ListPagesResult {
-    /// The result as the TypeScript server writes it: `pages`, `total`, then `hasMore` and
-    /// `warnings` when there is a warning.
+    /// The result in BR-0013's key order.
     pub fn to_value(&self) -> Value {
-        let pages = self
-            .pages
-            .iter()
-            .map(|page| {
-                let mut entry = Map::new();
-                entry.insert("name".into(), Value::from(page.name.as_str()));
-                if !page.aliases.is_empty() {
-                    entry.insert("aliases".into(), Value::from(page.aliases.clone()));
-                }
-                Value::Object(entry)
-            })
-            .collect::<Vec<_>>();
-        let mut result = Map::new();
-        result.insert("pages".into(), Value::Array(pages));
-        result.insert("total".into(), Value::from(self.total));
-        if let Some(warning) = &self.warning {
-            result.insert("hasMore".into(), Value::Bool(warning.how_to_fetch_all.is_some()));
-            result.insert("warnings".into(), serde_json::to_value([warning]).expect("a warning serializes"));
-        }
-        Value::Object(result)
+        result_value(&ListPagesOutput {
+            total: self.total,
+            completeness: self.warning.as_ref().map(|warning| Completeness { has_more: warning.how_to_fetch_all.is_some(), warnings: [warning] }),
+            pages: &self.pages,
+        })
     }
 }
 
@@ -290,7 +293,7 @@ fn pages_truncated(shown: usize, total: usize, offset: usize, requested: u64) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::testing::{meaning, schema_of};
+    use crate::tool::testing::{keys, meaning, schema_of};
     use serde_json::json;
 
     fn entity(id: i64, name: &str, written: bool, alias_ids: &[i64]) -> ListedEntity {
@@ -367,13 +370,14 @@ mod tests {
     }
 
     #[test]
-    fn the_result_is_written_in_the_order_the_typescript_server_writes_it() {
+    fn the_total_and_the_warning_come_before_the_pages() {
         let plain = ListPagesResult {
             pages: vec![ListedPage { name: "Alice".into(), aliases: vec!["Al".into()] }, ListedPage { name: "Bob".into(), aliases: vec![] }],
             total: 2,
             warning: None,
         };
-        assert_eq!(js::json_stringify(&plain.to_value()), r#"{"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}],"total":2}"#);
+        assert_eq!(js::json_stringify(&plain.to_value()), r#"{"total":2,"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}]}"#);
+        assert_eq!(keys(&plain.to_value()), ["total", "pages"]);
         let cut = ListPagesResult {
             pages: vec![],
             total: 3,
@@ -381,8 +385,12 @@ mod tests {
         };
         assert_eq!(
             js::json_stringify(&cut.to_value()),
-            r#"{"pages":[],"total":3,"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}]}"#
+            r#"{"total":3,"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"pages":[]}"#
         );
+        assert_eq!(keys(&cut.to_value()), ["total", "hasMore", "warnings", "pages"]);
+        // a warning with no way to fetch more says so
+        let no_more = ListPagesResult { warning: Some(ResultWarning::new("c", "m".into())), ..cut };
+        assert_eq!(no_more.to_value()["hasMore"], false);
     }
 
     #[test]
