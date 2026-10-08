@@ -25,22 +25,23 @@ serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 # Tool input schemas, generated from the same type serde parses the arguments into. Already in
 # rmcp's tree (rmcp's `server` feature turns it on).
 schemars = "1"
-# Unicode normalization (NFD), for the places JavaScript's behavior depends on it: `localeCompare`
-# ignores accents at its first level, and fuzzysort strips them. Already in the tree, through
-# reqwest > url > idna > idna_adapter, with these same features and locked version, so it adds no
-# build and no download.
-icu_normalizer = { version = "2.2", default-features = false, features = ["compiled_data"] }
-# fuzzysort strips accents only from Latin-script letters (`\p{Script=Latin}`): the script of a
-# character. Also already in the tree, under idna_adapter, with the same features and version.
+# General categories (letter, number) for `query_by_date_range`'s whole-word test (`\p{L}`, `\p{N}`).
+# Already in the tree, under idna_adapter, with the same features and version.
 icu_properties = { version = "2.2", default-features = false, features = ["compiled_data"] }
 # `localeCompare`'s order across scripts, which only the full collation tables give (Latin before Greek
-# before Cyrillic, `ß` as `ss`, ...). Same ICU4X release line as the two above (unicode-org/icu4x, Unicode-3.0
-# license, actively released: 2.3.1 as of Oct 2026) and built on the icu_normalizer, icu_properties and
+# before Cyrillic, `ß` as `ss`, ...). Same ICU4X release line as icu_properties (unicode-org/icu4x, Unicode-3.0
+# license, actively released: 2.3.1 as of Oct 2026) and built on the icu_properties and
 # icu_provider already locked, so the new builds are icu_collator and its data crate. Its data ships in the
 # binary (the PR records the size). The data is CLDR 48 root, as in Node 24's ICU 78, except for Han: ICU4X
 # orders ideographs by block (code point) and Node by radical and stroke. The maintainer accepted that
 # difference (#299, `js::locale_compare`).
 icu_collator = { version = "2.3", default-features = false, features = ["compiled_data"] }
+# The closest page names for a missing page (`src/fuzzy.rs`, ADR-0032): a maintained fuzzy matcher
+# (helix-editor/nucleo, MPL-2.0, accepted next to this repo's MIT licence by the maintainer on 2026-10-08)
+# in place of a port of fuzzysort. Only its two Unicode tables (accent stripping and case folding) are
+# on, which need no crate: it adds itself and `memchr`, which is already locked. `unicode-segmentation`
+# (grapheme splitting) stays off.
+nucleo-matcher = { version = "0.3.1", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 
 # The local calendar day (`localtime_r`), which `new Date()`'s local components give the TypeScript
 # server and no standard library function does. Already in the tree (tokio, mio and socket2 use it),

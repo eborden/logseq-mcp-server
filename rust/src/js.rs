@@ -4,7 +4,7 @@
 //! it copies, so a tool can say "as `JSON.stringify` writes it" instead of redoing the rule.
 //!
 //! JavaScript strings are UTF-16. Where a length or an index is part of the output (a snippet
-//! cut at 80 characters, the fuzzy matcher's scores) the callers work in UTF-16 code units, with
+//! cut at 80 characters) the callers work in UTF-16 code units, with
 //! [`utf16`], and not in Rust's bytes or `char`s.
 
 use std::cmp::Ordering;
@@ -34,7 +34,7 @@ pub fn trim_end(value: &str) -> &str {
 }
 
 // PARITY(#299): JavaScript counts, cuts and indexes strings by UTF-16 code unit, which shows in the
-// snippet cut and fuzzysort's scores — drop if Rust becomes the only server.
+// snippet cut — drop if Rust becomes the only server.
 /// The UTF-16 code units of a string, which is what `.length`, `charCodeAt` and `slice` count.
 pub fn utf16(value: &str) -> Vec<u16> {
     value.encode_utf16().collect()
