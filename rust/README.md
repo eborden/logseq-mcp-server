@@ -9,7 +9,7 @@ It has the skeleton (#123): the LogSeq HTTP client, EDN-encoded Datalog inputs, 
 and an MCP stdio server. The first tool is `logseq_get_page_outline` (#125), which exercises the
 pieces most likely to differ between implementations: the shared page resolver, a Datalog query
 bound with `:in`, a capped result with a warning, sibling order by the `:block/left` chain, and
-2 API calls. Left unproven: alias groups (#69) and the Markdown renderer.
+2 API calls. `logseq_get_backlinks` (#307) adds the alias groups (#69) and a result that is the Editor API's own entities, kept as sent. Left unproven: the Markdown renderer.
 
 | File | What it holds |
 |---|---|
@@ -19,12 +19,13 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
 | `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
 | `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type, argument parsing at the boundary, and the TypeScript server's result shapes |
-| `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125), `get_graph_info/`, `list_pages/` and `search_blocks/` (#306) |
+| `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125), `get_backlinks/` (#307), `get_graph_info/`, `list_pages/` and `search_blocks/` (#306) |
 | `src/args.rs` | `Arguments`: a tool's arguments read one by one in the order of its schema, `null` as absent, nothing coerced, a bad one worded as `parseArgs` words it (`an integer, not a fraction`, `at least 0`, zod's own `Too big`) |
 | `src/entity.rs`, `src/slim.rs` | A page or block as LogSeq spells it, in either key spelling (`entity-fields.ts`) with the checks of the entity schemas; and slim output (`slim-entities.ts`, BR-0012). Entities stay the `Value`s LogSeq sent, so a full result carries them as they came |
 | `src/truncation.rs`, `src/escape.rs` | The warnings a capped list carries (`result-meta.ts`) and regex escaping (`escape-regex.ts`) |
 | `src/wire.rs` | The reader every wire type is written with: LogSeq's answers parsed into typed values at the boundary (`src/response-schemas.ts`). A mismatch is a `ResponseError` naming the path in zod's words, never "no data" |
-| `src/resolve/` | The shared page resolver (BR-0010): exact name, alias, ISO date, namespace leaf, the closest names for a miss. Its queries and wire types are in the directory, since only it reads them |
+| `src/resolve/` | The shared page resolver (BR-0010): exact name, alias, ISO date, namespace leaf, the closest names for a miss. Its queries and wire types are in the directory, since only it reads them. `resolve/alias.rs` holds the alias groups (#69): one query for any number of pages, none for a page with no alias link |
+| `src/block_tree.rs` | `camelizeKeys` and `camelizeBlock`: a pulled block in the Editor API's spelling |
 | `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (messages word for word as `src/errors.ts`), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
 | `src/fuzzy.rs` | fuzzysort 3.1.0's `go`, ported step for step, because the closest names are in an error message compared byte for byte. Tested against the library's own output (`tests/data/fuzzysort-oracle.json`) |
 | `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and an approximation of `localeCompare` |
