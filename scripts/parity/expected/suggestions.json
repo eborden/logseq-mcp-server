@@ -70,5 +70,32 @@
       }
     ],
     "isError": true
+  },
+  "suggestions: stacked accents in a name": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"nguyen\\\". Closest: Nguyễn. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: an accent in the input": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"menu café\\\". Closest: Cafe Menu. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: a letter with no decomposition": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"bjorn\\\". Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
   }
 }
