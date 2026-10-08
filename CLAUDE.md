@@ -159,13 +159,13 @@ These need the `project` scope: `gh auth refresh -s project`.
 
 ### Verification before merge
 Done by whoever merges:
-- CI (`.github/workflows/ci.yml`) runs `tsc --noEmit` and `vitest run src` on Node 22 and 24 on every PR and push to `main`. It must be green. `engines.node` is `>=22.12.0`, the floor of the dev toolchain (vite 7). The integration tests and measure script stay local.
-- The `Mutation testing` job (ADR-0026) is green. The `mutation-baseline-change` label is on the PR only when it lowers a score in `mutation-baseline.json` or edits the `mutate` globs or the exclusion list in `vitest.mutation.config.ts`, and that needs the maintainer's OK first.
-- Run `mutation-weekly.yml` on the PR's head commit (full SHA in "ref") before merging only when the `Mutation testing` job fails because a changed source was left out of its run (ADR-0028), then re-run the job. A `::warning` for a test import or a baseline entry left to the weekly run needs no run: the scheduled weekly run covers it (ADR-0029).
+- CI (`.github/workflows/ci.yml`) must be green. The Rust server is the only server (#356), so its job is the main check: `cargo build` and `cargo test --locked`, the parity harness against the recorded results (and its `--self-check`), and the guard tests that start the binary. The tooling job runs `npm run typecheck` and `npx vitest run tests/guards` on Node 22 and 24 (`engines.node` is `>=22.12.0`, the floor of the dev toolchain, vite 7). The integration tests and the measure scripts stay local.
+- Mutation testing on the Rust crate (ADR-0033, #364) is not a CI job yet; the TypeScript Stryker job and its ratchet (ADR-0026 to ADR-0030) were removed with the TypeScript server (#356).
 - Privacy grep of the diff, commit messages, PR body and review comments/replies. Don't paste integration-test or measure-script output anywhere on GitHub. Report pass/fail and approximate counts only.
-- `npx tsc --noEmit`
-- `npx vitest run src`
-- `npm run test:integration` against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`, the run, then `stop`; read-only). The instance opens a copy (#151), so afterwards `git status` must still show no change under `tests/fixtures/graph/`
+- `cd rust && cargo test --locked`
+- `npx vite-node scripts/parity.ts` (and `--self-check`) against the debug build, `cd rust && cargo build`
+- `npm run typecheck` and `npx vitest run tests/guards tests/rust-guards`
+- `npm run test:integration` against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`, the run, then `stop`; read-only). The instance opens a copy (#151), so afterwards the repo's status must still show no change under `tests/fixtures/graph/`
 - `npx tsx scripts/measure-api-calls.ts` still runs
 - A clean merge against current `main`. If `main` has moved, test the PR merged onto it.
 
@@ -182,11 +182,13 @@ Done by whoever merges:
 
 ## Overview
 
-This is an MCP (Model Context Protocol) server that provides Claude with 16 tools for querying LogSeq knowledge graphs. Built with TypeScript, it uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
+This is an MCP (Model Context Protocol) server that provides Claude with 16 tools for querying LogSeq knowledge graphs. It uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
+
+> **The server is Rust (`rust/`) since #356.** The TypeScript server this file was written for was removed on `feature/rust-spike` after the Go on #349 (2026-10-08). Where the sections below name `src/*.ts` files (query builders, `callParsed`, `parseArgs`, `src/tool-list.test.ts` and so on), they describe that server as of commit `10103c8`, and the Rust crate has the same pieces under `rust/src/` (see `rust/README.md`). The Datalog constraints, the data shapes and the business rules still hold unchanged. The recorded results of that server, `scripts/parity/expected/`, are the golden tests of the Rust server. #128 re-scopes this file.
 
 **Key Stats:**
 - 16 MCP tools for graph operations, search, and temporal queries
-- Unit tests (`npx vitest run src`) plus integration tests against the committed fixture graph (`npm run test:integration`). `npm test` runs both.
+- Rust unit and call-count tests (`cd rust && cargo test --locked`), the golden-result harness (`scripts/parity.ts`), the repo's guard tests (`npx vitest run tests/guards tests/rust-guards`) and integration tests against the committed fixture graph (`npm run test:integration`, which runs the Rust server). `npm test` runs the guards and the integration tests.
 - Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see "Current Implementation Status" below)
 
 **Architecture:**
@@ -547,9 +549,11 @@ it('returns every neighbour of a page under the caps', async () => {
 - **A known bug** is a plain `it` that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails`, which also passes when the body throws for another reason.
 
 **Test Categories:**
-- **Unit tests** (`npx vitest run src`): Query builders, data transformations, mocked clients
-- **Integration tests** (`npm run test:integration`, ~190 in 21 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool
-- Note: `npm test` runs the unit tests, then `npm run test:integration`, so it needs the fixture instance running. The default vitest config leaves `tests/integration/` out.
+- **Rust tests** (`cd rust && cargo test --locked`): query builders, data transformations and call-count tests against a stub LogSeq
+- **Golden results** (`npx vite-node scripts/parity.ts`): every tool, prompt and resource result byte for byte against the results recorded from the TypeScript server, the LogSeq calls, and `tools/list` by meaning (ADR-0031)
+- **Guard tests** (`npx vitest run tests/guards tests/rust-guards`): the repo's rules (docs format, templates, privacy, fixture, workflows, tool-list guardrails)
+- **Integration tests** (`npm run test:integration`, ~215 in 22 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool, through the Rust server
+- Note: `npm test` runs the guard tests, then `npm run test:integration`, so it needs the fixture instance running and the Rust debug build. The default vitest config leaves `tests/integration/` out.
 - **Property tests**: Universal invariants, equivalence validation (`tests/integration/properties/`, and the crawl oracles in `query-by-property` and `temporal-queries`)
 
 ### Integration Test Requirements (Hard Failures)
@@ -647,10 +651,9 @@ scripts/
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live LogSeq (use the fixture)
 ├── measure-api-calls.ts           - Counts API calls per tool against a live graph (baseline: the real graph)
 ├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
-├── measure-parse-time.ts          - Time the response schemas on large synthetic results (no LogSeq needed; #202)
 ├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on a copy of the fixture graph (#118, #151, macOS)
 ├── generate-hub-fixture.ts        - Writes (or --check's) the hub fixture's files from fixture-hub/hub-graph.ts (#89)
-├── fixture-hub/hub-graph.ts       - Shape and counts of the hub fixture; src/fixture-hub.test.ts checks the committed files against it
+├── fixture-hub/hub-graph.ts       - Shape and counts of the hub fixture; tests/guards/fixture-hub.test.ts checks the committed files against it
 └── logseq-instance/
     ├── instance.ts                - Instance logic: paths, port, random token, graph copy, launch, readiness, stop (deps injected)
     ├── local-storage.ts           - Writes a fresh profile's Chromium localStorage LevelDB (current-repo, http-server-enabled)
@@ -671,20 +674,19 @@ skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, refe
 ## Useful Commands
 
 ```bash
-# Run all tests (unit, then integration; integration needs the fixture instance)
-npm test
+# The Rust server: build, then its unit and call-count tests (touch no LogSeq)
+(cd rust && cargo build && cargo test --locked)
 
-# Run unit tests only
-npx vitest run src
+# The golden-result harness against the debug build (#124); --self-check proves it can fail
+npx vite-node scripts/parity.ts
+npx vite-node scripts/parity.ts --self-check
+# Re-record the expected results on purpose, from the Rust debug build, never in CI (#299)
+npx vite-node scripts/parity.ts --record-from-rust
 
-# Run specific test file
-npx vitest run src/tools/build-context.test.ts
-
-# Mutation testing on the unit suite (ADR-0026; slow cold, `-- --mutate src/x.ts` for one file; touches no LogSeq)
-npm run mutation
-
-# Build the project
-npm run build
+# The repo's guard tests (docs format, templates, privacy, workflows, tool-list guardrails) and the type-check
+npx vitest run tests/guards tests/rust-guards
+npm run typecheck
+npx tsx scripts/docs-format.ts
 
 # Integration tests against this worktree's fixture instance (macOS; own profile, port and random API token)
 npx tsx scripts/logseq-instance.ts start
@@ -692,8 +694,7 @@ npm run test:integration          # picks up .logseq-instance/config.json while 
 npx tsx scripts/logseq-instance.ts stop
 git status                        # sanity check: nothing under tests/fixtures/graph/ (the instance opens a copy, #151)
 
-# The same suites against the Rust server (#352): build rust/ first, run with the instance up
-npm run test:integration:rust     # LOGSEQ_MCP_SERVER=rust; details in tests/integration/setup.md
+# The suites run the Rust server (#352, #356): build rust/ first; details in tests/integration/setup.md
 
 # Verify Datalog/API constraints (read-only); the fixture reproduces all of them
 npx tsx scripts/probe-constraints.ts   # uses the running instance; never the personal config
@@ -703,9 +704,6 @@ npx tsx scripts/measure-api-calls.ts
 
 # Output size per tool: slim vs full, markdown and compact vs json (read-only; prints byte counts only)
 npx tsx scripts/measure-output-size.ts
-
-# Debug Datalog query
-npx tsx scripts/test-datalog-query.ts
 ```
 
 ---
@@ -740,10 +738,10 @@ Checklist for new Datalog-based tools:
 
 6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
 
-7. **Tool-list guardrails** - `src/tool-list.test.ts` checks the `tools/list` payload ([ADR-0016 (tool-list-size-guardrails)](docs/adr/0016-tool-list-size-guardrails.md))
+7. **Tool-list guardrails** - `tests/guards/tool-list.test.ts` checks the recorded `tools/list` (`scripts/parity/expected/tool-list.json`; the parity harness holds the Rust server's list to it by meaning, so a change to a tool's name, description or schema is a change to that file, re-recorded with `--record-from-rust`) ([ADR-0016 (tool-list-size-guardrails)](docs/adr/0016-tool-list-size-guardrails.md))
    - Size budget: `TOOL_LIST_BUDGET_CHARS` (~15% headroom over the size measured when it was added). If your tool or parameters push past it, trim first. If the growth is worth it, raise the constant and justify it in the PR description.
    - Description cap: 400 characters per tool. A new tool gets no allowance. Existing long descriptions are listed in `DESCRIPTION_ALLOWANCES` and may shrink but not grow. Delete an entry once its tool fits the cap.
-   - Snapshot: any change to a name, title, annotation, description or input schema fails the snapshot test. Review the diff, then run `npx vitest run src/tool-list.test.ts -u` and commit `src/__snapshots__/tool-list.test.ts.snap`.
+   - Recorded list: any change to a name, title, annotation, description or input schema fails the parity step. Review the diff of `scripts/parity/expected/tool-list.json` before you accept it.
 
 ---
 
@@ -752,7 +750,7 @@ Checklist for new Datalog-based tools:
 - **LogSeq HTTP API:** http://127.0.0.1:12315/api (default)
 - **DataScript Docs:** https://github.com/tonsky/datascript (note: LogSeq subset only)
 - **Decisions and rules:** [`docs/adr/`](docs/adr/README.md) (why we chose X) and [`docs/business-rules/`](docs/business-rules/README.md) (what must stay true). The Datalog migration is recorded in [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md) and [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md).
-- **Example Scripts:** `scripts/test-datalog-query.ts`
+- **Example Scripts:** `scripts/probe-constraints.ts`
 - **MCP Spec:** https://github.com/modelcontextprotocol
 
 ---

@@ -1,12 +1,15 @@
 # Rust spike
 
-The LogSeq MCP server in Rust, beside the TypeScript one in `src/`. It's a bounded spike
-([ADR-0025](../docs/adr/0025-rust-implementation-alongside-typescript.md), #122) that ends in a
-go/no-go call (#127). The TypeScript server is the one that ships, and its tool contract is the
-specification this crate must match.
+The LogSeq MCP server in Rust. It began as a bounded spike
+([ADR-0025](../docs/adr/0025-rust-implementation-alongside-typescript.md), #122) beside a TypeScript server, and
+since the Go on #349 (2026-10-08) it is the only server on this branch: the TypeScript server was removed in #356.
+The tool contract it keeps is that server's. Comments in this crate that name `src/*.ts` files mean that server as
+of commit `10103c8` (its last version is readable there, as `10103c8:src/client.ts`), and
+`scripts/parity/expected/` holds its recorded results, which the parity harness holds this crate to (`npx vite-node
+scripts/parity.ts`). `// PARITY(#299)` tags the code that exists only to match it.
 
 It lists all 16 tools, the five prompts, the reading guide and the page resource, and the server
-`instructions`, and the parity harness holds each to the TypeScript server's output (#316). It began
+`instructions`, and the parity harness holds each to the recorded output (#316). It began
 as a skeleton (#123): the LogSeq HTTP client, EDN-encoded Datalog inputs, the config file
 and an MCP stdio server. The first tool was `logseq_get_page_outline` (#125), which exercises the
 pieces most likely to differ between implementations: the shared page resolver, a Datalog query
@@ -17,10 +20,10 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 |---|---|
 | `src/env.rs` | The environment, read once at startup into `Env`: `config_path` (`LOGSEQ_MCP_CONFIG` or `~/.logseq-mcp/config.json`, absolute by type), `tips` (`LOGSEQ_MCP_TIPS`) and `clock` (`LOGSEQ_MCP_NOW`, a fixed instant in milliseconds for the parity harness; unset is the system clock; a release build ignores it). Nothing else reads a variable (`tests/env_reads.rs`) |
 | `src/config.rs` | The config file, parsed once. Its errors never show a file value (ADR-0003) |
-| `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as `src/client.ts` |
+| `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as the TypeScript server's client |
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
 | `src/server.rs` | rmcp `ServerHandler`: `initialize` (the name, `serverInfo.version` from `../package.json` and the `instructions`), `tools/list`, `tools/call`, and the prompt and resource requests. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
-| `src/prompts.rs`, `src/instructions.rs`, `src/mcp_error.rs` | The five prompts (`prompts.ts`: `prompts/list` and `prompts/get`, each one short user message that names the tools; arguments are strings, an unknown or malformed one is `InvalidParams`; the week and month come from the server's clock, never read inside a builder). The server `instructions` (`instructions.ts`, byte for byte; a unit test reads the TypeScript file and fails if they drift). And the JSON-RPC error the TypeScript SDK's `McpError` sends, shared by the prompts and the resources |
+| `src/prompts.rs`, `src/instructions.rs`, `src/mcp_error.rs` | The five prompts (`prompts.ts`: `prompts/list` and `prompts/get`, each one short user message that names the tools; arguments are strings, an unknown or malformed one is `InvalidParams`; the week and month come from the server's clock, never read inside a builder). The server `instructions` (`instructions.ts`, byte for byte; the guide resource's recorded bytes hold them). And the JSON-RPC error the TypeScript SDK's `McpError` sends, shared by the prompts and the resources |
 | `src/markdown.rs`, `src/resources.rs` | The one Markdown renderer (`markdown.ts`: title, resolved-from note, page properties and the pre-block rule, the block outline with its cap, a single block, the warnings/hasMore/tips footer); `compact`, `show_uuid` and `show_page` on the outline are the context tools' (#312). And the resources (`resources.ts`): `resources/templates/list` and `resources/read` of `logseq://page/{name}`, cut at `MAX_PAGE_CHARS`. `resources/list` and the reading guide `logseq://guide` (the instructions plus a one-line index of the tools, prompts and resources) are here too |
 | `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type (every named type written in place: the MCP SDK's client drops `$defs`), argument parsing at the boundary, and the TypeScript server's result shapes |
 | `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125), `get_backlinks/` (#307), `get_graph_info/`, `list_pages/` and `search_blocks/` (#306), `get_block/` and `get_page/` (#308), `query_by_date_range/` (#311), `build_context/` and `get_context_for_query/` (#312), `search_by_relationship/` and `check_links/` (#314), `get_concept_network/` and `get_concept_evolution/` (#313) |

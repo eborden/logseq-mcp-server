@@ -211,17 +211,19 @@ To check a build locally first, `npm pack --dry-run` lists the tarball, and `npm
 
 ## Development
 
+The server is Rust (`rust/`, since #356). The TypeScript tooling (`scripts/`, `tests/`) holds the golden-result harness and the integration suites:
+
 ```bash
-npm install
-npm run build
-npx vitest run src        # unit tests
-npm run test:integration  # needs LogSeq serving the fixture graph; see tests/integration/setup.md
-npm test                  # both
+npm ci
+(cd rust && cargo build && cargo test --locked)
+npx vite-node scripts/parity.ts       # the Rust server against the recorded results
+npx vitest run tests/guards tests/rust-guards  # the repo's guard tests
+npm run test:integration              # needs LogSeq serving the fixture graph; see tests/integration/setup.md
 ```
 
 ## Architecture
 
-- **TypeScript** MCP server using `@modelcontextprotocol/sdk`
-- **LogSeq HTTP API** client for graph queries
-- **Vitest** for unit and integration testing
+- **Rust** MCP server (`rust/`, rmcp) that talks to LogSeq's HTTP API over stdio. The TypeScript server it replaced was removed in #356
+- **Golden results**: `scripts/parity/expected/` holds the results recorded from the TypeScript server, and `scripts/parity.ts` holds the Rust server to them
+- **Vitest** for the repo's guard tests and the integration suites, **cargo test** for the server
 - **TDD approach** - all tools have comprehensive test coverage
