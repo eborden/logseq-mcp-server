@@ -1,12 +1,10 @@
-//! The one Datalog query only the current context makes (`getPagesByIds` in
-//! `src/datalog/queries.ts`). Only page `:db/id`s are embedded, through [`ground_ids`], which
-//! takes [`PageId`]s and not numbers.
+//! The Datalog query that pulls full page entities for some ids (`getPagesByIds` in
+//! `src/datalog/queries.ts`). The block search (`include_context`) and the current context both make
+//! it, so it is here and not in either tool's directory. Only page `:db/id`s are embedded, through
+//! [`ground_ids`], which takes [`PageId`]s and not numbers; nothing is bound with `:in`.
 
 use crate::edn::{PageId, Query, ground_ids};
 
-// The block search makes the same query (`search_blocks::queries::pages_by_ids`). It is repeated here so
-// that no tool's directory reaches into another's; both build what `getPagesByIds` builds. Hoisting it
-// into one shared module is tracked in #327.
 /// The full page entities for some ids, in one query.
 pub fn pages_by_ids(ids: &[PageId]) -> Query {
     Query {
