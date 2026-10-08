@@ -46,7 +46,9 @@ export async function residentBytes(pid: number): Promise<number> {
 }
 
 export async function probeServer({ server, call, beforeCall, settleMs = 500, timeoutMs = 15000 }: ProbeOptions): Promise<ProbeResult> {
-  const waiting = new Map<number, (message: Record<string, unknown>) => void>();
+  const waiting = new Map<number, { resolve: (message: Record<string, unknown>) => void; reject: (error: Error) => void }>();
+  // Set when stdout carries something that is not JSON-RPC; every pending and later request then fails with it
+  let fatal: Error | undefined;
   let buffer = '';
   let stderr = '';
   const started = performance.now();
@@ -64,22 +66,37 @@ export async function probeServer({ server, call, beforeCall, settleMs = 500, ti
       const line = buffer.slice(0, end).trim();
       buffer = buffer.slice(end + 1);
       if (!line) continue;
-      const message = JSON.parse(line) as Record<string, unknown>;
-      const resolve = typeof message.id === 'number' ? waiting.get(message.id) : undefined;
-      if (resolve) resolve(message);
+      let message: Record<string, unknown>;
+      try {
+        message = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        // Only the length: the line is the server's, and it is not printed (BR-0001)
+        fatal = new Error(`the server wrote a line to stdout that is not JSON (${line.length} characters)\n${stderr.trim()}`);
+        for (const pending of waiting.values()) pending.reject(fatal);
+        return;
+      }
+      const pending = typeof message.id === 'number' ? waiting.get(message.id) : undefined;
+      if (pending) pending.resolve(message);
     }
   });
 
   const send = (message: Record<string, unknown>) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
   const request = (id: number, method: string, params: Record<string, unknown>) =>
     new Promise<Record<string, unknown>>((resolve, reject) => {
+      if (fatal) return reject(fatal);
       const timer = setTimeout(
         () => reject(new Error(`no response to ${method} in ${timeoutMs} ms\n${stderr.trim()}`)),
         timeoutMs
       );
-      waiting.set(id, message => {
-        clearTimeout(timer);
-        resolve(message);
+      waiting.set(id, {
+        resolve: message => {
+          clearTimeout(timer);
+          resolve(message);
+        },
+        reject: error => {
+          clearTimeout(timer);
+          reject(error);
+        }
       });
       child.once('exit', () => {
         clearTimeout(timer);
