@@ -211,3 +211,54 @@ async fn a_year_before_1000_is_a_name_not_a_date_and_costs_three_calls_where_typ
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery", "logseq.Editor.getAllPages"]);
     assert_eq!(logseq.seen.lock().unwrap()[0]["args"].as_array().unwrap().len(), 2, "no journal day is bound");
 }
+
+// BR-0003: an infrastructure error is an error wherever the miss path meets it, never "page not found".
+// A mock that has sent its last answer drops its listener, so the next call is a refused connection.
+
+fn is_not_running(error: &ToolError) -> bool {
+    matches!(error, ToolError::Logseq(logseq) if logseq.is_infrastructure()) && error.to_string().starts_with("Cannot connect to LogSeq at ")
+}
+
+#[tokio::test]
+async fn a_refused_connection_at_the_namespace_leaf_query_is_the_error_and_not_a_missing_page() {
+    let logseq = mock_logseq(vec![json!([])]).await;
+    let error = get_page_outline(&client(&logseq), "Retro").await.unwrap_err();
+    assert!(is_not_running(&error), "{error}");
+    // the resolver query went out, and nothing after the refused one
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
+}
+
+#[tokio::test]
+async fn a_logseq_error_at_the_namespace_leaf_query_is_the_error_and_not_a_missing_page() {
+    let logseq = mock_logseq(vec![json!([]), json!({"error": "Query timed out"})]).await;
+    let error = get_page_outline(&client(&logseq), "Retro").await.unwrap_err();
+    assert_eq!(error.to_string(), "LogSeq API error: Query timed out");
+    // no suggestion lookup after a failed leaf query
+    assert_eq!(methods(&logseq).len(), 2);
+}
+
+#[tokio::test]
+async fn a_refused_connection_at_the_suggestion_lookup_is_the_error_and_not_a_missing_page() {
+    let logseq = mock_logseq(vec![json!([]), json!([])]).await;
+    let error = get_page_outline(&client(&logseq), "Alce").await.unwrap_err();
+    assert!(is_not_running(&error), "{error}");
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery"]);
+}
+
+#[tokio::test]
+async fn a_logseq_error_at_the_suggestion_lookup_is_a_missing_page_with_no_suggestions() {
+    // The one place an error is allowed to be empty: suggestions are best effort (`suggest_pages`), and the
+    // page is missing either way. Infrastructure errors, above, are not swallowed.
+    let logseq = mock_logseq(vec![json!([]), json!([]), json!({"error": "getAllPages failed"})]).await;
+    let error = get_page_outline(&client(&logseq), "Alce").await.unwrap_err();
+    let ToolError::PageNotFound(missing) = error else { panic!("expected a missing page, got {error}") };
+    assert!(missing.suggestions.is_empty());
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery", "logseq.Editor.getAllPages"]);
+}
+
+#[tokio::test]
+async fn an_unreadable_page_list_at_the_suggestion_lookup_is_a_response_error_and_not_no_suggestions() {
+    let logseq = mock_logseq(vec![json!([]), json!([]), json!("not a page list")]).await;
+    let error = get_page_outline(&client(&logseq), "Alce").await.unwrap_err();
+    assert!(matches!(error, ToolError::Response(_)), "{error}");
+}
