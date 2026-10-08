@@ -6,6 +6,7 @@
 use rmcp::model::{CallToolResult, JsonObject, Tool};
 
 use crate::client::LogseqClient;
+use crate::dates::Clock;
 use crate::errors::ToolError;
 
 pub mod get_backlinks;
@@ -15,6 +16,7 @@ pub mod get_graph_info;
 pub mod get_page;
 pub mod get_page_outline;
 pub mod list_pages;
+pub mod query_by_date_range;
 pub mod query_by_property;
 pub mod search_blocks;
 
@@ -28,6 +30,7 @@ pub fn list() -> Vec<Tool> {
         get_page::definition(),
         get_page_outline::definition(),
         list_pages::definition(),
+        query_by_date_range::definition(),
         query_by_property::definition(),
         search_blocks::definition(),
     ]
@@ -38,6 +41,7 @@ pub async fn call(
     name: &str,
     client: &LogseqClient,
     tips_enabled: bool,
+    clock: Clock,
     arguments: Option<JsonObject>,
 ) -> Option<Result<CallToolResult, ToolError>> {
     match name {
@@ -48,6 +52,7 @@ pub async fn call(
         get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),
         get_page_outline::NAME => Some(get_page_outline::call(client, tips_enabled, arguments).await),
         list_pages::NAME => Some(list_pages::call(client, tips_enabled, arguments).await),
+        query_by_date_range::NAME => Some(query_by_date_range::call(client, tips_enabled, clock, arguments).await),
         query_by_property::NAME => Some(query_by_property::call(client, tips_enabled, arguments).await),
         search_blocks::NAME => Some(search_blocks::call(client, tips_enabled, arguments).await),
         _ => None,
