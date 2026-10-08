@@ -10,12 +10,14 @@
 //!   byte: a markdown result (`format: "markdown"`), a prompt's messages, a resource read, and the frame of a
 //!   page-not-found message outside the closest names. Nothing else compares text.
 //! - [`minified_failures`] holds every JSON tool result to ADR-0009 separately, so deep equality can't let
-//!   layout whitespace through: the text is parsed, written again compactly, and has to be as long.
+//!   layout whitespace through: the text is parsed, written again as `JSON.stringify` writes it (`js::json_stringify`), and
+//!   has to be as long.
 //! - [`compare_calls`] holds the LogSeq calls to a case's steps: in order, a step's calls as a set, nothing after.
 //! - [`compare_tool_lists`] holds `tools/list` to the recorded list by meaning (ADR-0031, #292).
 
 use std::collections::BTreeSet;
 
+use logseq_mcp_server::js;
 use serde_json::{Map, Value, json};
 
 use super::cases::Canned;
@@ -74,7 +76,11 @@ pub fn same_tool_text(expected: &str, actual: &str) -> bool {
 }
 
 /// The JSON texts of a tool result's `content` that are not minified (ADR-0009): a text that parses as JSON and
-/// is not as long as the same value written compactly has layout whitespace in it.
+/// is not as long as the same value written the way `JSON.stringify` writes it has layout whitespace in it, or a
+/// spelling of a string or number that `JSON.stringify` would not have written (`\u0041`, `1.0`, `1e0`). The
+/// re-serialization is `js::json_stringify`, which writes numbers and strings as JavaScript does, so this agrees
+/// with the Node harness (`minifiedFailures`, which re-serializes with `JSON.stringify`) in every case. Lengths
+/// are in UTF-16 units, as JavaScript counts them.
 pub fn minified_failures(result: &Value) -> Vec<String> {
     let blocks = result.get("content").and_then(Value::as_array).cloned().unwrap_or_default();
     blocks
@@ -82,9 +88,9 @@ pub fn minified_failures(result: &Value) -> Vec<String> {
         .enumerate()
         .filter_map(|(i, block)| {
             let text = block.get("text")?.as_str()?;
-            let compact = serde_json::to_string(&json_container(text)?).ok()?;
-            (compact.chars().count() != text.chars().count())
-                .then(|| format!("content[{i}].text is JSON that is not minified (ADR-0009): {} characters, {} written compactly", text.chars().count(), compact.chars().count()))
+            let compact = js::json_stringify(&json_container(text)?);
+            let (have, want) = (text.encode_utf16().count(), compact.encode_utf16().count());
+            (have != want).then(|| format!("content[{i}].text is JSON that is not minified (ADR-0009): {have} characters, {want} written as JSON.stringify writes it"))
         })
         .collect()
 }
