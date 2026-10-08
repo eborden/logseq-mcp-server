@@ -170,10 +170,12 @@ const connectedQuery = (ids: number[]) =>
 async function largeNetwork(): Promise<Measured> {
   const base = (await parityCase('network: exact name, two levels, both directions, journals as leaves')).case;
   const [resolveStep, depthOne] = [base.steps[0], base.steps[1]];
-  const neighbours = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `neighbour ${i + 1}`, originalName: `Neighbour ${i + 1}` }));
-  const outer = Array.from({ length: 150 }, (_, i) => ({ id: 200 + i, name: `outer ${i + 1}`, originalName: `Outer ${i + 1}` }));
+  const pad = (n: number) => String(n).padStart(3, '0');
+  const neighbours = Array.from({ length: 30 }, (_, i) => ({ id: 100 + i, name: `neighbour ${pad(i + 1)}`, originalName: `Neighbour ${pad(i + 1)}` }));
+  const outer = Array.from({ length: 150 }, (_, i) => ({ id: 200 + i, name: `outer ${pad(i + 1)}`, originalName: `Outer ${pad(i + 1)}` }));
   const row = (source: number, page: { id: number; name: string; originalName: string }, rel: string, count: number) => [source, page.id, page.name, page.originalName, false, rel, count];
-  const rootRows = neighbours.flatMap((n, i) => [row(ATLAS.id, n, 'outbound', 1 + (i % 4)), ...(i % 3 === 0 ? [row(ATLAS.id, n, 'inbound', 2)] : [])]);
+  // Every neighbour is linked the same way and as often, so the order the server expands them in is by name (and id), which this list matches
+  const rootRows = neighbours.map(n => row(ATLAS.id, n, 'outbound', 2));
   const secondRows = neighbours.flatMap((n, i) =>
     Array.from({ length: 10 }, (_, k) => row(n.id, outer[(i * 5 + k * 3) % 150], k % 2 === 0 ? 'outbound' : 'inbound', 1 + (k % 3)))
   );
@@ -212,8 +214,12 @@ function startServer(name: 'rust' | 'node', command: string, args: string[], env
   const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
   const server: Server = { name, child, stderr: '', call: undefined as never, notify: undefined as never, stop: undefined as never };
   const waiting = new Map<number, (line: string, at: number) => void>();
+  const failers = new Set<(error: Error) => void>();
   let buffer = '';
   let nextId = 1;
+  child.once('exit', () => {
+    for (const fail of [...failers]) fail(new Error(`${name} exited\n${server.stderr.trim()}`));
+  });
   child.stderr!.on('data', (chunk: Buffer) => {
     server.stderr += chunk.toString('utf8');
   });
@@ -239,12 +245,15 @@ function startServer(name: 'rust' | 'node', command: string, args: string[], env
       waiting.set(id, (line, at) => {
         clearTimeout(timer);
         waiting.delete(id);
+        failers.delete(fail);
         resolveCall({ ms: at - started, response: JSON.parse(line) as Record<string, unknown> });
       });
-      child.once('exit', () => {
+      const fail = (error: Error) => {
         clearTimeout(timer);
-        reject(new Error(`${name} exited during ${method}\n${server.stderr.trim()}`));
-      });
+        failers.delete(fail);
+        reject(error);
+      };
+      failers.add(fail);
       write({ id, method, params });
     });
   server.notify = method => write({ method });
@@ -323,8 +332,8 @@ async function main(): Promise<void> {
         const made = live.calls().length;
         const failures = live.failures();
         const result = response.result as ToolResult | undefined;
-        if (response.error || !result || result.isError) throw new Error(`${server.name}: ${measured.label} did not return a result`);
         if (failures.length > 0) throw new Error(`${server.name}: ${measured.label}: the stub saw ${failures.length} call(s) it had no answer for\n${failures.join('\n')}`);
+        if (response.error || !result || result.isError) throw new Error(`${server.name}: ${measured.label} did not return a result: ${JSON.stringify(response.error ?? result?.content ?? response).slice(0, 400)}`);
         const outcome = outcomes[server.name];
         if (outcome.first === undefined) {
           outcome.first = toToolResult(result);
