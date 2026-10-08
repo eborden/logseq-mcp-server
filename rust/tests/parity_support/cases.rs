@@ -1,5 +1,11 @@
-//! The parity cases, read from `tests/data/parity/*.json` (written by `scripts/export-parity.ts` from the
-//! case files and golden results in `scripts/parity`, #371), and the perturbation the self-check applies.
+//! The parity cases, read from `tests/data/parity/*.json`, and the perturbation the self-check applies.
+//!
+//! Those files are the only source of the cases and of the golden results (#379): each group file holds its
+//! cases, one per line, and each case holds its stub answers, its MCP request, its expected call steps and the
+//! golden result under `expected`. A case is added or edited by hand, and `PARITY_RECORD=1 cargo test --test
+//! parity_record -- --nocapture` (`record.rs`) fills in or rewrites the `expected` of the cases whose result
+//! changed in meaning. `tool-list.json` is the recorded `tools/list` and `clock-cases.json` lists the cases that
+//! read today's date; neither is a group file.
 
 use std::collections::HashSet;
 use std::fs;
@@ -7,7 +13,10 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
 
-const REGENERATE: &str = "run: npx vite-node scripts/export-parity.ts";
+const RECORD: &str = "record it: PARITY_RECORD=1 cargo test --test parity_record -- --nocapture";
+
+/// The files in the data folder that are not case groups.
+pub const NOT_GROUPS: [&str; 2] = ["tool-list", "clock-cases"];
 
 /// A LogSeq call the server should make, with the answer the stub gives.
 #[derive(Debug, Clone)]
@@ -46,7 +55,8 @@ pub struct Case {
     /// The answer for the last call in the self-check, in place of the suffixed strings
     pub perturbed: Option<Value>,
     pub request: Request,
-    /// The golden result, recorded from the TypeScript server (`scripts/parity/expected`)
+    /// The golden result, recorded from the TypeScript server before it was retired. `Value::Null` for a case
+    /// that has none yet, which only the recorder reads (`load_cases_for_recording`).
     pub expected: Value,
 }
 
@@ -61,18 +71,18 @@ impl Case {
     }
 }
 
-/// The exported fixtures' folder.
+/// The data folder: the cases, their golden results, the recorded tool list and the clock list.
 pub fn data_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("data").join("parity")
 }
 
 fn read_json(file: &Path) -> Value {
-    let text = fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}\n{REGENERATE}", file.display()));
-    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{} is not JSON: {e}\n{REGENERATE}", file.display()))
+    let text = fs::read_to_string(file).unwrap_or_else(|e| panic!("{}: {e}\n{RECORD}", file.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{} is not JSON: {e}\n{RECORD}", file.display()))
 }
 
 fn text_of<'a>(object: &'a Map<String, Value>, key: &str, case: &str) -> &'a str {
-    object.get(key).and_then(Value::as_str).unwrap_or_else(|| panic!("case {case:?}: {key} is not a string\n{REGENERATE}"))
+    object.get(key).and_then(Value::as_str).unwrap_or_else(|| panic!("case {case:?}: {key} is not a string\n{RECORD}"))
 }
 
 fn canned_of(call: &Value, case: &str) -> Canned {
@@ -84,7 +94,9 @@ fn canned_of(call: &Value, case: &str) -> Canned {
     }
 }
 
-fn case_of(group: &str, value: &Value) -> Case {
+/// One case from its JSON object. A case with no `expected` panics unless `require_expected` is false, which
+/// is for the recorder: a case new to the file has no golden result until it is recorded.
+pub fn case_of(group: &str, value: &Value, require_expected: bool) -> Case {
     let object = value.as_object().expect("a case is an object");
     let name = text_of(object, "name", "?").to_owned();
     let steps = object
@@ -112,6 +124,11 @@ fn case_of(group: &str, value: &Value) -> Case {
     } else {
         Request::Tool
     };
+    let expected = match object.get("expected") {
+        Some(expected) => expected.clone(),
+        None if require_expected => panic!("case {name:?} has no golden result\n{RECORD}"),
+        None => Value::Null,
+    };
     Case {
         group: group.to_owned(),
         tool: text_of(object, "tool", &name).to_owned(),
@@ -119,39 +136,78 @@ fn case_of(group: &str, value: &Value) -> Case {
         steps,
         perturbed: object.get("perturbed").cloned(),
         request,
-        expected: object.get("expected").unwrap_or_else(|| panic!("case {name:?} has no golden result")).clone(),
+        expected,
         name,
     }
 }
 
-/// Every case of every group, in the order of the group files' names.
-pub fn load_cases() -> Vec<Case> {
-    let mut files: Vec<PathBuf> = fs::read_dir(data_dir())
-        .unwrap_or_else(|e| panic!("{}: {e}\n{REGENERATE}", data_dir().display()))
+/// A group file as it is written: the group's name and its cases, each as the JSON object on its line.
+#[derive(Debug, Clone)]
+pub struct GroupFile {
+    pub name: String,
+    pub path: PathBuf,
+    pub cases: Vec<Value>,
+}
+
+/// Every group file of a folder, in the order of the files' names. A group file names its group, and the name
+/// is the file's stem.
+pub fn group_files_in(dir: &Path) -> Vec<GroupFile> {
+    let mut files: Vec<PathBuf> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{}: {e}\n{RECORD}", dir.display()))
         .map(|entry| entry.unwrap().path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .filter(|path| !matches!(path.file_stem().and_then(|s| s.to_str()), Some("tool-list" | "clock-cases")))
+        .filter(|path| !path.file_stem().and_then(|s| s.to_str()).is_some_and(|stem| NOT_GROUPS.contains(&stem)))
         .collect();
     files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let group = read_json(&path);
+            let name = group["group"].as_str().unwrap_or_else(|| panic!("{} does not name its group", path.display())).to_owned();
+            assert_eq!(
+                Some(name.as_str()),
+                path.file_stem().and_then(|s| s.to_str()),
+                "{} names the group {name:?}, which is not its file's name",
+                path.display()
+            );
+            let cases = group["cases"].as_array().unwrap_or_else(|| panic!("{} holds no list of cases", path.display())).clone();
+            GroupFile { name, path, cases }
+        })
+        .collect()
+}
+
+fn cases_in(dir: &Path, require_expected: bool) -> Vec<Case> {
     let mut cases = Vec::new();
-    for file in files {
-        let group = read_json(&file);
-        let group_name = group["group"].as_str().expect("a group file names its group").to_owned();
-        for case in group["cases"].as_array().expect("a group file holds its cases") {
-            cases.push(case_of(&group_name, case));
+    for group in group_files_in(dir) {
+        for case in &group.cases {
+            cases.push(case_of(&group.name, case, require_expected));
         }
     }
     let mut names = HashSet::new();
     for case in &cases {
         assert!(names.insert(case.name.as_str()), "duplicate parity case name {:?}", case.name);
     }
-    assert!(!cases.is_empty(), "no parity cases were read from {}", data_dir().display());
+    assert!(!cases.is_empty(), "no parity cases were read from {}", dir.display());
     cases
+}
+
+/// Every case of every group, in the order of the group files' names.
+pub fn load_cases() -> Vec<Case> {
+    cases_in(&data_dir(), true)
+}
+
+/// The cases of a folder for the recorder: one with no golden result yet is allowed, and has `Value::Null`.
+pub fn load_cases_for_recording(dir: &Path) -> Vec<Case> {
+    cases_in(dir, false)
 }
 
 /// The recorded `tools/list`, in the projection `{ name, title, annotations, description, inputSchema }`.
 pub fn load_tool_list() -> Vec<Value> {
-    read_json(&data_dir().join("tool-list.json")).as_array().expect("the tool list is a list").clone()
+    load_tool_list_in(&data_dir())
+}
+
+pub fn load_tool_list_in(dir: &Path) -> Vec<Value> {
+    read_json(&dir.join("tool-list.json")).as_array().expect("the tool list is a list").clone()
 }
 
 /// The cases that read today's date: the release binary ignores the fixed clock, so they leave its run.
@@ -208,8 +264,8 @@ pub fn perturb_value(value: &Value) -> Value {
     if changed { out } else { json!({"error": "parity harness: perturbed answer"}) }
 }
 
-/// One row of the table both comparators are held to (`tests/data/comparator-cases.json`): two results and
-/// whether the comparator calls them the same.
+/// One row of the comparator's table (`tests/data/comparator-cases.json`): two results and whether the
+/// comparator calls them the same.
 #[derive(Debug)]
 pub struct ComparatorRow {
     pub name: String,
@@ -219,8 +275,7 @@ pub struct ComparatorRow {
     pub same: bool,
 }
 
-/// The shared table. The Node harness's comparator is held to the same rows by
-/// `tests/guards/comparator-table.test.ts`, so the two can't drift apart.
+/// The table of verdicts the comparator is held to.
 pub fn load_comparator_table() -> Vec<ComparatorRow> {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("data").join("comparator-cases.json");
     read_json(&file)

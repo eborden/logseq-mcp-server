@@ -1,8 +1,7 @@
 //! The golden-result test (#371): run the server binary against the stub LogSeq and hold it to the results
-//! recorded from the TypeScript server before it was retired (`scripts/parity/expected`, exported to
-//! `tests/data/parity/` by `npx vite-node scripts/export-parity.ts`). It is the Rust side of the Node
-//! harness `scripts/parity.ts`, run by `cargo test` so that a mutant (`cargo-mutants`, ADR-0033) is killed by
-//! any parity case that notices it.
+//! recorded from the TypeScript server before it was retired, which live in `tests/data/parity/` with the cases
+//! (#379: the one source, rewritten only by the recorder, `parity_record.rs`). It runs under `cargo test`, so
+//! that a mutant (`cargo-mutants`, ADR-0033) is killed by any parity case that notices it.
 //!
 //! It checks, for every case:
 //! - the result: a JSON tool result by deep equality (key order ignored, array order kept, numbers by value)
@@ -41,7 +40,7 @@ fn cases_for_this_build() -> Vec<Case> {
 #[test]
 fn every_parity_case_matches_its_golden_result() {
     let cases = cases_for_this_build();
-    let report = run_parity(&Run { cases: &cases, unperturbed: &cases, expected_tool_list: &load_tool_list(), now_ms: PARITY_NOW_MS, settle_ms: 2000 });
+    let report = run_parity(&Run { cases: &cases, unperturbed: &cases, expected_tool_list: &load_tool_list(), now_ms: PARITY_NOW_MS, settle_ms: 2000, record: false });
     assert!(
         report.failures.is_empty(),
         "{} failure(s) in {} case(s):\n- {}\n{}",
