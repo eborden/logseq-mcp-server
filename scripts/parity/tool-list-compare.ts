@@ -9,11 +9,12 @@
 //      A `$ref` with sibling keywords, and an `allOf` of one schema, are merged into one schema,
 //      since both mean "this schema and these keywords" (schemars writes a described enum as
 //      `allOf: [{$ref}]` plus `description`). If a key clashes, both stay as an `allOf`, and differ.
-//   2. A property that is not in `required` and also accepts null (`type: [T, "null"]`, a
-//      `{type: "null"}` branch of `anyOf` / `oneOf`, or `null` in `enum`) loses the null. Clients
-//      omit an argument they don't set rather than send null, so the contract they see is "optional"
-//      either way: that's how `Option<T>` serializes, not a promise to accept null. A required
-//      property keeps its null, which is meaning.
+//   2. A top-level argument (a key of the input schema's root `properties`) that is not in
+//      `required` and also accepts null (`type: [T, "null"]`, a `{type: "null"}` branch of
+//      `anyOf` / `oneOf`, or `null` in `enum`) loses the null. The TypeScript server drops a
+//      top-level null before parsing (`withoutNulls` in src/utils/parse-args.ts), so there null and
+//      absent are the same argument, as with `Option<T>`. Anywhere else the null stays and counts:
+//      in a nested object zod rejects null, and a required argument's null is meaning.
 //   3. `$schema`, `format` and `title` keywords are dropped. `$schema` names the draft, not a rule.
 //      `format` is an annotation by default in JSON Schema 2020-12, and the values schemars writes
 //      (`uint32`, `double`) aren't registered formats. `title` is a label. These are keywords of a
@@ -61,7 +62,8 @@ function merge(a: Schema, b: Schema): Schema {
 
 /** The schema a local JSON pointer (`#/$defs/Name`) names. */
 function resolvePointer(root: Schema, ref: string): unknown {
-  if (!ref.startsWith('#')) throw new Error(`can't resolve non-local $ref ${JSON.stringify(ref)}`);
+  // Only `#` and `#/...` are JSON pointers; an anchor (`#Foo`) or another document can't be resolved here
+  if (ref !== '#' && !ref.startsWith('#/')) throw new Error(`can't resolve $ref ${JSON.stringify(ref)}: only local JSON pointers are supported`);
   let node: unknown = root;
   for (const raw of ref.slice(1).split('/').slice(1)) {
     const part = decodeURIComponent(raw).replace(/~1/g, '/').replace(/~0/g, '~');
@@ -124,12 +126,6 @@ function normalizeNode(node: unknown, root: Schema, refs: readonly string[]): un
   }
 
   if (Array.isArray(out.required)) out.required = [...out.required].sort();
-  if (isObject(out.properties)) {
-    const required = new Set(Array.isArray(out.required) ? out.required : []);
-    out.properties = Object.fromEntries(
-      Object.entries(out.properties).map(([name, v]) => [name, required.has(name) ? v : withoutNull(v)])
-    );
-  }
   if (Array.isArray(out.allOf) && out.allOf.length === 1 && isObject(out.allOf[0])) {
     const { allOf, ...rest } = out;
     out = merge(allOf[0] as Schema, rest);
@@ -139,7 +135,17 @@ function normalizeNode(node: unknown, root: Schema, refs: readonly string[]): un
 
 /** A JSON Schema with the quirks above taken out, so equal meaning gives equal values. Pure. */
 export function normalizeSchema(schema: unknown): unknown {
-  return isObject(schema) ? normalizeNode(schema, schema, []) : schema;
+  if (!isObject(schema)) return schema;
+  const out = normalizeNode(schema, schema, []);
+  // Rule 2, for top-level arguments only
+  if (!isObject(out) || !isObject(out.properties)) return out;
+  const required = new Set(Array.isArray(out.required) ? out.required : []);
+  return {
+    ...out,
+    properties: Object.fromEntries(
+      Object.entries(out.properties).map(([name, v]) => [name, required.has(name) ? v : withoutNull(v)])
+    )
+  };
 }
 
 /** The fields of a tool the harness compares, in the shape of the snapshot (tool-list-projection). */
