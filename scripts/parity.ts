@@ -19,46 +19,14 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
-import { compareResult, perturbCases, runParity, type ParityReport, type ServerCommand, type ToolResult } from './parity/harness.js';
+import { compareResult, perturbCases, runParity, type ParityReport, type ToolResult } from './parity/harness.js';
 import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
-import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer } from './parity/ts-server.js';
+import { parseCommandLine } from './parity/command-line.js';
+import { REPO_ROOT, SNAPSHOT_FILE } from './parity/ts-server.js';
 
 export const EXPECTED_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'get-page-outline.json');
 /** The TypeScript server's tools/list in the snapshot's shape; it must match the snapshot exactly. */
 export const EXPECTED_TOOL_LIST_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'tool-list.json');
-
-const USAGE =
-  'usage: npx tsx scripts/parity.ts [--perturb | --self-check] [-- <server command> [args...]]\n' +
-  '       npx tsx scripts/parity.ts --tested-tools-only -- <server command> [args...]   (a server with only some tools)\n' +
-  '       npx tsx scripts/parity.ts --record   (TypeScript server only; review the JSON diff; never in CI)';
-
-function parseCommandLine(argv: string[]): {
-  mode: 'check' | 'record' | 'perturb' | 'self-check';
-  server: ServerCommand;
-  onlyTestedTools: boolean;
-} {
-  const dashes = argv.indexOf('--');
-  const allFlags = dashes === -1 ? argv : argv.slice(0, dashes);
-  const onlyTestedTools = allFlags.includes('--tested-tools-only');
-  const flags = allFlags.filter(flag => flag !== '--tested-tools-only');
-  const command = dashes === -1 ? [] : argv.slice(dashes + 1);
-  const modes = flags.map(flag => {
-    if (flag === '--record') return 'record' as const;
-    if (flag === '--perturb') return 'perturb' as const;
-    if (flag === '--self-check') return 'self-check' as const;
-    throw new Error(`unknown flag ${flag}\n${USAGE}`);
-  });
-  if (modes.length > 1) throw new Error(`pick one mode\n${USAGE}`);
-  if (dashes !== -1 && command.length === 0) throw new Error(`no server command after --\n${USAGE}`);
-  if (modes[0] === 'record' && command.length > 0) {
-    throw new Error(`--record runs the TypeScript server only: a candidate can't record its own reference\n${USAGE}`);
-  }
-  if (onlyTestedTools && modes[0] === 'record') {
-    throw new Error(`--record needs the whole tools/list, so it can't take --tested-tools-only\n${USAGE}`);
-  }
-  const server = command.length > 0 ? { command: command[0], args: command.slice(1) } : typescriptServer();
-  return { mode: modes[0] ?? 'check', server, onlyTestedTools };
-}
 
 function print(label: string, report: ParityReport): void {
   if (report.failures.length === 0) {
