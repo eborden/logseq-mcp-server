@@ -1229,6 +1229,28 @@ describe('the closest-name rules (ADR-0032, #335)', () => {
   });
 
   describe('against the TypeScript server', () => {
+    it('judges a perturbed run by the candidates as committed, so a list that reads the fixture is caught', async () => {
+      const group = CASE_GROUPS.find(g => g.name === 'suggestions')!;
+      const expected = JSON.parse(await readFile(expectedFileOf(group), 'utf8')) as Record<string, ToolResult>;
+      const prefixHit = suggestionsCases.find(c => c.name.endsWith('a prefix hit'))!;
+      const run = async (unperturbedCases?: ParityCase[]) =>
+        runParity({
+          server: typescriptServer(),
+          cases: perturbCases([prefixHit]),
+          unperturbedCases,
+          expected: { [prefixHit.name]: expected[prefixHit.name] },
+          expectedToolList: await loadToolList(),
+          onlyTestedTools: true,
+          bySuggestionRules: true,
+          snapshotFile: SNAPSHOT_FILE
+        });
+      const ofCase = (report: Awaited<ReturnType<typeof run>>) => report.failures.filter(f => f.startsWith(`[${prefixHit.tool}: ${prefixHit.name}]`));
+      // the perturbed names are candidates of the perturbed case, so by its own candidates the list passes
+      expect(ofCase(await run())).toEqual([]);
+      // by the committed candidates, "Project Zed (perturbed)" is not a page
+      expect(ofCase(await run([prefixHit])).join('\n')).toContain('rule 3');
+    }, 60000);
+
     it('passes its own run under the rules, since the rules accept the reference list', async () => {
       const group = CASE_GROUPS.find(g => g.name === 'suggestions')!;
       const report = await runParity({
