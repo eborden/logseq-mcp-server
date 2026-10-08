@@ -3,6 +3,7 @@
 // are unique across every group (runParity refuses a duplicate).
 import { join } from 'node:path';
 import { getBacklinksCases } from './cases/get-backlinks.js';
+import { getCurrentContextCases } from './cases/get-current-context.js';
 import { getGraphInfoCases } from './cases/get-graph-info.js';
 import { getPageOutlineCases } from './cases/get-page-outline.js';
 import { listPagesCases } from './cases/list-pages.js';
@@ -19,6 +20,7 @@ export interface CaseGroup {
 
 export const CASE_GROUPS: CaseGroup[] = [
   { name: 'get-backlinks', cases: getBacklinksCases },
+  { name: 'get-current-context', cases: getCurrentContextCases },
   { name: 'get-graph-info', cases: getGraphInfoCases },
   { name: 'get-page-outline', cases: getPageOutlineCases },
   { name: 'list-pages', cases: listPagesCases },

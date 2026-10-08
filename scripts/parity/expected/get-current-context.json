@@ -1,0 +1,321 @@
+{
+  "current context: a page is open and nothing else": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\",\"properties\":{\"type\":\"project\"}}}"
+      }
+    ]
+  },
+  "current context: unknown arguments are ignored": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\",\"properties\":{\"type\":\"project\"}}}"
+      }
+    ]
+  },
+  "current context: a journal page is open": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"isJournal\":true,\"journalDate\":20250101}}"
+      }
+    ]
+  },
+  "current context: a focused block on the open page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\",\"properties\":{\"type\":\"project\"}},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000512\",\"content\":\"TODO ship the [[Importer]] with #urgent and #later\",\"pageName\":\"Project Atlas\",\"properties\":{\"status\":\"open\",\"count\":0},\"marker\":\"TODO\",\"tags\":[\"urgent\",\"later\"],\"pageRefs\":[\"Importer\"]}}"
+      }
+    ]
+  },
+  "current context: a focused block with unfetched and fetched children": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\",\"properties\":{\"type\":\"project\"}},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000600\",\"content\":\"parent block\",\"pageName\":\"Project Atlas\",\"childrenTruncated\":true,\"children\":[{\"uuid\":\"00000000-0000-4000-8000-000000000601\",\"content\":\"whole child #kept\",\"tags\":[\"kept\"],\"children\":[{\"uuid\":\"00000000-0000-4000-8000-000000000602\",\"content\":\"grandchild\"}]}]}}"
+      }
+    ]
+  },
+  "current context: children that are not a list are left out": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\",\"properties\":{\"type\":\"project\"}},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000600\",\"content\":\"parent block\",\"pageName\":\"Project Atlas\"}}"
+      }
+    ]
+  },
+  "current context: selected blocks, one on another page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\",\"properties\":{\"type\":\"project\"}},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000512\",\"content\":\"TODO ship the [[Importer]] with #urgent and #later\",\"pageName\":\"Project Atlas\",\"properties\":{\"status\":\"open\",\"count\":0},\"marker\":\"TODO\",\"tags\":[\"urgent\",\"later\"],\"pageRefs\":[\"Importer\"]},\"selectedBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000105\",\"content\":\"Bob owns the importer\",\"pageName\":\"Bob\"},{\"uuid\":\"00000000-0000-4000-8000-000000000106\",\"content\":\"second on bob\",\"pageName\":\"Bob\"},{\"uuid\":\"00000000-0000-4000-8000-000000000513\",\"content\":\"[[Alice]] said hi\",\"pageName\":\"Project Atlas\",\"pageRefs\":[\"Alice\"]}]}"
+      }
+    ]
+  },
+  "current context: no page open, a focused block": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"bob\",\"originalName\":\"Bob\"},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000105\",\"content\":\"Bob owns the importer\",\"pageName\":\"Bob\"}}"
+      }
+    ]
+  },
+  "current context: no page open, a selection only": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\"},\"selectedBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000512\",\"content\":\"TODO ship the [[Importer]] with #urgent and #later\",\"pageName\":\"Project Atlas\",\"properties\":{\"status\":\"open\",\"count\":0},\"marker\":\"TODO\",\"tags\":[\"urgent\",\"later\"],\"pageRefs\":[\"Importer\"]},{\"uuid\":\"00000000-0000-4000-8000-000000000105\",\"content\":\"Bob owns the importer\",\"pageName\":\"Bob\"}]}"
+      }
+    ]
+  },
+  "current context: zoomed into a block": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\"},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000512\",\"content\":\"TODO ship the [[Importer]] with #urgent and #later\",\"pageName\":\"Project Atlas\",\"properties\":{\"status\":\"open\",\"count\":0},\"marker\":\"TODO\",\"tags\":[\"urgent\",\"later\"],\"pageRefs\":[\"Importer\"]}}"
+      }
+    ]
+  },
+  "current context: zoomed into a block while another is focused": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"bob\",\"originalName\":\"Bob\"},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000105\",\"content\":\"Bob owns the importer\",\"pageName\":\"Bob\"}}"
+      }
+    ]
+  },
+  "current context: an answer with neither name nor page is read as a page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"originalName\":\"\",\"properties\":{\"kind\":\"odd\"}}}"
+      }
+    ]
+  },
+  "current context: nothing open": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":null,\"message\":\"No page is open in LogSeq (for example the All Pages view is showing).\"}"
+      }
+    ]
+  },
+  "current context: nothing open, an empty selection": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":null,\"message\":\"No page is open in LogSeq (for example the All Pages view is showing).\"}"
+      }
+    ]
+  },
+  "current context: no page open, a block with no page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":null,\"message\":\"No page is open in LogSeq (for example the All Pages view is showing).\",\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000800\",\"content\":\"a block with no page\"},\"selectedBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000801\",\"content\":\"another\"}]}"
+      }
+    ]
+  },
+  "current context: a block page id spelled db/id": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"bob\",\"originalName\":\"Bob\"},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000900\",\"content\":\"on bob\",\"pageName\":\"Bob\"}}"
+      }
+    ]
+  },
+  "current context: page ids are looked up once, focused block first": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"bob\",\"originalName\":\"Bob\"},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000900\",\"content\":\"on bob\",\"pageName\":\"Bob\"},\"selectedBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000901\",\"content\":\"on atlas\",\"pageName\":\"Project Atlas\"},{\"uuid\":\"00000000-0000-4000-8000-000000000902\",\"content\":\"on bob again\",\"pageName\":\"Bob\"},{\"uuid\":\"00000000-0000-4000-8000-000000000903\",\"content\":\"on a page not found\"}]}"
+      }
+    ]
+  },
+  "current context: lookup rows that are null or name nothing": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":null,\"message\":\"No page is open in LogSeq (for example the All Pages view is showing).\",\"selectedBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000900\",\"content\":\"one\"},{\"uuid\":\"00000000-0000-4000-8000-000000000901\",\"content\":\"two\",\"pageName\":\"plain name\"},{\"uuid\":\"00000000-0000-4000-8000-000000000902\",\"content\":\"three\"},{\"uuid\":\"00000000-0000-4000-8000-000000000903\",\"content\":\"four\"}]}"
+      }
+    ]
+  },
+  "current context: the page that stands in has no name": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":null,\"message\":\"No page is open in LogSeq (for example the All Pages view is showing).\",\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000900\",\"content\":\"on a page with no name\"}}"
+      }
+    ]
+  },
+  "current context: an empty original name falls back to the name": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"bob\",\"originalName\":\"bob\"},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000900\",\"content\":\"on bob\",\"pageName\":\"bob\"}}"
+      }
+    ]
+  },
+  "current context: the page lookup answers null": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":null,\"message\":\"No page is open in LogSeq (for example the All Pages view is showing).\",\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000105\",\"content\":\"Bob owns the importer\"}}"
+      }
+    ]
+  },
+  "current context: a block on the open page takes its name from it": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\"},\"focusedBlock\":{\"uuid\":\"00000000-0000-4000-8000-000000000512\",\"content\":\"on atlas\",\"pageName\":\"Project Atlas\"},\"selectedBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000513\",\"content\":\"also on atlas\",\"pageName\":\"Project Atlas\"}]}"
+      }
+    ]
+  },
+  "current context: slim properties and page references of a selected block": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":{\"name\":\"project atlas\",\"originalName\":\"Project Atlas\"},\"selectedBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000512\",\"content\":\"[[Atlas]] [[Bob Smith]] #a#b\",\"pageName\":\"Project Atlas\",\"properties\":{\"zero\":0,\"no\":false,\"nested\":{\"a\":\"\"}},\"tags\":[\"a\",\"b\"],\"pageRefs\":[\"Atlas\",\"Bob Smith\"]},{\"uuid\":\"00000000-0000-4000-8000-000000000513\",\"content\":\"\",\"pageName\":\"Project Atlas\"}]}"
+      }
+    ]
+  },
+  "current context: LogSeq error for the open page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq API error: MethodNotExist: logseq.Editor.getCurrentPage\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: LogSeq error for the page lookup": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq API error: boom\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the open page is in a shape the server cannot read": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getCurrentPage in a shape this server can't read: originalName: Invalid input: expected string, received number\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the open page has a null name": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getCurrentPage in a shape this server can't read: name: Invalid input: expected string, received null\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the open page is a number": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getCurrentPage in a shape this server can't read: (response): expected an object\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the open page is a list": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getCurrentPage in a shape this server can't read: (response): expected an object\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the open page is text": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getCurrentPage in a shape this server can't read: (response): expected an object\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the zoomed block is in a shape the server cannot read": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getCurrentPage in a shape this server can't read: uuid: Invalid input: expected string, received undefined\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the focused block is in a shape the server cannot read": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getCurrentBlock in a shape this server can't read: content: Invalid input: expected string, received number\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the selection is not a list": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getSelectedBlocks in a shape this server can't read: (response): Invalid input: expected array, received object\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: a selected block is in a shape the server cannot read": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getSelectedBlocks in a shape this server can't read: [1].page.id: Invalid input: expected number, received string\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: the page lookup is not a list of rows": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.DB.datascriptQuery in a shape this server can't read: (response): Invalid input: expected array, received object\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: a page lookup row is in a shape the server cannot read": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.DB.datascriptQuery in a shape this server can't read: [0][0].name: Invalid input: expected string, received number\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: a page lookup row with a second cell": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.DB.datascriptQuery in a shape this server can't read: [0]: Too big: expected array to have <1 items\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "current context: a page lookup row with no cells": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.DB.datascriptQuery in a shape this server can't read: [0][0]: Invalid input: expected object, received undefined\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  }
+}
