@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync, spawnSync } from 'child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -84,6 +84,15 @@ describe('the shellcheck job in ci.yml', () => {
   describe('its ShellCheck step, run against a scratch repository', () => {
     const script = runBlock(job, 'ShellCheck the shell scripts');
 
+    // One probe up front: a machine without ShellCheck fails here with the install hint, not as a bare
+    // `expected 127 to be 0` from the scratch runs.
+    beforeAll(() => {
+      const probe = spawnSync('shellcheck', ['--version'], { encoding: 'utf-8' });
+      if (probe.error || probe.status !== 0) {
+        throw new Error('shellcheck is not installed or does not run: install it (ubuntu-latest has it; locally `brew install shellcheck`)');
+      }
+    });
+
     function scratch(files: Record<string, string>): { status: number | null; output: string } {
       const dir = mkdtempSync(join(tmpdir(), 'shellcheck-job-'));
       try {
@@ -92,7 +101,7 @@ describe('the shellcheck job in ci.yml', () => {
         for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
         git('add', '.');
         const run = spawnSync('bash', ['-eo', 'pipefail', '-c', script], { cwd: dir, encoding: 'utf-8' });
-        if (run.error) throw new Error(`could not run the step (is shellcheck installed?): ${run.error.message}`);
+        if (run.error) throw new Error(`could not run the step: ${run.error.message}`);
         return { status: run.status, output: `${run.stdout}${run.stderr}` };
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -119,5 +128,34 @@ describe('the shellcheck job in ci.yml', () => {
     it('passes when the repository has no shell script', () => {
       expect(scratch({ 'notes.txt': 'nothing here\n' }).status).toBe(0);
     });
+  });
+});
+
+// CLAUDE.md: a `# shellcheck disable=` needs its reason on the same line, as `# shellcheck disable=SC2034 # why`.
+describe('shellcheck disable directives', () => {
+  const directive = /#\s*shellcheck\s+disable=/;
+  const withReason = /#\s*shellcheck\s+disable=[A-Za-z0-9,-]+\s+#\s*\S/;
+
+  it('the matcher wants a reason after the codes, on the same line', () => {
+    expect(withReason.test('# shellcheck disable=SC2034 # read by the sourcing script')).toBe(true);
+    expect(withReason.test('x=1 # shellcheck disable=SC2034,SC2154 # set by the caller')).toBe(true);
+    expect(withReason.test('# shellcheck disable=SC2034')).toBe(false);
+    expect(withReason.test('# shellcheck disable=SC2034 #')).toBe(false);
+  });
+
+  it('every one in a tracked shell script or workflow has a reason', () => {
+    const tracked = execFileSync('git', ['ls-files', '-z', '*.sh', '.github/workflows/*.yml'], { cwd: ROOT, encoding: 'utf-8' })
+      .split('\0')
+      .filter(Boolean);
+    expect(tracked.length).toBeGreaterThan(0);
+    const missing: string[] = [];
+    for (const file of tracked) {
+      readFileSync(join(ROOT, file), 'utf-8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (directive.test(line) && !withReason.test(line)) missing.push(`${file}:${i + 1}`);
+        });
+    }
+    expect(missing, 'add the reason on the same line, as `# shellcheck disable=SCxxxx # why`').toEqual([]);
   });
 });
