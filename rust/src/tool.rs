@@ -27,10 +27,10 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
 ///   schema has it: schemars leaves the key out, and a client may look for it;
 /// - the arguments are an object, and unknown fields are ignored, as every TypeScript tool
 ///   ignores them (the param aliases rely on it), so there's no `additionalProperties: false`;
-/// - numbers are `f64`, never an integer type. Accepting `2.5` is the current contract
-///   (`z.number()`, and the tools clamp or floor), which an `"integer"` schema would narrow.
-///   #293 makes count and limit parameters integers; once it lands, they become `u32` here and
-///   this check goes.
+/// - a count, limit, offset or depth is a `u32` (#293: `z.int().min(0)`): schemars gives it
+///   `"type": "integer"` and `"minimum": 0`, plus a `format` the comparison drops. A parameter
+///   whose TypeScript minimum is 1 says so with `#[schemars(range(min = 1))]`. What the tool
+///   does with a bad value (`2.5`, `-1`, `"5"`) is `params::normalize_params`, not serde.
 pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
     let Value::Object(mut schema) = serde_json::to_value(generator.into_root_schema_for::<T>()).expect("a schema serializes")
@@ -41,21 +41,8 @@ pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     schema.remove("description");
     assert_eq!(schema.get("type"), Some(&json!("object")), "a tool's arguments must be an object");
     assert!(!schema.contains_key("additionalProperties"), "a tool's arguments must ignore unknown fields");
-    assert!(!mentions_integer(&Value::Object(schema.clone())), "use f64 for numbers until #293: z.number() accepts 2.5");
     schema.entry("properties").or_insert_with(|| json!({}));
     Arc::new(schema)
-}
-
-/// Whether any `type` in the schema, at any depth, is or includes `"integer"`.
-fn mentions_integer(schema: &Value) -> bool {
-    match schema {
-        Value::Object(map) => map.iter().any(|(key, value)| {
-            (key == "type" && (value == "integer" || value.as_array().is_some_and(|types| types.contains(&json!("integer")))))
-                || mentions_integer(value)
-        }),
-        Value::Array(items) => items.iter().any(mentions_integer),
-        _ => false,
-    }
 }
 
 /// Parse a tool's arguments at the boundary (ADR-0019). As in `parseArgs`: unknown fields are
@@ -291,9 +278,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "use f64 for numbers until #293")]
-    fn an_integer_field_is_refused_until_293_lands() {
-        input_schema::<IntegerArgs>();
+    fn a_count_is_an_integer_with_a_minimum() {
+        let schema = schema_of::<IntegerArgs>();
+        let depth = &schema["properties"]["max_depth"];
+        assert_eq!(depth["type"], json!(["integer", "null"]));
+        assert_eq!(depth["minimum"], json!(0));
+        // `format` is schemars' own and means nothing to a caller: the harness drops it
+        assert_eq!(
+            meaning(&schema),
+            meaning(&json!({"type": "object", "properties": {"max_depth": {"type": "integer", "minimum": 0}}}))
+        );
     }
 
     fn args(value: Value) -> Option<JsonObject> {
