@@ -288,7 +288,7 @@ fn page_properties(page: &Value) -> Value {
 }
 
 /// `resolvedFromInfo`: says the page isn't the exact name the caller gave. Absent for an exact match.
-fn resolved_from(input: &str, resolved: &ResolvedPage) -> Option<Value> {
+pub fn resolved_from(input: &str, resolved: &ResolvedPage) -> Option<Value> {
     (resolved.matched_by != MatchedBy::Name)
         .then(|| json!({"name": input, "matchedBy": resolved.matched_by.as_str(), "resolvedTo": resolved.original_name}))
 }
