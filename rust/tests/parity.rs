@@ -254,6 +254,36 @@ fn a_json_tool_result_is_compared_by_deep_equality() {
     assert!(!same(r#"{"a":2,"b":[1,2],"c":{"x":"y","z":2}}"#).is_empty());
     assert!(!same(r#"{"a":1,"b":[1,2]}"#).is_empty());
     assert!(!same(r#"{"a":1,"b":[1,2],"c":{"x":"y","z":2},"d":0}"#).is_empty());
+    // A changed string, at depth, is a different result
+    assert!(!same(r#"{"a":1,"b":[1,2],"c":{"x":"Y","z":2}}"#).is_empty());
+    // A changed type is too: the number 1 is not the text "1"
+    assert!(!same(r#"{"a":"1","b":[1,2],"c":{"x":"y","z":2}}"#).is_empty());
+    assert!(!same(r#"{"a":1,"b":["1",2],"c":{"x":"y","z":2}}"#).is_empty());
+    assert!(!same(r#"{"a":true,"b":[1,2],"c":{"x":"y","z":2}}"#).is_empty());
+    // A null is not an absent key, in either direction
+    assert!(!same(r#"{"a":1,"b":[1,2],"c":{"x":"y","z":null}}"#).is_empty());
+    assert!(!same(r#"{"a":1,"b":[1,2],"c":{"x":"y"}}"#).is_empty());
+    let with_null = tool_result(r#"{"a":null}"#);
+    assert!(!compare_results(&with_null, &tool_result("{}"), &[]).is_empty());
+    assert!(!compare_results(&tool_result("{}"), &with_null, &[]).is_empty());
+    // An array's order matters at depth too, and so does its length
+    let nested = tool_result(r#"{"rows":[{"id":1},{"id":2}]}"#);
+    assert!(!compare_results(&nested, &tool_result(r#"{"rows":[{"id":2},{"id":1}]}"#), &[]).is_empty());
+    assert!(!compare_results(&nested, &tool_result(r#"{"rows":[{"id":1}]}"#), &[]).is_empty());
+    assert!(!compare_results(&nested, &tool_result(r#"{"rows":[{"id":1},{"id":2},{"id":3}]}"#), &[]).is_empty());
+}
+
+#[test]
+fn values_differ_by_string_by_type_and_by_array_order() {
+    assert!(!values_equal(&json!("a"), &json!("b")));
+    assert!(!values_equal(&json!(1), &json!("1")));
+    assert!(!values_equal(&json!(null), &json!(false)));
+    assert!(!values_equal(&json!(0), &json!(false)));
+    assert!(!values_equal(&json!({"a": null}), &json!({})));
+    assert!(!values_equal(&json!({"a": 1}), &json!({"b": 1})));
+    assert!(!values_equal(&json!([[1], [2]]), &json!([[2], [1]])));
+    assert!(values_equal(&json!([{"a": 1, "b": 2}]), &json!([{"b": 2, "a": 1}])));
+    assert!(values_equal(&json!("same"), &json!("same")));
 }
 
 #[test]
