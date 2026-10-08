@@ -1,5 +1,6 @@
-// Differential parity harness (#124, ADR-0031): run a server against the stub LogSeq and compare
-// its tools/list (by meaning, #292), its tool, prompt and resource results (byte for byte) and its
+// Differential parity harness (#124, ADR-0031, ADR-0032): run a server against the stub LogSeq and compare
+// its tools/list (by meaning, #292), its tool, prompt and resource results (byte for byte, except the closest
+// names of a page-not-found message, which any server but the TypeScript one is held to by rule, #335) and its
 // LogSeq calls with the TypeScript server's. Synthetic fixtures only; it never contacts a real LogSeq.
 //
 //   npx tsx scripts/parity.ts                      # the TypeScript server against its recorded results
@@ -13,8 +14,8 @@
 //   npx tsx scripts/parity.ts --real-clock -- rust/target/release/logseq-mcp-server
 //                                                  # a server that reads the system clock (the Rust release build
 //                                                  # ignores LOGSEQ_MCP_NOW): the cases that read today are left out
-//   npx tsx scripts/parity.ts --record           # re-record the expected results from the TypeScript server
-//   npx tsx scripts/parity.ts --self-check         # passes as is, and fails on every perturbed case
+//   npx tsx scripts/parity.ts --record             # re-record the expected results from the TypeScript server
+//   npx tsx scripts/parity.ts --self-check         # passes as is, fails on every perturbed case, and on every wrong list of closest names
 //
 // Only the TypeScript server records: the expected files are the reference other servers are judged
 // against, so --record refuses a command after --. A re-record is done by hand when the TypeScript
@@ -24,7 +25,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CASE_GROUPS, allCases, expectedFileOf, type CaseGroup } from './parity/case-groups.js';
-import { compareResult, perturbCases, runParity, type ParityReport, type ToolResult } from './parity/harness.js';
+import { checkWrongLists, compareResult, perturbCases, runParity, type ParityReport, type ToolResult } from './parity/harness.js';
 import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
 import { parseCommandLine } from './parity/command-line.js';
 import { withoutClockCases } from './parity/clock-cases.js';
@@ -84,12 +85,14 @@ async function readExpected(groups: readonly CaseGroup[]): Promise<Record<string
 }
 
 async function main(): Promise<number> {
-  const { mode, server, onlyTestedTools, realClock } = parseCommandLine(process.argv.slice(2));
+  const { mode, server, onlyTestedTools, isReference, realClock } = parseCommandLine(process.argv.slice(2));
+  // Any server but the TypeScript one is held to ADR-0032's rules for the closest names; the recorded set must exercise them
+  const suggestions = { bySuggestionRules: !isReference, requireSuggestionCases: true };
   const cases = realClock ? withoutClockCases(allCases()) : allCases();
   const snapshotFile = SNAPSHOT_FILE;
 
   if (mode === 'record') {
-    const report = await runParity({ server, cases, snapshotFile });
+    const report = await runParity({ server, cases, snapshotFile, ...suggestions });
     print('record', report);
     if (report.failures.length > 0) return 1;
     for (const group of CASE_GROUPS) {
@@ -117,20 +120,20 @@ async function main(): Promise<number> {
   const expectedToolList = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
   if (!expectedToolList) throw new Error(`no expected tool list at ${EXPECTED_TOOL_LIST_FILE}; record it with --record`);
   if (mode === 'check') {
-    const report = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile });
+    const report = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
     print('parity', report);
     return report.failures.length === 0 ? 0 : 1;
   }
   if (mode === 'perturb') {
-    const report = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, onlyTestedTools, snapshotFile });
+    const report = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
     print('parity with perturbed fixtures', report);
     return report.failures.length === 0 ? 0 : 1;
   }
 
   // self-check: the fixtures pass as they are, and every case with a LogSeq call fails once perturbed
-  const clean = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile });
+  const clean = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
   print('self-check, fixtures as committed', clean);
-  const perturbed = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, onlyTestedTools, snapshotFile });
+  const perturbed = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
   const caught = cases.filter(c => c.steps.length > 0).map(c => ({
     name: c.name,
     failures: perturbed.failures.filter(f => f.startsWith(`[${c.tool}: ${c.name}]`))
@@ -138,7 +141,9 @@ async function main(): Promise<number> {
   for (const { name, failures } of caught) {
     console.log(`self-check, perturbed "${name}": ${failures.length > 0 ? `caught (${failures.length} failure(s), first: ${failures[0].split('\n')[0]})` : 'NOT CAUGHT'}`);
   }
-  const ok = clean.failures.length === 0 && caught.every(c => c.failures.length > 0);
+  const wrongLists = checkWrongLists(cases, expected);
+  for (const line of wrongLists.lines) console.log(line);
+  const ok = clean.failures.length === 0 && caught.every(c => c.failures.length > 0) && wrongLists.ok;
   console.log(ok ? 'self-check: ok' : 'self-check: FAILED');
   return ok ? 0 : 1;
 }

@@ -2,8 +2,7 @@ import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { isDeepStrictEqual } from 'util';
 import { LogseqClient } from '../../src/client.js';
 import { PageEntity, BlockEntity } from '../../src/types.js';
-import { queryByDateRange } from '../../src/tools/query-by-date-range.js';
-import { getConceptEvolution } from '../../src/tools/get-concept-evolution.js';
+import { getConceptEvolution, queryByDateRange } from './helpers/tools.js';
 import { formatLogseqDate } from '../../src/utils/date-utils.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS, laterJournalDays } from './helpers/fixture-client.js';
 
