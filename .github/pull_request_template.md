@@ -46,7 +46,7 @@ empty result, oversized result. -->
 <!-- Tests added, and what each one pins. Measurements are approximate, no graph data. -->
 - [ ] Tests added: <what each pins>
 - [ ] `cd rust && cargo test --locked` passes
-- [ ] `npx vite-node scripts/parity.ts` and its `--self-check` pass against the debug build (`cd rust && cargo build`)
+- [ ] `cd rust && cargo test --locked --test parity --test parity_self_check` passes (the parity cases and their self-check, #371)
 - [ ] `npm run typecheck` and `npx vitest run tests/guards tests/rust-guards` pass
 - [ ] `npm run test:integration` passes against this worktree's fixture instance, and `git status` shows no change under `tests/fixtures/graph/`
 - [ ] `npx tsx scripts/measure-api-calls.ts` still runs. Approximate calls before/after: <n / n>

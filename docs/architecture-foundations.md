@@ -139,7 +139,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **In this repo.** Four kinds of test pin behavior, from the cheapest up:
 - **Rust unit tests** (`cd rust && cargo test --locked`) sit beside the code. The call-count tests in `rust/tests/*_calls.rs` run a tool against a mock HTTP LogSeq and assert the exact calls it makes and the result it returns.
-- **The golden-result harness** (`scripts/parity.ts`) starts the built server against a stub LogSeq and compares every tool, prompt and resource result byte for byte with the results recorded from the TypeScript server before it was retired (`scripts/parity/expected/`), and `tools/list` by meaning (ADR-0031). The recorded files are the tool contract and the characterization tests of the whole server: a change to one is a contract change.
+- **The golden-result test** (`rust/tests/parity.rs`, run by `cargo test`; the Node harness `scripts/parity.ts` is the recorder) starts the built server against a stub LogSeq and compares every tool, prompt and resource result byte for byte with the results recorded from the TypeScript server before it was retired (`scripts/parity/expected/`), and `tools/list` by meaning (ADR-0031). The recorded files are the tool contract and the characterization tests of the whole server: a change to one is a contract change.
 - **Guard tests** (`tests/guards`, `tests/rust-guards`) hold the repo's rules.
 - **Integration tests** (`npm run test:integration`) run the Rust server against the committed fixture graph in a live LogSeq and assert exact results on its known pages.
 
@@ -236,5 +236,5 @@ The sections live in [`.github/pull_request_template.md`](../.github/pull_reques
 - [ ] No new dependency, tool or abstraction that the task did not need.
 - [ ] Tool contract changes are additive.
 - [ ] Nothing writes to stdout.
-- [ ] `cd rust && cargo test --locked` and the parity harness pass. A change to a golden file (`scripts/parity/expected/`) is called out and carries the maintainer's OK.
+- [ ] `cd rust && cargo test --locked` passes, parity cases included. A change to a golden file (`scripts/parity/expected/`) is called out and carries the maintainer's OK.
 - [ ] My notes report what I actually verified, and list my assumptions.

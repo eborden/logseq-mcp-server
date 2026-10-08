@@ -17,8 +17,9 @@ The default lives in `DEFAULT_SLIM_RESULTS` (`rust/src/slim.rs`): each tool that
 test: `tests/integration/slim-default.test.ts` (omitted means slim, false means full)
 test: `rust/src/slim.rs`
 test: `tests/guards/tool-list.test.ts`
+test: `rust/tests/parity.rs`
 
-`tests/guards/tool-list.test.ts` asserts that every `slim_results` parameter of the recorded `tools/list` advertises `default: true`, and the parity step of CI holds the server's schema to that list.
+`tests/guards/tool-list.test.ts` asserts that every `slim_results` parameter of the recorded `tools/list` advertises `default: true`, and the parity test (`rust/tests/parity.rs`, run by `cargo test`) holds the server's schema to that list.
 
 ## Changelog
 
@@ -28,3 +29,4 @@ test: `tests/guards/tool-list.test.ts`
 | 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #121 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertion for the `slim_results` default. | #370 |
 | 2026-10-08 | Rationale only: where the default lives is the Rust crate's (`DEFAULT_SLIM_RESULTS` in `rust/src/slim.rs`, read by each tool's `slim_results` argument) and not the TypeScript argument schema. Statement unchanged. | #372 |
+| 2026-10-08 | Mechanical enforcement: the parity check of the server's schema against the recorded `tools/list` is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
