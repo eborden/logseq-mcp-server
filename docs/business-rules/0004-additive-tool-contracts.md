@@ -12,11 +12,11 @@ An MCP client, a skill, or a prompt that names a tool and its parameters is a co
 
 test: `tests/guards/tool-list.test.ts`
 test: `tests/rust-guards/tool-list-live.test.ts`
-test: `scripts/parity/expected/tool-list.json`
+test: `rust/tests/data/parity/tool-list.json`
 test: `rust/tests/parity.rs`
 
 `tool-list-live.test.ts` holds the Rust server's own list to the size budget and the description cap, since the recorded list is smaller than what a client receives. The parity test (`cargo test`, `rust/tests/parity.rs`) fails on any difference in meaning between the Rust server's `tools/list` and the recorded one in a tool's name, title, annotation, description or input schema, so a rename or removal can't land unseen. Change the recorded file only for additive changes and call out the diff in the PR. The comparison can't tell an additive change from a breaking one, so a reviewer still checks the diff.
-reviewer: A diff of `scripts/parity/expected/tool-list.json` only adds optional parameters, tools or result fields.
+reviewer: A diff of `rust/tests/data/parity/tool-list.json` only adds optional parameters, tools or result fields.
 
 ## Changelog
 
