@@ -11,8 +11,9 @@ on:
       # serverInfo.version is read from package.json at build time (rust/src/server.rs).
       - 'package.json'
       - '.github/workflows/rust.yml'
+  # pull_request has no branch filter, so it runs on PRs into feature/rust-spike as well as main.
   push:
-    branches: [main]
+    branches: [main, feature/rust-spike]
     paths:
       - 'rust/**'
       - 'package.json'
