@@ -94,7 +94,7 @@ pub fn roll_up_top_concepts<'a>(
     }
     fn visit(blocks: &[Value], date: i64, refs_by_block: &HashMap<i64, Vec<ConceptRef>>, order: &mut Vec<i64>, tally: &mut HashMap<i64, Tally>) {
         for block in blocks {
-            let block_id = block.get("id").and_then(Value::as_i64);
+            let block_id = block.get("id").and_then(crate::wire::whole_number);
             for concept in block_id.and_then(|id| refs_by_block.get(&id)).into_iter().flatten() {
                 let slot = tally.entry(concept.id).or_insert_with(|| {
                     order.push(concept.id);

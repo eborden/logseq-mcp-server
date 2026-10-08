@@ -21,7 +21,7 @@ use crate::wire::{Parsed, Part, Reader, entity_id};
 
 /// A whole number a JSON value holds, as the id of an entity is.
 fn whole(value: Option<&Value>) -> Option<i64> {
-    value.and_then(Value::as_i64)
+    value.and_then(crate::wire::whole_number)
 }
 
 /// `entityId`: the id of an entity or of a reference to one, in either spelling. A zero or missing
@@ -68,11 +68,7 @@ impl Reader {
     pub(crate) fn required_whole(&mut self, map: &serde_json::Map<String, Value>, key: &'static str) -> Parsed<()> {
         self.at(Part::Key(key), |r| match map.get(key) {
             None => Err(r.mismatch("number", None)),
-            Some(value) => {
-                let n = r.number_value(value)?;
-                // 2^53 is where an f64 stops holding every whole number, as a JavaScript number does
-                if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 { Ok(()) } else { Err(r.mismatch("int", Some(value))) }
-            }
+            Some(value) => r.id_value(value).map(|_| ()),
         })
     }
 
@@ -239,6 +235,25 @@ mod tests {
         assert_eq!(problem(check, json!({"id": 1})), "name: Invalid input: expected string, received undefined");
         assert_eq!(problem(check, json!({"id": 1, "name": "a", "alias": [{"id": "x"}]})), "alias[0].id: Invalid input: expected number, received string");
         assert!(check(&mut Reader::default(), Some(&json!({"id": 1, "name": "a", "originalName": "A", "extra": 1}))).is_ok());
+    }
+
+    #[test]
+    fn what_the_check_accepts_as_an_id_the_readers_read_and_never_as_absent() {
+        // `5.0` and `1e3` are whole numbers to a JavaScript number but floats to serde_json
+        let editor = |r: &mut Reader, v: Option<&Value>| r.check_editor_page(v);
+        let block = |r: &mut Reader, v: Option<&Value>| r.check_block(v);
+        for (id, read) in [(json!(5), 5), (json!(5.0), 5), (json!(1e3), 1000)] {
+            let page = json!({"id": id, "name": "a", "uuid": "u"});
+            assert!(editor(&mut Reader::default(), Some(&page)).is_ok(), "{id}");
+            assert!(block(&mut Reader::default(), Some(&page)).is_ok(), "{id}");
+            assert_eq!(id_of(Some(&page)), Some(read), "{id}");
+        }
+        // a fraction or a number past 2^53 is no id, and the check says so
+        for id in [json!(1.5), json!(1e300), json!(9007199254740993u64)] {
+            let page = json!({"id": id, "name": "a", "uuid": "u"});
+            assert!(problem(editor, page.clone()).starts_with("id: Invalid input: expected int"), "{id}");
+            assert!(problem(block, page).starts_with("id: Invalid input: expected int"), "{id}");
+        }
     }
 
     #[test]

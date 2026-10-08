@@ -138,7 +138,7 @@ pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext
     // Page names by id: the open page is already known; resolve the rest in one pull.
     let mut page_names: HashMap<i64, String> = HashMap::new();
     if let Some(entity) = page_entity {
-        if let Some(id) = entity.get("id").and_then(Value::as_i64) {
+        if let Some(id) = entity.get("id").and_then(crate::wire::whole_number) {
             page_names.insert(id, page_display_name(Some(entity)));
         }
     }

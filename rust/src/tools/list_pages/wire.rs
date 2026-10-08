@@ -49,13 +49,13 @@ fn entity(page: &Value) -> ListedEntity {
     let alias_ids = page
         .get("alias")
         .and_then(Value::as_array)
-        .map(|links| links.iter().filter_map(|link| link.get("id").and_then(Value::as_i64)).collect())
+        .map(|links| links.iter().filter_map(|link| link.get("id").and_then(crate::wire::whole_number)).collect())
         .unwrap_or_default();
     let name = page["name"].as_str().expect("a checked page has a name");
     // `page.originalName || page.name`: the Editor API's spelling only, and an empty one counts as missing
     let display_name = page.get("originalName").and_then(Value::as_str).filter(|name| !name.is_empty()).unwrap_or(name);
     ListedEntity {
-        id: page["id"].as_i64().expect("a checked page has an id"),
+        id: crate::wire::whole_number(&page["id"]).expect("a checked page has an id"),
         name: name.to_owned(),
         display_name: display_name.to_owned(),
         journal: journal_flag(Some(page)).unwrap_or(false),
@@ -92,6 +92,13 @@ mod tests {
     }
 
     #[test]
+    fn a_float_valued_whole_id_is_read_as_that_id_and_never_panics() {
+        let answer = json!([{"id": 5.0, "name": "a", "alias": [{"id": 1e3}]}]);
+        let page = pages(&answer).unwrap().unwrap().remove(0);
+        assert_eq!((page.id, page.alias_ids), (5, vec![1000]));
+    }
+
+    #[test]
     fn null_is_not_an_empty_list() {
         assert_eq!(pages(&json!(null)).unwrap(), None);
         assert_eq!(pages(&json!([])).unwrap(), Some(vec![]));
@@ -102,5 +109,6 @@ mod tests {
         assert_eq!(problem(json!({})), "(response): Invalid input: expected array, received object");
         assert_eq!(problem(json!([{"id": 1, "name": "a"}, {"id": "2", "name": "b"}])), "[1].id: Invalid input: expected number, received string");
         assert_eq!(problem(json!([{"id": 1}])), "[0].name: Invalid input: expected string, received undefined");
+        assert!(problem(json!([{"id": 1.5, "name": "a"}])).starts_with("[0].id: Invalid input: expected int"));
     }
 }
