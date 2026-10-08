@@ -56,9 +56,13 @@ compares the tool result byte for byte, the LogSeq calls and `tools/list` by mea
 with what the TypeScript server did. From the repo root, after `npm ci` and `cargo build`:
 
 ```bash
-npx tsx scripts/parity.ts --tested-tools-only -- "$PWD/rust/target/debug/logseq-mcp-server"
-npx tsx scripts/parity.ts --self-check --tested-tools-only -- "$PWD/rust/target/debug/logseq-mcp-server"
+node node_modules/vite-node/vite-node.mjs scripts/parity.ts --tested-tools-only "$PWD/rust/target/debug/logseq-mcp-server"
+node node_modules/vite-node/vite-node.mjs scripts/parity.ts --self-check --tested-tools-only "$PWD/rust/target/debug/logseq-mcp-server"
 ```
+
+The runner is the `vite-node` that `npm ci` installs from the lockfile (CI uses the same; `npx tsx`
+would download an unpinned package). It swallows `--`, so the server command follows the flags
+directly; `scripts/parity.ts -- <command>` still works under `npx tsx`.
 
 `--tested-tools-only` is for a server with only some tools: `tools/list` is compared for the tools
 the cases call, and the server must list those and no others. Fixtures are made up (BR-0001).
