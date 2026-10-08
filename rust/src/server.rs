@@ -50,8 +50,14 @@ fn read_only_annotations(title: &str) -> ToolAnnotations {
 
 /// A tool's `inputSchema`, generated from the type its arguments are parsed into, so the two
 /// can't drift apart (ADR-0019). It has the TypeScript server's shape (`toInputSchema` in
-/// `src/utils/parse-args.ts`): no `$schema`, `title` or `description` at the top, `required`
-/// always present, and no `additionalProperties`, because unknown fields are ignored.
+/// `src/utils/parse-args.ts`, as the ADR-0016 snapshot shows it): no `$schema`, `title` or
+/// `description` at the top, `required` always present, and no `additionalProperties`, because
+/// unknown fields are ignored.
+///
+/// Each property is then rewritten into zod's shape (see [`zod_shaped_property`]). What the
+/// argument type must do itself: numbers are `f64`, as zod's `z.number()` accepts `2.5` and the
+/// tools clamp or floor them. An integer type would advertise `"type": "integer"` and reject
+/// `2.5`, which TypeScript accepts, so this panics on one.
 pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
     let Value::Object(mut schema) = serde_json::to_value(generator.into_root_schema_for::<T>()).expect("a schema serializes")
@@ -63,13 +69,76 @@ pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     }
     assert_eq!(schema.get("type"), Some(&json!("object")), "a tool's arguments must be an object");
     assert!(!schema.contains_key("additionalProperties"), "a tool's arguments must ignore unknown fields");
-    schema.entry("properties").or_insert_with(|| json!({}));
+    let defs = match schema.remove("$defs") {
+        Some(Value::Object(defs)) => defs,
+        _ => JsonObject::new(),
+    };
+    let properties = match schema.remove("properties") {
+        Some(Value::Object(properties)) => properties
+            .into_iter()
+            .map(|(name, property)| {
+                let property = zod_shaped_property(property, &defs);
+                (name, property)
+            })
+            .collect(),
+        _ => JsonObject::new(),
+    };
+    schema.insert("properties".into(), Value::Object(properties));
     schema.entry("required").or_insert_with(|| json!([]));
     Arc::new(schema)
 }
 
+/// One property as zod's `toJSONSchema` writes it, from what schemars writes:
+/// - An `Option` is optional through `required`, and zod doesn't add `null` to its type, so the
+///   `null` alternative goes: `"type": ["number", "null"]` becomes `"number"`, `null` leaves an
+///   `enum`, and `anyOf: [{...}, {"type": "null"}]` becomes the one schema.
+/// - A string enum is inlined from `$defs` (zod has no `$ref`), keeping the property's own
+///   `description` and `default` rather than the enum type's doc comment.
+/// - schemars' `format` (`"double"`) goes; zod writes none.
+fn zod_shaped_property(property: Value, defs: &JsonObject) -> Value {
+    let Value::Object(mut property) = property else { panic!("a property schema must be an object") };
+    if let Some(Value::Array(alternatives)) = property.remove("anyOf") {
+        let mut rest = alternatives.into_iter().filter(|alt| alt != &json!({"type": "null"}));
+        let (Some(Value::Object(only)), None) = (rest.next(), rest.next()) else {
+            panic!("only Option<T> may produce anyOf in a tool's arguments");
+        };
+        for (key, value) in only {
+            property.entry(key).or_insert(value);
+        }
+    }
+    if let Some(Value::String(reference)) = property.remove("$ref") {
+        let name = reference.strip_prefix("#/$defs/").expect("refs point into $defs");
+        let Some(Value::Object(def)) = defs.get(name) else { panic!("$defs has no {name}") };
+        for (key, value) in def {
+            if key != "description" && key != "title" {
+                property.entry(key.clone()).or_insert(value.clone());
+            }
+        }
+    }
+    if let Some(Value::Array(types)) = property.get("type") {
+        let types: Vec<&Value> = types.iter().filter(|t| *t != "null").collect();
+        let [only] = types[..] else { panic!("a property must have one type besides null") };
+        property.insert("type".into(), only.clone());
+    }
+    if let Some(Value::Array(values)) = property.get_mut("enum") {
+        values.retain(|value| !value.is_null());
+    }
+    // A whole-number f64 default (`50.0`) is written as JSON.stringify writes it (`50`).
+    if let Some(Value::Number(n)) = property.get("default") {
+        if let Some(x) = n.as_f64().filter(|x| n.is_f64() && x.fract() == 0.0 && x.abs() < 9_007_199_254_740_992.0) {
+            property.insert("default".into(), Value::from(x as i64));
+        }
+    }
+    property.remove("format");
+    assert_ne!(property.get("type"), Some(&json!("integer")), "use f64 for numbers: zod's z.number() accepts 2.5");
+    Value::Object(property)
+}
+
 /// Parse a tool's arguments at the boundary (ADR-0019). As in `parseArgs`: unknown fields are
-/// ignored, nothing is coerced (`"5"` is not `5`), and `null` means absent.
+/// ignored and nothing is coerced (`"5"` is not `5`). `null` means absent because this drops
+/// every `null` before serde sees it, so a defaulted non-`Option` field (`#[serde(default)]
+/// bool`) takes its default for `null` too. serde alone would reject that `null`: keep the
+/// filter in every tool.
 pub fn parse_args<T: DeserializeOwned>(arguments: Option<JsonObject>) -> Result<T, String> {
     let present: JsonObject = arguments.unwrap_or_default().into_iter().filter(|(_, v)| !v.is_null()).collect();
     serde_json::from_value(Value::Object(present)).map_err(|error| format!("Invalid parameter: {error}"))
@@ -154,13 +223,34 @@ mod tests {
     use rmcp::ServiceExt;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+    /// `format` as the TypeScript tools take it. The doc comment is the type's, not the property's.
+    #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
+    #[serde(rename_all = "lowercase")]
+    enum Format {
+        Json,
+        Markdown,
+    }
+
+    fn default_max_nodes() -> f64 {
+        50.0
+    }
+
+    /// One field of each kind the TypeScript tools take, modelled on the ADR-0016 snapshot
+    /// (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
     #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
     struct SampleArgs {
         /// The page to read.
         page_name: String,
+        /// Include child blocks
         #[serde(default)]
         include_children: bool,
-        limit: Option<u32>,
+        /// json (default), or markdown text
+        format: Option<Format>,
+        /// Most names to return
+        limit: Option<f64>,
+        /// Maximum pages in the network (default: 50, max: 500)
+        #[serde(default = "default_max_nodes")]
+        max_nodes: f64,
     }
 
     #[test]
@@ -169,13 +259,41 @@ mod tests {
     }
 
     #[test]
-    fn the_schema_comes_from_the_type_that_parses_the_arguments() {
-        let schema = Value::Object((*input_schema::<SampleArgs>()).clone());
-        assert_eq!(schema["required"], json!(["page_name"]));
-        assert_eq!(schema["properties"]["page_name"], json!({"type": "string", "description": "The page to read."}));
-        assert_eq!(schema["properties"]["include_children"], json!({"type": "boolean", "default": false}));
-        assert!(schema.get("$schema").is_none() && schema.get("title").is_none());
-        assert!(schema.get("additionalProperties").is_none());
+    fn the_schema_comes_from_the_type_that_parses_the_arguments_in_zod_s_shape() {
+        // Each property is what the TypeScript snapshot has for a field of that kind.
+        assert_eq!(
+            Value::Object((*input_schema::<SampleArgs>()).clone()),
+            json!({
+                "type": "object",
+                "properties": {
+                    "page_name": {"type": "string", "description": "The page to read."},
+                    "include_children": {"type": "boolean", "default": false, "description": "Include child blocks"},
+                    "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text"},
+                    "limit": {"type": "number", "description": "Most names to return"},
+                    "max_nodes": {"type": "number", "default": 50, "description": "Maximum pages in the network (default: 50, max: 500)"},
+                },
+                "required": ["page_name"],
+            })
+        );
+    }
+
+    #[test]
+    fn an_integral_default_is_written_as_json_stringify_writes_it() {
+        // serde_json writes 50.0_f64 as `50.0`; JSON.stringify writes `50`.
+        let schema = input_schema::<SampleArgs>();
+        assert_eq!(serde_json::to_string(&schema["properties"]["max_nodes"]["default"]).unwrap(), "50");
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct IntegerArgs {
+        max_depth: Option<u32>,
+    }
+
+    #[test]
+    #[should_panic(expected = "use f64 for numbers")]
+    fn an_integer_field_is_refused_as_zod_accepts_fractions() {
+        input_schema::<IntegerArgs>();
     }
 
     fn args(value: Value) -> Option<JsonObject> {
@@ -184,13 +302,31 @@ mod tests {
 
     #[test]
     fn parsing_ignores_unknown_fields_treats_null_as_absent_and_never_coerces() {
-        let parsed: SampleArgs = parse_args(args(json!({"page_name": "my page", "limit": null, "extra": 1}))).unwrap();
-        assert_eq!(parsed, SampleArgs { page_name: "my page".into(), include_children: false, limit: None });
+        let parsed: SampleArgs = parse_args(args(json!({
+            "page_name": "my page", "limit": null, "include_children": null, "max_nodes": null, "format": "markdown", "extra": 1
+        })))
+        .unwrap();
+        assert_eq!(
+            parsed,
+            SampleArgs {
+                page_name: "my page".into(),
+                include_children: false,
+                format: Some(Format::Markdown),
+                limit: None,
+                max_nodes: 50.0
+            }
+        );
+        // zod's z.number() takes a fraction; the tool clamps or floors it.
+        let parsed: SampleArgs = parse_args(args(json!({"page_name": "x", "max_nodes": 2.5}))).unwrap();
+        assert_eq!(parsed.max_nodes, 2.5);
         assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "limit": "5"}))).is_err());
         assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "include_children": "true"}))).is_err());
+        assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "format": "html"}))).is_err());
         assert!(parse_args::<SampleArgs>(args(json!({"page_name": null}))).unwrap_err().contains("page_name"));
         assert!(parse_args::<SampleArgs>(None).is_err());
         assert!(parse_args::<PingArgs>(None).is_ok());
+        // Without the null filter serde rejects a null for a defaulted bool: the filter does that work.
+        assert!(serde_json::from_value::<SampleArgs>(json!({"page_name": "x", "include_children": null})).is_err());
     }
 
     #[test]
