@@ -8,7 +8,8 @@
 //! aliases and needs no query. A page that has some costs one Datalog query, for any number of
 //! pages, two hops, bound with `ground_ids`.
 //!
-//! Not ported yet: `resolveAliasSetByName` (the group of a free-text name, for `search_term`).
+//! [`resolve_alias_set_by_name`] is the group of a free-text name (a `search_term`), where "not a
+//! page" is an ordinary answer.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -17,7 +18,7 @@ use super::queries;
 pub use super::queries::linked_references_of_pages;
 use super::wire::{self, PulledPage};
 use crate::client::LogseqClient;
-use crate::edn::PageId;
+use crate::edn::{PageId, PageName};
 use crate::errors::ToolError;
 use crate::js;
 use crate::meta::ResultWarning;
@@ -187,6 +188,26 @@ pub async fn resolve_alias_set(client: &LogseqClient, page: &PulledPage) -> Resu
     Ok(resolve_alias_sets(client, &[page]).await?.remove(0))
 }
 
+/// `resolveAliasSetByName`: the alias set of a page known only by name, or `None` when no page has
+/// that name or it has no aliases. For free text that may or may not be a page name (a
+/// `search_term`), where "not a page" is an ordinary answer, not an error. One Datalog query.
+pub async fn resolve_alias_set_by_name(client: &LogseqClient, name: &str) -> Result<Option<AliasSet>, ToolError> {
+    let query = queries::alias_set_by_name(&PageName::new(name));
+    let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
+    // PARITY(#299): a `null` answer is read as "no rows", so the name looks like a page with no aliases when
+    // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
+    let rows = wire::alias_set_by_name_rows(&answer)?.unwrap_or_default();
+    Ok(alias_set_of_rows(&rows))
+}
+
+/// What `resolveAliasSetByName` makes of the rows: the first start page that has an id, the
+/// members of every row, and the set they make, or `None` when it holds no more than the start page.
+fn alias_set_of_rows(rows: &[(PulledPage, PulledPage)]) -> Option<AliasSet> {
+    let first = rows.iter().find_map(|(start, _)| AliasMember::of(start))?;
+    let found: Vec<AliasMember> = rows.iter().filter_map(|(_, member)| AliasMember::of(member)).collect();
+    Some(build_set(first, found)).filter(AliasSet::has_aliases)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,6 +219,21 @@ mod tests {
 
     fn page(value: serde_json::Value) -> PulledPage {
         wire::page_rows(&json!([[value]])).unwrap().unwrap().remove(0)
+    }
+
+    #[test]
+    fn a_name_found_by_rows_is_a_set_only_when_it_has_aliases() {
+        let row = |start: serde_json::Value, member: serde_json::Value| (page(start), page(member));
+        let atlas = || json!({"id": 1, "name": "atlas", "original-name": "Atlas"});
+        let rows = [row(atlas(), json!({"id": 2, "name": "project atlas", "original-name": "Project Atlas"})), row(atlas(), atlas())];
+        let set = alias_set_of_rows(&rows).unwrap();
+        assert_eq!(set.members.iter().map(|m| m.id).collect::<Vec<_>>(), [1, 2]);
+        // the page alone (a link from itself) is no group, and no rows is no page
+        assert_eq!(alias_set_of_rows(&[row(atlas(), atlas())]), None);
+        assert_eq!(alias_set_of_rows(&[]), None);
+        // a start page with no id is passed over for the next one
+        let rows = [row(json!({"name": "no id"}), atlas()), row(atlas(), json!({"id": 3, "name": "b"}))];
+        assert_eq!(alias_set_of_rows(&rows).unwrap().members[0].id, 1);
     }
 
     #[test]

@@ -5,11 +5,14 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
+import { queryByDateRangeCases } from '../scripts/parity/cases/query-by-date-range.js';
 import { pageResourceCases } from '../scripts/parity/cases/page-resource.js';
 import { CASE_GROUPS, allCases, expectedFileOf } from '../scripts/parity/case-groups.js';
 import {
   compareCalls,
   compareResult,
+  PARITY_NOW_MS,
+  PARITY_TZ,
   perturbCases,
   readSnapshotEntry,
   runCase,
@@ -487,6 +490,20 @@ describe('the server environment', () => {
     expect(env.XDG_CONFIG_HOME).toBe(join(env.HOME!, '.config'));
     expect(env.CFFIXED_USER_HOME).toBe(process.platform === 'darwin' ? env.HOME : null);
   }, 60000);
+
+  it('fixes the clock and the time zone, so a result that depends on today is the same on every day (#311)', async () => {
+    const report = await runParity({
+      server: viteNodeCommand('env-report-server.ts'),
+      cases: [{ name: 'env', tool: 'report_env', arguments: {}, steps: [] }],
+      snapshotFile: SNAPSHOT_FILE
+    });
+    const env = JSON.parse(report.results.env?.content?.[0]?.text as string) as Record<string, string | null>;
+    expect(env.LOGSEQ_MCP_NOW).toBe(String(PARITY_NOW_MS));
+    expect(env.TZ).toBe(PARITY_TZ);
+    // 03:30 UTC on the 12th is 23:30 on the 11th in New York (daylight saving began on the 9th)
+    expect(new Date(PARITY_NOW_MS).toISOString()).toBe('2025-03-12T03:30:00.000Z');
+    expect(new Date(PARITY_NOW_MS).toLocaleDateString('en-CA', { timeZone: PARITY_TZ })).toBe('2025-03-11');
+  }, 60000);
 });
 
 describe('the parity command line (--tested-tools-only, #125)', () => {
@@ -617,6 +634,19 @@ describe('runParity against the TypeScript server', () => {
     });
     expect(report.failures, report.stderr).toEqual([]);
   }, 60000);
+
+  it('passes the TypeScript server against its recorded date-range results, whatever day it is (#311)', async () => {
+    // `last_n` and the presets read today's date: the harness fixes the clock and the zone for the server
+    const expected = JSON.parse(await readFile(join(REPO_ROOT, 'scripts', 'parity', 'expected', 'query-by-date-range.json'), 'utf8')) as Record<string, ToolResult>;
+    const report = await runParity({
+      server: typescriptServer(),
+      cases: queryByDateRangeCases,
+      expected,
+      expectedToolList: await loadToolList(),
+      snapshotFile: SNAPSHOT_FILE
+    });
+    expect(report.failures, report.stderr).toEqual([]);
+  }, 120000);
 
   it('fails loud on a perturbed answer, a missing or reordered call, and a changed tools/list', async () => {
     const expected = await loadExpected();

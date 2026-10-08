@@ -63,6 +63,16 @@ impl<'a> Arguments<'a> {
         }
     }
 
+    /// An optional number (`z.number().optional()`): any finite number, a fraction too. A date is one,
+    /// checked as `YYYYMMDD` by the tool, not here.
+    pub fn optional_number(&self, param: &str) -> Result<Option<f64>, InvalidParameter> {
+        match self.sent(param) {
+            None => Ok(None),
+            Some(Value::Number(number)) => Ok(Some(number.as_f64().expect("a JSON number is finite"))),
+            Some(other) => Err(wrong(param, other, format!("a number, not {}", kind_of(other)), Some(format!("{param}: 5")))),
+        }
+    }
+
     /// A required string (`z.string()`). An empty string is a string.
     pub fn required_string(&self, param: &str) -> Result<String, InvalidParameter> {
         match self.sent(param) {
@@ -191,6 +201,24 @@ mod tests {
         assert!(read.boolean("flag", true).unwrap());
         assert_eq!(read.optional_string("name").unwrap(), None);
         assert_eq!(Arguments::new(None).count_or("limit", 0, 7).unwrap(), 7);
+    }
+
+    #[test]
+    fn a_number_is_any_number_and_nothing_else() {
+        let args = arguments(json!({"a": 20250101, "b": 1.5, "c": "5", "d": true, "e": null}));
+        let read = Arguments::new(Some(&args));
+        assert_eq!(read.optional_number("a").unwrap(), Some(20250101.0));
+        assert_eq!(read.optional_number("b").unwrap(), Some(1.5));
+        assert_eq!(read.optional_number("e").unwrap(), None);
+        assert_eq!(read.optional_number("missing").unwrap(), None);
+        assert_eq!(
+            message(read.optional_number("c").unwrap_err()),
+            "Invalid parameter 'c': \"5\"\n\nExpected: a number, not a string\nExample: c: 5"
+        );
+        assert_eq!(
+            message(read.optional_number("d").unwrap_err()),
+            "Invalid parameter 'd': true\n\nExpected: a number, not a boolean\nExample: d: 5"
+        );
     }
 
     #[test]

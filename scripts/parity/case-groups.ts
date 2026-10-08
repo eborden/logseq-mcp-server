@@ -11,6 +11,7 @@ import { getGraphInfoCases } from './cases/get-graph-info.js';
 import { getPageCases } from './cases/get-page.js';
 import { getPageOutlineCases } from './cases/get-page-outline.js';
 import { listPagesCases } from './cases/list-pages.js';
+import { queryByDateRangeCases } from './cases/query-by-date-range.js';
 import { markdownCases } from './cases/markdown.js';
 import { pageResourceCases } from './cases/page-resource.js';
 import { queryByPropertyCases } from './cases/query-by-property.js';
@@ -35,6 +36,7 @@ export const CASE_GROUPS: CaseGroup[] = [
   { name: 'get-page', cases: getPageCases },
   { name: 'get-page-outline', cases: getPageOutlineCases },
   { name: 'list-pages', cases: listPagesCases },
+  { name: 'query-by-date-range', cases: queryByDateRangeCases },
   { name: 'markdown', cases: markdownCases },
   { name: 'page-resource', cases: pageResourceCases },
   { name: 'query-by-property', cases: queryByPropertyCases },

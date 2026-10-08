@@ -248,7 +248,20 @@ export function compareResult(expected: ToolResult, actual: ToolResult): string[
 }
 
 /**
- * The caller's environment, with the config pointed at the stub, tips left at their default, and
+ * The instant every server under test reads as "now" (`LOGSEQ_MCP_NOW`, milliseconds since 1970-01-01
+ * UTC): 2025-03-12T03:30:00Z, which is still the evening of Tuesday 2025-03-11 in `PARITY_TZ`. A
+ * result that depends on today's date (`last_n`, a preset) is then the same on every day, and a
+ * server that reads the date in UTC where the TypeScript one reads it locally gets the 12th, not
+ * the 11th, and fails.
+ */
+export const PARITY_NOW_MS = Date.UTC(2025, 2, 12, 3, 30);
+
+/** The time zone every server under test runs in (`TZ`): one with daylight saving, and not UTC. */
+export const PARITY_TZ = 'America/New_York';
+
+/**
+ * The caller's environment, with the config pointed at the stub, tips left at their default, the clock
+ * fixed at {@link PARITY_NOW_MS} in {@link PARITY_TZ} (TypeScript reads it through `run-ts-server.ts`), and
  * every home and config directory a server could look in for a fallback config (`~/.logseq-mcp/`)
  * moved to `home`, an empty temp dir.
  */
@@ -257,6 +270,8 @@ export function sandboxedEnv(configPath: string, home: string): Record<string, s
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   delete env.LOGSEQ_MCP_TIPS;
   env.LOGSEQ_MCP_CONFIG = configPath;
+  env.LOGSEQ_MCP_NOW = String(PARITY_NOW_MS);
+  env.TZ = PARITY_TZ;
   env.HOME = home;
   env.USERPROFILE = home;
   env.XDG_CONFIG_HOME = join(home, '.config');

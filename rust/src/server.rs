@@ -15,6 +15,7 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::Value;
 
 use crate::client::LogseqClient;
+use crate::dates::Clock;
 use crate::resources;
 use crate::tool::{error_result, into_result};
 use crate::tools;
@@ -37,15 +38,23 @@ pub struct LogseqServer {
     client: Arc<LogseqClient>,
     /// Whether results carry next-step tips (`LOGSEQ_MCP_TIPS` over the config file's `tips`)
     tips_enabled: bool,
+    /// Where the tools read "now" from: the system, or the instant `LOGSEQ_MCP_NOW` fixes
+    clock: Clock,
 }
 
 impl LogseqServer {
     pub fn new(client: LogseqClient, tips_enabled: bool) -> Self {
-        LogseqServer { client: Arc::new(client), tips_enabled }
+        LogseqServer { client: Arc::new(client), tips_enabled, clock: Clock::System }
+    }
+
+    /// The same server reading "now" from `clock`.
+    pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.clock = clock;
+        self
     }
 
     async fn dispatch(&self, request: CallToolRequestParams) -> CallToolResult {
-        match tools::call(request.name.as_ref(), &self.client, self.tips_enabled, request.arguments).await {
+        match tools::call(request.name.as_ref(), &self.client, self.tips_enabled, self.clock, request.arguments).await {
             Some(outcome) => into_result(outcome),
             None => error_result(&format!("Unknown tool: {}", request.name)),
         }

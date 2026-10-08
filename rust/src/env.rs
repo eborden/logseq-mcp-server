@@ -8,12 +8,22 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::ConfigError;
+use crate::dates::Clock;
 
 /// Environment variable naming another config file (#118).
 pub const CONFIG_PATH_ENV: &str = "LOGSEQ_MCP_CONFIG";
 
 /// Environment variable that turns next-step tips (#44) on or off over the config file's `tips`.
 pub const TIPS_ENV: &str = "LOGSEQ_MCP_TIPS";
+
+/// Environment variable that fixes the instant the tools read as "now", in milliseconds since
+/// 1970-01-01 UTC (`Date.now()`'s count). Only the parity harness sets it, so a result that depends on
+/// today's date (`last_n`, a preset) is the same on every day. Unset, the system clock is read.
+///
+/// A test hook, so it exists in debug builds only (`cfg!(debug_assertions)`): a release binary
+/// ignores it, whatever it holds, as the TypeScript server has no such hook in production. The
+/// parity job runs the debug binary.
+pub const NOW_ENV: &str = "LOGSEQ_MCP_NOW";
 
 const TIPS_ON_VALUES: [&str; 4] = ["1", "true", "on", "yes"];
 const TIPS_OFF_VALUES: [&str; 4] = ["0", "false", "off", "no"];
@@ -23,6 +33,7 @@ const TIPS_OFF_VALUES: [&str; 4] = ["0", "false", "off", "no"];
 pub struct Env {
     pub config_path: ConfigPath,
     pub tips: TipsOverride,
+    pub clock: Clock,
 }
 
 /// The config file's path. Absolute by construction: the MCP client picks the server's working
@@ -60,7 +71,7 @@ impl TipsOverride {
 impl Env {
     /// Read the process environment. The one place in the crate that does.
     pub fn from_process() -> Result<Env, ConfigError> {
-        let vars: HashMap<String, String> = [CONFIG_PATH_ENV, TIPS_ENV]
+        let vars: HashMap<String, String> = [CONFIG_PATH_ENV, TIPS_ENV, NOW_ENV]
             .into_iter()
             .filter_map(|key| std::env::var_os(key).map(|value| (key.to_owned(), value.to_string_lossy().into_owned())))
             .collect();
@@ -74,6 +85,7 @@ impl Env {
         Ok(Env {
             config_path: config_path(vars.get(CONFIG_PATH_ENV).map(String::as_str), home)?,
             tips: tips(vars.get(TIPS_ENV).map(String::as_str))?,
+            clock: clock(vars.get(NOW_ENV).map(String::as_str))?,
         })
     }
 }
@@ -120,6 +132,28 @@ fn tips(raw: Option<&str>) -> Result<TipsOverride, ConfigError> {
             field: TIPS_ENV.to_owned(),
             problem: format!("must be one of {} (got \"{raw}\")", [TIPS_ON_VALUES, TIPS_OFF_VALUES].concat().join(", ")),
         })
+    }
+}
+
+/// `LOGSEQ_MCP_NOW`: a whole number of milliseconds since 1970-01-01 UTC, or unset (blank counts as
+/// unset) for the system clock. The message echoes the value, which holds no secret. A release build
+/// ignores the variable, even a bad value (see [`NOW_ENV`]).
+fn clock(raw: Option<&str>) -> Result<Clock, ConfigError> {
+    // PARITY(#299): the hook is for the parity harness, so a release build never reads it - drop if Rust
+    // becomes the only server.
+    if !cfg!(debug_assertions) {
+        return Ok(Clock::System);
+    }
+    let text = crate::js::trim(raw.unwrap_or_default());
+    if text.is_empty() {
+        return Ok(Clock::System);
+    }
+    match text.parse::<i64>() {
+        Ok(ms) => Ok(Clock::Fixed(ms)),
+        Err(_) => Err(ConfigError::Validation {
+            field: NOW_ENV.to_owned(),
+            problem: format!("must be a whole number of milliseconds since 1970-01-01 UTC (got \"{}\")", raw.unwrap_or_default()),
+        }),
     }
 }
 
@@ -217,6 +251,29 @@ mod tests {
     fn the_config_path_is_checked_before_tips() {
         let text = message(env(&[(CONFIG_PATH_ENV, "relative"), (TIPS_ENV, "disabled")], home()));
         assert!(text.contains("LOGSEQ_MCP_CONFIG"), "{text}");
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_release_build_ignores_the_variable_whatever_it_holds() {
+        for value in ["1741750200000", "yesterday", ""] {
+            assert_eq!(env(&[(NOW_ENV, value)], home()).unwrap().clock, Clock::System, "{value:?}");
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn the_clock_is_the_system_one_unless_an_instant_is_fixed() {
+        assert_eq!(env(&[], home()).unwrap().clock, Clock::System);
+        assert_eq!(env(&[(NOW_ENV, "  ")], home()).unwrap().clock, Clock::System);
+        assert_eq!(env(&[(NOW_ENV, " 1741750200000 ")], home()).unwrap().clock, Clock::Fixed(1_741_750_200_000));
+        assert_eq!(env(&[(NOW_ENV, "-1")], home()).unwrap().clock, Clock::Fixed(-1));
+        for bad in ["yesterday", "1.5", "2025-03-12T03:30:00Z", "1e3"] {
+            assert_eq!(
+                message(env(&[(NOW_ENV, bad)], home())),
+                format!("Configuration validation failed: LOGSEQ_MCP_NOW must be a whole number of milliseconds since 1970-01-01 UTC (got \"{bad}\")")
+            );
+        }
     }
 
     #[test]

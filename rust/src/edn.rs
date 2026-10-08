@@ -35,6 +35,8 @@ pub enum DatalogInput {
     PageNames(Vec<PageName>),
     /// A journal day for `:block/journal-day`.
     JournalDay(JournalDay),
+    /// A bound of a range over `:block/journal-day`.
+    DayBound(DayBound),
     /// `/` and a page name, for `clojure.string/ends-with?` on `:block/name`: the namespace
     /// leaf lookup (`namespaceLeafPages`). Lowercase by construction, as the name is.
     LeafSuffix(PageName),
@@ -48,6 +50,7 @@ impl DatalogInput {
             DatalogInput::PageName(name) => Value::from(name.as_str()),
             DatalogInput::PageNames(names) => Value::from(names.iter().map(PageName::as_str).collect::<Vec<_>>()),
             DatalogInput::JournalDay(day) => Value::from(day.as_int()),
+            DatalogInput::DayBound(bound) => Value::from(bound.get()),
             DatalogInput::LeafSuffix(name) => Value::from(format!("/{}", name.as_str())),
         };
         // Serializing a Value made of strings and integers can't fail.
@@ -164,6 +167,24 @@ impl JournalDay {
 
     pub fn ymd(self) -> (u32, u32, u32) {
         (self.0 / 10000, self.0 / 100 % 100, self.0 % 100)
+    }
+}
+
+/// A bound of a range over `:block/journal-day`, as `assertJournalBounds` takes it: any whole number.
+/// It is compared with each page's journal day (`[(>= ?day ?start)]`), never read as a date, so
+/// it need not be one: a date range the tool accepted (`20250231`, day 31 of any month) is a bound
+/// where a [`JournalDay`] would refuse it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DayBound(i64);
+
+impl DayBound {
+    /// `Number.isInteger(value)`, up to the largest whole number a JavaScript number holds exactly.
+    pub fn from_number(value: f64) -> Option<DayBound> {
+        (value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_991.0).then_some(DayBound(value as i64))
+    }
+
+    pub fn get(self) -> i64 {
+        self.0
     }
 }
 

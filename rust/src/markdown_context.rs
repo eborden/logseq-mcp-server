@@ -60,10 +60,11 @@ fn array<'a>(context: &'a Value, key: &str) -> &'a [Value] {
 /// parent was cut by `max_blocks` is shown as a top-level one, and a pull with neither link is too, so
 /// nothing is dropped.
 ///
-/// This is `buildBlockTrees` for the one page, as the renderer reads it: the same grouping and
-/// the same sibling order (`order_siblings`), without the `level` and the camelized keys, which no
-/// line of Markdown shows. The trees of the pages of an alias group follow the main page's, in the
-/// order each page's first top-level block came.
+/// This is `buildBlockTrees` as the renderer reads it: the same grouping and the same sibling order
+/// (`order_siblings`), without the `level` and the camelized keys, which no line of Markdown shows.
+/// `block_tree::build_block_trees` (#311) groups alike but answers a map by page id, and the
+/// trees of the pages of an alias group are written in the order the TypeScript map holds them:
+/// the main page's, then each other page's in the order its first top-level block came.
 fn block_tree(blocks: &[Value], page_id: i64) -> Vec<Value> {
     let mut nodes: Vec<Option<Map<String, Value>>> = blocks
         .iter()

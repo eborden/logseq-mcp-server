@@ -499,6 +499,7 @@ version = "0.0.0"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+ "libc",
  "reqwest",
  "rmcp",
  "schemars",

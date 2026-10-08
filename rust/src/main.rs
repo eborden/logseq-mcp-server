@@ -25,7 +25,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // LOGSEQ_MCP_TIPS wins over the config file's `tips`; a bad value was rejected above
     let tips_enabled = env.tips.tips_enabled(config.tips);
 
-    let server = LogseqServer::new(LogseqClient::new(&config), tips_enabled);
+    let server = LogseqServer::new(LogseqClient::new(&config), tips_enabled).with_clock(env.clock);
     let running = server.serve(rmcp::transport::stdio()).await?;
     eprintln!("LogSeq MCP server running on stdio");
     running.waiting().await?;

@@ -121,6 +121,19 @@ pub fn alias_set_rows(answer: &Value) -> Result<Option<Vec<(f64, PulledPage)>>, 
         .map_err(|issue| to_error(DATALOG_METHOD, issue))
 }
 
+/// `responses.aliasSetByNameRows`: `[startPage, member]` per row, the alias group of the page a name
+/// found, both sides pulled.
+pub fn alias_set_by_name_rows(answer: &Value) -> Result<Option<Vec<(PulledPage, PulledPage)>>, ResponseError> {
+    let mut reader = Reader::default();
+    reader
+        .rows(answer, 2, |r, cells| {
+            let start = r.at(Part::Index(0), |r| r.pulled_page(cells.first()))?;
+            let member = r.at(Part::Index(1), |r| r.pulled_page(cells.get(1)))?;
+            Ok((start, member))
+        })
+        .map_err(|issue| to_error(DATALOG_METHOD, issue))
+}
+
 /// `responses.pageRows`: `[page]` per row.
 pub fn page_rows(answer: &Value) -> Result<Option<Vec<PulledPage>>, ResponseError> {
     let mut reader = Reader::default();
@@ -170,6 +183,15 @@ mod tests {
         assert_eq!(resolver_rows(&json!([])).unwrap(), Some(vec![]));
         assert_eq!(page_rows(&Value::Null).unwrap(), None);
         assert_eq!(page_names(&Value::Null, "m").unwrap(), None);
+    }
+
+    #[test]
+    fn an_alias_group_by_name_is_rows_of_a_start_page_and_a_member() {
+        let rows = alias_set_by_name_rows(&json!([[{"id": 1, "name": "atlas"}, {"id": 2, "name": "project atlas"}]])).unwrap().unwrap();
+        assert_eq!((rows[0].0.entity_id(), rows[0].1.entity_id()), (Some(1), Some(2)));
+        assert_eq!(alias_set_by_name_rows(&Value::Null).unwrap(), None);
+        assert_eq!(problem(alias_set_by_name_rows(&json!([[{"id": 1}]]))), "[0][1]: Invalid input: expected object, received undefined");
+        assert_eq!(problem(alias_set_by_name_rows(&json!([[null, {"id": 1}]]))), "[0][0]: Invalid input: expected object, received null");
     }
 
     #[test]
