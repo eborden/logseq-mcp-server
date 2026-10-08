@@ -67,6 +67,11 @@ pub fn day_of(block: &Value) -> Option<f64> {
 /// The blocks once each, by `id`: a later block with the same id takes the earlier one's place in
 /// the order (`new Map(blocks.map(b => [b.id, b])).values()`), so the Datalog pull of a block the tree
 /// also holds is the one kept.
+///
+/// PARITY(#299): the later block replaces the earlier one in its place, so a block on the page that also
+/// links it comes back as the Datalog pull (kebab-case keys, no `children`) and the tree's block, with its
+/// children, is lost (suspected TS bug: a fix would keep the tree's block) — drop if Rust becomes the only
+/// server.
 pub fn unique_by_id(blocks: Vec<Value>) -> Vec<Value> {
     let mut places: HashMap<i64, usize> = HashMap::new();
     let mut unique: Vec<Value> = Vec::with_capacity(blocks.len());
@@ -222,9 +227,10 @@ pub fn week_identifier(date: f64) -> String {
         }
         _ => None,
     };
-    // PARITY(#299): a date that isn't eight digits has no week, and JavaScript writes the number it
-    // computes for it as "NaN" (LogSeq's journal days always have eight digits) — drop if Rust becomes the
-    // only server.
+    // PARITY(#299): a date whose month or day digits are missing (fewer than seven digits, or a `.` in those
+    // places) has no week, and JavaScript writes the number it computes for it as "NaN". A 7- or 9-digit
+    // date does get a week, from the characters at the same places (LogSeq's journal days always have eight
+    // digits) — drop if Rust becomes the only server.
     let number = week.map_or_else(|| "NaN".to_owned(), |week| week.to_string());
     format!("{year}-W{number:0>2}")
 }
@@ -365,6 +371,10 @@ mod tests {
         assert_eq!(period_key(GroupBy::Month, 20250102.0), "202501");
         assert_eq!(period_key(GroupBy::Week, 20250102.0), "2025-W01");
         assert_eq!(week_identifier(2025.0), "2025-WNaN");
+        assert_eq!(week_identifier(202501.0), "2025-WNaN");
+        // a seventh digit is a day of one digit, and a ninth is never read
+        assert_eq!(week_identifier(2025011.0), "2025-W01");
+        assert_eq!(week_identifier(202501011.0), "2025-W01");
         // a month past 12 or a day past the month's end rolls over, as `Date.UTC` has it
         assert_eq!(week_identifier(20251301.0), "2025-W53");
         assert_eq!(week_identifier(20250230.0), week_identifier(20250302.0));
