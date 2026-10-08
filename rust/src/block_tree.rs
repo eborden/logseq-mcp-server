@@ -3,9 +3,11 @@
 //! `pathRefs`. A tool that merges a pulled block into a result the Editor API also produces
 //! (the aliased backlinks) camelizes it first, so both paths give one shape.
 //!
-//! `orderSiblings` and `buildBlockTrees` stay with the tools that use them for now: the outline
-//! orders its own siblings (`tools/get_page_outline`), and nothing else has been ported that
-//! rebuilds a tree.
+//! It also puts sibling blocks in page order (`orderSiblings`): LogSeq doesn't store an order, each
+//! block says which block is to its `:block/left`, so the order is the chain those links make.
+//! `buildBlockTrees` stays with the tools that use it: nothing ported so far rebuilds a tree.
+
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
@@ -60,6 +62,52 @@ pub fn camelize_block(block: &Map<String, Value>) -> Map<String, Value> {
         out.insert("propertiesOrder".to_owned(), Value::Array(camelized));
     }
     out
+}
+
+// PARITY(#299): drops a sibling that shares an id with one already placed, though the doc says nothing is
+// dropped (suspected TS bug) — drop if Rust becomes the only server.
+/// `orderSiblings`: siblings in page order, by following the `:block/left` chain.
+///
+/// The first sibling's `left` is the parent (or the page), which is not itself a sibling, so it
+/// is the head of the chain; each following sibling's `left` is the previous one. Blocks the
+/// chain can't reach (a corrupt graph, or a cycle) are appended in id order so nothing is
+/// dropped. Two siblings with one `left`: the first listed follows it. Two with one id: the
+/// first one the order reaches is kept.
+///
+/// `id` is a sibling's own id and `left` the id its `:block/left` points at, if it has one.
+pub fn order_siblings<T>(siblings: Vec<T>, id: impl Fn(&T) -> i64, left: impl Fn(&T) -> Option<i64>) -> Vec<T> {
+    if siblings.len() < 2 {
+        return siblings;
+    }
+    let ids: HashSet<i64> = siblings.iter().map(&id).collect();
+    let mut by_left: HashMap<i64, usize> = HashMap::new();
+    let mut heads: Vec<usize> = Vec::new();
+    for (i, sibling) in siblings.iter().enumerate() {
+        match left(sibling) {
+            Some(left) if ids.contains(&left) => {
+                by_left.entry(left).or_insert(i);
+            }
+            _ => heads.push(i),
+        }
+    }
+    heads.sort_by_key(|&i| id(&siblings[i])); // a stable sort, as `Array.prototype.sort` is
+
+    let mut order: Vec<usize> = Vec::with_capacity(siblings.len());
+    let mut seen: HashSet<i64> = HashSet::new();
+    for head in heads {
+        let mut current = Some(head);
+        while let Some(i) = current.filter(|&i| !seen.contains(&id(&siblings[i]))) {
+            seen.insert(id(&siblings[i]));
+            order.push(i);
+            current = by_left.get(&id(&siblings[i])).copied();
+        }
+    }
+    let mut rest: Vec<usize> = (0..siblings.len()).collect();
+    rest.sort_by_key(|&i| id(&siblings[i]));
+    order.extend(rest.into_iter().filter(|&i| !seen.contains(&id(&siblings[i]))));
+
+    let mut slots: Vec<Option<T>> = siblings.into_iter().map(Some).collect();
+    order.into_iter().map(|i| slots[i].take().expect("each sibling is placed once")).collect()
 }
 
 #[cfg(test)]
@@ -131,5 +179,41 @@ mod tests {
         );
         // the key order is the pull's
         assert_eq!(out.as_object().unwrap().keys().collect::<Vec<_>>(), ["id", "pathRefs", "properties", "propertiesTextValues", "propertiesOrder"]);
+    }
+
+    /// `(id, left)`
+    type Sibling = (i64, Option<i64>);
+
+    fn ordered(siblings: Vec<Sibling>) -> Vec<i64> {
+        order_siblings(siblings, |s| s.0, |s| s.1).into_iter().map(|s| s.0).collect()
+    }
+
+    #[test]
+    fn siblings_follow_the_left_chain_from_the_head() {
+        // 1 hangs off the parent (10), 2 off 1, 3 off 2
+        assert_eq!(ordered(vec![(3, Some(2)), (1, Some(10)), (2, Some(1))]), [1, 2, 3]);
+        assert_eq!(ordered(vec![(5, None)]), [5]);
+        assert_eq!(ordered(vec![]), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn a_broken_or_cyclic_chain_loses_no_sibling() {
+        // 411 and 412 point at each other and 413 at a block that isn't there: the chain from 413
+        // comes first, then the siblings no chain reached, by id
+        assert_eq!(ordered(vec![(411, Some(412)), (412, Some(411)), (414, Some(413)), (413, Some(999))]), [413, 414, 411, 412]);
+    }
+
+    #[test]
+    fn two_siblings_with_one_left_keep_the_first_listed_in_the_chain() {
+        // 6 was listed before 7, so it follows 5; 7, which no chain reached, comes last
+        assert_eq!(ordered(vec![(5, Some(4)), (6, Some(5)), (7, Some(5)), (4, Some(1))]), [4, 5, 6, 7]);
+        // two heads are ordered by id
+        assert_eq!(ordered(vec![(3, Some(1)), (2, Some(1))]), [2, 3]);
+    }
+
+    #[test]
+    fn a_sibling_that_shares_an_id_with_a_placed_one_is_dropped() {
+        // suspected TS bug, kept: nothing is dropped, the doc says, yet the second 7 is
+        assert_eq!(ordered(vec![(7, Some(1)), (7, Some(1))]), [7]);
     }
 }
