@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 // inline in plugin.json rather than in a root .mcp.json, and skills name tools by
 // bare name so they work under any host prefix.
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SKILL_DIR = join(ROOT, 'skills', 'logseq-skills');
 const SKILL_LINK = join(ROOT, '.claude', 'skills', 'logseq-skills');
 const readJson = (path: string) => JSON.parse(readFileSync(join(ROOT, path), 'utf-8'));

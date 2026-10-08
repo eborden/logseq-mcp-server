@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import { getGraphInfo } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 

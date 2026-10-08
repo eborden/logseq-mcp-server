@@ -1,27 +1,16 @@
 /**
- * Count LogSeq HTTP API calls made by each tool against a live graph.
+ * Count LogSeq HTTP API calls made by each tool of the Rust server against a live graph.
  * Evidence for the performance claims in CLAUDE.md.
  *
  * Usage: npx tsx scripts/measure-api-calls.ts [pageName]
- * Requires LogSeq running with the HTTP API enabled. Read-only.
+ * Requires LogSeq running with the HTTP API enabled, and the Rust debug build (`cd rust && cargo build`). Read-only.
+ *
+ * The server is started with a config that points at a small forwarder in this process, which makes each call
+ * through a counting client (scripts/lib/rust-server.ts), so the counts are the server's own calls. With no
+ * LOGSEQ_MCP_CONFIG it reads the real graph on purpose, and its output has real page names: never paste it.
  */
-import { loadConfig, resolveConfigPath } from '../src/config.js';
-import { LogseqClient } from '../src/client.js';
-import { getConceptNetwork } from '../src/tools/get-concept-network.js';
-import { searchBlocks } from '../src/tools/search-blocks.js';
-import { queryByDateRange } from '../src/tools/query-by-date-range.js';
-import { queryByProperty } from '../src/tools/query-by-property.js';
-import { buildContextForTopic } from '../src/tools/build-context.js';
-import { getContextForQuery } from '../src/tools/get-context-for-query.js';
-import { getCurrentContext } from '../src/tools/get-current-context.js';
-import { getBlock } from '../src/tools/get-block.js';
-import { getPage } from '../src/tools/get-page.js';
-import { getPageOutline } from '../src/tools/get-page-outline.js';
-import { queryJournals } from '../src/tools/query-by-date-range.js';
-import { getBacklinks } from '../src/tools/get-backlinks.js';
-import { getConceptEvolution } from '../src/tools/get-concept-evolution.js';
-import { searchByRelationship } from '../src/tools/search-by-relationship.js';
-import { checkLinks } from '../src/tools/check-links.js';
+import { loadConfig, LogseqClient, resolveConfigPath } from './lib/logseq-api.js';
+import { closeSessions, rustSession } from './lib/rust-server.js';
 
 class CountingClient extends LogseqClient {
   calls = new Map<string, number>();
@@ -94,70 +83,79 @@ async function main() {
   const end = new Date();
   const start = new Date(end.getTime() - 6 * 86400000);
 
-  const cases: Array<[string, () => Promise<unknown>]> = [
-    ['get_concept_network depth=1', () => getConceptNetwork(client, subject, 1)],
-    ['get_concept_network depth=2', () => getConceptNetwork(client, subject, 2)],
-    ['build_context', () => buildContextForTopic(client, subject)],
-    ['get_context_for_query (1 topic)', () => getContextForQuery(client, `what about [[${subject}]]?`)],
-    ['search_blocks', () => searchBlocks(client, subject.slice(0, 4), 10)],
-    ['query_by_date_range (7 days)', () => queryByDateRange(client, ymd(start), ymd(end))],
-    ['query_by_property', () => queryByProperty(client, 'type', 'x')],
-    ['get_current_context', () => getCurrentContext(client)],
-    ['build_context resolve_refs', () => buildContextForTopic(client, subject, { resolveRefs: true })],
-    ['query_by_date_range 7d resolve_refs', () =>
-      queryJournals(client, { startDate: ymd(start), endDate: ymd(end), resolveRefs: true })],
-    ['get_page', () => getPage(client, subject, false)],
-    ['get_page_outline', () => getPageOutline(client, subject)],
-    ['get_backlinks', () => getBacklinks(client, subject)],
-    ['get_concept_evolution', () => getConceptEvolution(client, subject)],
-    ['search_by_relationship references', () => searchByRelationship(client, subject, otherSubject, 'references')],
-    ['search_by_relationship references (same topic twice)', () => searchByRelationship(client, subject, subject, 'references')],
-    ['search_by_relationship connected-within', () => searchByRelationship(client, subject, otherSubject, 'connected-within', 1)],
-    ['get_page (not found)', () => getPage(client, 'no such page 41 probe', false).catch(e => e.name)],
+  /** One tool call through the Rust server, as a client makes it: its result's first block as JSON, `isError` or not. */
+  const mcp = await rustSession(client, { tips: false });
+  const tool = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    const result = (await mcp.callTool({ name: `logseq_${name}`, arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
+    const first = result.content[0]?.text ?? '';
+    try {
+      const parsed: any = JSON.parse(first);
+      // The one-word outcome of an error result, as the old script printed an error's name
+      return result.isError ? { error: true } : parsed;
+    } catch {
+      return first;
+    }
+  };
+  type Case = [string, () => Promise<unknown>];
+
+  const cases: Case[] = [
+    ['get_concept_network depth=1', () => tool('get_concept_network', { concept_name: subject, max_depth: 1 })],
+    ['get_concept_network depth=2', () => tool('get_concept_network', { concept_name: subject, max_depth: 2 })],
+    ['build_context', () => tool('build_context', { topic_name: subject })],
+    ['get_context_for_query (1 topic)', () => tool('get_context_for_query', { query: `what about [[${subject}]]?` })],
+    ['search_blocks', () => tool('search_blocks', { query: subject.slice(0, 4), limit: 10 })],
+    ['query_by_date_range (7 days)', () => tool('query_by_date_range', { start_date: ymd(start), end_date: ymd(end) })],
+    ['query_by_property', () => tool('query_by_property', { property_key: 'type', property_value: 'x' })],
+    ['get_current_context', () => tool('get_current_context', {})],
+    ['build_context resolve_refs', () => tool('build_context', { topic_name: subject, resolve_refs: true })],
+    ['query_by_date_range 7d resolve_refs', () => tool('query_by_date_range', { start_date: ymd(start), end_date: ymd(end), resolve_refs: true })],
+    ['get_page', () => tool('get_page', { page_name: subject, include_children: false })],
+    ['get_page_outline', () => tool('get_page_outline', { page_name: subject })],
+    ['get_backlinks', () => tool('get_backlinks', { page_name: subject })],
+    ['get_concept_evolution', () => tool('get_concept_evolution', { concept_name: subject })],
+    ['search_by_relationship references', () => tool('search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'references' })],
+    ['search_by_relationship references (same topic twice)', () => tool('search_by_relationship', { topic_a: subject, topic_b: subject, relationship_type: 'references' })],
+    ['search_by_relationship connected-within', () => tool('search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 })],
+    ['get_page (not found)', () => tool('get_page', { page_name: 'no such page 41 probe', include_children: false })],
     // Real pages, an alias when the graph has one, and a made-up term, all in one text
     ['check_links (4 terms)', () => {
       const terms = [subject, otherSubject, uniqueAlias ?? 'no such page 146 probe a', 'no such page 146 probe b'];
-      return checkLinks(client, terms.join(', '), terms.map(t => `[[${t}]]`).join(', '));
+      return tool('check_links', { before: terms.join(', '), after: terms.map(t => `[[${t}]]`).join(', ') });
     }],
     ...(uniqueAlias
       ? ([
-          ['build_context (alias)', () => buildContextForTopic(client, uniqueAlias)],
-          ['get_page (alias)', () => getPage(client, uniqueAlias, false)],
-          ['get_page_outline (alias)', () => getPageOutline(client, uniqueAlias)]
-        ] as Array<[string, () => Promise<unknown>]>)
+          ['build_context (alias)', () => tool('build_context', { topic_name: uniqueAlias })],
+          ['get_page (alias)', () => tool('get_page', { page_name: uniqueAlias, include_children: false })],
+          ['get_page_outline (alias)', () => tool('get_page_outline', { page_name: uniqueAlias })]
+        ] as Case[])
       : []),
-    ...(sharedAlias
-      ? ([['get_page (shared alias)', () => getPage(client, sharedAlias, false).catch(e => e.name)]] as Array<
-          [string, () => Promise<unknown>]
-        >)
-      : []),
+    ...(sharedAlias ? ([['get_page (shared alias)', () => tool('get_page', { page_name: sharedAlias, include_children: false })]] as Case[]) : []),
     ...(aliased
       ? ([
-          ['get_backlinks (aliased page)', () => getBacklinks(client, aliased)],
-          ['build_context (aliased page)', () => buildContextForTopic(client, aliased)],
-          ['get_concept_evolution (aliased page)', () => getConceptEvolution(client, aliased)],
-          ['get_concept_network depth=1 (aliased page)', () => getConceptNetwork(client, aliased, 1)],
-          ['get_concept_network depth=2 (aliased page)', () => getConceptNetwork(client, aliased, 2)],
-          ['search_by_relationship references (aliased topic)', () => searchByRelationship(client, aliased, otherSubject, 'references')],
-          ['search_by_relationship connected-within (aliased topic)', () => searchByRelationship(client, aliased, otherSubject, 'connected-within', 1)],
-          ['query_by_date_range 7d search_term (aliased page)', () =>
-            queryJournals(client, { startDate: ymd(start), endDate: ymd(end), searchTerm: aliased })]
-        ] as Array<[string, () => Promise<unknown>]>)
+          ['get_backlinks (aliased page)', () => tool('get_backlinks', { page_name: aliased })],
+          ['build_context (aliased page)', () => tool('build_context', { topic_name: aliased })],
+          ['get_concept_evolution (aliased page)', () => tool('get_concept_evolution', { concept_name: aliased })],
+          ['get_concept_network depth=1 (aliased page)', () => tool('get_concept_network', { concept_name: aliased, max_depth: 1 })],
+          ['get_concept_network depth=2 (aliased page)', () => tool('get_concept_network', { concept_name: aliased, max_depth: 2 })],
+          ['search_by_relationship references (aliased topic)', () => tool('search_by_relationship', { topic_a: aliased, topic_b: otherSubject, relationship_type: 'references' })],
+          ['search_by_relationship connected-within (aliased topic)', () => tool('search_by_relationship', { topic_a: aliased, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 })],
+          ['query_by_date_range 7d search_term (aliased page)', () => tool('query_by_date_range', { start_date: ymd(start), end_date: ymd(end), search_term: aliased })]
+        ] as Case[])
       : []),
     ...(isoDay
       ? ([
-          ['get_page (ISO date)', () => getPage(client, isoDay, false)],
-          ['get_page_outline (ISO date)', () => getPageOutline(client, isoDay)],
-          ['build_context (ISO date)', () => buildContextForTopic(client, isoDay)]
-        ] as Array<[string, () => Promise<unknown>]>)
+          ['get_page (ISO date)', () => tool('get_page', { page_name: isoDay, include_children: false })],
+          ['get_page_outline (ISO date)', () => tool('get_page_outline', { page_name: isoDay })],
+          ['build_context (ISO date)', () => tool('build_context', { topic_name: isoDay })]
+        ] as Case[])
       : []),
     ...(refBlock && refPage
       ? ([
-          ['get_block (ref block)', () => getBlock(client, refBlock, false)],
-          ['get_block resolve_refs', () => getBlock(client, refBlock, false, { resolveRefs: true })],
-          ['get_page children', () => getPage(client, refPage, true)],
-          ['get_page children resolve_refs', () => getPage(client, refPage, true, { resolveRefs: true })]
-        ] as Array<[string, () => Promise<unknown>]>)
+          ['get_block (ref block)', () => tool('get_block', { block_uuid: refBlock, include_children: false })],
+          ['get_block resolve_refs', () => tool('get_block', { block_uuid: refBlock, include_children: false, resolve_refs: true })],
+          ['get_page children', () => tool('get_page', { page_name: refPage, include_children: true })],
+          ['get_page children resolve_refs', () => tool('get_page', { page_name: refPage, include_children: true, resolve_refs: true })]
+        ] as Case[])
       : [])
   ];
 
@@ -170,6 +168,7 @@ async function main() {
     const byMethod = [...client.calls.entries()].map(([m, n]) => `${m.replace('logseq.', '')}=${n}`).join(' ');
     console.log(`${label.padEnd(30)} calls=${String(client.total()).padEnd(5)} ${ms}ms${nodes}   ${byMethod}`);
   }
+  await closeSessions();
 }
 
 main().catch((e) => {

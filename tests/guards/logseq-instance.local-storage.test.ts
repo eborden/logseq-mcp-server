@@ -11,7 +11,7 @@ import {
   varint,
   versionEdit,
   writeBatch,
-} from '../scripts/logseq-instance/local-storage.js';
+} from '../../scripts/logseq-instance/local-storage.js';
 
 // The LevelDB files scripts/logseq-instance.ts writes to seed a fresh LogSeq profile (#118).
 // These pin the byte layout. That real LevelDB (and Chromium) reads them was checked by hand:

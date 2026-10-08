@@ -3,19 +3,18 @@ import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { LogseqClient } from './client.js';
-import { LogSeqAuthError, LogSeqNotRunningError, LogSeqTimeoutError, isInfrastructureError } from './errors.js';
+import { LogseqClient, LogSeqAuthError, LogSeqNotRunningError, LogSeqTimeoutError, isInfrastructureError } from '../../scripts/lib/logseq-api.js';
 import {
   FIXTURE_SENTINEL_PAGE,
   FIXTURE_VERSION,
   FixtureGraphError,
   requireFixtureGraph,
-} from '../tests/integration/helpers/fixture-graph.js';
+} from '../integration/helpers/fixture-graph.js';
 
 // Unit tests for the fixture graph (#87): the guard against a mocked client, and the committed
 // files it depends on. Every integration suite runs it through connectFixture (#90).
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const graphDir = join(repoRoot, 'tests/fixtures/graph');
 
 function clientReturning(rows: unknown): { client: LogseqClient; query: ReturnType<typeof vi.fn> } {

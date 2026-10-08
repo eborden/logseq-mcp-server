@@ -25,8 +25,8 @@
 import { join, sep } from 'path';
 import { createHash } from 'crypto';
 import { z } from 'zod/v4';
-import type { LogseqMCPConfig } from '../../src/types.js';
-import { LogSeqAuthError } from '../../src/errors.js';
+import type { LogseqMCPConfig } from '../lib/logseq-api.js';
+import { LogSeqAuthError } from '../lib/logseq-api.js';
 import { levelDbFiles, localStorageEntries, logseqGraphId, logseqSeedItems } from './local-storage.js';
 
 /** Ports an instance may use. The maintainer's LogSeq keeps the default, 12315. */

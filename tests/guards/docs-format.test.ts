@@ -8,13 +8,13 @@ import {
   memoryFs,
   nodeFs,
   type RuleCode,
-} from '../scripts/docs-format.js';
+} from '../../scripts/docs-format.js';
 
 // Guard for docs/adr/ and docs/business-rules/ (#78). The format is the
 // "Format rules" section of each directory's README; the checker lives in
 // scripts/docs-format.ts so these self-tests can feed it synthetic trees.
 
-const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('docs/adr and docs/business-rules follow their format rules', () => {
   const result = checkAllDocs(nodeFs(REPO_ROOT));

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { isDeepStrictEqual } from 'util';
-import { LogseqClient } from '../../src/client.js';
-import { PageEntity, BlockEntity } from '../../src/types.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
+import type { PageEntity, BlockEntity } from './helpers/types.js';
 import { getConceptEvolution, queryByDateRange } from './helpers/tools.js';
-import { formatLogseqDate } from '../../src/utils/date-utils.js';
+import { formatLogseqDate } from './helpers/dates.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS, laterJournalDays } from './helpers/fixture-client.js';
 
 /**
@@ -178,7 +178,7 @@ describe('Temporal Queries Integration Tests', () => {
     it('should group mentions by day', async () => {
       const result = await getConceptEvolution(client, 'Bob', { groupBy: 'day' });
 
-      expect(Object.fromEntries(Object.entries(result.groupedTimeline!).map(([k, v]) => [k, v.length]))).toEqual({
+      expect(Object.fromEntries(Object.entries(result.groupedTimeline as Record<string, unknown[]>).map(([k, v]) => [k, v.length]))).toEqual({
         '20250106': 2, '20250107': 1, '20250110': 1, '20250115': 1,
       });
     });
@@ -187,7 +187,7 @@ describe('Temporal Queries Integration Tests', () => {
       const result = await getConceptEvolution(client, 'Bob', { groupBy: 'week' });
 
       // Weeks count 7-day blocks from January 1st, not ISO weeks: Jan 6th and 7th are week 1
-      expect(Object.fromEntries(Object.entries(result.groupedTimeline!).map(([k, v]) => [k, v.length]))).toEqual({
+      expect(Object.fromEntries(Object.entries(result.groupedTimeline as Record<string, unknown[]>).map(([k, v]) => [k, v.length]))).toEqual({
         '2025-W01': 3, '2025-W02': 1, '2025-W03': 1,
       });
     });
@@ -195,7 +195,7 @@ describe('Temporal Queries Integration Tests', () => {
     it('should group mentions by month', async () => {
       const result = await getConceptEvolution(client, 'Bob', { groupBy: 'month' });
 
-      expect(Object.fromEntries(Object.entries(result.groupedTimeline!).map(([k, v]) => [k, v.length]))).toEqual({
+      expect(Object.fromEntries(Object.entries(result.groupedTimeline as Record<string, unknown[]>).map(([k, v]) => [k, v.length]))).toEqual({
         '202501': 5,
       });
     });

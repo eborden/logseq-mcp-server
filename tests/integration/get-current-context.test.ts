@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
-import { DatalogQueryBuilder } from '../../src/datalog/queries.js';
+import { LogseqClient } from '../../scripts/lib/logseq-api.js';
+import { getPageQuery } from './helpers/page-queries.js';
 import { getCurrentContext } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
@@ -20,7 +20,7 @@ describe('getCurrentContext - Integration', () => {
 
   async function pageExists(name: string | undefined): Promise<boolean> {
     if (name === undefined) return false;
-    const { query, inputs } = DatalogQueryBuilder.getPage(name);
+    const { query, inputs } = getPageQuery(name);
     return ((await client.executeDatalogQuery<unknown[]>(query, ...inputs)) ?? []).length === 1;
   }
 

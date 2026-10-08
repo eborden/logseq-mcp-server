@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { LogSeqAuthError, LogSeqNotRunningError } from './errors.js';
-import { FixtureGraphError } from '../tests/integration/helpers/fixture-graph.js';
+import { LogSeqAuthError, LogSeqNotRunningError } from '../../scripts/lib/logseq-api.js';
+import { FixtureGraphError } from '../integration/helpers/fixture-graph.js';
 import {
   DEFAULT_APP_BUNDLE,
   GRAPH_COPY_EXCLUDES,
@@ -31,12 +31,12 @@ import {
   renderConfigsEdn,
   startInstance,
   stopInstance,
-} from '../scripts/logseq-instance/instance.js';
+} from '../../scripts/logseq-instance/instance.js';
 
 // scripts/logseq-instance.ts (#118), on a fake file system, process table, clock and API.
 
 const here = dirname(fileURLToPath(import.meta.url));
-const TEMPLATE = readFileSync(join(here, '..', 'scripts', 'logseq-instance', 'configs.edn.template'), 'utf-8');
+const TEMPLATE = readFileSync(join(here, '..', '..', 'scripts', 'logseq-instance', 'configs.edn.template'), 'utf-8');
 
 const WORKTREE = '/work/tree';
 const GRAPH = '/work/tree/tests/fixtures/graph';

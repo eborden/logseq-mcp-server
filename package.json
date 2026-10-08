@@ -19,14 +19,13 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "echo 'The TypeScript server is retired (#356): the server is Rust, built with: cd rust && cargo build --release --locked. Shipping it is #355 and #350.' >&2 && exit 1",
     "prepublishOnly": "npm run build",
-    "test": "vitest run && npm run test:integration",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tests/integration/tsconfig.json",
+    "test": "vitest run tests/guards && vitest run tests/rust-guards && npm run test:integration",
+    "test:guards": "vitest run tests/guards",
     "test:watch": "vitest",
-    "test:ui": "vitest --ui",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:integration:rust": "LOGSEQ_MCP_SERVER=rust vitest run --config vitest.integration.config.ts",
-    "mutation": "stryker run"
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "keywords": [
     "mcp",
@@ -47,19 +46,11 @@
     "url": "https://github.com/eborden/logseq-mcp-server/issues"
   },
   "homepage": "https://github.com/eborden/logseq-mcp-server#readme",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.22.0",
-    "fuzzysort": "^3.1.0",
-    "zod": "3.25.76"
-  },
   "devDependencies": {
-    "@stryker-mutator/core": "10.0.0",
-    "@stryker-mutator/vitest-runner": "10.0.0",
+    "@modelcontextprotocol/sdk": "^1.22.0",
     "@types/node": "^24.10.1",
-    "@vitest/pretty-format": "3.2.4",
-    "@vitest/ui": "^3.2.4",
-    "fast-check": "^4.3.0",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "zod": "3.25.76"
   }
 }

@@ -193,7 +193,7 @@ function jobCondition(job: YamlNode): string | undefined {
 }
 
 const readWorkflow = (name: string) =>
-  readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), 'utf-8');
+  readFileSync(new URL(`../../.github/workflows/${name}`, import.meta.url), 'utf-8');
 
 describe('workflow YAML reader', () => {
   it('reads nested maps, block and inline lists, comments and block scalars', () => {
@@ -328,7 +328,7 @@ function publishLines(name: string, text: string): string[] {
 // workflow (ci.yml runs on every push to main) would reverse ADR-0017 with all of
 // them green. This scans the raw text, because the YAML reader skips `run: |` bodies.
 describe('ADR-0017: no other workflow publishes', () => {
-  const WORKFLOWS_DIR = new URL('../.github/workflows/', import.meta.url);
+  const WORKFLOWS_DIR = new URL('../../.github/workflows/', import.meta.url);
 
   it('flags publish commands and the npm token in raw workflow text', () => {
     expect(
@@ -345,11 +345,12 @@ describe('ADR-0017: no other workflow publishes', () => {
 });
 
 // ADR-0022 (minimum-node-22-12): engines.node is the dev toolchain's floor, and CI
-// tests the oldest major that satisfies it and the newest (24).
+// tests the oldest major that satisfies it and the newest (24). Since #356 the toolchain is the parity harness,
+// the integration suites and the repo's guard tests, and the job that tests them is the tooling job.
 describe('ADR-0022: CI covers the engines.node floor', () => {
   const readJson = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf-8'));
-  const pkg = readJson('../package.json');
-  const lock = readJson('../package-lock.json');
+  const pkg = readJson('../../package.json');
+  const lock = readJson('../../package-lock.json');
   const NEWEST_MAJOR = '24';
 
   type Version = [number, number, number];
@@ -378,21 +379,21 @@ describe('ADR-0022: CI covers the engines.node floor', () => {
   const floor = floorOf(pkg.engines.node);
   const floorMajor = String(floor[0]);
 
-  /** Jobs in ci.yml that run the unit tests, with their Node matrix. */
+  /** Jobs in ci.yml that run the tooling's guard tests, with their Node matrix. */
   const unitTestJobs = () => {
     const ci = parseWorkflowYaml(readWorkflow('ci.yml'));
     return [...at(ci, 'jobs').map.entries()]
       .filter(([, job]) =>
-        (job.map.get('steps')?.items ?? []).some(step => /^npx vitest run src(?:\s|$)/.test(step.map.get('run')?.value ?? '')),
+        (job.map.get('steps')?.items ?? []).some(step => /^npx vitest run tests\/guards(?:\s|$)/.test(step.map.get('run')?.value ?? '')),
       )
       .map(([name, job]) => ({ name, job, nodes: listOf(at(job, 'strategy', 'matrix', 'node')) }));
   };
 
-  it('ci.yml has a unit-test job with a Node matrix', () => {
+  it('ci.yml has a guard-test job with a Node matrix', () => {
     expect(unitTestJobs().length).toBeGreaterThan(0);
   });
 
-  it(`each unit-test job runs on the floor's major and on Node ${NEWEST_MAJOR}, and nothing below the floor`, () => {
+  it(`each guard-test job runs on the floor's major and on Node ${NEWEST_MAJOR}, and nothing below the floor`, () => {
     for (const { name, nodes } of unitTestJobs()) {
       expect(nodes, `job "${name}"`).toContain(floorMajor);
       expect(nodes, `job "${name}"`).toContain(NEWEST_MAJOR);
@@ -400,7 +401,7 @@ describe('ADR-0022: CI covers the engines.node floor', () => {
     }
   });
 
-  it('each unit-test job sets up the Node version from its matrix', () => {
+  it('each guard-test job sets up the Node version from its matrix', () => {
     for (const { name, job } of unitTestJobs()) {
       const setup = at(job, 'steps').items.find(step => step.map.get('uses')?.value.startsWith('actions/setup-node@'));
       expect(setup, `job "${name}" has no actions/setup-node step`).toBeDefined();

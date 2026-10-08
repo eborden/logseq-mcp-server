@@ -1,35 +1,44 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { LogseqClient } from '../../src/client.js';
-import { LogSeqAuthError } from '../../src/errors.js';
-import { LogseqMCPConfig } from '../../src/types.js';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { LogseqMCPConfig } from '../../scripts/lib/logseq-api.js';
 import { connectFixture } from './helpers/fixture-client.js';
+import { connectMcpToApi } from './helpers/server-under-test.js';
 
 /**
- * Integration test for rejected tokens (issue #8)
+ * Integration test for rejected tokens (issue #8, ADR-0003)
  *
- * Verifies that a real LogSeq answering HTTP 401 surfaces as LogSeqAuthError.
- * The URL comes from the fixture instance's config; the token is deliberately
- * bogus, so the real token is never used or printed.
+ * Verifies that a real LogSeq answering HTTP 401 reaches the caller as an error that names the auth token
+ * setting and never shows a token. The server talks to the fixture instance itself here (no forwarder), with
+ * a deliberately bogus token, so the real token is never used or printed.
  *
  * Runs against the fixture graph (tests/integration/setup.md). Read-only.
  */
 
 describe('Rejected auth token Integration Tests', () => {
   let config: LogseqMCPConfig;
+  let mcp: Client;
+  const bogusToken = 'not-the-real-token';
 
   beforeAll(async () => {
     ({ config } = await connectFixture());
+    mcp = await connectMcpToApi({ apiUrl: config.apiUrl, authToken: bogusToken }, { tips: false });
   });
 
-  it('throws LogSeqAuthError when the token is wrong', async () => {
-    const bogusToken = 'not-the-real-token';
-    const client = new LogseqClient({ ...config, authToken: bogusToken });
+  afterAll(async () => {
+    await mcp?.close();
+  });
 
-    const error = (await client.callAPI('logseq.App.getCurrentGraph').catch(e => e)) as Error;
+  it('reports the rejected token as an error that never shows a token', async () => {
+    const result = (await mcp.callTool({ name: 'logseq_get_graph_info', arguments: {} })) as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    const text = result.content[0].text;
 
-    expect(error).toBeInstanceOf(LogSeqAuthError);
-    expect(error.message).toContain('authToken');
-    expect(error.message).not.toContain(bogusToken);
-    expect(error.message).not.toContain(config.authToken);
+    expect(result.isError).toBe(true);
+    expect(text).toContain('rejected the auth token (HTTP 401)');
+    expect(text).toContain('authToken');
+    expect(text).not.toContain(bogusToken);
+    expect(text).not.toContain(config.authToken);
   });
 });

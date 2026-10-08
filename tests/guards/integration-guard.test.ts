@@ -8,13 +8,13 @@ import {
   HOW_TO_RUN,
   instanceConfigPath,
   resolveFixtureConfigPath,
-} from '../tests/integration/helpers/instance-config.js';
+} from '../integration/helpers/instance-config.js';
 
 // The integration tests never contact the maintainer's personal LogSeq (#90). These guards keep it
 // that way: the config resolver has no fallback to ~/.logseq-mcp/config.json and refuses port 12315,
 // and every suite connects through connectFixture, which uses that resolver.
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const integrationDir = join(repoRoot, 'tests', 'integration');
 
 function testFiles(dir: string): string[] {
@@ -135,34 +135,25 @@ describe('integration suites', () => {
   });
 });
 
-// A suite that imports a tool's function from src/tools/, or createServer, runs the TypeScript server
-// even when LOGSEQ_MCP_SERVER=rust, and nothing says so (#352). The helpers take the same names.
+// The suites exercise the Rust server and nothing else (#352, #356). A suite reaches a tool through the helpers, which
+// start the Rust binary (`connectMcp`, `tools.ts`), so none imports from a TypeScript server that no longer exists.
 describe('integration suites reach the tools through the helpers', () => {
   const helperSource = readFileSync(join(integrationDir, 'helpers', 'tools.ts'), 'utf-8');
-  const helperNames = new Set([...helperSource.matchAll(/^export const (\w+)/gm)].map(match => match[1]));
+  const helperNames = new Set([...helperSource.matchAll(/^export (?:async function|const) (\w+)/gm)].map(match => match[1]));
   const files = testFiles(integrationDir);
-
-  /** Names a source imports from the module paths that match `from`, as written (`as` renames dropped). */
-  function importedFrom(source: string, from: RegExp): string[] {
-    return [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'([^']+)'/g)]
-      .filter(match => from.test(match[2]))
-      .flatMap(match => match[1].split(',').map(name => name.trim().split(/\s+as\s+/)[0].replace(/^type\s+/, '')))
-      .filter(Boolean);
-  }
 
   it('finds the helper functions', () => {
     expect(helperNames.size).toBeGreaterThanOrEqual(19);
     expect(helperNames.has('getPage')).toBe(true);
   });
 
-  it.each(files.map(path => [relative(repoRoot, path), path]))('%s imports no tool function from src/tools/', (_label, path) => {
+  it.each(files.map(path => [relative(repoRoot, path), path]))('%s imports nothing from src/', (_label, path) => {
     const source = readFileSync(path, 'utf-8');
-    const direct = importedFrom(source, /\/src\/tools\/[\w-]+\.js$/).filter(name => helperNames.has(name));
-    expect(direct, 'import these from helpers/tools.js').toEqual([]);
+    expect(source).not.toMatch(/from\s+'(\.\.\/)+src\//);
   });
 
-  it.each(files.map(path => [relative(repoRoot, path), path]))('%s does not build the TypeScript server itself', (_label, path) => {
+  it.each(files.map(path => [relative(repoRoot, path), path]))('%s starts no server of its own', (_label, path) => {
     const source = readFileSync(path, 'utf-8');
-    expect(importedFrom(source, /\/src\/index\.js$/), 'use connectMcp from helpers/server-under-test.js').not.toContain('createServer');
+    expect(source, 'use connectMcp from helpers/server-under-test.js').not.toMatch(/\bStdioClientTransport\b|\bcreateServer\b/);
   });
 });

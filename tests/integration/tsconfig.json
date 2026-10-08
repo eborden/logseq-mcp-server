@@ -1,0 +1,12 @@
+// Type-checks the integration suites (#114). They read tool results as `any` (helpers/types.ts: the server is
+// Rust, so there are no TypeScript result types to import), which leaves the parameters of their callbacks
+// without a type; the rest of the tooling is checked strictly by the root tsconfig.json.
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "noImplicitAny": false
+  },
+  "include": ["./**/*.ts", "../../scripts/lib/*.ts"],
+  "exclude": ["node_modules", "**/.logseq-instance/**"]
+}
