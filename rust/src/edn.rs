@@ -35,6 +35,9 @@ pub enum DatalogInput {
     PageNames(Vec<PageName>),
     /// A journal day for `:block/journal-day`.
     JournalDay(JournalDay),
+    /// `/` and a page name, for `clojure.string/ends-with?` on `:block/name`: the namespace
+    /// leaf lookup (`namespaceLeafPages`). Lowercase by construction, as the name is.
+    LeafSuffix(PageName),
 }
 
 impl DatalogInput {
@@ -45,6 +48,7 @@ impl DatalogInput {
             DatalogInput::PageName(name) => Value::from(name.as_str()),
             DatalogInput::PageNames(names) => Value::from(names.iter().map(PageName::as_str).collect::<Vec<_>>()),
             DatalogInput::JournalDay(day) => Value::from(day.as_int()),
+            DatalogInput::LeafSuffix(name) => Value::from(format!("/{}", name.as_str())),
         };
         // Serializing a Value made of strings and integers can't fail.
         serde_json::to_string(&value).expect("a string, integer or string list serializes")
@@ -276,6 +280,11 @@ mod tests {
         let names = vec![PageName::new("Alice"), PageName::new("project \"Atlas\"")];
         assert_eq!(DatalogInput::PageNames(names).to_edn(), r#"["alice","project \"atlas\""]"#);
         assert_eq!(DatalogInput::PageNames(vec![]).to_edn(), "[]");
+    }
+
+    #[test]
+    fn a_leaf_suffix_is_a_slash_and_a_lowercase_name() {
+        assert_eq!(DatalogInput::LeafSuffix(PageName::new("Retro \"X\"")).to_edn(), r#""/retro \"x\"""#);
     }
 
     #[test]
