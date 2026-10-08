@@ -25,9 +25,9 @@ We add `.github/workflows/mutation-nightly.yml`, which runs once a day (05:47 UT
 
 ## Status
 
-accepted
+deprecated
 
-Date: 2026-10-07
+Date: 2026-10-08
 
 ## Mechanical enforcement
 
