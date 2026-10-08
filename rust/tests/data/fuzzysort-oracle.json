@@ -1,0 +1,1609 @@
+{
+ "names": [
+  "Alice",
+  "Alice Notes",
+  "Bob",
+  "Project Atlas",
+  "Project Atlas/Log",
+  "Project Atlas/Retro",
+  "atlas",
+  "Café Menu",
+  "cafe",
+  "Résumé",
+  "Jan 1st, 2025",
+  "Weekly Review",
+  "weekly review notes",
+  "ReadingList",
+  "reading list",
+  "Zoë",
+  "Zoe",
+  "ÅNGSTRÖM",
+  "angstrom",
+  "Ünïcödé Page",
+  "naïve bayes",
+  "Straße",
+  "İstanbul",
+  "Dr. Alice Smith",
+  "a",
+  "ab",
+  "abc",
+  "A B C",
+  "foo-bar-baz",
+  "FooBarBaz",
+  "foo_bar",
+  "日本語",
+  "日本語 notes",
+  "😀 smile",
+  "x😀y",
+  "Hello World",
+  "hello",
+  "World Hello",
+  "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again",
+  "page 1",
+  "page 2",
+  "page 10",
+  "Page",
+  "pages",
+  "PAGE",
+  "Straße 2",
+  "ǅ",
+  "ﬁne",
+  "Ａｌｉｃｅ"
+ ],
+ "limited": [
+  {
+   "search": "Alce",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-16001",
+    "-16007",
+    "-23211"
+   ]
+  },
+  {
+   "search": "alice",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "0",
+    "-3.0044378698224854",
+    "-5.012130177514793"
+   ]
+  },
+  {
+   "search": "Alice N",
+   "results": [
+    "Alice Notes"
+   ],
+   "scores": [
+    "-2.0008"
+   ]
+  },
+  {
+   "search": "project",
+   "results": [
+    "Project Atlas",
+    "Project Atlas/Log",
+    "Project Atlas/Retro"
+   ],
+   "scores": [
+    "-3.0012",
+    "-5.002",
+    "-6.0024"
+   ]
+  },
+  {
+   "search": "atlas log",
+   "results": [
+    "Project Atlas/Log"
+   ],
+   "scores": [
+    "-6.744905325443787"
+   ]
+  },
+  {
+   "search": "log atlas",
+   "results": [
+    "Project Atlas/Log"
+   ],
+   "scores": [
+    "-18.74490532544379"
+   ]
+  },
+  {
+   "search": "cafe",
+   "results": [
+    "cafe",
+    "Café Menu"
+   ],
+   "scores": [
+    "0",
+    "-2.508650519031142"
+   ]
+  },
+  {
+   "search": "resume",
+   "results": [
+    "Résumé"
+   ],
+   "scores": [
+    "0"
+   ]
+  },
+  {
+   "search": "zoe",
+   "results": [
+    "Zoe",
+    "Zoë"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "angstrom",
+   "results": [
+    "angstrom",
+    "ÅNGSTRÖM"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "unicode",
+   "results": [
+    "Ünïcödé Page"
+   ],
+   "scores": [
+    "-2.501"
+   ]
+  },
+  {
+   "search": "naive",
+   "results": [
+    "naïve bayes"
+   ],
+   "scores": [
+    "-3.0044378698224854"
+   ]
+  },
+  {
+   "search": "strasse",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "istanbul",
+   "results": [
+    "İstanbul"
+   ],
+   "scores": [
+    "0"
+   ]
+  },
+  {
+   "search": "dr alice",
+   "results": [
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-5.886065088757396"
+   ]
+  },
+  {
+   "search": "abc",
+   "results": [
+    "abc",
+    "A B C"
+   ],
+   "scores": [
+    "0",
+    "-36"
+   ]
+  },
+  {
+   "search": "a b",
+   "results": [
+    "A B C",
+    "ab",
+    "abc"
+   ],
+   "scores": [
+    "-1.01",
+    "-1.1",
+    "-2.1"
+   ]
+  },
+  {
+   "search": "ab c",
+   "results": [
+    "abc",
+    "A B C"
+   ],
+   "scores": [
+    "-1.66",
+    "-12.6"
+   ]
+  },
+  {
+   "search": "fbb",
+   "results": [
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-47",
+    "-56"
+   ]
+  },
+  {
+   "search": "foo bar",
+   "results": [
+    "foo_bar",
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-2.036",
+    "-3.0389999999999997",
+    "-4.056"
+   ]
+  },
+  {
+   "search": "nihon",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "日本",
+   "results": [
+    "日本語",
+    "日本語 notes"
+   ],
+   "scores": [
+    "-0.52",
+    "-3.64"
+   ]
+  },
+  {
+   "search": "smile",
+   "results": [
+    "😀 smile"
+   ],
+   "scores": [
+    "-1.5048816568047336"
+   ]
+  },
+  {
+   "search": "x",
+   "results": [
+    "x😀y",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-3",
+    "-64868"
+   ]
+  },
+  {
+   "search": "hello world",
+   "results": [
+    "Hello World",
+    "World Hello"
+   ],
+   "scores": [
+    "0",
+    "-15.009763313609469"
+   ]
+  },
+  {
+   "search": "cafe menu",
+   "results": [
+    "Café Menu"
+   ],
+   "scores": [
+    "0"
+   ]
+  },
+  {
+   "search": "café",
+   "results": [
+    "cafe",
+    "Café Menu"
+   ],
+   "scores": [
+    "0",
+    "-2.508650519031142"
+   ]
+  },
+  {
+   "search": "ÅNGSTRÖM",
+   "results": [
+    "angstrom",
+    "ÅNGSTRÖM"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "zoë",
+   "results": [
+    "Zoe",
+    "Zoë"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "foo bar baz",
+   "results": [
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-3.0599999999999996",
+    "-4.093333333333333"
+   ]
+  },
+  {
+   "search": "FBB",
+   "results": [
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-47",
+    "-56"
+   ]
+  },
+  {
+   "search": "a1",
+   "results": [
+    "Jan 1st, 2025",
+    "page 1",
+    "page 10"
+   ],
+   "scores": [
+    "-18211",
+    "-20204",
+    "-20205"
+   ]
+  },
+  {
+   "search": "p 1",
+   "results": [
+    "page 1",
+    "page 10"
+   ],
+   "scores": [
+    "-7.5",
+    "-8.5"
+   ]
+  },
+  {
+   "search": "jan 1",
+   "results": [
+    "Jan 1st, 2025"
+   ],
+   "scores": [
+    "-4.005917159763314"
+   ]
+  },
+  {
+   "search": "wk rev",
+   "results": [
+    "Weekly Review",
+    "weekly review notes"
+   ],
+   "scores": [
+    "-8508.074",
+    "-8512.589"
+   ]
+  },
+  {
+   "search": "hello  world",
+   "results": [
+    "Hello World",
+    "World Hello"
+   ],
+   "scores": [
+    "-3.0097633136094677",
+    "-15.009763313609469"
+   ]
+  },
+  {
+   "search": "x😀",
+   "results": [
+    "x😀y"
+   ],
+   "scores": [
+    "-0.505"
+   ]
+  },
+  {
+   "search": "😀",
+   "results": [
+    "x😀y",
+    "😀 smile"
+   ],
+   "scores": [
+    "-1.048",
+    "-3.12"
+   ]
+  },
+  {
+   "search": "ß",
+   "results": [
+    "Straße",
+    "Straße 2"
+   ],
+   "scores": [
+    "-8.2",
+    "-10.2"
+   ]
+  },
+  {
+   "search": "smith dr",
+   "results": [
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-25.898491124260353"
+   ]
+  },
+  {
+   "search": "alice smith",
+   "results": [
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-2.0003493684493416"
+   ]
+  },
+  {
+   "search": "the quick",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-30.004461629982153"
+   ]
+  },
+  {
+   "search": "again again",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-49.23076923076923"
+   ]
+  },
+  {
+   "search": "o",
+   "results": [
+    "Zoë",
+    "Zoe",
+    "Bob"
+   ],
+   "scores": [
+    "-202",
+    "-202",
+    "-202"
+   ]
+  },
+  {
+   "search": "a\tb",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "\tabc",
+   "results": [
+    "abc",
+    "A B C"
+   ],
+   "scores": [
+    "0",
+    "-36"
+   ]
+  },
+  {
+   "search": "lazy  fox again",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-89.98858397657705"
+   ]
+  },
+  {
+   "search": "world hello",
+   "results": [
+    "World Hello",
+    "Hello World"
+   ],
+   "scores": [
+    "0",
+    "-15.009763313609469"
+   ]
+  },
+  {
+   "search": "lazy fox",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-91.36749134948097"
+   ]
+  },
+  {
+   "search": "pg",
+   "results": [
+    "PAGE",
+    "Page",
+    "pages"
+   ],
+   "scores": [
+    "-15002",
+    "-15002",
+    "-15003"
+   ]
+  },
+  {
+   "search": "page",
+   "results": [
+    "PAGE",
+    "Page",
+    "pages"
+   ],
+   "scores": [
+    "0",
+    "0",
+    "-0.5017301038062284"
+   ]
+  },
+  {
+   "search": "pge 1",
+   "results": [
+    "page 1",
+    "page 10"
+   ],
+   "scores": [
+    "-7506.5",
+    "-7507.5"
+   ]
+  },
+  {
+   "search": "Weekly Reveiw",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "reading",
+   "results": [
+    "ReadingList",
+    "reading list",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-2.0008",
+    "-2.501",
+    "-480262"
+   ]
+  },
+  {
+   "search": "readinglist",
+   "results": [
+    "ReadingList",
+    "reading list"
+   ],
+   "scores": [
+    "0",
+    "-22"
+   ]
+  },
+  {
+   "search": "fine",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "ALICE",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "0",
+    "-3.0044378698224854",
+    "-5.012130177514793"
+   ]
+  },
+  {
+   "search": " alice ",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "0",
+    "-3.0044378698224854",
+    "-5.012130177514793"
+   ]
+  },
+  {
+   "search": "al ice",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-1.2890000000000001",
+    "-4.364",
+    "-6.51"
+   ]
+  },
+  {
+   "search": "a  b",
+   "results": [
+    "ab",
+    "abc",
+    "A B C"
+   ],
+   "scores": [
+    "-1.1",
+    "-2.1",
+    "-4.4"
+   ]
+  },
+  {
+   "search": "é",
+   "results": [
+    "Straße",
+    "Straße 2",
+    "hello"
+   ],
+   "scores": [
+    "-10",
+    "-12",
+    "-204"
+   ]
+  },
+  {
+   "search": "e",
+   "results": [
+    "Straße",
+    "Straße 2",
+    "hello"
+   ],
+   "scores": [
+    "-10",
+    "-12",
+    "-204"
+   ]
+  },
+  {
+   "search": "qqq",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "jan 2025",
+   "results": [
+    "Jan 1st, 2025"
+   ],
+   "scores": [
+    "-4.810813148788927"
+   ]
+  },
+  {
+   "search": "1st",
+   "results": [
+    "Jan 1st, 2025"
+   ],
+   "scores": [
+    "-5.082"
+   ]
+  },
+  {
+   "search": "review weekly notes",
+   "results": [
+    "weekly review notes"
+   ],
+   "scores": [
+    "-20.69499922919881"
+   ]
+  }
+ ],
+ "full": [
+  {
+   "search": "Alce",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-16001",
+    "-16007",
+    "-23211"
+   ]
+  },
+  {
+   "search": "alice",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "0",
+    "-3.0044378698224854",
+    "-5.012130177514793"
+   ]
+  },
+  {
+   "search": "Alice N",
+   "results": [
+    "Alice Notes"
+   ],
+   "scores": [
+    "-2.0008"
+   ]
+  },
+  {
+   "search": "project",
+   "results": [
+    "Project Atlas",
+    "Project Atlas/Log",
+    "Project Atlas/Retro"
+   ],
+   "scores": [
+    "-3.0012",
+    "-5.002",
+    "-6.0024"
+   ]
+  },
+  {
+   "search": "atlas log",
+   "results": [
+    "Project Atlas/Log"
+   ],
+   "scores": [
+    "-6.744905325443787"
+   ]
+  },
+  {
+   "search": "log atlas",
+   "results": [
+    "Project Atlas/Log"
+   ],
+   "scores": [
+    "-18.74490532544379"
+   ]
+  },
+  {
+   "search": "cafe",
+   "results": [
+    "cafe",
+    "Café Menu"
+   ],
+   "scores": [
+    "0",
+    "-2.508650519031142"
+   ]
+  },
+  {
+   "search": "resume",
+   "results": [
+    "Résumé"
+   ],
+   "scores": [
+    "0"
+   ]
+  },
+  {
+   "search": "zoe",
+   "results": [
+    "Zoe",
+    "Zoë"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "angstrom",
+   "results": [
+    "angstrom",
+    "ÅNGSTRÖM"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "unicode",
+   "results": [
+    "Ünïcödé Page"
+   ],
+   "scores": [
+    "-2.501"
+   ]
+  },
+  {
+   "search": "naive",
+   "results": [
+    "naïve bayes"
+   ],
+   "scores": [
+    "-3.0044378698224854"
+   ]
+  },
+  {
+   "search": "strasse",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "istanbul",
+   "results": [
+    "İstanbul"
+   ],
+   "scores": [
+    "0"
+   ]
+  },
+  {
+   "search": "dr alice",
+   "results": [
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-5.886065088757396"
+   ]
+  },
+  {
+   "search": "abc",
+   "results": [
+    "abc",
+    "A B C"
+   ],
+   "scores": [
+    "0",
+    "-36"
+   ]
+  },
+  {
+   "search": "a b",
+   "results": [
+    "A B C",
+    "ab",
+    "abc",
+    "naïve bayes",
+    "FooBarBaz",
+    "foo_bar",
+    "foo-bar-baz",
+    "İstanbul",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-1.01",
+    "-1.1",
+    "-2.1",
+    "-113.6",
+    "-1610.9",
+    "-2509.6",
+    "-2513.6",
+    "-3407",
+    "-6344.000000000001"
+   ]
+  },
+  {
+   "search": "ab c",
+   "results": [
+    "abc",
+    "A B C"
+   ],
+   "scores": [
+    "-1.66",
+    "-12.6"
+   ]
+  },
+  {
+   "search": "fbb",
+   "results": [
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-47",
+    "-56"
+   ]
+  },
+  {
+   "search": "foo bar",
+   "results": [
+    "foo_bar",
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-2.036",
+    "-3.0389999999999997",
+    "-4.056"
+   ]
+  },
+  {
+   "search": "nihon",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "日本",
+   "results": [
+    "日本語",
+    "日本語 notes"
+   ],
+   "scores": [
+    "-0.52",
+    "-3.64"
+   ]
+  },
+  {
+   "search": "smile",
+   "results": [
+    "😀 smile"
+   ],
+   "scores": [
+    "-1.5048816568047336"
+   ]
+  },
+  {
+   "search": "x",
+   "results": [
+    "x😀y",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-3",
+    "-64868"
+   ]
+  },
+  {
+   "search": "hello world",
+   "results": [
+    "Hello World",
+    "World Hello"
+   ],
+   "scores": [
+    "0",
+    "-15.009763313609469"
+   ]
+  },
+  {
+   "search": "cafe menu",
+   "results": [
+    "Café Menu"
+   ],
+   "scores": [
+    "0"
+   ]
+  },
+  {
+   "search": "café",
+   "results": [
+    "cafe",
+    "Café Menu"
+   ],
+   "scores": [
+    "0",
+    "-2.508650519031142"
+   ]
+  },
+  {
+   "search": "ÅNGSTRÖM",
+   "results": [
+    "angstrom",
+    "ÅNGSTRÖM"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "zoë",
+   "results": [
+    "Zoe",
+    "Zoë"
+   ],
+   "scores": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "search": "foo bar baz",
+   "results": [
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-3.0599999999999996",
+    "-4.093333333333333"
+   ]
+  },
+  {
+   "search": "FBB",
+   "results": [
+    "FooBarBaz",
+    "foo-bar-baz"
+   ],
+   "scores": [
+    "-47",
+    "-56"
+   ]
+  },
+  {
+   "search": "a1",
+   "results": [
+    "Jan 1st, 2025",
+    "page 1",
+    "page 10"
+   ],
+   "scores": [
+    "-18211",
+    "-20204",
+    "-20205"
+   ]
+  },
+  {
+   "search": "p 1",
+   "results": [
+    "page 1",
+    "page 10"
+   ],
+   "scores": [
+    "-7.5",
+    "-8.5"
+   ]
+  },
+  {
+   "search": "jan 1",
+   "results": [
+    "Jan 1st, 2025"
+   ],
+   "scores": [
+    "-4.005917159763314"
+   ]
+  },
+  {
+   "search": "wk rev",
+   "results": [
+    "Weekly Review",
+    "weekly review notes"
+   ],
+   "scores": [
+    "-8508.074",
+    "-8512.589"
+   ]
+  },
+  {
+   "search": "hello  world",
+   "results": [
+    "Hello World",
+    "World Hello"
+   ],
+   "scores": [
+    "-3.0097633136094677",
+    "-15.009763313609469"
+   ]
+  },
+  {
+   "search": "x😀",
+   "results": [
+    "x😀y"
+   ],
+   "scores": [
+    "-0.505"
+   ]
+  },
+  {
+   "search": "😀",
+   "results": [
+    "x😀y",
+    "😀 smile"
+   ],
+   "scores": [
+    "-1.048",
+    "-3.12"
+   ]
+  },
+  {
+   "search": "ß",
+   "results": [
+    "Straße",
+    "Straße 2"
+   ],
+   "scores": [
+    "-8.2",
+    "-10.2"
+   ]
+  },
+  {
+   "search": "smith dr",
+   "results": [
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-25.898491124260353"
+   ]
+  },
+  {
+   "search": "alice smith",
+   "results": [
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-2.0003493684493416"
+   ]
+  },
+  {
+   "search": "the quick",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-30.004461629982153"
+   ]
+  },
+  {
+   "search": "again again",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-49.23076923076923"
+   ]
+  },
+  {
+   "search": "o",
+   "results": [
+    "Zoe",
+    "Bob",
+    "Zoë",
+    "foo_bar",
+    "FooBarBaz",
+    "World Hello",
+    "foo-bar-baz",
+    "Project Atlas",
+    "Project Atlas/Log",
+    "Project Atlas/Retro",
+    "hello",
+    "Hello World",
+    "Ünïcödé Page",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again",
+    "日本語 notes",
+    "angstrom",
+    "ÅNGSTRÖM",
+    "Alice Notes",
+    "weekly review notes"
+   ],
+   "scores": [
+    "-202",
+    "-202",
+    "-202",
+    "-206",
+    "-208",
+    "-210",
+    "-210",
+    "-812",
+    "-816",
+    "-818",
+    "-3204",
+    "-3210",
+    "-3211",
+    "-4124",
+    "-5008",
+    "-7207",
+    "-7207",
+    "-9810",
+    "-45018"
+   ]
+  },
+  {
+   "search": "a\tb",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "\tabc",
+   "results": [
+    "abc",
+    "A B C"
+   ],
+   "scores": [
+    "0",
+    "-36"
+   ]
+  },
+  {
+   "search": "lazy  fox again",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-89.98858397657705"
+   ]
+  },
+  {
+   "search": "world hello",
+   "results": [
+    "World Hello",
+    "Hello World"
+   ],
+   "scores": [
+    "0",
+    "-15.009763313609469"
+   ]
+  },
+  {
+   "search": "lazy fox",
+   "results": [
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-91.36749134948097"
+   ]
+  },
+  {
+   "search": "pg",
+   "results": [
+    "PAGE",
+    "Page",
+    "pages",
+    "page 2",
+    "page 1",
+    "page 10",
+    "Ünïcödé Page",
+    "Project Atlas/Log",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-15002",
+    "-15002",
+    "-15003",
+    "-15004",
+    "-15004",
+    "-15005",
+    "-35810",
+    "-43015",
+    "-177867"
+   ]
+  },
+  {
+   "search": "page",
+   "results": [
+    "Page",
+    "PAGE",
+    "pages",
+    "page 2",
+    "page 1",
+    "page 10",
+    "Ünïcödé Page"
+   ],
+   "scores": [
+    "0",
+    "0",
+    "-0.5017301038062284",
+    "-1.0034602076124568",
+    "-1.0034602076124568",
+    "-1.505190311418685",
+    "-4.058131487889273"
+   ]
+  },
+  {
+   "search": "pge 1",
+   "results": [
+    "page 1",
+    "page 10"
+   ],
+   "scores": [
+    "-7506.5",
+    "-7507.5"
+   ]
+  },
+  {
+   "search": "Weekly Reveiw",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "reading",
+   "results": [
+    "ReadingList",
+    "reading list",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-2.0008",
+    "-2.501",
+    "-480262"
+   ]
+  },
+  {
+   "search": "readinglist",
+   "results": [
+    "ReadingList",
+    "reading list"
+   ],
+   "scores": [
+    "0",
+    "-22"
+   ]
+  },
+  {
+   "search": "fine",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "ALICE",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "0",
+    "-3.0044378698224854",
+    "-5.012130177514793"
+   ]
+  },
+  {
+   "search": " alice ",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "0",
+    "-3.0044378698224854",
+    "-5.012130177514793"
+   ]
+  },
+  {
+   "search": "al ice",
+   "results": [
+    "Alice",
+    "Alice Notes",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-1.2890000000000001",
+    "-4.364",
+    "-6.51"
+   ]
+  },
+  {
+   "search": "a  b",
+   "results": [
+    "ab",
+    "abc",
+    "A B C",
+    "naïve bayes",
+    "FooBarBaz",
+    "foo_bar",
+    "foo-bar-baz",
+    "İstanbul",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again"
+   ],
+   "scores": [
+    "-1.1",
+    "-2.1",
+    "-4.4",
+    "-113.6",
+    "-1610.9",
+    "-2509.6",
+    "-2513.6",
+    "-3407",
+    "-6344.000000000001"
+   ]
+  },
+  {
+   "search": "é",
+   "results": [
+    "Straße",
+    "Straße 2",
+    "hello",
+    "Résumé",
+    "ReadingList",
+    "Hello World",
+    "reading list",
+    "Weekly Review",
+    "weekly review notes",
+    "Zoe",
+    "Zoë",
+    "ﬁne",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again",
+    "cafe",
+    "Page",
+    "PAGE",
+    "pages",
+    "page 1",
+    "page 2",
+    "page 10",
+    "Café Menu",
+    "Alice",
+    "Alice Notes",
+    "naïve bayes",
+    "Project Atlas",
+    "Project Atlas/Log",
+    "Project Atlas/Retro",
+    "Ünïcödé Page",
+    "😀 smile",
+    "日本語 notes",
+    "World Hello",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-10",
+    "-12",
+    "-204",
+    "-205",
+    "-210",
+    "-210",
+    "-211",
+    "-212",
+    "-218",
+    "-802",
+    "-802",
+    "-802",
+    "-868",
+    "-1803",
+    "-1803",
+    "-1803",
+    "-1804",
+    "-1805",
+    "-1805",
+    "-1806",
+    "-1808",
+    "-3204",
+    "-3210",
+    "-3210",
+    "-3212",
+    "-3216",
+    "-3218",
+    "-7211",
+    "-9807",
+    "-9808",
+    "-9810",
+    "-12814"
+   ]
+  },
+  {
+   "search": "e",
+   "results": [
+    "Straße",
+    "Straße 2",
+    "hello",
+    "Résumé",
+    "ReadingList",
+    "Hello World",
+    "reading list",
+    "Weekly Review",
+    "weekly review notes",
+    "Zoe",
+    "Zoë",
+    "ﬁne",
+    "The Quick Brown Fox Jumps Over The Lazy Dog Again And Again And Again",
+    "cafe",
+    "Page",
+    "PAGE",
+    "pages",
+    "page 1",
+    "page 2",
+    "page 10",
+    "Café Menu",
+    "Alice",
+    "Alice Notes",
+    "naïve bayes",
+    "Project Atlas",
+    "Project Atlas/Log",
+    "Project Atlas/Retro",
+    "Ünïcödé Page",
+    "😀 smile",
+    "日本語 notes",
+    "World Hello",
+    "Dr. Alice Smith"
+   ],
+   "scores": [
+    "-10",
+    "-12",
+    "-204",
+    "-205",
+    "-210",
+    "-210",
+    "-211",
+    "-212",
+    "-218",
+    "-802",
+    "-802",
+    "-802",
+    "-868",
+    "-1803",
+    "-1803",
+    "-1803",
+    "-1804",
+    "-1805",
+    "-1805",
+    "-1806",
+    "-1808",
+    "-3204",
+    "-3210",
+    "-3210",
+    "-3212",
+    "-3216",
+    "-3218",
+    "-7211",
+    "-9807",
+    "-9808",
+    "-9810",
+    "-12814"
+   ]
+  },
+  {
+   "search": "qqq",
+   "results": [],
+   "scores": []
+  },
+  {
+   "search": "jan 2025",
+   "results": [
+    "Jan 1st, 2025"
+   ],
+   "scores": [
+    "-4.810813148788927"
+   ]
+  },
+  {
+   "search": "1st",
+   "results": [
+    "Jan 1st, 2025"
+   ],
+   "scores": [
+    "-5.082"
+   ]
+  },
+  {
+   "search": "review weekly notes",
+   "results": [
+    "weekly review notes"
+   ],
+   "scores": [
+    "-20.69499922919881"
+   ]
+  }
+ ]
+}

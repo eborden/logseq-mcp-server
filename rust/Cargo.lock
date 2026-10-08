@@ -498,6 +498,7 @@ name = "logseq-mcp-server"
 version = "0.0.0"
 dependencies = [
  "icu_normalizer",
+ "icu_properties",
  "reqwest",
  "rmcp",
  "schemars",

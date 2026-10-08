@@ -7,6 +7,7 @@ pub mod client;
 pub mod config;
 pub mod edn;
 pub mod env;
+pub mod fuzzy;
 pub mod js;
 pub mod server;
 pub mod wire;

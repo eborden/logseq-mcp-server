@@ -30,6 +30,9 @@ schemars = "1"
 # reqwest > url > idna > idna_adapter, with these same features and locked version, so it adds no
 # build and no download.
 icu_normalizer = { version = "2.2", default-features = false, features = ["compiled_data"] }
+# fuzzysort strips accents only from Latin-script letters (`\p{Script=Latin}`): the script of a
+# character. Also already in the tree, under idna_adapter, with the same features and version.
+icu_properties = { version = "2.2", default-features = false, features = ["compiled_data"] }
 
 [dev-dependencies]
 tokio = { version = "1.47", default-features = false, features = ["rt", "macros", "net", "io-util", "time"] }
