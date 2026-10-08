@@ -110,8 +110,8 @@ pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> S
     }
     if let Some(temporal) = context.get("temporalContext") {
         if temporal.get("isJournal") == Some(&Value::Bool(true)) {
-            if let Some(date) = temporal.get("date").and_then(Value::as_f64) {
-                lines.push(format!("Journal: {}", js::number_to_string(date)));
+            if let Some(date) = temporal.get("date").and_then(Value::as_i64) {
+                lines.push(format!("Journal: {date}"));
                 lines.push(String::new());
             }
         }

@@ -138,12 +138,12 @@ pub fn link_target_rows(answer: &Value) -> Result<Option<Vec<LinkTargetRow>>, Re
 }
 
 /// `responses.aliasSetRows`: `[startId, member]` per row, the alias group of each start page.
-pub fn alias_set_rows(answer: &Value) -> Result<Option<Vec<(f64, PulledPage)>>, ResponseError> {
+pub fn alias_set_rows(answer: &Value) -> Result<Option<Vec<(i64, PulledPage)>>, ResponseError> {
     let mut reader = Reader::default();
     reader
         .rows(answer, 2, |r, cells| {
             let start = r.at(Part::Index(0), |r| match cells.first() {
-                Some(value) => r.number_value(value),
+                Some(value) => r.id_value(value),
                 None => Err(r.mismatch("number", None)),
             })?;
             let member = r.at(Part::Index(1), |r| r.pulled_page(cells.get(1)))?;

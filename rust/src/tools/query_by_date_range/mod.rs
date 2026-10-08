@@ -53,7 +53,7 @@ use crate::tool::{input_schema, read_only_annotations, success_result};
 
 use self::cap::{BlockCut, MAX_DATE_RANGE_BLOCKS, TruncationOptions, blocks_truncated, cap_entries};
 use self::search::BlockMatcher;
-use self::selection::{Resolved, Selection, resolve_selection};
+use self::selection::{Resolved, Selection, bad_date, resolve_selection};
 use self::tips::date_range_tips;
 use self::top_concepts::{ConceptRef, DEFAULT_TOP_CONCEPTS_LIMIT, concept_value, extract_concept_refs, roll_up_top_concepts};
 
@@ -93,9 +93,11 @@ fn default_max_blocks() -> u64 {
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Start date in YYYYMMDD format (e.g., 20251115). Needs end_date
-    pub start_date: Option<f64>,
+    #[schemars(with = "Option<f64>")]
+    pub start_date: Option<i64>,
     /// End date in YYYYMMDD format (e.g., 20251120). Needs start_date
-    pub end_date: Option<f64>,
+    #[schemars(with = "Option<f64>")]
+    pub end_date: Option<i64>,
     /// The N most recent journals that exist (whole number, 1+), newest first
     #[schemars(range(min = 1))]
     pub last_n: Option<u32>,
@@ -131,8 +133,8 @@ fn saturate(count: u64) -> u32 {
 fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
     let read = Arguments::new(arguments);
     Ok(Args {
-        start_date: read.optional_number("start_date")?,
-        end_date: read.optional_number("end_date")?,
+        start_date: read.optional_whole_or("start_date", |value, _| bad_date("start_date", value, "20251115 for November 15, 2025"))?,
+        end_date: read.optional_whole_or("end_date", |value, _| bad_date("end_date", value, "20251120 for November 20, 2025"))?,
         last_n: read.optional_count("last_n", 1)?.map(saturate),
         preset: read.optional_enum("preset", DATE_PRESET_VALUES)?.and_then(DatePreset::from_word),
         search_term: read.optional_string("search_term")?,
@@ -168,7 +170,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, argum
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     /// `YYYYMMDD`
-    pub date: f64,
+    pub date: i64,
     /// The page as the Editor API spells it (`camelizeKeys` of the pull)
     pub page: Value,
     /// The day's top-level blocks (kept ones only, after the cap), each with its `children`
@@ -189,12 +191,7 @@ struct Journal {
     page: Map<String, Value>,
     id: Option<i64>,
     /// `page.journalDay || 0`
-    day: f64,
-}
-
-/// A number as a JSON value, a whole one as an integer.
-fn number_value(n: f64) -> Value {
-    if n.fract() == 0.0 && n.abs() < 9_007_199_254_740_992.0 { Value::from(n as i64) } else { Value::from(n) }
+    day: i64,
 }
 
 /// `fetchPages`: the journal pages a query finds, or `None` when LogSeq answered `null`. `null` is
@@ -207,8 +204,8 @@ async fn fetch_journals(client: &LogseqClient, query: crate::edn::Query) -> Resu
             .iter()
             .map(|pulled| {
                 let page = camelize_keys(pulled);
-                let id = page.get("id").and_then(Value::as_f64).map(|id| id as i64);
-                let day = page.get("journalDay").and_then(Value::as_f64).filter(|day| *day != 0.0).unwrap_or(0.0);
+                let id = page.get("id").and_then(Value::as_i64);
+                let day = page.get("journalDay").and_then(Value::as_i64).unwrap_or(0);
                 Journal { page, id, day }
             })
             .collect(),
@@ -266,8 +263,8 @@ fn trees_of(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> (HashMap<i64, 
         .into_iter()
         .map(|mut block| {
             let Some(refs) = block.get("refs").and_then(Value::as_array) else { return block };
-            if let Some(id) = block.get("id").and_then(Value::as_f64) {
-                refs_by_block.insert(id as i64, extract_concept_refs(&block));
+            if let Some(id) = block.get("id").and_then(Value::as_i64) {
+                refs_by_block.insert(id, extract_concept_refs(&block));
             }
             // `refs.map(ref => ({ id: entityId(ref) }))`: a ref with no id is `{}`
             let bare: Vec<Value> = refs
@@ -325,26 +322,26 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
     let mut unavailable: Vec<ResultWarning> = Vec::new();
     let (mut journals, range_start, range_end, newest_first) = match selection {
         Resolved::Range { start, end } => {
-            let found = fetch_journals(client, queries::journal_pages_in_range(start, end)?).await?;
+            let found = fetch_journals(client, queries::journal_pages_in_range(start, end)).await?;
             if found.is_none() {
                 unavailable = vec![journals_unavailable()];
             }
             let mut journals = found.unwrap_or_default();
-            journals.sort_by(|a, b| a.day.total_cmp(&b.day));
+            journals.sort_by_key(|journal| journal.day);
             (journals, start, end, false)
         }
         Resolved::LastN { count, latest } => {
-            let found = fetch_journals(client, queries::journal_pages_up_to(latest)?).await?;
+            let found = fetch_journals(client, queries::journal_pages_up_to(latest)).await?;
             if found.is_none() {
                 unavailable = vec![journals_unavailable()];
             }
             let mut all = found.unwrap_or_default();
-            all.sort_by(|a, b| b.day.total_cmp(&a.day));
+            all.sort_by_key(|journal| std::cmp::Reverse(journal.day));
             all.truncate(count as usize);
             // Journals are unique per day, so every page between the oldest and newest kept is one of
             // the kept pages: the range query below fetches exactly them.
-            let end = all.first().map_or(0.0, |journal| journal.day);
-            let start = all.last().map_or(0.0, |journal| journal.day);
+            let end = all.first().map_or(0, |journal| journal.day);
+            let start = all.last().map_or(0, |journal| journal.day);
             (all, start, end, true)
         }
     };
@@ -354,7 +351,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
     let mut trees: HashMap<i64, Vec<Value>> = HashMap::new();
     let mut refs_by_block: HashMap<i64, Vec<ConceptRef>> = HashMap::new();
     if !journals.is_empty() {
-        let query = queries::journal_blocks_in_range(range_start, range_end)?;
+        let query = queries::journal_blocks_in_range(range_start, range_end);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         let rows = wire::blocks(&answer)?;
         // `null` here would otherwise show journal pages that exist with no blocks, as if the days were empty
@@ -390,7 +387,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         }
     }
 
-    let date_range = object_text(&[("start", number_value(range_start).to_string()), ("end", number_value(range_end).to_string())]);
+    let date_range = object_text(&[("start", range_start.to_string()), ("end", range_end.to_string())]);
     // The summary describes every block found, cut or not (#61), so a cut result still shows what the period was about
     let mut summary = Map::new();
     summary.insert("totalDays".to_owned(), Value::from(all_entries.len()));
@@ -449,7 +446,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
             .map(|entry| {
                 let snippets: Vec<String> = entry.blocks.iter().map(|block| js::json_string_utf16(&snippet_of(block))).collect();
                 object_text(&[
-                    ("date", number_value(entry.date).to_string()),
+                    ("date", entry.date.to_string()),
                     ("pageName", js::json_stringify(&Value::from(page_name(entry)))),
                     ("blockCount", count_blocks(&entry.blocks).to_string()),
                     ("snippets", format!("[{}]", snippets.join(","))),
@@ -485,7 +482,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         .iter()
         .map(|entry| {
             let mut map = Map::new();
-            map.insert("date".to_owned(), number_value(entry.date));
+            map.insert("date".to_owned(), Value::from(entry.date));
             if args.slim_results {
                 map.insert("pageName".to_owned(), Value::from(page_name(entry)));
                 // The entry names the page, so its blocks don't repeat it (#42)
@@ -606,6 +603,21 @@ mod tests {
         assert!(read(json!({"max_blocks": 2.5})).unwrap_err().starts_with("Invalid parameter 'max_blocks': 2.5"));
     }
 
+    #[test]
+    fn a_date_is_a_whole_number_and_anything_else_is_refused_as_a_date_of_the_wrong_format() {
+        let args = read(json!({"start_date": 20250101, "end_date": 20250102.0})).unwrap();
+        assert_eq!((args.start_date, args.end_date), (Some(20_250_101), Some(20_250_102)));
+        let format = "Expected: Date in YYYYMMDD format (8 digits, valid year/month/day)";
+        assert_eq!(
+            read(json!({"start_date": 20250101.5, "end_date": 20250102})).unwrap_err(),
+            format!("Invalid parameter 'start_date': 20250101.5\n\n{format}\nExample: 20251115 for November 15, 2025")
+        );
+        assert_eq!(
+            read(json!({"start_date": 20250101, "end_date": 1e300})).unwrap_err(),
+            format!("Invalid parameter 'end_date': 1e+300\n\n{format}\nExample: 20251120 for November 20, 2025")
+        );
+    }
+
     fn block(content: &str) -> Value {
         json!({"id": 1, "uuid": "u", "content": content, "children": []})
     }
@@ -633,9 +645,8 @@ mod tests {
     }
 
     #[test]
-    fn a_whole_number_is_written_as_an_integer_and_the_meta_leaves_out_totals_unless_there_was_a_cut() {
-        assert_eq!(number_value(20250101.0).to_string(), "20250101");
-        assert_eq!(number_value(1.5).to_string(), "1.5");
+    fn a_day_is_written_as_an_integer_and_the_meta_leaves_out_totals_unless_there_was_a_cut() {
+        assert_eq!(Value::from(20250101_i64).to_string(), "20250101");
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) };
         let parts = meta_parts(&[warning], Some((9, 2)));
         assert_eq!(object_text(&parts), r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#);

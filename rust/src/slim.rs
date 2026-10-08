@@ -156,8 +156,8 @@ pub fn to_slim_page(page: &Value) -> Map<String, Value> {
     }
     if journal_flag(Some(page)).unwrap_or(false) {
         slim.insert("isJournal".into(), Value::Bool(true));
-        if let Some(day) = journal_day_of(Some(page)).filter(|day| *day != 0.0) {
-            slim.insert("journalDate".into(), Value::from(day as i64));
+        if let Some(day) = journal_day_of(Some(page)).filter(|day| *day != 0) {
+            slim.insert("journalDate".into(), Value::from(day));
         }
     }
     slim
