@@ -274,7 +274,7 @@ struct Completeness<'a> {
 /// `get_context_for_query` keeps each topic's context without the completeness keys
 /// (`TopicQueryContext`), since it rolls the warnings up into its own.
 #[derive(Serialize)]
-struct TopicContextOutput<'a> {
+pub(crate) struct TopicContextOutput<'a> {
     topic: &'a str,
     #[serde(rename = "resolvedFrom", skip_serializing_if = "Option::is_none")]
     resolved_from: Option<&'a Value>,
@@ -302,7 +302,12 @@ impl TopicContext {
 
     /// The context in BR-0013's key order, with `hasMore`, `warnings` and `totals` when `with_meta`.
     pub fn to_value(&self, with_meta: bool) -> Value {
-        result_value(&TopicContextOutput {
+        result_value(&self.output(with_meta))
+    }
+
+    /// What [`to_value`](Self::to_value) writes, for a result that holds contexts of its own.
+    pub(crate) fn output(&self, with_meta: bool) -> TopicContextOutput<'_> {
+        TopicContextOutput {
             topic: &self.topic,
             resolved_from: self.resolved_from.as_ref(),
             resolved_aliases: self.resolved_aliases.as_deref(),
@@ -318,7 +323,7 @@ impl TopicContext {
             related_pages: self.related_pages.iter().map(|page| RelatedPage { page, relationship_type: "inbound" }).collect(),
             references: &self.references,
             temporal_context: self.temporal_context,
-        })
+        }
     }
 }
 
