@@ -385,7 +385,7 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 **Verified** (`scripts/probe-constraints.ts`). The sketch in #18 used plain strings and would match nothing.
 
-**Current practice:** `ground_uuids(&uuids, "?u")` (`rust/src/edn.rs`) embeds `#uuid "..."` literals. It takes `BlockUuid`s, and `BlockUuid::parse` accepts only the strict 8-4-4-4-12 hex pattern (lowercase), which rules out quotes, brackets and whitespace, so nothing can escape the literal. Page names for embeds still go through `:in $ [?n ...]` (a string collection works for names), with the or-join head `[?e ?n]`. Block uuids come back from pulls as plain strings. See `ref_targets` in `rust/src/resolve_refs/queries.rs` and `rust/src/resolve_refs/mod.rs`.
+**Current practice:** `ground_uuids(&uuids, "?u")` (`rust/src/edn.rs`) embeds `#uuid "..."` literals. It takes `BlockUuid`s, and `BlockUuid::parse` accepts only the strict 8-4-4-4-12 hex pattern (any case, stored lowercase), which rules out quotes, brackets and whitespace, so nothing can escape the literal. Page names for embeds still go through `:in $ [?n ...]` (a string collection works for names), with the or-join head `[?e ?n]`. Block uuids come back from pulls as plain strings. See `ref_targets` in `rust/src/resolve_refs/queries.rs` and `rust/src/resolve_refs/mod.rs`.
 
 ---
 
