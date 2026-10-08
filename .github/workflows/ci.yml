@@ -1,9 +1,10 @@
 name: CI
 
 # The Rust server is the only server (ADR-0025, #349, #356), so the Rust job is the main check. Node stays for the
-# tooling around it: the parity recorder (scripts/parity; the parity cases run in cargo test, #375), the repo's guard
-# tests (tests/guards, tests/rust-guards) and the type-check of both. The integration suites (tests/integration) need a LogSeq
-# desktop app serving the fixture graph, which CI doesn't have; they run locally (tests/integration/setup.md).
+# tooling around it: the repo's guard tests (tests/guards, tests/rust-guards) and the type-check of both. The parity
+# cases and the recorder that writes their results are Rust (rust/tests/parity*.rs, #375, #379), so they run in cargo
+# test. The integration suites (tests/integration) need a LogSeq desktop app serving the fixture graph, which CI doesn't
+# have; they run locally (tests/integration/setup.md).
 #
 # It builds and tests only; it never publishes (ADR-0017 covers npm, and a binary release needs its own ADR first).
 on:
@@ -85,11 +86,16 @@ jobs:
       - name: Lint the workflows and their run blocks
         run: '"${RUNNER_TEMP}/actionlint" -color'
 
-  # The golden files, scripts/parity/expected, are the tool contract (BR-0004, ADR-0031): the parity test (cargo test,
-  # rust/tests/parity.rs) holds the Rust server to them, so a change to one is a change to what the tools promise. A pull request that changes any of
-  # them fails here unless it carries the `golden-change` label, which goes on only after the maintainer's explicit OK,
-  # recorded on the PR (CLAUDE.md, "Verification before merge"). `--record-from-rust` writes a file only when a result
-  # changed in meaning, so a cosmetic re-record doesn't trip this.
+  # The golden results are the tool contract (BR-0004, ADR-0034): the `expected` result of each case in
+  # rust/tests/data/parity/<group>.json, and the recorded tools/list, rust/tests/data/parity/tool-list.json. The parity
+  # test (cargo test, rust/tests/parity.rs) holds the Rust server to them, so a change to one is a change to what the
+  # tools promise. A pull request that changes any of them fails here unless it carries the `golden-change` label, which
+  # goes on only after the maintainer's explicit OK, recorded on the PR (CLAUDE.md, "Verification before merge"). A group
+  # file holds the cases too (stub answers, arguments, expected calls), and a change to those is not a change to the
+  # contract (ADR-0034 Decision 5), so a group file is compared by its goldens alone: each case's name and `expected`,
+  # key order and layout aside. The recorder (`PARITY_RECORD=1`, rust/tests/parity_record.rs) writes a result only when
+  # it changed in meaning, so a re-record that changes nothing doesn't trip this, and neither does moving a file without
+  # changing a result. The clock list (clock-cases.json) is not a golden.
   #
   # The labels come in through env:, never into the script text. The base is the first parent of the merge commit that
   # was checked out, so it is the base tip this HEAD was built on even when the base moved after the event, and a
@@ -109,19 +115,56 @@ jobs:
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
           base="$(git rev-parse HEAD^1)"
-          changed="$(git diff --name-only "$base" HEAD -- scripts/parity/expected)"
+          dir=rust/tests/data/parity
+          # A group file's goldens: each case's name and result, a line of JSON each (none for a file that is not
+          # there or not JSON, which then reads as every golden in it gone).
+          file_cases() {
+            git show "$1:$2" 2> /dev/null | jq -c '.cases[] | {name, expected}'
+          }
+          # Those of one file, or of every group file at a revision, as one list sorted by case name, keys sorted.
+          # The latter is what a result is compared by: a case moved to another file, or a file renamed, changes
+          # no result, so it is not a change.
+          sorted() {
+            jq -s -S -c 'sort_by(.name)'
+          }
+          cases_at() {
+            git ls-tree -r --name-only "$1" -- "$dir" | while IFS= read -r file; do
+              case "$file" in
+                "$dir/clock-cases.json" | "$dir/tool-list.json") continue ;;
+              esac
+              file_cases "$1" "$file"
+            done | sorted
+          }
+          tools_at() {
+            git show "$1:$dir/tool-list.json" 2> /dev/null | jq -S -c . || echo "unreadable at $1"
+          }
+          changed=""
+          if [ "$(cases_at "$base")" != "$(cases_at HEAD)" ]; then
+            # Name the files whose own goldens changed
+            while IFS= read -r file; do
+              case "$file" in
+                "$dir/clock-cases.json" | "$dir/tool-list.json" | "") continue ;;
+              esac
+              if [ "$(file_cases "$base" "$file" | sorted)" != "$(file_cases HEAD "$file" | sorted)" ]; then
+                changed="${changed}${file}"$'\n'
+              fi
+            done <<< "$(git diff --name-only --no-renames "$base" HEAD -- "$dir")"
+          fi
+          if [ "$(tools_at "$base")" != "$(tools_at HEAD)" ]; then
+            changed="${changed}${dir}/tool-list.json"$'\n'
+          fi
           if [ -z "$changed" ]; then
-            echo "No golden file changed."
+            echo "No golden result changed."
             exit 0
           fi
           if printf '%s' "$PR_LABELS" | jq -e 'index("golden-change")' > /dev/null; then
             echo "The golden-change label is on this PR; the maintainer's recorded OK covers these changes:"
-            printf '%s\n' "$changed"
+            printf '%s' "$changed"
             exit 0
           fi
           files="$(printf '%s' "$changed" | tr '\n' ' ')"
-          echo "::error::This PR changes the golden files, which are the tool contract: ${files}"
-          printf '%s\n' "$changed"
+          echo "::error::This PR changes the golden results, which are the tool contract: ${files}"
+          printf '%s' "$changed"
           echo "::error::They change only with the maintainer's explicit OK, recorded on the PR. Once it is, the maintainer adds the golden-change label."
           exit 1
 
@@ -160,20 +203,21 @@ jobs:
         run: cargo build --locked
 
       # Includes the parity cases (#371): rust/tests/parity.rs holds the binary to the recorded results, calls and
-      # tools/list from rust/tests/data/parity (exported from scripts/parity by scripts/export-parity.ts, and kept
-      # in step by tests/guards/parity-export.test.ts), and parity_self_check.rs proves it can fail. cargo-mutants
-      # runs this same command per mutant (ADR-0033), so a parity case kills a mutant it notices.
-      - name: Unit tests
-        run: cargo test --locked
-
-      # The golden-result comparison (#124) is the cargo test above (#371, #375): rust/tests/parity.rs holds the binary
-      # just built to the results recorded from the TypeScript server before it was retired (scripts/parity/expected):
+      # tools/list from rust/tests/data/parity (the one source of the cases and their goldens, #379), and
+      # parity_self_check.rs proves it can fail. cargo-mutants runs this same command per mutant (ADR-0033), so a
+      # parity case kills a mutant it notices.
+      #
+      # The golden-result comparison (#124) is this cargo test (#371, #375): rust/tests/parity.rs holds the binary
+      # just built to the results recorded from the TypeScript server before it was retired (rust/tests/data/parity):
       # each tool result (JSON by deep equality and minified), prompt and resource, the LogSeq calls and `tools/list`
       # by meaning (ADR-0031), the closest names of a missing page by the rules of ADR-0032, and parity_self_check.rs
       # shows it fails on every perturbed case. It starts its own stub LogSeq on a random local port, so nothing here
-      # contacts a LogSeq. The Node harness (scripts/parity.ts) is no longer a CI step; it stays as the recorder
-      # (--record-from-rust), and its comparator is held in step with the cargo one by tests/guards/comparator-table.test.ts.
-      #
+      # contacts a LogSeq. parity_comparator.rs and parity_harness.rs hold the comparator and the harness to their own
+      # rules, and parity_record.rs holds the recorder (which refuses to run here: `CI` is set). Nothing in Node
+      # compares a result any more.
+      - name: Unit tests
+        run: cargo test --locked
+
       # Node is for the guard tests that start the binary, and for nothing else here.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -185,7 +229,7 @@ jobs:
         working-directory: .
         run: npm ci
 
-      # The recorder's own end-to-end tests and the server-version check, which start the binary just built.
+      # The guards that start the binary just built: the live tools/list, the arguments it refuses, its version.
       - name: Guard tests that start the server
         working-directory: .
         run: npx vitest run tests/rust-guards

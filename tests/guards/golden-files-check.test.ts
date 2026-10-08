@@ -2,13 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-// The golden files (scripts/parity/expected) are the tool contract. CI fails a pull request that changes one unless it
-// carries the `golden-change` label, which the maintainer adds after an explicit OK recorded on the PR (#356). These
-// guards keep the check in ci.yml, and run its script against a scratch repository, so a reworded step can't quietly
-// stop checking.
+// The golden results are the tool contract: the `expected` result of each case in rust/tests/data/parity/<group>.json,
+// and the recorded tool list rust/tests/data/parity/tool-list.json. CI fails a pull request that changes one unless it
+// carries the `golden-change` label, which the maintainer adds after an explicit OK recorded on the PR (#356, #379). A
+// group file holds the cases beside their goldens, and a change to a case's stub answers is not a change to the
+// contract (ADR-0034 Decision 5), so a group file is compared by its goldens. These guards keep the check in ci.yml, and
+// run its script against a scratch repository, so a reworded step can't quietly stop checking.
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const workflow = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf-8');
@@ -29,6 +31,21 @@ function runBlock(stepName: string): string {
   return body.join('\n');
 }
 
+const DATA = 'rust/tests/data/parity';
+
+/** A group file as the recorder writes it: one case to a line. */
+const group = (name: string, cases: Array<Record<string, unknown>>): string =>
+  `{"group":${JSON.stringify(name)},"cases":[\n${cases.map(c => `  ${JSON.stringify(c)}`).join(',\n')}\n]}\n`;
+
+const aCase = (over: Record<string, unknown> = {}) => ({
+  name: 'alice',
+  tool: 'logseq_get_page',
+  arguments: { page_name: 'Alice' },
+  steps: [[{ method: 'logseq.Editor.getPage', args: ['alice'], response: { id: 1 } }]],
+  expected: { content: [{ type: 'text', text: '{"page":"Alice"}' }] },
+  ...over
+});
+
 describe('the golden-files job in ci.yml', () => {
   it('runs on pull requests, and again when the golden-change label is added or removed', () => {
     expect(workflow).toMatch(/pull_request:\s*\n(?:\s*#.*\n)*\s*types: \[[^\]]*\blabeled\b[^\]]*\]/);
@@ -44,32 +61,40 @@ describe('the golden-files job in ci.yml', () => {
     expect(job).toContain('PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}');
     const script = runBlock('Check the golden files');
     expect(script).toContain('HEAD^1');
-    expect(script).toContain('scripts/parity/expected');
+    expect(script).toContain('rust/tests/data/parity');
     expect(script).toContain('golden-change');
     // never a `${{ }}` expression inside the script text
     expect(script).not.toContain('${{');
   });
 
-  describe('its script, run against a scratch repository', () => {
+  // Each run makes a repository with two commits, and a test makes up to three
+  describe('its script, run against a scratch repository', { timeout: 30000 }, () => {
     const script = runBlock('Check the golden files');
 
-    function scratch(changes: Record<string, string>): string {
+    /** A repository whose base commit holds one group file, a tool list and a clock list, and whose next commit makes `changes` (a text, or null to delete the file). */
+    function scratch(changes: Record<string, string | null>): string {
       const dir = mkdtempSync(join(tmpdir(), 'golden-files-'));
       const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
       git('init', '-q', '-b', 'main');
       git('config', 'user.email', 'test@example.com');
       git('config', 'user.name', 'Test');
-      mkdirSync(join(dir, 'scripts', 'parity', 'expected'), { recursive: true });
-      writeFileSync(join(dir, 'scripts', 'parity', 'expected', 'get-page.json'), '{}\n');
+      mkdirSync(join(dir, DATA), { recursive: true });
+      writeFileSync(join(dir, DATA, 'get-page.json'), group('get-page', [aCase(), aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]));
+      writeFileSync(join(dir, DATA, 'tool-list.json'), '[\n  {\n    "name": "logseq_get_page"\n  }\n]\n');
+      writeFileSync(join(dir, DATA, 'clock-cases.json'), '[]\n');
       writeFileSync(join(dir, 'README.md'), 'base\n');
       git('add', '.');
       git('commit', '-q', '-m', 'base');
       // the merge commit CI checks out: the base tip is its first parent
       for (const [path, text] of Object.entries(changes)) {
-        mkdirSync(join(dir, path, '..'), { recursive: true });
+        if (text === null) {
+          rmSync(join(dir, path));
+          continue;
+        }
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
         writeFileSync(join(dir, path), text);
       }
-      git('add', '.');
+      git('add', '-A');
       git('commit', '-q', '-m', 'the PR');
       return dir;
     }
@@ -80,34 +105,107 @@ describe('the golden-files job in ci.yml', () => {
       return { status: result.status, out: `${result.stdout}${result.stderr}` };
     }
 
-    it('passes when no golden file changed, label or not', () => {
+    const GET_PAGE = `${DATA}/get-page.json`;
+
+    it('passes when nothing under the data folder changed, label or not', () => {
       expect(run(scratch({ 'README.md': 'changed\n' }), []).status).toBe(0);
       expect(run(scratch({ 'README.md': 'changed\n' }), ['golden-change']).status).toBe(0);
     });
 
-    it('fails a change to a golden file without the label, and names the files', () => {
-      const { status, out } = run(
-        scratch({ 'scripts/parity/expected/get-page.json': '{"a":1}\n', 'scripts/parity/expected/tool-list.json': '[]\n' }),
-        ['task', 'documentation']
-      );
+    it('passes a change to a case that is not a change to its golden result, with no label', () => {
+      // A re-recorded call fixture (ADR-0034 Decision 5): the stub's answer, the query, the arguments
+      const stub = aCase({ steps: [[{ method: 'logseq.Editor.getPage', args: ['alice', { includeChildren: true }], response: { id: 1, extra: true } }]], arguments: { page_name: 'alice' } });
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [stub, aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]) }), []).status).toBe(0);
+    });
+
+    it('passes a change to the clock list, which is not a golden', () => {
+      expect(run(scratch({ [`${DATA}/clock-cases.json`]: '["alice"]\n' }), []).status).toBe(0);
+    });
+
+    it('passes a file written another way with the same goldens: other layout, other key order, the cases in another order', () => {
+      const pretty = JSON.stringify({ cases: [aCase({ name: 'bob', arguments: { page_name: 'Bob' } }), aCase()].map(c => ({ expected: c.expected, name: c.name, tool: c.tool, steps: c.steps, arguments: c.arguments })), group: 'get-page' }, null, 2);
+      expect(run(scratch({ [GET_PAGE]: `${pretty}\n` }), []).status).toBe(0);
+    });
+
+    it('passes a move that changes no result: a file renamed, or a case moved to another file', () => {
+      const bob = aCase({ name: 'bob', arguments: { page_name: 'Bob' } });
+      expect(run(scratch({ [GET_PAGE]: null, [`${DATA}/get-pages.json`]: group('get-pages', [aCase(), bob]) }), []).status).toBe(0);
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [aCase()]), [`${DATA}/get-block.json`]: group('get-block', [bob]) }), []).status).toBe(0);
+    });
+
+    it('fails a move that changes a result on the way, and names the file it landed in', () => {
+      const bob = aCase({ name: 'bob', arguments: { page_name: 'Bob' }, expected: { content: [{ type: 'text', text: '{}' }] } });
+      const { status, out } = run(scratch({ [GET_PAGE]: group('get-page', [aCase()]), [`${DATA}/get-block.json`]: group('get-block', [bob]) }), []);
       expect(status).toBe(1);
-      expect(out).toContain('scripts/parity/expected/get-page.json');
-      expect(out).toContain('scripts/parity/expected/tool-list.json');
+      expect(out).toContain(`${DATA}/get-block.json`);
+    });
+
+    it('fails a changed golden result without the label, and names the file', () => {
+      const changed = aCase({ expected: { content: [{ type: 'text', text: '{"page":"alice"}' }] } });
+      const { status, out } = run(scratch({ [GET_PAGE]: group('get-page', [changed, aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]) }), ['task', 'documentation']);
+      expect(status).toBe(1);
+      expect(out).toContain(GET_PAGE);
       expect(out).toContain('golden-change');
     });
 
-    it('fails when no label is set at all', () => {
-      expect(run(scratch({ 'scripts/parity/expected/get-page.json': '{"a":1}\n' }), []).status).toBe(1);
+    it('fails a case added or removed, since a case is a golden', () => {
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [aCase(), aCase({ name: 'bob', arguments: { page_name: 'Bob' } }), aCase({ name: 'carol' })]) }), []).status).toBe(1);
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [aCase()]) }), []).status).toBe(1);
     });
 
-    it('passes a change to a golden file that carries the golden-change label', () => {
-      const { status, out } = run(scratch({ 'scripts/parity/expected/get-page.json': '{"a":1}\n' }), ['golden-change']);
+    it('fails a case that loses its golden result, and a case renamed', () => {
+      const { expected: _expected, ...noResult } = aCase();
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [noResult, aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]) }), []).status).toBe(1);
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [aCase({ name: 'alice, renamed' }), aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]) }), []).status).toBe(1);
+    });
+
+    it('fails a group file added or deleted, and one that is not JSON', () => {
+      const added = run(scratch({ [`${DATA}/get-block.json`]: group('get-block', [aCase({ name: 'a block' })]) }), []);
+      expect(added.status).toBe(1);
+      expect(added.out).toContain(`${DATA}/get-block.json`);
+      expect(run(scratch({ [GET_PAGE]: null }), []).status).toBe(1);
+      expect(run(scratch({ [GET_PAGE]: 'not json\n' }), []).status).toBe(1);
+    });
+
+    it('fails a change to the recorded tool list without the label, and names the file', () => {
+      const { status, out } = run(scratch({ [`${DATA}/tool-list.json`]: '[\n  {\n    "name": "logseq_get_page",\n    "title": "Get Page"\n  }\n]\n' }), []);
+      expect(status).toBe(1);
+      expect(out).toContain(`${DATA}/tool-list.json`);
+    });
+
+    it('passes a tool list written with its keys in another order, which is the same list', () => {
+      expect(run(scratch({ [`${DATA}/tool-list.json`]: '[{"name":"logseq_get_page"}]' }), []).status).toBe(0);
+    });
+
+    it('names every golden file that changed', () => {
+      const { status, out } = run(
+        scratch({
+          [GET_PAGE]: group('get-page', [aCase({ name: 'carol' })]),
+          [`${DATA}/tool-list.json`]: '[]\n'
+        }),
+        []
+      );
+      expect(status).toBe(1);
+      expect(out).toContain(GET_PAGE);
+      expect(out).toContain(`${DATA}/tool-list.json`);
+    });
+
+    it('fails when no label is set at all', () => {
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [aCase({ name: 'carol' })]) }), []).status).toBe(1);
+    });
+
+    it('passes a changed golden that carries the golden-change label, and still lists the files', () => {
+      const { status, out } = run(scratch({ [GET_PAGE]: group('get-page', [aCase({ name: 'carol' })]) }), ['golden-change']);
       expect(status).toBe(0);
-      expect(out).toContain('scripts/parity/expected/get-page.json');
+      expect(out).toContain(GET_PAGE);
     });
 
     it('does not take a label that merely contains the name', () => {
-      expect(run(scratch({ 'scripts/parity/expected/get-page.json': '{"a":1}\n' }), ['golden-change-later']).status).toBe(1);
+      expect(run(scratch({ [GET_PAGE]: group('get-page', [aCase({ name: 'carol' })]) }), ['golden-change-later']).status).toBe(1);
+    });
+
+    it('no longer watches the old folder, which is gone', () => {
+      expect(run(scratch({ 'scripts/parity/expected/get-page.json': '{"a":1}\n' }), []).status).toBe(0);
     });
   });
 });
