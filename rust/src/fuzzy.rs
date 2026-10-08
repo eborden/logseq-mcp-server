@@ -21,6 +21,9 @@
 //!
 //! The tests compare this against the library itself: `tests/data/fuzzysort-oracle.json` holds
 //! what fuzzysort 3.1.0 returned for made-up names and searches, scores included.
+//! `scripts/parity/fuzzysort-oracle.ts` writes that file, and `src/fuzzysort-oracle.test.ts`
+//! recomputes it with the installed fuzzysort, so it can't drift from the library the TypeScript
+//! server runs.
 
 // PARITY(#299): the whole module copies fuzzysort 3.1.0's matching, scoring and result order, so
 // the closest names in a "no such page" message are the same three the TypeScript server gives. A
