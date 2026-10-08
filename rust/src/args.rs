@@ -87,6 +87,34 @@ impl<'a> Arguments<'a> {
         }
     }
 
+    /// A required string of at most `max` UTF-16 code units (`z.string().max(max)`), which is what
+    /// `.length` counts. A longer one is zod's own `Too big`, with the whole text as the value and no example.
+    pub fn required_string_max(&self, param: &str, max: usize) -> Result<String, InvalidParameter> {
+        let text = self.required_string(param)?;
+        if text.encode_utf16().count() > max {
+            return Err(InvalidParameter {
+                param: param.to_owned(),
+                value: js::json_stringify(&Value::String(text)),
+                expected: format!("Too big: expected string to have <={max} characters"),
+                example: None,
+            });
+        }
+        Ok(text)
+    }
+
+    /// A required string that must be one of `values` (`z.enum([...])`). Absent or `null` is
+    /// `missing`, and anything else is worded as [`Arguments::optional_enum`] words it.
+    pub fn required_enum(&self, param: &str, values: &[&'static str]) -> Result<&'static str, InvalidParameter> {
+        match self.optional_enum(param, values)? {
+            Some(value) => Ok(value),
+            None => {
+                let shown: Vec<String> = values.iter().map(|value| js::json_stringify(&Value::from(*value))).collect();
+                let example = values.last().map(|last| format!("{param}: {}", js::json_stringify(&Value::from(*last))));
+                Err(InvalidParameter { param: param.to_owned(), value: "missing".to_owned(), expected: format!("one of {}", shown.join(", ")), example })
+            }
+        }
+    }
+
     /// An optional string that must be one of `values` (`z.enum([...]).optional()`). Whatever else
     /// is sent, a number or a list as much as a wrong word, is "one of ..." with the last value
     /// as the example, as zod's `invalid_value` is.
@@ -258,6 +286,42 @@ mod tests {
                 format!("Invalid parameter 'format': {shown}\n\nExpected: one of \"json\", \"markdown\"\nExample: format: \"markdown\"")
             );
         }
+    }
+
+    #[test]
+    fn a_required_enum_is_missing_when_absent_and_otherwise_an_optional_one() {
+        const TYPES: &[&str] = &["references", "connected-within"];
+        let read = |value: Value| {
+            let args = arguments(json!({"relationship_type": value}));
+            Arguments::new(Some(&args)).required_enum("relationship_type", TYPES)
+        };
+        assert_eq!(read(json!("references")).unwrap(), "references");
+        let missing = "Invalid parameter 'relationship_type': missing\n\nExpected: one of \"references\", \"connected-within\"\nExample: relationship_type: \"connected-within\"";
+        assert_eq!(message(read(Value::Null).unwrap_err()), missing);
+        assert_eq!(message(Arguments::new(None).required_enum("relationship_type", TYPES).unwrap_err()), missing);
+        assert_eq!(
+            message(read(json!("xml")).unwrap_err()),
+            "Invalid parameter 'relationship_type': \"xml\"\n\nExpected: one of \"references\", \"connected-within\"\nExample: relationship_type: \"connected-within\""
+        );
+    }
+
+    #[test]
+    fn a_string_with_a_maximum_counts_utf16_units_and_says_too_big_with_the_whole_text() {
+        let read = |text: &str| {
+            let args = arguments(json!({"after": text}));
+            Arguments::new(Some(&args)).required_string_max("after", 3)
+        };
+        assert_eq!(read("abc").unwrap(), "abc");
+        // an emoji is two units: `.length` of "ab😀" is 4
+        assert_eq!(
+            message(read("ab\u{1F600}").unwrap_err()),
+            "Invalid parameter 'after': \"ab\u{1F600}\"\n\nExpected: Too big: expected string to have <=3 characters"
+        );
+        assert_eq!(read("a\u{1F600}").unwrap(), "a\u{1F600}");
+        assert_eq!(
+            message(Arguments::new(None).required_string_max("after", 3).unwrap_err()),
+            "Invalid parameter 'after': missing\n\nExpected: a string (required)\nExample: after: \"...\""
+        );
     }
 
     #[test]
