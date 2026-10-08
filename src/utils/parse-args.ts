@@ -96,11 +96,6 @@ function kindOf(value: unknown): string {
   return article(typeof value);
 }
 
-/** A finite number that isn't whole. NaN and ±Infinity are described by `kindOf` instead. */
-function isFraction(value: unknown): boolean {
-  return typeof value === 'number' && Number.isFinite(value) && !Number.isInteger(value);
-}
-
 const EXPECTED_TYPE: Record<string, string> = {
   string: 'a string',
   boolean: 'true or false',
@@ -120,8 +115,10 @@ const expectedMessage: z.core.$ZodErrorMap = issue => {
     case 'invalid_type': {
       const expected = EXPECTED_TYPE[issue.expected] ?? issue.expected;
       if (issue.input === undefined) return `${expected} (required)`;
-      // 2.5 is a number, so "an integer, not a number" would say nothing (#293)
-      if (issue.expected === 'int' && isFraction(issue.input)) return `${expected}, not a fraction`;
+      // 2.5 is a number, so "an integer, not a number" would say nothing (#293). zod reports
+      // `int` only for a finite non-whole number: NaN, ±Infinity and other kinds come back as
+      // `number`, so this is always a fraction (pinned in parse-args.test.ts)
+      if (issue.expected === 'int') return `${expected}, not a fraction`;
       return `${expected}, not ${kindOf(issue.input)}`;
     }
     case 'invalid_value':

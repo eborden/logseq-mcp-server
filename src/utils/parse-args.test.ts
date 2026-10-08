@@ -194,6 +194,13 @@ describe('parseArgs', () => {
       );
     });
 
+    it('keeps the zod message, with no Example:, for a number above its maximum', () => {
+      // An inclusive numeric bound like a minimum, but too_big: neither "at least" nor an example applies
+      const capped = z.object({ v: z.number().max(5) });
+
+      expect(messageFor(capped, { v: 6 })).toBe(`Invalid parameter 'v': 6\n\nExpected: ${zodMessage(capped, { v: 6 })}`);
+    });
+
     it('keeps the zod message, with no Example:, for an exclusive minimum', () => {
       const positive = z.object({ v: z.number().gt(0) });
 
