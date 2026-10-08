@@ -49,89 +49,44 @@ fn read_only_annotations(title: &str) -> ToolAnnotations {
 }
 
 /// A tool's `inputSchema`, generated from the type its arguments are parsed into, so the two
-/// can't drift apart (ADR-0019). It has the TypeScript server's shape (`toInputSchema` in
-/// `src/utils/parse-args.ts`, as the ADR-0016 snapshot shows it): no `$schema`, `title` or
-/// `description` at the top, `required` always present, and no `additionalProperties`, because
-/// unknown fields are ignored.
-///
-/// Each property is then rewritten into zod's shape (see [`zod_shaped_property`]). What the
-/// argument type must do itself: numbers are `f64`, as zod's `z.number()` accepts `2.5` and the
-/// tools clamp or floor them. An integer type would advertise `"type": "integer"` and reject
-/// `2.5`, which TypeScript accepts, so this panics on one.
+/// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, `$defs` and `$ref`
+/// for enums, `null` in an `Option`'s type, `format` on numbers). The parity harness compares
+/// schemas by meaning (#292), so zod's serialization isn't copied, only the contract:
+/// - the top-level `title` and `description` (the Rust type's name and doc comment, not part of
+///   the contract) are dropped, as rmcp's own `schema_for_input` does;
+/// - an argument type with no fields still gets `"properties": {}`, as rmcp's own empty-input
+///   schema has it: schemars leaves the key out, and a client may look for it;
+/// - the arguments are an object, and unknown fields are ignored, as every TypeScript tool
+///   ignores them (the param aliases rely on it), so there's no `additionalProperties: false`;
+/// - numbers are `f64`, never an integer type. Accepting `2.5` is the current contract
+///   (`z.number()`, and the tools clamp or floor), which an `"integer"` schema would narrow.
+///   #293 makes count and limit parameters integers; once it lands, they become `u32` here and
+///   this check goes.
 pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
     let Value::Object(mut schema) = serde_json::to_value(generator.into_root_schema_for::<T>()).expect("a schema serializes")
     else {
         panic!("a tool's argument type must produce an object schema");
     };
-    for key in ["$schema", "title", "description"] {
-        schema.remove(key);
-    }
+    schema.remove("title");
+    schema.remove("description");
     assert_eq!(schema.get("type"), Some(&json!("object")), "a tool's arguments must be an object");
     assert!(!schema.contains_key("additionalProperties"), "a tool's arguments must ignore unknown fields");
-    let defs = match schema.remove("$defs") {
-        Some(Value::Object(defs)) => defs,
-        _ => JsonObject::new(),
-    };
-    let properties = match schema.remove("properties") {
-        Some(Value::Object(properties)) => properties
-            .into_iter()
-            .map(|(name, property)| {
-                let property = zod_shaped_property(property, &defs);
-                (name, property)
-            })
-            .collect(),
-        _ => JsonObject::new(),
-    };
-    schema.insert("properties".into(), Value::Object(properties));
-    schema.entry("required").or_insert_with(|| json!([]));
+    assert!(!mentions_integer(&Value::Object(schema.clone())), "use f64 for numbers until #293: z.number() accepts 2.5");
+    schema.entry("properties").or_insert_with(|| json!({}));
     Arc::new(schema)
 }
 
-/// One property as zod's `toJSONSchema` writes it, from what schemars writes:
-/// - An `Option` is optional through `required`, and zod doesn't add `null` to its type, so the
-///   `null` alternative goes: `"type": ["number", "null"]` becomes `"number"`, `null` leaves an
-///   `enum`, and `anyOf: [{...}, {"type": "null"}]` becomes the one schema.
-/// - A string enum is inlined from `$defs` (zod has no `$ref`), keeping the property's own
-///   `description` and `default` rather than the enum type's doc comment.
-/// - schemars' `format` (`"double"`) goes; zod writes none.
-fn zod_shaped_property(property: Value, defs: &JsonObject) -> Value {
-    let Value::Object(mut property) = property else { panic!("a property schema must be an object") };
-    if let Some(Value::Array(alternatives)) = property.remove("anyOf") {
-        let mut rest = alternatives.into_iter().filter(|alt| alt != &json!({"type": "null"}));
-        let (Some(Value::Object(only)), None) = (rest.next(), rest.next()) else {
-            panic!("only Option<T> may produce anyOf in a tool's arguments");
-        };
-        for (key, value) in only {
-            property.entry(key).or_insert(value);
-        }
+/// Whether any `type` in the schema, at any depth, is or includes `"integer"`.
+fn mentions_integer(schema: &Value) -> bool {
+    match schema {
+        Value::Object(map) => map.iter().any(|(key, value)| {
+            (key == "type" && (value == "integer" || value.as_array().is_some_and(|types| types.contains(&json!("integer")))))
+                || mentions_integer(value)
+        }),
+        Value::Array(items) => items.iter().any(mentions_integer),
+        _ => false,
     }
-    if let Some(Value::String(reference)) = property.remove("$ref") {
-        let name = reference.strip_prefix("#/$defs/").expect("refs point into $defs");
-        let Some(Value::Object(def)) = defs.get(name) else { panic!("$defs has no {name}") };
-        for (key, value) in def {
-            if key != "description" && key != "title" {
-                property.entry(key.clone()).or_insert(value.clone());
-            }
-        }
-    }
-    if let Some(Value::Array(types)) = property.get("type") {
-        let types: Vec<&Value> = types.iter().filter(|t| *t != "null").collect();
-        let [only] = types[..] else { panic!("a property must have one type besides null") };
-        property.insert("type".into(), only.clone());
-    }
-    if let Some(Value::Array(values)) = property.get_mut("enum") {
-        values.retain(|value| !value.is_null());
-    }
-    // A whole-number f64 default (`50.0`) is written as JSON.stringify writes it (`50`).
-    if let Some(Value::Number(n)) = property.get("default") {
-        if let Some(x) = n.as_f64().filter(|x| n.is_f64() && x.fract() == 0.0 && x.abs() < 9_007_199_254_740_992.0) {
-            property.insert("default".into(), Value::from(x as i64));
-        }
-    }
-    property.remove("format");
-    assert_ne!(property.get("type"), Some(&json!("integer")), "use f64 for numbers: zod's z.number() accepts 2.5");
-    Value::Object(property)
 }
 
 /// Parse a tool's arguments at the boundary (ADR-0019). As in `parseArgs`: unknown fields are
@@ -253,17 +208,90 @@ mod tests {
         max_nodes: f64,
     }
 
-    #[test]
-    fn the_stub_schema_is_an_empty_object_with_required() {
-        assert_eq!(Value::Object((*input_schema::<PingArgs>()).clone()), json!({"type": "object", "properties": {}, "required": []}));
+    /// A schema reduced to its meaning, as the parity harness compares `tools/list` (#292):
+    /// `$ref`s resolved from `$defs` (the property's own keys win), an optional property's `null`
+    /// alternative dropped, `format`, `title` and `$schema` dropped, numbers compared by value, a
+    /// missing `required` read as `[]`. Key order never matters to `Value` equality.
+    fn meaning(schema: &Value) -> Value {
+        let defs = schema.get("$defs").cloned().unwrap_or(json!({}));
+        let required: Vec<Value> = schema.get("required").and_then(Value::as_array).cloned().unwrap_or_default();
+        let mut out = normalize(schema, &defs);
+        let map = out.as_object_mut().unwrap();
+        map.remove("$defs");
+        map.insert("required".into(), Value::Array(required.clone()));
+        map.entry("properties").or_insert_with(|| json!({}));
+        if let Some(Value::Object(properties)) = map.get_mut("properties") {
+            for (name, property) in properties.iter_mut() {
+                if !required.contains(&json!(name)) {
+                    *property = without_null(property.take());
+                }
+            }
+        }
+        out
+    }
+
+    fn normalize(value: &Value, defs: &Value) -> Value {
+        match value {
+            Value::Object(map) => {
+                let mut out = JsonObject::new();
+                for (key, value) in map {
+                    if !matches!(key.as_str(), "format" | "title" | "$schema" | "$ref") {
+                        out.insert(key.clone(), normalize(value, defs));
+                    }
+                }
+                if let Some(Value::String(reference)) = map.get("$ref") {
+                    let def = &defs[reference.strip_prefix("#/$defs/").unwrap()];
+                    for (key, value) in normalize(def, defs).as_object().unwrap() {
+                        out.entry(key.clone()).or_insert(value.clone());
+                    }
+                }
+                Value::Object(out)
+            }
+            Value::Array(items) => Value::Array(items.iter().map(|item| normalize(item, defs)).collect()),
+            Value::Number(n) => json!(n.as_f64().unwrap()),
+            other => other.clone(),
+        }
+    }
+
+    /// Optional and nullable mean the same to a caller: drop the `null` alternative.
+    fn without_null(property: Value) -> Value {
+        let Value::Object(mut map) = property else { return property };
+        if let Some(Value::Array(alternatives)) = map.remove("anyOf") {
+            let mut rest: Vec<Value> = alternatives.into_iter().filter(|alt| alt != &json!({"type": "null"})).collect();
+            if rest.len() == 1 {
+                for (key, value) in rest.remove(0).as_object().unwrap() {
+                    map.entry(key.clone()).or_insert(value.clone());
+                }
+            } else {
+                map.insert("anyOf".into(), Value::Array(rest));
+            }
+        }
+        if let Some(Value::Array(types)) = map.get("type").cloned() {
+            let types: Vec<Value> = types.into_iter().filter(|t| t != "null").collect();
+            map.insert("type".into(), if types.len() == 1 { types[0].clone() } else { Value::Array(types) });
+        }
+        if let Some(Value::Array(values)) = map.get_mut("enum") {
+            values.retain(|value| !value.is_null());
+        }
+        Value::Object(map)
+    }
+
+    fn schema_of<T: JsonSchema>() -> Value {
+        Value::Object((*input_schema::<T>()).clone())
     }
 
     #[test]
-    fn the_schema_comes_from_the_type_that_parses_the_arguments_in_zod_s_shape() {
-        // Each property is what the TypeScript snapshot has for a field of that kind.
+    fn the_stub_schema_means_what_the_typescript_one_means() {
+        assert_eq!(meaning(&schema_of::<PingArgs>()), meaning(&json!({"type": "object", "properties": {}, "required": []})));
+    }
+
+    #[test]
+    fn the_schema_comes_from_the_type_that_parses_the_arguments_and_means_the_typescript_contract() {
+        // The right-hand side is the TypeScript snapshot's schema for fields of each kind
+        // (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
         assert_eq!(
-            Value::Object((*input_schema::<SampleArgs>()).clone()),
-            json!({
+            meaning(&schema_of::<SampleArgs>()),
+            meaning(&json!({
                 "type": "object",
                 "properties": {
                     "page_name": {"type": "string", "description": "The page to read."},
@@ -273,15 +301,17 @@ mod tests {
                     "max_nodes": {"type": "number", "default": 50, "description": "Maximum pages in the network (default: 50, max: 500)"},
                 },
                 "required": ["page_name"],
-            })
+            }))
         );
     }
 
     #[test]
-    fn an_integral_default_is_written_as_json_stringify_writes_it() {
-        // serde_json writes 50.0_f64 as `50.0`; JSON.stringify writes `50`.
-        let schema = input_schema::<SampleArgs>();
-        assert_eq!(serde_json::to_string(&schema["properties"]["max_nodes"]["default"]).unwrap(), "50");
+    fn the_schema_is_schemars_own_with_no_zod_quirks_copied() {
+        let schema = schema_of::<SampleArgs>();
+        assert!(schema.get("$defs").is_some_and(|defs| defs.get("Format").is_some()), "{schema}");
+        assert_eq!(schema["properties"]["limit"]["type"], json!(["number", "null"]));
+        assert!(schema.get("title").is_none() && schema.get("description").is_none());
+        assert!(schema.get("additionalProperties").is_none());
     }
 
     #[derive(Deserialize, JsonSchema)]
@@ -291,8 +321,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "use f64 for numbers")]
-    fn an_integer_field_is_refused_as_zod_accepts_fractions() {
+    #[should_panic(expected = "use f64 for numbers until #293")]
+    fn an_integer_field_is_refused_until_293_lands() {
         input_schema::<IntegerArgs>();
     }
 
@@ -422,7 +452,7 @@ mod tests {
         let tools = responses[1]["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], PING_TOOL);
-        assert_eq!(tools[0]["inputSchema"], json!({"type": "object", "properties": {}, "required": []}));
+        assert_eq!(meaning(&tools[0]["inputSchema"]), meaning(&json!({"type": "object", "properties": {}, "required": []})));
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
     }
 
