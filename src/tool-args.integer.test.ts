@@ -111,7 +111,7 @@ describe('count and limit parameters are integers (#293)', () => {
 
   it.each(cases)('%s rejects a fraction, naming it', (_, p) => {
     expect(errorFor(p.schema, { ...p.required, [p.param]: 2.5 }).message).toBe(
-      `Invalid parameter '${p.param}': 2.5\n\nExpected: an integer, not a number\nExample: ${p.param}: 5`
+      `Invalid parameter '${p.param}': 2.5\n\nExpected: an integer, not a fraction\nExample: ${p.param}: 5`
     );
   });
 
