@@ -21,6 +21,7 @@ pub mod errors;
 pub mod escape;
 pub mod fuzzy;
 pub mod js;
+pub mod markdown;
 pub mod meta;
 pub mod output_format;
 pub mod params;
