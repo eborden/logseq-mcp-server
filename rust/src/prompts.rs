@@ -170,15 +170,12 @@ pub fn resolve_week(week: Option<&str>, today: CalendarDate) -> Result<WeekRange
             ))
         })?,
     };
-    let monday = anchor.monday();
-    // Journal days are `YYYYMMDD` integers, which have no year before 0000. A week of the first days of year 0000
-    // starts in year -1.
-    if monday.year < 0 {
-        return Err(invalid(&format!(
-            "The week of {} starts before the year 0000, which a journal day (YYYYMMDD) cannot hold. Use a later date.",
-            iso(anchor)
-        )));
-    }
+    // Journal days are `YYYYMMDD` integers, which have no year before 0000, so a week that starts earlier starts on
+    // 0000-01-01. (`week` of 0000-01-01 or 0000-01-02: the week's Monday and Friday both fall in year -1, so the
+    // week is that one day.)
+    let first_day = CalendarDate { year: 0, month: 1, day: 1 };
+    let true_monday = anchor.monday();
+    let monday = true_monday.max(first_day);
     if monday > today {
         return Err(invalid(&format!(
             "The week of {} has not started yet. Use \"this\", \"last\", or a date in a past or current week.",
@@ -187,7 +184,7 @@ pub fn resolve_week(week: Option<&str>, today: CalendarDate) -> Result<WeekRange
     }
     // Any year is a real year, so a week whose Monday falls in year 99 (`week` of 0100-01-01 to 0100-01-03) ends
     // on the calendar's Friday, 0100-01-01 (end_date 1000101).
-    let friday = monday.shifted(4);
+    let friday = true_monday.shifted(4).max(first_day);
     let end = if friday > today { today } else { friday };
     Ok(WeekRange {
         monday: iso(monday),
@@ -577,6 +574,7 @@ mod tests {
         let old = month(Some("0050-03"), TUESDAY).unwrap();
         assert_eq!((old.month.as_str(), old.start, old.end, old.end_iso.as_str()), ("0050-03", 500301, 500331, "0050-03-31"));
         // a three-digit year keeps its leading zero
+        assert_eq!(week(Some("0500-03-04"), TUESDAY).unwrap().monday, "0500-03-01");
         assert_eq!(month(Some("0100-03"), TUESDAY).unwrap().month, "0100-03");
         // year 0 is a leap year; its first Monday is 0000-01-03
         assert_eq!(month(Some("0000-02"), TUESDAY).unwrap().end, 229);
@@ -585,14 +583,19 @@ mod tests {
     }
 
     #[test]
-    fn a_week_that_starts_before_year_0_is_refused() {
-        // 0000-01-01 is a Saturday, so its week starts on a Monday in year -1, which YYYYMMDD cannot hold
+    fn a_week_that_starts_before_year_0_starts_on_0000_01_01() {
+        // 0000-01-01 is a Saturday, so its week runs from a Monday in year -1 to a Friday in year -1; YYYYMMDD has no
+        // such year, so the week is clamped to the first day it can hold
         for spec in ["0000-01-01", "0000-01-02"] {
+            let clamped = week(Some(spec), TUESDAY).unwrap();
             assert_eq!(
-                week(Some(spec), TUESDAY).unwrap_err(),
-                format!("MCP error -32602: The week of {spec} starts before the year 0000, which a journal day (YYYYMMDD) cannot hold. Use a later date.")
+                (clamped.monday.as_str(), clamped.start, clamped.end_iso.as_str(), clamped.end, clamped.partial),
+                ("0000-01-01", 101, "0000-01-01", 101, false),
+                "{spec}"
             );
         }
+        // the Monday after it is a whole week of year 0
+        assert_eq!(week(Some("0000-01-03"), TUESDAY).unwrap().monday, "0000-01-03");
     }
 
     #[test]
