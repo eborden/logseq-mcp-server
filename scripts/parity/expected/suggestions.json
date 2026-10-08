@@ -1,0 +1,74 @@
+{
+  "suggestions: an exact hit comes before the prefix hits": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"alice\\\". Closest: Alice, Alice Notes, Alice Cooper. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: a prefix hit": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"proj\\\". Closest: Project Zed, Project Atlas. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: more than three prefix hits": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"al\\\". Closest: Alan, Alba, Alice. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: no page covers the input": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"zzz\\\". Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: a name that contains a comma and a space": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"smth\\\". Closest: Smith, Bob, Smith, Alice. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: a name that ends with a full stop": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"notes v\\\". Closest: Notes v2., Notes v1.. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: a name with a quote and a backslash": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"say \\\\\\\"hi\\\\\\\"\\\". Closest: Say \\\"hi\\\" \\\\ bye. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "suggestions: capitals and accents": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"cafe\\\". Closest: CAFÉ, Café Notes. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  }
+}

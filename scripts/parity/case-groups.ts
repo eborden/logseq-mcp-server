@@ -23,6 +23,7 @@ import { resolveRefsCases } from './cases/resolve-refs.js';
 import { resourcesCases } from './cases/resources.js';
 import { searchBlocksCases } from './cases/search-blocks.js';
 import { searchByRelationshipCases } from './cases/search-by-relationship.js';
+import { suggestionsCases } from './cases/suggestions.js';
 import type { ParityCase } from './harness.js';
 import { REPO_ROOT } from './ts-server.js';
 
@@ -53,7 +54,8 @@ export const CASE_GROUPS: CaseGroup[] = [
   { name: 'resolve-refs', cases: resolveRefsCases },
   { name: 'resources', cases: resourcesCases },
   { name: 'search-blocks', cases: searchBlocksCases },
-  { name: 'search-by-relationship', cases: searchByRelationshipCases }
+  { name: 'search-by-relationship', cases: searchByRelationshipCases },
+  { name: 'suggestions', cases: suggestionsCases }
 ];
 
 /** Where a group's results, recorded from the TypeScript server, are kept. */
