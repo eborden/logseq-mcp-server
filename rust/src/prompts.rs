@@ -451,8 +451,17 @@ pub fn get(name: &str, arguments: Option<&JsonObject>, today: CalendarDate) -> R
         let available: Vec<&str> = DEFINITIONS.iter().map(|d| d.name).collect();
         invalid(&format!("Unknown prompt {}. Available: {}.", quoted(name), available.join(", ")))
     })?;
-    let empty = JsonObject::new();
-    let raw = arguments.unwrap_or(&empty);
+    // PARITY(#299): the SDK's zod `record` parse copies the arguments with plain assignment, and assigning a
+    // string to `__proto__` is a no-op, so the TypeScript server never sees that key (suspected TS bug: an
+    // argument is silently dropped). A value that is not a string is still an error there, as for any key -
+    // drop if Rust becomes the only server.
+    let raw: JsonObject = arguments
+        .into_iter()
+        .flatten()
+        .filter(|(key, value)| !(key.as_str() == "__proto__" && value.is_string()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let raw = &raw;
     // Every value must be a string. The TypeScript SDK checks this before the prompt sees the request (and
     // answers -32603 with the zod issues); a malformed argument is `InvalidParams` here.
     let mut strings = Arguments::new();
@@ -595,6 +604,24 @@ mod tests {
         assert_eq!(
             text_of("prioritize_tasks", json!({"b": "x", "10": "y", "2": "z"}), TUESDAY).unwrap_err(),
             r#"MCP error -32602: Prompt "prioritize_tasks" has no argument "2", "10", "b". Arguments: focus."#
+        );
+    }
+
+    #[test]
+    fn a_proto_argument_that_is_a_string_is_dropped_and_constructor_is_not() {
+        // PARITY(#299): the TypeScript SDK never sees a `__proto__` key
+        let plain = text_of("continue_on", json!({"topic": "atlas"}), TUESDAY).unwrap();
+        let with = |args: &str| text_of("continue_on", serde_json::from_str(args).unwrap(), TUESDAY);
+        assert_eq!(with(r#"{"topic": "atlas", "__proto__": "x"}"#).unwrap(), plain);
+        assert_eq!(
+            with(r#"{"__proto__": 5, "topic": "atlas"}"#).unwrap_err(),
+            r#"MCP error -32602: Argument "__proto__" of prompt "continue_on" must be a string."#,
+            "a value that is not a string is refused as for any key (TypeScript's SDK refuses it too, with -32603)"
+        );
+        assert!(with(r#"{"__proto__": "x"}"#).unwrap_err().contains("needs a non-empty \"topic\" argument"));
+        assert_eq!(
+            with(r#"{"topic": "atlas", "constructor": "z", "__proto__": "y"}"#).unwrap_err(),
+            r#"MCP error -32602: Prompt "continue_on" has no argument "constructor". Arguments: topic."#
         );
     }
 
