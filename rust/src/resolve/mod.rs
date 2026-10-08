@@ -287,6 +287,18 @@ mod tests {
     }
 
     #[test]
+    fn a_year_before_1000_is_a_name_here_and_a_date_in_typescript() {
+        // DIFFERENT FROM TYPESCRIPT, on purpose: it sends the seven-digit journal day 9991231 for
+        // this, so for TypeScript it is one call and no suggestions. A journal day here is eight
+        // digits, so it is a plain name, which costs the leaf query and the suggestions
+        // (`get_page_outline_calls.rs` counts them). The harness can't express an accepted
+        // difference without weakening its comparison, so there is no parity case.
+        assert_eq!(iso_date_to_journal_day("0999-12-31"), None);
+        assert_eq!(iso_date_to_journal_day("0100-01-01"), None);
+        assert_eq!(iso_date_to_journal_day("1000-01-01").map(JournalDay::as_int), Some(10000101));
+    }
+
+    #[test]
     fn an_exact_name_wins_over_an_alias_of_the_same_name() {
         let rows = vec![row(10, "atlas", "Atlas", true, Some("name")), row(11, "project atlas", "Project Atlas", true, Some("alias"))];
         assert_eq!(found_name(resolve("atlas", rows)), ("Atlas".into(), MatchedBy::Name));
