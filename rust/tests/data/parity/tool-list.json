@@ -1,0 +1,677 @@
+[
+  {
+    "name": "logseq_build_context",
+    "title": "Build Context",
+    "annotations": {
+      "title": "Build Context",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n**Use when:** researching or explaining a topic that has a page.\n**Can't find:** topics with no page (use logseq_search_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic_name": {
+          "description": "Topic to build context for (page name, alias or ISO date)",
+          "type": "string"
+        },
+        "max_blocks": {
+          "description": "Maximum number of blocks to include (default: 50)",
+          "default": 50,
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_related_pages": {
+          "description": "Maximum number of related pages to include (default: 10)",
+          "default": 10,
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_references": {
+          "description": "Maximum number of reference blocks to include (default: 20)",
+          "default": 20,
+          "type": "integer",
+          "minimum": 0
+        },
+        "include_temporal_context": {
+          "description": "Include temporal context for journal pages (default: true)",
+          "default": true,
+          "type": "boolean"
+        },
+        "resolve_refs": {
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "default": false,
+          "type": "boolean"
+        },
+        "format": {
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
+          "type": "string",
+          "enum": [
+            "json",
+            "markdown"
+          ]
+        },
+        "compact": {
+          "description": "Block snippets and uuids, no bodies. Read one with logseq_get_block",
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "topic_name"
+      ]
+    }
+  },
+  {
+    "name": "logseq_check_links",
+    "title": "Check Links",
+    "annotations": {
+      "title": "Check Links",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.\n\n**Can't find:** a link to the wrong page, or a name split across a ref.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "description": "Text before linking",
+          "type": "string",
+          "maxLength": 50000
+        },
+        "after": {
+          "description": "before plus [[links]], at most 500 distinct terms",
+          "type": "string",
+          "maxLength": 50000
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ]
+    }
+  },
+  {
+    "name": "logseq_get_backlinks",
+    "title": "Get Backlinks",
+    "annotations": {
+      "title": "Get Backlinks",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n**Use when:** \"what links to X?\" or \"where is X used?\"\n**Can't find:** unlinked text mentions (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n**Alternatives:** logseq_build_context for related pages.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_name": {
+          "description": "Page to get backlinks for (name, alias or ISO date)",
+          "type": "string"
+        },
+        "max_pages": {
+          "description": "Max source pages (default: 20, max: 100)",
+          "default": 20,
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_blocks_per_page": {
+          "description": "Max linking blocks per source page (default: 10, max: 50)",
+          "default": 10,
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "page_name"
+      ]
+    }
+  },
+  {
+    "name": "logseq_get_block",
+    "title": "Get Block",
+    "annotations": {
+      "title": "Get Block",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.\n\n**Can't find:** blocks by text (logseq_search_blocks) or by numeric id. For a whole page use logseq_get_page.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "block_uuid": {
+          "description": "UUID of the block to retrieve",
+          "type": "string"
+        },
+        "include_children": {
+          "description": "Whether to include child blocks",
+          "default": false,
+          "type": "boolean"
+        },
+        "resolve_refs": {
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "default": false,
+          "type": "boolean"
+        },
+        "format": {
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
+          "type": "string",
+          "enum": [
+            "json",
+            "markdown"
+          ]
+        }
+      },
+      "required": [
+        "block_uuid"
+      ]
+    }
+  },
+  {
+    "name": "logseq_get_concept_evolution",
+    "title": "Get Concept Evolution",
+    "annotations": {
+      "title": "Get Concept Evolution",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.\n\n**Use when:** \"how has X evolved?\" or \"what's the history of Y?\"\n**Can't find:** unlinked plain-text mentions (logseq_search_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n**Alternatives:** logseq_query_by_date_range for plain journal queries.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "concept_name": {
+          "description": "Concept to track (page name, alias or ISO date)",
+          "type": "string"
+        },
+        "start_date": {
+          "description": "Optional start date in YYYYMMDD format",
+          "type": "number"
+        },
+        "end_date": {
+          "description": "Optional end date in YYYYMMDD format",
+          "type": "number"
+        },
+        "group_by": {
+          "description": "Optional grouping period",
+          "type": "string",
+          "enum": [
+            "day",
+            "week",
+            "month"
+          ]
+        },
+        "max_entries": {
+          "description": "Max mentions, oldest first (default: 100, max: 500)",
+          "default": 100,
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "concept_name"
+      ]
+    }
+  },
+  {
+    "name": "logseq_get_concept_network",
+    "title": "Get Concept Network",
+    "annotations": {
+      "title": "Get Concept Network",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n**Can't find:** unlinked pages, or what pages say (logseq_build_context).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "concept_name": {
+          "description": "Root concept (page name, alias or ISO date)",
+          "type": "string"
+        },
+        "max_depth": {
+          "description": "Maximum depth to traverse (default: 2, max: 3)",
+          "default": 2,
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_nodes": {
+          "description": "Maximum pages in the network, root included (default: 50, max: 500)",
+          "default": 50,
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_fanout": {
+          "description": "Maximum new pages any one page may add (default: 15, max: 100)",
+          "default": 15,
+          "type": "integer",
+          "minimum": 1
+        },
+        "expand_journals": {
+          "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.",
+          "default": false,
+          "type": "boolean"
+        },
+        "format": {
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
+          "type": "string",
+          "enum": [
+            "json",
+            "markdown"
+          ]
+        }
+      },
+      "required": [
+        "concept_name"
+      ]
+    }
+  },
+  {
+    "name": "logseq_get_context_for_query",
+    "title": "Get Context for Query",
+    "annotations": {
+      "title": "Get Context for Query",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Context for a natural-language question. Takes [[page]] and #tag topics from the query, else searches its first 3 words over 3 letters (max 100 hits), and builds context for each.\n\n**Can't find:** meaning, or over 100 keyword hits (put specific words first). Topics come from links, tags or literal words, so put page names in [[brackets]].\n**Alternatives:** logseq_build_context for one known topic.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "Natural language query (can include [[page references]] and #tags)",
+          "type": "string"
+        },
+        "max_topics": {
+          "description": "Maximum number of topics to extract context for (default: 5)",
+          "default": 5,
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_search_results": {
+          "description": "Maximum number of search results for queries without explicit topics (default: 20, max: 100)",
+          "default": 20,
+          "type": "integer",
+          "minimum": 0
+        },
+        "format": {
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
+          "type": "string",
+          "enum": [
+            "json",
+            "markdown"
+          ]
+        },
+        "compact": {
+          "description": "Block snippets and uuids, no bodies. Read one with logseq_get_block",
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "logseq_get_current_context",
+    "title": "Get Current Context",
+    "annotations": {
+      "title": "Get Current Context",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "description": "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n**Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_build_context or logseq_get_page.\n\n**Can't find:** anything not open right now. Returns page: null with a message when no page is open.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "logseq_get_graph_info",
+    "title": "Get Graph Info",
+    "annotations": {
+      "title": "Get Graph Info",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Get the connected graph's name and filesystem path.\n\n**Use when:** confirming which graph is attached or debugging paths.\n**Can't find:** anything about content. See logseq_list_pages and logseq_build_context.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "logseq_get_page",
+    "title": "Get Page",
+    "annotations": {
+      "title": "Get Page",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Get a page by name (case-insensitive). With include_children, also its blocks.\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_search_blocks, logseq_list_pages) or what links here (logseq_get_backlinks).\n**Alternatives:** logseq_build_context adds related pages and references; logseq_get_page_outline for a long page.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_name": {
+          "description": "Page name, alias, or ISO date (2025-01-01) for a journal",
+          "type": "string"
+        },
+        "include_children": {
+          "description": "Whether to include child blocks/pages",
+          "default": false,
+          "type": "boolean"
+        },
+        "resolve_refs": {
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "default": false,
+          "type": "boolean"
+        },
+        "format": {
+          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
+          "type": "string",
+          "enum": [
+            "json",
+            "markdown"
+          ]
+        }
+      },
+      "required": [
+        "page_name"
+      ]
+    }
+  },
+  {
+    "name": "logseq_get_page_outline",
+    "title": "Get Page Outline",
+    "annotations": {
+      "title": "Get Page Outline",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "List a page's top-level blocks: uuid, the first line (80 characters) and the number of children. Cheaper than logseq_get_page for a long page.\n\n**Use when:** you need a page's shape before reading parts of it. Read the blocks you pick with logseq_get_block.\n**Can't find:** nested blocks below the first level, or block text past the first line (logseq_get_block, logseq_get_page).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page_name": {
+          "description": "Page name, alias, or ISO date (2025-01-01) for a journal",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page_name"
+      ]
+    }
+  },
+  {
+    "name": "logseq_list_pages",
+    "title": "List Pages",
+    "annotations": {
+      "title": "List Pages",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "List non-journal pages as { name, aliases? }, filtered by name_contains (substring of name or alias). Aliases nest under pages.\n\n**Use when:** unsure which pages exist or what the user calls something.\n**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.\n**Next:** logseq_get_page.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name_contains": {
+          "description": "Filter pages whose name or alias contains this text (case-insensitive)",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Max pages (default: 200, max: 1000)",
+          "default": 200,
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset": {
+          "description": "Pages to skip, in name order; shifts if the graph changes",
+          "default": 0,
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "logseq_query_by_date_range",
+    "title": "Query by Date Range",
+    "annotations": {
+      "title": "Query by Date Range",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.\n\n**Use when:** \"what did I do last week?\" or catching up. summary.topConcepts shows what a period was about.\n**Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n**Alternatives:** logseq_get_concept_evolution, logseq_search_blocks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "start_date": {
+          "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
+          "type": "number"
+        },
+        "end_date": {
+          "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date",
+          "type": "number"
+        },
+        "last_n": {
+          "description": "The N most recent journals that exist (whole number, 1+), newest first",
+          "type": "integer",
+          "minimum": 1
+        },
+        "preset": {
+          "description": "Named period in local time; weeks run Monday to Sunday",
+          "type": "string",
+          "enum": [
+            "today",
+            "yesterday",
+            "this_week",
+            "last_week",
+            "this_month",
+            "last_month",
+            "this_year",
+            "year_to_date"
+          ]
+        },
+        "search_term": {
+          "description": "Optional search term to filter blocks",
+          "type": "string"
+        },
+        "slim_results": {
+          "description": "Slim blocks (default). false returns full entities",
+          "default": true,
+          "type": "boolean"
+        },
+        "include_content": {
+          "description": "false returns only per-day block counts and top-level snippets",
+          "default": true,
+          "type": "boolean"
+        },
+        "top_concepts_limit": {
+          "description": "Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it",
+          "default": 10,
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolve_refs": {
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "default": false,
+          "type": "boolean"
+        },
+        "max_blocks": {
+          "description": "Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000",
+          "default": 200,
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "logseq_query_by_property",
+    "title": "Query by Property",
+    "annotations": {
+      "title": "Query by Property",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.\n\n**Matching:** key as stored (created-at) or camelCase; values are exact strings (\"42\", \"true\"); a multi-value property matches if any one value equals it. Flat list with page name, no children.\n**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_search_blocks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "property_key": {
+          "description": "Name of the property to query (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent)",
+          "type": "string"
+        },
+        "property_value": {
+          "description": "Value to match for the property. For multi-value properties, matches if any one value equals it",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "limit": {
+          "description": "Max blocks to return (default: 100, max: 500)",
+          "default": 100,
+          "type": "integer",
+          "minimum": 0
+        },
+        "slim_results": {
+          "description": "Slim blocks (default). false returns full entities",
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "property_key",
+        "property_value"
+      ]
+    }
+  },
+  {
+    "name": "logseq_search_blocks",
+    "title": "Search Blocks",
+    "annotations": {
+      "title": "Search Blocks",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.\n\n**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).\n**Next:** logseq_build_context on a result's page.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "Text to search for in block content",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum number of results to return (default: 100, max: 500)",
+          "type": "integer",
+          "minimum": 0
+        },
+        "include_context": {
+          "description": "Include semantic context (page, references, tags)",
+          "default": false,
+          "type": "boolean"
+        },
+        "slim_results": {
+          "description": "Slim blocks (default). false returns full entities",
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "logseq_search_by_relationship",
+    "title": "Search by Relationship",
+    "annotations": {
+      "title": "Search by Relationship",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n**Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.\n**Alternatives:** logseq_search_blocks (keywords), logseq_get_concept_network (overview).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic_a": {
+          "description": "Primary topic to search for (page name, alias or ISO date)",
+          "type": "string"
+        },
+        "topic_b": {
+          "description": "Related topic that defines the relationship (page name, alias or ISO date)",
+          "type": "string"
+        },
+        "relationship_type": {
+          "description": "Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)",
+          "type": "string",
+          "enum": [
+            "references",
+            "referenced-by",
+            "in-pages-linking-to",
+            "connected-within"
+          ]
+        },
+        "max_distance": {
+          "description": "Maximum graph distance for connected-within (default: 2)",
+          "default": 2,
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "description": "Max results (default: 50, max: 500). connected-within counts every block of both pages, nested ones too, topic A's first; a block that lost children has childrenTruncated",
+          "default": 50,
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "topic_a",
+        "topic_b",
+        "relationship_type"
+      ]
+    }
+  }
+]
