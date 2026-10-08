@@ -18,9 +18,14 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
 }
 
 /// A tool's `inputSchema`, generated from the type its arguments are parsed into, so the two
-/// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, `$defs` and `$ref`
-/// for enums, `null` in an `Option`'s type, `format` on numbers). The parity harness compares
-/// schemas by meaning (#292), so zod's serialization isn't copied, only the contract:
+/// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, `null` in an
+/// `Option`'s type, `format` on numbers). The parity harness compares schemas by meaning (#292), so
+/// zod's serialization isn't copied, only the contract:
+/// - every named type (an enum such as `format`) is written where it is used, with no `$defs` and
+///   no `$ref` (`inline_subschemas`): the MCP SDK's client drops `$defs` from a tool's `inputSchema`
+///   (the parity harness reads the list through that client, and so do real clients), so a `$ref`
+///   into it would point at nothing there. A type needs no attribute of its own, so none can be
+///   forgotten, and the assert below fails on a `$defs` that gets through anyway;
 /// - the top-level `title` and `description` (the Rust type's name and doc comment, not part of
 ///   the contract) are dropped, as rmcp's own `schema_for_input` does;
 /// - an argument type with no fields still gets `"properties": {}`, as rmcp's own empty-input
@@ -33,7 +38,7 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
 ///   does with a bad value (`2.5`, `-1`, `"5"`) is `crate::args::Arguments` (`optional_count`,
 ///   `count_or`), which reads a count up to 2^53 - 1 as a `u64`, not serde.
 pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
-    let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+    let generator = schemars::generate::SchemaSettings::draft2020_12().with(|settings| settings.inline_subschemas = true).into_generator();
     let Value::Object(mut schema) = serde_json::to_value(generator.into_root_schema_for::<T>()).expect("a schema serializes")
     else {
         panic!("a tool's argument type must produce an object schema");
@@ -42,6 +47,7 @@ pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     schema.remove("description");
     assert_eq!(schema.get("type"), Some(&json!("object")), "a tool's arguments must be an object");
     assert!(!schema.contains_key("additionalProperties"), "a tool's arguments must ignore unknown fields");
+    assert!(!schema.contains_key("$defs"), "a tool's schema must have no $defs, which the MCP SDK's client drops");
     schema.entry("properties").or_insert_with(|| json!({}));
     Arc::new(schema)
 }
@@ -275,7 +281,9 @@ mod tests {
     #[test]
     fn the_schema_is_schemars_own_with_no_zod_quirks_copied() {
         let schema = schema_of::<SampleArgs>();
-        assert!(schema.get("$defs").is_some_and(|defs| defs.get("Format").is_some()), "{schema}");
+        // a named type is written in place: the MCP SDK's client drops `$defs`, so a `$ref` would dangle
+        assert!(schema.get("$defs").is_none() && !schema.to_string().contains("$ref"), "{schema}");
+        assert_eq!(schema["properties"]["format"]["enum"], json!(["json", "markdown", null]), "{schema}");
         assert_eq!(schema["properties"]["limit"]["type"], json!(["number", "null"]));
         assert!(schema.get("title").is_none() && schema.get("description").is_none());
         assert!(schema.get("additionalProperties").is_none());
