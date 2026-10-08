@@ -23,4 +23,5 @@ pub mod server;
 pub mod tips;
 pub mod tool;
 pub mod tools;
+pub mod truncation;
 pub mod wire;
