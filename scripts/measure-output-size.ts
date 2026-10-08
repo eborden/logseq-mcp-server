@@ -10,13 +10,17 @@
  * never the message text, so the output is safe to read. Quote it as approximate
  * percentages and not verbatim.
  *
- * Usage: npx tsx scripts/measure-output-size.ts [pageName]
- * Requires LogSeq running with the HTTP API enabled, and the Rust debug build (`cd rust && cargo build`).
- * Read-only. With no LOGSEQ_MCP_CONFIG it reads the real graph on purpose: the counts are a real-graph baseline.
+ * Usage: npx tsx scripts/measure-output-size.ts [--server ts|rust] [--rust-binary <path>] [pageName]
+ * `--server rust` runs the Rust binary over MCP stdio instead of the TypeScript server (#353); the
+ * setup queries that pick the subject go straight to LogSeq either way, so both measure the same pages.
+ * Requires LogSeq running with the HTTP API enabled. Read-only.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { loadConfig, LogseqClient, resolveConfigPath } from './lib/logseq-api.js';
-import { connectMcpToApi } from './lib/rust-server.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { loadConfig, resolveConfigPath } from '../src/config.js';
+import { LogseqClient } from '../src/client.js';
+import { createServer } from '../src/index.js';
+import { parseServerFlags, startRustServer } from './measure-server.js';
 
 type Args = Record<string, unknown>;
 
@@ -38,6 +42,8 @@ async function jsonOf(mcp: Client, name: string, args: Args): Promise<any> {
 const pct = (slim: number, full: number) => (full === 0 ? '  n/a' : `${(((full - slim) / full) * 100).toFixed(0).padStart(4)}%`);
 
 async function main() {
+  const choice = parseServerFlags(process.argv.slice(2));
+  if (choice.kind === 'ts-mcp') throw new Error('--server takes ts or rust here: this script always goes through MCP');
   // LOGSEQ_MCP_CONFIG if set (e.g. the fixture instance), else ~/.logseq-mcp/config.json
   const config = await loadConfig(resolveConfigPath());
   const logseq = new LogseqClient(config);
@@ -48,7 +54,7 @@ async function main() {
   ]);
   const counts = new Map<string, number>();
   for (const [n] of refRows) counts.set(n, (counts.get(n) ?? 0) + 1);
-  const subject = process.argv[2] ?? [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const subject = choice.rest[0] ?? [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 
   // A property key/value that exists, so query_by_property has something to return
   const propRows = await logseq.callAPI<Array<[{ properties?: Record<string, unknown> }]>>('logseq.DB.datascriptQuery', [
@@ -66,8 +72,18 @@ async function main() {
   const topPair = [...pairCounts.entries()].sort((a, b) => b[1] - a[1])[0];
   const [propKey, propValue] = topPair ? (JSON.parse(topPair[0]) as [string, string]) : [undefined, undefined];
 
-  // The server talks to LogSeq itself, with the same URL and token (a home of its own: no other config to find)
-  const mcp: Client = await connectMcpToApi({ apiUrl: config.apiUrl, authToken: config.authToken }, { tips: true });
+  let mcp: Client;
+  let closeRust: (() => Promise<void>) | undefined;
+  if (choice.kind === 'rust') {
+    const rust = await startRustServer(choice.rustBinary, config, false);
+    mcp = rust.mcp;
+    closeRust = rust.close;
+  } else {
+    const server = createServer(logseq, { tips: true });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    mcp = new Client({ name: 'measure-output-size', version: '1.0.0' }, { capabilities: {} });
+    await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+  }
 
   const slimCases: Array<[string, string, Args]> = [
     ['search_blocks (limit 50)', 'logseq_search_blocks', { query: subject.slice(0, 4), limit: 50 }],
@@ -130,7 +146,8 @@ async function main() {
     console.log(`${'build_context: markdown'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextMarkdown).padStart(9)}  ${pct(contextMarkdown, contextJson)}`);
     console.log(`${'build_context: compact json'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextCompact).padStart(9)}  ${pct(contextCompact, contextJson)}`);
   }
-  await mcp.close();
+  if (closeRust) await closeRust();
+  else await mcp.close();
 }
 
 main().catch((e: unknown) => {
