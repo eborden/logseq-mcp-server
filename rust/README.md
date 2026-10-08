@@ -85,7 +85,17 @@ changes.
 
 The whole `tools/list` is compared, and the cases cover every tool, `prompts/list`, `prompts/get`,
 `resources/list` and `resources/read` (the guide, a page and the unknown-URI error). CI runs exactly
-this. `--tested-tools-only` is still there for local use with a server that has only some tools:
+this for the debug build. The release binary (`cargo build --release --locked`) ignores `LOGSEQ_MCP_NOW`,
+so it reads the real date and can't match the 32 recorded results that depend on today (`last_n`, a preset,
+a weekly or monthly prompt for "this week"). `--real-clock` runs every other case against it, and
+`scripts/parity/clock-cases.ts` lists the ones it leaves out. CI does this after the release build, on
+`main` and on a manual run (#359):
+
+```bash
+node node_modules/vite-node/vite-node.mjs scripts/parity.ts --real-clock "$PWD/rust/target/release/logseq-mcp-server"
+```
+
+`--tested-tools-only` is still there for local use with a server that has only some tools:
 `tools/list` is compared for the tools the cases call, and the server must list those and no others.
 Fixtures are made up (BR-0001).
 

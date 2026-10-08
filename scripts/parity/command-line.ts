@@ -6,12 +6,14 @@ import { typescriptServer } from './ts-server.js';
 export const USAGE =
   'usage: npx tsx scripts/parity.ts [--perturb | --self-check] [-- <server command> [args...]]\n' +
   '       npx tsx scripts/parity.ts --tested-tools-only -- <server command> [args...]   (a server with only some tools, for local use)\n' +
-  '       npx tsx scripts/parity.ts --record   (TypeScript server only; review the JSON diff; never in CI)';
+  '       npx tsx scripts/parity.ts --real-clock -- <server command> [args...]   (a server that reads the system clock, like the Rust release build: the cases that read today are left out)\n' +
+  '       npx tsx scripts/parity.ts --record  (TypeScript server only; review the JSON diff; never in CI)';
 
 export function parseCommandLine(argv: string[]): {
   mode: 'check' | 'record' | 'perturb' | 'self-check';
   server: ServerCommand;
   onlyTestedTools: boolean;
+  realClock: boolean;
 } {
   // The command follows `--`. vite-node, which CI runs this with from the lockfile, swallows every
   // `--` before the script sees its arguments, so without one the command starts at the first
@@ -21,7 +23,8 @@ export function parseCommandLine(argv: string[]): {
   const commandAt = dashes !== -1 ? dashes + 1 : bare;
   const allFlags = dashes !== -1 ? argv.slice(0, dashes) : bare === -1 ? argv : argv.slice(0, bare);
   const onlyTestedTools = allFlags.includes('--tested-tools-only');
-  const flags = allFlags.filter(flag => flag !== '--tested-tools-only');
+  const realClock = allFlags.includes('--real-clock');
+  const flags = allFlags.filter(flag => flag !== '--tested-tools-only' && flag !== '--real-clock');
   const command = commandAt === -1 ? [] : argv.slice(commandAt);
   const modes = flags.map(flag => {
     if (flag === '--record') return 'record' as const;
@@ -37,6 +40,9 @@ export function parseCommandLine(argv: string[]): {
   if (onlyTestedTools && modes[0] === 'record') {
     throw new Error(`--record needs the whole tools/list, so it can't take --tested-tools-only\n${USAGE}`);
   }
+  if (realClock && modes[0] === 'record') {
+    throw new Error(`--record needs every case, so it can't take --real-clock\n${USAGE}`);
+  }
   const server = command.length > 0 ? { command: command[0], args: command.slice(1) } : typescriptServer();
-  return { mode: modes[0] ?? 'check', server, onlyTestedTools };
+  return { mode: modes[0] ?? 'check', server, onlyTestedTools, realClock };
 }
