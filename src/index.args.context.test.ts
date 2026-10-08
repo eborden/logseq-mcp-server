@@ -360,8 +360,10 @@ describe('values that pass the parser keep their old meaning', () => {
     expect(capped.hasMore).toBe(true);
   });
 
-  it('build_context: a fractional max_blocks is cut down to a whole number of blocks', async () => {
-    expect((await body('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).directBlocks).toHaveLength(1);
+  it('build_context: a fractional max_blocks is rejected before any call, not cut down (#293)', async () => {
+    expect(await rejection('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).toContain(
+      "Invalid parameter 'max_blocks': 1.5\n\nExpected: an integer, not a number"
+    );
   });
 
   it('list_pages: an empty name_contains is still no filter', async () => {

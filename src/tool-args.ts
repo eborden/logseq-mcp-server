@@ -85,18 +85,18 @@ export const getPageOutlineArgs = z.object({
 });
 
 /**
- * `max_pages` and `max_blocks_per_page` (#61) are plain `z.number()`, like `limit` on
- * search_blocks: the tool clamps them to 0..100 and 0..50 and floors them, so a larger
- * value is clamped, not rejected.
+ * `max_pages` and `max_blocks_per_page` (#61) are integers with no schema bounds, like
+ * `limit` on search_blocks: the tool clamps them to 0..100 and 0..50, so a larger value
+ * is clamped, not rejected.
  */
 export const getBacklinksArgs = z.object({
   page_name: z.string().describe('Page to get backlinks for (name, alias or ISO date)'),
   max_pages: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_PAGES)
     .describe(`Max source pages (default: ${DEFAULT_MAX_PAGES}, max: ${MAX_PAGES})`),
   max_blocks_per_page: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_BLOCKS_PER_PAGE)
     .describe(`Max linking blocks per source page (default: ${DEFAULT_MAX_BLOCKS_PER_PAGE}, max: ${MAX_BLOCKS_PER_PAGE})`),
 });
@@ -113,8 +113,9 @@ export const searchBlocksArgs = z.object({
   // No advertised default: absent reaches the tool as undefined, and the tool uses 100.
   // The tool clamps it to 500 and reports a cut there (#61); no schema `maximum`, so a
   // larger value is clamped, not rejected. A negative limit returns no blocks, as it always did.
+  // A count, so a fraction is rejected (#293), as with every count and limit below.
   limit: z
-    .number()
+    .int()
     .optional()
     .describe(`Maximum number of results to return (default: ${DEFAULT_SEARCH_LIMIT}, max: ${MAX_SEARCH_LIMIT})`),
   include_context: z.boolean().default(false).describe('Include semantic context (page, references, tags)'),
@@ -130,31 +131,31 @@ export const queryByPropertyArgs = z.object({
   property_value: z
     .union([z.string(), z.number(), z.boolean()])
     .describe('Value to match for the property. For multi-value properties, matches if any one value equals it'),
-  // Plain `z.number()`, like `limit` on search_blocks: the tool floors it and clamps it to 0..500,
+  // An integer with no schema bounds, like `limit` on search_blocks: the tool clamps it to 0..500,
   // so a larger value is clamped (and reported), not rejected (#61)
   limit: z
-    .number()
+    .int()
     .default(DEFAULT_PROPERTY_LIMIT)
     .describe(`Max blocks to return (default: ${DEFAULT_PROPERTY_LIMIT}, max: ${MAX_PROPERTY_LIMIT})`),
   slim_results: slimResultsArg,
 });
 
 /**
- * Numbers are plain `z.number()`: NaN and ±Infinity are rejected, but negative and
- * fractional values pass to the handler, which clamps them as it always did
+ * Integers with no schema bounds: fractions, NaN and ±Infinity are rejected (#293),
+ * but negative values pass to the handler, which clamps them as it always did
  * (`max_depth` <= 3, `max_nodes` <= 500, `max_fanout` <= 100; the tool floors
- * `max_nodes` and `max_fanout` at 1). `.int()` or `.min()` would also change the
- * advertised schema (`integer`, `minimum`).
+ * `max_nodes` and `max_fanout` at 1). `.min()` would also change the advertised
+ * schema (`minimum`).
  */
 export const getConceptNetworkArgs = z.object({
   concept_name: z.string().describe('Root concept (page name, alias or ISO date)'),
-  max_depth: z.number().default(DEFAULT_MAX_DEPTH).describe('Maximum depth to traverse (default: 2, max: 3)'),
+  max_depth: z.int().default(DEFAULT_MAX_DEPTH).describe('Maximum depth to traverse (default: 2, max: 3)'),
   max_nodes: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_NODES)
     .describe('Maximum pages in the network, root included (default: 50, max: 500)'),
   max_fanout: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_FANOUT)
     .describe('Maximum new pages any one page may add (default: 15, max: 100)'),
   expand_journals: z
@@ -176,13 +177,13 @@ export const searchByRelationshipArgs = z.object({
     ),
   // No clamp: a negative distance walks no hops, as it always did
   max_distance: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_DISTANCE)
     .describe('Maximum graph distance for connected-within (default: 2)'),
-  // Plain `z.number()`: the tool floors it and clamps it to 0..500, so a larger value is
+  // An integer with no schema bounds: the tool clamps it to 0..500, so a larger value is
   // clamped (and reported), not rejected (#61)
   limit: z
-    .number()
+    .int()
     .default(DEFAULT_RELATIONSHIP_LIMIT)
     .describe(
       `Max results (default: ${DEFAULT_RELATIONSHIP_LIMIT}, max: ${MAX_RELATIONSHIP_LIMIT}). connected-within counts every block of both pages, nested ones too, topic A's first; a block that lost children has childrenTruncated`
@@ -195,11 +196,11 @@ export const getContextForQueryArgs = z.object({
   // clamps max_search_results to 100, reporting a cut there (#61); no schema `maximum`,
   // so a larger value is clamped, not rejected.
   max_topics: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_TOPICS)
     .describe('Maximum number of topics to extract context for (default: 5)'),
   max_search_results: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_SEARCH_RESULTS)
     .describe(
       `Maximum number of search results for queries without explicit topics (default: ${DEFAULT_MAX_SEARCH_RESULTS}, max: ${MAX_SEARCH_RESULTS})`
@@ -216,15 +217,15 @@ export const getContextForQueryArgs = z.object({
 export const buildContextArgs = z.object({
   topic_name: z.string().describe('Topic to build context for (page name, alias or ISO date)'),
   max_blocks: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_BLOCKS)
     .describe('Maximum number of blocks to include (default: 50)'),
   max_related_pages: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_RELATED_PAGES)
     .describe('Maximum number of related pages to include (default: 10)'),
   max_references: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_REFERENCES)
     .describe('Maximum number of reference blocks to include (default: 20)'),
   include_temporal_context: z
@@ -237,17 +238,18 @@ export const buildContextArgs = z.object({
 });
 
 /**
- * Only the types are checked here. Which selection was given (exactly one of
+ * Only the types are checked here, counts as integers. Which selection was given (exactly one of
  * start_date + end_date, last_n or preset), the YYYYMMDD format, last_n >= 1 and
  * a whole top_concepts_limit >= 0 are still checked by `queryJournals`, the one
- * validation path for direct callers too. `max_blocks` (#61) is a plain `z.number()`
- * like `limit` on search_blocks: the tool clamps it to 0..1000 and floors it, so a
- * larger value is clamped, not rejected.
+ * validation path for direct callers too. `max_blocks` (#61) is an integer with no
+ * schema bounds, like `limit` on search_blocks: the tool clamps it to 0..1000, so a
+ * larger value is clamped, not rejected. Dates stay plain numbers: they are checked
+ * as YYYYMMDD, not counted.
  */
 export const queryByDateRangeArgs = z.object({
   start_date: z.number().optional().describe('Start date in YYYYMMDD format (e.g., 20251115). Needs end_date'),
   end_date: z.number().optional().describe('End date in YYYYMMDD format (e.g., 20251120). Needs start_date'),
-  last_n: z.number().optional().describe('The N most recent journals that exist (whole number, 1+), newest first'),
+  last_n: z.int().optional().describe('The N most recent journals that exist (whole number, 1+), newest first'),
   preset: z.enum(DATE_PRESETS).optional().describe('Named period in local time; weeks run Monday to Sunday'),
   search_term: z.string().optional().describe('Optional search term to filter blocks'),
   slim_results: slimResultsArg,
@@ -256,12 +258,12 @@ export const queryByDateRangeArgs = z.object({
     .default(true)
     .describe('false returns only per-day block counts and top-level snippets'),
   top_concepts_limit: z
-    .number()
+    .int()
     .default(DEFAULT_TOP_CONCEPTS_LIMIT)
     .describe('Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it'),
   resolve_refs: resolveRefsArg,
   max_blocks: z
-    .number()
+    .int()
     .default(DEFAULT_DATE_RANGE_MAX_BLOCKS)
     .describe(
       `Max blocks across all days, nested ones counted (top-level with include_content false), default ${DEFAULT_DATE_RANGE_MAX_BLOCKS}, max ${MAX_DATE_RANGE_BLOCKS}`
@@ -271,8 +273,8 @@ export const queryByDateRangeArgs = z.object({
 /**
  * Types only. The tool does no range checks on the dates: 0 or an absent date is
  * no bound, and any other number is compared with each block's YYYYMMDD day.
- * `max_entries` (#61) is a plain `z.number()`, like `limit` on search_blocks: the
- * tool clamps it to 0..500 and floors it, so a larger value is clamped, not rejected.
+ * `max_entries` (#61) is an integer with no schema bounds, like `limit` on
+ * search_blocks: the tool clamps it to 0..500, so a larger value is clamped, not rejected.
  */
 export const getConceptEvolutionArgs = z.object({
   concept_name: z.string().describe('Concept to track (page name, alias or ISO date)'),
@@ -280,26 +282,25 @@ export const getConceptEvolutionArgs = z.object({
   end_date: z.number().optional().describe('Optional end date in YYYYMMDD format'),
   group_by: z.enum(GROUP_BY_PERIODS).optional().describe('Optional grouping period'),
   max_entries: z
-    .number()
+    .int()
     .default(DEFAULT_MAX_ENTRIES)
     .describe(`Max mentions, oldest first (default: ${DEFAULT_MAX_ENTRIES}, max: ${MAX_ENTRIES})`),
 });
 
 /**
  * An empty `name_contains` is no filter, as the tool always read it. `limit` and
- * `offset` (#61) are plain `z.number()`, like `limit` on search_blocks: `.int()`
- * would advertise `integer` with a safe-integer `maximum`. The tool clamps
- * `limit` to 0..1000 and `offset` to 0 and up, flooring both, so a larger
- * limit is clamped, not rejected.
+ * `offset` (#61) are integers with no schema bounds, like `limit` on search_blocks
+ * (`toInputSchema` drops zod's safe-integer `minimum` and `maximum`). The tool clamps
+ * `limit` to 0..1000 and `offset` to 0 and up, so a larger limit is clamped, not rejected.
  */
 export const listPagesArgs = z.object({
   name_contains: z.string().optional().describe('Filter pages whose name or alias contains this text (case-insensitive)'),
   limit: z
-    .number()
+    .int()
     .default(DEFAULT_LIST_PAGES_LIMIT)
     .describe(`Max pages (default: ${DEFAULT_LIST_PAGES_LIMIT}, max: ${MAX_LIST_PAGES_LIMIT})`),
   offset: z
-    .number()
+    .int()
     .default(DEFAULT_LIST_PAGES_OFFSET)
     .describe('Pages to skip, in name order; shifts if the graph changes'),
 });

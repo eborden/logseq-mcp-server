@@ -446,6 +446,7 @@ describe('numbers that pass the parser keep their old meaning', () => {
 
   it.each([
     [{ last_n: -1 }, 'last_n'],
+    // The fractions are rejected by the parser since #293, naming the same parameter
     [{ last_n: 2.5 }, 'last_n'],
     [{ last_n: 0 }, 'last_n'],
     [{ start_date: 2025, end_date: 20250107 }, 'start_date'],
@@ -456,9 +457,10 @@ describe('numbers that pass the parser keep their old meaning', () => {
     expect(await rejection('logseq_query_by_date_range', args)).toContain(`Invalid parameter '${param}'`);
   });
 
-  it('search_blocks: a fractional limit is cut down to a whole number of blocks', async () => {
-    const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: 2.5 });
-    expect(JSON.parse(result.content[0].text)).toHaveLength(2);
+  it('search_blocks: a fractional limit is rejected before any call, not cut down (#293)', async () => {
+    expect(await rejection('logseq_search_blocks', { ...SEARCH, limit: 2.5 })).toContain(
+      "Invalid parameter 'limit': 2.5\n\nExpected: an integer, not a number"
+    );
   });
 });
 
