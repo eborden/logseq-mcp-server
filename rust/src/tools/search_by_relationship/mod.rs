@@ -1,10 +1,10 @@
 //! `logseq_search_by_relationship` (the Rust side of `src/tools/search-by-relationship.ts`): blocks
 //! tied to topic A by a link to topic B, as `references`, `referenced-by` / `in-pages-linking-to`
-//! (one query, see below) or `connected-within` N hops (#7), cut to `limit` (#61, #183).
+//! (one query each, see below) or `connected-within` N hops (#7), cut to `limit` (#61, #183).
 //!
 //! Calls: the page resolver for each topic (1 query for an exact name, an alias or an ISO date; the
 //! two topics run together, and once when both are the same name), then the alias groups (1 query for
-//! both topics, none when neither has an alias link), then the search itself. `references` and
+//! both topics, none when neither has an alias link), then the search itself. `references`, `referenced-by` and
 //! `in-pages-linking-to` are 1 query. `connected-within` is O(`max_distance`): 1 query per hop,
 //! seeded with the resolved ids, ending at the first hop that reaches topic B, then the two page
 //! trees (2 `logseq.Editor.getPageBlocksTree` calls) only when a connection was found. Two names of
@@ -391,15 +391,24 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
             };
             results = fetch_blocks(client, query).await?;
         }
-        // Both types run the same query: blocks that reference topic A, on pages that also hold a block
-        // referencing topic B.
-        // PARITY(#299): `referenced-by` is documented as "pages referenced by topicB" but has always run this
-        // inbound reading, as `in-pages-linking-to` does (suspected TS bug) — drop if Rust becomes the only server.
-        RelationshipType::ReferencedBy | RelationshipType::InPagesLinkingTo => {
+        // Blocks that reference topic A, on pages that also hold a block referencing topic B (inbound: the
+        // pages that link to B).
+        RelationshipType::InPagesLinkingTo => {
             let query = if any_aliases {
                 queries::blocks_referencing_in_pages_linking_ids(&set_a.ids()?, &set_b.ids()?)?
             } else {
                 queries::blocks_referencing_in_pages_linking(&PageName::new(name_a), &PageName::new(name_b))
+            };
+            results = fetch_blocks(client, query).await?;
+        }
+        // Blocks that reference topic A, on pages that a block on topic B's page references (outbound: the
+        // pages B links to). The TypeScript server ran the inbound query here too, against its own
+        // description (#299, D5); the maintainer approved making it do what the description says.
+        RelationshipType::ReferencedBy => {
+            let query = if any_aliases {
+                queries::blocks_referencing_in_pages_referenced_by_ids(&set_a.ids()?, &set_b.ids()?)?
+            } else {
+                queries::blocks_referencing_in_pages_referenced_by(&PageName::new(name_a), &PageName::new(name_b))
             };
             results = fetch_blocks(client, query).await?;
         }
