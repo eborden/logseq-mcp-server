@@ -1,0 +1,36 @@
+[package]
+name = "logseq-mcp-server"
+# Not the server's version: serverInfo.version is read from ../package.json, as the TypeScript
+# server reads it (src/version.ts), so both report the same one.
+version = "0.0.0"
+edition = "2024"
+# rmcp 3.x needs 1.88. rust-toolchain.toml pins the same version for local builds and CI.
+rust-version = "1.88"
+publish = false
+description = "Spike: the LogSeq MCP server in Rust, beside the TypeScript one (ADR-0025, #122)"
+
+[dependencies]
+# The official MCP SDK. No macros (the tools are listed by hand, see src/server.rs) and only
+# the stdio transport.
+rmcp = { version = "3.5.1", default-features = false, features = ["server", "transport-io"] }
+# The async runtime rmcp is built on. Current-thread only: one stdio client at a time.
+tokio = { version = "1.47", default-features = false, features = ["rt", "macros"] }
+# HTTP to LogSeq's API. No TLS (the API is plain HTTP on localhost) and no default features.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# JSON in and out. Already in rmcp's tree. preserve_order keeps object keys in insertion order,
+# as JSON.stringify does: without it serde_json sorts them, and the byte-for-byte parity of
+# ADR-0025 Decision 2 would fail on key order alone.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Tool input schemas, generated from the same type serde parses the arguments into. Already in
+# rmcp's tree (rmcp's `server` feature turns it on).
+schemars = "1"
+
+[dev-dependencies]
+tokio = { version = "1.47", default-features = false, features = ["rt", "macros", "net", "io-util", "time"] }
+
+[profile.release]
+# Startup time and footprint are what the spike measures (#126).
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

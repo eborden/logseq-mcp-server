@@ -1,0 +1,4 @@
+[toolchain]
+# The oldest Rust that builds rmcp 3.x. CI reads this file too, so local and CI builds match.
+channel = "1.88.0"
+profile = "minimal"
