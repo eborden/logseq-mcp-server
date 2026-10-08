@@ -389,6 +389,28 @@ export const getBacklinksCases: ParityCase[] = [
     ]
   },
   {
+    // An error from the aliased query is an error result, not an empty list (BR-0003)
+    name: 'aliases: LogSeq error from the aliased query',
+    tool: TOOL,
+    arguments: { page_name: 'Atlas' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"atlas"'], [[pulled(ATLAS_WITH_ALIAS), 'name']])],
+      [query(aliasSetsQuery([10]), [], [member(10, ATLAS), member(10, PROJECT_ATLAS)])],
+      [query(linkedReferencesQuery([10, 11]), [], { error: 'Query timed out' })]
+    ]
+  },
+  {
+    // A block whose page has no id has no source page: it is dropped, with no warning
+    name: 'aliases: a block whose page has no id is dropped',
+    tool: TOOL,
+    arguments: { page_name: 'Atlas' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"atlas"'], [[pulled(ATLAS_WITH_ALIAS), 'name']])],
+      [query(aliasSetsQuery([10]), [], [member(10, ATLAS), member(10, PROJECT_ATLAS)])],
+      [query(linkedReferencesQuery([10, 11]), [], [pulledBlock(203, BOB, { page: { name: 'bob' } }), pulledBlock(201, BOB)])]
+    ]
+  },
+  {
     name: 'aliases: blocks in a shape the server cannot read',
     tool: TOOL,
     arguments: { page_name: 'Atlas' },
