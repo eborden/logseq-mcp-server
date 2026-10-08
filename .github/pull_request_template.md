@@ -45,15 +45,16 @@ empty result, oversized result. -->
 ## Test plan
 <!-- Tests added, and what each one pins. Measurements are approximate, no graph data. -->
 - [ ] Tests added: <what each pins>
-- [ ] `npx tsc --noEmit` passes
-- [ ] `npx vitest run src` passes
+- [ ] `cd rust && cargo test --locked` passes
+- [ ] `npx vite-node scripts/parity.ts` and its `--self-check` pass against the debug build (`cd rust && cargo build`)
+- [ ] `npm run typecheck` and `npx vitest run tests/guards tests/rust-guards` pass
 - [ ] `npm run test:integration` passes against this worktree's fixture instance, and `git status` shows no change under `tests/fixtures/graph/`
 - [ ] `npx tsx scripts/measure-api-calls.ts` still runs. Approximate calls before/after: <n / n>
 - [ ] Privacy grep done on the diff, commit messages and this description: no names or content from the personal graph (pass/fail only, no output pasted)
 
 ### If it applies (tick, or write N/A)
 - [ ] **ADR or business rule added, changed, superseded or retired**: this PR needs the maintainer's explicit OK before merge. A changed rule has a new Changelog row citing this PR. (An additive-only Mechanical enforcement edit needs no OK; say so here.)
-- [ ] **Tool contract changed**: additive only, `src/__snapshots__/tool-list.test.ts.snap` reviewed and updated, tool-list budget respected (ADR-0016)
+- [ ] **Tool contract changed**: additive only, the diff of `scripts/parity/expected/` reviewed (a PR that changes it needs the maintainer's OK and the `golden-change` label), tool-list budget respected (ADR-0016)
 - [ ] **API call count or behavior of a tool changed**: "Current Implementation Status" table in `CLAUDE.md` updated
 - [ ] **New tool**: the "When Adding New Tools" checklist in `CLAUDE.md` is done
 
