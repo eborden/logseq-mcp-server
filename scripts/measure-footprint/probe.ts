@@ -1,0 +1,118 @@
+// Runs one MCP server process over stdio, the way a client does, and reads off what #126 needs:
+// the time from spawn to the `initialize` response, and the process's resident memory before and
+// after one tool call. Raw newline-delimited JSON-RPC rather than the SDK client, so the client's
+// own start-up and bookkeeping stay out of the timing.
+import { spawn, execFile } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
+import { promisify } from 'node:util';
+import { parsePsRssBytes } from './stats.js';
+
+const execFileAsync = promisify(execFile);
+
+export interface ServerProcess {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd?: string;
+}
+
+export interface ProbeResult {
+  /** Spawn to the first `initialize` response, in milliseconds */
+  coldStartMs: number;
+  /** Resident memory once the handshake is done and the process has settled, in bytes */
+  idleRssBytes: number;
+  /** Resident memory after one tool call, in bytes */
+  afterCallRssBytes: number;
+}
+
+export interface ProbeOptions {
+  server: ServerProcess;
+  /** The one tool call made after the handshake */
+  call: { name: string; arguments: Record<string, unknown> };
+  /** Runs just before the tool call, to give the stub its answers */
+  beforeCall: () => void;
+  /** Milliseconds to let the process settle before each memory reading */
+  settleMs?: number;
+  timeoutMs?: number;
+}
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+/** The resident set of a process in bytes. macOS and Linux only: Windows has no `ps`. */
+export async function residentBytes(pid: number): Promise<number> {
+  if (process.platform === 'win32') throw new Error('measuring resident memory needs ps; run this on macOS or Linux');
+  const { stdout } = await execFileAsync('ps', ['-o', 'rss=', '-p', String(pid)]);
+  return parsePsRssBytes(stdout);
+}
+
+export async function probeServer({ server, call, beforeCall, settleMs = 500, timeoutMs = 15000 }: ProbeOptions): Promise<ProbeResult> {
+  const waiting = new Map<number, (message: Record<string, unknown>) => void>();
+  let buffer = '';
+  let stderr = '';
+  const started = performance.now();
+  const child = spawn(server.command, server.args, { cwd: server.cwd, env: server.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let exited: string | undefined;
+  child.once('exit', (code, signal) => {
+    exited = `exited early (code ${code}, signal ${signal})`;
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString('utf8');
+  });
+  child.stdout.on('data', (chunk: Buffer) => {
+    buffer += chunk.toString('utf8');
+    for (let end = buffer.indexOf('\n'); end !== -1; end = buffer.indexOf('\n')) {
+      const line = buffer.slice(0, end).trim();
+      buffer = buffer.slice(end + 1);
+      if (!line) continue;
+      const message = JSON.parse(line) as Record<string, unknown>;
+      const resolve = typeof message.id === 'number' ? waiting.get(message.id) : undefined;
+      if (resolve) resolve(message);
+    }
+  });
+
+  const send = (message: Record<string, unknown>) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+  const request = (id: number, method: string, params: Record<string, unknown>) =>
+    new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`no response to ${method} in ${timeoutMs} ms\n${stderr.trim()}`)),
+        timeoutMs
+      );
+      waiting.set(id, message => {
+        clearTimeout(timer);
+        resolve(message);
+      });
+      child.once('exit', () => {
+        clearTimeout(timer);
+        reject(new Error(`no response to ${method}; the server ${exited}\n${stderr.trim()}`));
+      });
+      send({ id, method, params });
+    });
+
+  try {
+    const init = await request(1, 'initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'logseq-footprint-probe', version: '1.0.0' }
+    });
+    const coldStartMs = performance.now() - started;
+    if (init.error || !init.result) throw new Error(`initialize failed: ${JSON.stringify(init.error ?? init)}`);
+    send({ method: 'notifications/initialized' });
+
+    await sleep(settleMs);
+    const idleRssBytes = await residentBytes(child.pid!);
+
+    beforeCall();
+    const response = await request(2, 'tools/call', call);
+    const result = response.result as { isError?: boolean; content?: Array<{ text?: string }> } | undefined;
+    if (response.error || !result || result.isError || !result.content?.[0]?.text) {
+      throw new Error(`the tool call did not return a result: ${JSON.stringify(response.error ?? { isError: result?.isError })}\n${stderr.trim()}`);
+    }
+    await sleep(settleMs);
+    const afterCallRssBytes = await residentBytes(child.pid!);
+    return { coldStartMs, idleRssBytes, afterCallRssBytes };
+  } finally {
+    child.stdin.end();
+    child.kill();
+    await new Promise<void>(resolve => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
+  }
+}
