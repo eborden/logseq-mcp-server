@@ -123,8 +123,9 @@ the note's does not. `unresolved-only.md` isolates check 3 by keeping the prose 
 It passes `expected/` and fails each negative case on the checks in the table above. It also covers the bare variant: its
 expected result passes the gate, no page in the overlaid graph other than `Devon` mentions him, and its `expected/` differs
 from the base one in the `Devon` ref alone, so the two cannot drift apart. A negative case that starts to pass fails the test.
-The test is the port of the TypeScript `check-links` unit test that ran the fixture before the TypeScript server went
-(#356, #369); that test's last version is in commit `10103c8`.
+The same file holds the gate's prose check (check 1) to an independent reference: the first difference it reports (line,
+column and the excerpts around it) must match a reference written from the rule, on a table of tricky pairs and on
+seeded random pairs, with a fixed seed so a failure reproduces.
 
 The shell script that used to be the gate, `skills/logseq-skills/scripts/check-link-safety.sh`,
 was retired in #142. The tool runs the same checks, plus one the script lacked: every ref in the
