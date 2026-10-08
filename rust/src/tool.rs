@@ -27,10 +27,11 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
 ///   schema has it: schemars leaves the key out, and a client may look for it;
 /// - the arguments are an object, and unknown fields are ignored, as every TypeScript tool
 ///   ignores them (the param aliases rely on it), so there's no `additionalProperties: false`;
-/// - a count, limit, offset or depth is a `u32` (#293: `z.int().min(0)`): schemars gives it
-///   `"type": "integer"` and `"minimum": 0`, plus a `format` the comparison drops. A parameter
-///   whose TypeScript minimum is 1 says so with `#[schemars(range(min = 1))]`. What the tool
-///   does with a bad value (`2.5`, `-1`, `"5"`) is `params::normalize_params`, not serde.
+/// - a count, limit, offset or depth is an integer (#293: `z.int().min(0)`): schemars gives an
+///   unsigned type `"type": "integer"` and `"minimum": 0`, plus a `format` the comparison drops. A
+///   parameter whose TypeScript minimum is 1 says so with `#[schemars(range(min = 1))]`. What a tool
+///   does with a bad value (`2.5`, `-1`, `"5"`) is `crate::args::Arguments` (`optional_count`,
+///   `count_or`), which reads a count up to 2^53 - 1 as a `u64`, not serde.
 pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
     let Value::Object(mut schema) = serde_json::to_value(generator.into_root_schema_for::<T>()).expect("a schema serializes")
