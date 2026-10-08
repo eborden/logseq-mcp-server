@@ -29,8 +29,7 @@ pub static SERVER_VERSION: LazyLock<String> = LazyLock::new(|| {
 
 /// Server `instructions`. A placeholder until more tools land: the TypeScript text
 /// (`src/instructions.ts`) names tools this server doesn't have yet.
-pub const SERVER_INSTRUCTIONS: &str =
-    "Rust spike of the LogSeq MCP server (read-only). Only logseq_get_page_outline is available: it lists a page's top-level blocks.";
+pub const SERVER_INSTRUCTIONS: &str = "Rust spike of the LogSeq MCP server (read-only). Available tools: logseq_get_graph_info (which graph is open), logseq_list_pages (page names), logseq_search_blocks (keyword search) and logseq_get_page_outline (a page's top-level blocks).";
 
 #[derive(Clone)]
 pub struct LogseqServer {
