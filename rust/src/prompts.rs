@@ -130,16 +130,17 @@ fn parse_day(text: &str) -> Option<CalendarDate> {
     if at != bytes.len() {
         return None;
     }
-    // PARITY(#299): `new Date(year, ...)` reads a year below 100 as 19xx, so `getFullYear()` never equals it
-    // and the check below rejects 0000 to 0099 (suspected TS bug) - drop if Rust becomes the only server.
-    if year < 100 {
-        return None;
-    }
     CalendarDate::real(year as i32, month, day)
 }
 
+/// `YYYY-MM-DD`, the year padded to four digits so that year 50 reads `0050`.
 fn iso(date: CalendarDate) -> String {
-    format!("{}-{:02}-{:02}", date.year, date.month, date.day)
+    format!("{:04}-{:02}-{:02}", date.year, date.month, date.day)
+}
+
+/// `YYYY-MM`.
+fn iso_month(date: CalendarDate) -> String {
+    format!("{:04}-{:02}", date.year, date.month)
 }
 
 /// A work week, Monday to Friday.
@@ -170,16 +171,22 @@ pub fn resolve_week(week: Option<&str>, today: CalendarDate) -> Result<WeekRange
         })?,
     };
     let monday = anchor.monday();
+    // Journal days are `YYYYMMDD` integers, which have no year before 0000. A week of the first days of year 0000
+    // starts in year -1.
+    if monday.year < 0 {
+        return Err(invalid(&format!(
+            "The week of {} starts before the year 0000, which a journal day (YYYYMMDD) cannot hold. Use a later date.",
+            iso(anchor)
+        )));
+    }
     if monday > today {
         return Err(invalid(&format!(
             "The week of {} has not started yet. Use \"this\", \"last\", or a date in a past or current week.",
             iso(monday)
         )));
     }
-    // A deliberate difference from the TypeScript server (#299): a week whose Monday falls in year 99 (`week` of
-    // 0100-01-01 to 0100-01-03). There `shiftDays` builds `new Date(99, ...)`, which JavaScript reads as 1999, so
-    // TypeScript's Friday is 2000-01-01 and its end_date 20000101. Here the Friday is the next day of the calendar,
-    // 0100-01-01 (end_date 1000101). Copying it would put a Friday nine hundred years from its Monday.
+    // Any year is a real year, so a week whose Monday falls in year 99 (`week` of 0100-01-01 to 0100-01-03) ends
+    // on the calendar's Friday, 0100-01-01 (end_date 1000101).
     let friday = monday.shifted(4);
     let end = if friday > today { today } else { friday };
     Ok(WeekRange {
@@ -224,23 +231,19 @@ pub fn resolve_month(month: Option<&str>, today: CalendarDate) -> Result<MonthRa
                     quoted(month.unwrap_or_default())
                 )));
             };
-            // PARITY(#299): `new Date(year, month, 1)` reads a year below 100 as 19xx, and nothing rejects it
-            // here, so "0050-03" is March 1950 (suspected TS bug) - drop if Rust becomes the only server.
-            let year = if year < 100 { year + 1900 } else { year };
             CalendarDate { year: year as i32, month: m, day: 1 }
         }
     };
     if first > today {
-        // `iso(first).slice(0, 7)`: the first 7 characters, which cuts a year of 3 digits short
         return Err(invalid(&format!(
             "{} has not started yet. Use \"this\", \"last\", or a past or current month.",
-            iso(first).chars().take(7).collect::<String>()
+            iso_month(first)
         )));
     }
     let last = first.last_of_month_before(1);
     let end = if last > today { today } else { last };
     Ok(MonthRange {
-        month: iso(first).chars().take(7).collect(),
+        month: iso_month(first),
         start: first.to_logseq_day(),
         end: end.to_logseq_day(),
         end_iso: iso(end),
@@ -451,17 +454,8 @@ pub fn get(name: &str, arguments: Option<&JsonObject>, today: CalendarDate) -> R
         let available: Vec<&str> = DEFINITIONS.iter().map(|d| d.name).collect();
         invalid(&format!("Unknown prompt {}. Available: {}.", quoted(name), available.join(", ")))
     })?;
-    // PARITY(#299): the SDK's zod `record` parse copies the arguments with plain assignment, and assigning a
-    // string to `__proto__` is a no-op, so the TypeScript server never sees that key (suspected TS bug: an
-    // argument is silently dropped). A value that is not a string is still an error there, as for any key -
-    // drop if Rust becomes the only server.
-    let raw: JsonObject = arguments
-        .into_iter()
-        .flatten()
-        .filter(|(key, value)| !(key.as_str() == "__proto__" && value.is_string()))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-    let raw = &raw;
+    let empty = JsonObject::new();
+    let raw = arguments.unwrap_or(&empty);
     // Every value must be a string. The TypeScript SDK checks this before the prompt sees the request (and
     // answers -32603 with the zod issues); a malformed argument is `InvalidParams` here.
     let mut strings = Arguments::new();
@@ -521,12 +515,11 @@ mod tests {
 
     #[test]
     fn a_week_whose_monday_is_in_year_99_ends_on_the_calendars_friday() {
-        // Deliberate difference (#299): TypeScript reads year 99 as 1999 while it shifts the Monday to Friday and answers
-        // "through 2000-01-01" (end_date 20000101). The calendar has Friday 0100-01-01.
+        // The Monday is 0099-12-28 and the calendar has Friday 0100-01-01.
         let week = week(Some("0100-01-01"), TUESDAY).unwrap();
         assert_eq!(
             (week.monday.as_str(), week.start, week.end_iso.as_str(), week.end, week.partial),
-            ("99-12-28", 991228, "100-01-01", 1000101, false)
+            ("0099-12-28", 991228, "0100-01-01", 1000101, false)
         );
     }
 
@@ -545,7 +538,7 @@ mod tests {
             week(Some("tomorrow"), TUESDAY).unwrap_err(),
             r#"MCP error -32602: "week" must be "this", "last", or a date as YYYY-MM-DD or YYYYMMDD (any day in the week); got "tomorrow"."#
         );
-        for bad in ["2025-02-30", "2025-13-01", "2025-00-10", "2025-03-00", "0099-01-01", "2025-3-5", "2025-03-051", "+2025-03-05"] {
+        for bad in ["2025-02-30", "2025-13-01", "2025-00-10", "2025-03-00", "2025-3-5", "2025-03-051", "+2025-03-05"] {
             assert!(week(Some(bad), TUESDAY).unwrap_err().contains("must be \"this\""), "{bad}");
         }
         assert_eq!(week(Some("2025-03-31"), TUESDAY).unwrap_err(), "MCP error -32602: The week of 2025-03-31 has not started yet. Use \"this\", \"last\", or a date in a past or current week.");
@@ -574,13 +567,32 @@ mod tests {
     }
 
     #[test]
-    fn a_year_below_100_is_read_as_the_typescript_server_reads_it() {
-        // a week rejects it; a month takes it for 19xx
-        assert!(week(Some("0050-03-04"), TUESDAY).is_err());
+    fn a_year_below_100_is_a_real_year() {
+        // 0050-03-04 is a Friday: its week starts on Monday 0050-02-28 (year 50 is not a leap year)
+        let old_week = week(Some("0050-03-04"), TUESDAY).unwrap();
+        assert_eq!(
+            (old_week.monday.as_str(), old_week.start, old_week.end_iso.as_str(), old_week.end, old_week.partial),
+            ("0050-02-28", 500228, "0050-03-04", 500304, false)
+        );
         let old = month(Some("0050-03"), TUESDAY).unwrap();
-        assert_eq!((old.month.as_str(), old.start, old.end), ("1950-03", 19500301, 19500331));
-        // a three-digit year's `iso(...).slice(0, 7)` stops after the hyphen
-        assert_eq!(month(Some("0100-03"), TUESDAY).unwrap().month, "100-03-");
+        assert_eq!((old.month.as_str(), old.start, old.end, old.end_iso.as_str()), ("0050-03", 500301, 500331, "0050-03-31"));
+        // a three-digit year keeps its leading zero
+        assert_eq!(month(Some("0100-03"), TUESDAY).unwrap().month, "0100-03");
+        // year 0 is a leap year; its first Monday is 0000-01-03
+        assert_eq!(month(Some("0000-02"), TUESDAY).unwrap().end, 229);
+        let zero = week(Some("0000-01-03"), TUESDAY).unwrap();
+        assert_eq!((zero.monday.as_str(), zero.start, zero.end), ("0000-01-03", 103, 107));
+    }
+
+    #[test]
+    fn a_week_that_starts_before_year_0_is_refused() {
+        // 0000-01-01 is a Saturday, so its week starts on a Monday in year -1, which YYYYMMDD cannot hold
+        for spec in ["0000-01-01", "0000-01-02"] {
+            assert_eq!(
+                week(Some(spec), TUESDAY).unwrap_err(),
+                format!("MCP error -32602: The week of {spec} starts before the year 0000, which a journal day (YYYYMMDD) cannot hold. Use a later date.")
+            );
+        }
     }
 
     #[test]
@@ -608,20 +620,19 @@ mod tests {
     }
 
     #[test]
-    fn a_proto_argument_that_is_a_string_is_dropped_and_constructor_is_not() {
-        // PARITY(#299): the TypeScript SDK never sees a `__proto__` key
-        let plain = text_of("continue_on", json!({"topic": "atlas"}), TUESDAY).unwrap();
+    fn a_proto_argument_is_an_argument_like_any_other() {
         let with = |args: &str| text_of("continue_on", serde_json::from_str(args).unwrap(), TUESDAY);
-        assert_eq!(with(r#"{"topic": "atlas", "__proto__": "x"}"#).unwrap(), plain);
+        assert_eq!(
+            with(r#"{"topic": "atlas", "__proto__": "x"}"#).unwrap_err(),
+            r#"MCP error -32602: Prompt "continue_on" has no argument "__proto__". Arguments: topic."#
+        );
         assert_eq!(
             with(r#"{"__proto__": 5, "topic": "atlas"}"#).unwrap_err(),
-            r#"MCP error -32602: Argument "__proto__" of prompt "continue_on" must be a string."#,
-            "a value that is not a string is refused as for any key (TypeScript's SDK refuses it too, with -32603)"
+            r#"MCP error -32602: Argument "__proto__" of prompt "continue_on" must be a string."#
         );
-        assert!(with(r#"{"__proto__": "x"}"#).unwrap_err().contains("needs a non-empty \"topic\" argument"));
         assert_eq!(
             with(r#"{"topic": "atlas", "constructor": "z", "__proto__": "y"}"#).unwrap_err(),
-            r#"MCP error -32602: Prompt "continue_on" has no argument "constructor". Arguments: topic."#
+            r#"MCP error -32602: Prompt "continue_on" has no argument "constructor", "__proto__". Arguments: topic."#
         );
     }
 
