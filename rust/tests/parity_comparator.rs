@@ -5,7 +5,8 @@
 //!
 //! The rules:
 //! - the LogSeq calls (`compare_calls`, ADR-0034 Decision 5): each call made matches a recorded call, in any order, a
-//!   query asked twice is matched in the recorded order, at most the case's ceiling are made, and all are reads;
+//!   query asked twice is matched in the recorded order, at most the case's ceiling are made, and all are reads
+//!   (`stale_ceiling` is the other side: fewer than the ceiling is a failure to lower it, for a run of the cases as committed);
 //! - a result: its keys and content blocks, a JSON text by deep equality and minified, every other text byte for
 //!   byte, a resource's `contents`, a prompt's messages, a JSON-RPC error (`compare_results`);
 //! - `tools/list` by meaning (ADR-0031): the normalization of a schema and the failures it still reports;
@@ -14,7 +15,7 @@
 mod parity_support;
 
 use parity_support::cases::{Canned, Case, Request, load_cases, load_tool_list};
-use parity_support::compare::{check_wrong_lists, compare_calls, compare_results, compare_tool_lists, is_read_method, normalize_schema};
+use parity_support::compare::{check_wrong_lists, compare_calls, compare_results, compare_tool_lists, is_read_method, normalize_schema, stale_ceiling};
 use parity_support::stub::{Call, DATASCRIPT_QUERY};
 use parity_support::suggestion_rules::{
     GUIDANCE, REQUIRED_CASES, candidates_of, check_list, check_reference_list, check_reference_lists, fold, matches_of, missing_required_cases, parse_not_found,
@@ -123,6 +124,17 @@ fn more_calls_than_the_ceiling_fail_even_when_each_matches_a_recorded_call() {
     // A ceiling of nothing allows nothing
     assert_eq!(compare_calls(&steps, 0, &made_all(&[&a])).len(), 1);
     assert_eq!(compare_calls(&steps, 0, &[]), Vec::<String>::new());
+}
+
+#[test]
+fn a_ceiling_above_the_calls_made_is_stale_and_names_the_command_that_lowers_it() {
+    assert_eq!(stale_ceiling(3, 3), None);
+    assert_eq!(stale_ceiling(0, 0), None);
+    // Over the ceiling is compare_calls' failure, not this one
+    assert_eq!(stale_ceiling(2, 3), None);
+    let stale = stale_ceiling(4, 3).expect("a ceiling above the calls made");
+    assert!(stale.contains("made 3 call(s), under the case's ceiling of 4") && stale.contains("PARITY_RECORD=1 cargo test --test parity_record"), "{stale}");
+    assert!(stale_ceiling(1, 0).is_some());
 }
 
 #[test]
