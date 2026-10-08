@@ -1,8 +1,8 @@
-//! Server `instructions`, sent in the `initialize` response (`src/instructions.ts`, #44). Hosts show
-//! them to the model once per session, so every character is paid for every session.
+//! Server `instructions`, sent in the `initialize` response (#44). Hosts show them to the model once per
+//! session, so every character is paid for every session. The text is the TypeScript server's, byte for byte, as
+//! recorded in the guide resource (`scripts/parity/expected/resources.json`).
 
-/// The text of `SERVER_INSTRUCTIONS` in `src/instructions.ts`, byte for byte. A test reads that file and
-/// fails if the two drift apart.
+/// The server instructions.
 pub const SERVER_INSTRUCTIONS: &str = r##"Read-only access to a LogSeq graph. Nothing here edits it.
 
 Start with:
@@ -24,16 +24,17 @@ Reading results:
 mod tests {
     use super::*;
 
-    /// The template literal of `SERVER_INSTRUCTIONS` in the TypeScript source. It holds no escape and no
-    /// substitution, so its text is what is between the backticks.
+    /// The instructions are model-facing text paid for every session, and the parity harness holds the guide resource, which
+    /// embeds them, to the bytes recorded from the TypeScript server (`scripts/parity/expected/resources.json`). This keeps the
+    /// two things that don't move: the opening line, and that every tool the text names is a tool this server has.
     #[test]
-    fn the_text_is_the_typescript_servers() {
-        let source = include_str!("../../src/instructions.ts");
-        let opening = "SERVER_INSTRUCTIONS = `";
-        let start = source.find(opening).expect("the constant") + opening.len();
-        let end = start + source[start..].find('`').expect("the closing backtick");
-        let typescript = &source[start..end];
-        assert!(!typescript.contains('\\') && !typescript.contains("${"), "the template has an escape or a substitution; read it as JavaScript would");
-        assert_eq!(SERVER_INSTRUCTIONS, typescript);
+    fn the_text_opens_read_only_and_names_only_real_tools() {
+        assert!(SERVER_INSTRUCTIONS.starts_with("Read-only access to a LogSeq graph. Nothing here edits it."));
+        let listed: Vec<String> = crate::tools::list().iter().map(|tool| tool.name.to_string()).collect();
+        for word in SERVER_INSTRUCTIONS.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+            if word.starts_with("logseq_") {
+                assert!(listed.iter().any(|name| name == word), "the instructions name {word}, which is not a tool");
+            }
+        }
     }
 }

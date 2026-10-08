@@ -22,7 +22,7 @@ measure-*.json
 measure-*.md
 measure-*.csv
 measure-*.tsv
-# src/repo-hygiene.test.ts fails if a file matching these is tracked or a pattern is dropped.
+# tests/guards/repo-hygiene.test.ts fails if a file matching these is tracked or a pattern is dropped.
 # These patterns are case-sensitive; the test's tracked-file check is not.
 
 # Per-worktree LogSeq test instance (#118): profile, home, graph copy (#151), log, instance.json, config.json
@@ -33,18 +33,13 @@ measure-*.tsv
 
 # Files LogSeq writes when tests/fixtures/graph is opened as a graph (#87).
 # The fixture is hand-written: only its pages, journals and logseq/config.edn are committed.
-# src/fixture-graph.test.ts checks these patterns.
+# tests/guards/fixture-graph.test.ts checks these patterns.
 tests/fixtures/graph/logseq/*
 !tests/fixtures/graph/logseq/config.edn
 tests/fixtures/graph/pages/contents.md
 # Today's journal, created on open. Fixture journals are dated 2025 or earlier.
 tests/fixtures/graph/journals/202[6-9]_*
 tests/fixtures/graph/journals/20[3-9][0-9]_*
-
-# StrykerJS (ADR-0026, #204): its sandbox, and the reports and incremental file it writes.
-# They hold source and test text and are large; never commit them.
-.stryker-tmp/
-reports/mutation/
 
 # Cargo build output of the Rust spike (ADR-0025, #123). Large, and rebuilt from rust/Cargo.lock.
 rust/target/
