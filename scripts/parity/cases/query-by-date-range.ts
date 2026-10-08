@@ -429,7 +429,7 @@ const cases: ParityCase[] = [
  * A search_term "orb" whose group holds `members` besides the term, and one block per text on January 2:
  * the blocks that match are the ones saying a name in a case-folded spelling. U+FB05 folds to U+FB06,
  * U+1FD3 to U+0390 and U+1FE3 to U+03B0 although each has a longer uppercase. (Each case has one script
- * among its aliases, so `resolvedAliases` sorts the same wherever `localeCompare` is approximated.)
+ * among its aliases, so `resolvedAliases` sorts the same whatever the host's collation.)
  */
 function foldCase(name: string, members: Array<{ id: number; name: string }>, texts: string[]): ParityCase {
   return rangeCase(name, 20250102, 20250102, { search_term: 'orb' }, {
