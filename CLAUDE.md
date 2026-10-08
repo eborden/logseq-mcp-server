@@ -692,6 +692,9 @@ npm run test:integration          # picks up .logseq-instance/config.json while 
 npx tsx scripts/logseq-instance.ts stop
 git status                        # sanity check: nothing under tests/fixtures/graph/ (the instance opens a copy, #151)
 
+# The same suites against the Rust server (#352): build rust/ first, run with the instance up
+npm run test:integration:rust     # LOGSEQ_MCP_SERVER=rust; details in tests/integration/setup.md
+
 # Verify Datalog/API constraints (read-only); the fixture reproduces all of them
 npx tsx scripts/probe-constraints.ts   # uses the running instance; never the personal config
 

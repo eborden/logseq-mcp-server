@@ -1,11 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
-import { getBacklinksWithMeta } from '../../src/tools/get-backlinks.js';
-import { buildContextForTopic } from '../../src/tools/build-context.js';
-import { getConceptEvolution } from '../../src/tools/get-concept-evolution.js';
-import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
-import { searchByRelationship } from '../../src/tools/search-by-relationship.js';
-import { queryJournals } from '../../src/tools/query-by-date-range.js';
+import { buildContextForTopic, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, queryJournals, searchByRelationship } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**

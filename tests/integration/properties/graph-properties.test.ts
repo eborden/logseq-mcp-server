@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../../src/client.js';
-import { getConceptNetwork, ConceptNetworkResult } from '../../../src/tools/get-concept-network.js';
+import { getConceptNetwork } from '../helpers/tools.js';
+import { ConceptNetworkResult } from '../../../src/tools/get-concept-network.js';
 import { connectFixture } from '../helpers/fixture-client.js';
 import {
   assertNoNodeDuplicates,

@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createServer } from '../../src/index.js';
 import { connectFixture } from './helpers/fixture-client.js';
+import { connectMcp } from './helpers/server-under-test.js';
 
 /**
  * Slim output is the default through the real MCP server (#42): the same call
@@ -15,10 +14,7 @@ describe('slim_results default (#42)', () => {
 
   beforeAll(async () => {
     const { client } = await connectFixture();
-    const server = createServer(client);
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    mcp = new Client({ name: 'slim-default-test', version: '1.0.0' }, { capabilities: {} });
-    await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+    mcp = await connectMcp(client);
   });
 
   afterAll(async () => {

@@ -25,6 +25,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:rust": "LOGSEQ_MCP_SERVER=rust vitest run --config vitest.integration.config.ts",
     "mutation": "stryker run"
   },
   "keywords": [
