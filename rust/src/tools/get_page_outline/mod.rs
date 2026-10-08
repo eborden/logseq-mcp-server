@@ -5,11 +5,21 @@
 //! Calls: 2 for an exact name, an alias or an ISO date (the page resolver, then one Datalog query
 //! for the blocks). A namespace-leaf name adds the resolver's leaf query; a missing page adds the
 //! suggestion lookup before it fails. Never one call per block.
+//!
+//! This directory holds everything only the outline uses: its query (`queries.rs`), the blocks it
+//! reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside it: the
+//! page resolver, `ResultMeta`, the errors and the tool helpers.
+
+mod queries;
+mod tips;
+mod wire;
 
 use std::collections::{HashMap, HashSet};
 
-use serde::Serialize;
+use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
+use schemars::JsonSchema;
 use serde::ser::Error as _;
+use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 use crate::client::LogseqClient;
@@ -17,9 +27,54 @@ use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
 use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
-use crate::queries;
+use crate::params::{ParamAliases, bad_string_param, resolve_param_aliases};
 use crate::resolve::require_page;
-use crate::wire::{self, OutlineBlock};
+use crate::tips::tips_content;
+use crate::tool::{input_schema, parse_args, read_only_annotations, success_result};
+
+use self::tips::{TipBlock, outline_tips};
+use self::wire::OutlineBlock;
+
+pub const NAME: &str = "logseq_get_page_outline";
+
+/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+const DESCRIPTION: &str = "List a page's top-level blocks: uuid, the first line (80 characters) and the number of children. Cheaper than logseq_get_page for a long page.\n\n\
+**Use when:** you need a page's shape before reading parts of it. Read the blocks you pick with logseq_get_block.\n\
+**Can't find:** nested blocks below the first level, or block text past the first line (logseq_get_block, logseq_get_page).";
+
+/// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
+const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
+
+/// The outline's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct Args {
+    /// Page name, alias, or ISO date (2025-01-01) for a journal
+    pub page_name: String,
+}
+
+/// The tool as `tools/list` shows it.
+pub fn definition() -> Tool {
+    Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
+        .with_title("Get Page Outline")
+        .with_annotations(read_only_annotations("Get Page Outline"))
+}
+
+/// A call: aliases folded, arguments parsed, the tool, then its tip.
+pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
+    let arguments = resolve_param_aliases(ALIASES, arguments)?;
+    let args = parse_args::<Args>(arguments.clone())
+        .map_err(|_| ToolError::InvalidParameter(bad_string_param("page_name", arguments.as_ref())))?;
+    let outline = get_page_outline(client, &args.page_name).await?;
+    let mut content = vec![ContentBlock::text(serde_json::to_string(&outline).expect("an outline serializes"))];
+    if tips_enabled {
+        let blocks: Vec<TipBlock<'_>> =
+            outline.blocks.iter().map(|block| TipBlock { uuid: &block.uuid, child_count: block.child_count }).collect();
+        if let Some(tips) = tips_content(&outline_tips(&blocks)) {
+            content.push(ContentBlock::text(tips));
+        }
+    }
+    Ok(success_result(content))
+}
 
 /// Most top-level blocks one outline lists. A page with more is cut, and the result says so.
 pub const MAX_OUTLINE_BLOCKS: usize = 200;
@@ -154,7 +209,7 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
     let mut top: Vec<Top<'_>> = Vec::new();
     let mut child_count: HashMap<i64, usize> = HashMap::new();
     for block in rows.iter().flatten() {
-        let Some(parent_id) = block.parent.and_then(wire::Parent::id) else { continue };
+        let Some(parent_id) = block.parent.and_then(self::wire::Parent::id) else { continue };
         if parent_id == page_id {
             top.push(Top { id: block.entity_id().unwrap_or(0), left: block.left_id, block });
         } else {
@@ -202,7 +257,7 @@ pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<
     let raw_id = resolved.page.entity_id().ok_or(ToolError::PageWithoutId)?;
     let page_id = PageId::new(raw_id)?;
 
-    let query = queries::page_outline_blocks(page_id);
+    let query = self::queries::page_outline_blocks(page_id);
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
     let rows = wire::outline_rows(&answer)?.unwrap_or_default();
 
@@ -357,6 +412,29 @@ mod tests {
         let (blocks, warnings, total) = outline_of(10, &[]);
         assert!(blocks.is_empty() && warnings.is_empty());
         assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn the_outline_schema_means_what_the_typescript_one_means() {
+        use crate::tool::testing::{meaning, schema_of};
+        // `inputSchema` of logseq_get_page_outline in the ADR-0016 snapshot
+        let typescript = json!({
+            "type": "object",
+            "properties": {"page_name": {"type": "string", "description": "Page name, alias, or ISO date (2025-01-01) for a journal"}},
+            "required": ["page_name"],
+        });
+        assert_eq!(meaning(&schema_of::<Args>()), meaning(&typescript));
+    }
+
+    #[test]
+    fn the_outline_tool_is_read_only_and_titled_as_in_typescript() {
+        let tool = definition();
+        assert_eq!(tool.name, NAME);
+        assert_eq!(tool.title.as_deref(), Some("Get Page Outline"));
+        assert_eq!(
+            serde_json::to_value(&tool.annotations).unwrap(),
+            json!({"title": "Get Page Outline", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
+        );
     }
 
     #[test]

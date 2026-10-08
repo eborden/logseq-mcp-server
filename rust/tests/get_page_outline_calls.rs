@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::outline::get_page_outline;
+use logseq_mcp_server::tools::get_page_outline::get_page_outline;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
