@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
-import { getPage } from '../../src/tools/get-page.js';
-import { getBacklinks } from '../../src/tools/get-backlinks.js';
-import { searchBlocks } from '../../src/tools/search-blocks.js';
-import { queryByProperty } from '../../src/tools/query-by-property.js';
+import { getBacklinks, getPage, queryByProperty, searchBlocks } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**

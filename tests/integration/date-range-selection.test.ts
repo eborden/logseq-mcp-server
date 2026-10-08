@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { isDeepStrictEqual } from 'util';
 import { LogseqClient } from '../../src/client.js';
-import { queryJournals, DateRangeResult } from '../../src/tools/query-by-date-range.js';
+import { queryJournals } from './helpers/tools.js';
+import { DateRangeResult } from '../../src/tools/query-by-date-range.js';
 import { formatLogseqDate } from '../../src/utils/date-utils.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS, laterJournalDays } from './helpers/fixture-client.js';
 
