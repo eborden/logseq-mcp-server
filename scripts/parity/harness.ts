@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { format } from '@vitest/pretty-format';
 import { compareToolLists, type ProjectedTool } from './tool-list-compare.js';
 import { toolListForSnapshot } from './tool-list-projection.js';
@@ -36,6 +37,14 @@ export interface ParityCase {
    * names only a path, or a cut that shows no text. It must make the server's result differ.
    */
   perturbed?: unknown;
+  /**
+   * Read this resource (`resources/read`) instead of calling `tool`, which is then only the label the
+   * case is reported under. The result is `{ contents }`, or `{ error: { code, message } }` for a
+   * JSON-RPC error (and `data` when the server sent some).
+   */
+  readResource?: string;
+  /** List the resource templates (`resources/templates/list`) instead of calling `tool` */
+  listResourceTemplates?: boolean;
 }
 
 /**
@@ -204,31 +213,34 @@ function keyDifferences(where: string, expected: object, actual: object): string
 export function compareResult(expected: ToolResult, actual: ToolResult): string[] {
   const failures = keyDifferences('the result', expected, actual);
   for (const key of Object.keys(expected)) {
-    if (key === 'content' || !(key in actual)) continue;
+    if (key === 'content' || key === 'contents' || !(key in actual)) continue;
     if (stable(expected[key]) !== stable(actual[key])) {
       failures.push(`${key}: expected ${stable(expected[key])}, got ${stable(actual[key])}`);
     }
   }
-  if (!('content' in expected && 'content' in actual)) return failures;
-  const wantBlocks = expected.content ?? [];
-  const gotBlocks = actual.content ?? [];
-  if (wantBlocks.length !== gotBlocks.length) {
-    failures.push(`expected ${wantBlocks.length} content block(s), got ${gotBlocks.length}`);
-  }
-  for (let i = 0; i < Math.min(wantBlocks.length, gotBlocks.length); i++) {
-    const want = wantBlocks[i];
-    const got = gotBlocks[i];
-    failures.push(...keyDifferences(`content[${i}]`, want, got));
-    for (const key of Object.keys(want)) {
-      if (!(key in got)) continue;
-      if (key === 'text' && typeof want.text === 'string' && typeof got.text === 'string') {
-        if (want.text !== got.text) {
-          const at = firstCharDifference(want.text, got.text);
-          const around = (t: string) => JSON.stringify(t.slice(Math.max(0, at - 40), at + 40));
-          failures.push(`content[${i}].text differs at character ${at}:\n  expected: ${around(want.text)}\n  actual:   ${around(got.text)}`);
+  // A tool result's `content` and a resource's `contents`: the same blocks with the same fields, each `text` byte for byte
+  for (const list of ['content', 'contents']) {
+    if (!(list in expected && list in actual)) continue;
+    const wantBlocks = (expected[list] ?? []) as Array<Record<string, unknown>>;
+    const gotBlocks = (actual[list] ?? []) as Array<Record<string, unknown>>;
+    if (wantBlocks.length !== gotBlocks.length) {
+      failures.push(`expected ${wantBlocks.length} ${list} block(s), got ${gotBlocks.length}`);
+    }
+    for (let i = 0; i < Math.min(wantBlocks.length, gotBlocks.length); i++) {
+      const want = wantBlocks[i];
+      const got = gotBlocks[i];
+      failures.push(...keyDifferences(`${list}[${i}]`, want, got));
+      for (const key of Object.keys(want)) {
+        if (!(key in got)) continue;
+        if (key === 'text' && typeof want.text === 'string' && typeof got.text === 'string') {
+          if (want.text !== got.text) {
+            const at = firstCharDifference(want.text, got.text);
+            const around = (t: string) => JSON.stringify(t.slice(Math.max(0, at - 40), at + 40));
+            failures.push(`${list}[${i}].text differs at character ${at}:\n  expected: ${around(want.text)}\n  actual:   ${around(got.text)}`);
+          }
+        } else if (stable(want[key]) !== stable(got[key])) {
+          failures.push(`${list}[${i}].${key}: expected ${stable(want[key])}, got ${stable(got[key])}`);
         }
-      } else if (stable(want[key]) !== stable(got[key])) {
-        failures.push(`content[${i}].${key}: expected ${stable(want[key])}, got ${stable(got[key])}`);
       }
     }
   }
@@ -257,6 +269,21 @@ export function sandboxedEnv(configPath: string, home: string): Record<string, s
 export function toolsCalledBy(tools: readonly ProjectedTool[], cases: readonly ParityCase[]): ProjectedTool[] {
   const called = new Set(cases.map(c => c.tool));
   return tools.filter(tool => called.has(tool.name));
+}
+
+/** One case's request: a tool call, or (`readResource`, `listResourceTemplates`) a resource request. */
+async function runCase(client: Client, c: ParityCase, timeout: number): Promise<ToolResult> {
+  if (c.listResourceTemplates) return toToolResult(await client.listResourceTemplates(undefined, { timeout }));
+  if (c.readResource !== undefined) {
+    try {
+      return toToolResult(await client.readResource({ uri: c.readResource }, { timeout }));
+    } catch (error) {
+      // A JSON-RPC error is a result of the case, as a tool's `isError` is
+      if (!(error instanceof McpError)) throw error;
+      return { error: { code: error.code, message: error.message, ...(error.data === undefined ? {} : { data: error.data }) } };
+    }
+  }
+  return toToolResult(await client.callTool({ name: c.tool, arguments: c.arguments }, undefined, { timeout }));
 }
 
 /**
@@ -324,7 +351,7 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
       const prefix = `[${c.tool}: ${c.name}]`;
       let result: ToolResult;
       try {
-        result = toToolResult(await client.callTool({ name: c.tool, arguments: c.arguments }, undefined, { timeout: timeoutMs }));
+        result = await runCase(client, c, timeoutMs);
       } catch (error) {
         failures.push(`${prefix} the call failed: ${(error as Error).message}`);
         continue;
