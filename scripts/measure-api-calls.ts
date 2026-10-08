@@ -228,7 +228,9 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
+main().catch((e: unknown) => {
+  // The error class only. Never print e.message, e.stack or the error object: an MCP error
+  // carries the server's text, which can quote a page name from the graph.
+  console.error(`measure-api-calls failed: ${e instanceof Error ? e.name : typeof e}`);
   process.exit(1);
 });
