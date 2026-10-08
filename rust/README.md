@@ -17,12 +17,14 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 | `src/config.rs` | The config file, parsed once. Its errors never show a file value (ADR-0003) |
 | `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as `src/client.ts` |
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
-| `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`. Each input schema comes from the type that parses the arguments |
-| `src/wire.rs` | What LogSeq answers, parsed into typed rows at the boundary (`src/response-schemas.ts`). A mismatch is a `ResponseError` naming the path in zod's words, never "no data" |
-| `src/resolve.rs`, `src/queries.rs`, `src/errors.rs` | The shared page resolver (BR-0010): exact name, alias, ISO date, namespace leaf, the closest names for a miss, and the queries and errors that go with it |
+| `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
+| `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type, argument parsing at the boundary, and the TypeScript server's result shapes |
+| `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125) |
+| `src/wire.rs` | The reader every wire type is written with: LogSeq's answers parsed into typed values at the boundary (`src/response-schemas.ts`). A mismatch is a `ResponseError` naming the path in zod's words, never "no data" |
+| `src/resolve/` | The shared page resolver (BR-0010): exact name, alias, ISO date, namespace leaf, the closest names for a miss. Its queries and wire types are in the directory, since only it reads them |
+| `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (messages word for word as `src/errors.ts`), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
 | `src/fuzzy.rs` | fuzzysort 3.1.0's `go`, ported step for step, because the closest names are in an error message compared byte for byte. Tested against the library's own output (`tests/data/fuzzysort-oracle.json`) |
 | `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and an approximation of `localeCompare` |
-| `src/outline.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | The tool, its `ResultMeta`, its next-step tip and its parameter aliases and argument errors |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
 
 ## Build and test

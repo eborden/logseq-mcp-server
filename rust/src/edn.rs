@@ -55,6 +55,14 @@ impl DatalogInput {
     }
 }
 
+/// A query and the inputs bound to its `:in` variables, in order. The text never holds a string
+/// from the caller; each query builder takes typed values and binds them here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Query {
+    pub text: String,
+    pub inputs: Vec<DatalogInput>,
+}
+
 /// A value that failed to parse into one of this module's types. The message names the value:
 /// each is a tool argument or a value from LogSeq, never a secret.
 #[derive(Debug, Clone, PartialEq, Eq)]
