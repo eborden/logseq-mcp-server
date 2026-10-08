@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { LogseqClient } from '../../src/client.js';
-import { createServer } from '../../src/index.js';
 import { connectFixture } from './helpers/fixture-client.js';
+import { connectMcp } from './helpers/server-under-test.js';
 
 /**
  * The page outline tool and `format: "markdown"` / `compact` (#43) against the
@@ -45,10 +44,7 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
       return original(method, args);
     }) as typeof logseq.callAPI;
 
-    const server = createServer(logseq);
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    mcp = new Client({ name: 'output-format-test', version: '1.0.0' }, { capabilities: {} });
-    await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+    mcp = await connectMcp(logseq);
   });
 
   afterAll(async () => {

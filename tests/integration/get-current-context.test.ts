@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
 import { DatalogQueryBuilder } from '../../src/datalog/queries.js';
-import { getCurrentContext } from '../../src/tools/get-current-context.js';
+import { getCurrentContext } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**

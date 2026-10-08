@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
-import { listPages, ListPagesResult, MAX_LIST_PAGES_LIMIT } from '../../src/tools/list-pages.js';
+import { listPages } from './helpers/tools.js';
+import { ListPagesResult, MAX_LIST_PAGES_LIMIT } from '../../src/tools/list-pages.js';
 import type { PageEntity } from '../../src/types.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 

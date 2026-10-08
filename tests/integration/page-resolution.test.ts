@@ -1,12 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
-import { getPage } from '../../src/tools/get-page.js';
-import { getBacklinks, getBacklinksWithMeta } from '../../src/tools/get-backlinks.js';
-import { buildContextForTopic } from '../../src/tools/build-context.js';
-import { getContextForQuery } from '../../src/tools/get-context-for-query.js';
-import { getConceptEvolution } from '../../src/tools/get-concept-evolution.js';
-import { getConceptNetwork } from '../../src/tools/get-concept-network.js';
-import { searchByRelationship } from '../../src/tools/search-by-relationship.js';
+import { buildContextForTopic, getBacklinks, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, getContextForQuery, getPage, searchByRelationship } from './helpers/tools.js';
 import { resolvePage } from '../../src/utils/resolve-page.js';
 import { AmbiguousPageError, PageNotFoundError } from '../../src/errors.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';

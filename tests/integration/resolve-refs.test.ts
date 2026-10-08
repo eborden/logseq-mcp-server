@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
-import { getBlock } from '../../src/tools/get-block.js';
-import { getPage } from '../../src/tools/get-page.js';
+import { getBlock, getPage } from './helpers/tools.js';
 import { resolveBlockRefs } from '../../src/utils/resolve-refs.js';
 import { BlockEntity, ResolvedRef } from '../../src/types.js';
 import { connectFixture } from './helpers/fixture-client.js';

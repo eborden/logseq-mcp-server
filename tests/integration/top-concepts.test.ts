@@ -1,12 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
 import { DatalogQueryBuilder } from '../../src/datalog/queries.js';
-import {
-  queryJournals,
-  BUILT_IN_CONCEPTS,
-  DateRangeResult,
-  TopConcept
-} from '../../src/tools/query-by-date-range.js';
+import { queryJournals } from './helpers/tools.js';
+import { BUILT_IN_CONCEPTS, DateRangeResult, TopConcept } from '../../src/tools/query-by-date-range.js';
 import { BlockEntity } from '../../src/types.js';
 import { connectFixture } from './helpers/fixture-client.js';
 

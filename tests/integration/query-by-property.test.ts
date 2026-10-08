@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
-import { queryByProperty } from '../../src/tools/query-by-property.js';
+import { queryByProperty } from './helpers/tools.js';
 import { InvalidParameterError } from '../../src/errors.js';
 import { buildPageNameMap, toSlimBlock } from '../../src/utils/slim-entities.js';
 import { BlockEntity, PageEntity } from '../../src/types.js';
