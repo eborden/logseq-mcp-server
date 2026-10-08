@@ -123,12 +123,15 @@ pub fn link_target_rows(answer: &Value) -> Result<Option<Vec<LinkTargetRow>>, Re
     let mut reader = Reader::default();
     reader
         .rows(answer, 3, |r, cells| {
-            // `rows` has refused a row of fewer than two cells, so `cells[1]` is there; the name may not be
+            // `rows` refuses a row of fewer than two cells, so the route is there; the name may not be
             let page = r.at(Part::Index(0), |r| match cells.first() {
                 Some(Value::Null) => Ok(None),
                 value => r.pulled_page(value).map(Some),
             })?;
-            let via = r.at(Part::Index(1), |r| r.string_value(&cells[1]))?;
+            let via = r.at(Part::Index(1), |r| match cells.get(1) {
+                Some(value) => r.string_value(value),
+                None => Err(r.mismatch("string", None)),
+            })?;
             Ok(LinkTargetRow { page, via, name: cells.get(2).and_then(Value::as_str).map(str::to_owned) })
         })
         .map_err(|issue| to_error(DATALOG_METHOD, issue))

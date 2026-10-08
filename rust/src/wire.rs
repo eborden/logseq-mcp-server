@@ -227,7 +227,8 @@ impl Reader {
             Value::Array(items) => items,
             other => return Err(self.mismatch("array", Some(other))),
         };
-        let shortest = (width - optional_tail).saturating_sub(1);
+        debug_assert!(optional_tail <= width, "a tuple of {width} cells can't end in {optional_tail} optional ones");
+        let shortest = width.saturating_sub(optional_tail).saturating_sub(1);
         let mut rows = Vec::with_capacity(items.len());
         for (i, item) in items.iter().enumerate() {
             rows.push(self.at(Part::Index(i), |r| match item {
