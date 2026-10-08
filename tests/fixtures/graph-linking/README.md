@@ -1,7 +1,7 @@
 # Fixture: concept linking
 
 A synthetic LogSeq graph for exercising `skills/logseq-skills/skills/concept-linking.md`
-and its gate, the `logseq_check_links` tool (`src/tools/check-links.ts`).
+and its gate, the `logseq_check_links` tool (`rust/src/tools/check_links/`).
 
 Every name, page and event here is invented. Nothing in this fixture comes from a real graph,
 which is what allows it to live in a public repository.
@@ -118,15 +118,12 @@ the note's does not. `unresolved-only.md` isolates check 3 by keeping the prose 
 
 ## Running
 
-`src/tools/check-links.test.ts` runs `checkLinks` on `expected/` and on each file in `negative/`
-against a fake graph built from `pages.txt`. It passes `expected/` and fails each negative case
-on the checks in the table above. It also covers the bare variant: its expected result passes the
-gate, no page in the overlaid graph other than `Devon` mentions him, and its `expected/` differs from
-the base one in the `Devon` ref alone, so the two cannot drift apart:
-
-```bash
-npx vitest run src/tools/check-links.test.ts
-```
+The TypeScript unit test that ran `checkLinks` on `expected/` and on each file in `negative/` against a fake graph
+built from `pages.txt` went with the TypeScript server (#356). Its last version is `10103c8:src/tools/check-links.test.ts`.
+It passed `expected/` and failed each negative case on the checks in the table above. It also covered the bare variant: its
+expected result passes the gate, no page in the overlaid graph other than `Devon` mentions him, and its `expected/` differs
+from the base one in the `Devon` ref alone, so the two cannot drift apart. Nothing runs the fixture until #369 ports that test
+to a Rust test against a stub LogSeq.
 
 The shell script that used to be the gate, `skills/logseq-skills/scripts/check-link-safety.sh`,
 was retired in #142. The tool runs the same checks, plus one the script lacked: every ref in the
