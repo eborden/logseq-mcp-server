@@ -86,8 +86,17 @@ async fn a_bad_uri_is_refused_before_any_call() {
         let error = resources::read(&client(&logseq), uri).await.unwrap_err();
         assert_eq!(error.code.0, code, "{uri}");
     }
-    let error = resources::read(&client(&logseq), "logseq://guide").await.unwrap_err();
-    assert_eq!(error.message, "MCP error -32002: Unknown resource \"logseq://guide\". Available: logseq://page/{name}.");
+    let error = resources::read(&client(&logseq), "logseq://nope").await.unwrap_err();
+    assert_eq!(error.message, "MCP error -32002: Unknown resource \"logseq://nope\". Available: logseq://guide, logseq://page/{name}.");
+    assert!(methods(&logseq).is_empty());
+}
+
+#[tokio::test]
+async fn the_guide_is_read_without_a_call() {
+    let logseq = mock_logseq(vec![]).await;
+    let read = resources::read(&client(&logseq), "logseq://guide").await.unwrap();
+    let text = serde_json::to_value(&read).unwrap()["contents"][0]["text"].as_str().unwrap().to_owned();
+    assert!(text.starts_with("# LogSeq MCP guide\n\n"), "{text}");
     assert!(methods(&logseq).is_empty());
 }
 
