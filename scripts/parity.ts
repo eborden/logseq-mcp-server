@@ -1,13 +1,13 @@
 // Differential parity harness (#124, ADR-0025): run a server against the stub LogSeq and compare
-// its tools/list, its logseq_get_page_outline results and its LogSeq calls with the TypeScript
-// server's. Synthetic fixtures only; it never contacts a real LogSeq.
+// its tools/list (by meaning, #292), its logseq_get_page_outline results (byte for byte) and its
+// LogSeq calls with the TypeScript server's. Synthetic fixtures only; it never contacts a real LogSeq.
 //
 //   npx tsx scripts/parity.ts                      # the TypeScript server against its recorded results
 //   npx tsx scripts/parity.ts -- ./my-server --x   # any other server command (the Rust one, #125)
 //   npx tsx scripts/parity.ts --record             # re-record the expected results from the TypeScript server
 //   npx tsx scripts/parity.ts --self-check         # passes as is, and fails on every perturbed case
 //
-// Only the TypeScript server records: the expected file is the reference other servers are judged
+// Only the TypeScript server records: the expected files are the reference other servers are judged
 // against, so --record refuses a command after --. A re-record is done by hand when the TypeScript
 // output changes on purpose, ships with a reviewed diff of the JSON, and never runs in CI.
 //
@@ -16,9 +16,12 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
 import { compareResult, perturbCases, runParity, type ParityReport, type ServerCommand, type ToolResult } from './parity/harness.js';
+import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
 import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer } from './parity/ts-server.js';
 
 export const EXPECTED_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'get-page-outline.json');
+/** The TypeScript server's tools/list in the snapshot's shape; it must match the snapshot exactly. */
+export const EXPECTED_TOOL_LIST_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'tool-list.json');
 
 const USAGE =
   'usage: npx tsx scripts/parity.ts [--perturb | --self-check] [-- <server command> [args...]]\n' +
@@ -53,9 +56,9 @@ function print(label: string, report: ParityReport): void {
   if (report.stderr.trim()) console.log(`server stderr:\n${report.stderr.trim()}`);
 }
 
-async function readExpected(): Promise<Record<string, ToolResult> | undefined> {
+async function readJson<T>(file: string): Promise<T | undefined> {
   try {
-    return JSON.parse(await readFile(EXPECTED_FILE, 'utf8')) as Record<string, ToolResult>;
+    return JSON.parse(await readFile(file, 'utf8')) as T;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
@@ -90,29 +93,36 @@ async function main(): Promise<number> {
     const report = await runParity({ server, cases, snapshotFile });
     print('record', report);
     if (report.failures.length > 0) return 1;
-    printChanges(await readExpected(), report.results);
+    printChanges(await readJson(EXPECTED_FILE), report.results);
+    const previousTools = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
+    const toolChanges = previousTools ? compareToolLists(previousTools, report.toolList ?? []) : ['no recorded tool list yet'];
+    for (const line of toolChanges) console.log(`tools/list changed: ${line}`);
     await writeFile(EXPECTED_FILE, `${JSON.stringify(report.results, null, 2)}\n`);
+    await writeFile(EXPECTED_TOOL_LIST_FILE, `${JSON.stringify(report.toolList, null, 2)}\n`);
     console.log(`wrote ${Object.keys(report.results).length} results to ${EXPECTED_FILE}`);
+    console.log(`wrote ${report.toolList?.length ?? 0} tools to ${EXPECTED_TOOL_LIST_FILE}`);
     return 0;
   }
 
-  const expected = await readExpected();
+  const expected = await readJson<Record<string, ToolResult>>(EXPECTED_FILE);
   if (!expected) throw new Error(`no expected results at ${EXPECTED_FILE}; record them with --record`);
+  const expectedToolList = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
+  if (!expectedToolList) throw new Error(`no expected tool list at ${EXPECTED_TOOL_LIST_FILE}; record it with --record`);
   if (mode === 'check') {
-    const report = await runParity({ server, cases, expected, snapshotFile });
+    const report = await runParity({ server, cases, expected, expectedToolList, snapshotFile });
     print('parity', report);
     return report.failures.length === 0 ? 0 : 1;
   }
   if (mode === 'perturb') {
-    const report = await runParity({ server, cases: perturbCases(cases), expected, snapshotFile });
+    const report = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, snapshotFile });
     print('parity with perturbed fixtures', report);
     return report.failures.length === 0 ? 0 : 1;
   }
 
   // self-check: the fixtures pass as they are, and every case with a LogSeq call fails once perturbed
-  const clean = await runParity({ server, cases, expected, snapshotFile });
+  const clean = await runParity({ server, cases, expected, expectedToolList, snapshotFile });
   print('self-check, fixtures as committed', clean);
-  const perturbed = await runParity({ server, cases: perturbCases(cases), expected, snapshotFile });
+  const perturbed = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, snapshotFile });
   const caught = cases.filter(c => c.steps.length > 0).map(c => ({
     name: c.name,
     failures: perturbed.failures.filter(f => f.startsWith(`[${c.tool}: ${c.name}]`))
