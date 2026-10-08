@@ -6,7 +6,9 @@
  *
  * It drives the binary over MCP stdio with the SDK client, the way Claude Code does, and calls
  * each of the 16 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
- * gets one prompt and lists tools, prompts, resources and resource templates. It prints one
+ * gets one prompt and lists tools, prompts, resources and resource templates. A few items read the
+ * clock (a preset, `last_n`, and the weekly and monthly prompts with no argument) and are checked against
+ * today's local date, which a release binary reads from the system: no parity case can check that. It prints one
  * PASS or FAIL line per item and a count, never a result's content (BR-0001), and exits 1 on
  * any failure.
  *
@@ -26,7 +28,26 @@ const EXPECTED_TOOLS = 16;
 interface ToolCall {
   name: string;
   args: Record<string, unknown>;
+  /** What the call is named in the report, when the tool is called more than once */
+  label?: string;
+  /** Holds the parsed JSON result to today's date; the item then fails with only "wrong date" */
+  readsClock?: (result: Record<string, unknown>) => boolean;
 }
+
+// Today in the machine's local zone, which the server under test reads too: the release binary has no
+// LOGSEQ_MCP_NOW (rust/src/env.rs), so the system clock and the local-zone conversion run here and in no
+// parity case (#359). These are computed from `new Date()`, never from the server.
+const pad = (n: number): string => String(n).padStart(2, '0');
+const NOW = new Date();
+const isoOf = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const ymdOf = (d: Date): number => Number(isoOf(d).replaceAll('-', ''));
+const TODAY = new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate());
+const MONDAY = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() - ((TODAY.getDay() + 6) % 7));
+const SUNDAY = new Date(MONDAY.getFullYear(), MONDAY.getMonth(), MONDAY.getDate() + 6);
+const THIS_MONTH = `${TODAY.getFullYear()}-${pad(TODAY.getMonth() + 1)}`;
+
+const dateRangeOf = (result: Record<string, unknown>): { start?: unknown; end?: unknown } =>
+  (result.dateRange ?? {}) as { start?: unknown; end?: unknown };
 
 // Made-up fixture pages and a known fixture block (tests/fixtures/README.md)
 const TOOL_CALLS: ToolCall[] = [
@@ -44,6 +65,19 @@ const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_get_concept_network', args: { concept_name: 'Alice', max_depth: 2 } },
   { name: 'logseq_search_by_relationship', args: { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references' } },
   { name: 'logseq_query_by_date_range', args: { start_date: 20250101, end_date: 20250131 } },
+  {
+    name: 'logseq_query_by_date_range',
+    label: 'preset this_week',
+    args: { preset: 'this_week' },
+    readsClock: result => dateRangeOf(result).start === ymdOf(MONDAY) && dateRangeOf(result).end === ymdOf(SUNDAY),
+  },
+  {
+    // The fixture instance has today's journal (LogSeq makes it on open), so the newest of the last 3 is today
+    name: 'logseq_query_by_date_range',
+    label: 'last_n',
+    args: { last_n: 3 },
+    readsClock: result => dateRangeOf(result).end === ymdOf(TODAY),
+  },
   { name: 'logseq_get_concept_evolution', args: { concept_name: 'project atlas' } },
   { name: 'logseq_check_links', args: { before: 'Alice met Bob about atlas.', after: '[[Alice]] met [[Bob]] about [[atlas]].' } },
 ];
@@ -142,9 +176,19 @@ async function main(): Promise<void> {
     });
 
     for (const call of TOOL_CALLS) {
-      await check(`tools/call ${call.name}`, async () => {
+      await check(`tools/call ${call.name}${call.label ? ` (${call.label})` : ''}`, async () => {
         if (!toolNames.includes(call.name)) return 'not listed';
-        return toolProblem((await mcp.callTool({ name: call.name, arguments: call.args })) as { isError?: boolean; content?: unknown });
+        const result = (await mcp.callTool({ name: call.name, arguments: call.args })) as { isError?: boolean; content?: unknown };
+        const problem = toolProblem(result);
+        if (problem || !call.readsClock) return problem;
+        const text = ((result.content ?? []) as Content).find(part => part.type === 'text')?.text ?? '';
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(text) as Record<string, unknown>;
+        } catch {
+          return 'wrong date';
+        }
+        return call.readsClock(parsed) ? undefined : 'wrong date';
       });
     }
 
@@ -157,6 +201,17 @@ async function main(): Promise<void> {
       const { contents } = await mcp.readResource({ uri: 'logseq://guide' });
       const text = contents[0] && 'text' in contents[0] ? contents[0].text : undefined;
       return text ? undefined : 'no text';
+    });
+    // With no argument these are the week and the month in progress, so the text holds today's date as the machine reads it
+    await check('prompts/get weekly_summary (this week)', async () => {
+      const { messages } = await mcp.getPrompt({ name: 'weekly_summary' });
+      const text = messages.map(message => (message.content.type === 'text' ? message.content.text : '')).join('\n');
+      return text.includes(`starting Monday ${isoOf(MONDAY)}`) ? undefined : 'wrong date';
+    });
+    await check('prompts/get monthly_summary (this month)', async () => {
+      const { messages } = await mcp.getPrompt({ name: 'monthly_summary' });
+      const text = messages.map(message => (message.content.type === 'text' ? message.content.text : '')).join('\n');
+      return text.includes(`notes for ${THIS_MONTH}`) ? undefined : 'wrong date';
     });
     await check('prompts/get continue_on', async () => {
       const { messages } = await mcp.getPrompt({ name: 'continue_on', arguments: { topic: 'project atlas' } });
