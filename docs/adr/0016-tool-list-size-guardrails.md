@@ -40,5 +40,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `tests/guards/tool-list.test.ts` (token budget, description cap, no stale allowances), with the exact text held by the recorded `tools/list` in `scripts/parity/expected/tool-list.json` and the parity step of CI (by meaning, ADR-0031, not byte for byte)
+- test: `tests/rust-guards/tool-list-live.test.ts` (token budget and description cap, measured on the Rust server's own `tools/list`, which is what a client receives: 19,383 characters of the budget's 19,700 when written)
+- test: `tests/guards/tool-list.test.ts` (the same budget and cap over the recorded list, `scripts/parity/expected/tool-list.json`, which serializes smaller because the server's schemas carry spellings the by-meaning comparison drops, and no stale allowances); the exact text is held by the parity step of CI by meaning (ADR-0031), not byte for byte
 - reviewer: A PR that raises TOOL_LIST_BUDGET_CHARS explains in its description why the growth is worth it.

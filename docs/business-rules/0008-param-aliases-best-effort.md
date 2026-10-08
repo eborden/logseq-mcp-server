@@ -11,12 +11,13 @@ An alias that leaked into the advertised schema, or replaced a required canonica
 ## Mechanical enforcement
 
 test: `rust/src/params.rs`
+test: `tests/guards/tool-list.test.ts`
 
-Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and that the recorded `tools/list` (held by the parity step of CI) keeps the canonical name `required` and advertises no alias.
+Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity step of CI holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
 
 ## Changelog
 
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #56 |
-| 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. | #370 |
+| 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertions for the canonical parameter and the absent aliases. | #370 |

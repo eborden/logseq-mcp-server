@@ -29,7 +29,8 @@ Date: 2025-11-24
 
 ## Mechanical enforcement
 
-The config loader has no `features` section, so a flag cannot be read without adding one. The test fails if the loader's key set grows. A flag read from somewhere else, or a second implementation of a tool, still rests on review: the TypeScript guard that looked for `*-http.ts` and `*-datalog.ts` files went with the TypeScript server (#356), and the Rust crate has one module per tool.
+The config loader has no `features` section, so a flag cannot be read without adding one. The test fails if the loader's key set grows. A flag read from somewhere else still rests on review. The TypeScript guard that looked for `*-http.ts` and `*-datalog.ts` files went with the TypeScript server (#356), and the guard over `rust/src/tools` replaces it.
 
 - test: `rust/src/config.rs` (the loader returns exactly apiUrl and authToken, plus timeoutMs and tips when set, and drops unknown keys)
+- test: `tests/guards/tool-list.test.ts` (`rust/src/tools` holds exactly one module per recorded tool, so no `*_http`, `*_datalog` or other extra module can be added without failing it)
 - reviewer: Reject a PR that adds an implementation or rollout flag, or a second implementation of a tool, unless it cites an ADR that supersedes ADR-0005. Config toggles for output, such as tips, are not rollout flags.
