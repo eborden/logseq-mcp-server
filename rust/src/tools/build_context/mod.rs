@@ -365,7 +365,7 @@ pub async fn build_context_for_topic(client: &LogseqClient, topic_name: &str, ca
     let blocks_query = if aliased { get_blocks_on_pages(&alias_set.ids()?) } else { get_page_blocks(&PageName::new(&resolved.lookup_name)) };
     let answer = client.execute_datalog_query(&blocks_query.text, &blocks_query.inputs).await?;
     // PARITY(#299): a `null` answer is read as "no blocks", so the page looks empty when LogSeq didn't answer
-    // (suspected TS bug, BR-0011) — drop if Rust becomes the only server.
+    // (suspected TS bug, BR-0011) — fix per #338, in both servers.
     let rows = block_rows(answer)?.unwrap_or_default();
     let fetched: Vec<Value> = rows.into_iter().flatten().map(Value::Object).collect();
     let all_blocks = blocks_of(fetched, aliased, id_of(Some(&main_page)));
@@ -373,7 +373,7 @@ pub async fn build_context_for_topic(client: &LogseqClient, topic_name: &str, ca
 
     // Query 3: the reference blocks, and the related pages derived from them. `null` and `[]` both
     // mean the page has no backlinks; an error (connection, timeout, auth, unexpected) propagates.
-    // PARITY(#299): a `null` answer is read as "no backlinks" (suspected TS bug, BR-0011) — fix per #318.
+    // PARITY(#299): a `null` answer is read as "no backlinks" (suspected TS bug, BR-0011) — fix per #338, in both servers.
     let backlinks = fetch_backlinks(client, &resolved.lookup_name, &alias_set).await?.unwrap_or_default();
     let (all_related_pages, all_references) = references_of(backlinks);
 
