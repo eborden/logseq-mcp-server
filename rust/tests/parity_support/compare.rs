@@ -20,9 +20,9 @@ use std::collections::BTreeSet;
 use logseq_mcp_server::js;
 use serde_json::{Map, Value, json};
 
-use super::cases::Canned;
+use super::cases::{Canned, Case};
 use super::stub::{Call, canonical};
-use super::suggestion_rules::{Site, check_suggestion_rules, describe_site, not_found_sites, read_message, with_message};
+use super::suggestion_rules::{Site, WRONG_LIST_LABELS, candidates_of, check_suggestion_rules, describe_site, not_found_sites, read_message, with_message, wrong_lists};
 
 /// Whether two values are the same JSON value: objects by key (order doesn't matter), numbers by value
 /// (`50`, `50.0` and `5e1` are one number), everything else exactly.
@@ -487,4 +487,39 @@ pub fn compare_tool_lists(expected: &[Value], actual: &[Value]) -> Vec<String> {
         }
     }
     failures
+}
+
+/// The self-check of the closest-name rules: for each recorded case with a list, put each kind of wrong list in the
+/// reference's place and check that the rules fail it. It runs no server. Every kind has to apply to some case, or the
+/// check proves nothing about it, so a kind that applies to none is a failure of the check itself. Returns the lines
+/// that say what happened, and whether every kind applied and was caught.
+pub fn check_wrong_lists(cases: &[Case]) -> (Vec<String>, bool) {
+    let mut applied = vec![0usize; WRONG_LIST_LABELS.len()];
+    let mut caught = vec![0usize; WRONG_LIST_LABELS.len()];
+    let mut lines = Vec::new();
+    for case in cases {
+        let candidates = candidates_of(case);
+        for site in not_found_sites(&case.expected) {
+            let reference = read_message(&case.expected, site).expect("the site was found in the expected result");
+            for wrong in wrong_lists(&reference, &candidates) {
+                let at = WRONG_LIST_LABELS.iter().position(|label| *label == wrong.label).expect("a known kind of wrong list");
+                applied[at] += 1;
+                if compare_results(&case.expected, &with_message(&case.expected, site, &wrong.message), &candidates).is_empty() {
+                    lines.push(format!("NOT CAUGHT: {} in {:?}", wrong.label, case.name));
+                } else {
+                    caught[at] += 1;
+                }
+            }
+        }
+    }
+    let mut ok = lines.is_empty();
+    for (at, label) in WRONG_LIST_LABELS.iter().enumerate() {
+        if applied[at] == 0 {
+            lines.push(format!("self-check, closest names, {label}: no recorded case it applies to"));
+            ok = false;
+        } else {
+            lines.push(format!("self-check, closest names, {label}: caught in {} of {} case(s)", caught[at], applied[at]));
+        }
+    }
+    (lines, ok)
 }

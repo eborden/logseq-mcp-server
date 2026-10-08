@@ -13,7 +13,7 @@
 mod parity_support;
 
 use parity_support::cases::{Canned, Case, Request, load_cases, load_tool_list};
-use parity_support::compare::{compare_calls, compare_results, compare_tool_lists, normalize_schema};
+use parity_support::compare::{check_wrong_lists, compare_calls, compare_results, compare_tool_lists, normalize_schema};
 use parity_support::stub::{Call, DATASCRIPT_QUERY};
 use parity_support::suggestion_rules::{
     GUIDANCE, REQUIRED_CASES, candidates_of, check_list, check_reference_list, check_reference_lists, fold, matches_of, missing_required_cases, parse_not_found,
@@ -812,4 +812,18 @@ fn a_reference_that_breaks_a_rule_is_not_recorded() {
     assert!(check_reference_lists(&[case_with(tool_error(&message("Projct", Some("Bob"))))]).join("\n").contains("rule 5"));
     assert_eq!(check_reference_lists(&[case_with(tool_error(&message("Projct", Some(TYPO))))]), Vec::<String>::new());
     assert_eq!(candidates_of(&case_with(Value::Null)), names(&PAGES));
+}
+
+#[test]
+fn the_wrong_list_self_check_fails_when_a_kind_of_wrong_list_applies_to_no_case() {
+    // With no recorded case, no kind applies, so the check would prove nothing and says so
+    let (lines, ok) = check_wrong_lists(&[]);
+    assert!(!ok);
+    let report = lines.join("\n");
+    assert!(report.contains("no recorded case it applies to"), "{report}");
+    assert_eq!(lines.len(), parity_support::suggestion_rules::WRONG_LIST_LABELS.len(), "{report}");
+    // And with the recorded cases every kind applies and is caught
+    let (lines, ok) = check_wrong_lists(&load_cases());
+    assert!(ok, "{}", lines.join("\n"));
+    assert!(lines.iter().all(|line| line.contains("caught in")), "{lines:?}");
 }
