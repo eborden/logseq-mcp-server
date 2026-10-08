@@ -230,6 +230,12 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 
 Re-run the script after changing any of these tools, and update this table.
 
+**Rust server (#353, Oct 2026, same ~2k-page graph and hub page, one run per server).** The Rust server on `feature/rust-spike` makes the same LogSeq calls as the TypeScript server, so the call counts above hold for it. `scripts/measure-api-calls.ts` ran 38 cases on this graph (every measured row above plus the alias, ISO date, `resolve_refs` and not-found variants) against the TypeScript tool functions, the TypeScript server through MCP and the Rust server through MCP stdio. All three gave the same call total and the same split by LogSeq method in every case. (A missing page answers an error through MCP, with the same 4 calls.) `list_pages` and `get_graph_info` aren't in the script, so this run doesn't cover them. `scripts/measure-output-size.ts` gave byte-identical sizes for the two servers.
+
+Times were also about equal, but the machine was under heavy load for all three runs (1-minute load average ~11-13, and it never fell below 3 in the 20 minutes waited), so treat them as order of magnitude: a single-page tool takes a few ms to ~0.1s, and a depth-2 network or `build_context` ~0.2-0.7s, on either server, inside the run-to-run noise. Re-measure on a quiet machine before quoting a difference between the servers.
+
+Select the server with `--server ts` (default: each tool function in process), `--server ts-mcp` (the TypeScript server through an in-memory MCP client) or `--server rust` (the binary at `--rust-binary`, default `rust/target/release/logseq-mcp-server`, over MCP stdio). Build it with `cd rust && cargo build --release --locked`. For `rust` the script counts calls with a forwarding proxy between the binary and LogSeq (`scripts/measure-server.ts`); the binary gets a temporary config with the same token, deleted afterwards. The proxy and the MCP layer add a little to each time.
+
 ## Critical LogSeq Datalog Constraints
 
 LogSeq's Datalog implementation (via `logseq.DB.datascriptQuery`) has significant limitations compared to standard DataScript. Understanding these constraints is essential for writing working queries.
@@ -611,6 +617,7 @@ Measured numbers are in "Current Implementation Status" under "Why Datalog?". Re
 ```bash
 npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
 npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
+npx tsx scripts/measure-api-calls.ts --server rust  # the Rust binary (build it first); also --server ts-mcp. measure-output-size.ts takes --server ts|rust
 npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42), markdown and compact vs json (#43); bytes only, no names
 ```
 
