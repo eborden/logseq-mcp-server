@@ -27,6 +27,7 @@ One row per rule, sorted by number. See [Format rules](#format-rules) for what e
 | [0010-page-names-resolved-via-resolver](0010-page-names-resolved-via-resolver.md) | Page names, aliases and ISO dates resolve the same way in every page-taking tool, and a tool says when it resolved indirectly. |
 | [0011-null-is-not-empty](0011-null-is-not-empty.md) | `null` from an API call is not `[]`; report it as unavailable with a warning. |
 | [0012-slim-output-default](0012-slim-output-default.md) | Slim output is the default; only an explicit `slim_results: false` returns full entities. |
+| [0013-response-key-order](0013-response-key-order.md) | A result lists its keys in one fixed order: what was answered, what must not be missed, the data, then optional guidance. |
 
 ## Numbering and naming
 
