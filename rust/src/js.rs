@@ -86,19 +86,25 @@ pub fn json_stringify(value: &Value) -> String {
         Value::String(s) => serde_json::to_string(s).expect("a string serializes"),
         Value::Array(items) => format!("[{}]", items.iter().map(json_stringify).collect::<Vec<_>>().join(",")),
         Value::Object(map) => {
-            let mut indices: Vec<(u32, &String)> =
-                map.keys().filter_map(|key| array_index(key).map(|index| (index, key))).collect();
-            indices.sort();
-            let others = map.keys().filter(|key| array_index(key).is_none());
-            let entries: Vec<String> = indices
+            let entries: Vec<String> = entries_in_js_order(map)
                 .into_iter()
-                .map(|(_, key)| key)
-                .chain(others)
-                .map(|key| format!("{}:{}", serde_json::to_string(key).expect("a key serializes"), json_stringify(&map[key])))
+                .map(|(key, value)| format!("{}:{}", serde_json::to_string(key).expect("a key serializes"), json_stringify(value)))
                 .collect();
             format!("{{{}}}", entries.join(","))
         }
     }
+}
+
+// PARITY(#299): a JavaScript object lists integer-like keys first, whatever order they came in — drop if
+// Rust becomes the only server.
+/// An object's entries in the order `Object.entries` (and `JSON.stringify`) gives them: integer-like
+/// keys first, in ascending order, then the others in the order they came.
+pub fn entries_in_js_order(map: &serde_json::Map<String, Value>) -> Vec<(&String, &Value)> {
+    let mut indices: Vec<(u32, (&String, &Value))> =
+        map.iter().filter_map(|(key, value)| array_index(key).map(|index| (index, (key, value)))).collect();
+    indices.sort_by_key(|(index, _)| *index);
+    let others = map.iter().filter(|(key, _)| array_index(key).is_none());
+    indices.into_iter().map(|(_, entry)| entry).chain(others).collect()
 }
 
 // PARITY(#299): writes a snippet cut inside an emoji as a lone-surrogate escape, which is ill-formed

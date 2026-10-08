@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
 import { queryByDateRangeCases } from '../scripts/parity/cases/query-by-date-range.js';
+import { pageResourceCases } from '../scripts/parity/cases/page-resource.js';
 import { CASE_GROUPS, allCases, expectedFileOf } from '../scripts/parity/case-groups.js';
 import {
   compareCalls,
@@ -12,6 +15,7 @@ import {
   PARITY_TZ,
   perturbCases,
   readSnapshotEntry,
+  runCase,
   runParity,
   serializeLikeVitest,
   toolsCalledBy,
@@ -90,6 +94,51 @@ describe('compareResult', () => {
     expect(compareResult({ ...result, _meta: { a: 1 } }, { ...result, _meta: { a: 2 } })).toEqual([
       '_meta: expected {"a":1}, got {"a":2}'
     ]);
+  });
+});
+
+describe('compareResult on a resource', () => {
+  const block = { uri: 'logseq://page/Alice', mimeType: 'text/markdown', text: '# Alice\n' };
+  const read: ToolResult = { contents: [block] };
+
+  it('compares the text of each contents block byte for byte, and its other fields', () => {
+    expect(compareResult(read, structuredClone(read))).toEqual([]);
+    expect(compareResult(read, { contents: [{ ...block, text: '# Alice \n' }] })).toEqual([
+      expect.stringContaining('contents[0].text differs at character 7')
+    ]);
+    expect(compareResult(read, { contents: [{ ...block, mimeType: 'text/plain' }] })).toEqual([
+      'contents[0].mimeType: expected "text/markdown", got "text/plain"'
+    ]);
+    expect(compareResult(read, { contents: [block, block] })).toHaveLength(1);
+    expect(compareResult(read, { contents: [{ uri: block.uri, text: block.text }] })).toEqual([
+      'contents[0] lacks key(s) mimeType'
+    ]);
+  });
+
+  it('compares a JSON-RPC error recorded as a result', () => {
+    const error: ToolResult = { error: { code: -32002, message: 'MCP error -32002: No page' } };
+    expect(compareResult(error, structuredClone(error))).toEqual([]);
+    expect(compareResult(error, { error: { code: -32602, message: 'MCP error -32002: No page' } })).toHaveLength(1);
+    expect(compareResult(error, { error: { ...(error.error as object), data: { uri: 'x' } } })).toHaveLength(1);
+  });
+});
+
+describe('runCase on a resource read that fails', () => {
+  const read = (uri: string): ParityCase => ({ name: 'n', tool: 't', arguments: {}, readResource: uri, steps: [] });
+  const failing = (error: unknown) => ({ readResource: async () => { throw error; } }) as unknown as Client;
+
+  it('records the error a server sent as the result of the case', async () => {
+    const result = await runCase(failing(new McpError(-32002, 'No page', { uri: 'x' })), read('logseq://page/x'), 1000);
+    expect(result).toEqual({ error: { code: -32002, message: 'MCP error -32002: No page', data: { uri: 'x' } } });
+  });
+
+  it('does not record the client\'s own timeout or closed connection, which say nothing about the server\'s answer', async () => {
+    for (const code of [ErrorCode.RequestTimeout, ErrorCode.ConnectionClosed]) {
+      const error = new McpError(code, 'client side');
+      await expect(runCase(failing(error), read('logseq://page/x'), 1000), String(code)).rejects.toBe(error);
+    }
+    const other = new Error('boom');
+    await expect(runCase(failing(other), read('logseq://page/x'), 1000)).rejects.toBe(other);
   });
 });
 
@@ -658,3 +707,51 @@ describe('runParity against the TypeScript server', () => {
     }
   }, 60000);
 });
+
+describe('runParity on resources against the TypeScript server', () => {
+  const expectedPages = async () => JSON.parse(await readFile(expectedFileOf(CASE_GROUPS.find(g => g.name === 'page-resource')!), 'utf8')) as Record<string, ToolResult>;
+  const named = (name: string) => pageResourceCases.find(c => c.name === `page resource: ${name}`)!;
+
+  it('reads a page, lists the template and records a JSON-RPC error as the result of its case', async () => {
+    const cases = [named('the template'), named('an exact name with its blocks'), named('no such page, with the closest names'), named('no name')];
+    const expected = await expectedPages();
+    const report = await runParity({
+      server: typescriptServer(),
+      cases,
+      expected: Object.fromEntries(cases.map(c => [c.name, expected[c.name]])),
+      expectedToolList: await loadToolList(),
+      onlyTestedTools: true,
+      snapshotFile: SNAPSHOT_FILE
+    });
+    // the reference lists the tools the cases call, and a resource case calls none: every tool is beyond it
+    expect(report.failures.filter(f => !f.endsWith(': not in the reference')), report.stderr).toEqual([]);
+    expect(Object.keys(report.results['page resource: the template'])).toEqual(['resourceTemplates']);
+    expect(report.results['page resource: an exact name with its blocks'].contents).toEqual([
+      expect.objectContaining({ uri: 'logseq://page/Project%20Atlas', mimeType: 'text/markdown' })
+    ]);
+    expect(report.results['page resource: no such page, with the closest names'].error).toEqual({
+      code: -32002,
+      message: expect.stringContaining('MCP error -32002: MCP error -32002: No page "Projct Atlas"')
+    });
+    expect(report.results['page resource: no name'].error).toEqual({ code: -32602, message: expect.stringContaining('No page name in logseq://page/') });
+  }, 60000);
+
+  it('fails a resource case on a perturbed answer that changes the page, and on a changed result', async () => {
+    const exact = named('an exact name with its blocks');
+    const expected = await expectedPages();
+    const run = async (cases: ParityCase[]) =>
+      runParity({
+        server: typescriptServer(),
+        cases,
+        expected: { [exact.name]: expected[exact.name] },
+        expectedToolList: await loadToolList(),
+        onlyTestedTools: true,
+        snapshotFile: SNAPSHOT_FILE
+      });
+    const ofCase = (report: Awaited<ReturnType<typeof run>>) => report.failures.filter(f => f.startsWith(`[${exact.tool}: ${exact.name}]`));
+
+    expect(ofCase(await run([exact]))).toEqual([]);
+    expect(ofCase(await run(perturbCases([exact]))).join('\n')).toContain('contents[0].text differs');
+  }, 60000);
+});
+

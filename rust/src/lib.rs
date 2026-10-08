@@ -7,7 +7,7 @@
 //! uses is here at the top level: the client, config and environment, the typed query values
 //! (`edn`), the LogSeq reader (`wire`), the page resolver (`resolve`, BR-0010) with its own
 //! queries and wire types, `fuzzy` (the resolver's suggestions), the errors, `ResultMeta`
-//! (`meta`), tips, the JavaScript rules the output depends on (`js`) and the tool helpers (`tool`).
+//! (`meta`), the page lookup by id (`pages_by_ids`), tips, the JavaScript rules the output depends on (`js`) and the tool helpers (`tool`).
 //! Block refs and embeds are resolved by `resolve_refs`.
 
 pub mod args;
@@ -23,11 +23,14 @@ pub mod errors;
 pub mod escape;
 pub mod fuzzy;
 pub mod js;
+pub mod markdown;
 pub mod meta;
 pub mod output_format;
+pub mod pages_by_ids;
 pub mod params;
 pub mod resolve;
 pub mod resolve_refs;
+pub mod resources;
 pub mod server;
 pub mod slim;
 pub mod tips;
