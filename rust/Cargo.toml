@@ -1,8 +1,8 @@
 [package]
 name = "logseq-mcp-server"
-# Not the server's version: serverInfo.version is read from ../package.json, as the TypeScript
-# server reads it (src/version.ts), so both report the same one.
-version = "0.0.0"
+# The server's version: serverInfo.version is this (src/server.rs). tests/rust-guards/version.test.ts keeps
+# it equal to package.json and the plugin manifest.
+version = "1.0.0"
 edition = "2024"
 # rmcp 3.x needs 1.88. rust-toolchain.toml pins the same version for local builds and CI.
 rust-version = "1.88"

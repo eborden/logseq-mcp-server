@@ -4,8 +4,9 @@ import { connectMcpToApi } from '../../scripts/lib/rust-server.js';
 
 const readJson = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf-8'));
 
-// The Rust server reads its version from package.json at build time (rust/src/server.rs), so one number names
-// the server, the npm package and the plugin until #355 and #350 change how it ships.
+// The Rust server reports its Cargo package version (rust/src/server.rs), and this keeps it equal to
+// package.json, so one number names the server, the npm package and the plugin until #355 and #350 change how
+// it ships.
 describe('server version (#46, #356)', () => {
   const pkg = readJson('../../package.json');
 
@@ -18,6 +19,11 @@ describe('server version (#46, #356)', () => {
       await mcp.close();
     }
   }, 30000);
+
+  it('keeps the Cargo package on the same version', () => {
+    const cargo = readFileSync(new URL('../../rust/Cargo.toml', import.meta.url), 'utf-8');
+    expect(cargo.match(/^\[package\][^[]*?^version = "([^"]+)"/ms)?.[1]).toBe(pkg.version);
+  });
 
   it('is a semver string', () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+/);
