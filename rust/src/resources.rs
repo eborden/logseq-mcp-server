@@ -97,6 +97,8 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
     let name = page_name_from_uri(uri)?;
     let page = match get_page(client, &name, true, false).await {
         Ok(page) => page,
+        // rmcp rewrites -32002 to -32602 for a client that negotiated protocol 2026-07-28 or newer (SEP-2164); the
+        // TypeScript SDK can't negotiate that, so it's not a regression, and the rewrite stays (#299)
         Err(error @ ToolError::PageNotFound(_)) => return Err(mcp_error(ErrorCode::RESOURCE_NOT_FOUND, &error.to_string())),
         Err(error @ ToolError::AmbiguousPage(_)) => return Err(mcp_error(ErrorCode::INVALID_PARAMS, &error.to_string())),
         Err(error) => return Err(ErrorData::new(ErrorCode::INTERNAL_ERROR, error.to_string(), None)),
