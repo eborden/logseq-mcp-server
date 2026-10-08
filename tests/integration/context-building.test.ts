@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../src/client.js';
-import { buildContextForTopic } from '../../src/tools/build-context.js';
-import { getContextForQuery } from '../../src/tools/get-context-for-query.js';
+import { buildContextForTopic, getContextForQuery } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**

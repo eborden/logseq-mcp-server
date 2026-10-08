@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { LogseqClient } from '../../src/client.js';
-import { createServer } from '../../src/index.js';
-import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT, searchBlocksWithMeta } from '../../src/tools/search-blocks.js';
+import { searchBlocksWithMeta } from './helpers/tools.js';
+import { DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT } from '../../src/tools/search-blocks.js';
 import { DEFAULT_MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS } from '../../src/tools/get-context-for-query.js';
 import { DEFAULT_LIST_PAGES_LIMIT, MAX_LIST_PAGES_LIMIT } from '../../src/tools/list-pages.js';
 import { DEFAULT_MAX_ENTRIES, MAX_ENTRIES } from '../../src/tools/get-concept-evolution.js';
@@ -17,6 +16,7 @@ import {
 import { DEFAULT_PROPERTY_LIMIT, MAX_PROPERTY_LIMIT } from '../../src/tools/query-by-property.js';
 import { DEFAULT_RELATIONSHIP_LIMIT, MAX_RELATIONSHIP_LIMIT } from '../../src/tools/search-by-relationship.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.js';
+import { connectMcp } from './helpers/server-under-test.js';
 
 /**
  * Result caps hold against a real graph (#61): no tool returns more than its
@@ -64,10 +64,7 @@ describe('result caps (#61)', () => {
 
   beforeAll(async () => {
     ({ client } = await connectFixture());
-    const server = createServer(client, { tips: false });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    mcp = new Client({ name: 'result-caps-test', version: '1.0.0' }, { capabilities: {} });
-    await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+    mcp = await connectMcp(client, { tips: false });
   });
 
   afterAll(async () => {
