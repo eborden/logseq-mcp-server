@@ -14,16 +14,24 @@
 //! the better nucleo score does, then the shorter name. Ties keep the order `getAllPages` listed the
 //! names in. Names are distinct (rule 3), and an empty name or input matches nothing.
 //!
-//! The words are the input split on spaces, each matched on its own as `Pattern::new` does with
-//! `AtomKind::Fuzzy`, not `Pattern::parse`, so an fzf operator (`^`, `$`, `'`, `!`) is just a
-//! character. `Pattern::new` still reads `\ ` as an escaped space, which would let a word match
-//! text the input didn't type, so each word gets a pattern of its own and none holds a space.
+//! Every comparison is made on folded text, and the fold is the harness's: trim, Unicode NFD, drop the
+//! marks, lowercase. nucleo's own normalization is off (`Normalization::Never`, `CaseMatching::Respect`,
+//! and none of its Unicode features). Its table is wrong for Latin Extended Additional in 0.3.1 (`ạ`
+//! becomes `o`), it doesn't split letters the way NFD does (`ø`), and `Normalization::Smart` turns it off
+//! for a word that holds an accent. What nucleo is left to do is the subsequence match and the score, over
+//! text that is already folded.
+//!
+//! The words are the folded input split on spaces, one `Atom` each, built by `Atom::new` with no escape
+//! processing and `AtomKind::Fuzzy`, so an fzf operator (`^`, `$`, `'`, `!`) or a backslash is just a
+//! character.
 
 use std::cmp::Reverse;
 use std::collections::HashSet;
 
-use nucleo_matcher::chars::{normalize, to_lower_case};
-use nucleo_matcher::pattern::{AtomKind, CaseMatching, Normalization, Pattern};
+use icu_normalizer::{DecomposingNormalizer, DecomposingNormalizerBorrowed};
+use icu_properties::props::{GeneralCategory, GeneralCategoryGroup};
+use icu_properties::{CodePointMapData, CodePointMapDataBorrowed};
+use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use crate::js;
@@ -39,25 +47,37 @@ enum Tier {
     Fuzzy,
 }
 
-/// Lowercased, and with accents taken off the letters nucleo knows (`É` is `e`), the way the harness's
-/// `fold` does it for ordinary names. Combining marks are dropped, as a name typed as `e` and U+0301 is `é`.
-fn fold(text: &str) -> String {
-    text.chars()
-        .filter(|c| !('\u{300}'..='\u{36f}').contains(c))
-        .map(|c| to_lower_case(normalize(c)))
-        .collect()
+/// The harness's `fold(s)`: trim, NFD, drop the general category Mark (`\p{M}`), lowercase.
+struct Folder {
+    nfd: DecomposingNormalizerBorrowed<'static>,
+    categories: CodePointMapDataBorrowed<'static, GeneralCategory>,
+}
+
+impl Folder {
+    fn new() -> Self {
+        Self { nfd: DecomposingNormalizer::new_nfd(), categories: CodePointMapData::<GeneralCategory>::new() }
+    }
+
+    fn fold(&self, text: &str) -> String {
+        let decomposed = self.nfd.normalize(js::trim(text));
+        let unmarked: String =
+            decomposed.chars().filter(|c| !GeneralCategoryGroup::Mark.contains(self.categories.get(*c))).collect();
+        unmarked.to_lowercase()
+    }
 }
 
 /// The indexes into `names` of the best `limit` closest names to `input`, best first.
 pub fn go(input: &str, names: &[&str], limit: usize) -> Vec<usize> {
-    let input = js::trim(input);
-    let words: Vec<&str> = input.split(' ').filter(|word| !word.is_empty()).collect();
-    if words.is_empty() || limit == 0 {
+    let folder = Folder::new();
+    let wanted = folder.fold(input);
+    let atoms: Vec<Atom> = wanted
+        .split(' ')
+        .filter(|word| !word.is_empty())
+        .map(|word| Atom::new(word, CaseMatching::Respect, Normalization::Never, AtomKind::Fuzzy, false))
+        .collect();
+    if atoms.is_empty() || limit == 0 {
         return Vec::new();
     }
-    let patterns: Vec<Pattern> =
-        words.iter().map(|word| Pattern::new(word, CaseMatching::Ignore, Normalization::Smart, AtomKind::Fuzzy)).collect();
-    let wanted = fold(input);
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut buffer = Vec::new();
     let mut seen = HashSet::new();
@@ -67,11 +87,9 @@ pub fn go(input: &str, names: &[&str], limit: usize) -> Vec<usize> {
         if name.is_empty() || !seen.insert(*name) {
             continue;
         }
-        let haystack = Utf32Str::new(name, &mut buffer);
-        let scores: Option<Vec<u32>> =
-            patterns.iter().map(|pattern| pattern.score(haystack, &mut matcher)).collect();
-        let score = scores.as_ref().map_or(0, |scores| scores.iter().sum());
-        let folded = fold(name);
+        let folded = folder.fold(name);
+        let haystack = Utf32Str::new(&folded, &mut buffer);
+        let scores: Option<Vec<u32>> = atoms.iter().map(|atom| atom.score(haystack, &mut matcher).map(u32::from)).collect();
         let tier = if folded == wanted {
             Tier::Exact
         } else if folded.starts_with(&wanted) {
@@ -83,7 +101,7 @@ pub fn go(input: &str, names: &[&str], limit: usize) -> Vec<usize> {
         };
         // A score only ranks the names that matched by being spread out: an exact or prefix match is as
         // close as it gets, and the shorter name is the nearer one
-        let score = if tier == Tier::Fuzzy { score } else { 0 };
+        let score = if tier == Tier::Fuzzy { scores.map_or(0, |scores| scores.iter().sum()) } else { 0 };
         found.push((tier, Reverse(score), name.chars().count(), index));
     }
     found.sort_unstable();
@@ -153,6 +171,34 @@ mod tests {
     }
 
     #[test]
+    fn an_accent_on_the_input_still_matches_a_name_without_it() {
+        // one word, then a word of two, in a name that has no accent at all
+        assert_eq!(closest("cfé", &["Cafe", "Bob"]), ["Cafe"]);
+        assert_eq!(closest("menu café", &["Cafe Menu", "Bob"]), ["Cafe Menu"]);
+        assert_eq!(closest("bayes naïve", &["naive bayes", "Bob"]), ["naive bayes"]);
+        // typed with a combining accent, as macOS often gives it
+        let listed = closest("menu cafe\u{301}", &["Café Menu", "Cafe Menu", "Bob"]);
+        assert_eq!(listed.iter().copied().collect::<HashSet<_>>(), HashSet::from(["Café Menu", "Cafe Menu"]));
+    }
+
+    #[test]
+    fn latin_extended_additional_letters_fold_as_nfd_does() {
+        // nucleo-matcher 0.3.1's own table maps `ạ` to `o` and `ḍ` to `i`
+        assert_eq!(closest("nguyen", &["Nguyễn", "Bob"]), ["Nguyễn"]);
+        assert_eq!(closest("viet", &["Việt Nam", "Bob"]), ["Việt Nam"]);
+        assert_eq!(closest("ha noi", &["Hà Nội", "Bob"]), ["Hà Nội"]);
+        assert!(closest("mo", &["Mạ"]).is_empty());
+        assert_eq!(closest("ma", &["Mạ"]), ["Mạ"]);
+    }
+
+    #[test]
+    fn a_letter_nfd_does_not_split_stays_itself() {
+        // `ø` has no decomposition: "bjorn" doesn't cover "Bjørn", and "bjørn" does
+        assert!(closest("bjorn", &["Bjørn", "Bob"]).is_empty());
+        assert_eq!(closest("bjørn", &["Bjørn", "Bob"]), ["Bjørn"]);
+    }
+
+    #[test]
     fn nothing_that_does_not_cover_the_input_is_listed() {
         assert!(closest("zzz", &["Project Atlas", "Alice", "Bob"]).is_empty());
     }
@@ -162,6 +208,11 @@ mod tests {
         assert!(closest("", &["Alice"]).is_empty());
         assert!(closest("   ", &["Alice"]).is_empty());
         assert!(closest("a", &["", "Alice"]) == ["Alice"]);
+    }
+
+    #[test]
+    fn a_name_is_trimmed_as_the_harness_does() {
+        assert_eq!(closest("alice", &[" Alice ", "Bob"]), [" Alice "]);
     }
 
     #[test]
@@ -179,10 +230,11 @@ mod tests {
     }
 
     #[test]
-    fn a_backslash_is_not_an_escaped_space() {
-        // `Pattern::new` alone would read `a\ b` as the one word "a b", which "a b" matches without any backslash
+    fn a_backslash_is_a_plain_character() {
+        // `a\ b` is the words `a\` and `b`: "a b" has no backslash, and a word with one doubles nothing
         assert!(closest("a\\ b", &["a b", "ab"]).is_empty());
         assert_eq!(closest("a\\ b", &["a\\ b"]), ["a\\ b"]);
+        assert_eq!(closest("menu café\\x", &["café\\x menu", "Bob"]), ["café\\x menu"]);
     }
 
     #[test]
