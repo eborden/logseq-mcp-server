@@ -29,6 +29,9 @@ export function buildExport(): Map<string, string> {
     const expected = JSON.parse(readFileSync(expectedFileOf(group), 'utf8')) as Record<string, unknown>;
     const lines = group.cases.map(c => {
       if (!(c.name in expected)) throw new Error(`no golden result for the case ${JSON.stringify(c.name)}; record it with --record-from-rust`);
+      // `perturbCases` checks `'perturbed' in c`, so an explicit `perturbed: undefined` serves an empty body as the last
+      // answer in the Node self-check, while JSON drops the key and the cargo self-check would suffix the strings instead
+      if ('perturbed' in c && c.perturbed === undefined) throw new Error(`the case ${JSON.stringify(c.name)} has perturbed: undefined; leave the key out`);
       // A JSON file can't hold `undefined`, which the stub would have served as an empty body
       for (const call of c.steps.flat()) {
         if (call.response === undefined) throw new Error(`the case ${JSON.stringify(c.name)} has a stub answer of undefined`);
