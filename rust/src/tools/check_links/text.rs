@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use serde_json::{Map, Value, json};
+use serde::Serialize;
 
 use crate::js;
 
@@ -18,7 +18,7 @@ const EXCERPT_BEFORE: usize = 30;
 const EXCERPT_AFTER: usize = 50;
 
 /// Where the stripped texts first differ. Excerpts are of the texts with brackets removed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProseDifference {
     /// 1-based line of the first difference
     pub line: usize,
@@ -31,54 +31,36 @@ pub struct ProseDifference {
 }
 
 /// Check 1: stripping `[[ ]]` from both texts leaves them identical.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProseCheck {
     pub ok: bool,
     /// Absent when the prose is preserved
+    #[serde(rename = "firstDifference", skip_serializing_if = "Option::is_none")]
     pub first_difference: Option<ProseDifference>,
 }
 
-impl ProseCheck {
-    pub fn to_value(&self) -> Value {
-        let mut check = Map::new();
-        check.insert("ok".into(), json!(self.ok));
-        if let Some(difference) = &self.first_difference {
-            check.insert(
-                "firstDifference".into(),
-                json!({"line": difference.line, "column": difference.column, "before": difference.before, "after": difference.after}),
-            );
-        }
-        Value::Object(check)
-    }
+/// The first line where a `[[` opens inside another, and the stretch around it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Nested {
+    pub line: usize,
+    pub excerpt: String,
 }
 
 /// Check 2: as many `[[` as `]]`, and no `[[` opened inside another on the same line.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BracketCheck {
     pub ok: bool,
     /// `[[` in `after`
     pub opens: usize,
     /// `]]` in `after`
     pub closes: usize,
-    /// The first line where a `[[` opens inside another, and the stretch around it; absent when nothing nests
-    pub nested: Option<(usize, String)>,
-}
-
-impl BracketCheck {
-    pub fn to_value(&self) -> Value {
-        let mut check = Map::new();
-        check.insert("ok".into(), json!(self.ok));
-        check.insert("opens".into(), json!(self.opens));
-        check.insert("closes".into(), json!(self.closes));
-        if let Some((line, excerpt)) = &self.nested {
-            check.insert("nested".into(), json!({"line": line, "excerpt": excerpt}));
-        }
-        Value::Object(check)
-    }
+    /// Absent when nothing nests
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nested: Option<Nested>,
 }
 
 /// A ref that was in `before` and is in `after` fewer times.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RemovedRef {
     /// The term as `before` first spells it
     pub term: String,
@@ -89,18 +71,10 @@ pub struct RemovedRef {
 }
 
 /// Check 4: every `[[term]]` in `before` is still a ref in `after`, as many times.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RefsPreservedCheck {
     pub ok: bool,
     pub removed: Vec<RemovedRef>,
-}
-
-impl RefsPreservedCheck {
-    pub fn to_value(&self) -> Value {
-        let removed: Vec<Value> =
-            self.removed.iter().map(|r| json!({"term": r.term, "before": r.before, "after": r.after})).collect();
-        json!({"ok": self.ok, "removed": removed})
-    }
 }
 
 /// Each `[[term]]` of the text as a `(start, end)` range of `chars`, brackets included: the
@@ -258,7 +232,7 @@ pub fn check_brackets(after: &str) -> BracketCheck {
     let opens = after.matches("[[").count();
     let closes = after.matches("]]").count();
     let chars: Vec<char> = after.chars().collect();
-    let nested = first_nested(&chars).map(|at| (position(&chars, at).0, excerpt(&chars, at)));
+    let nested = first_nested(&chars).map(|at| Nested { line: position(&chars, at).0, excerpt: excerpt(&chars, at) });
     BracketCheck { ok: opens == closes && nested.is_none(), opens, closes, nested }
 }
 
@@ -366,7 +340,7 @@ mod tests {
         assert_eq!((unbalanced.ok, unbalanced.opens, unbalanced.closes), (false, 2, 1));
         let nested = check_brackets("fine [[a]]\nbad [[a [[b]] c]]");
         assert!(!nested.ok);
-        assert_eq!(nested.nested, Some((2, "bad [[a [[b]] c]]".to_owned())));
+        assert_eq!(nested.nested, Some(Nested { line: 2, excerpt: "bad [[a [[b]] c]]".to_owned() }));
         // a newline between the two ends the run: not nested, though unbalanced
         assert_eq!(check_brackets("[[a\n[[b]]").nested, None);
         // non-overlapping, left to right
@@ -389,17 +363,20 @@ mod tests {
     }
 
     #[test]
-    fn the_checks_write_their_keys_in_the_order_the_typescript_result_has_them() {
-        assert_eq!(check_prose("a", "a").to_value().to_string(), r#"{"ok":true}"#);
+    fn each_check_says_whether_it_passed_before_its_detail() {
+        fn written<T: serde::Serialize>(check: &T) -> String {
+            serde_json::to_string(check).unwrap()
+        }
+        assert_eq!(written(&check_prose("a", "a")), r#"{"ok":true}"#);
         assert_eq!(
-            check_prose("a", "b").to_value().to_string(),
+            written(&check_prose("a", "b")),
             r#"{"ok":false,"firstDifference":{"line":1,"column":1,"before":"a","after":"b"}}"#
         );
-        assert_eq!(check_brackets("[[a").to_value().to_string(), r#"{"ok":false,"opens":1,"closes":0}"#);
+        assert_eq!(written(&check_brackets("[[a")), r#"{"ok":false,"opens":1,"closes":0}"#);
         assert_eq!(
-            check_brackets("[[a [[b]]").to_value().to_string(),
+            written(&check_brackets("[[a [[b]]")),
             r#"{"ok":false,"opens":2,"closes":1,"nested":{"line":1,"excerpt":"[[a [[b]]"}}"#
         );
-        assert_eq!(check_refs_preserved("[[a]]", "a").to_value().to_string(), r#"{"ok":false,"removed":[{"term":"a","before":1,"after":0}]}"#);
+        assert_eq!(written(&check_refs_preserved("[[a]]", "a")), r#"{"ok":false,"removed":[{"term":"a","before":1,"after":0}]}"#);
     }
 }

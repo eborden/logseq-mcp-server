@@ -16,8 +16,8 @@ mod text;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::args::Arguments;
 use crate::client::LogseqClient;
@@ -26,9 +26,9 @@ use crate::js;
 use crate::meta::ResultWarning;
 use crate::resolve::alias::compare_code_units;
 use crate::resolve::{Resolution, link_key, resolve_link_targets};
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 
-use self::text::{check_brackets, check_prose, check_refs_preserved, key_counts, key_of, link_counts};
+use self::text::{BracketCheck, ProseCheck, RefsPreservedCheck, check_brackets, check_prose, check_refs_preserved, key_counts, key_of, link_counts};
 
 pub const NAME: &str = "logseq_check_links";
 
@@ -122,9 +122,9 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
     let names: Vec<&str> = terms.iter().map(String::as_str).collect();
     let targets = resolve_link_targets(client, &names).await?;
     let mut warnings: Vec<ResultWarning> = Vec::new();
-    let mut resolved: Vec<Value> = Vec::new();
-    let mut unresolved: Vec<Value> = Vec::new();
-    let mut ambiguous: Vec<Value> = Vec::new();
+    let mut resolved: Vec<ResolvedRef> = Vec::new();
+    let mut unresolved: Vec<&str> = Vec::new();
+    let mut ambiguous: Vec<AmbiguousRef> = Vec::new();
     let mut ambiguous_all_preexisting = true;
 
     if targets.unavailable {
@@ -139,20 +139,20 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
     } else {
         for term in &terms {
             match targets.resolutions.get(&link_key(term)).unwrap_or(&Resolution::NotFound) {
-                Resolution::Found(page) => resolved.push(json!({
-                    "term": term,
-                    "page": page.original_name,
-                    "matchedBy": if page.matched_by == MatchedBy::Alias { "alias" } else { "name" },
-                })),
+                Resolution::Found(page) => resolved.push(ResolvedRef {
+                    term,
+                    page: &page.original_name,
+                    matched_by: if page.matched_by == MatchedBy::Alias { "alias" } else { "name" },
+                }),
                 Resolution::Ambiguous(found) => {
                     let existing = preexisting(term);
                     ambiguous_all_preexisting &= existing;
-                    ambiguous.push(json!({
-                        "term": term,
-                        "candidates": found.candidates.iter().map(|candidate| candidate.original_name.as_str()).collect::<Vec<_>>(),
-                        "totalCandidates": found.total_candidates,
-                        "preexisting": existing,
-                    }));
+                    ambiguous.push(AmbiguousRef {
+                        term,
+                        candidates: found.candidates.iter().map(|candidate| candidate.original_name.as_str()).collect(),
+                        total_candidates: found.total_candidates,
+                        preexisting: existing,
+                    });
                     if found.total_candidates > found.candidates.len() {
                         warnings.push(ResultWarning::new(
                             "candidates_truncated",
@@ -164,34 +164,111 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
                         ));
                     }
                 }
-                Resolution::NotFound => unresolved.push(json!(term)),
+                Resolution::NotFound => unresolved.push(term),
             }
         }
     }
     let refs_ok = !targets.unavailable && unresolved.is_empty() && ambiguous_all_preexisting;
 
-    let mut result = Map::new();
-    result.insert("ok".into(), json!(prose.ok && brackets.ok && refs_ok && refs_preserved.ok));
-    result.insert("prose".into(), prose.to_value());
-    result.insert("brackets".into(), brackets.to_value());
-    result.insert(
-        "refs".into(),
-        json!({"ok": refs_ok, "resolved": resolved, "unresolved": unresolved, "ambiguous": ambiguous}),
-    );
-    result.insert("refsPreserved".into(), refs_preserved.to_value());
-    // `buildResultMeta`: `hasMore` follows the warnings. None of these warnings offers a way to fetch more.
-    result.insert("hasMore".into(), json!(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())));
-    result.insert("warnings".into(), serde_json::to_value(&warnings).expect("warnings serialize"));
-    result.insert(
-        "totals".into(),
-        json!({"refsBefore": count_of(before, "[["), "refsAfter": brackets.opens, "terms": terms.len()}),
-    );
-    Ok(Value::Object(result))
+    Ok(result_value(&CheckLinksOutput {
+        // `buildResultMeta`: `hasMore` follows the warnings. None of these warnings offers a way to fetch more.
+        has_more: warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()),
+        warnings: &warnings,
+        totals: RefTotals { refs_before: count_of(before, "[["), refs_after: brackets.opens, terms: terms.len() },
+        ok: prose.ok && brackets.ok && refs_ok && refs_preserved.ok,
+        prose: &prose,
+        brackets: &brackets,
+        refs: RefsCheck { ok: refs_ok, resolved, unresolved, ambiguous },
+        refs_preserved: &refs_preserved,
+    }))
+}
+
+/// A `[[term]]` that names one page: the term as written, the page it reaches and how.
+#[derive(Serialize)]
+struct ResolvedRef<'a> {
+    term: &'a str,
+    page: &'a str,
+    #[serde(rename = "matchedBy")]
+    matched_by: &'static str,
+}
+
+/// A `[[term]]` that several pages answer to, and whether it was already a link before the pass.
+#[derive(Serialize)]
+struct AmbiguousRef<'a> {
+    term: &'a str,
+    candidates: Vec<&'a str>,
+    #[serde(rename = "totalCandidates")]
+    total_candidates: usize,
+    preexisting: bool,
+}
+
+/// Check 3: every `[[term]]` in `after` names one page or alias.
+#[derive(Serialize)]
+struct RefsCheck<'a> {
+    ok: bool,
+    resolved: Vec<ResolvedRef<'a>>,
+    unresolved: Vec<&'a str>,
+    ambiguous: Vec<AmbiguousRef<'a>>,
+}
+
+/// How much was checked.
+#[derive(Serialize)]
+struct RefTotals {
+    #[serde(rename = "refsBefore")]
+    refs_before: usize,
+    #[serde(rename = "refsAfter")]
+    refs_after: usize,
+    terms: usize,
+}
+
+/// A result as written, in BR-0013's order: what must not be missed (`hasMore`, `warnings`, `totals`, then the
+/// verdict `ok`), then the four checks.
+#[derive(Serialize)]
+struct CheckLinksOutput<'a> {
+    #[serde(rename = "hasMore")]
+    has_more: bool,
+    warnings: &'a [ResultWarning],
+    totals: RefTotals,
+    ok: bool,
+    prose: &'a ProseCheck,
+    brackets: &'a BracketCheck,
+    refs: RefsCheck<'a>,
+    #[serde(rename = "refsPreserved")]
+    refs_preserved: &'a RefsPreservedCheck,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_result_says_what_may_be_missing_and_the_verdict_before_the_four_checks() {
+        use crate::tool::testing::keys;
+        let ambiguous = AmbiguousRef { term: "al", candidates: vec!["Alice", "Alan"], total_candidates: 2, preexisting: false };
+        let output = CheckLinksOutput {
+            has_more: false,
+            warnings: &[],
+            totals: RefTotals { refs_before: 0, refs_after: 1, terms: 1 },
+            ok: false,
+            prose: &check_prose("a", "a"),
+            brackets: &check_brackets("[[a]]"),
+            refs: RefsCheck {
+                ok: false,
+                resolved: vec![ResolvedRef { term: "a", page: "A", matched_by: "name" }],
+                unresolved: vec!["gone"],
+                ambiguous: vec![ambiguous],
+            },
+            refs_preserved: &check_refs_preserved("", ""),
+        };
+        let value = result_value(&output);
+        assert_eq!(keys(&value), ["hasMore", "warnings", "totals", "ok", "prose", "brackets", "refs", "refsPreserved"]);
+        assert_eq!(keys(&value["totals"]), ["refsBefore", "refsAfter", "terms"]);
+        assert_eq!(keys(&value["refs"]), ["ok", "resolved", "unresolved", "ambiguous"]);
+        assert_eq!(keys(&value["refs"]["resolved"][0]), ["term", "page", "matchedBy"]);
+        assert_eq!(keys(&value["refs"]["ambiguous"][0]), ["term", "candidates", "totalCandidates", "preexisting"]);
+        assert_eq!(js::json_stringify(&value["refs"]["unresolved"]), r#"["gone"]"#);
+    }
 
     fn read(value: Value) -> Result<Args, ToolError> {
         read_args(value.as_object())
