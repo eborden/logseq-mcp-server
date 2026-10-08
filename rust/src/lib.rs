@@ -4,3 +4,4 @@
 //! (ADR-0004), and `tests/no_stdout.rs` fails on a `print!`/`println!` or a direct stdout write.
 
 pub mod config;
+pub mod edn;
