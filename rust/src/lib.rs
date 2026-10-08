@@ -13,6 +13,7 @@
 pub mod args;
 pub mod block_tree;
 pub mod client;
+pub mod compact;
 pub mod config;
 pub mod edn;
 pub mod entity;
@@ -22,6 +23,7 @@ pub mod escape;
 pub mod fuzzy;
 pub mod js;
 pub mod markdown;
+pub mod markdown_context;
 pub mod meta;
 pub mod output_format;
 pub mod pages_by_ids;
