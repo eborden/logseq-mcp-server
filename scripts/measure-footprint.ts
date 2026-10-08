@@ -26,7 +26,7 @@ import { promisify } from 'node:util';
 import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
 import { sandboxedEnv } from './parity/harness.js';
 import { REPO_ROOT } from './parity/ts-server.js';
-import { startStubLogseq } from './parity/stub-logseq.js';
+import { startStubLogseq, type StubLogseq } from './parity/stub-logseq.js';
 import { probeServer, type ProbeResult, type ServerProcess } from './measure-footprint/probe.js';
 import { formatMb, formatMs, formatSummary, summarize } from './measure-footprint/stats.js';
 
@@ -107,8 +107,10 @@ async function main(): Promise<void> {
   });
 
   const work = await mkdtemp(join(tmpdir(), 'logseq-footprint-'));
-  const stub = await startStubLogseq();
+  let stub: StubLogseq | undefined;
   try {
+    const live = await startStubLogseq();
+    stub = live;
     console.log('staging the Node server (npm ci --omit=dev, tsc) ...');
     const nodeDir = join(work, 'node-server');
     await mkdir(nodeDir);
@@ -117,7 +119,7 @@ async function main(): Promise<void> {
     const configPath = join(work, 'config.json');
     const home = join(work, 'home');
     await mkdir(home);
-    await writeFile(configPath, JSON.stringify({ apiUrl: stub.apiUrl, authToken: stub.authToken }));
+    await writeFile(configPath, JSON.stringify({ apiUrl: live.apiUrl, authToken: live.authToken }));
     const env = sandboxedEnv(configPath, home);
 
     const servers: Record<'rust' | 'node', ServerProcess> = {
@@ -128,7 +130,7 @@ async function main(): Promise<void> {
     // `stub.load` clears the stub's failure log, so look at it before every load and after every
     // probe: a call the stub could not answer in any run, at start-up or during the tool call, fails the script.
     const checkStub = (what: string) => {
-      const failures = stub.failures();
+      const failures = live.failures();
       if (failures.length > 0) throw new Error(`the stub LogSeq saw ${failures.length} call(s) it had no answer for ${what}`);
     };
     const measure = async (server: ServerProcess) => {
@@ -137,7 +139,7 @@ async function main(): Promise<void> {
         call: { name: outline.tool, arguments: outline.arguments },
         beforeCall: () => {
           checkStub('during start-up');
-          stub.load(outline.steps.flat());
+          live.load(outline.steps.flat());
         },
         settleMs: options.settleMs
       });
@@ -163,7 +165,7 @@ async function main(): Promise<void> {
       `  Node:  node ${formatMb(nodeBinary)} + dist ${formatMb(nodeSize.dist)} + production node_modules ${formatMb(nodeSize.modules)} = ${formatMb(nodeBinary + nodeSize.dist + nodeSize.modules)}`
     );
   } finally {
-    await stub.close();
+    await stub?.close();
     await rm(work, { recursive: true, force: true });
   }
 }
