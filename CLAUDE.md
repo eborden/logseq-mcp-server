@@ -534,7 +534,7 @@ Quick reference checklist for future work:
 
 ### Fixture Graph, Exact Assertions
 
-The integration tests run against `tests/fixtures/graph/`, a small made-up graph in the repo (#86, #90), and nothing else. `connectFixture()` (`tests/integration/helpers/fixture-client.ts`) loads the config and calls `requireFixtureGraph`, and the run's global setup does it once first, so a run against any other graph fails loud. `tests/integration/setup.md` has the run steps; `tests/fixtures/README.md` says what each page is for and what it returns.
+The integration tests run against `tests/fixtures/graph/`, a small made-up graph in the repo (#86, #90), and nothing else. `connectFixture()` (`tests/integration/helpers/fixture-client.ts`) loads the config and calls `requireFixtureGraph`, and the run's global setup does it once first, so a run against any other graph fails loud. The suites are TypeScript (vitest) but test the Rust server: a tool function imported from `tests/integration/helpers/tools.ts` calls the built binary over MCP stdio (`tests/integration/setup.md`, "The server under test"). `tests/integration/setup.md` has the run steps; `tests/fixtures/README.md` says what each page is for and what it returns.
 
 **Pattern:**
 ```typescript
@@ -554,14 +554,14 @@ it('returns every neighbour of a page under the caps', async () => {
 - **Compute what drifts**: today's journal (LogSeq makes it on open; `laterJournalDays`), and page counts that include built-in pages. Use fixed date windows that end before 2026.
 - **Caps that pick by `:db/id` order** are stable in count, not by name; the fixture README's hub section says which is which.
 - **Invariants** that hold for any graph stay as property tests (`tests/integration/properties/`), run over a fixed list of fixture pages.
-- **A known bug** is a plain `it` that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails`, which also passes when the body throws for another reason.
+- **A known bug** is a plain `it` (or a plain Rust `#[test]`) that pins the current wrong value and names its issue, to be flipped with the fix. Not `it.fails` or `#[should_panic]`, which also pass when the body fails for another reason. Behavior copied from the TypeScript server that looks like a bug is tagged `// PARITY(#299)` in the crate and pinned the same way (see BR-0011).
 
 **Test Categories:**
-- **Rust tests** (`cd rust && cargo test --locked`): query builders, data transformations and call-count tests against a stub LogSeq
-- **Golden results** (`npx vite-node scripts/parity.ts`): every tool, prompt and resource result byte for byte against the results recorded from the TypeScript server, the LogSeq calls, and `tools/list` by meaning (ADR-0031)
-- **Guard tests** (`npx vitest run tests/guards tests/rust-guards`): the repo's rules (docs format, templates, privacy, fixture, workflows, tool-list guardrails)
+- **Rust tests** (`cd rust && cargo test --locked`): unit tests beside the code (`#[cfg(test)]`: query builders, parsers, renderers, caps) and call-count tests in `rust/tests/*_calls.rs`, which run a tool against a mock HTTP LogSeq (`rust/tests/common/mod.rs`) and assert the exact calls and result. Also `rust/tests/no_stdout.rs`, `env_reads.rs` and `no_env_proxy.rs`, which fail on a write to stdout, an environment read outside `env.rs` and a proxy picked up from the environment. They touch no LogSeq
+- **Golden results** (`npx vite-node scripts/parity.ts`): every tool, prompt and resource result byte for byte against the results recorded from the TypeScript server, the LogSeq calls, and `tools/list` by meaning (ADR-0031). It starts the binary against a stub LogSeq, and `--self-check` proves it can fail
+- **Guard tests** (`npx vitest run tests/guards tests/rust-guards`): the repo's rules (docs format, templates, privacy, fixture, workflows, tool-list guardrails, the golden-files check). `tests/rust-guards` starts the Rust binary: the harness's own tests, the live `tools/list` against the size budget and description cap, a wrong-typed value sent to every parameter of every tool, and the version
 - **Integration tests** (`npm run test:integration`, ~215 in 22 files as of Oct 2026, against the fixture graph in a live LogSeq): exact results of every tool, through the Rust server
-- Note: `npm test` runs the guard tests, then `npm run test:integration`, so it needs the fixture instance running and the Rust debug build. The default vitest config leaves `tests/integration/` out.
+- Note: `npm test` runs the guard tests, then `npm run test:integration`, so it needs the fixture instance running and the Rust debug build (it doesn't run `cargo test`: run that separately). The default vitest config leaves `tests/integration/` out.
 - **Property tests**: Universal invariants, equivalence validation (`tests/integration/properties/`, and the crawl oracles in `query-by-property` and `temporal-queries`)
 
 ### Integration Test Requirements (Hard Failures)
@@ -630,37 +630,41 @@ These runs use the default config, the real ~2k-page graph: time and output size
 ## Code Organization
 
 ```
-src/
-├── client.ts                      - LogseqClient with HTTP + Datalog methods
-├── datalog/
-│   └── queries.ts                 - DatalogQueryBuilder with all query templates
-├── tools/
-│   ├── build-context.ts           - Two-query pattern (page + blocks)
-│   ├── get-page-outline.ts        - Top-level blocks, snippets and child counts
-│   ├── get-concept-network.ts     - Batched BFS with caps (Pattern 2)
-│   ├── search-by-relationship.ts  - Relationship search
-│   └── [12 other tools]
-├── utils/
-│   ├── markdown.ts                - The one Markdown renderer (pages, blocks, footer); used by the page resource too
-│   ├── markdown-context.ts        - Markdown for build_context, get_context_for_query, get_concept_network
-│   ├── compact.ts                 - compact JSON; snippet.ts has firstLineSnippet
-│   ├── parse-args.ts              - parseArgs / toInputSchema: tool arguments parsed with zod (#60)
-│   ├── parse-response.ts          - callParsed / queryParsed / parseResponse: LogSeq responses checked against the schemas (#202)
-│   └── entity-fields.ts           - Reads a page or block field in either key spelling
-├── tool-args.ts                   - zod argument schemas, one per tool, which also generate each inputSchema
-├── response-schemas.ts            - zod schemas for LogSeq's responses (Editor API camelCase and Datalog kebab-case); the entity types are built from them (#202)
-└── types.ts                       - TypeScript interfaces
+rust/                              - The server: one crate (README.md has the file-by-file map)
+├── Cargo.toml, Cargo.lock         - Dependencies, each justified in a comment; the lockfile is committed
+├── rust-toolchain.toml            - The pinned compiler, which CI reads too
+├── src/
+│   ├── main.rs, lib.rs            - Starts the server on stdio; the crate's module list
+│   ├── server.rs                  - rmcp ServerHandler: initialize, tools, prompts, resources. Only wires
+│   ├── client.rs                  - LogseqClient: call_api and execute_datalog_query, timeout per call, LogseqError
+│   ├── edn.rs                     - Typed query values (PageName, PageId, JournalDay, BlockUuid), DatalogInput, Query, ground_ids / ground_uuids
+│   ├── config.rs, env.rs          - The config file and the environment, each parsed once at startup
+│   ├── tool.rs, args.rs, params.rs - What every tool shares: read-only hints, schema generated from the argument type, Arguments readers, parameter aliases
+│   ├── wire.rs, entity.rs         - LogSeq's answers parsed at the boundary (ResponseError), and a page or block in either key spelling
+│   ├── errors.rs, meta.rs, truncation.rs, tips.rs, slim.rs - ToolError, ResultMeta, the warnings a cap carries, next-step tips, slim output
+│   ├── resolve/, resolve_refs/    - The page resolver (BR-0010) with the alias groups, and `((uuid))` / `{{embed}}` resolution (BR-0007)
+│   ├── markdown.rs, markdown_context.rs, compact.rs, snippet.rs - The one Markdown renderer, Markdown for the context tools, compact JSON, snippets
+│   ├── prompts.rs, resources.rs, instructions.rs - The five prompts, the page resource and guide, the server instructions
+│   └── tools/<tool>/              - One directory per tool (16): mod.rs (NAME, definition, call), queries.rs, wire.rs, tips.rs where it has them
+└── tests/                         - Call-count tests against a mock LogSeq (common/mod.rs), and the no-stdout and env-read checks
 
-tests/
-├── integration/                   - Tests against real LogSeq
+tests/                             - Node tooling around the crate (vitest), all dev-only
+├── guards/                        - The repo's rules as tests: docs format, templates, privacy, fixture, workflows, tool-list limits, golden files
+├── rust-guards/                   - Guard tests that start the Rust binary: the harness, the live tool list, wrong-typed arguments, the version
+├── integration/                   - Tests against a real LogSeq serving the fixture, through the Rust server
 │   └── properties/                - Property-based tests
-└── [unit test files]              - Mocked tests (co-located in src/)
+└── fixtures/                      - The made-up graph (graph/) and the hub fixture
 
 scripts/
+├── parity.ts, parity/             - The golden-result harness (#124), its cases, and expected/ (the recorded results: the tool contract)
 ├── probe-constraints.ts           - Verifies the Datalog/API constraints against a live LogSeq (use the fixture)
 ├── measure-api-calls.ts           - Counts API calls per tool against a live graph (baseline: the real graph)
 ├── measure-output-size.ts         - Output bytes per tool, slim vs full and markdown/compact vs json, through the MCP server
+├── measure-footprint.ts, measure-latency.ts - Start-up, memory and size of the release binary (#126), and per-tool latency and call counts (#353), against the parity harness's stub LogSeq
+├── measure-server.ts, lib/        - Shared code: the call-counting proxy of the measure scripts, and the LogSeq API client, Rust binary lookup and MCP stdio client the suites and scripts use
+├── smoke-rust-server.ts           - Drives a release binary through all 16 tools against the fixture instance (#359)
 ├── logseq-instance.ts             - start/stop/status of this worktree's own LogSeq on a copy of the fixture graph (#118, #151, macOS)
+├── docs-format.ts                 - The format check for docs/adr and docs/business-rules (the guard test runs it)
 ├── generate-hub-fixture.ts        - Writes (or --check's) the hub fixture's files from fixture-hub/hub-graph.ts (#89)
 ├── fixture-hub/hub-graph.ts       - Shape and counts of the hub fixture; tests/guards/fixture-hub.test.ts checks the committed files against it
 └── logseq-instance/
@@ -669,13 +673,14 @@ scripts/
     └── configs.edn.template       - App settings for the instance (API autostart, port and token placeholders)
 
 skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, references/, scripts/); symlinked from .claude/skills/
-.claude-plugin/                    - plugin.json + marketplace.json (server declared inline in plugin.json)
+.claude-plugin/                    - plugin.json + marketplace.json (the server entry still runs the TypeScript build; stale until #350 and #355)
 ```
 
 **Key files:**
-- `src/datalog/queries.ts` - All Datalog query builders (study this for patterns)
-- `src/tools/build-context.ts` - Example of two-query pattern
-- `src/tools/get-concept-network.ts` - Example of multi-query BFS
+- `rust/src/tools/build_context/queries.rs` - Query builders: typed inputs, `:in` binding and `ground_ids` (study this for patterns)
+- `rust/src/tools/build_context/mod.rs` - Example of two-query pattern
+- `rust/src/tools/get_concept_network/mod.rs` - Example of multi-query BFS
+- `rust/tests/concept_calls.rs` - Example of a call-count test against the mock LogSeq
 - `tests/integration/properties/graph-properties.test.ts` - Property-based testing examples
 
 ---
@@ -685,6 +690,10 @@ skills/logseq-skills/              - Claude Code skills (SKILL.md, skills/, refe
 ```bash
 # The Rust server: build, then its unit and call-count tests (touch no LogSeq)
 (cd rust && cargo build && cargo test --locked)
+(cd rust && cargo build --release --locked)   # the binary the measure scripts and the smoke run use
+
+# The Node tooling's dependencies (the harness, the guards, the scripts), from the lockfile
+npm ci
 
 # The golden-result harness against the debug build (#124); --self-check proves it can fail
 npx vite-node scripts/parity.ts
@@ -696,6 +705,9 @@ npx vite-node scripts/parity.ts --record-from-rust
 npx vitest run tests/guards tests/rust-guards
 npm run typecheck
 npx tsx scripts/docs-format.ts
+
+# A release binary against the fixture instance, tool by tool (#359; start the instance first)
+node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts rust/target/release/logseq-mcp-server
 
 # Integration tests against this worktree's fixture instance (macOS; own profile, port and random API token)
 npx tsx scripts/logseq-instance.ts start
@@ -719,36 +731,39 @@ npx tsx scripts/measure-output-size.ts
 
 ## When Adding New Tools
 
-Checklist for new Datalog-based tools:
+Checklist for new Datalog-based tools. Each tool is a directory in `rust/src/tools/<tool>/`:
 
-1. **Query Builder** - Add static method to `DatalogQueryBuilder`
-   - Pre-lowercase any page name parameters
-   - Return `{ query, inputs }` and bind strings with `:in`; don't embed them in the query text
+1. **Queries** - In `queries.rs`, functions that return a `Query { text, inputs }`
+   - Take typed values (`PageName`, `PageId`, `JournalDay`, `BlockUuid`), not strings, so a page name is lowercased by construction and an id can only be a whole number
+   - Bind strings with `:in` (`DatalogInput`); don't embed them in the query text. Embed ids only through `ground_ids` and uuids through `ground_uuids`
    - Don't use `clojure.string/lower-case`
    - No `getAllPages` + per-page crawls
 
-2. **Tool Implementation** - Follow two-query pattern if data is optional
-   - Query 1: Main entity (fail if not found)
+2. **Tool Implementation** - `mod.rs` holds `NAME`, `definition` and `call`; register the tool in `rust/src/tools/mod.rs` (`list` and `call`). Follow two-query pattern if data is optional
+   - Query 1: Main entity (fail if not found). Resolve a page name with `require_page`, never a lookup of your own
    - Query 2+: Related data (handle empty results)
+   - Read each LogSeq response through a wire type in the tool's `wire.rs` (add one when the shape is new), and propagate errors with `?`
+   - A cap reports `ResultMeta` (BR-0006) and a tip is advisory (BR-0009)
 
-3. **Tests** - Write unit tests with mocks
+3. **Tests** - Write Rust tests: unit tests beside the code, and a call-count test in `rust/tests/<tool>_calls.rs` against the mock LogSeq (`rust/tests/common/mod.rs`)
    - Test happy path with data
    - Test empty results (no blocks, no connections)
    - Test case-insensitive lookup
+   - Test a bad argument and an infrastructure error (the error reaches the caller, never an empty result)
 
 4. **Integration Test** - Add to `tests/integration/`
-   - Connect with `connectFixture()` and assert exact results on fixture pages; add fixture data (and its README rows) if the tool needs a case the fixture lacks
+   - Connect with `connectFixture()` and assert exact results on fixture pages; add a function for the tool to `tests/integration/helpers/tools.ts`, and fixture data (and its README rows) if the tool needs a case the fixture lacks
    - Fail loud, never skip (see Integration Test Requirements)
 
-5. **Documentation** - Update MCP tool handler in `src/index.ts`
-   - Give the tool `annotations: readOnlyAnnotations('Title')` (`tests/guards/tool-list.test.ts` and `rust/src/server.rs` fail without it). Every tool is read-only: [BR-0002 (tools-read-only)](docs/business-rules/0002-tools-read-only.md)
-   - Declare the tool's zod schema in `src/tool-args.ts` and parse with `parseArgs`. The guard test (`src/index.args.guard.test.ts`) checks it
-   - Read each LogSeq response with `callParsed` / `queryParsed` and a schema from `src/response-schemas.ts` (add one when the shape is new)
+5. **Contract and documentation** - The tool's `definition`
+   - Give the tool `read_only_annotations("Title")` (`tests/guards/tool-list.test.ts` and `rust/src/server.rs` fail without it). Every tool is read-only: [BR-0002 (tools-read-only)](docs/business-rules/0002-tools-read-only.md)
+   - Generate the `inputSchema` from the argument type with `input_schema`, and read every argument through `Arguments` (`rust/src/args.rs`) before the first LogSeq call. `tests/rust-guards/tool-arguments.test.ts` sends a wrong-typed value to every parameter and checks it fails
+   - Write the description with a "Can't find" line (ADR-0015), and add the tool to the parity harness (`scripts/parity/cases/<tool>.ts`). A new tool changes `scripts/parity/expected/tool-list.json` and adds an expected file, which the `golden-files` job fails until the maintainer has OKed it and added the `golden-change` label (see "Verification before merge")
 
 6. **Measure** - Add the tool to `scripts/measure-api-calls.ts` and record its call count in "Current Implementation Status"
 
-7. **Tool-list guardrails** - `tests/guards/tool-list.test.ts` checks the recorded `tools/list` (`scripts/parity/expected/tool-list.json`; the parity harness holds the Rust server's list to it by meaning, so a change to a tool's name, description or schema is a change to that file, re-recorded with `--record-from-rust`) ([ADR-0016 (tool-list-size-guardrails)](docs/adr/0016-tool-list-size-guardrails.md))
-   - Size budget: `TOOL_LIST_BUDGET_CHARS` (~15% headroom over the size measured when it was added). If your tool or parameters push past it, trim first. If the growth is worth it, raise the constant and justify it in the PR description.
+7. **Tool-list guardrails** - `tests/guards/tool-list.test.ts` checks the recorded `tools/list`, and `tests/rust-guards/tool-list-live.test.ts` the server's own (`scripts/parity/expected/tool-list.json`; the parity harness holds the Rust server's list to it by meaning, so a change to a tool's name, description or schema is a change to that file, re-recorded with `--record-from-rust`) ([ADR-0016 (tool-list-size-guardrails)](docs/adr/0016-tool-list-size-guardrails.md))
+   - Size budget: `TOOL_LIST_BUDGET_CHARS` in `tests/guards/tool-list-limits.ts` (~15% headroom over the size measured when it was added). If your tool or parameters push past it, trim first. If the growth is worth it, raise the constant and justify it in the PR description.
    - Description cap: 400 characters per tool. A new tool gets no allowance. Existing long descriptions are listed in `DESCRIPTION_ALLOWANCES` and may shrink but not grow. Delete an entry once its tool fits the cap.
    - Recorded list: any change to a name, title, annotation, description or input schema fails the parity step. Review the diff of `scripts/parity/expected/tool-list.json` before you accept it.
 
@@ -760,6 +775,7 @@ Checklist for new Datalog-based tools:
 - **DataScript Docs:** https://github.com/tonsky/datascript (note: LogSeq subset only)
 - **Decisions and rules:** [`docs/adr/`](docs/adr/README.md) (why we chose X) and [`docs/business-rules/`](docs/business-rules/README.md) (what must stay true). The Datalog migration is recorded in [ADR-0002 (datalog-over-editor-api)](docs/adr/0002-datalog-over-editor-api.md) and [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md).
 - **Example Scripts:** `scripts/probe-constraints.ts`
+- **The crate's map:** [`rust/README.md`](rust/README.md)
 - **MCP Spec:** https://github.com/modelcontextprotocol
 
 ---
@@ -768,8 +784,8 @@ Checklist for new Datalog-based tools:
 
 Datalog is how this project gets its performance gains (see "Current Implementation Status"), and LogSeq's Datalog needs careful handling. The key is to:
 
-1. **Bind strings with `:in`** (`executeDatalogQuery` EDN-encodes the inputs); never embed them in the query text
-2. **Lowercase in TypeScript** (`clojure.string/lower-case` is unavailable; `includes?` / `re-find` work)
+1. **Bind strings with `:in`** (`execute_datalog_query` EDN-encodes the inputs); never embed them in the query text
+2. **Lowercase in Rust** (a `PageName` does it; `clojure.string/lower-case` is unavailable; `includes?` / `re-find` work)
 3. **Split queries** for optional data (no or-join with ground nil)
 4. **Always lowercase** page names before queries
 5. **Handle empty results** gracefully, but never turn errors into empty results
@@ -777,4 +793,4 @@ Datalog is how this project gets its performance gains (see "Current Implementat
 
 When a constraint seems to block you, re-run `scripts/probe-constraints.ts` against the fixture instance before working around it.
 
-When in doubt, look at `src/datalog/queries.ts` for working patterns and `src/tools/build-context.ts` or `src/tools/get-concept-network.ts` for implementation examples.
+When in doubt, look at `rust/src/tools/build_context/queries.rs` for working patterns and `rust/src/tools/build_context/mod.rs` or `rust/src/tools/get_concept_network/mod.rs` for implementation examples.
