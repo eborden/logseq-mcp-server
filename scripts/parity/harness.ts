@@ -30,6 +30,12 @@ export interface ParityCase {
    * one step are the ones the TypeScript code makes concurrently, and are compared as a set.
    */
   steps: CannedCall[][];
+  /**
+   * The answer to give the last call in the self-check instead of the suffixed strings
+   * ({@link perturbCases}), for a case whose result doesn't depend on any string: an error that
+   * names only a path, or a cut that shows no text. It must make the server's result differ.
+   */
+  perturbed?: unknown;
 }
 
 /**
@@ -356,7 +362,7 @@ export function perturbCases(cases: readonly ParityCase[]): ParityCase[] {
   return cases.map(c => {
     const copy = structuredClone(c);
     const last = copy.steps.at(-1)?.at(-1);
-    if (last) last.response = perturbValue(last.response);
+    if (last) last.response = 'perturbed' in copy ? copy.perturbed : perturbValue(last.response);
     return copy;
   });
 }
