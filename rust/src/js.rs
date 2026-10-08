@@ -12,6 +12,8 @@ use std::cmp::Ordering;
 use icu_normalizer::DecomposingNormalizer;
 use serde_json::Value;
 
+// PARITY(#299): the set of characters JavaScript's `trim()` and `\s` take as white space (U+FEFF in, U+0085 out)
+// where Rust's differs — drop if Rust becomes the only server.
 /// A character `String.prototype.trim()` removes: JavaScript's WhiteSpace and LineTerminator.
 /// That is Rust's `White_Space` plus U+FEFF (a byte-order mark), less U+0085, which JavaScript
 /// keeps. It is also what `\s` matches.
@@ -29,11 +31,15 @@ pub fn trim_end(value: &str) -> &str {
     value.trim_end_matches(is_js_space)
 }
 
+// PARITY(#299): JavaScript counts, cuts and indexes strings by UTF-16 code unit, which shows in the
+// snippet cut and fuzzysort's scores — drop if Rust becomes the only server.
 /// The UTF-16 code units of a string, which is what `.length`, `charCodeAt` and `slice` count.
 pub fn utf16(value: &str) -> Vec<u16> {
     value.encode_utf16().collect()
 }
 
+// PARITY(#299): how JavaScript writes a number in an error message (`1e+21`, `0.000001`) — drop if Rust
+// becomes the only server.
 /// A number as `String(n)` or a template literal writes it (ECMAScript `Number::toString`).
 /// JSON has no NaN or infinity, so a value that came from JSON is always finite.
 pub fn number_to_string(n: f64) -> String {
@@ -66,6 +72,8 @@ pub fn number_to_string(n: f64) -> String {
     }
 }
 
+// PARITY(#299): `JSON.stringify` writes integer-like object keys first and numbers its own way — drop if
+// Rust becomes the only server.
 /// `JSON.stringify(value)`, for the places the TypeScript server writes a value it was handed
 /// into a message (a bad argument, a conflicting alias). Numbers are written as JavaScript writes
 /// them, and an object's integer-like keys come first, in ascending order, then the others in
@@ -93,6 +101,9 @@ pub fn json_stringify(value: &Value) -> String {
     }
 }
 
+// PARITY(#299): writes a snippet cut inside an emoji as a lone-surrogate escape, which is ill-formed
+// UTF-16 that many clients replace with U+FFFD (suspected TS bug: `slice` should cut by code point) — drop
+// if Rust becomes the only server.
 /// `JSON.stringify(text)` for a JavaScript string that may be ill-formed: a code unit that is half
 /// of a surrogate pair, which happens when a string is cut between the two. JSON.stringify writes
 /// such a unit as the escape `\ud83d` (well-formed JSON.stringify, ES2019), and Rust's `String`
@@ -124,6 +135,9 @@ fn array_index(key: &str) -> Option<u32> {
     canonical.then(|| key.parse::<u32>().ok()).flatten().filter(|index| *index != u32::MAX)
 }
 
+// PARITY(#299): copies `localeCompare`, which orders candidate pages by the host's locale and ICU, so the
+// TypeScript order differs from machine to machine (suspected TS bug: sort by a fixed order) — drop if
+// Rust becomes the only server.
 /// The order `a.localeCompare(b)` gives in Node's default (root) collation, approximated.
 ///
 /// ICU's collation compares in layers. First the letters, digits and symbols as a sequence,

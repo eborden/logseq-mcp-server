@@ -60,6 +60,8 @@ impl Reader {
         self.number(map, "created-at")?;
         self.number(map, "updated-at")?;
         self.map_field(map, "properties-text-values")?;
+        // PARITY(#299): reads the Editor API's `originalName` spelling from a Datalog pull, as `entity-fields`
+        // does — drop if Rust becomes the only server.
         // `entity-fields` reads `originalName` first, in case a pull carried the Editor API's
         // spelling. The schema doesn't name it, so it is read only when it is text.
         let camel = map.get("originalName").and_then(Value::as_str).map(str::to_owned);

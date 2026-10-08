@@ -88,6 +88,8 @@ pub const SNIPPET_MAX_CHARS: usize = 80;
 pub struct Snippet(Vec<u16>);
 
 impl Snippet {
+    // PARITY(#299): cuts at 80 UTF-16 code units with `slice`, which can split an emoji and leave a lone
+    // surrogate (suspected TS bug) — drop if Rust becomes the only server.
     /// `firstLineSnippet`: the first non-blank line, trimmed, cut to 80 code units with a
     /// trailing `...`. Empty for a block with no content.
     pub fn of(content: Option<&str>) -> Snippet {
@@ -159,6 +161,8 @@ struct Top<'a> {
     block: &'a OutlineBlock,
 }
 
+// PARITY(#299): drops a sibling that shares an id with one already placed, though the doc says nothing is
+// dropped (suspected TS bug) — drop if Rust becomes the only server.
 /// `orderSiblings`: siblings in page order, by following the `:block/left` chain.
 ///
 /// The first sibling's `left` is the parent (or the page), which is not itself a sibling, so it
@@ -209,6 +213,8 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
     let mut top: Vec<Top<'_>> = Vec::new();
     let mut child_count: HashMap<i64, usize> = HashMap::new();
     for block in rows.iter().flatten() {
+        // PARITY(#299): a parent counts by its `id` only, while a block's own id reads `id` then `db/id`
+        // (suspected TS inconsistency) — drop if Rust becomes the only server.
         let Some(parent_id) = block.parent.and_then(self::wire::Parent::id) else { continue };
         if parent_id == page_id {
             top.push(Top { id: block.entity_id().unwrap_or(0), left: block.left_id, block });

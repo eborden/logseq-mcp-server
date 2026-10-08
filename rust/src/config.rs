@@ -134,6 +134,8 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     Ok(Config { api_url, auth_token, timeout_ms, tips })
 }
 
+// PARITY(#299): JavaScript truthiness for `authToken` and `apiUrl`, where an empty string and a missing one are
+// alike — drop if Rust becomes the only server.
 /// JavaScript truthiness, which the TypeScript checks use for `authToken` and `apiUrl`.
 fn is_truthy(value: &Value) -> bool {
     match value {

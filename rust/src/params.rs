@@ -55,6 +55,8 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
     Ok(Some(out))
 }
 
+// PARITY(#299): zod's phrasing for a bad argument (`a string, not a number`, `(required)`), written as
+// `parseArgs` writes it — drop if Rust becomes the only server.
 /// What `parseArgs` makes of a bad required string parameter: `missing` when it is absent or
 /// `null`, else the value as JSON, and what was expected (`expectedMessage`, `exampleFor`).
 /// `args` are the arguments as sent.
