@@ -83,7 +83,7 @@ fn most_common<'v>(values: impl IntoIterator<Item = &'v str>) -> Option<&'v str>
     best
 }
 
-enum Kind {
+pub(crate) enum Kind {
     Page,
     Topic,
 }
@@ -94,7 +94,7 @@ enum Kind {
 /// 2. the `#tag` or `[[ref]]` most hits mention (slim hits carry no journal flag);
 /// 3. the most common page whose kind is unknown (its journal flag isn't in the hit);
 /// 4. a journal page, only when nothing else is available.
-fn suggest_topic(blocks: &[Value]) -> Option<(&str, Kind)> {
+pub(crate) fn suggest_topic(blocks: &[Value]) -> Option<(&str, Kind)> {
     let named: Vec<(&str, Option<bool>)> =
         blocks.iter().filter_map(|block| page_name_of(block).map(|name| (name, journal_status(block)))).collect();
 
