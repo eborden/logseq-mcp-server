@@ -133,6 +133,13 @@ fn reference_id(block: &Map<String, Value>, key: &str) -> Option<i64> {
 /// Every page in `page_ids` has an entry, `[]` for a page with no blocks. A block whose own `id`
 /// is missing counts as id 0; every block the pull gives has one (`blockSchema`).
 pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> HashMap<i64, Vec<Value>> {
+    build_block_trees_ordered(blocks, page_ids).into_iter().collect()
+}
+
+/// [`build_block_trees`] in the order the TypeScript `Map` holds its entries: the pages of
+/// `page_ids` first, in that order, then every other page in the order its first top-level block
+/// came. A caller that writes the pages one after the other (the context Markdown) needs it.
+pub fn build_block_trees_ordered(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> Vec<(i64, Vec<Value>)> {
     let mut nodes: Vec<Option<Map<String, Value>>> = blocks
         .iter()
         .map(|block| {
@@ -146,7 +153,13 @@ pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> H
     let lefts: Vec<Option<i64>> = nodes.iter().map(|node| node.as_ref().and_then(|node| reference_id(node, "left"))).collect();
 
     let mut children_of: HashMap<i64, Vec<usize>> = HashMap::new();
-    let mut roots_of: HashMap<i64, Vec<usize>> = page_ids.iter().map(|&id| (id, Vec::new())).collect();
+    let mut roots_of: HashMap<i64, Vec<usize>> = HashMap::new();
+    let mut page_order: Vec<i64> = Vec::new();
+    for &id in page_ids {
+        if roots_of.insert(id, Vec::new()).is_none() {
+            page_order.push(id);
+        }
+    }
     for (i, node) in nodes.iter().enumerate() {
         let node = node.as_ref().expect("no node is taken yet");
         let parent_id = reference_id(node, "parent");
@@ -155,6 +168,9 @@ pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> H
             _ => {
                 // `node.page?.id ?? parentId`
                 let Some(page_id) = reference_id(node, "page").or(parent_id) else { continue };
+                if !roots_of.contains_key(&page_id) {
+                    page_order.push(page_id);
+                }
                 roots_of.entry(page_id).or_default().push(i);
             }
         }
@@ -183,9 +199,12 @@ pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> H
             .collect()
     }
 
-    roots_of
+    page_order
         .into_iter()
-        .map(|(page_id, roots)| (page_id, attach(roots, 1, &mut nodes, &ids, &lefts, &mut children_of)))
+        .map(|page_id| {
+            let roots = roots_of.remove(&page_id).expect("every page in the order has roots");
+            (page_id, attach(roots, 1, &mut nodes, &ids, &lefts, &mut children_of))
+        })
         .collect()
 }
 
@@ -302,6 +321,14 @@ mod tests {
 
     fn block(id: i64, page: i64, parent: i64, left: i64) -> Value {
         json!({"id": id, "uuid": format!("u{id}"), "content": format!("b{id}"), "page": {"id": page}, "parent": {"id": parent}, "left": {"id": left}, "path-refs": []})
+    }
+
+    #[test]
+    fn the_pages_come_in_the_order_the_pages_asked_for_then_each_other_page_by_its_first_root() {
+        // 41's block is a child, so page 40 is first met at its root 42, after page 30's root
+        let blocks = flat(vec![block(41, 40, 42, 42), block(31, 30, 30, 30), block(42, 40, 40, 40), block(11, 10, 10, 10)]);
+        let pages: Vec<i64> = build_block_trees_ordered(blocks, &[10, 20, 10]).into_iter().map(|(page, _)| page).collect();
+        assert_eq!(pages, [10, 20, 30, 40]);
     }
 
     #[test]

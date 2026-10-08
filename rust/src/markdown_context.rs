@@ -6,11 +6,11 @@
 //!
 //! Not ported yet: `renderNetwork`, which comes with `get_concept_network`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde_json::{Map, Value, json};
 
-use crate::block_tree::order_siblings;
+use crate::block_tree::build_block_trees_ordered;
 use crate::entity::id_of;
 use crate::js;
 use crate::markdown::{OutlineOptions, page_link, page_title, property_lines, render_outline, resolved_from_line};
@@ -58,74 +58,20 @@ fn array<'a>(context: &'a Value, key: &str) -> &'a [Value] {
 /// `blockTree`: the topic's blocks as a tree. `directBlocks` are flat Datalog pulls, in query order;
 /// the `:block/parent` and `:block/left` links give back the page's order and nesting. A block whose
 /// parent was cut by `max_blocks` is shown as a top-level one, and a pull with neither link is too, so
-/// nothing is dropped.
-///
-/// This is `buildBlockTrees` as the renderer reads it: the same grouping and the same sibling order
-/// (`order_siblings`), without the `level` and the camelized keys, which no line of Markdown shows.
-/// `block_tree::build_block_trees` (#311) groups alike but answers a map by page id, and the
-/// trees of the pages of an alias group are written in the order the TypeScript map holds them:
-/// the main page's, then each other page's in the order its first top-level block came.
+/// nothing is dropped. The trees of the pages of an alias group follow the main page's, in the order
+/// each page's first top-level block came (`build_block_trees_ordered`).
 fn block_tree(blocks: &[Value], page_id: i64) -> Vec<Value> {
-    let mut nodes: Vec<Option<Map<String, Value>>> = blocks
+    let with_page: Vec<Map<String, Value>> = blocks
         .iter()
         .map(|block| {
-            let mut node = block.as_object().cloned().unwrap_or_default();
-            if !truthy(node.get("page")) && !truthy(node.get("parent")) {
-                node.insert("page".to_owned(), json!({"id": page_id}));
+            let mut block = block.as_object().cloned().unwrap_or_default();
+            if !truthy(block.get("page")) && !truthy(block.get("parent")) {
+                block.insert("page".to_owned(), json!({"id": page_id}));
             }
-            node.insert("children".to_owned(), Value::Array(Vec::new()));
-            Some(node)
+            block
         })
         .collect();
-    let reference_id = |node: &Option<Map<String, Value>>, key: &str| -> Option<i64> {
-        node.as_ref()?.get(key)?.get("id")?.as_f64().map(|id| id as i64)
-    };
-    let ids: Vec<i64> = nodes.iter().map(|node| node.as_ref().and_then(|node| node.get("id")).and_then(Value::as_f64).map_or(0, |id| id as i64)).collect();
-    let parents: Vec<Option<i64>> = nodes.iter().map(|node| reference_id(node, "parent")).collect();
-    let pages: Vec<Option<i64>> = nodes.iter().map(|node| reference_id(node, "page")).collect();
-    let lefts: Vec<Option<i64>> = nodes.iter().map(|node| reference_id(node, "left")).collect();
-    let node_ids: HashSet<i64> = ids.iter().copied().collect();
-
-    let mut children_of: HashMap<i64, Vec<usize>> = HashMap::new();
-    let mut roots_of: HashMap<i64, Vec<usize>> = HashMap::from([(page_id, Vec::new())]);
-    let mut page_order = vec![page_id];
-    for i in 0..nodes.len() {
-        match parents[i] {
-            Some(parent) if node_ids.contains(&parent) && parent != ids[i] => children_of.entry(parent).or_default().push(i),
-            // A block whose parent is not among the blocks is a root, under its page, so it is not lost
-            _ => {
-                let Some(page) = pages[i].or(parents[i]) else { continue };
-                if !roots_of.contains_key(&page) {
-                    page_order.push(page);
-                }
-                roots_of.entry(page).or_default().push(i);
-            }
-        }
-    }
-
-    // Each node is in exactly one sibling list, so each is taken once
-    fn attach(
-        siblings: Vec<usize>,
-        nodes: &mut Vec<Option<Map<String, Value>>>,
-        ids: &[i64],
-        lefts: &[Option<i64>],
-        children_of: &mut HashMap<i64, Vec<usize>>,
-    ) -> Vec<Value> {
-        order_siblings(siblings, |&i| ids[i], |&i| lefts[i])
-            .into_iter()
-            .map(|i| {
-                let below = children_of.remove(&ids[i]).unwrap_or_default();
-                let children = attach(below, nodes, ids, lefts, children_of);
-                let mut node = nodes[i].take().expect("a node is attached once");
-                node.insert("children".to_owned(), Value::Array(children));
-                Value::Object(node)
-            })
-            .collect()
-    }
-    page_order
-        .into_iter()
-        .flat_map(|page| attach(roots_of.remove(&page).unwrap_or_default(), &mut nodes, &ids, &lefts, &mut children_of))
-        .collect()
+    build_block_trees_ordered(with_page, &[page_id]).into_iter().flat_map(|(_, trees)| trees).collect()
 }
 
 /// A block as the outline lists it by itself: its own children are not part of it.
