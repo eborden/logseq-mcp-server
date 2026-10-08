@@ -28,7 +28,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { CASE_GROUPS, expectedFileOf } from './parity/case-groups.js';
-import { compareResult, sandboxedEnv, toToolResult, type ParityCase, type ToolResult } from './parity/harness.js';
+import { compareCalls, compareResult, sandboxedEnv, toToolResult, type ParityCase, type ToolResult } from './parity/harness.js';
 import { pulledPage, uuid, ATLAS } from './parity/ref-fixtures.js';
 import { REPO_ROOT } from './parity/ts-server.js';
 import { LOGSEQ_PORT, startStubLogseq, type CannedCall, type StubLogseq } from './parity/stub-logseq.js';
@@ -145,12 +145,14 @@ async function largeDateRange(): Promise<Measured> {
       }
     }
   }
+  const BOUNDS = [JSON.stringify(20250101), JSON.stringify(20250107)];
   const [pagesCall, blocksCall] = [base.steps[0][0], base.steps[1][0]];
   return {
     label: 'query_by_date_range, 7 days, 350 blocks',
     tool: base.tool,
     arguments: { start_date: 20250101, end_date: 20250107 },
-    steps: [[withResponse(pagesCall, pages)], [withResponse(blocksCall, blocks)]]
+    // The range's bounds are inputs of both queries, and are checked: the base case's are for its 3 days
+    steps: [[{ ...withResponse(pagesCall, pages), args: [pagesCall.args[0], ...BOUNDS] }], [{ ...withResponse(blocksCall, blocks), args: [blocksCall.args[0], ...BOUNDS] }]]
   };
 }
 
@@ -324,12 +326,16 @@ async function main(): Promise<void> {
       const expectedCalls = measured.steps.flat().length;
       const outcomes = { rust: { ms: [], calls: [] } as unknown as Outcome, node: { ms: [], calls: [] } as unknown as Outcome };
       const problems: string[] = [];
+      const callProblems = new Set<string>();
       const once = async (server: Server, timed: boolean): Promise<void> => {
         live.load(measured.steps.flat());
         const { ms, response } = await server.call('tools/call', { name: measured.tool, arguments: measured.arguments });
         // Outside the timing: wait for the calls the server made at once to reach the stub, then read the log
         await live.settle(expectedCalls, { quietMs: 50, maxMs: 1000 });
         const made = live.calls().length;
+        // Every call, the large cases included, against the case's steps: the method and inputs of each call, in order
+        // (the calls within a step as a set). A server that skips a step or sends other inputs times a different workload.
+        for (const mismatch of compareCalls(measured.steps, live.calls())) callProblems.add(`${server.name}: ${mismatch.slice(0, 300)}`);
         const failures = live.failures();
         const result = response.result as ToolResult | undefined;
         if (failures.length > 0) throw new Error(`${server.name}: ${measured.label}: the stub saw ${failures.length} call(s) it had no answer for\n${failures.join('\n')}`);
@@ -348,8 +354,10 @@ async function main(): Promise<void> {
       for (let i = 0; i < options.iterations; i++) {
         for (const server of turn++ % 2 === 0 ? servers : [...servers].reverse()) await once(server, true);
       }
+      problems.push(...callProblems);
       for (const name of ['rust', 'node'] as const) {
         const outcome = outcomes[name];
+        if (outcome.calls[0] !== expectedCalls) problems.push(`${name} made ${outcome.calls[0]} LogSeq call(s), the case lists ${expectedCalls}`);
         if (new Set(outcome.calls).size !== 1) problems.push(`${name} made a varying number of calls: ${[...new Set(outcome.calls)].join(', ')}`);
         if (measured.expected) problems.push(...compareResult(measured.expected, outcome.first).slice(0, 2).map(p => `${name} result differs from the recorded one: ${p.slice(0, 120)}`));
       }
