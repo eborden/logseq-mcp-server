@@ -25,6 +25,11 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # Tool input schemas, generated from the same type serde parses the arguments into. Already in
 # rmcp's tree (rmcp's `server` feature turns it on).
 schemars = "1"
+# Unicode normalization (NFD), for the places JavaScript's behavior depends on it: `localeCompare`
+# ignores accents at its first level, and fuzzysort strips them. Already in the tree, through
+# reqwest > url > idna > idna_adapter, with these same features and locked version, so it adds no
+# build and no download.
+icu_normalizer = { version = "2.2", default-features = false, features = ["compiled_data"] }
 
 [dev-dependencies]
 tokio = { version = "1.47", default-features = false, features = ["rt", "macros", "net", "io-util", "time"] }
