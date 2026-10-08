@@ -194,3 +194,20 @@ async fn an_ambiguous_name_stops_after_the_resolver() {
     assert_eq!(ambiguous.total_candidates, 2);
     assert_eq!(methods(&logseq).len(), 1);
 }
+
+#[tokio::test]
+async fn a_year_before_1000_is_a_name_not_a_date_and_costs_three_calls_where_typescript_makes_one() {
+    // Different from the TypeScript server on purpose (see `resolve`): it takes "0999-12-31" for a
+    // date, makes one call and gives no suggestions. Here it is a plain name, so the leaf query and
+    // the suggestion lookup follow, and the error lists the closest names.
+    let logseq = mock_logseq(vec![
+        json!([]),
+        json!([]),
+        json!([{"id": 1, "name": "alice", "originalName": "Alice"}]),
+    ])
+    .await;
+    let error = get_page_outline(&client(&logseq), "0999-12-31").await.unwrap_err();
+    assert!(matches!(error, ToolError::PageNotFound(_)));
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery", "logseq.Editor.getAllPages"]);
+    assert_eq!(logseq.seen.lock().unwrap()[0]["args"].as_array().unwrap().len(), 2, "no journal day is bound");
+}
