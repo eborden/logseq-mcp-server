@@ -91,7 +91,7 @@ struct OutlineArgs { page: String, offset: Option<u64> }
 <!-- Exact commands and the numbers the PR must report (approximate, no names). -->
 ```bash
 (cd rust && cargo test --locked)
-npx vite-node scripts/parity.ts && npx vite-node scripts/parity.ts --self-check
+(cd rust && cargo test --locked --test parity --test parity_self_check)
 npm run typecheck && npx vitest run tests/guards tests/rust-guards
 npx tsx scripts/logseq-instance.ts start && npm run test:integration && npx tsx scripts/logseq-instance.ts stop
 npx tsx scripts/measure-api-calls.ts   # report calls for: <tool>
