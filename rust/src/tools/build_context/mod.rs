@@ -24,8 +24,8 @@ use std::collections::HashSet;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use crate::args::Arguments;
 use crate::client::LogseqClient;
@@ -42,7 +42,7 @@ use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
 use crate::resolve::{ResolvedPage, require_page};
 use crate::resolve_refs::resolve_block_refs;
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::get_backlinks::{block_rows, fetch_backlinks};
 use crate::truncation::{INLINE_BLOCKS, INLINE_REFERENCES, INLINE_RELATED_PAGES, truncation_warning};
 
@@ -194,18 +194,30 @@ impl Default for Caps {
 }
 
 /// A block that links the topic, and the page it sits on.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Reference {
     pub block: Value,
+    #[serde(rename = "sourcePage")]
     pub source_page: Value,
 }
 
 /// Real counts before the caps were applied (`totals`; the `summary` counts what is returned).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Totals {
     pub blocks: usize,
+    #[serde(rename = "relatedPages")]
     pub related_pages: usize,
     pub references: usize,
+}
+
+/// `temporalContext`: whether the page is a journal, and its day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TemporalContext {
+    #[serde(rename = "isJournal")]
+    pub is_journal: bool,
+    /// The journal's day as `YYYYMMDD`; absent for a page that is not a journal or has no day
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<i64>,
 }
 
 /// A topic's context (`TopicContext`). The page, the blocks and the pages are the entities LogSeq
@@ -221,9 +233,65 @@ pub struct TopicContext {
     /// The pages that link the topic, each shown as `{ page, relationshipType: "inbound" }`
     pub related_pages: Vec<Value>,
     pub references: Vec<Reference>,
-    pub temporal_context: Option<Value>,
+    pub temporal_context: Option<TemporalContext>,
     pub warnings: Vec<ResultWarning>,
     pub totals: Totals,
+}
+
+/// One related page as the result shows it.
+#[derive(Serialize)]
+struct RelatedPage<'a> {
+    page: &'a Value,
+    #[serde(rename = "relationshipType")]
+    relationship_type: &'static str,
+}
+
+/// What the result holds, counted over what it returns (`summary`; `totals` counts before the caps).
+#[derive(Serialize)]
+struct ContextSummary {
+    #[serde(rename = "totalBlocks")]
+    total_blocks: usize,
+    #[serde(rename = "totalRelatedPages")]
+    total_related_pages: usize,
+    #[serde(rename = "totalReferences")]
+    total_references: usize,
+    #[serde(rename = "pageProperties")]
+    page_properties: Value,
+}
+
+/// The completeness keys of a context.
+#[derive(Serialize)]
+struct Completeness<'a> {
+    #[serde(rename = "hasMore")]
+    has_more: bool,
+    warnings: &'a [ResultWarning],
+    totals: Totals,
+}
+
+/// A context as written, in BR-0013's order: what was answered (`topic`, `resolvedFrom`,
+/// `resolvedAliases`), what must not be missed (`hasMore`, `warnings`, `totals`, then `summary`), then
+/// the data (`mainPage`, `directBlocks`, `relatedPages`, `references`, `temporalContext`).
+/// `get_context_for_query` keeps each topic's context without the completeness keys
+/// (`TopicQueryContext`), since it rolls the warnings up into its own.
+#[derive(Serialize)]
+struct TopicContextOutput<'a> {
+    topic: &'a str,
+    #[serde(rename = "resolvedFrom", skip_serializing_if = "Option::is_none")]
+    resolved_from: Option<&'a Value>,
+    #[serde(rename = "resolvedAliases", skip_serializing_if = "Option::is_none")]
+    resolved_aliases: Option<&'a [String]>,
+    #[serde(flatten)]
+    completeness: Option<Completeness<'a>>,
+    summary: ContextSummary,
+    #[serde(rename = "mainPage")]
+    main_page: &'a Value,
+    #[serde(rename = "directBlocks")]
+    direct_blocks: &'a [Value],
+    #[serde(rename = "relatedPages")]
+    related_pages: Vec<RelatedPage<'a>>,
+    references: &'a [Reference],
+    #[serde(rename = "temporalContext", skip_serializing_if = "Option::is_none")]
+    temporal_context: Option<TemporalContext>,
 }
 
 impl TopicContext {
@@ -232,50 +300,25 @@ impl TopicContext {
         self.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())
     }
 
-    /// The context as the TypeScript object is written: `topic`, `resolvedFrom`, `resolvedAliases`,
-    /// `mainPage`, `directBlocks`, `relatedPages`, `references`, `temporalContext`, `summary`, then
-    /// (with `with_meta`) `hasMore`, `warnings` and `totals`. `get_context_for_query` keeps the
-    /// context without them (`TopicQueryContext`).
+    /// The context in BR-0013's key order, with `hasMore`, `warnings` and `totals` when `with_meta`.
     pub fn to_value(&self, with_meta: bool) -> Value {
-        let mut out = Map::new();
-        out.insert("topic".into(), json!(self.topic));
-        if let Some(from) = &self.resolved_from {
-            out.insert("resolvedFrom".into(), from.clone());
-        }
-        if let Some(names) = &self.resolved_aliases {
-            out.insert("resolvedAliases".into(), json!(names));
-        }
-        out.insert("mainPage".into(), self.main_page.clone());
-        out.insert("directBlocks".into(), Value::Array(self.direct_blocks.clone()));
-        out.insert(
-            "relatedPages".into(),
-            Value::Array(self.related_pages.iter().map(|page| json!({"page": page, "relationshipType": "inbound"})).collect()),
-        );
-        out.insert(
-            "references".into(),
-            Value::Array(self.references.iter().map(|reference| json!({"block": reference.block, "sourcePage": reference.source_page})).collect()),
-        );
-        if let Some(temporal) = &self.temporal_context {
-            out.insert("temporalContext".into(), temporal.clone());
-        }
-        out.insert(
-            "summary".into(),
-            json!({
-                "totalBlocks": self.direct_blocks.len(),
-                "totalRelatedPages": self.related_pages.len(),
-                "totalReferences": self.references.len(),
-                "pageProperties": page_properties(&self.main_page),
-            }),
-        );
-        if with_meta {
-            out.insert("hasMore".into(), json!(self.has_more()));
-            out.insert("warnings".into(), serde_json::to_value(&self.warnings).expect("warnings serialize"));
-            out.insert(
-                "totals".into(),
-                json!({"blocks": self.totals.blocks, "relatedPages": self.totals.related_pages, "references": self.totals.references}),
-            );
-        }
-        Value::Object(out)
+        result_value(&TopicContextOutput {
+            topic: &self.topic,
+            resolved_from: self.resolved_from.as_ref(),
+            resolved_aliases: self.resolved_aliases.as_deref(),
+            completeness: with_meta.then(|| Completeness { has_more: self.has_more(), warnings: &self.warnings, totals: self.totals }),
+            summary: ContextSummary {
+                total_blocks: self.direct_blocks.len(),
+                total_related_pages: self.related_pages.len(),
+                total_references: self.references.len(),
+                page_properties: page_properties(&self.main_page),
+            },
+            main_page: &self.main_page,
+            direct_blocks: &self.direct_blocks,
+            related_pages: self.related_pages.iter().map(|page| RelatedPage { page, relationship_type: "inbound" }).collect(),
+            references: &self.references,
+            temporal_context: self.temporal_context,
+        })
     }
 }
 
@@ -330,17 +373,12 @@ fn references_of(backlinks: Vec<crate::tools::get_backlinks::Backlink>) -> (Vec<
     (related_pages, references)
 }
 
-/// `temporalContext`: whether the page is a journal, and its day.
-fn temporal_context(page: &Value) -> Value {
+/// The `temporalContext` of a page: whether it is a journal, and its day.
+fn temporal_context(page: &Value) -> TemporalContext {
     if journal_flag(Some(page)) == Some(true) {
-        let mut temporal = Map::new();
-        temporal.insert("isJournal".into(), json!(true));
-        if let Some(day) = journal_day_of(Some(page)) {
-            temporal.insert("date".into(), json!(day));
-        }
-        Value::Object(temporal)
+        TemporalContext { is_journal: true, date: journal_day_of(Some(page)) }
     } else {
-        json!({"isJournal": false})
+        TemporalContext { is_journal: false, date: None }
     }
 }
 
@@ -517,13 +555,6 @@ mod tests {
         assert_eq!(references[2].source_page, json!({"id": 30}));
     }
 
-    #[test]
-    fn a_journal_says_so_with_its_day_and_any_other_page_says_it_is_not_one() {
-        assert_eq!(js::json_stringify(&temporal_context(&json!({"journal?": true, "journal-day": 20250101}))), r#"{"isJournal":true,"date":20250101}"#);
-        assert_eq!(js::json_stringify(&temporal_context(&json!({"journal?": true}))), r#"{"isJournal":true}"#);
-        assert_eq!(temporal_context(&json!({"journal?": false, "journal-day": 20250101})), json!({"isJournal": false}));
-        assert_eq!(temporal_context(&json!({})), json!({"isJournal": false}));
-    }
 
     #[test]
     fn the_properties_of_a_page_with_none_are_an_empty_object() {
@@ -534,8 +565,16 @@ mod tests {
     }
 
     #[test]
-    fn a_context_is_written_in_the_order_of_the_typescript_object() {
-        let context = TopicContext {
+    fn a_journal_says_so_with_its_day_and_any_other_page_says_it_is_not_one() {
+        let written = |page: Value| js::json_stringify(&result_value(&temporal_context(&page)));
+        assert_eq!(written(json!({"journal?": true, "journal-day": 20250101})), r#"{"isJournal":true,"date":20250101}"#);
+        assert_eq!(written(json!({"journal?": true})), r#"{"isJournal":true}"#);
+        assert_eq!(written(json!({"journal?": false, "journal-day": 20250101})), r#"{"isJournal":false}"#);
+        assert_eq!(written(json!({})), r#"{"isJournal":false}"#);
+    }
+
+    fn context() -> TopicContext {
+        TopicContext {
             topic: "atlas".into(),
             resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
             resolved_aliases: Some(vec!["Atlas".into(), "Project Atlas".into()]),
@@ -543,24 +582,45 @@ mod tests {
             direct_blocks: vec![json!({"id": 5, "uuid": "u5"})],
             related_pages: vec![json!({"id": 2})],
             references: vec![Reference { block: json!({"id": 6}), source_page: json!({"id": 2}) }],
-            temporal_context: Some(json!({"isJournal": false})),
+            temporal_context: Some(TemporalContext { is_journal: false, date: None }),
             warnings: vec![ResultWarning::new("w", "m".into())],
             totals: Totals { blocks: 9, related_pages: 1, references: 1 },
-        };
+        }
+    }
+
+    #[test]
+    fn a_context_writes_what_was_answered_then_what_must_not_be_missed_then_the_data() {
         assert_eq!(
-            js::json_stringify(&context.to_value(true)),
+            js::json_stringify(&context().to_value(true)),
             concat!(
                 r#"{"topic":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,
+                r#""hasMore":false,"warnings":[{"code":"w","message":"m"}],"totals":{"blocks":9,"relatedPages":1,"references":1},"#,
+                r#""summary":{"totalBlocks":1,"totalRelatedPages":1,"totalReferences":1,"pageProperties":{"type":"project"}},"#,
                 r#""mainPage":{"id":1,"name":"project atlas","properties":{"type":"project"}},"#,
                 r#""directBlocks":[{"id":5,"uuid":"u5"}],"relatedPages":[{"page":{"id":2},"relationshipType":"inbound"}],"#,
-                r#""references":[{"block":{"id":6},"sourcePage":{"id":2}}],"temporalContext":{"isJournal":false},"#,
-                r#""summary":{"totalBlocks":1,"totalRelatedPages":1,"totalReferences":1,"pageProperties":{"type":"project"}},"#,
-                r#""hasMore":false,"warnings":[{"code":"w","message":"m"}],"totals":{"blocks":9,"relatedPages":1,"references":1}}"#
+                r#""references":[{"block":{"id":6},"sourcePage":{"id":2}}],"temporalContext":{"isJournal":false}}"#
             )
         );
-        // `get_context_for_query` keeps the context without the meta
-        let bare = context.to_value(false);
-        assert_eq!(bare.as_object().unwrap().keys().last().unwrap(), "summary");
     }
+
+    #[test]
+    fn the_order_of_a_context_does_not_depend_on_which_optional_keys_are_there() {
+        use crate::tool::testing::keys;
+        let all = [
+            "topic", "resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages",
+            "references", "temporalContext",
+        ];
+        assert_eq!(keys(&context().to_value(true)), all);
+        // `get_context_for_query` keeps a topic's context without the completeness keys
+        let without_meta: Vec<&str> = all.iter().copied().filter(|key| !["hasMore", "warnings", "totals"].contains(key)).collect();
+        assert_eq!(keys(&context().to_value(false)), without_meta);
+        // no resolution, no temporal context: the others keep their places
+        let bare = TopicContext { resolved_from: None, resolved_aliases: None, temporal_context: None, ..context() };
+        assert_eq!(
+            keys(&bare.to_value(true)),
+            ["topic", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages", "references"]
+        );
+    }
+
 }
