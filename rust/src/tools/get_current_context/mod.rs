@@ -6,11 +6,10 @@
 //! fetches all pages. An answer of `null` is a case of its own: no page open is a normal result
 //! (`page: null` with a message), not an error. Infrastructure errors propagate (BR-0003).
 //!
-//! This directory holds everything only the current context uses: its query (`queries.rs`) and the
-//! answers it reads (`wire.rs`). What it shares with other tools is outside it: slim output, entity
-//! fields and the tool helpers.
+//! This directory holds everything only the current context uses: the answers it reads
+//! (`wire.rs`). What it shares with other tools is outside it: the page lookup by id, slim output,
+//! entity fields and the tool helpers.
 
-mod queries;
 mod wire;
 
 use std::collections::HashMap;
@@ -25,6 +24,7 @@ use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
 use crate::js;
+use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, success_result, with_empty_required};
 
@@ -152,7 +152,7 @@ pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext
 
     if !missing_ids.is_empty() {
         let ids = missing_ids.iter().map(|&id| PageId::new(id)).collect::<Result<Vec<_>, _>>()?;
-        let query = queries::pages_by_ids(&ids);
+        let query = pages_by_ids(&ids);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // PARITY(#299): a `null` answer is read as no pages, so every block silently loses its page name and the
         // result may say no page is open, where BR-0011 asks for a warning that the names are unavailable
