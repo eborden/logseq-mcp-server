@@ -55,10 +55,9 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
     Ok(Some(out))
 }
 
-// PARITY(#299): zod's phrasing for a bad argument (`a string, not a number`, `(required)`), written as
-// `parseArgs` writes it — drop if Rust becomes the only server.
-/// What `parseArgs` makes of a bad required string parameter: `missing` when it is absent or
-/// `null`, else the value as JSON, and what was expected (`expectedMessage`, `exampleFor`).
+/// What `parseArgs` made of a bad required string parameter: `missing` when it is absent or
+/// `null`, else the value as JSON, and what was expected (`expectedMessage`, `exampleFor`). The wording
+/// (`a string, not a number`, `(required)`) began as zod's and is this server's own readable message now.
 /// `args` are the arguments as sent.
 pub fn bad_string_param(param: &str, args: Option<&Map<String, Value>>) -> InvalidParameter {
     let sent = args.and_then(|args| args.get(param)).filter(|value| !value.is_null());
