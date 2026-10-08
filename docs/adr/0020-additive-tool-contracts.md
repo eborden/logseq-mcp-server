@@ -27,10 +27,10 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-The recorded `tools/list` (`scripts/parity/expected/tool-list.json`) records every tool's name, description, annotations and input schema, and the parity step of CI holds the Rust server to it by meaning (ADR-0031), so a rename, removal or new required parameter fails until a reviewer accepts the change to the recorded file deliberately.
+The recorded `tools/list` (`scripts/parity/expected/tool-list.json`) records every tool's name, description, annotations and input schema, and the parity test (`cargo test`, `rust/tests/parity.rs`) holds the Rust server to it by meaning (ADR-0031), so a rename, removal or new required parameter fails until a reviewer accepts the change to the recorded file deliberately.
 
 - test: `tests/guards/tool-list.test.ts` (the recorded list is the one the guardrails of ADR-0015 and ADR-0016 hold)
 - test: `tests/guards/tool-list.test.ts` (the canonical parameter stays required for every aliased tool of the recorded list, and no alias is advertised; the aliases are checked against the `ALIASES` constants in `rust/src/tools`)
-- ci: `.github/workflows/ci.yml` (the parity step holds `tools/list` to the recorded one by meaning: `compareToolLists` in `scripts/parity/tool-list-compare.ts`)
+- test: `rust/tests/parity.rs` (`tools/list` is held to the recorded one by meaning: `compare_tool_lists` in `rust/tests/parity_support/compare.rs`)
 - test: `rust/src/params.rs` (an alias is folded into the canonical name, and a conflicting alias is refused)
 - reviewer: A PR that renames or removes a tool, parameter or result field says so and includes a migration note.

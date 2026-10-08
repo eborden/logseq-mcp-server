@@ -32,8 +32,8 @@ Date: 2025-11-24
 
 ## Mechanical enforcement
 
-The recorded tool list (`scripts/parity/expected/tool-list.json`) names every tool, so adding or removing one shows up in review as a JSON diff, and the parity harness fails a server whose `tools/list` differs from it by meaning. The list cannot tell that a new tool overlaps an old one, so overlap is a review judgment.
+The recorded tool list (`scripts/parity/expected/tool-list.json`) names every tool, so adding or removing one shows up in review as a JSON diff, and the parity test (`cargo test`) fails a server whose `tools/list` differs from it by meaning. The list cannot tell that a new tool overlaps an old one, so overlap is a review judgment.
 
 - test: `tests/guards/tool-list.test.ts` (the recorded list names 16 tools, once each)
-- ci: `.github/workflows/ci.yml` (the parity step holds the Rust server's `tools/list` to the recorded one by meaning: `compareToolLists` in `scripts/parity/tool-list-compare.ts`)
+- test: `rust/tests/parity.rs` (the Rust server's `tools/list` is held to the recorded one by meaning: `compare_tool_lists` in `rust/tests/parity_support/compare.rs`)
 - reviewer: Before adding a tool, check whether an existing tool already covers the behaviour with a parameter.
