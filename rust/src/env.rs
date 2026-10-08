@@ -83,7 +83,7 @@ impl Env {
 /// it's a path the user set, with no secret in it.
 fn config_path(raw: Option<&str>, home: Option<&Path>) -> Result<ConfigPath, ConfigError> {
     let raw = raw.unwrap_or_default();
-    let path = raw.trim();
+    let path = js_trim(raw);
     if path.is_empty() {
         return match home {
             Some(home) if home.is_absolute() => Ok(ConfigPath(home.join(".logseq-mcp").join("config.json"))),
@@ -103,12 +103,12 @@ fn config_path(raw: Option<&str>, home: Option<&Path>) -> Result<ConfigPath, Con
     Ok(ConfigPath(PathBuf::from(path)))
 }
 
-/// `LOGSEQ_MCP_TIPS`, case-insensitive with surrounding spaces ignored. Any other value is an
+/// `LOGSEQ_MCP_TIPS`, case-insensitive with surrounding whitespace ignored (as `trim()` does). Any other value is an
 /// error, so a typo such as `disabled` can't leave tips on silently. The message echoes the
 /// value, which holds no secret, as in TypeScript.
 fn tips(raw: Option<&str>) -> Result<TipsOverride, ConfigError> {
     let Some(raw) = raw else { return Ok(TipsOverride::Unset) };
-    let flag = raw.trim().to_lowercase();
+    let flag = js_trim(raw).to_lowercase();
     if flag.is_empty() {
         Ok(TipsOverride::Unset)
     } else if TIPS_OFF_VALUES.contains(&flag.as_str()) {
@@ -121,6 +121,12 @@ fn tips(raw: Option<&str>) -> Result<TipsOverride, ConfigError> {
             problem: format!("must be one of {} (got \"{raw}\")", [TIPS_ON_VALUES, TIPS_OFF_VALUES].concat().join(", ")),
         })
     }
+}
+
+/// `String.prototype.trim()`: JavaScript's whitespace and line terminators. That is Rust's
+/// `White_Space` plus U+FEFF (a byte-order mark), less U+0085, which JavaScript keeps.
+fn js_trim(value: &str) -> &str {
+    value.trim_matches(|c: char| c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}'))
 }
 
 #[cfg(test)]
@@ -195,6 +201,16 @@ mod tests {
         ] {
             assert_eq!(env(&[(TIPS_ENV, value)], home()).unwrap().tips, expected, "{value:?}");
         }
+    }
+
+    #[test]
+    fn values_are_trimmed_as_javascript_trims() {
+        assert_eq!(js_trim("\u{feff} on \u{a0}\u{2028}\t"), "on");
+        assert_eq!(js_trim("\u{85}on\u{85}"), "\u{85}on\u{85}");
+        assert_eq!(env(&[(TIPS_ENV, "\u{feff}off")], home()).unwrap().tips, TipsOverride::Off);
+        assert_eq!(env(&[(TIPS_ENV, "\u{feff}")], home()).unwrap().tips, TipsOverride::Unset);
+        let env = env(&[(CONFIG_PATH_ENV, "\u{feff}/tmp/instance/config.json")], None).unwrap();
+        assert_eq!(env.config_path.as_path(), Path::new("/tmp/instance/config.json"));
     }
 
     #[test]
