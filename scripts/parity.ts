@@ -4,19 +4,25 @@
 //
 //   npx tsx scripts/parity.ts                      # the TypeScript server against its recorded results
 //   npx tsx scripts/parity.ts -- ./my-server --x   # any other server command (the Rust one, #125)
-//   npx tsx scripts/parity.ts --record             # re-record the expected results from the server
+//   npx tsx scripts/parity.ts --record             # re-record the expected results from the TypeScript server
 //   npx tsx scripts/parity.ts --self-check         # passes as is, and fails on every perturbed case
+//
+// Only the TypeScript server records: the expected file is the reference other servers are judged
+// against, so --record refuses a command after --. A re-record is done by hand when the TypeScript
+// output changes on purpose, ships with a reviewed diff of the JSON, and never runs in CI.
 //
 // Exit code 0 when everything matches (for --self-check: when both halves behave), 1 otherwise.
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
-import { perturbCases, runParity, type ParityReport, type ServerCommand, type ToolResult } from './parity/harness.js';
+import { compareResult, perturbCases, runParity, type ParityReport, type ServerCommand, type ToolResult } from './parity/harness.js';
 import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer } from './parity/ts-server.js';
 
 export const EXPECTED_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'get-page-outline.json');
 
-const USAGE = 'usage: npx tsx scripts/parity.ts [--record | --perturb | --self-check] [-- <server command> [args...]]';
+const USAGE =
+  'usage: npx tsx scripts/parity.ts [--perturb | --self-check] [-- <server command> [args...]]\n' +
+  '       npx tsx scripts/parity.ts --record   (TypeScript server only; review the JSON diff; never in CI)';
 
 function parseCommandLine(argv: string[]): { mode: 'check' | 'record' | 'perturb' | 'self-check'; server: ServerCommand } {
   const dashes = argv.indexOf('--');
@@ -30,6 +36,9 @@ function parseCommandLine(argv: string[]): { mode: 'check' | 'record' | 'perturb
   });
   if (modes.length > 1) throw new Error(`pick one mode\n${USAGE}`);
   if (dashes !== -1 && command.length === 0) throw new Error(`no server command after --\n${USAGE}`);
+  if (modes[0] === 'record' && command.length > 0) {
+    throw new Error(`--record runs the TypeScript server only: a candidate can't record its own reference\n${USAGE}`);
+  }
   const server = command.length > 0 ? { command: command[0], args: command.slice(1) } : typescriptServer();
   return { mode: modes[0] ?? 'check', server };
 }
@@ -44,6 +53,34 @@ function print(label: string, report: ParityReport): void {
   if (report.stderr.trim()) console.log(`server stderr:\n${report.stderr.trim()}`);
 }
 
+async function readExpected(): Promise<Record<string, ToolResult> | undefined> {
+  try {
+    return JSON.parse(await readFile(EXPECTED_FILE, 'utf8')) as Record<string, ToolResult>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+/** What a re-record changes in the expected file, case by case, before it is written. */
+function printChanges(previous: Record<string, ToolResult> | undefined, next: Record<string, ToolResult>): void {
+  if (!previous) {
+    console.log('no expected file yet; every case is new');
+    return;
+  }
+  let changed = 0;
+  for (const name of new Set([...Object.keys(previous), ...Object.keys(next)])) {
+    const before = previous[name];
+    const after = next[name];
+    const lines = !before ? ['new case'] : !after ? ['case removed'] : compareResult(before, after);
+    if (lines.length === 0) continue;
+    changed++;
+    console.log(`changed: ${name}`);
+    for (const line of lines) console.log(`  - ${line}`);
+  }
+  console.log(changed === 0 ? 'no case changed' : `${changed} case(s) changed; review the JSON diff before committing`);
+}
+
 async function main(): Promise<number> {
   const { mode, server } = parseCommandLine(process.argv.slice(2));
   const cases = getPageOutlineCases;
@@ -53,12 +90,14 @@ async function main(): Promise<number> {
     const report = await runParity({ server, cases, snapshotFile });
     print('record', report);
     if (report.failures.length > 0) return 1;
+    printChanges(await readExpected(), report.results);
     await writeFile(EXPECTED_FILE, `${JSON.stringify(report.results, null, 2)}\n`);
     console.log(`wrote ${Object.keys(report.results).length} results to ${EXPECTED_FILE}`);
     return 0;
   }
 
-  const expected = JSON.parse(await readFile(EXPECTED_FILE, 'utf8')) as Record<string, ToolResult>;
+  const expected = await readExpected();
+  if (!expected) throw new Error(`no expected results at ${EXPECTED_FILE}; record them with --record`);
   if (mode === 'check') {
     const report = await runParity({ server, cases, expected, snapshotFile });
     print('parity', report);
