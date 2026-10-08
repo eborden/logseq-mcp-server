@@ -5,9 +5,11 @@ The LogSeq MCP server in Rust, beside the TypeScript one in `src/`. It's a bound
 go/no-go call (#127). The TypeScript server is the one that ships, and its tool contract is the
 specification this crate must match.
 
-For now it has the skeleton (#123): the LogSeq HTTP client, EDN-encoded Datalog inputs, the
-config file, and an MCP stdio server with one stub tool, `logseq_spike_ping`. The first real
-tool is #125.
+It has the skeleton (#123): the LogSeq HTTP client, EDN-encoded Datalog inputs, the config file
+and an MCP stdio server. The one tool is `logseq_get_page_outline` (#125), which exercises the
+pieces most likely to differ between implementations: the shared page resolver, a Datalog query
+bound with `:in`, a capped result with a warning, sibling order by the `:block/left` chain, and
+2 API calls. Left unproven: alias groups (#69) and the Markdown renderer.
 
 | File | What it holds |
 |---|---|
@@ -16,6 +18,11 @@ tool is #125.
 | `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as `src/client.ts` |
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
 | `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`. Each input schema comes from the type that parses the arguments |
+| `src/wire.rs` | What LogSeq answers, parsed into typed rows at the boundary (`src/response-schemas.ts`). A mismatch is a `ResponseError` naming the path in zod's words, never "no data" |
+| `src/resolve.rs`, `src/queries.rs`, `src/errors.rs` | The shared page resolver (BR-0010): exact name, alias, ISO date, namespace leaf, the closest names for a miss, and the queries and errors that go with it |
+| `src/fuzzy.rs` | fuzzysort 3.1.0's `go`, ported step for step, because the closest names are in an error message compared byte for byte. Tested against the library's own output (`tests/data/fuzzysort-oracle.json`) |
+| `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and an approximation of `localeCompare` |
+| `src/outline.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | The tool, its `ResultMeta`, its next-step tip and its parameter aliases and argument errors |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
 
 ## Build and test
@@ -29,8 +36,22 @@ cargo test
 cargo build --release   # target/release/logseq-mcp-server
 ```
 
-The unit tests never contact LogSeq. The client tests run their own mock HTTP server on a free
-local port.
+The unit tests never contact LogSeq. The client and outline tests run their own mock HTTP server on
+a free local port.
+
+## Parity with the TypeScript server
+
+The parity harness (#124) starts a server over stdio against a stub LogSeq on a random port, and
+compares the tool result byte for byte, the LogSeq calls and `tools/list` by meaning (ADR-0031)
+with what the TypeScript server did. From the repo root, after `npm ci` and `cargo build`:
+
+```bash
+npx tsx scripts/parity.ts --tested-tools-only -- "$PWD/rust/target/debug/logseq-mcp-server"
+npx tsx scripts/parity.ts --self-check --tested-tools-only -- "$PWD/rust/target/debug/logseq-mcp-server"
+```
+
+`--tested-tools-only` is for a server with only some tools: `tools/list` is compared for the tools
+the cases call, and the server must list those and no others. Fixtures are made up (BR-0001).
 
 ## Running it
 

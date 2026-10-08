@@ -2,7 +2,7 @@
 //!
 //! Tools are listed by hand rather than with rmcp's `#[tool]` macros, so every byte of a tool's
 //! definition is ours to match against the TypeScript snapshot (ADR-0016, ADR-0025 Decision 2).
-//! The spike has one stub tool, a connectivity check; the first real port is #125.
+//! The spike has one tool, `logseq_get_page_outline` (#125).
 
 use std::sync::{Arc, LazyLock};
 
@@ -17,7 +17,12 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::client::{LogseqClient, LogseqError};
+use crate::client::LogseqClient;
+use crate::errors::ToolError;
+use crate::meta::ambiguous_page_result;
+use crate::outline::{PageOutline, get_page_outline};
+use crate::params::{ParamAliases, bad_string_param, resolve_param_aliases};
+use crate::tips::{OutlineTipBlock, outline_tips, tips_content};
 
 /// The server name the TypeScript server reports (`src/index.ts`).
 pub const SERVER_NAME: &str = "logseq-mcp-server";
@@ -28,20 +33,27 @@ pub static SERVER_VERSION: LazyLock<String> = LazyLock::new(|| {
     package["version"].as_str().expect("package.json has a version").to_owned()
 });
 
-/// Server `instructions`. A placeholder until a real tool lands: the TypeScript text
+/// Server `instructions`. A placeholder until more tools land: the TypeScript text
 /// (`src/instructions.ts`) names tools this server doesn't have yet.
 pub const SERVER_INSTRUCTIONS: &str =
-    "Rust spike of the LogSeq MCP server (read-only). Only logseq_spike_ping is available: it checks that LogSeq answers.";
+    "Rust spike of the LogSeq MCP server (read-only). Only logseq_get_page_outline is available: it lists a page's top-level blocks.";
 
-pub const PING_TOOL: &str = "logseq_spike_ping";
+pub const OUTLINE_TOOL: &str = "logseq_get_page_outline";
 
-const PING_DESCRIPTION: &str = "Check that LogSeq's HTTP API answers with this server's token. Returns {\"connected\":true}.\n\n\
-**Use when:** debugging the connection.\n\
-**Can't find:** anything in the graph. This spike has no other tools yet.";
+/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+const OUTLINE_DESCRIPTION: &str = "List a page's top-level blocks: uuid, the first line (80 characters) and the number of children. Cheaper than logseq_get_page for a long page.\n\n\
+**Use when:** you need a page's shape before reading parts of it. Read the blocks you pick with logseq_get_block.\n\
+**Can't find:** nested blocks below the first level, or block text past the first line (logseq_get_block, logseq_get_page).";
 
-/// The stub's arguments: none. Unknown fields are ignored, as every TypeScript tool ignores them.
-#[derive(Debug, Default, Deserialize, JsonSchema)]
-pub struct PingArgs {}
+/// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
+const OUTLINE_ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
+
+/// The outline's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct OutlineArgs {
+    /// Page name, alias, or ISO date (2025-01-01) for a journal
+    pub page_name: String,
+}
 
 /// Hints shared by every tool: each only reads from one known local LogSeq (BR-0002).
 fn read_only_annotations(title: &str) -> ToolAnnotations {
@@ -94,22 +106,28 @@ fn mentions_integer(schema: &Value) -> bool {
 /// every `null` before serde sees it, so a defaulted non-`Option` field (`#[serde(default)]
 /// bool`) takes its default for `null` too. serde alone would reject that `null`: keep the
 /// filter in every tool.
-pub fn parse_args<T: DeserializeOwned>(arguments: Option<JsonObject>) -> Result<T, String> {
+///
+/// A failure is serde's own. The words a model reads for it are the tool's (`params.rs`), which
+/// match the TypeScript server's.
+pub fn parse_args<T: DeserializeOwned>(arguments: Option<JsonObject>) -> Result<T, serde_json::Error> {
     let present: JsonObject = arguments.unwrap_or_default().into_iter().filter(|(_, v)| !v.is_null()).collect();
-    serde_json::from_value(Value::Object(present)).map_err(|error| format!("Invalid parameter: {error}"))
+    serde_json::from_value(Value::Object(present))
 }
 
 pub fn tools() -> Vec<Tool> {
     vec![
-        Tool::new(PING_TOOL, PING_DESCRIPTION, input_schema::<PingArgs>())
-            .with_title("Spike Ping")
-            .with_annotations(read_only_annotations("Spike Ping")),
+        Tool::new(OUTLINE_TOOL, OUTLINE_DESCRIPTION, input_schema::<OutlineArgs>())
+            .with_title("Get Page Outline")
+            .with_annotations(read_only_annotations("Get Page Outline")),
     ]
 }
 
-/// A tool result: one text block holding minified JSON (ADR-0009).
-fn json_result(value: &Value) -> CallToolResult {
-    CallToolResult::success(vec![ContentBlock::text(value.to_string())])
+/// A result with no `isError` key, as the TypeScript server's has none: an absent `isError` and
+/// `isError: false` are different results on the wire (rmcp's own `success` writes the latter).
+fn success_result(content: Vec<ContentBlock>) -> CallToolResult {
+    let mut result = CallToolResult::success(content);
+    result.is_error = None;
+    result
 }
 
 /// A failed call, as `{"error": message}` with `isError`, the TypeScript server's shape.
@@ -120,31 +138,49 @@ fn error_result(message: &str) -> CallToolResult {
 #[derive(Clone)]
 pub struct LogseqServer {
     client: Arc<LogseqClient>,
+    /// Whether results carry next-step tips (`LOGSEQ_MCP_TIPS` over the config file's `tips`)
+    tips_enabled: bool,
 }
 
 impl LogseqServer {
-    pub fn new(client: LogseqClient) -> Self {
-        LogseqServer { client: Arc::new(client) }
+    pub fn new(client: LogseqClient, tips_enabled: bool) -> Self {
+        LogseqServer { client: Arc::new(client), tips_enabled }
     }
 
-    async fn ping(&self, _args: PingArgs) -> Result<Value, LogseqError> {
-        // The answer names the open graph; it isn't returned (BR-0001), only that one came.
-        self.client.call_api("logseq.App.getCurrentGraph", &[]).await?;
-        Ok(json!({ "connected": true }))
+    /// The outline tool: aliases folded, arguments parsed, the tool, then its tips.
+    async fn outline(&self, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
+        let arguments = resolve_param_aliases(OUTLINE_ALIASES, arguments)?;
+        let args = parse_args::<OutlineArgs>(arguments.clone())
+            .map_err(|_| ToolError::InvalidParameter(bad_string_param("page_name", arguments.as_ref())))?;
+        let outline = get_page_outline(&self.client, &args.page_name).await?;
+        let mut content = vec![ContentBlock::text(serde_json::to_string(&outline).expect("an outline serializes"))];
+        if self.tips_enabled {
+            if let Some(tips) = tips_content(&outline_tips(&tip_blocks(&outline))) {
+                content.push(ContentBlock::text(tips));
+            }
+        }
+        Ok(success_result(content))
     }
 
+    /// Run a tool and turn what stops it into the TypeScript server's results: an ambiguous name
+    /// is a result with the candidates, anything else `{"error": message}` with `isError`.
     async fn dispatch(&self, request: CallToolRequestParams) -> CallToolResult {
-        match request.name.as_ref() {
-            PING_TOOL => match parse_args::<PingArgs>(request.arguments) {
-                Ok(args) => match self.ping(args).await {
-                    Ok(value) => json_result(&value),
-                    Err(error) => error_result(&error.to_string()),
-                },
-                Err(message) => error_result(&message),
-            },
-            other => error_result(&format!("Unknown tool: {other}")),
+        let result = match request.name.as_ref() {
+            OUTLINE_TOOL => self.outline(request.arguments).await,
+            other => return error_result(&format!("Unknown tool: {other}")),
+        };
+        match result {
+            Ok(result) => result,
+            Err(ToolError::AmbiguousPage(ambiguous)) => {
+                success_result(vec![ContentBlock::text(ambiguous_page_result(&ambiguous))])
+            }
+            Err(error) => error_result(&error.to_string()),
         }
     }
+}
+
+fn tip_blocks(outline: &PageOutline) -> Vec<OutlineTipBlock<'_>> {
+    outline.blocks.iter().map(|block| OutlineTipBlock { uuid: &block.uuid, child_count: block.child_count }).collect()
 }
 
 impl ServerHandler for LogseqServer {
@@ -300,8 +336,14 @@ mod tests {
     }
 
     #[test]
-    fn the_stub_schema_means_what_the_typescript_one_means() {
-        assert_eq!(meaning(&schema_of::<PingArgs>()), meaning(&json!({"type": "object", "properties": {}, "required": []})));
+    fn the_outline_schema_means_what_the_typescript_one_means() {
+        // `inputSchema` of logseq_get_page_outline in the ADR-0016 snapshot
+        let typescript = json!({
+            "type": "object",
+            "properties": {"page_name": {"type": "string", "description": "Page name, alias, or ISO date (2025-01-01) for a journal"}},
+            "required": ["page_name"],
+        });
+        assert_eq!(meaning(&schema_of::<OutlineArgs>()), meaning(&typescript));
     }
 
     /// The TypeScript snapshot's schema for fields of each kind in [`SampleArgs`]
@@ -396,9 +438,8 @@ mod tests {
         assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "limit": "5"}))).is_err());
         assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "include_children": "true"}))).is_err());
         assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "format": "html"}))).is_err());
-        assert!(parse_args::<SampleArgs>(args(json!({"page_name": null}))).unwrap_err().contains("page_name"));
+        assert!(parse_args::<SampleArgs>(args(json!({"page_name": null}))).unwrap_err().to_string().contains("page_name"));
         assert!(parse_args::<SampleArgs>(None).is_err());
-        assert!(parse_args::<PingArgs>(None).is_ok());
         // Without the null filter serde rejects a null for a defaulted bool: the filter does that work.
         assert!(serde_json::from_value::<SampleArgs>(json!({"page_name": "x", "include_children": null})).is_err());
     }
@@ -408,19 +449,19 @@ mod tests {
         // A pulled LogSeq entity is passed through as it came; sorting its keys would break
         // byte-for-byte parity with the TypeScript server (ADR-0025 Decision 2).
         let entity: Value = serde_json::from_str(r#"{"uuid":"u","content":"c","id":1}"#).unwrap();
-        let result = json_result(&json!({"warnings": [], "block": entity}));
-        assert_eq!(
-            serde_json::to_value(&result.content[0]).unwrap()["text"],
-            r#"{"warnings":[],"block":{"uuid":"u","content":"c","id":1}}"#
-        );
+        assert_eq!(json!({"warnings": [], "block": entity}).to_string(), r#"{"warnings":[],"block":{"uuid":"u","content":"c","id":1}}"#);
+        let error = error_result("No \"page\"");
+        assert_eq!(serde_json::to_value(&error.content[0]).unwrap()["text"], r#"{"error":"No \"page\""}"#);
     }
 
     #[test]
-    fn the_stub_is_read_only() {
+    fn the_outline_tool_is_read_only_and_titled_as_in_typescript() {
         let [tool] = tools().try_into().unwrap();
+        assert_eq!(tool.name, OUTLINE_TOOL);
+        assert_eq!(tool.title.as_deref(), Some("Get Page Outline"));
         assert_eq!(
             serde_json::to_value(&tool.annotations).unwrap(),
-            json!({"title": "Spike Ping", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
+            json!({"title": "Get Page Outline", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
         );
     }
 
@@ -441,7 +482,7 @@ mod tests {
         let (server_io, client_io) = tokio::io::duplex(1 << 16);
         let (server_read, server_write) = tokio::io::split(server_io);
         let running = tokio::spawn(async move {
-            let service = LogseqServer::new(client).serve((server_read, server_write)).await.unwrap();
+            let service = LogseqServer::new(client, true).serve((server_read, server_write)).await.unwrap();
             let _ = service.waiting().await;
         });
         let (client_read, mut client_write) = tokio::io::split(client_io);
@@ -486,7 +527,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_returns_the_one_stub_tool() {
+    async fn tools_list_returns_the_outline_tool() {
         let responses = exchange(&closed_port_url().await, &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
@@ -495,8 +536,8 @@ mod tests {
         .await;
         let tools = responses[1]["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], PING_TOOL);
-        assert_eq!(meaning(&tools[0]["inputSchema"]), meaning(&json!({"type": "object", "properties": {}, "required": []})));
+        assert_eq!(tools[0]["name"], OUTLINE_TOOL);
+        assert_eq!(meaning(&tools[0]["inputSchema"]), meaning(&schema_of::<OutlineArgs>()));
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
     }
 
@@ -506,13 +547,13 @@ mod tests {
         let responses = exchange(&api_url, &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
-            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": PING_TOOL, "arguments": {}}}),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": OUTLINE_TOOL, "arguments": {"page_name": "Alice"}}}),
             json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "logseq_nope", "arguments": {}}}),
         ])
         .await;
-        let ping = &responses[1]["result"];
-        assert_eq!(ping["isError"], true);
-        let text: Value = serde_json::from_str(ping["content"][0]["text"].as_str().unwrap()).unwrap();
+        let outline = &responses[1]["result"];
+        assert_eq!(outline["isError"], true);
+        let text: Value = serde_json::from_str(outline["content"][0]["text"].as_str().unwrap()).unwrap();
         assert!(text["error"].as_str().unwrap().starts_with(&format!("Cannot connect to LogSeq at {api_url}")), "{text}");
         let unknown = &responses[2]["result"];
         assert_eq!(unknown["isError"], true);
