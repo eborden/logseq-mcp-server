@@ -89,7 +89,7 @@ ADR-0026 to ADR-0028 are already superseded, so only ADR-0029 and ADR-0030 are i
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-08
 
