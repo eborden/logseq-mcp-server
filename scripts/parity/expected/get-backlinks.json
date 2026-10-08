@@ -191,6 +191,18 @@
       }
     ]
   },
+  "aliases: resolvedAliases order across scripts": {
+    "content": [
+      {
+        "type": "text",
+        "text": "[[{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"},[{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Project Atlas]] (201)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":20},\"left\":{\"id\":20},\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}}]]]"
+      },
+      {
+        "type": "text",
+        "text": "{\"meta\":{\"hasMore\":false,\"warnings\":[],\"resolvedAliases\":[\"Atlas\",\"stone\",\"ﬆone\",\"Zeta\",\"αλφα\",\"Ωmega\",\"Яблоко\",\"日本語\"],\"tips\":[\"For the page's own content and related pages: logseq_build_context {\\\"topic_name\\\":\\\"Atlas\\\"}.\"]}}"
+      }
+    ]
+  },
   "aliases: the cut on the aliased path": {
     "content": [
       {

@@ -329,6 +329,29 @@ export const getBacklinksCases: ParityCase[] = [
     ]
   },
   {
+    // Names from several scripts sort as ICU orders them: Latin (the ligature U+FB06 sorts as "st"), Greek,
+    // Cyrillic, then Han, where code points would put the ligature after every Greek letter
+    name: 'aliases: resolvedAliases order across scripts',
+    tool: TOOL,
+    arguments: { page_name: 'Atlas' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"atlas"'], [[pulled({ ...ATLAS, alias: [12, 13, 14, 15, 16, 17, 18] }), 'name']])],
+      [
+        query(aliasSetsQuery([10]), [], [
+          member(10, ATLAS),
+          member(10, { id: 12, name: 'ωmega', originalName: 'Ωmega' }),
+          member(10, { id: 13, name: 'ﬆone', originalName: 'ﬆone' }),
+          member(10, { id: 14, name: 'zeta', originalName: 'Zeta' }),
+          member(10, { id: 15, name: 'яблоко', originalName: 'Яблоко' }),
+          member(10, { id: 16, name: 'stone', originalName: 'stone' }),
+          member(10, { id: 17, name: 'αλφα', originalName: 'αλφα' }),
+          member(10, { id: 18, name: '日本語', originalName: '日本語' })
+        ])
+      ],
+      [query(linkedReferencesQuery([10, 16, 13, 14, 17, 12, 15, 18]), [], [pulledBlock(201, BOB)])]
+    ]
+  },
+  {
     // The aliased path cuts like the Editor path: after the fetch, with the same warnings
     name: 'aliases: the cut on the aliased path',
     tool: TOOL,
