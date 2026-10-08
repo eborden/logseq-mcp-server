@@ -175,7 +175,7 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<Ve
         let query = queries::pages_by_ids(&ids);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // PARITY(#299): a `null` answer is read as no pages, so every block silently loses its context, where
-        // BR-0011 asks for a warning that the context is unavailable (suspected TS bug) — fix in both servers.
+        // BR-0011 asks for a warning that the context is unavailable (suspected TS bug) — fix per #326, in both servers.
         for row in wire::page_rows(&answer)?.unwrap_or_default() {
             let page = pulled_page_to_entity(row.as_object().expect("a checked page is an object"));
             if let Some(id) = page.get("id").and_then(Value::as_f64) {
