@@ -207,6 +207,22 @@
       }
     ]
   },
+  "date range: a name whose simple fold is not its uppercase and lowercase: the long s t ligature": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"dateRange\":{\"start\":20250102,\"end\":20250102},\"entries\":[{\"date\":20250102,\"pageName\":\"Jan 2nd, 2025\",\"blocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000002001\",\"content\":\"a ﬅop here\"}]}],\"summary\":{\"totalDays\":1,\"totalBlocks\":1,\"searchTerm\":\"orb\",\"topConcepts\":[]},\"resolvedAliases\":[\"Orb\",\"ﬆop\"]}"
+      }
+    ]
+  },
+  "date range: names that are one Greek letter with accents, folded by the same rule": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"dateRange\":{\"start\":20250102,\"end\":20250102},\"entries\":[{\"date\":20250102,\"pageName\":\"Jan 2nd, 2025\",\"blocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000002001\",\"content\":\"an ΐ there\"},{\"uuid\":\"00000000-0000-4000-8000-000000002002\",\"content\":\"an ΰ there\"}]}],\"summary\":{\"totalDays\":1,\"totalBlocks\":2,\"searchTerm\":\"orb\",\"topConcepts\":[]},\"resolvedAliases\":[\"Orb\",\"ΐ\",\"ΰ\"]}"
+      }
+    ]
+  },
   "date range: last_n: the newest first, one query for the span between them": {
     "content": [
       {
