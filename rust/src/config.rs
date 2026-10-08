@@ -134,9 +134,12 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     Ok(Config { api_url, auth_token, timeout_ms, tips })
 }
 
-// PARITY(#299): JavaScript truthiness for `authToken` and `apiUrl`, where an empty string and a missing one are
-// alike — drop if Rust becomes the only server.
-/// JavaScript truthiness, which the TypeScript checks use for `authToken` and `apiUrl`.
+/// JavaScript truthiness, which the TypeScript checks use for `authToken` and `apiUrl`. Keep
+/// rejecting a missing or empty `authToken` (a safeguard: an empty token fails every call later
+/// with a 401), and an empty `apiUrl` falling back to the default.
+// PARITY(#299): only which message a non-string token or URL gets follows JavaScript truthiness: `0`,
+// `false` and `null` say "authToken is required", while `1`, `true`, `[]` and `{}` get past it and say
+// "not a string" — drop that distinction if Rust becomes the only server.
 fn is_truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
