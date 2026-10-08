@@ -93,6 +93,31 @@ pub fn json_stringify(value: &Value) -> String {
     }
 }
 
+/// `JSON.stringify(text)` for a JavaScript string that may be ill-formed: a code unit that is half
+/// of a surrogate pair, which happens when a string is cut between the two. JSON.stringify writes
+/// such a unit as the escape `\ud83d` (well-formed JSON.stringify, ES2019), and Rust's `String`
+/// can't hold one, so a string cut by UTF-16 index is kept as code units until it is written.
+pub fn json_string_utf16(units: &[u16]) -> String {
+    let mut out = String::with_capacity(units.len() + 2);
+    out.push('"');
+    for decoded in char::decode_utf16(units.iter().copied()) {
+        match decoded {
+            Ok('"') => out.push_str("\\\""),
+            Ok('\\') => out.push_str("\\\\"),
+            Ok('\u{8}') => out.push_str("\\b"),
+            Ok('\u{c}') => out.push_str("\\f"),
+            Ok('\n') => out.push_str("\\n"),
+            Ok('\r') => out.push_str("\\r"),
+            Ok('\t') => out.push_str("\\t"),
+            Ok(c) if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            Ok(c) => out.push(c),
+            Err(lone) => out.push_str(&format!("\\u{:04x}", lone.unpaired_surrogate())),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// A key JavaScript treats as an array index: a canonical decimal below 2^32 - 1.
 fn array_index(key: &str) -> Option<u32> {
     let canonical = key == "0" || (!key.starts_with('0') && !key.is_empty() && key.bytes().all(|b| b.is_ascii_digit()));
@@ -202,6 +227,16 @@ mod tests {
         assert_eq!(json_stringify(&value), r#"{"1":{"z":1e+21},"2":true,"b":100,"a":[null,1.5,"x\"y"],"01":0}"#);
         assert_eq!(json_stringify(&json!({})), "{}");
         assert_eq!(json_stringify(&json!("é\n")), "\"é\\n\"");
+    }
+
+    #[test]
+    fn a_cut_surrogate_pair_is_written_as_an_escape_as_json_stringify_does() {
+        // JSON.stringify("a\ud83d") and JSON.stringify("\ude00b\n\u0001\"")
+        assert_eq!(json_string_utf16(&[0x61, 0xd83d]), r#""a\ud83d""#);
+        assert_eq!(json_string_utf16(&[0xde00, 0x62, 0x0a, 1, 0x22]), r#""\ude00b\n\u0001\"""#);
+        // a whole pair is the character
+        assert_eq!(json_string_utf16(&utf16("é😀\u{2028}\u{7f}")), "\"é😀\u{2028}\u{7f}\"");
+        assert_eq!(json_string_utf16(&utf16("\u{8}\u{c}\r\t\\")), r#""\b\f\r\t\\""#);
     }
 
     #[test]
