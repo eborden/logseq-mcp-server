@@ -61,6 +61,12 @@ export interface ParityOptions {
    * is compared with it by meaning. Omit to record: the list must then match the snapshot exactly.
    */
   expectedToolList?: ProjectedTool[];
+  /**
+   * For a server that implements only some tools (the Rust spike has one, #125): compare its
+   * tools/list with the reference's entries for the tools the cases call, and nothing else. The
+   * server must list exactly those. The recorded list is still checked against the snapshot whole.
+   */
+  onlyTestedTools?: boolean;
   /** The vitest snapshot file holding the tools/list snapshot */
   snapshotFile: string;
   /** Milliseconds to wait for each MCP request */
@@ -241,13 +247,19 @@ export function sandboxedEnv(configPath: string, home: string): Record<string, s
   return env;
 }
 
+/** The entries of a tool list for the tools the cases call (`onlyTestedTools`). */
+export function toolsCalledBy(tools: readonly ProjectedTool[], cases: readonly ParityCase[]): ProjectedTool[] {
+  const called = new Set(cases.map(c => c.tool));
+  return tools.filter(tool => called.has(tool.name));
+}
+
 /**
  * Run every case against one server process and report what differs. With no `expected` the
  * results are only collected (record mode); the calls and tools/list are still checked, the list
  * against the snapshot byte for byte when there is no `expectedToolList`.
  */
 export async function runParity(options: ParityOptions): Promise<ParityReport> {
-  const { server, cases, expected, expectedToolList, snapshotFile, timeoutMs = 30000 } = options;
+  const { server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, timeoutMs = 30000 } = options;
   const failures: string[] = [];
   const results: Record<string, ToolResult> = {};
   let toolList: ProjectedTool[] | undefined;
@@ -292,7 +304,8 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
       if (recorded !== snapshot) {
         failures.push(`the recorded tools/list differs from the snapshot; re-record it, ${firstDifference(snapshot, recorded)}`);
       }
-      for (const f of compareToolLists(expectedToolList, toolList)) failures.push(`tools/list differs in meaning, ${f}`);
+      const reference = onlyTestedTools ? toolsCalledBy(expectedToolList, cases) : expectedToolList;
+      for (const f of compareToolLists(reference, toolList)) failures.push(`tools/list differs in meaning, ${f}`);
     } else {
       const listed = serializeLikeVitest(toolListForSnapshot(tools));
       if (listed !== snapshot) failures.push(`tools/list differs from the snapshot, ${firstDifference(snapshot, listed)}`);

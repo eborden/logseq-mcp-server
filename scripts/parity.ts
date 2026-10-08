@@ -3,7 +3,11 @@
 // LogSeq calls with the TypeScript server's. Synthetic fixtures only; it never contacts a real LogSeq.
 //
 //   npx tsx scripts/parity.ts                      # the TypeScript server against its recorded results
-//   npx tsx scripts/parity.ts -- ./my-server --x   # any other server command (the Rust one, #125)
+//   npx tsx scripts/parity.ts -- ./my-server --x   # any other server command
+//   npx tsx scripts/parity.ts --tested-tools-only -- rust/target/debug/logseq-mcp-server
+//                                                  # a server with only some tools, e.g. the Rust spike (#125):
+//                                                  # tools/list is compared for the tools the cases call, and the
+//                                                  # server must list those and no others
 //   npx tsx scripts/parity.ts --record             # re-record the expected results from the TypeScript server
 //   npx tsx scripts/parity.ts --self-check         # passes as is, and fails on every perturbed case
 //
@@ -25,11 +29,18 @@ export const EXPECTED_TOOL_LIST_FILE = join(REPO_ROOT, 'scripts', 'parity', 'exp
 
 const USAGE =
   'usage: npx tsx scripts/parity.ts [--perturb | --self-check] [-- <server command> [args...]]\n' +
+  '       npx tsx scripts/parity.ts --tested-tools-only -- <server command> [args...]   (a server with only some tools)\n' +
   '       npx tsx scripts/parity.ts --record   (TypeScript server only; review the JSON diff; never in CI)';
 
-function parseCommandLine(argv: string[]): { mode: 'check' | 'record' | 'perturb' | 'self-check'; server: ServerCommand } {
+function parseCommandLine(argv: string[]): {
+  mode: 'check' | 'record' | 'perturb' | 'self-check';
+  server: ServerCommand;
+  onlyTestedTools: boolean;
+} {
   const dashes = argv.indexOf('--');
-  const flags = dashes === -1 ? argv : argv.slice(0, dashes);
+  const allFlags = dashes === -1 ? argv : argv.slice(0, dashes);
+  const onlyTestedTools = allFlags.includes('--tested-tools-only');
+  const flags = allFlags.filter(flag => flag !== '--tested-tools-only');
   const command = dashes === -1 ? [] : argv.slice(dashes + 1);
   const modes = flags.map(flag => {
     if (flag === '--record') return 'record' as const;
@@ -42,8 +53,11 @@ function parseCommandLine(argv: string[]): { mode: 'check' | 'record' | 'perturb
   if (modes[0] === 'record' && command.length > 0) {
     throw new Error(`--record runs the TypeScript server only: a candidate can't record its own reference\n${USAGE}`);
   }
+  if (onlyTestedTools && modes[0] === 'record') {
+    throw new Error(`--record needs the whole tools/list, so it can't take --tested-tools-only\n${USAGE}`);
+  }
   const server = command.length > 0 ? { command: command[0], args: command.slice(1) } : typescriptServer();
-  return { mode: modes[0] ?? 'check', server };
+  return { mode: modes[0] ?? 'check', server, onlyTestedTools };
 }
 
 function print(label: string, report: ParityReport): void {
@@ -85,7 +99,7 @@ function printChanges(previous: Record<string, ToolResult> | undefined, next: Re
 }
 
 async function main(): Promise<number> {
-  const { mode, server } = parseCommandLine(process.argv.slice(2));
+  const { mode, server, onlyTestedTools } = parseCommandLine(process.argv.slice(2));
   const cases = getPageOutlineCases;
   const snapshotFile = SNAPSHOT_FILE;
 
@@ -109,20 +123,20 @@ async function main(): Promise<number> {
   const expectedToolList = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
   if (!expectedToolList) throw new Error(`no expected tool list at ${EXPECTED_TOOL_LIST_FILE}; record it with --record`);
   if (mode === 'check') {
-    const report = await runParity({ server, cases, expected, expectedToolList, snapshotFile });
+    const report = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile });
     print('parity', report);
     return report.failures.length === 0 ? 0 : 1;
   }
   if (mode === 'perturb') {
-    const report = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, snapshotFile });
+    const report = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, onlyTestedTools, snapshotFile });
     print('parity with perturbed fixtures', report);
     return report.failures.length === 0 ? 0 : 1;
   }
 
   // self-check: the fixtures pass as they are, and every case with a LogSeq call fails once perturbed
-  const clean = await runParity({ server, cases, expected, expectedToolList, snapshotFile });
+  const clean = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile });
   print('self-check, fixtures as committed', clean);
-  const perturbed = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, snapshotFile });
+  const perturbed = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, onlyTestedTools, snapshotFile });
   const caught = cases.filter(c => c.steps.length > 0).map(c => ({
     name: c.name,
     failures: perturbed.failures.filter(f => f.startsWith(`[${c.tool}: ${c.name}]`))
