@@ -369,10 +369,13 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
       try {
         result = await runCase(client, c, timeoutMs);
       } catch (error) {
+        await stub.settle(c.steps.flat().length);
         failures.push(`${prefix} the call failed: ${(error as Error).message}`);
         continue;
       }
       results[c.name] = result;
+      // A tool that fails on the first of several concurrent answers returns before the rest arrive (#340)
+      await stub.settle(c.steps.flat().length);
       for (const f of stub.failures()) failures.push(`${prefix} stub: ${f}`);
       for (const f of compareCalls(c.steps, stub.calls())) failures.push(`${prefix} LogSeq calls, ${f}`);
       if (expected) {

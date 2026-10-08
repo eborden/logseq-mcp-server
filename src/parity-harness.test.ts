@@ -50,6 +50,24 @@ describe('compareCalls', () => {
     expect(compareCalls([[a], [b, c]], [a, c, b])).toEqual([]);
   });
 
+  it('accepts the calls of a concurrent step in every arrival order, and a later step after any of them (#340)', () => {
+    const d = { method: 'logseq.Editor.getSelectedBlocks', args: [], response: [] };
+    const step = [a, c, d];
+    const permutations = (items: CannedCall[]): CannedCall[][] =>
+      items.length <= 1 ? [items] : items.flatMap((item, i) => permutations([...items.slice(0, i), ...items.slice(i + 1)]).map(rest => [item, ...rest]));
+    expect(permutations(step)).toHaveLength(6);
+    for (const arrival of permutations(step)) expect(compareCalls([step, [b]], [...arrival, b])).toEqual([]);
+  });
+
+  it('still wants every call of a concurrent step exactly once, with its inputs, whatever the arrival order', () => {
+    const d = { method: 'logseq.Editor.getSelectedBlocks', args: [], response: [] };
+    // One missing, one doubled in its place, one with another input: each fails in every order
+    for (const got of [[d, a], [c, a, a], [d, c, q('[:find ?a]', '"Alice"')], [a, c, d, d]]) {
+      expect(compareCalls([[a, c, d]], got)).not.toEqual([]);
+      expect(compareCalls([[a, c, d]], [...got].reverse())).not.toEqual([]);
+    }
+  });
+
   it('rejects sequential calls out of order', () => {
     expect(compareCalls([[a], [b]], [b, a])).toHaveLength(2);
   });
@@ -166,6 +184,43 @@ describe('the stub LogSeq', () => {
         'request with a wrong or missing auth token',
         expect.stringContaining('no canned response for logseq.DB.datascriptQuery [:find ?z]')
       ]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it('settles once every call of a step has arrived, though the first answer came back long before (#340)', async () => {
+    const stub = await startStubLogseq();
+    try {
+      const names = ['getCurrentPage', 'getCurrentBlock', 'getSelectedBlocks'];
+      stub.load(names.map(name => ({ method: `logseq.Editor.${name}`, args: [], response: null })));
+      const post = (method: string) =>
+        fetch(`${stub.apiUrl}/api`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${stub.authToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method, args: [] })
+        });
+      // The first call is answered at once, as a tool that fails on the first answer would return; the others arrive late, last one first
+      await post('logseq.Editor.getCurrentPage');
+      const late = [post('logseq.Editor.getSelectedBlocks'), new Promise<void>(r => setTimeout(r, 40)).then(() => post('logseq.Editor.getCurrentBlock'))];
+      expect(stub.calls().length).toBeLessThan(3);
+      await stub.settle(3);
+      expect(stub.calls().map(call => call.method).sort()).toEqual(names.map(name => `logseq.Editor.${name}`).sort());
+      expect(stub.failures()).toEqual([]);
+      await Promise.all(late);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it('gives up waiting for calls that never come, so a server that makes too few shows as a failed comparison', async () => {
+    const stub = await startStubLogseq();
+    try {
+      stub.load([]);
+      const started = Date.now();
+      await stub.settle(2, 30);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(stub.calls()).toEqual([]);
     } finally {
       await stub.close();
     }
