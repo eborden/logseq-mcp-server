@@ -265,6 +265,9 @@ pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<
 
     let query = self::queries::page_outline_blocks(page_id);
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
+    // PARITY(#299): a `null` answer becomes an empty outline with no warning, where BR-0011 asks for
+    // one that says the data was unavailable (suspected TS bug: #300) — drop if Rust becomes the
+    // only server.
     let rows = wire::outline_rows(&answer)?.unwrap_or_default();
 
     let (blocks, warnings, total) = outline_of(raw_id, &rows);
