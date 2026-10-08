@@ -94,7 +94,12 @@ pub struct LogseqClient {
 impl LogseqClient {
     pub fn new(config: &Config) -> Self {
         LogseqClient {
-            http: reqwest::Client::new(),
+            // No proxy, whatever HTTP_PROXY or ALL_PROXY say: a proxy would see the token and
+            // every query and answer (ADR-0003, BR-0001). Node's fetch ignores them too.
+            http: reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .expect("a client with no TLS and no proxy always builds"),
             api_url: config.api_url.clone(),
             auth_token: config.auth_token.clone(),
             timeout_ms: config.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
