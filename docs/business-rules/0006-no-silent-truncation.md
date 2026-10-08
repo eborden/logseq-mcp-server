@@ -23,4 +23,4 @@ reviewer: Any new cap, limit or maximum on a tool result reports through `Result
 |---|---|---|
 | 2026-10-05 | Introduced. | #52 |
 | 2026-10-06 | A cut at a hard maximum keeps `hasMore: true` when a paging parameter such as `offset` can fetch the rest, and `howToFetchAll` names it and its value. | #141 |
-| 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate's unit tests with the TypeScript server's removal. Statement unchanged. | #369 |
+| 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate's unit tests with the TypeScript server's removal. Statement unchanged. | #370 |

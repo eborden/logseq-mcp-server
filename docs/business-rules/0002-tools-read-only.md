@@ -23,4 +23,4 @@ The recorded `tools/list` test fails unless every tool sets `readOnlyHint: true`
 |---|---|---|
 | 2026-10-05 | Introduced as read-only annotations on every tool. | #28 |
 | 2026-10-05 | Restated as a hard rule and a re-runnable-calls principle in the foundations doc. | #38 |
-| 2026-10-08 | Mechanical enforcement: the annotation tests of the TypeScript server are replaced by the guard over the recorded tool list and the Rust server's own test. Statement unchanged. | #369 |
+| 2026-10-08 | Mechanical enforcement: the annotation tests of the TypeScript server are replaced by the guard over the recorded tool list and the Rust server's own test. Statement unchanged. | #370 |
