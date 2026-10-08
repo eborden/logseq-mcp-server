@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { buildContextCases } from './cases/build-context.js';
 import { getBacklinksCases } from './cases/get-backlinks.js';
 import { getBlockCases } from './cases/get-block.js';
+import { getConceptEvolutionCases } from './cases/get-concept-evolution.js';
+import { getConceptNetworkCases } from './cases/get-concept-network.js';
 import { getContextForQueryCases } from './cases/get-context-for-query.js';
 import { getCurrentContextCases } from './cases/get-current-context.js';
 import { getGraphInfoCases } from './cases/get-graph-info.js';
@@ -30,6 +32,8 @@ export const CASE_GROUPS: CaseGroup[] = [
   { name: 'build-context', cases: buildContextCases },
   { name: 'get-backlinks', cases: getBacklinksCases },
   { name: 'get-block', cases: getBlockCases },
+  { name: 'get-concept-evolution', cases: getConceptEvolutionCases },
+  { name: 'get-concept-network', cases: getConceptNetworkCases },
   { name: 'get-context-for-query', cases: getContextForQueryCases },
   { name: 'get-current-context', cases: getCurrentContextCases },
   { name: 'get-graph-info', cases: getGraphInfoCases },
