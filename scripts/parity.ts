@@ -1,12 +1,13 @@
-// Differential parity harness (#124, ADR-0031, ADR-0032): run a server against the stub LogSeq and compare
-// its tools/list (by meaning, #292), its tool, prompt and resource results (byte for byte, except the closest
-// names of a page-not-found message, which any server but the TypeScript one is held to by rule, #335) and its
-// LogSeq calls with the TypeScript server's. Synthetic fixtures only; it never contacts a real LogSeq.
+// Golden-result harness (#124, ADR-0031, ADR-0032, kept by #356): run the Rust server against the stub LogSeq and
+// compare its tools/list (by meaning, #292), its tool, prompt and resource results (byte for byte, except the closest
+// names of a page-not-found message, which are held to rules, #335) and its LogSeq calls with the results recorded
+// from the TypeScript server before it was retired (scripts/parity/expected). Synthetic fixtures only; it never
+// contacts a real LogSeq.
 //
-//   npx tsx scripts/parity.ts                      # the TypeScript server against its recorded results
+//   npx tsx scripts/parity.ts                      # this checkout's debug build (cd rust && cargo build)
 //   npx tsx scripts/parity.ts -- ./my-server --x   # any other server command
 //   npx tsx scripts/parity.ts -- rust/target/debug/logseq-mcp-server
-//                                                  # the Rust server (CI does this, and compares the whole tools/list)
+//                                                  # what CI does, and it compares the whole tools/list
 //   npx tsx scripts/parity.ts --tested-tools-only -- ./my-server
 //                                                  # for local use, a server with only some tools: tools/list is
 //                                                  # compared for the tools the cases call, and the server must
@@ -14,12 +15,13 @@
 //   npx tsx scripts/parity.ts --real-clock -- rust/target/release/logseq-mcp-server
 //                                                  # a server that reads the system clock (the Rust release build
 //                                                  # ignores LOGSEQ_MCP_NOW): the cases that read today are left out
-//   npx tsx scripts/parity.ts --record             # re-record the expected results from the TypeScript server
+//   npx tsx scripts/parity.ts --record-from-rust   # record the expected results again, from the Rust debug build
 //   npx tsx scripts/parity.ts --self-check         # passes as is, fails on every perturbed case, and on every wrong list of closest names
 //
-// Only the TypeScript server records: the expected files are the reference other servers are judged
-// against, so --record refuses a command after --. A re-record is done by hand when the TypeScript
-// output changes on purpose, ships with a reviewed diff of the JSON, and never runs in CI.
+// The expected files are the golden results of the Rust server. They were recorded from the TypeScript server, and
+// a re-record is a decision (#299 changes some on purpose), so --record-from-rust is guarded: it takes no command
+// (this checkout's debug build only, which also honours the test clock), no --tested-tools-only, no --real-clock, and
+// refuses to run when CI is set. It ships with a reviewed diff of the JSON.
 //
 // Exit code 0 when everything matches (for --self-check: when both halves behave), 1 otherwise.
 import { readFile, writeFile } from 'node:fs/promises';
@@ -29,9 +31,9 @@ import { checkWrongLists, compareResult, perturbCases, runParity, type ParityRep
 import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
 import { parseCommandLine } from './parity/command-line.js';
 import { withoutClockCases } from './parity/clock-cases.js';
-import { REPO_ROOT, SNAPSHOT_FILE } from './parity/ts-server.js';
+import { REPO_ROOT } from './parity/server-command.js';
 
-/** The TypeScript server's tools/list in the snapshot's shape; it must match the snapshot exactly. */
+/** The recorded tools/list, in the projection of scripts/parity/tool-list-projection.ts. */
 export const EXPECTED_TOOL_LIST_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'tool-list.json');
 
 function print(label: string, report: ParityReport): void {
@@ -78,21 +80,20 @@ async function readExpected(groups: readonly CaseGroup[]): Promise<Record<string
   for (const group of groups) {
     const file = expectedFileOf(group);
     const expected = await readJson<Record<string, ToolResult>>(file);
-    if (!expected) throw new Error(`no expected results at ${file}; record them with --record`);
+    if (!expected) throw new Error(`no expected results at ${file}; record them with --record-from-rust`);
     Object.assign(merged, expected);
   }
   return merged;
 }
 
 async function main(): Promise<number> {
-  const { mode, server, onlyTestedTools, isReference, realClock } = parseCommandLine(process.argv.slice(2));
-  // Any server but the TypeScript one is held to ADR-0032's rules for the closest names; the recorded set must exercise them
-  const suggestions = { bySuggestionRules: !isReference, requireSuggestionCases: true };
+  const { mode, server, onlyTestedTools, realClock } = parseCommandLine(process.argv.slice(2));
+  // The closest names are held to ADR-0032's rules, since the recorded lists are the TypeScript matcher's; the recorded set must exercise them
+  const suggestions = { bySuggestionRules: true, requireSuggestionCases: true };
   const cases = realClock ? withoutClockCases(allCases()) : allCases();
-  const snapshotFile = SNAPSHOT_FILE;
 
   if (mode === 'record') {
-    const report = await runParity({ server, cases, snapshotFile, ...suggestions });
+    const report = await runParity({ server, cases, ...suggestions });
     print('record', report);
     if (report.failures.length > 0) return 1;
     for (const group of CASE_GROUPS) {
@@ -118,22 +119,22 @@ async function main(): Promise<number> {
   const skipped = new Set(allCases().filter(c => !run.has(c.name)).map(c => c.name));
   const expected = Object.fromEntries(Object.entries(recorded).filter(([name]) => !skipped.has(name)));
   const expectedToolList = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
-  if (!expectedToolList) throw new Error(`no expected tool list at ${EXPECTED_TOOL_LIST_FILE}; record it with --record`);
+  if (!expectedToolList) throw new Error(`no expected tool list at ${EXPECTED_TOOL_LIST_FILE}; record it with --record-from-rust`);
   if (mode === 'check') {
-    const report = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
+    const report = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, ...suggestions });
     print('parity', report);
     return report.failures.length === 0 ? 0 : 1;
   }
   if (mode === 'perturb') {
-    const report = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
+    const report = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, ...suggestions });
     print('parity with perturbed fixtures', report);
     return report.failures.length === 0 ? 0 : 1;
   }
 
   // self-check: the fixtures pass as they are, and every case with a LogSeq call fails once perturbed
-  const clean = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
+  const clean = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, ...suggestions });
   print('self-check, fixtures as committed', clean);
-  const perturbed = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
+  const perturbed = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, ...suggestions });
   const caught = cases.filter(c => c.steps.length > 0).map(c => ({
     name: c.name,
     failures: perturbed.failures.filter(f => f.startsWith(`[${c.tool}: ${c.name}]`))

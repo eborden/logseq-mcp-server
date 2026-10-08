@@ -1,14 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
-import { queryByDateRangeCases } from '../scripts/parity/cases/query-by-date-range.js';
-import { pageResourceCases } from '../scripts/parity/cases/page-resource.js';
-import { CASE_GROUPS, allCases, expectedFileOf } from '../scripts/parity/case-groups.js';
+import { getPageOutlineCases } from '../../scripts/parity/cases/get-page-outline.js';
+import { queryByDateRangeCases } from '../../scripts/parity/cases/query-by-date-range.js';
+import { pageResourceCases } from '../../scripts/parity/cases/page-resource.js';
+import { CASE_GROUPS, allCases, expectedFileOf } from '../../scripts/parity/case-groups.js';
 import {
   checkWrongLists,
   compareCalls,
@@ -17,16 +18,13 @@ import {
   PARITY_NOW_MS,
   PARITY_TZ,
   perturbCases,
-  readSnapshotEntry,
   runCase,
   runParity,
-  serializeLikeVitest,
   toolsCalledBy,
-  TOOL_LIST_SNAPSHOT_KEY,
   type ParityCase,
   type ToolResult
-} from '../scripts/parity/harness.js';
-import { suggestionsCases } from '../scripts/parity/cases/suggestions.js';
+} from '../../scripts/parity/harness.js';
+import { suggestionsCases } from '../../scripts/parity/cases/suggestions.js';
 import {
   candidatesOf,
   checkList,
@@ -40,18 +38,27 @@ import {
   REQUIRED_CASES,
   requiredKindsOf,
   splitList
-} from '../scripts/parity/suggestion-rules.js';
-import { parseCommandLine } from '../scripts/parity/command-line.js';
-import { CLOCK_CASES, withoutClockCases } from '../scripts/parity/clock-cases.js';
-import { callKey, DATASCRIPT_QUERY, LOGSEQ_PORT, startStubLogseq, type CannedCall } from '../scripts/parity/stub-logseq.js';
-import { compareToolLists, normalizeSchema, type ProjectedTool } from '../scripts/parity/tool-list-compare.js';
-import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer, viteNodeCommand } from '../scripts/parity/ts-server.js';
+} from '../../scripts/parity/suggestion-rules.js';
+import { parseCommandLine } from '../../scripts/parity/command-line.js';
+import { CLOCK_CASES, withoutClockCases } from '../../scripts/parity/clock-cases.js';
+import { callKey, DATASCRIPT_QUERY, LOGSEQ_PORT, startStubLogseq, type CannedCall } from '../../scripts/parity/stub-logseq.js';
+import { compareToolLists, normalizeSchema, type ProjectedTool } from '../../scripts/parity/tool-list-compare.js';
+import { RUST_DEBUG_BINARY, REPO_ROOT, rustServer, viteNodeCommand } from '../../scripts/parity/server-command.js';
 
 /**
- * The differential parity harness (#124, ADR-0031 Decision 2). The end-to-end tests start the
- * TypeScript server over stdio, as the harness would start the Rust one, so they take a few
- * seconds each.
+ * The golden-result harness (#124, ADR-0031 Decision 2, kept by #356). The end-to-end tests start the Rust
+ * debug build over stdio, as the harness does, so they need `cd rust && cargo build` first and take a few
+ * seconds each. They hold the closest names to the rules of ADR-0032 (`bySuggestionRules`), as the harness does.
  */
+
+/** Fails loud, with the build command, when the Rust debug binary the end-to-end tests start is missing. */
+function requireRustBinary(): void {
+  beforeAll(() => {
+    if (!existsSync(RUST_DEBUG_BINARY)) {
+      throw new Error(`There is no Rust server at ${RUST_DEBUG_BINARY}. Build it with \`cd rust && cargo build\`.`);
+    }
+  });
+}
 
 const EXPECTED_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'get-page-outline.json');
 const loadExpected = async () => JSON.parse(await readFile(EXPECTED_FILE, 'utf8')) as Record<string, ToolResult>;
@@ -120,7 +127,7 @@ describe('compareResult', () => {
     expect(compareResult(result, { content: [...result.content!, { type: 'text', text: '{}' }] })).toHaveLength(1);
   });
 
-  it('fails on any key the TypeScript server did not send', () => {
+  it('fails on any key the recorded server did not send', () => {
     expect(compareResult(result, { ...result, structuredContent: { page: 'Alice' } })).toEqual([
       'the result has unexpected key(s) structuredContent'
     ]);
@@ -358,7 +365,7 @@ describe('the stub LogSeq', () => {
 });
 
 describe('the parity cases', () => {
-  it('have an expected result each, recorded from the TypeScript server', async () => {
+  it('have an expected result each', async () => {
     for (const group of CASE_GROUPS) {
       const expected = JSON.parse(await readFile(expectedFileOf(group), 'utf8')) as Record<string, ToolResult>;
       expect(Object.keys(expected).sort(), group.name).toEqual(group.cases.map(c => c.name).sort());
@@ -376,16 +383,6 @@ describe('the parity cases', () => {
     expect(await stems('cases', '.ts'), 'a file in scripts/parity/cases is not in CASE_GROUPS').toEqual(groups);
     // tool-list.json is the recorded tools/list, not a group's results
     expect((await stems('expected', '.json')).filter(stem => stem !== 'tool-list'), 'a file in scripts/parity/expected is not in CASE_GROUPS').toEqual(groups);
-  });
-
-  it('read the tools/list snapshot that src/tool-list.test.ts writes', async () => {
-    const entry = readSnapshotEntry(await readFile(SNAPSHOT_FILE, 'utf8'), TOOL_LIST_SNAPSHOT_KEY);
-    expect(entry).toContain('"name": "logseq_get_page_outline"');
-  });
-
-  it('have a recorded tool list that is the snapshot, byte for byte', async () => {
-    const entry = readSnapshotEntry(await readFile(SNAPSHOT_FILE, 'utf8'), TOOL_LIST_SNAPSHOT_KEY);
-    expect(serializeLikeVitest(await loadToolList())).toBe(entry);
   });
 });
 
@@ -640,7 +637,7 @@ describe('normalizeSchema', () => {
       properties: { a, opts: { type: 'object', properties: { b } } }
     });
     const plain = schema({ type: 'string' }, { type: 'string' });
-    // Top level: the TypeScript server drops an explicit null, so these mean the same
+    // Top level: the recorded (TypeScript) server dropped an explicit null, so these mean the same
     expect(compareToolLists([tool(plain)], [tool(schema({ type: ['string', 'null'] }, { type: 'string' }))])).toEqual([]);
     expect(compareToolLists([tool(plain)], [tool(schema({ anyOf: [{ type: 'string' }, { type: 'null' }] }, { type: 'string' }))])).toEqual([]);
     // Nested: zod rejects null there, so accepting it is a difference
@@ -656,7 +653,6 @@ describe('the server environment', () => {
     const report = await runParity({
       server: viteNodeCommand('env-report-server.ts'),
       cases: [{ name: 'env', tool: 'report_env', arguments: {}, steps: [] }],
-      snapshotFile: SNAPSHOT_FILE
     });
     const text = report.results.env?.content?.[0]?.text;
     expect(typeof text, report.failures.join('\n')).toBe('string');
@@ -675,7 +671,6 @@ describe('the server environment', () => {
     const report = await runParity({
       server: viteNodeCommand('env-report-server.ts'),
       cases: [{ name: 'env', tool: 'report_env', arguments: {}, steps: [] }],
-      snapshotFile: SNAPSHOT_FILE
     });
     const env = JSON.parse(report.results.env?.content?.[0]?.text as string) as Record<string, string | null>;
     expect(env.LOGSEQ_MCP_NOW).toBe(String(PARITY_NOW_MS));
@@ -695,14 +690,13 @@ describe('runParity on a server that returns before its other calls are sent (#3
       ['getCurrentPage', 'getCurrentBlock', 'getSelectedBlocks'].map(name => ({ method: `logseq.Editor.${name}`, args: [], response: null }))
     ]
   };
-  // The fake lists only its own tool, so tools/list fails the snapshot; the cases' own failures are what this asks about
+  // The stand-in lists only its own tool, and no tool list is recorded for it; the cases' own failures are what this asks about
   const caseFailures = (failures: string[]) => failures.filter(f => f.startsWith('[late_calls: '));
 
   it('sees all three calls of each case, because it waits for them before it reads the log', async () => {
     const report = await runParity({
       server: viteNodeCommand('late-calls-server.ts'),
       cases: [lateCase, { ...lateCase, name: 'late calls again' }],
-      snapshotFile: SNAPSHOT_FILE
     });
     expect(caseFailures(report.failures)).toEqual([]);
   }, 60000);
@@ -711,7 +705,6 @@ describe('runParity on a server that returns before its other calls are sent (#3
     const report = await runParity({
       server: viteNodeCommand('late-calls-server.ts'),
       cases: [lateCase, { ...lateCase, name: 'late calls again' }],
-      snapshotFile: SNAPSHOT_FILE,
       settleMs: 0
     });
     expect(caseFailures(report.failures).join('\n')).toMatch(/\[late_calls: late calls\] LogSeq calls, step 1 of 1: expected the 3 calls/);
@@ -724,15 +717,12 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
       mode: 'check',
       server: { command: 'x', args: ['a', '--b'] },
       onlyTestedTools: true,
-      isReference: false,
       realClock: false
     });
     expect(parseCommandLine(['--self-check', '--tested-tools-only', '--', 'x'])).toMatchObject({ mode: 'self-check', onlyTestedTools: true });
     expect(parseCommandLine(['--perturb', '--', 'x'])).toMatchObject({ mode: 'perturb', onlyTestedTools: false });
-    // no flag and no command: the TypeScript server, compared on the whole tools/list
-    expect(parseCommandLine([])).toMatchObject({ mode: 'check', onlyTestedTools: false, server: typescriptServer(), isReference: true });
-    // any command after `--` is a candidate, held to the rules for the closest names
-    expect(parseCommandLine(['--', 'x'])).toMatchObject({ isReference: false });
+    // no flag and no command: this checkout's Rust debug build, compared on the whole tools/list
+    expect(parseCommandLine([])).toMatchObject({ mode: 'check', onlyTestedTools: false, server: rustServer() });
   });
 
   it('finds the server command without a `--`, which vite-node removes from the arguments', () => {
@@ -740,38 +730,46 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
       mode: 'check',
       server: { command: '/bin/server', args: ['--b', 'c'] },
       onlyTestedTools: true,
-      isReference: false,
       realClock: false
     });
     expect(parseCommandLine(['--self-check', '/bin/server'])).toMatchObject({ mode: 'self-check', server: { command: '/bin/server' } });
-    // only flags: the TypeScript server
-    expect(parseCommandLine(['--self-check'])).toMatchObject({ mode: 'self-check', server: typescriptServer() });
-    // a candidate still can't record, with or without the `--`
-    expect(() => parseCommandLine(['--record', '/bin/server'])).toThrow(/a candidate can't record its own reference/);
+    // only flags: the Rust debug build
+    expect(parseCommandLine(['--self-check'])).toMatchObject({ mode: 'self-check', server: rustServer() });
   });
 
-  it('refuses --record with the flag, since a reference must hold every tool, and a candidate can not record', () => {
-    expect(() => parseCommandLine(['--record', '--tested-tools-only'])).toThrow(/--record needs the whole tools\/list, so it can't take --tested-tools-only/);
-    expect(() => parseCommandLine(['--tested-tools-only', '--record'])).toThrow(/--record needs the whole tools\/list/);
-    expect(() => parseCommandLine(['--record', '--', 'x'])).toThrow(/a candidate can't record its own reference/);
+  it('refuses --record-from-rust unless it is the whole run of this checkout\'s debug build, by hand', () => {
+    const none = {};
+    expect(parseCommandLine(['--record-from-rust'], none)).toMatchObject({ mode: 'record', server: rustServer() });
+    // a candidate can't record its own reference, with or without the `--`
+    expect(() => parseCommandLine(['--record-from-rust', '/bin/server'], none)).toThrow(/a candidate can't record its own reference/);
+    expect(() => parseCommandLine(['--record-from-rust', '--', 'x'], none)).toThrow(/a candidate can't record its own reference/);
+    // a reference holds every tool and every case
+    expect(() => parseCommandLine(['--record-from-rust', '--tested-tools-only'], none)).toThrow(/needs the whole tools\/list, so it can't take --tested-tools-only/);
+    expect(() => parseCommandLine(['--tested-tools-only', '--record-from-rust'], none)).toThrow(/needs the whole tools\/list/);
+    expect(() => parseCommandLine(['--record-from-rust', '--real-clock'], none)).toThrow(/needs every case, so it can't take --real-clock/);
+    // never in CI
+    expect(() => parseCommandLine(['--record-from-rust'], { CI: 'true' })).toThrow(/never run in CI/);
+    expect(parseCommandLine(['--self-check'], { CI: 'true' })).toMatchObject({ mode: 'self-check' });
+  });
+
+  it('says where the TypeScript server\'s --record went', () => {
+    expect(() => parseCommandLine(['--record'])).toThrow(/--record recorded from the TypeScript server, which is retired.*--record-from-rust/s);
     expect(() => parseCommandLine(['--tested-tools-only', '--'])).toThrow(/no server command after --/);
     expect(() => parseCommandLine(['--nope'])).toThrow(/unknown flag --nope/);
   });
 });
 
 describe('the parity command line (--real-clock, #359)', () => {
-  it('reads the flag with the server command intact, in any mode but record', () => {
+  it('reads the flag with the server command intact, in any mode but record (see --record-from-rust above)', () => {
     expect(parseCommandLine(['--real-clock', '--', 'x', 'a'])).toEqual({
       mode: 'check',
       server: { command: 'x', args: ['a'] },
       onlyTestedTools: false,
-      isReference: false,
       realClock: true
     });
     expect(parseCommandLine(['--real-clock', '/bin/server'])).toMatchObject({ realClock: true, server: { command: '/bin/server' } });
     expect(parseCommandLine(['--self-check', '--real-clock', '--', 'x'])).toMatchObject({ mode: 'self-check', realClock: true });
     expect(parseCommandLine(['--', 'x'])).toMatchObject({ realClock: false });
-    expect(() => parseCommandLine(['--record', '--real-clock'])).toThrow(/--record needs every case, so it can't take --real-clock/);
   });
 });
 
@@ -841,18 +839,20 @@ describe('perturbCases', () => {
   });
 });
 
-describe('runParity against the TypeScript server', () => {
+describe('runParity against the Rust server', () => {
+  requireRustBinary();
+
   it('with onlyTestedTools, fails on every tool the server lists beyond the ones the cases call', async () => {
-    // The TypeScript server lists 16 tools and the case calls one: the other 15 are not in the reference
+    // The server lists 16 tools and the case calls one: the other 15 are not in the reference
     const barren = getPageOutlineCases.find(c => c.steps.length === 0)!;
     const expected = await loadExpected();
     const report = await runParity({
-      server: typescriptServer(),
+      server: rustServer(),
       cases: [barren],
       expected: { [barren.name]: expected[barren.name] },
       expectedToolList: await loadToolList(),
       onlyTestedTools: true,
-      snapshotFile: SNAPSHOT_FILE
+      bySuggestionRules: true
     });
     const notInReference = report.failures.filter(f => f.endsWith(': not in the reference'));
     expect(notInReference).toHaveLength((await loadToolList()).length - 1);
@@ -865,12 +865,12 @@ describe('runParity against the TypeScript server', () => {
     const committed = exact.steps.at(-1)!.at(-1)!.response;
     const run = async (perturbed: unknown) =>
       runParity({
-        server: typescriptServer(),
+        server: rustServer(),
         cases: perturbCases([{ ...exact, perturbed }]),
         expected: { [exact.name]: expected[exact.name] },
         expectedToolList: await loadToolList(),
         onlyTestedTools: true,
-        snapshotFile: SNAPSHOT_FILE
+        bySuggestionRules: true
       });
     const resultFailures = (report: Awaited<ReturnType<typeof run>>) =>
       report.failures.filter(f => f.startsWith(`[${exact.tool}: ${exact.name}]`));
@@ -881,26 +881,26 @@ describe('runParity against the TypeScript server', () => {
     expect(resultFailures(await run([])).length).toBeGreaterThan(0);
   }, 60000);
 
-  it('passes the TypeScript server against its own recorded results', async () => {
+  it('passes the Rust server against the recorded results', async () => {
     const report = await runParity({
-      server: typescriptServer(),
+      server: rustServer(),
       cases: getPageOutlineCases,
       expected: await loadExpected(),
       expectedToolList: await loadToolList(),
-      snapshotFile: SNAPSHOT_FILE
+      bySuggestionRules: true
     });
     expect(report.failures, report.stderr).toEqual([]);
   }, 60000);
 
-  it('passes the TypeScript server against its recorded date-range results, whatever day it is (#311)', async () => {
+  it('passes the Rust server against the recorded date-range results, whatever day it is (#311)', async () => {
     // `last_n` and the presets read today's date: the harness fixes the clock and the zone for the server
     const expected = JSON.parse(await readFile(join(REPO_ROOT, 'scripts', 'parity', 'expected', 'query-by-date-range.json'), 'utf8')) as Record<string, ToolResult>;
     const report = await runParity({
-      server: typescriptServer(),
+      server: rustServer(),
       cases: queryByDateRangeCases,
       expected,
       expectedToolList: await loadToolList(),
-      snapshotFile: SNAPSHOT_FILE
+      bySuggestionRules: true
     });
     expect(report.failures, report.stderr).toEqual([]);
   }, 120000);
@@ -917,55 +917,46 @@ describe('runParity against the TypeScript server', () => {
     const exact = getPageOutlineCases[0];
     const leaf = getPageOutlineCases.find(c => c.steps.length === 3)!;
 
-    const broken: ParityCase[] = [
-      ...perturbCases(withCalls),
+    const changed: ParityCase[] = [
       // The outline query's answer taken away: the stub has nothing to say to it
       { ...exact, name: 'missing answer', steps: [exact.steps[0], []] },
       // The leaf lookup listed after the outline query, as if they ran the other way round
       { ...leaf, name: 'reordered', steps: [leaf.steps[0], leaf.steps[2], leaf.steps[1]] }
     ];
+    const broken: ParityCase[] = [...perturbCases(withCalls), ...changed];
     const brokenExpected = {
       ...expected,
       'missing answer': expected[exact.name],
       reordered: expected[leaf.name]
     };
 
-    // A snapshot in which the outline tool has another name
-    const dir = await mkdtemp(join(tmpdir(), 'parity-test-'));
-    const snapshotFile = join(dir, 'tool-list.test.ts.snap');
-    const snapshot = await readFile(SNAPSHOT_FILE, 'utf8');
-    const changed = snapshot.replace('"name": "logseq_get_page_outline"', '"name": "logseq_get_page_outline_v2"');
-    expect(changed).not.toBe(snapshot);
-    await writeFile(snapshotFile, changed);
+    const report = await runParity({
+      server: rustServer(),
+      cases: broken,
+      // The closest names are judged against the cases as committed, as the self-check does
+      unperturbedCases: [...withCalls, ...changed],
+      expected: brokenExpected,
+      expectedToolList,
+      bySuggestionRules: true
+    });
+    const failuresOf = (name: string) => report.failures.filter(f => f.startsWith(`[logseq_get_page_outline: ${name}]`));
 
-    try {
-      const report = await runParity({
-        server: typescriptServer(),
-        cases: broken,
-        expected: brokenExpected,
-        expectedToolList,
-        snapshotFile
-      });
-      const failuresOf = (name: string) => report.failures.filter(f => f.startsWith(`[logseq_get_page_outline: ${name}]`));
-
-      // The reference is held to the snapshot byte for byte, and the server to the reference by meaning
-      expect(report.failures).toContainEqual(expect.stringMatching(/^the recorded tools\/list differs from the snapshot; re-record it/));
-      expect(report.failures).toContainEqual(
-        'tools/list differs in meaning, logseq_check_links.inputSchema.properties.before.maxLength: expected 40000, got 50000'
-      );
-      expect(report.failures).toContainEqual(
-        'tools/list differs in meaning, logseq_get_block.inputSchema.properties.format.enum[1]: expected "html", got "markdown"'
-      );
-      for (const c of withCalls) expect(failuresOf(c.name), c.name).not.toEqual([]);
-      expect(failuresOf('missing answer')).toContainEqual(expect.stringContaining('stub: no canned response'));
-      expect(failuresOf('reordered')).toContainEqual(expect.stringContaining('LogSeq calls, step 2 of 3'));
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    // The server is held to the recorded list by meaning
+    expect(report.failures).toContainEqual(
+      'tools/list differs in meaning, logseq_check_links.inputSchema.properties.before.maxLength: expected 40000, got 50000'
+    );
+    expect(report.failures).toContainEqual(
+      'tools/list differs in meaning, logseq_get_block.inputSchema.properties.format.enum[1]: expected "html", got "markdown"'
+    );
+    for (const c of withCalls) expect(failuresOf(c.name), c.name).not.toEqual([]);
+    expect(failuresOf('missing answer')).toContainEqual(expect.stringContaining('stub: no canned response'));
+    expect(failuresOf('reordered')).toContainEqual(expect.stringContaining('LogSeq calls, step 2 of 3'));
   }, 60000);
 });
 
-describe('CLOCK_CASES against the TypeScript server (#359)', () => {
+describe('CLOCK_CASES against the Rust server (#359)', () => {
+  requireRustBinary();
+
   it('names exactly the cases whose result moves with the clock', async () => {
     // The reference run at two instants other than the recorded one: a week on, and 16 months on, so a
     // case that reads only the week and one that reads only the month or the year each change
@@ -978,7 +969,7 @@ describe('CLOCK_CASES against the TypeScript server (#359)', () => {
 
     const moved = new Set<string>();
     for (const now of [week, months]) {
-      const report = await runParity({ server: typescriptServer(), cases, expected, expectedToolList, snapshotFile: SNAPSHOT_FILE, now });
+      const report = await runParity({ server: rustServer(), cases, expected, expectedToolList, bySuggestionRules: true, now });
       const unexplained = report.failures.filter(f => !cases.some(c => f.startsWith(`[${c.tool}: ${c.name}]`)));
       expect(unexplained, report.stderr).toEqual([]);
       for (const c of cases) if (report.failures.some(f => f.startsWith(`[${c.tool}: ${c.name}]`))) moved.add(c.name);
@@ -990,7 +981,9 @@ describe('CLOCK_CASES against the TypeScript server (#359)', () => {
   }, 240000);
 });
 
-describe('runParity on resources against the TypeScript server', () => {
+describe('runParity on resources against the Rust server', () => {
+  requireRustBinary();
+
   const expectedPages = async () => JSON.parse(await readFile(expectedFileOf(CASE_GROUPS.find(g => g.name === 'page-resource')!), 'utf8')) as Record<string, ToolResult>;
   const named = (name: string) => pageResourceCases.find(c => c.name === `page resource: ${name}`)!;
 
@@ -998,12 +991,12 @@ describe('runParity on resources against the TypeScript server', () => {
     const cases = [named('the template'), named('an exact name with its blocks'), named('no such page, with the closest names'), named('no name')];
     const expected = await expectedPages();
     const report = await runParity({
-      server: typescriptServer(),
+      server: rustServer(),
       cases,
       expected: Object.fromEntries(cases.map(c => [c.name, expected[c.name]])),
       expectedToolList: await loadToolList(),
       onlyTestedTools: true,
-      snapshotFile: SNAPSHOT_FILE
+      bySuggestionRules: true
     });
     // the reference lists the tools the cases call, and a resource case calls none: every tool is beyond it
     expect(report.failures.filter(f => !f.endsWith(': not in the reference')), report.stderr).toEqual([]);
@@ -1023,12 +1016,12 @@ describe('runParity on resources against the TypeScript server', () => {
     const expected = await expectedPages();
     const run = async (cases: ParityCase[]) =>
       runParity({
-        server: typescriptServer(),
+        server: rustServer(),
         cases,
         expected: { [exact.name]: expected[exact.name] },
         expectedToolList: await loadToolList(),
         onlyTestedTools: true,
-        snapshotFile: SNAPSHOT_FILE
+        bySuggestionRules: true
       });
     const ofCase = (report: Awaited<ReturnType<typeof run>>) => report.failures.filter(f => f.startsWith(`[${exact.tool}: ${exact.name}]`));
 
@@ -1275,21 +1268,22 @@ describe('the closest-name rules (ADR-0032, #335)', () => {
     });
   });
 
-  describe('against the TypeScript server', () => {
+  describe('against the Rust server', () => {
+    requireRustBinary();
+
     it('judges a perturbed run by the candidates as committed, so a list that reads the fixture is caught', async () => {
       const group = CASE_GROUPS.find(g => g.name === 'suggestions')!;
       const expected = JSON.parse(await readFile(expectedFileOf(group), 'utf8')) as Record<string, ToolResult>;
       const prefixHit = suggestionsCases.find(c => c.name.endsWith('a prefix hit'))!;
       const run = async (unperturbedCases?: ParityCase[]) =>
         runParity({
-          server: typescriptServer(),
+          server: rustServer(),
           cases: perturbCases([prefixHit]),
           unperturbedCases,
           expected: { [prefixHit.name]: expected[prefixHit.name] },
           expectedToolList: await loadToolList(),
           onlyTestedTools: true,
-          bySuggestionRules: true,
-          snapshotFile: SNAPSHOT_FILE
+          bySuggestionRules: true
         });
       const ofCase = (report: Awaited<ReturnType<typeof run>>) => report.failures.filter(f => f.startsWith(`[${prefixHit.tool}: ${prefixHit.name}]`));
       // the perturbed names are candidates of the perturbed case, so by its own candidates the list passes
@@ -1301,13 +1295,12 @@ describe('the closest-name rules (ADR-0032, #335)', () => {
     it('passes its own run under the rules, since the rules accept the reference list', async () => {
       const group = CASE_GROUPS.find(g => g.name === 'suggestions')!;
       const report = await runParity({
-        server: typescriptServer(),
+        server: rustServer(),
         cases: suggestionsCases,
         expected: JSON.parse(await readFile(expectedFileOf(group), 'utf8')) as Record<string, ToolResult>,
         expectedToolList: await loadToolList(),
         onlyTestedTools: true,
-        bySuggestionRules: true,
-        snapshotFile: SNAPSHOT_FILE
+        bySuggestionRules: true
       });
       expect(report.failures.filter(f => f.startsWith('[logseq_get_page: suggestions: '))).toEqual([]);
     }, 60000);

@@ -1,23 +1,22 @@
-// The differential parity harness (#124, ADR-0031 (second-implementation-matches-tool-list-by-meaning)
-// Decision 2). It runs a server command over
+// The golden-result harness (#124, ADR-0031 (second-implementation-matches-tool-list-by-meaning)
+// Decision 2, kept as the Rust server's tests by #356). It runs a server command over
 // stdio, points it at the stub LogSeq through a temporary LOGSEQ_MCP_CONFIG, and checks three
-// things against what the TypeScript server does:
-//   1. `tools/list`, by meaning (#292, tool-list-compare.ts) against the one recorded from the
-//      TypeScript server, which must itself match the ADR-0016 snapshot in
-//      src/__snapshots__/tool-list.test.ts.snap byte for byte;
+// things against the results recorded from the TypeScript server before it was retired (#349):
+//   1. `tools/list`, by meaning (#292, tool-list-compare.ts) against the recorded list
+//      (scripts/parity/expected/tool-list.json); tests/guards/tool-list.test.ts holds that list to the
+//      ADR-0015, ADR-0016 and ADR-0008 guardrails;
 //   2. each case's tool result, byte for byte as the TypeScript server serialized it (ADR-0009); only
 //      the closest names of a page-not-found message are held to rules instead (ADR-0032, #335,
-//      suggestion-rules.ts), for a server other than the TypeScript one;
+//      suggestion-rules.ts);
 //   3. the LogSeq calls and their inputs: the steps of a case in order, the calls within a step
-//      (ones the TypeScript code makes concurrently) as a set.
+//      (ones the recorded server made concurrently) as a set.
 // Any LogSeq call the stub has no answer for is a failure too.
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { format } from '@vitest/pretty-format';
 import { compareToolLists, type ProjectedTool } from './tool-list-compare.js';
 import { toolListForSnapshot } from './tool-list-projection.js';
 import {
@@ -42,7 +41,7 @@ export interface ParityCase {
   arguments: Record<string, unknown>;
   /**
    * The calls the server should make, with the stub's answers. Steps run in order; the calls in
-   * one step are the ones the TypeScript code makes concurrently, and are compared as a set.
+   * one step are the ones the recorded server made concurrently, and are compared as a set.
    */
   steps: CannedCall[][];
   /**
@@ -92,23 +91,23 @@ export interface ServerCommand {
 export interface ParityOptions {
   server: ServerCommand;
   cases: ParityCase[];
-  /** Expected result per case name, as recorded from the TypeScript server. Omit to record. */
+  /** Expected result per case name (scripts/parity/expected). Omit to record. */
   expected?: Record<string, ToolResult>;
   /**
-   * The tools/list recorded from the TypeScript server, in the snapshot's shape. The server's list
-   * is compared with it by meaning. Omit to record: the list must then match the snapshot exactly.
+   * The recorded tools/list (scripts/parity/expected/tool-list.json), in the projection of
+   * `tool-list-projection.ts`. The server's list is compared with it by meaning. Omit to record.
    */
   expectedToolList?: ProjectedTool[];
   /**
    * For a server that implements only some tools (a work in progress; CI no longer uses it, #316): compare its
    * tools/list with the reference's entries for the tools the cases call, and nothing else. The
-   * server must list exactly those. The recorded list is still checked against the snapshot whole.
+   * server must list exactly those.
    */
   onlyTestedTools?: boolean;
   /**
    * Hold the closest-name list of a page-not-found message to the rules of ADR-0032 instead of to the
-   * reference's bytes (#335). For any server other than the TypeScript one; the rest of every result is
-   * still byte for byte.
+   * recorded bytes (#335); the rest of every result is still byte for byte. Every run of `scripts/parity.ts`
+   * sets it: the recorded lists are the TypeScript matcher's, which no server now has.
    */
   bySuggestionRules?: boolean;
   /**
@@ -121,8 +120,6 @@ export interface ParityOptions {
    * their candidates, not the perturbed ones, so a server that reads the fixture lists names that aren't candidates.
    */
   unperturbedCases?: readonly ParityCase[];
-  /** The vitest snapshot file holding the tools/list snapshot */
-  snapshotFile: string;
   /** Milliseconds to wait for each MCP request */
   timeoutMs?: number;
   /**
@@ -141,51 +138,10 @@ export interface ParityReport {
   failures: string[];
   /** What the server returned for each case, to record as the expected file */
   results: Record<string, ToolResult>;
-  /** The server's tools/list in the snapshot's shape, to record as the expected tool list */
+  /** The server's tools/list in the recorded projection, to record as the expected tool list */
   toolList?: ProjectedTool[];
   /** The server's stderr, to explain a failure (everything the stub serves is synthetic) */
   stderr: string;
-}
-
-/** Key of the tools/list snapshot in the snapshot file (src/tool-list.test.ts). */
-export const TOOL_LIST_SNAPSHOT_KEY = 'tools/list guardrails > matches the tool list snapshot 1';
-
-/**
- * Serialize a value as vitest writes it into a `.snap` file: pretty-format with vitest's snapshot
- * options (no `Object`/`Array` prefixes, strings unescaped), a multi-line value wrapped in newlines.
- */
-export function serializeLikeVitest(value: unknown): string {
-  const text = format(value, {
-    indent: 2,
-    escapeRegex: true,
-    printFunctionName: false,
-    printBasicPrototype: false,
-    escapeString: false
-  }).replace(/\r\n|\r/g, '\n');
-  return text.includes('\n') ? `\n${text}\n` : text;
-}
-
-/** One entry of a vitest snapshot file, which is JavaScript: read the way vitest reads it. */
-export function readSnapshotEntry(fileText: string, key: string): string {
-  const data: Record<string, string> = Object.create(null);
-  // A .snap file is only `exports[key] = \`...\`;` statements
-  new Function('exports', fileText)(data);
-  const entry = data[key];
-  if (entry === undefined) throw new Error(`snapshot ${JSON.stringify(key)} not found`);
-  return entry;
-}
-
-/** The first line where two texts differ. */
-export function firstDifference(expected: string, actual: string): string {
-  const a = expected.split('\n');
-  const b = actual.split('\n');
-  const n = Math.max(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    if (a[i] !== b[i]) {
-      return `line ${i + 1}:\n  expected: ${JSON.stringify(a[i] ?? '<end>')}\n  actual:   ${JSON.stringify(b[i] ?? '<end>')}`;
-    }
-  }
-  return 'texts are equal';
 }
 
 /** A call in comparable form: the query text with its whitespace collapsed, the inputs as sent. */
@@ -384,7 +340,7 @@ export function checkWrongLists(
  * The instant every server under test reads as "now" (`LOGSEQ_MCP_NOW`, milliseconds since 1970-01-01
  * UTC): 2025-03-12T03:30:00Z, which is still the evening of Tuesday 2025-03-11 in `PARITY_TZ`. A
  * result that depends on today's date (`last_n`, a preset) is then the same on every day, and a
- * server that reads the date in UTC where the TypeScript one reads it locally gets the 12th, not
+ * server that reads the date in UTC where the recorded one read it locally gets the 12th, not
  * the 11th, and fails.
  */
 export const PARITY_NOW_MS = Date.UTC(2025, 2, 12, 3, 30);
@@ -394,7 +350,7 @@ export const PARITY_TZ = 'America/New_York';
 
 /**
  * The caller's environment, with the config pointed at the stub, tips left at their default, the clock
- * fixed at {@link PARITY_NOW_MS} in {@link PARITY_TZ} (TypeScript reads it through `run-ts-server.ts`), and
+ * fixed at {@link PARITY_NOW_MS} in {@link PARITY_TZ}, and
  * every home and config directory a server could look in for a fallback config (`~/.logseq-mcp/`)
  * moved to `home`, an empty temp dir.
  */
@@ -442,8 +398,7 @@ export async function runCase(client: Client, c: ParityCase, timeout: number): P
 
 /**
  * Run every case against one server process and report what differs. With no `expected` the
- * results are only collected (record mode); the calls and tools/list are still checked, the list
- * against the snapshot byte for byte when there is no `expectedToolList`.
+ * results are only collected (record mode); the calls are still checked.
  */
 export async function runParity(options: ParityOptions): Promise<ParityReport> {
   const {
@@ -455,7 +410,6 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     bySuggestionRules,
     requireSuggestionCases,
     unperturbedCases = cases,
-    snapshotFile,
     timeoutMs = 30000,
     settleMs = 2000,
     now
@@ -499,18 +453,9 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     const tools = (await client.listTools(undefined, { timeout: timeoutMs })).tools;
     // As plain JSON, the way it is recorded
     toolList = JSON.parse(JSON.stringify(toolListForSnapshot(tools))) as ProjectedTool[];
-    const snapshot = readSnapshotEntry(await readFile(snapshotFile, 'utf8'), TOOL_LIST_SNAPSHOT_KEY);
     if (expectedToolList) {
-      // The reference must be the list the snapshot guards; the server needs only to mean the same
-      const recorded = serializeLikeVitest(expectedToolList);
-      if (recorded !== snapshot) {
-        failures.push(`the recorded tools/list differs from the snapshot; re-record it, ${firstDifference(snapshot, recorded)}`);
-      }
       const reference = onlyTestedTools ? toolsCalledBy(expectedToolList, cases) : expectedToolList;
       for (const f of compareToolLists(reference, toolList)) failures.push(`tools/list differs in meaning, ${f}`);
-    } else {
-      const listed = serializeLikeVitest(toolListForSnapshot(tools));
-      if (listed !== snapshot) failures.push(`tools/list differs from the snapshot, ${firstDifference(snapshot, listed)}`);
     }
     for (const f of stub.failures()) failures.push(`startup: stub: ${f}`);
     if (stub.calls().length > 0) failures.push(`startup and tools/list made ${stub.calls().length} LogSeq call(s); expected none`);
