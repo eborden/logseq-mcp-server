@@ -227,6 +227,25 @@ fn full_result(block: &Value, context: Option<&Context>) -> Value {
     result
 }
 
+/// The blocks whose content holds `query`, newest first (highest block id first) and not cut, or
+/// `None` when LogSeq answers `null`. One call. `get_context_for_query`'s keyword search reads these
+/// itself and does the cutting.
+pub async fn find_blocks(client: &LogseqClient, query: &str) -> Result<Option<Vec<Value>>, ToolError> {
+    let search = queries::search_blocks(query);
+    let answer = client.execute_datalog_query(&search.text, &search.inputs).await?;
+    let Some(mut matches) = wire::hits(&answer)? else { return Ok(None) };
+    // Ids are unique, and a sort that keeps ties in order
+    matches.sort_by(|a, b| block_id(b).total_cmp(&block_id(a)));
+    Ok(Some(matches))
+}
+
+/// `blocks` as full results with `context` (page, references, tags) added from one batched page
+/// lookup (`withPageContext`). API calls: 1, or 0 when no block has a page id.
+pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>) -> Result<Vec<Value>, ToolError> {
+    let contexts = with_page_context(client, &blocks).await?;
+    Ok(blocks.iter().zip(&contexts).map(|(block, context)| full_result(block, context.as_ref())).collect())
+}
+
 /// Search blocks for `query`: the results and their meta (`totals.matches` is the number of
 /// matching blocks before `limit`, and a `results_truncated` warning says what `limit` to use to get
 /// them all), or `None` when LogSeq answers `null` (no matches is an empty `results`).
@@ -241,12 +260,8 @@ pub async fn search_blocks_with_meta(
     slim_results: bool,
 ) -> Result<Option<SearchResults>, ToolError> {
     let limit = limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
-    let search = queries::search_blocks(query);
-    let answer = client.execute_datalog_query(&search.text, &search.inputs).await?;
-    let Some(mut matches) = wire::hits(&answer)? else { return Ok(None) };
-
-    // Newest first (highest block id first). Ids are unique, and a sort that keeps ties in order
-    matches.sort_by(|a, b| block_id(b).total_cmp(&block_id(a)));
+    // Newest first (highest block id first)
+    let Some(mut matches) = find_blocks(client, query).await? else { return Ok(None) };
     let total = matches.len();
     matches.truncate(limit.min(MAX_SEARCH_LIMIT) as usize);
 

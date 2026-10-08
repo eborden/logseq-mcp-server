@@ -68,7 +68,8 @@ pub fn ambiguous_page_result(error: &AmbiguousPage) -> String {
     Value::Object(result).to_string()
 }
 
-fn candidate(candidate: &Candidate) -> Value {
+/// One candidate page as the results show it (`PageCandidate`).
+pub fn candidate(candidate: &Candidate) -> Value {
     json!({
         "name": candidate.name,
         "originalName": candidate.original_name,
