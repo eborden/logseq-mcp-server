@@ -15,6 +15,7 @@ import {
   type ParityCase,
   type ToolResult
 } from '../scripts/parity/harness.js';
+import { parseCommandLine } from '../scripts/parity/command-line.js';
 import { callKey, DATASCRIPT_QUERY, LOGSEQ_PORT, startStubLogseq, type CannedCall } from '../scripts/parity/stub-logseq.js';
 import { compareToolLists, normalizeSchema, type ProjectedTool } from '../scripts/parity/tool-list-compare.js';
 import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer, viteNodeCommand } from '../scripts/parity/ts-server.js';
@@ -423,7 +424,46 @@ describe('the server environment', () => {
   }, 60000);
 });
 
+describe('the parity command line (--tested-tools-only, #125)', () => {
+  it('reads the flag with the server command intact, in any mode', () => {
+    expect(parseCommandLine(['--tested-tools-only', '--', 'x', 'a', '--b'])).toEqual({
+      mode: 'check',
+      server: { command: 'x', args: ['a', '--b'] },
+      onlyTestedTools: true
+    });
+    expect(parseCommandLine(['--self-check', '--tested-tools-only', '--', 'x'])).toMatchObject({ mode: 'self-check', onlyTestedTools: true });
+    expect(parseCommandLine(['--perturb', '--', 'x'])).toMatchObject({ mode: 'perturb', onlyTestedTools: false });
+    // no flag and no command: the TypeScript server, compared on the whole tools/list
+    expect(parseCommandLine([])).toMatchObject({ mode: 'check', onlyTestedTools: false, server: typescriptServer() });
+  });
+
+  it('refuses --record with the flag, since a reference must hold every tool, and a candidate can not record', () => {
+    expect(() => parseCommandLine(['--record', '--tested-tools-only'])).toThrow(/--record needs the whole tools\/list, so it can't take --tested-tools-only/);
+    expect(() => parseCommandLine(['--tested-tools-only', '--record'])).toThrow(/--record needs the whole tools\/list/);
+    expect(() => parseCommandLine(['--record', '--', 'x'])).toThrow(/a candidate can't record its own reference/);
+    expect(() => parseCommandLine(['--tested-tools-only', '--'])).toThrow(/no server command after --/);
+    expect(() => parseCommandLine(['--nope'])).toThrow(/unknown flag --nope/);
+  });
+});
+
 describe('runParity against the TypeScript server', () => {
+  it('with onlyTestedTools, fails on every tool the server lists beyond the ones the cases call', async () => {
+    // The TypeScript server lists 16 tools and the case calls one: the other 15 are not in the reference
+    const barren = getPageOutlineCases.find(c => c.steps.length === 0)!;
+    const expected = await loadExpected();
+    const report = await runParity({
+      server: typescriptServer(),
+      cases: [barren],
+      expected: { [barren.name]: expected[barren.name] },
+      expectedToolList: await loadToolList(),
+      onlyTestedTools: true,
+      snapshotFile: SNAPSHOT_FILE
+    });
+    const notInReference = report.failures.filter(f => f.endsWith(': not in the reference'));
+    expect(notInReference).toHaveLength((await loadToolList()).length - 1);
+    expect(report.failures).toHaveLength(notInReference.length);
+  }, 60000);
+
   it('passes the TypeScript server against its own recorded results', async () => {
     const report = await runParity({
       server: typescriptServer(),
