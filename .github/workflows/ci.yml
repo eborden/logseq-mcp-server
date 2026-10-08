@@ -8,7 +8,9 @@ name: CI
 # It builds and tests only; it never publishes (ADR-0017 covers npm, and a binary release needs its own ADR first).
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # labeled and unlabeled: the golden-files job reads the golden-change label, so adding or removing it has to
+    # re-run the check.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main, feature/rust-spike]
   # A manual run also builds and checks the release binary (see the steps below)
@@ -52,6 +54,46 @@ jobs:
       # tests/rust-guards needs the Rust binary and runs in the job below.
       - name: Guard tests
         run: npx vitest run tests/guards
+
+  # The golden files, scripts/parity/expected, are the tool contract (BR-0004, ADR-0031): the parity step holds the
+  # Rust server to them, so a change to one is a change to what the tools promise. A pull request that changes any of
+  # them fails here unless it carries the `golden-change` label, which goes on only after the maintainer's explicit OK,
+  # recorded on the PR (CLAUDE.md, "Verification before merge"). `--record-from-rust` writes a file only when a result
+  # changed in meaning, so a cosmetic re-record doesn't trip this.
+  #
+  # The labels come in through env:, never into the script text. The base is the first parent of the merge commit that
+  # was checked out, so it is the base tip this HEAD was built on even when the base moved after the event, and a
+  # labeled or unlabeled re-run doesn't count the base's own changes as the PR's.
+  golden-files:
+    name: Golden files
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check the golden files
+        env:
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          base="$(git rev-parse HEAD^1)"
+          changed="$(git diff --name-only "$base" HEAD -- scripts/parity/expected)"
+          if [ -z "$changed" ]; then
+            echo "No golden file changed."
+            exit 0
+          fi
+          if printf '%s' "$PR_LABELS" | jq -e 'index("golden-change")' > /dev/null; then
+            echo "The golden-change label is on this PR; the maintainer's recorded OK covers these changes:"
+            printf '%s\n' "$changed"
+            exit 0
+          fi
+          files="$(printf '%s' "$changed" | tr '\n' ' ')"
+          echo "::error::This PR changes the golden files, which are the tool contract: ${files}"
+          printf '%s\n' "$changed"
+          echo "::error::They change only with the maintainer's explicit OK, recorded on the PR. Once it is, the maintainer adds the golden-change label."
+          exit 1
 
   build-and-test:
     name: Cargo build and tests
