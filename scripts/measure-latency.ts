@@ -1,18 +1,17 @@
-// Per-tool latency and LogSeq call counts of the Rust server against the Node one.
+// Per-tool latency and LogSeq call counts of the Rust server (#353; the comparison with the Node server was
+// dropped with the TypeScript server, #356).
 //
-//   npm run build                                   # the Node server: dist/index.js
-//   cd rust && cargo build --release --locked       # the Rust server; the script builds neither
-//   npx tsx scripts/measure-latency.ts [--iterations 30] [--warmup 3] [--rust-binary <path>] [--node-entry <path>]
+//   cd rust && cargo build --release --locked       # the Rust server; the script does not build it
+//   npx tsx scripts/measure-latency.ts [--iterations 30] [--warmup 3] [--rust-binary <path>]
 //
-// Both servers run over MCP stdio against the parity harness's stub LogSeq (scripts/parity/stub-logseq.ts)
+// The server runs over MCP stdio against the parity harness's stub LogSeq (scripts/parity/stub-logseq.ts)
 // on a random local port with a fresh token, through a temp LOGSEQ_MCP_CONFIG and an empty temp home. It
 // never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Every page, block and
 // name is made up, and the output is aggregates only.
 //
 // For each of the 16 tools it calls one representative parity case (the happy path), then a few larger
 // made-up cases for the tools that do the most work. Per case and server: `--warmup` untimed calls, then
-// `--iterations` timed ones. The two servers are called alternately within every iteration, the order
-// flipping each time, so a drift in machine load hits both alike.
+// `--iterations` timed ones.
 //
 // What the numbers are: the stub answers instantly from memory, so a latency is the server's own work
 // (parse the request, build queries, parse and shape LogSeq's answers, serialize) plus the stdio and
@@ -20,8 +19,8 @@
 // The clock stops when the response line has arrived, before the client parses it.
 //
 // Each timed call is followed, outside the timing, by a read of the stub's call log: the LogSeq calls the
-// server actually made. The first result of every case is checked against the recorded one (a parity
-// case) or against the other server's (a larger case), so a number is never for a call that failed.
+// server actually made. The first result of every parity case is checked against the recorded one, and
+// every call of every case against the case's steps, so a number is never for a call that failed.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -30,25 +29,23 @@ import { performance } from 'node:perf_hooks';
 import { CASE_GROUPS, expectedFileOf } from './parity/case-groups.js';
 import { compareCalls, compareResult, sandboxedEnv, toToolResult, type ParityCase, type ToolResult } from './parity/harness.js';
 import { pulledPage, uuid, ATLAS } from './parity/ref-fixtures.js';
-import { REPO_ROOT } from './parity/ts-server.js';
+import { REPO_ROOT } from './parity/server-command.js';
 import { LOGSEQ_PORT, startStubLogseq, type CannedCall, type StubLogseq } from './parity/stub-logseq.js';
-import { formatMs2, summarizeLatency, type LatencySummary } from './measure-latency/stats.js';
+import { formatMs2, summarizeLatency } from './measure-latency/stats.js';
 
-const USAGE = 'usage: npx tsx scripts/measure-latency.ts [--iterations <n>] [--warmup <n>] [--rust-binary <path>] [--node-entry <path>]';
+const USAGE = 'usage: npx tsx scripts/measure-latency.ts [--iterations <n>] [--warmup <n>] [--rust-binary <path>]';
 
 interface Options {
   iterations: number;
   warmup: number;
   rustBinary: string;
-  nodeEntry: string;
 }
 
 function parseOptions(argv: string[]): Options {
   const options: Options = {
     iterations: 30,
     warmup: 3,
-    rustBinary: join(REPO_ROOT, 'rust', 'target', 'release', process.platform === 'win32' ? 'logseq-mcp-server.exe' : 'logseq-mcp-server'),
-    nodeEntry: join(REPO_ROOT, 'dist', 'index.js')
+    rustBinary: join(REPO_ROOT, 'rust', 'target', 'release', process.platform === 'win32' ? 'logseq-mcp-server.exe' : 'logseq-mcp-server')
   };
   for (let i = 0; i < argv.length; i += 2) {
     const value = argv[i + 1];
@@ -56,7 +53,6 @@ function parseOptions(argv: string[]): Options {
     if (argv[i] === '--iterations') options.iterations = Number(value);
     else if (argv[i] === '--warmup') options.warmup = Number(value);
     else if (argv[i] === '--rust-binary') options.rustBinary = resolve(value);
-    else if (argv[i] === '--node-entry') options.nodeEntry = resolve(value);
     else throw new Error(`unknown argument ${argv[i]}\n${USAGE}`);
   }
   if (!Number.isInteger(options.iterations) || options.iterations < 1) throw new Error(`--iterations must be a whole number of at least 1\n${USAGE}`);
@@ -104,7 +100,7 @@ interface Measured {
   tool: string;
   arguments: Record<string, unknown>;
   steps: CannedCall[][];
-  /** The recorded result, for a parity case; a larger case is checked against the other server's */
+  /** The recorded result, for a parity case; a larger case has none, and its calls are checked */
   expected?: ToolResult;
 }
 
@@ -203,7 +199,7 @@ async function buildCases(): Promise<Measured[]> {
 // ---- a server over stdio, called one request at a time
 
 interface Server {
-  name: 'rust' | 'node';
+  name: 'rust';
   child: ChildProcess;
   stderr: string;
   /** Send a request and resolve with the time to the response line (ms) and the parsed response. */
@@ -212,7 +208,7 @@ interface Server {
   stop(): Promise<void>;
 }
 
-function startServer(name: 'rust' | 'node', command: string, args: string[], env: Record<string, string>, cwd: string): Server {
+function startServer(name: 'rust', command: string, args: string[], env: Record<string, string>, cwd: string): Server {
   const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
   const server: Server = { name, child, stderr: '', call: undefined as never, notify: undefined as never, stop: undefined as never };
   const waiting = new Map<number, (line: string, at: number) => void>();
@@ -305,9 +301,6 @@ async function main(): Promise<void> {
   await stat(options.rustBinary).catch(() => {
     throw new Error(`no Rust binary at ${options.rustBinary}; build it with: cd rust && cargo build --release --locked`);
   });
-  await stat(options.nodeEntry).catch(() => {
-    throw new Error(`no Node server at ${options.nodeEntry}; build it with: npm run build`);
-  });
 
   const cases = await buildCases();
   const work = await mkdtemp(join(tmpdir(), 'logseq-latency-'));
@@ -322,18 +315,17 @@ async function main(): Promise<void> {
     await mkdir(home);
     await writeFile(configPath, JSON.stringify({ apiUrl: live.apiUrl, authToken: live.authToken }));
     const env = sandboxedEnv(configPath, home);
-    servers.push(startServer('rust', options.rustBinary, [], env, work), startServer('node', process.execPath, [options.nodeEntry], env, work));
+    servers.push(startServer('rust', options.rustBinary, [], env, work));
     for (const server of servers) {
       const init = await server.call('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'logseq-latency-probe', version: '1.0.0' } });
       if (init.response.error || !init.response.result) throw new Error(`${server.name}: initialize failed`);
       server.notify('notifications/initialized');
     }
 
-    const rows: Array<{ measured: Measured; rust: Outcome; node: Outcome; expectedCalls: number; problems: string[] }> = [];
-    let turn = 0;
+    const rows: Array<{ measured: Measured; rust: Outcome; expectedCalls: number; problems: string[] }> = [];
     for (const measured of cases) {
       const expectedCalls = measured.steps.flat().length;
-      const outcomes = { rust: { ms: [], calls: [] } as unknown as Outcome, node: { ms: [], calls: [] } as unknown as Outcome };
+      const outcomes = { rust: { ms: [], calls: [] } as unknown as Outcome };
       const problems: string[] = [];
       const callProblems = new Set<string>();
       const once = async (server: Server, timed: boolean): Promise<void> => {
@@ -361,17 +353,16 @@ async function main(): Promise<void> {
       };
       for (let i = 0; i < options.warmup; i++) for (const server of servers) await once(server, false);
       for (let i = 0; i < options.iterations; i++) {
-        for (const server of turn++ % 2 === 0 ? servers : [...servers].reverse()) await once(server, true);
+        for (const server of servers) await once(server, true);
       }
       problems.push(...callProblems);
-      for (const name of ['rust', 'node'] as const) {
+      for (const name of ['rust'] as const) {
         const outcome = outcomes[name];
         if (outcome.calls[0] !== expectedCalls) problems.push(`${name} made ${outcome.calls[0]} LogSeq call(s), the case lists ${expectedCalls}`);
         if (new Set(outcome.calls).size !== 1) problems.push(`${name} made a varying number of calls: ${[...new Set(outcome.calls)].join(', ')}`);
         if (measured.expected) problems.push(...compareResult(measured.expected, outcome.first).slice(0, 2).map(p => `${name} result differs from the recorded one: ${p.slice(0, 120)}`));
       }
-      if (!measured.expected && textOf(outcomes.rust.first) !== textOf(outcomes.node.first)) problems.push('the two servers returned different results');
-      rows.push({ measured, rust: outcomes.rust, node: outcomes.node, expectedCalls, problems });
+      rows.push({ measured, rust: outcomes.rust, expectedCalls, problems });
     }
 
     report(options, rows);
@@ -389,16 +380,14 @@ async function main(): Promise<void> {
   }
 }
 
-function report(options: Options, rows: Array<{ measured: Measured; rust: Outcome; node: Outcome; expectedCalls: number }>): void {
-  const cell = (s: LatencySummary) => `${formatMs2(s.median)} | ${formatMs2(s.p90)}`;
-  console.log(`node ${process.version}, ${process.platform}-${process.arch}, ${options.warmup} warm-up + ${options.iterations} timed calls per case and server\n`);
-  console.log('| case | Rust median ms | Rust p90 ms | Node median ms | Node p90 ms | Node/Rust (median) | result bytes | LogSeq calls: Rust | Node | listed |');
-  console.log('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');
-  for (const { measured, rust, node, expectedCalls } of rows) {
+function report(options: Options, rows: Array<{ measured: Measured; rust: Outcome; expectedCalls: number }>): void {
+  console.log(`node ${process.version} (harness), ${process.platform}-${process.arch}, ${options.warmup} warm-up + ${options.iterations} timed calls per case\n`);
+  console.log('| case | median ms | p90 ms | result bytes | LogSeq calls | listed |');
+  console.log('|---|---:|---:|---:|---:|---:|');
+  for (const { measured, rust, expectedCalls } of rows) {
     const r = summarizeLatency(rust.ms);
-    const n = summarizeLatency(node.ms);
     const callsOf = (o: Outcome) => (new Set(o.calls).size === 1 ? String(o.calls[0]) : `${Math.min(...o.calls)}-${Math.max(...o.calls)}`);
-    console.log(`| ${measured.label} | ${cell(r)} | ${cell(n)} | ${(n.median / r.median).toFixed(1)}x | ${rust.bytes} | ${callsOf(rust)} | ${callsOf(node)} | ${expectedCalls} |`);
+    console.log(`| ${measured.label} | ${formatMs2(r.median)} | ${formatMs2(r.p90)} | ${rust.bytes} | ${callsOf(rust)} | ${expectedCalls} |`);
   }
 }
 
