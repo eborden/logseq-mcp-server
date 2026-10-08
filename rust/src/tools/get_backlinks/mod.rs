@@ -192,7 +192,7 @@ fn rank_name(backlink: &Backlink) -> String {
 }
 
 fn rank_id(backlink: &Backlink) -> i64 {
-    first_present([field(backlink.page.as_object(), "id"), field(backlink.block_page(), "id")]).and_then(Value::as_i64).unwrap_or(0)
+    first_present([field(backlink.page.as_object(), "id"), field(backlink.block_page(), "id")]).and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
 /// `rankBacklinks`: source pages ranked by how many blocks link the target, most first (#178).
@@ -356,7 +356,7 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
     for row in rows.into_iter().flatten() {
         let mut block = camelize_block(&row);
         // A block with no page id has no source page
-        let Some(page_id) = block.get("page").and_then(Value::as_object).and_then(|page| page.get("id")).and_then(Value::as_i64) else {
+        let Some(page_id) = block.get("page").and_then(Value::as_object).and_then(|page| page.get("id")).and_then(crate::wire::whole_number) else {
             continue;
         };
         let at = *by_page.entry(page_id).or_insert_with(|| {
@@ -366,7 +366,7 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
         });
         let group = &mut groups[at];
         block.insert("page".to_owned(), Value::Object(group.page.clone()));
-        let block_id = block.get("id").and_then(Value::as_i64).unwrap_or_default();
+        let block_id = block.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
         match group.index.get(&block_id) {
             Some(&i) => group.blocks[i].1 = block,
             None => {
@@ -405,7 +405,7 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
     // `String(a.page.name).localeCompare(String(b.page.name)) || a.page.id - b.page.id`
     groups.sort_by(|a, b| {
         let name = |backlink: &Backlink| backlink.page.get("name").map_or_else(|| "undefined".to_owned(), js_string);
-        let id = |backlink: &Backlink| backlink.page.get("id").and_then(Value::as_i64).unwrap_or_default();
+        let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
         js::locale_compare(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
     });
     Ok(Some(groups))

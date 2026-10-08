@@ -132,7 +132,7 @@ pub struct PropertyResults {
 
 /// A block's id as the sort reads it.
 fn block_id(block: &Map<String, Value>) -> i64 {
-    block.get("id").and_then(Value::as_i64).unwrap_or(0)
+    block.get("id").and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
 // PARITY(#299): the sort reads only `page.id`, so a page spelled `db/id`, which LogSeq never sends for a
@@ -140,7 +140,7 @@ fn block_id(block: &Map<String, Value>) -> i64 {
 // server.
 /// `a.page?.id ?? 0`: the id of the page a block sits on, 0 when it carries none.
 fn page_id(block: &Map<String, Value>) -> i64 {
-    block.get("page").and_then(|page| page.get("id")).and_then(Value::as_i64).unwrap_or(0)
+    block.get("page").and_then(|page| page.get("id")).and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
 /// `(a.page?.id ?? 0) - (b.page?.id ?? 0) || a.id - b.id`: page id, then block id.
