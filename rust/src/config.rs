@@ -19,6 +19,10 @@ pub const CONFIG_PATH_ENV: &str = "LOGSEQ_MCP_CONFIG";
 /// What a field must be, the `<field> <problem>` tail of a [`ConfigError::Validation`] message.
 const AUTH_TOKEN_REQUIRED: &str = "is required";
 const NOT_A_STRING: &str = "must be a string";
+/// Known divergence from TypeScript: `"timeoutMs": 1e999` is `Infinity` to `JSON.parse`, so TS
+/// reports this validation error, but serde_json rejects the number itself ("number out of
+/// range"), so it is [`ConfigError::InvalidJson`] here. Neither shows a file value. Mapping it
+/// would need the key, which serde_json's error doesn't give.
 const TIMEOUT_MS: &str = "must be a positive finite number";
 const TIPS: &str = "must be a boolean";
 
@@ -271,6 +275,16 @@ mod tests {
                 }
                 other => panic!("expected InvalidJson for {text:?}, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn an_infinite_timeout_is_invalid_json_not_a_validation_error() {
+        // Pins the divergence documented on TIMEOUT_MS: TypeScript gives
+        // ConfigValidationError(timeoutMs) for this file.
+        match parse_config(r#"{"authToken":"x","timeoutMs":1e999}"#) {
+            Err(ConfigError::InvalidJson { detail }) => assert!(detail.starts_with("number out of range"), "{detail}"),
+            other => panic!("expected InvalidJson, got {other:?}"),
         }
     }
 
