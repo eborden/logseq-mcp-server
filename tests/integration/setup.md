@@ -33,6 +33,29 @@ npm run test:integration -- --reporter=verbose
 
 **After a run, `git status` should show nothing under `tests/fixtures/graph/`.** LogSeq writes to the graph it opens (it rewrites `logseq/config.edn` and adds `logseq/bak/`), which is why the instance opens a copy (#151) and the committed fixture is only read. A change there means something opened the fixture itself, such as a LogSeq of your own (below). Never commit a change LogSeq made to the fixture.
 
+### Against the Rust server (#352)
+
+The same suites run against the Rust server (`rust/`, #122) instead of the TypeScript one, with the same assertions:
+
+```bash
+npx tsx scripts/logseq-instance.ts start
+(cd rust && cargo build)                   # the debug build: rust/target/debug/logseq-mcp-server
+npm run test:integration:rust              # LOGSEQ_MCP_SERVER=rust npm run test:integration
+npx tsx scripts/logseq-instance.ts stop
+```
+
+`LOGSEQ_MCP_RUST_BIN` names another binary (a release build, say); `LOGSEQ_MCP_SERVER` unset or `ts` is the TypeScript server. The global setup stops the run when Rust is selected and the binary is missing.
+
+How it works (`helpers/server-under-test.ts`, `helpers/tools.ts`):
+
+- **A suite that sends `tools/call`** (`output-format`, `result-caps`, `slim-default`) gets its client from `connectMcp(client, options)`: the TypeScript server in memory, or the Rust binary over stdio.
+- **A suite that calls a tool's function** (`getPage`, `queryJournals`, ...) imports it from `helpers/tools.js`, not from `src/tools/`. With the TypeScript server that is the function itself. With Rust it calls the tool through MCP and turns the result back into what the function returns: the first content block as JSON, a bare-array tool's `meta` block as `meta`, an error result as a thrown `PageNotFoundError`, `InvalidParameterError` and so on, and the ambiguous-name result as an `AmbiguousPageError`. Each function sends the default a direct call has where the tool's differs (`slim_results` is false for a direct call: BR-0012). A new suite imports its tool functions from there, or it quietly stays on TypeScript in a Rust run.
+- **The Rust server never talks to LogSeq itself.** Its config points at a small HTTP forwarder in the test process, which makes each call through the suite's own `LogseqClient.callAPI`. The fixture check, the token and the port-12315 refusal stay with the TypeScript client, and a test that counts or wraps `client.callAPI` counts the Rust server's calls too. The Rust process gets a home directory of its own, so it has no `~/.logseq-mcp/config.json` to fall back on (BR-0001).
+- **A tool function that no MCP argument can express stays on TypeScript** in both modes: `searchBlocksWithMeta` with a `maxLimit` (only a direct call can lower the maximum), `getConceptNetwork` with a `maxNodes` or `maxFanout` above the tool's maximum (`Infinity`, for no cap), `searchByRelationship` with `maxFrontier`, and `getContextForQuery` with `hitPages`. An argument that JSON cannot carry (`Infinity`) is an error rather than a silent `null`.
+- **A suite on TypeScript internals** (the resolver, `DatalogQueryBuilder`, `resolveBlockRefs`, the client's auth error) runs the same TypeScript code in both modes: `auth-error`, `datalog-inputs`, the resolver cases of `page-resolution`, two cases of `resolve-refs`, and the connection check of `server`.
+- `LOGSEQ_MCP_SERVER_USAGE=<file>` appends the file and test name of every call that reaches the Rust server, to count how many tests did. A test that reads data fetched in `beforeAll` is listed under the `beforeAll`, with no test name.
+- `LOGSEQ_MCP_NOW` is how a test that passes a `now` to `queryJournals` fixes the Rust server's clock. A release build ignores it, so such a test needs the debug build.
+
 ### Without the instance (not recommended)
 
 **Use the instance script when you can.** The fallback below writes to the committed fixture and needs a LogSeq whose API is not on port 12315, because the tests refuse that port: it is LogSeq's default, so it is taken to be your personal LogSeq. It is for machines where the instance script cannot run (it is macOS-only). On such a machine, use a separate LogSeq install or profile, not the one with your own graph:
@@ -76,6 +99,7 @@ How it opens the graph without the UI: a new LogSeq profile opens the demo graph
 ## Writing an integration test
 
 - **Connect with `connectFixture()`** in `beforeAll`. It is the guard; never load the config by hand.
+- **Call tools through `helpers/tools.js`** (or `connectMcp` for `tools/call`), so the suite also runs against the Rust server ("Against the Rust server" above).
 - **Name fixture pages and assert exact values.** Take them from `tests/fixtures/README.md`, which records what each page was built to test and the results measured against an instance. If a test needs data the fixture lacks, add it to the fixture (and the README) in the same PR, made up like the rest. Never discover data at run time, and never return early when something is missing.
 - **Compute what drifts; hard-code what doesn't.** LogSeq creates today's journal (one empty block) when the graph opens, and its date moves every day; `laterJournalDays(client)` returns it, and anything counted back from today (`last_n`, the `today` and `year_to_date` presets) adds it. Use fixed windows that end before 2026 for everything else (`FIXTURE_JOURNAL_DAYS` lists the fixture's days). Page counts include 16 built-in pages and a page per property key; compute them from the graph rather than copying the README's total.
 - **Caps that pick by `:db/id` order** (ties at the same reference count) are not stable by name. The hub section of `tests/fixtures/README.md` lists which cases may assert names and which only counts, `truncated` and warnings.
