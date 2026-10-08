@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use parity_support::cases::{Canned, Case, Request, case_of, data_dir, group_files_in, load_cases, load_clock_cases, load_comparator_table, load_tool_list, perturb_cases, without_clock_cases};
+use parity_support::cases::{Canned, Case, Request, case_of, data_dir, group_files_in, load_cases, load_cases_in, load_ceilings_in, load_clock_cases, load_comparator_table, load_tool_list, perturb_cases, render_ceilings, without_clock_cases};
 use parity_support::record::{render_group, render_tool_list};
 use parity_support::server::{PARITY_NOW_MS, PARITY_TZ, Run, Server, run_parity, run_parity_with, scratch_dir};
 use parity_support::stub::{DATASCRIPT_QUERY, LOGSEQ_PORT, Stub, call_key};
@@ -89,6 +89,25 @@ fn the_stub_answers_one_query_asked_twice_in_the_order_of_its_answers() {
     // The third has no answer left
     post(&stub, DATASCRIPT_QUERY, &[json!("[:find ?a]"), json!("\"x\"")]);
     assert_eq!(stub.failures().len(), 1);
+}
+
+#[test]
+fn the_stub_answers_only_a_call_a_recorded_call_answers_so_a_changed_input_fails_the_case() {
+    let stub = Stub::start();
+    let answer = |input: &str, n: i64| Canned { method: DATASCRIPT_QUERY.to_owned(), args: vec![json!("[:find ?a]"), json!(input)], response: json!([[n]]) };
+    stub.load([&answer("\"x\"", 1), &answer("\"y\"", 2)]);
+    // The same query with an input no recorded call has: no answer, whatever else is listed for the query
+    let (status, unanswered) = post(&stub, DATASCRIPT_QUERY, &[json!("[:find ?a]"), json!("\"z\"")]);
+    assert_eq!(status, 200);
+    assert!(unanswered.get("error").is_some(), "{unanswered}");
+    assert_eq!(stub.failures().len(), 1);
+    assert!(stub.failures()[0].contains("no canned response for logseq.DB.datascriptQuery [:find ?a] (inputs [\"\\\"z\\\"\"])"), "{:?}", stub.failures());
+    // Calls with recorded inputs are answered in either order, each by its own input
+    assert_eq!(post(&stub, DATASCRIPT_QUERY, &[json!("[:find ?a]"), json!("\"y\"")]).1, json!([[2]]));
+    assert_eq!(post(&stub, DATASCRIPT_QUERY, &[json!("[:find ?a]"), json!("\"x\"")]).1, json!([[1]]));
+    assert_eq!(stub.failures().len(), 1);
+    // Every call is logged, the unanswered one included
+    assert_eq!(stub.calls().len(), 3);
 }
 
 #[test]
@@ -241,7 +260,7 @@ fn stand_in(mut handler: impl FnMut(&str, &Value) -> Reply + Send + 'static) -> 
 }
 
 fn plain_case(name: &str, tool: &str, request: Request) -> Case {
-    Case { group: "g".into(), name: name.into(), tool: tool.into(), arguments: json!({}), steps: vec![], perturbed: None, request, expected: Value::Null }
+    Case { group: "g".into(), name: name.into(), tool: tool.into(), arguments: json!({}), steps: vec![], ceiling: 0, perturbed: None, request, expected: Value::Null }
 }
 
 #[test]
@@ -314,7 +333,7 @@ fn late_calls_server(config_path: &Path) -> Server {
 }
 
 fn late_case(name: &str) -> Case {
-    Case { steps: vec![EDITOR.iter().map(|m| Canned { method: (*m).to_owned(), args: vec![], response: Value::Null }).collect()], ..plain_case(name, "late_calls", Request::Tool) }
+    Case { steps: vec![EDITOR.iter().map(|m| Canned { method: (*m).to_owned(), args: vec![], response: Value::Null }).collect()], ceiling: EDITOR.len(), ..plain_case(name, "late_calls", Request::Tool) }
 }
 
 #[test]
@@ -323,6 +342,8 @@ fn a_run_sees_all_three_calls_of_each_case_because_it_waits_for_them_before_it_r
     let run = Run { cases: &cases, unperturbed: &cases, expected_tool_list: &[], now_ms: PARITY_NOW_MS, settle_ms: 2000, record: true };
     let report = run_parity_with(&run, &|config, _, _| late_calls_server(config));
     assert_eq!(report.failures, Vec::<String>::new());
+    assert_eq!(report.call_counts["late calls"], 3);
+    assert_eq!(report.call_counts["late calls again"], 3);
 }
 
 #[test]
@@ -330,8 +351,8 @@ fn without_the_wait_the_calls_come_after_the_result_and_the_next_case_would_find
     let cases = vec![late_case("late calls"), late_case("late calls again")];
     let run = Run { cases: &cases, unperturbed: &cases, expected_tool_list: &[], now_ms: PARITY_NOW_MS, settle_ms: 0, record: true };
     let report = run_parity_with(&run, &|config, _, _| late_calls_server(config));
-    let failures = report.failures.join("\n");
-    assert!(failures.contains("[late_calls: late calls] LogSeq calls, step 1 of 1: expected the 3 calls"), "{failures}");
+    // Fewer calls than a case lists pass the comparison, so the count the run read is what shows the wait matters
+    assert!(report.call_counts["late calls"] < 3, "{:?}", report.call_counts);
 }
 
 // ---- the server's environment
@@ -454,12 +475,12 @@ fn a_case_names_its_perturbed_answer_by_the_key_in_the_data_and_a_missing_key_is
 // ---- the data the cases come from
 
 #[test]
-fn the_data_folder_holds_group_files_the_tool_list_and_the_clock_list_and_nothing_else() {
+fn the_data_folder_holds_group_files_the_tool_list_the_clock_list_and_the_call_ceilings_and_nothing_else() {
     let mut names: Vec<String> = fs::read_dir(data_dir()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
     let groups = group_files_in(&data_dir());
     let mut want: Vec<String> = groups.iter().map(|g| format!("{}.json", g.name)).collect();
-    want.extend(["tool-list.json".to_owned(), "clock-cases.json".to_owned()]);
+    want.extend(["tool-list.json".to_owned(), "clock-cases.json".to_owned(), "call-ceilings.json".to_owned()]);
     want.sort();
     assert_eq!(names, want);
 }
@@ -489,6 +510,41 @@ fn the_data_files_are_in_the_form_the_recorder_writes() {
     let clock = data_dir().join("clock-cases.json");
     let names: Value = serde_json::from_str(&fs::read_to_string(&clock).unwrap()).unwrap();
     assert!(fs::read_to_string(&clock).unwrap() == format!("{}\n", serde_json::to_string_pretty(&names).unwrap()), "clock-cases.json is not indented by two spaces");
+    let ceilings = data_dir().join("call-ceilings.json");
+    assert!(fs::read_to_string(&ceilings).unwrap() == render_ceilings(&load_ceilings_in(&data_dir(), false)), "call-ceilings.json is not in the recorder's form: sorted by case name, one to a line");
+}
+
+#[test]
+fn every_case_has_a_call_ceiling_no_higher_than_its_recorded_calls_and_none_is_left_without_a_case() {
+    let cases = load_cases();
+    for case in &cases {
+        // A ceiling is the most calls the server may make: a case can't make more calls than it records answers for,
+        // so one above the recorded count is slack that was never earned
+        assert!(case.ceiling <= case.call_count(), "{}: the ceiling {} is above the {} recorded calls", case.name, case.ceiling, case.call_count());
+    }
+    assert!(cases.iter().any(|case| case.ceiling > 0), "no case makes a call");
+    // A ceiling with no case, and a case with no ceiling, are failures of the load
+    let dir = scratch_dir("ceilings");
+    let group = &group_files_in(&data_dir())[0];
+    fs::write(dir.join(format!("{}.json", group.name)), fs::read_to_string(&group.path).unwrap()).unwrap();
+    let mut all = load_ceilings_in(&data_dir(), false);
+    all.retain(|name, _| group.cases.iter().any(|c| c["name"] == name.as_str()));
+    fs::write(dir.join("call-ceilings.json"), render_ceilings(&all)).unwrap();
+    assert_eq!(load_cases_in(&dir).len(), group.cases.len());
+    let first = group.cases[0]["name"].as_str().unwrap().to_owned();
+    let mut without = all.clone();
+    without.remove(&first);
+    fs::write(dir.join("call-ceilings.json"), render_ceilings(&without)).unwrap();
+    let panicked = std::panic::catch_unwind(|| load_cases_in(&dir)).unwrap_err();
+    let message = panicked.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(message.contains("has no call ceiling") && message.contains(&first), "{message}");
+    let mut stale = all;
+    stale.insert("a case that is not there".to_owned(), 1);
+    fs::write(dir.join("call-ceilings.json"), render_ceilings(&stale)).unwrap();
+    let panicked = std::panic::catch_unwind(|| load_cases_in(&dir)).unwrap_err();
+    let message = panicked.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(message.contains("ceiling for case(s) that don't exist") && message.contains("a case that is not there"), "{message}");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -594,7 +650,7 @@ fn a_case_fails_on_its_perturbed_answer_only_when_that_answer_changes_what_the_s
 }
 
 #[test]
-fn a_run_fails_loud_on_a_perturbed_answer_a_missing_or_reordered_call_and_a_changed_tool_list() {
+fn a_run_fails_loud_on_a_perturbed_answer_a_call_with_no_recorded_answer_and_a_changed_tool_list() {
     let all = load_cases();
     let outline: Vec<Case> = all.iter().filter(|c| c.group == "get-page-outline").cloned().collect();
     // A reference in which one bound and one enum value differ from what the server lists
@@ -605,12 +661,9 @@ fn a_run_fails_loud_on_a_perturbed_answer_a_missing_or_reordered_call_and_a_chan
 
     let with_calls: Vec<Case> = outline.iter().filter(|c| !c.steps.is_empty()).cloned().collect();
     let exact = outline[0].clone();
-    let leaf = outline.iter().find(|c| c.steps.len() == 3).expect("a case with three steps").clone();
     let changed = vec![
         // The outline query's answer taken away: the stub has nothing to say to it
         Case { name: "missing answer".into(), steps: vec![exact.steps[0].clone(), vec![]], ..exact.clone() },
-        // The leaf lookup listed after the outline query, as if they ran the other way round
-        Case { name: "reordered".into(), steps: vec![leaf.steps[0].clone(), leaf.steps[2].clone(), leaf.steps[1].clone()], ..leaf.clone() },
     ];
     let broken: Vec<Case> = perturb_cases(&with_calls).into_iter().chain(changed.clone()).collect();
     // The closest names are judged against the cases as committed, as the self-check does
@@ -623,8 +676,39 @@ fn a_run_fails_loud_on_a_perturbed_answer_a_missing_or_reordered_call_and_a_chan
     for case in &with_calls {
         assert!(!failures_of(&report.failures, case).is_empty(), "{}: a perturbed answer went unnoticed", case.name);
     }
-    assert!(failures_of(&report.failures, &changed[0]).iter().any(|f| f.contains("stub: no canned response")), "{:?}", report.failures);
-    assert!(failures_of(&report.failures, &changed[1]).iter().any(|f| f.contains("LogSeq calls, step 2 of 3")), "{:?}", report.failures);
+    let missing = failures_of(&report.failures, &changed[0]);
+    assert!(missing.iter().any(|f| f.contains("stub: no canned response")), "{:?}", report.failures);
+    assert!(missing.iter().any(|f| f.contains("LogSeq calls, the server made a call no recorded call answers")), "{:?}", report.failures);
+}
+
+#[test]
+fn a_run_judges_the_calls_by_what_they_ask_and_how_many_there_are_not_by_their_order_grouping_or_all_being_made() {
+    let all = load_cases();
+    let leaf = all.iter().find(|c| c.group == "get-page-outline" && c.steps.len() == 3).expect("a case with three steps").clone();
+    let never_made = Canned { method: "logseq.Editor.getPage".into(), args: vec![json!("a page the server never asks for")], response: Value::Null };
+    let insert = Canned { method: "logseq.Editor.insertBlock".into(), args: vec![json!("page"), json!("text")], response: Value::Null };
+    let cases = vec![
+        // The calls listed in another order and another grouping: still the calls the server makes
+        Case { name: "reordered".into(), steps: vec![leaf.steps[0].clone(), leaf.steps[2].clone(), leaf.steps[1].clone()], ..leaf.clone() },
+        Case { name: "regrouped".into(), steps: vec![leaf.steps.iter().flatten().cloned().collect()], ..leaf.clone() },
+        // A recorded call the server never makes, and a ceiling below the recorded count
+        Case { name: "a call never made".into(), steps: vec![leaf.steps.iter().flatten().cloned().chain([never_made]).collect()], ..leaf.clone() },
+        // The server makes more calls than the ceiling allows, each one recorded
+        Case { name: "over the ceiling".into(), ceiling: leaf.call_count() - 1, ..leaf.clone() },
+        // A recorded write
+        Case { name: "a recorded write".into(), steps: vec![leaf.steps.iter().flatten().cloned().chain([insert]).collect()], ..leaf.clone() },
+    ];
+    let report = run_parity(&Run { cases: &cases, unperturbed: &cases, expected_tool_list: &load_tool_list(), now_ms: PARITY_NOW_MS, settle_ms: 2000, record: false });
+    let of = |name: &str| failures_of(&report.failures, &case_named(&cases, name));
+    assert_eq!(of("reordered"), Vec::<String>::new());
+    assert_eq!(of("regrouped"), Vec::<String>::new());
+    assert_eq!(of("a call never made"), Vec::<String>::new());
+    let over = of("over the ceiling");
+    assert_eq!(over.len(), 1, "{over:?}");
+    assert!(over[0].contains(&format!("the server made {} call(s), over the case's ceiling of {}", leaf.call_count(), leaf.call_count() - 1)), "{over:?}");
+    let write = of("a recorded write");
+    assert!(write.iter().any(|f| f.contains("is not a read (BR-0002)")), "{write:?}");
+    assert_eq!(report.call_counts["reordered"], leaf.call_count());
 }
 
 #[test]

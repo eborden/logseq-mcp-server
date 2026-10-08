@@ -35,7 +35,7 @@ export interface ParityCase {
 /** The case with this name, from whichever group file holds it. */
 export function loadParityCase(name: string): ParityCase {
   for (const file of readdirSync(PARITY_DATA_DIR).sort()) {
-    if (!file.endsWith('.json') || file === 'tool-list.json' || file === 'clock-cases.json') continue;
+    if (!file.endsWith('.json') || file === 'tool-list.json' || file === 'clock-cases.json' || file === 'call-ceilings.json') continue;
     const group = JSON.parse(readFileSync(join(PARITY_DATA_DIR, file), 'utf8')) as { cases: ParityCase[] };
     const found = group.cases.find(c => c.name === name);
     if (found) return found;

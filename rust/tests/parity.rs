@@ -8,8 +8,10 @@
 //!   and minified (ADR-0009), every other text (markdown, a prompt's messages, a resource read, the frame of a
 //!   page-not-found message) byte for byte, and the closest names of a page-not-found message by the rules of
 //!   ADR-0032 (#335);
-//! - the LogSeq calls and their inputs: the steps of a case in order, the calls within a step as a set, and
-//!   nothing after the last step; a call the stub has no answer for is a failure;
+//! - the LogSeq calls (ADR-0034 Decision 5): every call the server makes matches a recorded call in method, query
+//!   text (layout aside) and inputs, whatever the server does with the answer, and there are at most as many as the
+//!   case's ceiling (`call-ceilings.json`). Their order and grouping are not compared, a repeated query is matched
+//!   to its recorded calls in the recorded order, and every recorded call is a read;
 //! and once: `tools/list` by meaning against the recorded list (ADR-0031, #292), that startup and `tools/list`
 //! make no LogSeq call, and that the recorded set exercises the closest-name rules.
 //!
@@ -110,41 +112,52 @@ fn the_comparator_fails_on_a_text_that_differs_by_a_trailing_space() {
     }
 }
 
+/// The calls a case lists, as the server would have made them.
+fn made_as_listed(case: &Case) -> Vec<Call> {
+    case.canned().map(|c| Call { method: c.method.clone(), args: c.args.clone() }).collect()
+}
+
 #[test]
 fn the_comparator_fails_on_a_wrong_call() {
     for case in cases_for_this_build().iter().filter(|c| c.call_count() > 0) {
         let as_made = |change: &dyn Fn(&mut Vec<Call>)| {
-            let mut calls: Vec<Call> = case.canned().map(|c| Call { method: c.method.clone(), args: c.args.clone() }).collect();
+            let mut calls = made_as_listed(case);
             change(&mut calls);
             calls
         };
-        assert_eq!(compare_calls(&case.steps, &as_made(&|_| {})), Vec::<String>::new(), "{}: the calls as listed", case.name);
-        assert!(!compare_calls(&case.steps, &as_made(&|calls| calls[0].method.push_str("X"))).is_empty(), "{}: a wrong method passed", case.name);
-        assert!(!compare_calls(&case.steps, &as_made(&|calls| calls[0].args.push(json!("extra")))).is_empty(), "{}: an extra input passed", case.name);
-        assert!(!compare_calls(&case.steps, &as_made(&|calls| drop(calls.pop()))).is_empty(), "{}: a missing call passed", case.name);
-        assert!(!compare_calls(&case.steps, &as_made(&|calls| calls.push(calls[0].clone()))).is_empty(), "{}: a call after the last step passed", case.name);
+        // A ceiling above the listed calls, so a rule is shown on its own and not through the ceiling
+        let roomy = case.call_count() + 5;
+        assert_eq!(compare_calls(&case.steps, case.ceiling, &as_made(&|_| {})), Vec::<String>::new(), "{}: the calls as listed", case.name);
+        assert!(!compare_calls(&case.steps, roomy, &as_made(&|calls| calls[0].method.push_str("X"))).is_empty(), "{}: a wrong method passed", case.name);
+        assert!(!compare_calls(&case.steps, roomy, &as_made(&|calls| calls[0].args.push(json!("extra")))).is_empty(), "{}: an extra input passed", case.name);
+        // One more call than were recorded: the repeat of a recorded call is answered by no recorded call
+        assert!(!compare_calls(&case.steps, roomy, &as_made(&|calls| calls.push(calls[0].clone()))).is_empty(), "{}: a call after the last one passed", case.name);
+        // And a call no recorded call answers fails even when the ceiling has room for it
+        assert!(!compare_calls(&case.steps, roomy, &as_made(&|calls| calls.push(Call { method: "logseq.Editor.getPage".into(), args: vec![json!("a page no case lists")] }))).is_empty(), "{}: an unrecorded call passed", case.name);
+        // The ceiling on its own: the listed calls, one more than it allows
+        assert!(!compare_calls(&case.steps, case.call_count() - 1, &as_made(&|_| {})).is_empty(), "{}: more calls than the ceiling passed", case.name);
+        // A recorded call the server never made is not a failure, and fewer calls than the ceiling pass
+        assert_eq!(compare_calls(&case.steps, case.ceiling, &as_made(&|calls| drop(calls.pop()))), Vec::<String>::new(), "{}: a missing call failed", case.name);
+        // A write fails, recorded or made
+        assert!(!compare_calls(&case.steps, roomy, &as_made(&|calls| calls[0].method = "logseq.Editor.insertBlock".into())).is_empty(), "{}: a made write passed", case.name);
     }
 }
 
 #[test]
-fn the_calls_within_a_step_are_a_set_and_the_steps_are_in_order() {
+fn the_calls_are_compared_in_any_order_and_without_their_steps() {
     let cases = cases_for_this_build();
+    // A case whose calls the retired server made at once, and one it made one after another
     let concurrent = cases.iter().find(|c| c.steps.iter().any(|step| step.len() > 1 && step[0].method != step[1].method)).expect("a case with concurrent calls");
-    let made = |order: &dyn Fn(&mut Vec<Call>)| {
-        let mut calls: Vec<Call> = concurrent.canned().map(|c| Call { method: c.method.clone(), args: c.args.clone() }).collect();
-        order(&mut calls);
-        calls
-    };
-    // Swap the two calls of the first step that has two
-    let start: usize = concurrent.steps.iter().take_while(|step| step.len() < 2).map(Vec::len).sum();
-    let swapped = made(&|calls| calls.swap(start, start + 1));
-    assert_eq!(compare_calls(&concurrent.steps, &swapped), Vec::<String>::new());
-
-    let sequential = cases.iter().find(|c| c.steps.len() > 1 && c.steps[0].len() == 1 && c.steps[1].len() == 1 && c.steps[0][0].method != c.steps[1][0].method);
-    if let Some(sequential) = sequential {
-        let mut calls: Vec<Call> = sequential.canned().map(|c| Call { method: c.method.clone(), args: c.args.clone() }).collect();
-        calls.swap(0, 1);
-        assert!(!compare_calls(&sequential.steps, &calls).is_empty(), "two steps made in the other order passed");
+    let sequential = cases.iter().find(|c| c.steps.len() > 1 && c.steps[0].len() == 1 && c.steps[1].len() == 1 && c.steps[0][0].method != c.steps[1][0].method).expect("a case with sequential calls");
+    for case in [concurrent, sequential] {
+        let listed = made_as_listed(case);
+        // Every order the calls could be made in, up to the first few calls, gives the same verdict
+        let mut reversed = listed.clone();
+        reversed.reverse();
+        assert_eq!(compare_calls(&case.steps, case.ceiling, &reversed), Vec::<String>::new(), "{}: the calls in the other order failed", case.name);
+        let mut rotated = listed.clone();
+        rotated.rotate_left(1);
+        assert_eq!(compare_calls(&case.steps, case.ceiling, &rotated), Vec::<String>::new(), "{}: the calls rotated failed", case.name);
     }
 }
 
@@ -153,9 +166,9 @@ fn a_query_is_compared_without_its_layout_but_with_its_inputs() {
     let step = |query: &str, input: &str| vec![parity_support::cases::Canned { method: "logseq.DB.datascriptQuery".into(), args: vec![json!(query), json!(input)], response: json!([]) }];
     let call = |query: &str, input: &str| Call { method: "logseq.DB.datascriptQuery".into(), args: vec![json!(query), json!(input)] };
     let steps = [step("[:find ?p\n   :where [?p :a ?b]]", "\"x\"")];
-    assert!(compare_calls(&steps, &[call("[:find ?p :where [?p :a ?b]]", "\"x\"")]).is_empty());
-    assert!(!compare_calls(&steps, &[call("[:find ?p :where [?p :a ?b]]", "\"y\"")]).is_empty());
-    assert!(!compare_calls(&steps, &[call("[:find ?q :where [?p :a ?b]]", "\"x\"")]).is_empty());
+    assert!(compare_calls(&steps, 1, &[call("[:find ?p :where [?p :a ?b]]", "\"x\"")]).is_empty());
+    assert!(!compare_calls(&steps, 1, &[call("[:find ?p :where [?p :a ?b]]", "\"y\"")]).is_empty());
+    assert!(!compare_calls(&steps, 1, &[call("[:find ?q :where [?p :a ?b]]", "\"x\"")]).is_empty());
 }
 
 #[test]

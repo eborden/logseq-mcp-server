@@ -20,9 +20,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use parity_support::cases::{data_dir, load_tool_list, load_tool_list_in};
+use parity_support::cases::{data_dir, load_ceilings_in, load_tool_list, load_tool_list_in, render_ceilings};
 use parity_support::compare::compare_tool_lists;
-use parity_support::record::{RecordRequest, plan_group, plan_tool_list, record_goldens, record_request, render_group, render_tool_list};
+use parity_support::record::{RecordRequest, plan_ceilings, plan_group, plan_tool_list, record_goldens, record_request, render_group, render_tool_list};
 use parity_support::server::scratch_dir;
 use parity_support::suggestion_rules::GUIDANCE;
 use serde_json::{Value, json};
@@ -254,11 +254,11 @@ fn case_named<'a>(cases: &'a mut [Value], name: &str) -> &'a mut Value {
 
 #[test]
 fn recording_the_recorded_files_writes_nothing() {
-    let dir = copy_of(&["get-page-outline.json", "tool-list.json"]);
-    let before: Vec<String> = ["get-page-outline.json", "tool-list.json"].iter().map(|f| fs::read_to_string(dir.join(f)).unwrap()).collect();
+    let dir = copy_of(&["get-page-outline.json", "tool-list.json", "call-ceilings.json"]);
+    let before: Vec<String> = ["get-page-outline.json", "tool-list.json", "call-ceilings.json"].iter().map(|f| fs::read_to_string(dir.join(f)).unwrap()).collect();
     let report = record_goldens(&dir, false).unwrap_or_else(|e| panic!("{e}"));
     assert!(report.written.is_empty(), "{:?}", report.lines);
-    let after: Vec<String> = ["get-page-outline.json", "tool-list.json"].iter().map(|f| fs::read_to_string(dir.join(f)).unwrap()).collect();
+    let after: Vec<String> = ["get-page-outline.json", "tool-list.json", "call-ceilings.json"].iter().map(|f| fs::read_to_string(dir.join(f)).unwrap()).collect();
     assert_eq!(before, after);
     assert!(report.lines.iter().any(|l| l.contains("no file was written")), "{:?}", report.lines);
     let _ = fs::remove_dir_all(&dir);
@@ -266,7 +266,7 @@ fn recording_the_recorded_files_writes_nothing() {
 
 #[test]
 fn recording_restores_what_changed_in_meaning_and_leaves_the_rest_as_it_was() {
-    let dir = copy_of(&["get-page-outline.json", "tool-list.json"]);
+    let dir = copy_of(&["get-page-outline.json", "tool-list.json", "call-ceilings.json"]);
     let original = read_cases(&dir, "get-page-outline.json");
     let original_tools = load_tool_list();
     // The committed file is in the form the recorder writes, or this test would show the form and not the change
@@ -319,7 +319,7 @@ fn recording_restores_what_changed_in_meaning_and_leaves_the_rest_as_it_was() {
 
 #[test]
 fn recording_writes_nothing_when_a_case_makes_the_wrong_calls() {
-    let dir = copy_of(&["get-page-outline.json", "tool-list.json"]);
+    let dir = copy_of(&["get-page-outline.json", "tool-list.json", "call-ceilings.json"]);
     let mut cases = read_cases(&dir, "get-page-outline.json");
     // The case lists no answer for the calls the server makes, and a golden result that is wrong, which a recording
     // from calls that went wrong would have recorded
@@ -338,10 +338,89 @@ fn recording_writes_nothing_when_a_case_makes_the_wrong_calls() {
 #[test]
 fn recording_writes_nothing_when_the_set_lacks_the_closest_name_cases_the_adr_requires() {
     // One group file holds some of them, not all: the real set is held to the requirement, a copy isn't
-    let dir = copy_of(&["get-page-outline.json", "tool-list.json"]);
+    let dir = copy_of(&["get-page-outline.json", "tool-list.json", "call-ceilings.json"]);
     let before = fs::read_to_string(dir.join("get-page-outline.json")).unwrap();
     let refused = record_goldens(&dir, true).unwrap_err();
     assert!(refused.contains("nothing was recorded") && refused.contains("lack a required closest-names case"), "{refused}");
     assert_eq!(fs::read_to_string(dir.join("get-page-outline.json")).unwrap(), before);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+// ---- the call ceilings (ADR-0034 Decision 5)
+
+fn ceiling_case(name: &str) -> parity_support::cases::Case {
+    parity_support::cases::case_of("g", &case(name, None), false)
+}
+
+fn ceilings(pairs: &[(&str, usize)]) -> std::collections::BTreeMap<String, usize> {
+    pairs.iter().map(|(name, n)| ((*name).to_owned(), *n)).collect()
+}
+
+fn counts(pairs: &[(&str, usize)]) -> HashMap<String, usize> {
+    pairs.iter().map(|(name, n)| ((*name).to_owned(), *n)).collect()
+}
+
+#[test]
+fn a_ceiling_is_lowered_to_the_calls_made_and_never_raised() {
+    let cases = [ceiling_case("fewer"), ceiling_case("same")];
+    let plan = plan_ceilings(&ceilings(&[("fewer", 5), ("same", 2)]), &cases, &counts(&[("fewer", 3), ("same", 2)])).unwrap();
+    assert_eq!(plan.ceilings, ceilings(&[("fewer", 3), ("same", 2)]));
+    assert_eq!(plan.changes, vec!["ceiling lowered: fewer 5 to 3".to_owned()]);
+    // More calls than the ceiling can't reach the recorder, since the run fails; if one did, it still is not raised
+    let more = plan_ceilings(&ceilings(&[("same", 2)]), &[ceiling_case("same")], &counts(&[("same", 4)])).unwrap();
+    assert_eq!(more.ceilings, ceilings(&[("same", 2)]));
+    assert!(more.changes.is_empty());
+}
+
+#[test]
+fn a_case_with_no_ceiling_takes_the_calls_it_made_and_a_ceiling_for_a_case_not_in_this_run_is_kept() {
+    let plan = plan_ceilings(&ceilings(&[("elsewhere", 7)]), &[ceiling_case("new")], &counts(&[("new", 2)])).unwrap();
+    assert_eq!(plan.ceilings, ceilings(&[("elsewhere", 7), ("new", 2)]));
+    assert_eq!(plan.changes, vec!["new ceiling: new is 2".to_owned()]);
+    assert!(plan_ceilings(&ceilings(&[]), &[ceiling_case("silent")], &counts(&[])).unwrap_err().contains("\"silent\""));
+}
+
+#[test]
+fn recording_lowers_a_ceiling_the_server_does_not_use_and_leaves_a_used_one() {
+    let dir = copy_of(&["get-page-outline.json", "tool-list.json", "call-ceilings.json"]);
+    let original = load_ceilings_in(&dir, false);
+    let mut edited = original.clone();
+    // A ceiling written higher than the calls the case makes is brought back down by the recorder
+    let alias_calls = edited["alias"];
+    assert!(alias_calls > 0, "the case needs a call to lower");
+    edited.insert("alias".to_owned(), alias_calls + 2);
+    fs::write(dir.join("call-ceilings.json"), render_ceilings(&edited)).unwrap();
+    let report = record_goldens(&dir, false).unwrap_or_else(|e| panic!("{e}"));
+    assert!(report.lines.iter().any(|l| l == &format!("  - ceiling lowered: alias {} to {alias_calls}", alias_calls + 2)), "{:?}", report.lines);
+    assert_eq!(load_ceilings_in(&dir, false), original);
+    assert_eq!(report.written.len(), 1);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn recording_writes_nothing_when_a_case_makes_more_calls_than_its_ceiling() {
+    let dir = copy_of(&["get-page-outline.json", "tool-list.json", "call-ceilings.json"]);
+    let mut edited = load_ceilings_in(&dir, false);
+    let alias_calls = edited["alias"];
+    edited.insert("alias".to_owned(), alias_calls - 1);
+    fs::write(dir.join("call-ceilings.json"), render_ceilings(&edited)).unwrap();
+    let refused = record_goldens(&dir, false).unwrap_err();
+    assert!(refused.contains("nothing was recorded") && refused.contains("alias") && refused.contains("over the case's ceiling"), "{refused}");
+    // The recorder never raises it
+    assert_eq!(load_ceilings_in(&dir, false)["alias"], alias_calls - 1);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn recording_with_no_ceilings_file_gives_every_case_the_calls_it_made() {
+    let dir = copy_of(&["get-page-outline.json", "tool-list.json"]);
+    let report = record_goldens(&dir, false).unwrap_or_else(|e| panic!("{e}"));
+    let recorded = load_ceilings_in(&dir, false);
+    let committed = load_ceilings_in(&data_dir(), false);
+    assert!(!recorded.is_empty());
+    for (name, ceiling) in &recorded {
+        assert_eq!(committed[name], *ceiling, "{name}");
+    }
+    assert!(report.lines.iter().any(|l| l.starts_with("  - new ceiling: ")), "{:?}", report.lines);
     let _ = fs::remove_dir_all(&dir);
 }
