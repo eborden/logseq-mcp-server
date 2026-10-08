@@ -116,8 +116,13 @@ fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
 ///
 /// API calls: 3 Editor calls, plus 1 Datalog query only when a block's page is not already known.
 pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext, ToolError> {
-    let (current_page, current_block, selected) =
-        tokio::try_join!(fetch_current_page(client), fetch_current_block(client), fetch_selected_blocks(client))?;
+    // `Promise.all` rejects on the first error, but the other two fetches still run to completion, so the
+    // TypeScript server always makes all three calls. `join!` lets all three finish too, and the errors are
+    // then raised in a fixed order (page, block, selection). With two answers wrong at once TypeScript reports
+    // whichever arrives first, so the parity cases never have two.
+    let (page_answer, block_answer, selected_answer) =
+        tokio::join!(fetch_current_page(client), fetch_current_block(client), fetch_selected_blocks(client));
+    let (current_page, current_block, selected) = (page_answer?, block_answer?, selected_answer?);
 
     // `getCurrentPage` answers the block itself when the user has zoomed into one.
     let zoomed_block = current_page.as_ref().and_then(Value::as_object).filter(|entity| is_block_entity(entity));
