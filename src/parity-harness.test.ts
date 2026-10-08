@@ -242,6 +242,12 @@ describe('compareToolLists', () => {
       expect(failures, what).toHaveLength(1);
       expect(failures[0], what).toContain(line);
     }
+    // Enum values are compared in order: the same values swapped is a difference
+    const swapped = withSchema(tools, 'logseq_get_page', s => { s.properties.format.enum = ['markdown', 'json']; });
+    expect(compareToolLists(tools, swapped)).toEqual([
+      'logseq_get_page.inputSchema.properties.format.enum[0]: expected "json", got "markdown"',
+      'logseq_get_page.inputSchema.properties.format.enum[1]: expected "markdown", got "json"'
+    ]);
     // A change is still caught when the schema is in the quirky form
     const bound = quirky(withSchema(tools, 'logseq_check_links', s => { s.properties.after.maxLength = 1; }));
     expect(compareToolLists(tools, bound)).toEqual([expect.stringContaining('after.maxLength: expected 50000, got 1')]);
@@ -349,6 +355,26 @@ describe('normalizeSchema', () => {
     const recursive = { properties: { a: { $ref: '#/$defs/A' } }, $defs: { A: { properties: { b: { $ref: '#/$defs/A' } } } } };
     expect(compareToolLists([tool({})], [tool(recursive)])).toEqual([expect.stringContaining('is recursive')]);
     expect(compareToolLists([tool({})], [tool({ $ref: '#/$defs/Nope' })])).toEqual([expect.stringContaining('points at nothing')]);
+    // An anchor is not a JSON pointer: it fails rather than resolving to the root
+    const anchored = { properties: { a: { $ref: '#Foo' } }, $defs: { Foo: { $anchor: 'Foo', type: 'string' } } };
+    expect(compareToolLists([tool({})], [tool(anchored)])).toEqual([expect.stringContaining('only local JSON pointers are supported')]);
+  });
+
+  it('drops null only from optional top-level arguments, not from nested objects', () => {
+    const tool = (inputSchema: unknown): ProjectedTool => ({ name: 'x', inputSchema });
+    const schema = (a: unknown, b: unknown) => ({
+      type: 'object',
+      properties: { a, opts: { type: 'object', properties: { b } } }
+    });
+    const plain = schema({ type: 'string' }, { type: 'string' });
+    // Top level: the TypeScript server drops an explicit null, so these mean the same
+    expect(compareToolLists([tool(plain)], [tool(schema({ type: ['string', 'null'] }, { type: 'string' }))])).toEqual([]);
+    expect(compareToolLists([tool(plain)], [tool(schema({ anyOf: [{ type: 'string' }, { type: 'null' }] }, { type: 'string' }))])).toEqual([]);
+    // Nested: zod rejects null there, so accepting it is a difference
+    expect(compareToolLists([tool(plain)], [tool(schema({ type: 'string' }, { type: ['string', 'null'] }))])).toEqual([
+      'x.inputSchema.properties.opts.properties.b.type: expected "string", got ["string","null"]'
+    ]);
+    expect(compareToolLists([tool(plain)], [tool(schema({ type: 'string' }, { anyOf: [{ type: 'string' }, { type: 'null' }] }))])).toHaveLength(2);
   });
 });
 
