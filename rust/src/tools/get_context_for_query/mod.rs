@@ -178,6 +178,9 @@ impl QueryContext {
         let mut out = Map::new();
         out.insert("query".into(), json!(self.query));
         out.insert("extractedTopics".into(), json!(self.extracted_topics));
+        // PARITY(#299): a topic's own warnings are dropped here, and only `topic_truncated` says it was cut, so the
+        // `alias_set_truncated` warning of a topic whose alias group was cut is never shown (suspected TS bug) —
+        // drop if Rust becomes the only server.
         out.insert("contexts".into(), Value::Array(self.contexts.iter().map(|context| context.to_value(false)).collect()));
         if let Some(results) = &self.search_results {
             out.insert("searchResults".into(), Value::Array(results.clone()));
@@ -366,7 +369,7 @@ pub async fn get_context_for_query(
             // source on this path, so any failure propagates: an empty result must mean "nothing matched".
             let searched = keywords.iter().fold(&keywords[0], |longest, keyword| if js::utf16(keyword).len() > js::utf16(longest).len() { keyword } else { longest });
             // PARITY(#299): a `null` answer is read as "no matches", so a search LogSeq didn't answer looks like
-            // one that found nothing (suspected TS bug, BR-0011) — drop if Rust becomes the only server.
+            // one that found nothing (suspected TS bug, BR-0011) — fix per #338, in both servers.
             let blocks = find_blocks(client, searched).await?.unwrap_or_default();
             let hits: Vec<Value> = blocks
                 .into_iter()
