@@ -2,7 +2,7 @@
 
 ## Statement
 
-Never cut results silently. Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`rust/src/meta.rs`): `hasMore`, `warnings: [{ code, message, howToFetchAll? }]`, and `totals` where already known (no extra API call just to count). `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise and a value. Object results get these fields. A tool that returns a bare array keeps it as the first content block and sends `{ "meta": ... }` as a second one (`meta_content` in `rust/src/tools/get_backlinks/mod.rs`).
+Never cut results silently. Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`rust/src/meta.rs`): `hasMore`, `warnings: [{ code, message, howToFetchAll? }]`, and `totals` where already known (no extra API call just to count). `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise and a value. Object results get these fields. A tool that returns a bare array keeps it as the first content block and sends `{ "meta": ... }` as a second one (for example `meta_content` in `rust/src/tools/get_backlinks/mod.rs`).
 
 The `warnings` entry is the truncation signal, not `hasMore`. A result cut at a hard maximum carries a warning with `hasMore: false`, and that warning must say the maximum was reached and that the rest can't be fetched in one call. The exception is a paging parameter, such as `offset`, that can fetch the rest. Then `hasMore` is true, the warning still says the maximum was reached, and `howToFetchAll` names that parameter and its value. The warnings are built in `rust/src/truncation.rs`.
 
