@@ -125,20 +125,30 @@ async function main(): Promise<void> {
       node: { command: process.execPath, args: [join(nodeDir, 'dist', 'index.js')], env, cwd: work }
     };
     const outline = getPageOutlineCases[0];
-    const measure = (server: ServerProcess) =>
-      probeServer({
+    // `stub.load` clears the stub's failure log, so look at it before every load and after every
+    // probe: a call the stub could not answer in any run, at start-up or during the tool call, fails the script.
+    const checkStub = (what: string) => {
+      const failures = stub.failures();
+      if (failures.length > 0) throw new Error(`the stub LogSeq saw ${failures.length} call(s) it had no answer for ${what}`);
+    };
+    const measure = async (server: ServerProcess) => {
+      const result = await probeServer({
         server,
         call: { name: outline.tool, arguments: outline.arguments },
-        beforeCall: () => stub.load(outline.steps.flat()),
+        beforeCall: () => {
+          checkStub('during start-up');
+          stub.load(outline.steps.flat());
+        },
         settleMs: options.settleMs
       });
+      checkStub('during the tool call');
+      return result;
+    };
 
     const results: Record<'rust' | 'node', ProbeResult[]> = { rust: [], node: [] };
     for (let run = 0; run <= options.runs; run++) {
       for (const which of ['rust', 'node'] as const) results[which].push(await measure(servers[which]));
     }
-    const failures = stub.failures();
-    if (failures.length > 0) throw new Error(`the stub LogSeq saw ${failures.length} call(s) it had no answer for`);
 
     console.log(`\nnode ${process.version}, ${process.platform}-${process.arch}, ${options.runs} runs per server, ${options.settleMs} ms settle before each memory reading\n`);
     report('Rust release binary', { first: results.rust[0], runs: results.rust.slice(1) });
