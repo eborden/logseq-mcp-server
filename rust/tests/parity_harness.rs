@@ -695,6 +695,8 @@ fn a_run_judges_the_calls_by_what_they_ask_and_how_many_there_are_not_by_their_o
         Case { name: "a call never made".into(), steps: vec![leaf.steps.iter().flatten().cloned().chain([never_made]).collect()], ..leaf.clone() },
         // The server makes more calls than the ceiling allows, each one recorded
         Case { name: "over the ceiling".into(), ceiling: leaf.call_count() - 1, ..leaf.clone() },
+        // A ceiling one above the calls the server makes: a saved call has to lower it
+        Case { name: "headroom".into(), ceiling: leaf.call_count() + 1, ..leaf.clone() },
         // A recorded write
         Case { name: "a recorded write".into(), steps: vec![leaf.steps.iter().flatten().cloned().chain([insert]).collect()], ..leaf.clone() },
     ];
@@ -706,6 +708,9 @@ fn a_run_judges_the_calls_by_what_they_ask_and_how_many_there_are_not_by_their_o
     let over = of("over the ceiling");
     assert_eq!(over.len(), 1, "{over:?}");
     assert!(over[0].contains(&format!("the server made {} call(s), over the case's ceiling of {}", leaf.call_count(), leaf.call_count() - 1)), "{over:?}");
+    let headroom = of("headroom");
+    assert_eq!(headroom.len(), 1, "{headroom:?}");
+    assert!(headroom[0].contains(&format!("the server made {} call(s), under the case's ceiling of {}: lower it with PARITY_RECORD=1", leaf.call_count(), leaf.call_count() + 1)), "{headroom:?}");
     let write = of("a recorded write");
     assert!(write.iter().any(|f| f.contains("is not a read (BR-0002)")), "{write:?}");
     assert_eq!(report.call_counts["reordered"], leaf.call_count());

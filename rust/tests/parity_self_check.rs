@@ -53,3 +53,22 @@ fn every_case_with_a_logseq_call_fails_once_its_ceiling_is_one_below_the_calls_i
         assert_eq!(of(case), Vec::<String>::new(), "{}: a case that makes no call failed", case.name);
     }
 }
+
+#[test]
+fn every_case_fails_once_its_ceiling_is_one_above_the_calls_it_makes() {
+    // The other half of the ratchet: a saved call has to lower the ceiling, or a later change could spend it with no OK
+    // (ADR-0034 Decision 5). Every case, those that make no call included, is given one more than it uses. Both lists are the
+    // loosened cases, so the run judges them as committed; what is under test is the server's calls against the ceiling
+    let cases: Vec<Case> = {
+        let all = load_cases();
+        if cfg!(debug_assertions) { all } else { without_clock_cases(all, &load_clock_cases()) }
+    };
+    let loose: Vec<Case> = cases.iter().map(|case| Case { ceiling: case.ceiling + 1, ..case.clone() }).collect();
+    let report = run_parity(&Run { cases: &loose, unperturbed: &loose, expected_tool_list: &load_tool_list(), now_ms: PARITY_NOW_MS, settle_ms: 2000, record: false });
+    let not_caught: Vec<&str> = cases
+        .iter()
+        .filter(|case| !report.failures.iter().any(|f| f.starts_with(&format!("[{}: {}]", case.tool, case.name)) && f.contains("under the case's ceiling")))
+        .map(|case| case.name.as_str())
+        .collect();
+    assert!(not_caught.is_empty(), "a ceiling one above the calls made went unnoticed in these cases ({} of {}):\n- {}", not_caught.len(), cases.len(), not_caught.join("\n- "));
+}

@@ -120,7 +120,7 @@ Date: 2026-10-08
 
 ## Mechanical enforcement
 
-- test: `rust/tests/parity.rs` (every recorded case is run against the stub and its result compared by meaning, `tools/list` is compared by meaning against the recorded list, and the recorded set has to exercise the closest-name rules; it holds each case's LogSeq calls to a bounded count and an effect, as Decision 5 says: every call made matches a recorded call, at most the case's ceiling are made, and all are reads)
+- test: `rust/tests/parity.rs` (every recorded case is run against the stub and its result compared by meaning, `tools/list` is compared by meaning against the recorded list, and the recorded set has to exercise the closest-name rules; it also holds a case to its recorded LogSeq calls, more tightly than Decision 5 until #385)
 - test: `rust/tests/parity_support/compare.rs` (the one comparator: JSON results by deep equality with array order kept, every other text byte for byte, the minified check, and the `tools/list` normalization)
 - test: `rust/tests/parity_support/suggestion_rules.rs` (the closest-name rules 1 to 6 and the recorded-case coverage of Decision 4)
 - test: `rust/tests/parity_self_check.rs` (each case fails when the stub's answer is perturbed, so the comparison can fail)
@@ -130,7 +130,7 @@ Date: 2026-10-08
 - test: `tests/rust-guards/tool-list-live.test.ts` (the same budget and cap over the list the server sends)
 - test: `rust/tests/parity_comparator.rs` (`compare_calls`: the calls may be made in any order and grouping; a call no recorded call answers fails, a changed input included; a query asked more than recorded has no recorded call left; more calls than the ceiling fail; a recorded call never made, and fewer calls than the ceiling, pass; a write fails, recorded or made)
 - test: `rust/tests/parity_harness.rs` (the stub answers a call only when a recorded call has the same method, query text and inputs, and gives a query asked twice its answers in the recorded order, so a call that matches none fails the case whatever the server does with the error; a run passes a reordered or regrouped case and a recorded call never made, and fails one over its ceiling or with a recorded write)
-- test: `rust/tests/parity_self_check.rs` (every case that makes a call fails once its ceiling is one below the calls it makes)
+- test: `rust/tests/parity_self_check.rs` (every case that makes a call fails once its ceiling is one below the calls it makes, and every case fails once its ceiling is one above, so a saved call has to lower the ceiling in the same change)
 - test: `rust/tests/parity_harness.rs` (every case has a ceiling in `call-ceilings.json`, none is left without a case, none is above the case's recorded calls, and the file is in the recorder's form, so the ceiling is read apart from the call fixtures)
 - test: `rust/tests/parity_record.rs` (the recorder lowers a ceiling to the calls made, gives a new case the calls it made, and never raises one)
 - ci: `.github/workflows/ci.yml` (the second step of the golden-files job, "Check the call ceilings", fails a pull request that raises a ceiling in `rust/tests/data/parity/call-ceilings.json`, or adds one, unless it carries the `golden-change` label, which goes on only after the maintainer's OK; a lowered ceiling needs no label)

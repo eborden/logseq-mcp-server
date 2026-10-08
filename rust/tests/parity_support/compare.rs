@@ -13,7 +13,8 @@
 //!   layout whitespace through: the text is parsed, written again as `JSON.stringify` writes it (`js::json_stringify`), and
 //!   has to be as long.
 //! - [`compare_calls`] holds the LogSeq calls to a case's recorded calls and its ceiling (ADR-0034 Decision 5): each
-//!   call made matches a recorded call, in any order, and there are at most as many as the ceiling.
+//!   call made matches a recorded call, in any order, and there are at most as many as the ceiling. [`stale_ceiling`]
+//!   is the other side: a run of the cases as committed that makes fewer than the ceiling fails until it is lowered.
 //! - [`compare_tool_lists`] holds `tools/list` to the recorded list by meaning (ADR-0031, #292).
 
 use std::collections::BTreeSet;
@@ -288,6 +289,16 @@ pub fn compare_calls(steps: &[Vec<Canned>], ceiling: usize, actual: &[Call]) -> 
         failures.push(format!("the server made {} call(s), over the case's ceiling of {ceiling} (ADR-0011)", actual.len()));
     }
     failures
+}
+
+/// The failure for a case whose server made fewer calls than its ceiling allows, `None` when it made as many. The
+/// ceiling is a ratchet (ADR-0034 Decision 5): a change that saves a call lowers it in the same pull request, which
+/// needs no OK, so a saved call can't be spent again later without asking. Only a run of the cases as committed asks
+/// this (a perturbed answer can change the count), and `compare_calls` alone doesn't, since it judges one set of calls.
+pub fn stale_ceiling(ceiling: usize, made: usize) -> Option<String> {
+    (made < ceiling).then(|| {
+        format!("the server made {made} call(s), under the case's ceiling of {ceiling}: lower it with PARITY_RECORD=1 cargo test --test parity_record -- --nocapture (lowering needs no OK)")
+    })
 }
 
 // ---- tools/list, by meaning (ADR-0031 Decision 2, #292; the rules are those of tool-list-compare.ts)
