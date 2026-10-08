@@ -30,3 +30,4 @@ Date: 2026-10-05
 
 - test: `tests/guards/adr-0018-plugin-layout.test.ts` (skills/logseq-skills/SKILL.md is the real skill and .claude/skills/logseq-skills a relative symlink to it, plugin.json declares mcpServers inline, no root .mcp.json is tracked, and no skill hard-codes an mcp__ prefix outside the line that explains host prefixes)
 - test: `tests/rust-guards/version.test.ts` (the server, the plugin manifest and the marketplace entry carry the package.json version)
+- reviewer: This ADR describes the retired TypeScript server's packaging: the plugin manifest still starts `node dist/index.js`, and how the Rust binary is shipped and wired into the plugin is open (#350, #355). The skills layout and the version-equality guards still apply.
