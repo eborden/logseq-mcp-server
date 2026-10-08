@@ -91,9 +91,9 @@ jobs:
   # test (cargo test, rust/tests/parity.rs) holds the Rust server to them, so a change to one is a change to what the
   # tools promise. A pull request that changes any of them fails here unless it carries the `golden-change` label, which
   # goes on only after the maintainer's explicit OK, recorded on the PR (CLAUDE.md, "Verification before merge"). A group
-  # file holds the cases too (stub answers, arguments, expected calls), and a change to those is not a change to the
-  # contract (ADR-0034 Decision 5), so a group file is compared by its goldens alone: each case's name and `expected`,
-  # key order and layout aside. The recorder (`PARITY_RECORD=1`, rust/tests/parity_record.rs) writes a result only when
+  # file holds the cases too. A golden answers a request, so the request counts with it: each case's name, `tool`,
+  # `arguments`, resource or prompt request, and `expected`, key order and layout aside. A case's stub answers and expected
+  # calls (`steps`) don't: re-recording a call is not a change to the contract (ADR-0034 Decision 5). The recorder (`PARITY_RECORD=1`, rust/tests/parity_record.rs) writes a result only when
   # it changed in meaning, so a re-record that changes nothing doesn't trip this, and neither does moving a file without
   # changing a result. The clock list (clock-cases.json) is not a golden.
   #
@@ -116,10 +116,10 @@ jobs:
         run: |
           base="$(git rev-parse HEAD^1)"
           dir=rust/tests/data/parity
-          # A group file's goldens: each case's name and result, a line of JSON each (none for a file that is not
+          # A group file's goldens: each case's name, the request it answers and its result, a line of JSON each (none for a file that is not
           # there or not JSON, which then reads as every golden in it gone).
           file_cases() {
-            git show "$1:$2" 2> /dev/null | jq -c '.cases[] | {name, expected}'
+            git show "$1:$2" 2> /dev/null | jq -c '.cases[] | {name, tool, arguments, readResource, getPrompt, listPrompts, listResources, listResourceTemplates, expected}'
           }
           # Those of one file, or of every group file at a revision, as one list sorted by case name, keys sorted.
           # The latter is what a result is compared by: a case moved to another file, or a file renamed, changes
