@@ -11,16 +11,18 @@ use std::collections::HashSet;
 
 use icu_properties::CodePointMapData;
 use icu_properties::props::{GeneralCategory, GeneralCategoryGroup};
+use regex::{Regex, RegexBuilder};
 use serde_json::Value;
 
+use crate::errors::ToolError;
 use crate::resolve::alias::AliasSet;
 
 /// What decides whether a block matches a term.
 pub struct BlockMatcher {
     /// The term, lowercase
     term: String,
-    /// The group's other names, as characters, folded for a case-insensitive comparison
-    other_names: Vec<Vec<char>>,
+    /// The group's other names, each a literal that matches in any case (simple Unicode case folding)
+    other_names: Vec<Regex>,
     /// The ids of the pages of the group
     page_ids: HashSet<i64>,
 }
@@ -28,17 +30,22 @@ pub struct BlockMatcher {
 impl BlockMatcher {
     /// `blockMatcher(searchTerm, aliasSet)`. The term's own name stays out of the whole-word
     /// names: `includes` matches it, and a case-folding comparison would also match spellings
-    /// (`ſam` for `sam`) that `includes` does not.
-    pub fn new(search_term: &str, alias_set: Option<&AliasSet>) -> BlockMatcher {
+    /// (`ſam` for `sam`) that `includes` does not. Fails only for a name too long to compile.
+    pub fn new(search_term: &str, alias_set: Option<&AliasSet>) -> Result<BlockMatcher, ToolError> {
         let term = search_term.to_lowercase();
         let other_names = alias_set
             .map(|set| set.members.iter().map(|member| member.name.as_str()).filter(|name| *name != term).collect::<Vec<_>>())
             .unwrap_or_default()
             .into_iter()
-            .map(|name| name.chars().map(fold).collect())
-            .collect();
+            .map(|name| {
+                RegexBuilder::new(&regex::escape(name))
+                    .case_insensitive(true)
+                    .build()
+                    .map_err(|_| ToolError::Failed("A name of the page is too long to search for".to_owned()))
+            })
+            .collect::<Result<_, _>>()?;
         let page_ids = alias_set.map(|set| set.members.iter().map(|member| member.id).collect()).unwrap_or_default();
-        BlockMatcher { term, other_names, page_ids }
+        Ok(BlockMatcher { term, other_names, page_ids })
     }
 
     /// Whether a block matches: its content holds the term or, as a whole word, another name of
@@ -59,52 +66,32 @@ impl BlockMatcher {
     /// `(?<![\p{L}\p{N}])(?:name|name...)(?![\p{L}\p{N}])` with the `iu` flags, as a test: some name
     /// of the group stands in the text with no letter or digit on either side.
     fn has_other_name_as_word(&self, content: &str) -> bool {
-        if self.other_names.is_empty() {
-            return false;
-        }
-        let chars: Vec<char> = content.chars().collect();
-        // a match may start at any position of the text, including the end, which an empty name fits
-        (0..=chars.len()).any(|start| {
-            let after_word_edge = start == 0 || !is_letter_or_number(chars[start - 1]);
-            after_word_edge
-                && self.other_names.iter().any(|name| {
-                    let end = start + name.len();
-                    end <= chars.len()
-                        && chars[start..end].iter().zip(name).all(|(&c, &folded)| fold(c) == folded)
-                        && (end == chars.len() || !is_letter_or_number(chars[end]))
-                })
-        })
+        self.other_names.iter().any(|name| stands_alone_in(name, content))
     }
+}
+
+/// Whether `name` matches somewhere in `text` with no letter or number on either side. The regular
+/// expression has no lookaround, so each match is checked here, and the search moves on one character
+/// from where a match began, which finds a match that overlaps one that failed (`ab-a` in `ab-ab-a`).
+fn stands_alone_in(name: &Regex, text: &str) -> bool {
+    let mut from = 0;
+    while let Some(found) = name.find_at(text, from) {
+        let before_ok = text[..found.start()].chars().next_back().is_none_or(|c| !is_letter_or_number(c));
+        let after_ok = text[found.end()..].chars().next().is_none_or(|c| !is_letter_or_number(c));
+        if before_ok && after_ok {
+            return true;
+        }
+        // an empty name matches at the end of the text too, where the search stops
+        let Some(next) = text[found.start()..].chars().next() else { return false };
+        from = found.start() + next.len_utf8();
+    }
+    false
 }
 
 /// `\p{L}` or `\p{N}`: a letter or a number in any script.
 fn is_letter_or_number(c: char) -> bool {
     let category = CodePointMapData::<GeneralCategory>::new().get(c);
     GeneralCategoryGroup::Letter.contains(category) || GeneralCategoryGroup::Number.contains(category)
-}
-
-// PARITY(#299): matches the group's other names with a case-insensitive Unicode regular expression, whose
-// case folding is approximated here by upper-then-lower case of a single character, and three listed
-// exceptions — drop if Rust becomes the only server.
-/// A character as the `iu` flags of a JavaScript regular expression compare it: by simple case
-/// folding, so `ſ` and `s` are one. Folded as lowercase of uppercase when each is one character; a
-/// character whose case change is longer (`ß`, `İ`) or that has no simple fold (`ı`) stays as it is.
-fn fold(c: char) -> char {
-    match c {
-        '\u{131}' => return c, // dotless i has only a Turkic fold
-        // simple folds whose uppercase is several characters, so the rule below would leave them alone
-        '\u{fb05}' => return '\u{fb06}',
-        '\u{1fd3}' => return '\u{390}',
-        '\u{1fe3}' => return '\u{3b0}',
-        _ => {}
-    }
-    let mut upper = c.to_uppercase();
-    let (Some(u), None) = (upper.next(), upper.next()) else { return c };
-    let mut lower = u.to_lowercase();
-    match (lower.next(), lower.next()) {
-        (Some(l), None) => l,
-        _ => c,
-    }
 }
 
 #[cfg(test)]
@@ -126,7 +113,7 @@ mod tests {
 
     #[test]
     fn a_plain_term_matches_its_text_in_any_case_and_inside_a_word() {
-        let matcher = BlockMatcher::new("Atlas", None);
+        let matcher = BlockMatcher::new("Atlas", None).unwrap();
         assert!(matcher.matches(&block("Kickoff for PROJECT ATLAS today")));
         assert!(matcher.matches(&block("the atlases")));
         assert!(!matcher.matches(&block("nothing here")));
@@ -136,11 +123,11 @@ mod tests {
     #[test]
     fn another_name_of_the_group_matches_only_as_a_whole_word() {
         let group = set(&[(1, "ai"), (2, "artificial intelligence")]);
-        let matcher = BlockMatcher::new("ai", Some(&group));
+        let matcher = BlockMatcher::new("ai", Some(&group)).unwrap();
         // the term itself matches inside a word, as `includes` does
         assert!(matcher.matches(&block("he said so")));
         // another name must stand alone
-        let matcher = BlockMatcher::new("artificial intelligence", Some(&group));
+        let matcher = BlockMatcher::new("artificial intelligence", Some(&group)).unwrap();
         assert!(matcher.matches(&block("notes on AI, mostly")));
         assert!(!matcher.matches(&block("he said so")));
         assert!(!matcher.matches(&block("domain driven")));
@@ -154,7 +141,7 @@ mod tests {
     #[test]
     fn a_block_that_references_a_page_of_the_group_matches_whatever_it_says() {
         let group = set(&[(1, "atlas"), (2, "project atlas")]);
-        let matcher = BlockMatcher::new("atlas", Some(&group));
+        let matcher = BlockMatcher::new("atlas", Some(&group)).unwrap();
         assert!(matcher.matches(&json!({"id": 1, "content": "unrelated", "refs": [{"id": 9}, {"id": 2}]})));
         assert!(!matcher.matches(&json!({"id": 1, "content": "unrelated", "refs": [{"id": 9}, {}]})));
         assert!(!matcher.matches(&json!({"id": 1, "content": "unrelated"})));
@@ -163,17 +150,43 @@ mod tests {
     #[test]
     fn names_are_compared_by_simple_case_folding_not_by_lowercase_alone() {
         // `ſ` (long s) folds to `s` under the `iu` flags
-        let group = set(&[(1, "other"), (2, "sam")]);
-        let matcher = BlockMatcher::new("other", Some(&group));
-        assert!(matcher.matches(&block("call \u{17f}am now")));
-        assert_eq!(fold('\u{131}'), '\u{131}');
-        assert_eq!(fold('\u{df}'), '\u{df}');
-        assert_eq!(fold('K'), 'k');
-        assert_eq!(fold('\u{3c2}'), '\u{3c3}');
-        // the three whose uppercase is longer than one character but which fold (CaseFolding.txt, S)
-        assert_eq!((fold('\u{fb05}'), fold('\u{fb06}')), ('\u{fb06}', '\u{fb06}'));
-        assert_eq!((fold('\u{1fd3}'), fold('\u{390}')), ('\u{390}', '\u{390}'));
-        assert_eq!((fold('\u{1fe3}'), fold('\u{3b0}')), ('\u{3b0}', '\u{3b0}'));
+        let stands = |name: &str, text: &str| {
+            let group = set(&[(1, "other"), (2, name)]);
+            BlockMatcher::new("other", Some(&group)).unwrap().matches(&block(text))
+        };
+        assert!(stands("sam", "call \u{17f}am now"));
+        assert!(stands("sam", "call SAM now"));
+        // the Kelvin sign, final sigma and the two ligatures and two accented iotas whose uppercase is longer
+        assert!(stands("k", "a \u{212a} b"));
+        assert!(stands("\u{3c3}", "\u{3c2}"));
+        assert!(stands("\u{fb05}", "\u{fb06}"));
+        assert!(stands("\u{fb06}", "\u{fb05}"));
+        assert!(stands("\u{1fd3}", "\u{390}"));
+        assert!(stands("\u{1fe3}", "\u{3b0}"));
+        // no simple fold: dotless i (Turkic only), sharp s and dotted capital I
+        assert!(!stands("i", "\u{131}"));
+        assert!(!stands("\u{df}", "ss"));
+    }
+
+    #[test]
+    fn a_name_that_overlaps_a_failed_match_is_still_found() {
+        // `ab-a` first matches at 0, followed by a letter, then again at 3, after a hyphen and at the end
+        let group = set(&[(1, "other"), (2, "ab-a")]);
+        let matcher = BlockMatcher::new("other", Some(&group)).unwrap();
+        assert!(matcher.matches(&block("ab-ab-a")));
+        assert!(!matcher.matches(&block("ab-ab")));
+        // a name with a regular-expression metacharacter is a literal
+        let group = set(&[(1, "other"), (2, "c++")]);
+        let matcher = BlockMatcher::new("other", Some(&group)).unwrap();
+        assert!(matcher.matches(&block("learn c++ today")));
+        assert!(!matcher.matches(&block("learn cc today")));
+    }
+
+    #[test]
+    fn a_name_too_long_to_compile_is_an_error_not_a_miss() {
+        let long = "k".repeat(80_000);
+        let group = set(&[(1, "other"), (2, &long)]);
+        assert!(matches!(BlockMatcher::new("other", Some(&group)), Err(ToolError::Failed(_))));
     }
 
     #[test]
