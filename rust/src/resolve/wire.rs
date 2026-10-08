@@ -77,34 +77,6 @@ impl Reader {
             has_alias_links: alias_links > 0,
         })
     }
-
-    /// `pageLikeSchema`, checked and not kept: a page of either spelling, every field optional.
-    /// The Editor API's fields (`originalName`, `journalDay`, `createdAt`, `updatedAt`) sit
-    /// between the shared fields and the pulled ones in the schema, so a mismatch is reported in
-    /// that order.
-    pub(crate) fn page_like_check(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.id(map, "id")?;
-        self.string(map, "name")?;
-        self.string(map, "uuid")?;
-        self.boolean(map, "journal?")?;
-        self.boolean(map, "journal")?;
-        self.optional_entity_ref(map, "file")?;
-        self.entity_refs(map, "alias")?;
-        self.optional_entity_ref(map, "namespace")?;
-        self.map_field(map, "properties")?;
-        self.string(map, "originalName")?;
-        self.number(map, "journalDay")?;
-        self.number(map, "createdAt")?;
-        self.number(map, "updatedAt")?;
-        self.id(map, "db/id")?;
-        self.string(map, "original-name")?;
-        self.number(map, "journal-day")?;
-        self.number(map, "created-at")?;
-        self.number(map, "updated-at")?;
-        self.map_field(map, "properties-text-values")?;
-        Ok(())
-    }
 }
 
 /// One row of the resolver's first query: the page and the route that found it.

@@ -117,6 +117,34 @@ impl Reader {
         Ok(())
     }
 
+    /// `pageLikeSchema`, checked and not kept: a page of either spelling, every field optional.
+    /// The Editor API's fields (`originalName`, `journalDay`, `createdAt`, `updatedAt`) sit
+    /// between the shared fields and the pulled ones in the schema, so a mismatch is reported in
+    /// that order.
+    pub(crate) fn check_page_like(&mut self, value: Option<&Value>) -> Parsed<()> {
+        let map = self.object(value)?;
+        self.id(map, "id")?;
+        self.string(map, "name")?;
+        self.string(map, "uuid")?;
+        self.boolean(map, "journal?")?;
+        self.boolean(map, "journal")?;
+        self.optional_entity_ref(map, "file")?;
+        self.entity_refs(map, "alias")?;
+        self.optional_entity_ref(map, "namespace")?;
+        self.map_field(map, "properties")?;
+        self.string(map, "originalName")?;
+        self.number(map, "journalDay")?;
+        self.number(map, "createdAt")?;
+        self.number(map, "updatedAt")?;
+        self.id(map, "db/id")?;
+        self.string(map, "original-name")?;
+        self.number(map, "journal-day")?;
+        self.number(map, "created-at")?;
+        self.number(map, "updated-at")?;
+        self.map_field(map, "properties-text-values")?;
+        Ok(())
+    }
+
     /// `nestedPageSchema`: the page nested in a block, or one of its refs. Only what the readers
     /// take from such a page is checked, since a block carries one page and several refs.
     pub(crate) fn check_nested_page(&mut self, value: Option<&Value>) -> Parsed<()> {
