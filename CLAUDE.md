@@ -100,7 +100,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 ### Ready items go to subagents
 - **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, spawns a separate reviewer subagent for each PR it opens (see Code review) and updates the board.
 - Pick unblocked items from *Ready* (no open blocked-by issue, see "Plans live in issues"). Run in parallel only items with no blocked-by edge between them and no file overlap.
-- Each subagent works in its own git worktree branched from `origin/main`.
+- Each subagent works in its own git worktree branched from the PR's base (`origin/feature/rust-spike` while the Rust-only work lives there, `origin/main` after it merges).
 - Run subagents in parallel only when their files don't overlap. Give each its own tool directory (`rust/src/tools/<tool>/`, with its queries in its own `queries.rs`) and its own new test file.
 - Subagents open PRs and don't merge. They stage files by explicit path and never commit `node_modules`, `dist`, local settings or draft docs.
 
