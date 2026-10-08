@@ -401,7 +401,7 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
     // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
     let rows = wire::block_rows(answer)?.unwrap_or_default();
     let mut groups = group_by_source_page(rows);
-    // PARITY(#299): orders names with `localeCompare`, approximated by `js::locale_compare` — drop if Rust
+    // PARITY(#299): orders names with `localeCompare`, as `js::locale_compare` orders them (ICU root collation) — drop if Rust
     // becomes the only server.
     // `String(a.page.name).localeCompare(String(b.page.name)) || a.page.id - b.page.id`
     groups.sort_by(|a, b| {

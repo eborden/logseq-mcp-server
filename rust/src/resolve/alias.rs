@@ -70,7 +70,7 @@ impl AliasSet {
         self.members.iter().map(|member| PageId::new(member.id).map_err(ToolError::from)).collect()
     }
 
-    // PARITY(#299): orders names with `localeCompare('en')`, approximated by `js::locale_compare`, then by
+    // PARITY(#299): orders names with `localeCompare('en')`, as `js::locale_compare` orders them (ICU root collation), then by
     // code unit — drop if Rust becomes the only server.
     /// `resolvedAliases`: the original-case names the tool covered, sorted so asking by either
     /// name of the group reports the same list. `None` when the page has no aliases, so default
