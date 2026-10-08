@@ -1,9 +1,9 @@
 name: CI
 
 # The Rust server is the only server (ADR-0025, #349, #356), so the Rust job is the main check. Node stays for the
-# tooling the Rust server is held to: the parity harness (scripts/parity), the repo's guard tests (tests/guards,
-# tests/rust-guards) and the type-check of both. The integration suites (tests/integration) need a LogSeq desktop
-# app serving the fixture graph, which CI doesn't have; they run locally (tests/integration/setup.md).
+# tooling around it: the parity recorder (scripts/parity; the parity cases run in cargo test, #375), the repo's guard
+# tests (tests/guards, tests/rust-guards) and the type-check of both. The integration suites (tests/integration) need a LogSeq
+# desktop app serving the fixture graph, which CI doesn't have; they run locally (tests/integration/setup.md).
 #
 # It builds and tests only; it never publishes (ADR-0017 covers npm, and a binary release needs its own ADR first).
 on:
@@ -55,8 +55,8 @@ jobs:
       - name: Guard tests
         run: npx vitest run tests/guards
 
-  # The golden files, scripts/parity/expected, are the tool contract (BR-0004, ADR-0031): the parity step holds the
-  # Rust server to them, so a change to one is a change to what the tools promise. A pull request that changes any of
+  # The golden files, scripts/parity/expected, are the tool contract (BR-0004, ADR-0031): the parity test (cargo test,
+  # rust/tests/parity.rs) holds the Rust server to them, so a change to one is a change to what the tools promise. A pull request that changes any of
   # them fails here unless it carries the `golden-change` label, which goes on only after the maintainer's explicit OK,
   # recorded on the PR (CLAUDE.md, "Verification before merge"). `--record-from-rust` writes a file only when a result
   # changed in meaning, so a cosmetic re-record doesn't trip this.
@@ -136,40 +136,31 @@ jobs:
       - name: Unit tests
         run: cargo test --locked
 
-      # The Node golden-result harness below checks what the cargo test above checks (#371), with its own comparator
-      # (a second reading of the rules, until the ADR and business-rule enforcement lines that cite it move to the
-      # cargo test, which needs the maintainer's OK), and it is the recorder (--record-from-rust).
+      # The golden-result comparison (#124) is the cargo test above (#371, #375): rust/tests/parity.rs holds the binary
+      # just built to the results recorded from the TypeScript server before it was retired (scripts/parity/expected):
+      # each tool result (JSON by deep equality and minified), prompt and resource, the LogSeq calls and `tools/list`
+      # by meaning (ADR-0031), the closest names of a missing page by the rules of ADR-0032, and parity_self_check.rs
+      # shows it fails on every perturbed case. It starts its own stub LogSeq on a random local port, so nothing here
+      # contacts a LogSeq. The Node harness (scripts/parity.ts) is no longer a CI step; it stays as the recorder
+      # (--record-from-rust), and its comparator is held in step with the cargo one by tests/guards/comparator-table.test.ts.
       #
-      # The golden-result harness (#124) holds the binary just built to the results recorded from the TypeScript
-      # server before it was retired (scripts/parity/expected): each tool result (JSON by deep equality and minified), prompt and resource,
-      # the LogSeq calls and `tools/list` by meaning (ADR-0031), the closest names of a missing page by the rules of
-      # ADR-0032. It starts its own stub LogSeq on a random local port, so nothing here contacts a LogSeq.
+      # Node is for the guard tests that start the binary, and for nothing else here.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install the harness's dependencies
+      - name: Install the guard tests' dependencies
         working-directory: .
         run: npm ci
 
-      - name: Parity with the recorded results
-        working-directory: .
-        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts "$PWD/rust/target/debug/logseq-mcp-server"
-
-      # Passes as committed, fails on every perturbed case and on every wrong list of closest names: a harness that
-      # can't fail proves nothing.
-      - name: Parity self-check
-        working-directory: .
-        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --self-check "$PWD/rust/target/debug/logseq-mcp-server"
-
-      # The harness's own end-to-end tests and the server-version check, which start the binary just built.
+      # The recorder's own end-to-end tests and the server-version check, which start the binary just built.
       - name: Guard tests that start the server
         working-directory: .
         run: npx vitest run tests/rust-guards
 
-      # The slowest step (thin LTO, one codegen unit). Only the parity step below uses its output:
+      # The slowest step (thin LTO, one codegen unit). Only the parity test below uses its output:
       # the startup and footprint measurements (#126) build the release binary locally. It runs on
       # a push to main and by hand. Until then the release profile is checked locally:
       # `cd rust && cargo build --release --locked`.
@@ -178,8 +169,9 @@ jobs:
         run: cargo build --release --locked
 
       # The parity cases through cargo test against the release profile (#371): the same comparator as the debug run,
-      # on the optimised build. A release build ignores LOGSEQ_MCP_NOW, so the cases that read today's date leave this
-      # run (parity_support/cases.rs, clock-cases.json), as --real-clock leaves them out of the Node run below.
+      # on the optimised build (thin LTO, one codegen unit, stripped), which proves it answers the same. A release
+      # build ignores LOGSEQ_MCP_NOW (rust/src/env.rs), so the cases that read today's date leave this run
+      # (parity_support/cases.rs, clock-cases.json); the debug run above still holds the server to every one.
       - name: Parity test (release build)
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: cargo test --release --locked --test parity --test parity_self_check
@@ -188,7 +180,7 @@ jobs:
       # build, such as the one holding that it ignores LOGSEQ_MCP_NOW (`#[cfg(not(debug_assertions))]` in
       # rust/src/env.rs), and the date logic as the shipped profile compiles it. Nothing runs these in a pull
       # request, so they run with the release build. `--lib` skips the integration tests, which spawn the
-      # binary and are covered by the debug run and the parity step. Turning LTO off and using 16 codegen
+      # binary and are covered by the debug run and the parity test. Turning LTO off and using 16 codegen
       # units keeps this to a few minutes: the full release profile (thin LTO, one codegen unit) is what makes
       # the build above slow, and neither setting changes what debug_assertions does. It rebuilds the
       # dependencies once, since the profile differs from the one the release build used.
@@ -198,13 +190,3 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: 'off'
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
         run: cargo test --release --locked --lib
-
-      # The same harness against the release binary (#359): the debug build above proves the logic,
-      # this proves the optimised build (thin LTO, one codegen unit, stripped) answers the same. It
-      # needs the release build, so it runs under the same condition. A release build ignores
-      # LOGSEQ_MCP_NOW (rust/src/env.rs), so --real-clock leaves out the cases that read today's date
-      # (scripts/parity/clock-cases.ts); the debug run above still holds the server to every one.
-      - name: Parity with the recorded results (release binary)
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        working-directory: .
-        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --real-clock "$PWD/rust/target/release/logseq-mcp-server"
