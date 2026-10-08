@@ -54,21 +54,50 @@ fn every_parity_case_matches_its_golden_result() {
 
 // ---- the comparator can fail: each rule it applies is shown to reject a wrong answer
 
+/// The golden result with every JSON text of its `content` changed in one value and written back compactly, so the
+/// text is still JSON and the comparison goes through deep equality; `None` when no text of it is JSON.
+fn with_json_texts_perturbed(expected: &Value) -> Option<Value> {
+    let mut wrong = expected.clone();
+    let mut any = false;
+    for block in wrong.get_mut("content")?.as_array_mut()? {
+        let Some(text) = block.get("text").and_then(Value::as_str) else { continue };
+        let Ok(parsed) = serde_json::from_str::<Value>(text) else { continue };
+        if !(parsed.is_object() || parsed.is_array()) {
+            continue;
+        }
+        block["text"] = Value::String(serde_json::to_string(&perturb_value(&parsed)).unwrap());
+        any = true;
+    }
+    any.then_some(wrong)
+}
+
 #[test]
 fn the_comparator_fails_on_every_perturbed_golden_result() {
     let cases = cases_for_this_build();
     let mut not_caught = Vec::new();
+    let mut by_deep_equality = 0;
     for case in &cases {
         let candidates = candidates_of(case);
-        // The answer the server would give if the golden result were different in every string it holds
-        let wrong = perturb_value(&case.expected);
-        if compare_results(&case.expected, &wrong, &candidates).is_empty() {
+        // The answer the server would give if the golden result were different in one value of each JSON text it
+        // holds; a result with no JSON text (markdown, a prompt, a resource) in every string it holds
+        let json = with_json_texts_perturbed(&case.expected);
+        let wrong = json.clone().unwrap_or_else(|| perturb_value(&case.expected));
+        let failures = compare_results(&case.expected, &wrong, &candidates);
+        if failures.is_empty() {
             not_caught.push(case.name.as_str());
+        }
+        // The perturbed text is JSON that is as minified as the original, so it is deep equality that rejects it
+        if json.is_some() {
+            if failures.iter().all(|f| f.contains("not minified")) {
+                not_caught.push(case.name.as_str());
+            }
+            by_deep_equality += 1;
         }
         // And the same result is a pass
         assert_eq!(compare_results(&case.expected, &case.expected, &candidates), Vec::<String>::new(), "{}", case.name);
     }
-    assert!(not_caught.is_empty(), "a perturbed golden result passed for: {not_caught:?}");
+    assert!(not_caught.is_empty(), "a perturbed golden result passed, or was rejected for something other than its value: {not_caught:?}");
+    assert!(by_deep_equality > 500, "the JSON results are most of the cases; only {by_deep_equality} were perturbed as JSON");
 }
 
 #[test]
