@@ -7,14 +7,15 @@
 use std::sync::{Arc, LazyLock};
 
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListToolsResult, PaginatedRequestParams,
-    ServerCapabilities, ServerConfig,
+    CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListResourceTemplatesResult, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::Value;
 
 use crate::client::LogseqClient;
+use crate::resources;
 use crate::tool::{error_result, into_result};
 use crate::tools;
 
@@ -53,7 +54,7 @@ impl LogseqServer {
 
 impl ServerHandler for LogseqServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
             .with_server_info(Implementation::new(SERVER_NAME, SERVER_VERSION.as_str()))
             .with_instructions(SERVER_INSTRUCTIONS)
     }
@@ -64,6 +65,30 @@ impl ServerHandler for LogseqServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         Ok(ListToolsResult::with_all_items(tools::list()))
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        Ok(ListResourcesResult::with_all_items(resources::list()))
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        Ok(ListResourceTemplatesResult::with_all_items(resources::templates()))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        Ok(resources::read(&self.client, &request.uri).await?.into())
     }
 
     async fn call_tool(
