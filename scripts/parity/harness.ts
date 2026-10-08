@@ -324,6 +324,9 @@ export function compareResultBySuggestionRules(expected: ToolResult, actual: Too
     const got = readMessage(actual, site);
     // A result that holds no message there is a difference compareResult reports
     if (got === undefined) continue;
+    // A block that is not the minified serialization of its own message (pretty-printed, escaped another way) is a
+    // byte difference (ADR-0009, rule 1): leave it unmasked so compareResult reports it
+    if (site.kind === 'tool' && actual.content?.[site.index]?.text !== JSON.stringify({ error: got })) continue;
     const want = readMessage(expected, site)!;
     for (const f of checkSuggestionRules(want, got, candidates)) failures.push(`${describeSite(site)} breaks ${f}`);
     masked = withMessage(masked, site, want);
