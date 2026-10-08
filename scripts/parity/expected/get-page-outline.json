@@ -9,8 +9,7 @@
         "type": "text",
         "text": "{\"meta\":{\"tips\":[\"To read a block and its children: logseq_get_block {\\\"block_uuid\\\":\\\"00000000-0000-4000-8000-000000000101\\\",\\\"include_children\\\":true}.\"]}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "alias": {
     "content": [
@@ -22,8 +21,7 @@
         "type": "text",
         "text": "{\"meta\":{\"tips\":[\"To read a block and its children: logseq_get_block {\\\"block_uuid\\\":\\\"00000000-0000-4000-8000-000000000101\\\",\\\"include_children\\\":true}.\"]}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "ISO date of a journal": {
     "content": [
@@ -35,8 +33,7 @@
         "type": "text",
         "text": "{\"meta\":{\"tips\":[\"To read a block and its children: logseq_get_block {\\\"block_uuid\\\":\\\"00000000-0000-4000-8000-000000000301\\\",\\\"include_children\\\":true}.\"]}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "page with no blocks": {
     "content": [
@@ -44,8 +41,7 @@
         "type": "text",
         "text": "{\"page\":\"Bob\",\"blocks\":[],\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":0}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "null rows from the outline query": {
     "content": [
@@ -53,8 +49,7 @@
         "type": "text",
         "text": "{\"page\":\"Bob\",\"blocks\":[],\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":0}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "namespace leaf": {
     "content": [
@@ -66,8 +61,7 @@
         "type": "text",
         "text": "{\"meta\":{\"tips\":[\"To read a block and its children: logseq_get_block {\\\"block_uuid\\\":\\\"00000000-0000-4000-8000-000000000601\\\",\\\"include_children\\\":true}.\"]}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "ambiguous alias": {
     "content": [
@@ -75,8 +69,7 @@
         "type": "text",
         "text": "{\"ambiguous\":true,\"pageName\":\"al\",\"candidates\":[{\"name\":\"alice\",\"originalName\":\"Alice\",\"matchedBy\":\"alias\",\"reason\":\"declares alias \\\"al\\\"\"},{\"name\":\"alice notes\",\"originalName\":\"Alice Notes\",\"matchedBy\":\"alias\",\"reason\":\"declares alias \\\"al\\\"\"}],\"totalCandidates\":2,\"hasMore\":false,\"warnings\":[{\"code\":\"ambiguous_page\",\"message\":\"\\\"al\\\" matches 2 pages: \\\"Alice\\\" (declares alias \\\"al\\\"); \\\"Alice Notes\\\" (declares alias \\\"al\\\"). Repeat the call with the exact name of one of them.\"}],\"totals\":{\"candidates\":2}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "missing page with suggestions": {
     "content": [
@@ -97,8 +90,7 @@
         "type": "text",
         "text": "{\"meta\":{\"tips\":[\"To read a block and its children: logseq_get_block {\\\"block_uuid\\\":\\\"00000000-0000-4000-8000-000000001000\\\",\\\"include_children\\\":true}.\"]}}"
       }
-    ],
-    "isError": false
+    ]
   },
   "bad argument": {
     "content": [

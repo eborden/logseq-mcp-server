@@ -53,19 +53,33 @@ describe('compareCalls', () => {
 });
 
 describe('compareResult', () => {
-  const result: ToolResult = { content: [{ type: 'text', text: '{"page":"Alice"}' }], isError: false };
+  const result: ToolResult = { content: [{ type: 'text', text: '{"page":"Alice"}' }] };
 
   it('compares text byte for byte', () => {
     expect(compareResult(result, structuredClone(result))).toEqual([]);
     // Same JSON value, different bytes: still a difference (ADR-0009)
-    expect(compareResult(result, { ...result, content: [{ type: 'text', text: '{"page": "Alice"}' }] })).toEqual([
+    expect(compareResult(result, { content: [{ type: 'text', text: '{"page": "Alice"}' }] })).toEqual([
       expect.stringContaining('differs at character 8')
     ]);
   });
 
-  it('compares the error flag and the number of content blocks', () => {
-    expect(compareResult(result, { ...result, isError: true })).toHaveLength(1);
-    expect(compareResult(result, { ...result, content: [...result.content, { type: 'text', text: '{}' }] })).toHaveLength(1);
+  it('tells an absent isError from isError: false, and compares the number of content blocks', () => {
+    expect(compareResult(result, { ...result, isError: false })).toEqual(['the result has unexpected key(s) isError']);
+    expect(compareResult({ ...result, isError: false }, { ...result, isError: true })).toHaveLength(1);
+    expect(compareResult(result, { content: [...result.content!, { type: 'text', text: '{}' }] })).toHaveLength(1);
+  });
+
+  it('fails on any key the TypeScript server did not send', () => {
+    expect(compareResult(result, { ...result, structuredContent: { page: 'Alice' } })).toEqual([
+      'the result has unexpected key(s) structuredContent'
+    ]);
+    expect(compareResult(result, { ...result, _meta: {} })).toHaveLength(1);
+    expect(compareResult(result, { content: [{ ...result.content![0], annotations: { priority: 1 } }] })).toEqual([
+      'content[0] has unexpected key(s) annotations'
+    ]);
+    expect(compareResult({ ...result, _meta: { a: 1 } }, { ...result, _meta: { a: 2 } })).toEqual([
+      '_meta: expected {"a":1}, got {"a":2}'
+    ]);
   });
 });
 

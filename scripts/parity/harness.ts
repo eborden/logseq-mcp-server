@@ -28,11 +28,12 @@ export interface ParityCase {
   steps: CannedCall[][];
 }
 
-/** A tool result as the harness compares it: each content block's type and text, and the error flag. */
-export interface ToolResult {
-  content: Array<{ type: string; text?: string }>;
-  isError: boolean;
-}
+/**
+ * A tool result as the client received it, minus the JSON-RPC framing: every key the server sent
+ * (`content`, `isError`, `structuredContent`, `_meta`, ...) and every field of every content block.
+ * An absent `isError` and `isError: false` are different results.
+ */
+export type ToolResult = { content?: Array<Record<string, unknown>> } & Record<string, unknown>;
 
 /**
  * The command that starts the server under test. It must speak MCP over stdio and read its config
@@ -141,16 +142,9 @@ export function compareCalls(steps: readonly CannedCall[][], actual: readonly Lo
   return failures;
 }
 
-/** The comparable part of an MCP tool result. */
+/** A tool result as plain JSON data, every key kept. */
 export function toToolResult(result: Record<string, unknown>): ToolResult {
-  const content: Array<{ type?: unknown; text?: unknown }> = Array.isArray(result.content) ? result.content : [];
-  return {
-    content: content.map(block => ({
-      type: String(block.type),
-      ...(typeof block.text === 'string' ? { text: block.text } : {})
-    })),
-    isError: result.isError === true
-  };
+  return JSON.parse(JSON.stringify(result)) as ToolResult;
 }
 
 function firstCharDifference(a: string, b: string): number {
@@ -159,23 +153,60 @@ function firstCharDifference(a: string, b: string): number {
   return i;
 }
 
-/** Compare a result with the expected one, block by block, each text byte for byte. */
+/** JSON with object keys sorted, to compare values whose key order doesn't matter. */
+function stable(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)))
+      : v
+  );
+}
+
+/** Keys one object has and the other lacks, as failure lines. */
+function keyDifferences(where: string, expected: object, actual: object): string[] {
+  const want = new Set(Object.keys(expected));
+  const got = new Set(Object.keys(actual));
+  const missing = [...want].filter(k => !got.has(k)).sort();
+  const unexpected = [...got].filter(k => !want.has(k)).sort();
+  return [
+    ...(missing.length ? [`${where} lacks key(s) ${missing.join(', ')}`] : []),
+    ...(unexpected.length ? [`${where} has unexpected key(s) ${unexpected.join(', ')}`] : [])
+  ];
+}
+
+/**
+ * Compare a result with the expected one: the same top-level keys, the same content blocks with
+ * the same fields, each `text` byte for byte (ADR-0009), and every other value equal.
+ */
 export function compareResult(expected: ToolResult, actual: ToolResult): string[] {
-  const failures: string[] = [];
-  if (expected.isError !== actual.isError) failures.push(`isError: expected ${expected.isError}, got ${actual.isError}`);
-  if (expected.content.length !== actual.content.length) {
-    failures.push(`expected ${expected.content.length} content block(s), got ${actual.content.length}`);
+  const failures = keyDifferences('the result', expected, actual);
+  for (const key of Object.keys(expected)) {
+    if (key === 'content' || !(key in actual)) continue;
+    if (stable(expected[key]) !== stable(actual[key])) {
+      failures.push(`${key}: expected ${stable(expected[key])}, got ${stable(actual[key])}`);
+    }
   }
-  const n = Math.min(expected.content.length, actual.content.length);
-  for (let i = 0; i < n; i++) {
-    const want = expected.content[i];
-    const got = actual.content[i];
-    if (want.type !== got.type) failures.push(`content[${i}].type: expected ${want.type}, got ${got.type}`);
-    if (want.text !== got.text) {
-      const [a, b] = [want.text ?? '', got.text ?? ''];
-      const at = firstCharDifference(a, b);
-      const around = (s: string) => JSON.stringify(s.slice(Math.max(0, at - 40), at + 40));
-      failures.push(`content[${i}].text differs at character ${at}:\n  expected: ${around(a)}\n  actual:   ${around(b)}`);
+  if (!('content' in expected && 'content' in actual)) return failures;
+  const wantBlocks = expected.content ?? [];
+  const gotBlocks = actual.content ?? [];
+  if (wantBlocks.length !== gotBlocks.length) {
+    failures.push(`expected ${wantBlocks.length} content block(s), got ${gotBlocks.length}`);
+  }
+  for (let i = 0; i < Math.min(wantBlocks.length, gotBlocks.length); i++) {
+    const want = wantBlocks[i];
+    const got = gotBlocks[i];
+    failures.push(...keyDifferences(`content[${i}]`, want, got));
+    for (const key of Object.keys(want)) {
+      if (!(key in got)) continue;
+      if (key === 'text' && typeof want.text === 'string' && typeof got.text === 'string') {
+        if (want.text !== got.text) {
+          const at = firstCharDifference(want.text, got.text);
+          const around = (t: string) => JSON.stringify(t.slice(Math.max(0, at - 40), at + 40));
+          failures.push(`content[${i}].text differs at character ${at}:\n  expected: ${around(want.text)}\n  actual:   ${around(got.text)}`);
+        }
+      } else if (stable(want[key]) !== stable(got[key])) {
+        failures.push(`content[${i}].${key}: expected ${stable(want[key])}, got ${stable(got[key])}`);
+      }
     }
   }
   return failures;
