@@ -276,4 +276,20 @@ describe('toInputSchema', () => {
   it('accepts a schema with no fields', () => {
     expect(toInputSchema(z.object({}))).toEqual({ type: 'object', properties: {} });
   });
+
+  it("advertises an integer without zod's safe-integer range, but keeps bounds the schema sets (#293)", () => {
+    const counts = z.object({
+      plain: z.int(),
+      bounded: z.int().min(1).max(10),
+      floored: z.int().min(0),
+      fraction: z.number().min(-1),
+    });
+
+    expect(toInputSchema(counts).properties).toEqual({
+      plain: { type: 'integer' },
+      bounded: { type: 'integer', minimum: 1, maximum: 10 },
+      floored: { type: 'integer', minimum: 0 },
+      fraction: { type: 'number', minimum: -1 },
+    });
+  });
 });

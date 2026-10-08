@@ -36,13 +36,24 @@ export interface ToolInputSchema {
  * `false` would make validating clients reject the unadvertised aliases (`name`,
  * `page`, `uuid`) that `resolveParamAliases` folds. `$schema` is dropped too;
  * tools/list never carried it.
+ *
+ * An integer (`z.int()`, #293) is advertised as `"type": "integer"` alone: zod adds
+ * the safe-integer range as `minimum` and `maximum`, which tells a caller nothing
+ * and costs about 50 characters a parameter. The parser still enforces it.
  */
 export function toInputSchema(schema: z.ZodObject): ToolInputSchema {
-  const { $schema: _dropped, ...rest } = z.toJSONSchema(schema, { io: 'input' });
+  const { $schema: _dropped, ...rest } = z.toJSONSchema(schema, { io: 'input', override: dropSafeIntegerRange });
   if (rest.type !== 'object' || rest.properties === undefined || 'additionalProperties' in rest) {
     throw new Error('toInputSchema needs a zod object schema that ignores unknown fields');
   }
   return { ...rest, type: 'object', properties: rest.properties };
+}
+
+/** Remove the bounds zod gives every integer; any other `minimum` or `maximum` stays. */
+function dropSafeIntegerRange({ jsonSchema }: { jsonSchema: Record<string, unknown> }): void {
+  if (jsonSchema.type !== 'integer') return;
+  if (jsonSchema.minimum === Number.MIN_SAFE_INTEGER) delete jsonSchema.minimum;
+  if (jsonSchema.maximum === Number.MAX_SAFE_INTEGER) delete jsonSchema.maximum;
 }
 
 /**
