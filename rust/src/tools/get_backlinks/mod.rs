@@ -36,7 +36,8 @@ use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning, large_result_note};
 
 use self::tips::backlink_tips;
-use self::wire::{Backlink, LINKED_REFERENCES_METHOD};
+pub use self::wire::{Backlink, block_rows};
+use self::wire::LINKED_REFERENCES_METHOD;
 
 pub const NAME: &str = "logseq_get_backlinks";
 
@@ -387,8 +388,9 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
 /// `fetchBacklinks`: the linked references of a resolved page. Without aliases this is the Editor
 /// API's own call for `resolved_name`, unchanged. For a page with aliases it is one Datalog query
 /// over the ids of the whole group, shaped like that call's result (camelCase entities, one
-/// `[page, blocks]` tuple per source page).
-async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_set: &AliasSet) -> Result<Option<Vec<Backlink>>, ToolError> {
+/// `[page, blocks]` tuple per source page), the pages in order of name, then id. A caller that ranks
+/// them (`get_backlinks`) loses that order, one that doesn't (`build_context`) keeps it.
+pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_set: &AliasSet) -> Result<Option<Vec<Backlink>>, ToolError> {
     if !alias_set.has_aliases() {
         let answer = client.call_api(LINKED_REFERENCES_METHOD, &[Value::from(resolved_name)]).await?;
         return Ok(wire::linked_references(answer)?);
@@ -398,7 +400,16 @@ async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_set: 
     // PARITY(#299): a `null` answer is read as "no rows", so the page looks like it has no backlinks when
     // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
     let rows = wire::block_rows(answer)?.unwrap_or_default();
-    Ok(Some(group_by_source_page(rows)))
+    let mut groups = group_by_source_page(rows);
+    // PARITY(#299): orders names with `localeCompare`, approximated by `js::locale_compare` — drop if Rust
+    // becomes the only server.
+    // `String(a.page.name).localeCompare(String(b.page.name)) || a.page.id - b.page.id`
+    groups.sort_by(|a, b| {
+        let name = |backlink: &Backlink| backlink.page.get("name").map_or_else(|| "undefined".to_owned(), js_string);
+        let id = |backlink: &Backlink| backlink.page.get("id").and_then(Value::as_f64).unwrap_or(f64::NAN);
+        js::locale_compare(&name(a), &name(b)).then_with(|| id(a).total_cmp(&id(b)))
+    });
+    Ok(Some(groups))
 }
 
 /// `getBacklinksWithMeta`: every page and block that links to `page_name` under any of its names.
