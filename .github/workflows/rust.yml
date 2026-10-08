@@ -16,7 +16,8 @@ on:
       - 'src/__snapshots__/tool-list.test.ts.snap'
       - '.github/workflows/rust.yml'
   # pull_request has no branch filter, so it runs on PRs into feature/rust-spike as well as main.
-  # A manual run is how the release build gets exercised off main (see its step below).
+  # GitHub offers a manual run only for a workflow file on the default branch, so this works once
+  # rust.yml is on main (see the release step below).
   workflow_dispatch:
   push:
     branches: [main, feature/rust-spike]
@@ -93,8 +94,9 @@ jobs:
         run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --tested-tools-only "$PWD/rust/target/debug/logseq-mcp-server"
 
       # The slowest step (thin LTO, one codegen unit), and nothing in CI uses its output: the
-      # startup and footprint measurements (#126) build the release binary locally. It still
-      # runs on a push to main and by hand, so a release-profile build error can't hide.
+      # startup and footprint measurements (#126) build the release binary locally. It runs on a
+      # push to main and by hand, but both only work once this file is on main. Until then the
+      # release profile is checked locally: `cd rust && cargo build --release --locked`.
       - name: Build (release)
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: cargo build --release --locked
