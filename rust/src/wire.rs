@@ -212,8 +212,9 @@ impl Reader {
         for (i, item) in items.iter().enumerate() {
             rows.push(self.at(Part::Index(i), |r| match item {
                 Value::Array(cells) if cells.len() > width => {
-                    // PARITY(#299): zod's wording, which says `<N items` where N is the most allowed (suspected
-                    // TS bug: off by one) — drop if Rust becomes the only server.
+                    // PARITY(#299): zod's wording, which says `<N items` where N is the most allowed (zod's own
+                    // off-by-one, passed through by the TS server, so not a TS bug) — drop if Rust becomes the
+                    // only server.
                     Err(r.issue(format!("Too big: expected array to have <{width} items")))
                 }
                 Value::Array(cells) => read_row(r, cells),
