@@ -549,6 +549,7 @@ name = "logseq-mcp-server"
 version = "0.0.0"
 dependencies = [
  "icu_collator",
+ "icu_normalizer",
  "icu_properties",
  "libc",
  "nucleo-matcher",
