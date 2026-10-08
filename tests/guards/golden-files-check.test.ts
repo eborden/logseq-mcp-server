@@ -9,8 +9,9 @@ import { promisify } from 'util';
 // The golden results are the tool contract: the `expected` result of each case in rust/tests/data/parity/<group>.json,
 // and the recorded tool list rust/tests/data/parity/tool-list.json. CI fails a pull request that changes one unless it
 // carries the `golden-change` label, which the maintainer adds after an explicit OK recorded on the PR (#356, #379). A
-// group file holds the cases beside their goldens, and a change to a case's stub answers is not a change to the
-// contract (ADR-0034 Decision 5), so a group file is compared by its goldens. These guards keep the check in ci.yml, and
+// group file holds the cases beside their goldens. A golden answers a request, so the request is compared with it (a case's
+// name, tool, arguments, resource or prompt request, and result), and a case's stub answers and expected calls are not: a
+// re-recorded call is not a change to the contract (ADR-0034 Decision 5). These guards keep the check in ci.yml, and
 // run its script against a scratch repository, so a reworded step can't quietly stop checking.
 
 const exec = promisify(execFile);
@@ -122,10 +123,34 @@ describe('the golden-files job in ci.yml', () => {
       expect((await run(scratch({ 'README.md': 'changed\n' }), ['golden-change'])).status).toBe(0);
     });
 
-    it('passes a change to a case that is not a change to its golden result, with no label', async () => {
-      // A re-recorded call fixture (ADR-0034 Decision 5): the stub's answer, the query, the arguments
-      const stub = aCase({ steps: [[{ method: 'logseq.Editor.getPage', args: ['alice', { includeChildren: true }], response: { id: 1, extra: true } }]], arguments: { page_name: 'alice' } });
+    it('passes a re-recorded call, which is not a change to a golden result or its request, with no label', async () => {
+      // ADR-0034 Decision 5: the stub's answers and the calls a case lists (its steps)
+      const stub = aCase({ steps: [[{ method: 'logseq.Editor.getPage', args: ['alice', { includeChildren: true }], response: { id: 1, extra: true } }]] });
       expect((await run(scratch({ [GET_PAGE]: group('get-page', [stub, aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]) }), [])).status).toBe(0);
+      expect((await run(scratch({ [GET_PAGE]: group('get-page', [aCase({ steps: [] }), aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]) }), [])).status).toBe(0);
+    });
+
+    it('fails an edited request, which changes what the golden result is a golden of, and names the file', async () => {
+      const bob = aCase({ name: 'bob', arguments: { page_name: 'Bob' } });
+      const edited = [
+        aCase({ arguments: { x: 1 } }),
+        aCase({ arguments: {} }),
+        aCase({ tool: 'logseq_get_block' }),
+        aCase({ readResource: 'logseq://page/alice' }),
+        aCase({ getPrompt: { name: 'weekly_summary' } }),
+        aCase({ listPrompts: true })
+      ];
+      for (const alice of edited) {
+        const { status, out } = await run(scratch({ [GET_PAGE]: group('get-page', [alice, bob]) }), []);
+        expect(status, JSON.stringify(alice)).toBe(1);
+        expect(out).toContain(GET_PAGE);
+      }
+    });
+
+    it('fails an edited request with the steps left as they are or emptied, and passes it with the label', async () => {
+      const bob = aCase({ name: 'bob', arguments: { page_name: 'Bob' } });
+      expect((await run(scratch({ [GET_PAGE]: group('get-page', [aCase({ arguments: { x: 1 }, steps: [] }), bob]) }), [])).status).toBe(1);
+      expect((await run(scratch({ [GET_PAGE]: group('get-page', [aCase({ arguments: { x: 1 } }), bob]) }), ['golden-change'])).status).toBe(0);
     });
 
     it('passes a change to the clock list, which is not a golden', async () => {
