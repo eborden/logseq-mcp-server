@@ -25,15 +25,18 @@ import { MAX_ENTRIES } from './tools/get-concept-evolution.js';
 import { MAX_LIST_PAGES_LIMIT } from './tools/list-pages.js';
 
 /**
- * Count, limit, offset and depth parameters are integers (#293). A fraction is
- * rejected at the boundary, never rounded. Any whole number still passes the
- * schema, and the tool clamps it to its range as before (no schema bounds).
+ * Count, limit, offset and depth parameters are integers with a lower bound (#293).
+ * A fraction or a value below the minimum is rejected at the boundary, never rounded
+ * or clamped. A value above a tool's cap still passes the schema (no schema maximum),
+ * and the tool clamps it as before.
  */
 
 interface CountParam {
   tool: string;
   schema: z.ZodObject;
   param: string;
+  /** The schema's minimum: 0 where none (an empty list) has a meaning, 1 where it doesn't. */
+  min: 0 | 1;
   required: Record<string, unknown>;
   /** The largest value the tool uses, where it caps one. */
   max?: number;
@@ -44,44 +47,44 @@ const RELATIONSHIP = { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'ref
 const PROPERTY = { property_key: 'status', property_value: 'done' };
 
 const COUNT_PARAMS: CountParam[] = [
-  { tool: 'get_backlinks', schema: getBacklinksArgs, param: 'max_pages', required: PAGE, max: MAX_PAGES },
-  { tool: 'get_backlinks', schema: getBacklinksArgs, param: 'max_blocks_per_page', required: PAGE, max: MAX_BLOCKS_PER_PAGE },
-  { tool: 'search_blocks', schema: searchBlocksArgs, param: 'limit', required: { query: 'x' }, max: MAX_SEARCH_LIMIT },
-  { tool: 'query_by_property', schema: queryByPropertyArgs, param: 'limit', required: PROPERTY, max: MAX_PROPERTY_LIMIT },
-  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_depth', required: { concept_name: 'x' }, max: 3 },
-  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_nodes', required: { concept_name: 'x' }, max: 500 },
-  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_fanout', required: { concept_name: 'x' }, max: 100 },
-  { tool: 'search_by_relationship', schema: searchByRelationshipArgs, param: 'max_distance', required: RELATIONSHIP },
+  { tool: 'get_backlinks', schema: getBacklinksArgs, param: 'max_pages', min: 0, required: PAGE, max: MAX_PAGES },
+  { tool: 'get_backlinks', schema: getBacklinksArgs, param: 'max_blocks_per_page', min: 0, required: PAGE, max: MAX_BLOCKS_PER_PAGE },
+  { tool: 'search_blocks', schema: searchBlocksArgs, param: 'limit', min: 0, required: { query: 'x' }, max: MAX_SEARCH_LIMIT },
+  { tool: 'query_by_property', schema: queryByPropertyArgs, param: 'limit', min: 0, required: PROPERTY, max: MAX_PROPERTY_LIMIT },
+  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_depth', min: 1, required: { concept_name: 'x' }, max: 3 },
+  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_nodes', min: 1, required: { concept_name: 'x' }, max: 500 },
+  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_fanout', min: 1, required: { concept_name: 'x' }, max: 100 },
+  { tool: 'search_by_relationship', schema: searchByRelationshipArgs, param: 'max_distance', min: 1, required: RELATIONSHIP },
   {
     tool: 'search_by_relationship',
     schema: searchByRelationshipArgs,
-    param: 'limit',
+    param: 'limit', min: 0,
     required: RELATIONSHIP,
     max: MAX_RELATIONSHIP_LIMIT,
   },
-  { tool: 'get_context_for_query', schema: getContextForQueryArgs, param: 'max_topics', required: { query: 'x' } },
+  { tool: 'get_context_for_query', schema: getContextForQueryArgs, param: 'max_topics', min: 1, required: { query: 'x' } },
   {
     tool: 'get_context_for_query',
     schema: getContextForQueryArgs,
-    param: 'max_search_results',
+    param: 'max_search_results', min: 0,
     required: { query: 'x' },
     max: MAX_SEARCH_RESULTS,
   },
-  { tool: 'build_context', schema: buildContextArgs, param: 'max_blocks', required: { topic_name: 'x' } },
-  { tool: 'build_context', schema: buildContextArgs, param: 'max_related_pages', required: { topic_name: 'x' } },
-  { tool: 'build_context', schema: buildContextArgs, param: 'max_references', required: { topic_name: 'x' } },
-  { tool: 'query_by_date_range', schema: queryByDateRangeArgs, param: 'last_n', required: {} },
-  { tool: 'query_by_date_range', schema: queryByDateRangeArgs, param: 'top_concepts_limit', required: {} },
-  { tool: 'query_by_date_range', schema: queryByDateRangeArgs, param: 'max_blocks', required: {}, max: MAX_DATE_RANGE_BLOCKS },
+  { tool: 'build_context', schema: buildContextArgs, param: 'max_blocks', min: 0, required: { topic_name: 'x' } },
+  { tool: 'build_context', schema: buildContextArgs, param: 'max_related_pages', min: 0, required: { topic_name: 'x' } },
+  { tool: 'build_context', schema: buildContextArgs, param: 'max_references', min: 0, required: { topic_name: 'x' } },
+  { tool: 'query_by_date_range', schema: queryByDateRangeArgs, param: 'last_n', min: 1, required: {} },
+  { tool: 'query_by_date_range', schema: queryByDateRangeArgs, param: 'top_concepts_limit', min: 0, required: {} },
+  { tool: 'query_by_date_range', schema: queryByDateRangeArgs, param: 'max_blocks', min: 0, required: {}, max: MAX_DATE_RANGE_BLOCKS },
   {
     tool: 'get_concept_evolution',
     schema: getConceptEvolutionArgs,
-    param: 'max_entries',
+    param: 'max_entries', min: 0,
     required: { concept_name: 'x' },
     max: MAX_ENTRIES,
   },
-  { tool: 'list_pages', schema: listPagesArgs, param: 'limit', required: {}, max: MAX_LIST_PAGES_LIMIT },
-  { tool: 'list_pages', schema: listPagesArgs, param: 'offset', required: {} },
+  { tool: 'list_pages', schema: listPagesArgs, param: 'limit', min: 0, required: {}, max: MAX_LIST_PAGES_LIMIT },
+  { tool: 'list_pages', schema: listPagesArgs, param: 'offset', min: 0, required: {} },
 ];
 
 const cases = COUNT_PARAMS.map(p => [`${p.tool} ${p.param}`, p] as const);
@@ -115,18 +118,25 @@ describe('count and limit parameters are integers (#293)', () => {
     );
   });
 
-  it.each(cases)('%s accepts whole numbers at and past its bounds, for the tool to clamp', (_, p) => {
-    const values = [0, 1, -1, Number.MAX_SAFE_INTEGER, ...(p.max === undefined ? [] : [p.max, p.max + 1])];
+  it.each(cases)('%s rejects a value below its minimum, naming the minimum', (_, p) => {
+    for (const value of [p.min - 1, -100]) {
+      expect(errorFor(p.schema, { ...p.required, [p.param]: value }).message, `${p.param}: ${value}`).toBe(
+        `Invalid parameter '${p.param}': ${value}\n\nExpected: at least ${p.min}\nExample: ${p.param}: ${p.min}`
+      );
+    }
+  });
+
+  it.each(cases)('%s accepts whole numbers from its minimum up, past its cap too, for the tool to clamp', (_, p) => {
+    const values = [p.min, p.min + 1, Number.MAX_SAFE_INTEGER, ...(p.max === undefined ? [] : [p.max, p.max + 1])];
     for (const value of values) {
       expect(parseArgs(p.schema, { ...p.required, [p.param]: value })[p.param], `${p.param}: ${value}`).toBe(value);
     }
   });
 
-  it.each(cases)('%s advertises an integer with no bounds', (_, p) => {
+  it.each(cases)('%s advertises an integer with its minimum and no maximum', (_, p) => {
     const property = toInputSchema(p.schema).properties[p.param];
 
-    expect(property).toMatchObject({ type: 'integer' });
-    expect(property).not.toHaveProperty('minimum');
+    expect(property).toMatchObject({ type: 'integer', minimum: p.min });
     expect(property).not.toHaveProperty('maximum');
   });
 
