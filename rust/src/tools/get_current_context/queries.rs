@@ -5,7 +5,8 @@
 use crate::edn::{PageId, Query, ground_ids};
 
 // The block search makes the same query (`search_blocks::queries::pages_by_ids`). It is repeated here so
-// that no tool's directory reaches into another's; both build what `getPagesByIds` builds.
+// that no tool's directory reaches into another's; both build what `getPagesByIds` builds. Hoisting it
+// into one shared module is tracked in #327.
 /// The full page entities for some ids, in one query.
 pub fn pages_by_ids(ids: &[PageId]) -> Query {
     Query {
