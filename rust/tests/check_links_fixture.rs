@@ -550,6 +550,97 @@ async fn the_prose_check_matches_the_reference_on_seeded_random_pairs_including_
     assert!(differing > PAIRS, "only {differing} of {} pairs differ", PAIRS * 2);
 }
 
+// ---------------------------------------------------------------- the order of terms
+
+/// A graph of file-backed pages with these names and no aliases.
+fn pages_named(names: &[&'static str]) -> Vec<StubPage> {
+    names.iter().map(|name| StubPage { name, file: true, aliases: vec![] }).collect()
+}
+
+/// `check_links` over a graph of `pages`: the result, and the one query's bound names.
+async fn gate_over(pages: &[StubPage], before: &str, after: &str) -> (Value, Value) {
+    let logseq = mock_logseq(vec![link_target_rows(pages)]).await;
+    let result = check_links(&client(&logseq), before, after).await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
+    (result, args_of(&logseq, 0)[1].clone())
+}
+
+fn terms_of(refs: &Value, key: &str) -> Vec<Value> {
+    refs[key].as_array().unwrap().iter().map(|r| if key == "resolved" { r["term"].clone() } else { r.clone() }).collect()
+}
+
+#[tokio::test]
+async fn terms_are_checked_and_listed_sorted_whatever_order_after_has_them_in() {
+    let pages = pages_named(&["Alice", "Bob", "Carol"]);
+
+    let (result, bound) = gate_over(&pages, "Bob Carol Alice", "[[Bob]] [[Carol]] [[Alice]]").await;
+
+    assert_eq!(terms_of(&result["refs"], "resolved"), [json!("Alice"), json!("Bob"), json!("Carol")]);
+    assert_eq!(bound, json!("[\"alice\",\"bob\",\"carol\"]"));
+}
+
+#[tokio::test]
+async fn terms_sort_by_utf16_code_unit_so_a_capital_comes_before_a_lowercase_letter() {
+    let (result, bound) = gate_over(&pages_named(&["Bob", "alice"]), "alice Bob", "[[alice]] [[Bob]]").await;
+
+    assert_eq!(terms_of(&result["refs"], "resolved"), [json!("Bob"), json!("alice")]);
+    assert_eq!(bound, json!("[\"bob\",\"alice\"]"));
+
+    // An astral character (UTF-16 units D83D DE00) sorts before a fullwidth letter (FF41) by code unit, after it by code point
+    let (result, bound) = gate_over(&[], "z \u{1F600} \u{FF41}", "[[\u{FF41}]] [[\u{1F600}]] [[Z]]").await;
+
+    assert_eq!(terms_of(&result["refs"], "unresolved"), [json!("Z"), json!("\u{1F600}"), json!("\u{FF41}")]);
+    assert_eq!(bound, json!("[\"z\",\"\u{1F600}\",\"\u{FF41}\"]"));
+}
+
+#[tokio::test]
+async fn unresolved_terms_are_listed_sorted() {
+    let (result, _) = gate_over(&[], "zed amy kim", "[[zed]] [[amy]] [[kim]]").await;
+
+    assert_eq!(terms_of(&result["refs"], "unresolved"), [json!("amy"), json!("kim"), json!("zed")]);
+    assert_eq!(result["refs"]["ok"], false);
+}
+
+#[tokio::test]
+async fn a_long_list_written_in_a_scrambled_order_is_sorted() {
+    let names: Vec<&'static str> = (0..70).map(|i| &*Box::leak(format!("page {i:02}").into_boxed_str())).collect();
+    // 29 is coprime to 70, so this visits every name once, out of order
+    let scrambled: Vec<&str> = (0..70).map(|i| names[(i * 29) % 70]).collect();
+    let before = scrambled.join(" ");
+    let after: String = scrambled.iter().map(|name| format!("[[{name}]]")).collect::<Vec<_>>().join(" ");
+
+    let (result, bound) = gate_over(&pages_named(&names), &before, &after).await;
+
+    let sorted: Vec<Value> = names.iter().map(|name| json!(name)).collect();
+    assert_eq!(terms_of(&result["refs"], "resolved"), sorted);
+    assert_eq!(bound, json!(serde_json::to_string(&names).unwrap()));
+}
+
+// ---------------------------------------------------------------- refs preserved
+
+#[tokio::test]
+async fn the_same_refs_in_another_order_are_all_kept() {
+    let (result, _) = gate_over(&pages_named(&["Alice", "Bob"]), "[[Alice]] then [[Bob]]", "[[Bob]] then [[Alice]]").await;
+
+    // the prose check fails on the reordering (it is another text); the refs check does not
+    assert_eq!(result["refsPreserved"], json!({"ok": true, "removed": []}));
+    assert_eq!(result["prose"]["ok"], false);
+}
+
+#[tokio::test]
+async fn refs_that_stay_but_move_between_mentions_are_kept() {
+    let (result, _) = gate_over(
+        &pages_named(&["Alice", "Bob"]),
+        "[[Alice]] met Bob, then Alice met [[Bob]]",
+        "Alice met [[Bob]], then [[Alice]] met Bob",
+    )
+    .await;
+
+    assert_eq!(result["refsPreserved"], json!({"ok": true, "removed": []}));
+    assert_eq!(result["prose"], json!({"ok": true}));
+    assert_eq!(result["ok"], true);
+}
+
 // ---------------------------------------------------------------- an empty after
 
 #[tokio::test]
