@@ -1,7 +1,7 @@
 //! The relationship search's LogSeq traffic against a mock LogSeq on a local port: how many calls
 //! it makes, in which order, with which inputs, and what it answers. The Rust side of the call
 //! counts in `CLAUDE.md` ("Current Implementation Status"); the parity harness
-//! (`scripts/parity.ts`) checks the same calls and the result bytes against the TypeScript server.
+//! (`parity.rs`) checks the same calls and the result bytes against the TypeScript server.
 //! Every page and block here is made up (BR-0001).
 //!
 //! The two topics are resolved together, so the order their first two requests arrive in is not

@@ -1,6 +1,6 @@
 //! The page outline's LogSeq traffic against a mock LogSeq on a local port: how many calls it
 //! makes, in which order, with which inputs, and what it answers. The Rust side of
-//! `src/index.outline.test.ts`'s call counts; the parity harness (`scripts/parity.ts`) checks the
+//! `src/index.outline.test.ts`'s call counts; the parity harness (`parity.rs`) checks the
 //! same calls and the result bytes against the TypeScript server. Every page and block here is
 //! made up (BR-0001).
 

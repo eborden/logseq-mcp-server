@@ -5,11 +5,11 @@ The LogSeq MCP server in Rust. It began as a bounded spike
 since the Go on #349 (2026-10-08) it is the only server on this branch: the TypeScript server was removed in #356.
 The tool contract it keeps is that server's. Comments in this crate that name `src/*.ts` files mean that server as
 of commit `10103c8` (its last version is readable there, as `10103c8:src/client.ts`), and
-`scripts/parity/expected/` holds its recorded results, which the parity harness holds this crate to (`npx vite-node
-scripts/parity.ts`). `// PARITY(#299)` tags the code that exists only to match it.
+`tests/data/parity/` holds its recorded results, which the parity test holds this crate to (`cargo test`, below).
+`// PARITY(#299)` tags the code that exists only to match it.
 
 It lists all 16 tools, the five prompts, the reading guide and the page resource, and the server
-`instructions`, and the parity harness holds each to the recorded output (#316). It began
+`instructions`, and the parity test holds each to the recorded output (#316). It began
 as a skeleton (#123): the LogSeq HTTP client, EDN-encoded Datalog inputs, the config file
 and an MCP stdio server. The first tool was `logseq_get_page_outline` (#125), which exercises the
 pieces most likely to differ between implementations: the shared page resolver, a Datalog query
@@ -18,7 +18,7 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 
 | File | What it holds |
 |---|---|
-| `src/env.rs` | The environment, read once at startup into `Env`: `config_path` (`LOGSEQ_MCP_CONFIG` or `~/.logseq-mcp/config.json`, absolute by type), `tips` (`LOGSEQ_MCP_TIPS`) and `clock` (`LOGSEQ_MCP_NOW`, a fixed instant in milliseconds for the parity harness; unset is the system clock; a release build ignores it). Nothing else reads a variable (`tests/env_reads.rs`) |
+| `src/env.rs` | The environment, read once at startup into `Env`: `config_path` (`LOGSEQ_MCP_CONFIG` or `~/.logseq-mcp/config.json`, absolute by type), `tips` (`LOGSEQ_MCP_TIPS`) and `clock` (`LOGSEQ_MCP_NOW`, a fixed instant in milliseconds for the parity test; unset is the system clock; a release build ignores it). Nothing else reads a variable (`tests/env_reads.rs`) |
 | `src/config.rs` | The config file, parsed once. Its errors never show a file value (ADR-0003) |
 | `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as the TypeScript server's client |
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
@@ -38,7 +38,7 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 | `src/dates.rs`, `src/block_budget.rs` | Calendar dates (`date-utils.ts`, `date-presets.ts`): the eight presets as plain calendar arithmetic, and a `Clock` that reads today's date in the host's local zone through `localtime_r`, so it honours `TZ` as Node does. And `block-budget.ts`: cutting block trees to a count of blocks, nested ones included |
 | `src/resolve_refs/`, `src/output_format.rs` | `((uuid))` refs and `{{embed}}`s resolved in returned blocks, one batched query per nesting level (BR-0007; `resolve-refs.ts`), with the ref and embed patterns written out since the crate has no regex engine; and the `format` parameter, `json` or `markdown` |
 | `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (messages word for word as `src/errors.ts`), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
-| `src/fuzzy.rs` | The closest names for a missing page, picked with `nucleo-matcher` (`Pattern::new`, `AtomKind::Fuzzy`): names equal to the input first, then names that start with it, then names that contain each of its words in order, best score first. The parity harness holds the list to ADR-0032's rules, not to the TypeScript server's bytes |
+| `src/fuzzy.rs` | The closest names for a missing page, picked with `nucleo-matcher` (`Pattern::new`, `AtomKind::Fuzzy`): names equal to the input first, then names that start with it, then names that contain each of its words in order, best score first. The parity test holds the list to ADR-0032's rules, not to the TypeScript server's bytes |
 | `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and `localeCompare` (ICU root collation, from `icu_collator`) |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
 
@@ -66,68 +66,59 @@ a free local port.
 
 ## Parity with the TypeScript server
 
-The parity harness (#124) starts a server over stdio against a stub LogSeq on a random port, and
-compares the tool result byte for byte, the LogSeq calls and `tools/list` by meaning, and the closest
-names of a page-not-found message by rule (ADR-0032), with what the TypeScript server did. From the repo root, after `npm ci` and `cargo build`:
+`cargo test --locked` runs the golden-result test (#124, #371). `tests/parity.rs` starts the binary cargo built,
+answers its LogSeq calls from a stub on a random local port, and holds it to what the TypeScript server did
+before it was retired, as recorded in `tests/data/parity/`: each result (a JSON tool result by deep equality, then
+minified; markdown, prompts, resources and the frame of a page-not-found message byte for byte; the closest names
+of a page-not-found message by the rules of ADR-0032, below), the LogSeq calls (the steps of a case in order, the
+calls of a step as a set, nothing after the last) and `tools/list` by meaning (ADR-0031). `parity_self_check.rs`
+runs the cases once more with the last answer of each changed and requires every case with a LogSeq call to fail,
+and the closest-name rules to catch every kind of wrong list. `parity_comparator.rs` and `parity_harness.rs` hold the
+comparator, the stub and the run to their own rules. Fixtures are made up (BR-0001). `cargo-mutants` (ADR-0033)
+counts the cases: a mutant dies when a case notices it. Every comparison rule is in `tests/parity_support/compare.rs`:
+`compare_results` judges a result, and `same_tool_text` and `same_text` are the only places that decide whether two
+texts match.
+
+The cases and their golden results live in `tests/data/parity/*.json` and nowhere else (#379). A group file holds its
+cases, one to a line: the stub answers, the MCP request, the expected call steps and, under `expected`, the golden
+result. `tool-list.json` is the recorded `tools/list` and `clock-cases.json` lists the cases that read today's date.
+They are in `rust/` because a copy of it is all `cargo-mutants` has. To add or change a case, edit its line, leave
+out `expected` for a case that has none yet, and record it:
 
 ```bash
-node node_modules/vite-node/vite-node.mjs scripts/parity.ts "$PWD/rust/target/debug/logseq-mcp-server"
-node node_modules/vite-node/vite-node.mjs scripts/parity.ts --self-check "$PWD/rust/target/debug/logseq-mcp-server"
+cd rust && PARITY_RECORD=1 cargo test --test parity_record -- --nocapture
 ```
 
-The runner is the `vite-node` that `npm ci` installs from the lockfile (CI uses the same; `npx tsx`
-would download an unpinned package). It swallows `--`, so the server command follows the flags
-directly; `scripts/parity.ts -- <command>` still works under `npx tsx`.
+The recorder runs every case against the stub with the debug build and rewrites only what changed in meaning. A
+case with no `expected` takes its result. One whose result differs from the recorded one, by the comparison the
+test uses, takes the new one. One that is the same by meaning keeps the bytes recorded for it, so the diff is the
+change and not the spelling of the Rust server's output. The tool list is done the same way, tool by tool. It
+refuses to run when `CI` is set or in a release build, and writes nothing when a case's LogSeq calls are wrong or the
+closest names would break ADR-0032's rules. A recorded result is the tool contract: a change to one needs the
+maintainer's explicit OK, recorded on the pull request, and the `golden-change` label that the `golden-files` job of
+`ci.yml` looks for.
 
-The harness runs both servers in one time zone (`America/New_York`) with one instant as "now"
-(`LOGSEQ_MCP_NOW`, 2025-03-12T03:30Z, which is still the evening of the 11th there): a result that
-depends on today's date (`last_n`, a preset) is then the same on every day, and a server that reads the
-date in UTC fails. The Rust server reads the variable itself; the TypeScript one is started through
-`scripts/parity/run-ts-server.ts`, which replaces `Date` before the server runs, so no server code
-changes.
+The test runs the server in one time zone (`America/New_York`) with one instant as "now" (`LOGSEQ_MCP_NOW`,
+2025-03-12T03:30Z, which is still the evening of the 11th there): a result that depends on today's date (`last_n`, a
+preset) is then the same on every day, and a server that reads the date in UTC fails. The Rust server reads the
+variable itself.
 
 The whole `tools/list` is compared, and the cases cover every tool, `prompts/list`, `prompts/get`,
-`resources/list` and `resources/read` (the guide, a page and the unknown-URI error). CI runs exactly
-this for the debug build. The release binary (`cargo build --release --locked`) ignores `LOGSEQ_MCP_NOW`,
-so it reads the real date and can't match the 32 recorded results that depend on today (`last_n`, a preset,
-a weekly or monthly prompt for "this week"). `--real-clock` runs every other case against it, and
-`scripts/parity/clock-cases.ts` lists the ones it leaves out. CI does this after the release build, on
-`main` and on a manual run (#359):
+`resources/list` and `resources/read` (the guide, a page and the unknown-URI error). The release binary
+(`cargo build --release --locked`) ignores `LOGSEQ_MCP_NOW`, so it reads the real date and can't match the recorded
+results that depend on today (`last_n`, a preset, a weekly or monthly prompt for "this week"). Under `--release` those
+cases leave the run: `clock-cases.json` lists them, and `parity_harness.rs` checks that it names exactly the cases
+whose result moves with the clock. CI runs the others against the release build after it, on `main` and on a manual
+run (#359):
 
 ```bash
-node node_modules/vite-node/vite-node.mjs scripts/parity.ts --real-clock "$PWD/rust/target/release/logseq-mcp-server"
+cargo test --release --locked --test parity --test parity_self_check
 ```
 
-`--tested-tools-only` is still there for local use with a server that has only some tools:
-`tools/list` is compared for the tools the cases call, and the server must list those and no others.
-Fixtures are made up (BR-0001).
-
-The closest names after `Closest:` in a page-not-found message are not compared byte for byte for the
-Rust server (ADR-0032 Decision 3, `scripts/parity/suggestion-rules.ts`): the harness checks the message
-frame, that the list is one to three distinct page names, that exact and prefix matches come first, that
-every name covers every word typed, and that there are as many as there are to list, up to three. The
-TypeScript run still compares its own bytes. The harness fails when the recorded cases lack one the ADR
-requires, and `--self-check` feeds it wrong lists to be sure they fail.
-
-### The same cases from `cargo test` (#371)
-
-`cargo test --locked --test parity` runs every parity case too, so `cargo-mutants` (ADR-0033) counts them:
-it kills a mutant when a case notices it. `rust/tests/parity.rs` starts the binary cargo built, answers its
-LogSeq calls from a stub on a random local port, and holds it to the same things as the Node harness: each
-result (a JSON tool result by deep equality, then minified; markdown, prompts, resources and the frame of a
-page-not-found message byte for byte; the closest names of a page-not-found message by ADR-0032's rules), the LogSeq calls (steps in order, the calls of a step as a set, nothing after the last), and
-`tools/list` by meaning (ADR-0031). `parity_self_check.rs` runs the cases once more with the last answer of each
-changed and requires every case with a LogSeq call to fail.
-
-The cases and golden results come from `rust/tests/data/parity/*.json`, which `npx vite-node
-scripts/export-parity.ts` writes from `scripts/parity/cases/` and `scripts/parity/expected/` (a copy of rust/ is
-all `cargo-mutants` has, so the test can't read `scripts/`). They are generated, never edited:
-`npx vite-node scripts/export-parity.ts --check` and `tests/guards/parity-export.test.ts` fail when they differ
-from their sources. The golden files stay the contract and the only place a result is recorded, so a re-record
-(`scripts/parity.ts --record-from-rust`, Node) is followed by an export, and the export's diff is the same change
-again, in the fixtures. Every comparison rule is in `tests/parity_support/compare.rs`: `compare_results` judges a
-result, and `same_tool_text` and `same_text` are the only places that decide whether two texts match. A release build (`cargo test
---release`) reads the real date, so the cases that read today (`clock-cases.json`) leave its run.
+The closest names after `Closest:` in a page-not-found message are not compared byte for byte (ADR-0032 Decision 3,
+`tests/parity_support/suggestion_rules.rs`): the test checks the message frame, that the list is one to three distinct
+page names, that exact and prefix matches come first, that every name covers every word typed, and that there are as
+many as there are to list, up to three. It fails when the recorded cases lack one the ADR requires.
 
 ## Running it
 

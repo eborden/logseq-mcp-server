@@ -1,6 +1,6 @@
 //! The LogSeq traffic of `logseq_get_current_context` against a mock LogSeq on a local port: how
 //! many calls it makes, with which inputs. The Rust side of the call count in `CLAUDE.md` ("Current
-//! Implementation Status"); the parity harness (`scripts/parity.ts`) checks the same calls and the
+//! Implementation Status"); the parity harness (`parity.rs`) checks the same calls and the
 //! result bytes against the TypeScript server. Every page and block here is made up (BR-0001).
 //!
 //! The three Editor calls are made at once, so they reach LogSeq in no fixed order: this mock answers

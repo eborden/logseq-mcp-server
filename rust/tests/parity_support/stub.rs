@@ -1,4 +1,4 @@
-//! A stand-in for LogSeq's HTTP API (`scripts/parity/stub-logseq.ts`, #124): it replays canned answers keyed
+//! A stand-in for LogSeq's HTTP API (#124): it replays canned answers keyed
 //! by method and query text, records every call it gets, and fails loud on any call it has no answer for.
 //! It listens on 127.0.0.1 with a port the OS picks, never LogSeq's 12315, and checks a token made fresh for
 //! each run, so a server pointed at it can't reach a real graph by mistake (BR-0001).

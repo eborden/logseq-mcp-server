@@ -1,7 +1,7 @@
 //! The ref resolver's LogSeq traffic and results against a mock LogSeq on a local port: how many
 //! queries it makes (one per nesting level, none when nothing has a ref), what it binds and what
 //! it makes of each answer. The Rust side of `src/utils/resolve-refs.test.ts`; the parity harness
-//! (`scripts/parity.ts`) checks the same calls and the result bytes against the TypeScript
+//! (`parity.rs`) checks the same calls and the result bytes against the TypeScript
 //! server, through `logseq_get_block` and `logseq_get_page`. Every page and block here is made up
 //! (BR-0001).
 

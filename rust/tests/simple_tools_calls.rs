@@ -1,7 +1,7 @@
 //! The LogSeq traffic of `logseq_get_graph_info`, `logseq_list_pages`, `logseq_search_blocks` and `logseq_query_by_property`
 //! against a mock LogSeq on a local port: how many calls each makes, with which inputs. The Rust
 //! side of the call counts in `CLAUDE.md` ("Current Implementation Status"); the parity harness
-//! (`scripts/parity.ts`) checks the same calls and the result bytes against the TypeScript server.
+//! (`parity.rs`) checks the same calls and the result bytes against the TypeScript server.
 //! Every page and block here is made up (BR-0001).
 
 use std::sync::{Arc, Mutex};
