@@ -92,6 +92,39 @@
       }
     ]
   },
+  "null cell and a row with no parent": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":\"Alice\",\"blocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000401\",\"snippet\":\"Alice works on [[Project Atlas]]\",\"childCount\":1}],\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1}}"
+      },
+      {
+        "type": "text",
+        "text": "{\"meta\":{\"tips\":[\"To read a block and its children: logseq_get_block {\\\"block_uuid\\\":\\\"00000000-0000-4000-8000-000000000401\\\",\\\"include_children\\\":true}.\"]}}"
+      }
+    ]
+  },
+  "broken and cyclic left chain": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"page\":\"Alice Notes\",\"blocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000413\",\"snippet\":\"Left of a missing block\",\"childCount\":0},{\"uuid\":\"00000000-0000-4000-8000-000000000414\",\"snippet\":\"After the orphan\",\"childCount\":0},{\"uuid\":\"00000000-0000-4000-8000-000000000411\",\"snippet\":\"Cycle one\",\"childCount\":0},{\"uuid\":\"00000000-0000-4000-8000-000000000412\",\"snippet\":\"Cycle two\",\"childCount\":0}],\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":4}}"
+      },
+      {
+        "type": "text",
+        "text": "{\"meta\":{\"tips\":[\"To read a block and its children: logseq_get_block {\\\"block_uuid\\\":\\\"00000000-0000-4000-8000-000000000413\\\",\\\"include_children\\\":true}.\"]}}"
+      }
+    ]
+  },
+  "LogSeq error from the resolver": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq API error: Query timed out\"}"
+      }
+    ],
+    "isError": true
+  },
   "bad argument": {
     "content": [
       {
