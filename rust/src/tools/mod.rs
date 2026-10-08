@@ -40,7 +40,7 @@ pub async fn call(
         get_page_outline::NAME => Some(get_page_outline::call(client, tips_enabled, arguments).await),
         list_pages::NAME => Some(list_pages::call(client, tips_enabled, arguments).await),
         query_by_property::NAME => Some(query_by_property::call(client, tips_enabled, arguments).await),
-        search_blocks::NAME =>Some(search_blocks::call(client, tips_enabled, arguments).await),
+        search_blocks::NAME => Some(search_blocks::call(client, tips_enabled, arguments).await),
         _ => None,
     }
 }
