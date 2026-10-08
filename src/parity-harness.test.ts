@@ -92,18 +92,19 @@ describe('compareResult', () => {
 });
 
 describe('compareResult on a resource', () => {
-  const read: ToolResult = { contents: [{ uri: 'logseq://page/Alice', mimeType: 'text/markdown', text: '# Alice\n' }] };
+  const block = { uri: 'logseq://page/Alice', mimeType: 'text/markdown', text: '# Alice\n' };
+  const read: ToolResult = { contents: [block] };
 
   it('compares the text of each contents block byte for byte, and its other fields', () => {
     expect(compareResult(read, structuredClone(read))).toEqual([]);
-    expect(compareResult(read, { contents: [{ ...read.contents![0], text: '# Alice \n' }] })).toEqual([
+    expect(compareResult(read, { contents: [{ ...block, text: '# Alice \n' }] })).toEqual([
       expect.stringContaining('contents[0].text differs at character 7')
     ]);
-    expect(compareResult(read, { contents: [{ ...read.contents![0], mimeType: 'text/plain' }] })).toEqual([
+    expect(compareResult(read, { contents: [{ ...block, mimeType: 'text/plain' }] })).toEqual([
       'contents[0].mimeType: expected "text/markdown", got "text/plain"'
     ]);
-    expect(compareResult(read, { contents: [...read.contents!, read.contents![0]] })).toHaveLength(1);
-    expect(compareResult(read, { contents: [{ uri: read.contents![0].uri, text: '# Alice\n' }] })).toEqual([
+    expect(compareResult(read, { contents: [block, block] })).toHaveLength(1);
+    expect(compareResult(read, { contents: [{ uri: block.uri, text: block.text }] })).toEqual([
       'contents[0] lacks key(s) mimeType'
     ]);
   });
