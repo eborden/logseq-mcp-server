@@ -218,7 +218,11 @@ mod tests {
         );
         assert!(read(json!({"before": "x".repeat(MAX_TEXT_CHARS), "after": ""})).is_ok());
         // 25,001 emoji are 50,002 units
-        assert!(read(json!({"before": "", "after": "\u{1F600}".repeat(25_001)})).is_err());
+        let emoji = "\u{1F600}".repeat(25_001);
+        assert_eq!(
+            read(json!({"before": "", "after": emoji})).unwrap_err().to_string(),
+            format!("Invalid parameter 'after': \"{emoji}\"\n\nExpected: Too big: expected string to have <=50000 characters")
+        );
         assert!(read(json!({"before": "", "after": "\u{1F600}".repeat(25_000)})).is_ok());
     }
 
