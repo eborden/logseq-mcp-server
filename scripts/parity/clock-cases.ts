@@ -7,7 +7,9 @@
 // rest of the harness runs as it does for the debug build. The debug build in CI still runs every one.
 //
 // Update the list when a case that depends on the date is added. A name that no case has is an error, so
-// a rename can't leave one here to match nothing.
+// a rename can't leave one here to match nothing. src/parity-harness.test.ts runs the TypeScript server at two
+// other instants and fails unless exactly these cases change, so a case missing from the list, or listed
+// without reading the date, fails there and not only in the release run on main.
 import type { ParityCase } from './harness.js';
 
 export const CLOCK_CASES: readonly string[] = [

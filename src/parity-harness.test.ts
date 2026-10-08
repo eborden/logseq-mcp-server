@@ -965,6 +965,31 @@ describe('runParity against the TypeScript server', () => {
   }, 60000);
 });
 
+describe('CLOCK_CASES against the TypeScript server (#359)', () => {
+  it('names exactly the cases whose result moves with the clock', async () => {
+    // The reference run at two instants other than the recorded one: a week on, and 16 months on, so a
+    // case that reads only the week and one that reads only the month or the year each change
+    const week = PARITY_NOW_MS + 7 * 24 * 3600 * 1000;
+    const months = Date.UTC(2026, 6, 12, 3, 30);
+    const expected: Record<string, ToolResult> = {};
+    for (const group of CASE_GROUPS) Object.assign(expected, JSON.parse(await readFile(expectedFileOf(group), 'utf8')));
+    const cases = allCases();
+    const expectedToolList = await loadToolList();
+
+    const moved = new Set<string>();
+    for (const now of [week, months]) {
+      const report = await runParity({ server: typescriptServer(), cases, expected, expectedToolList, snapshotFile: SNAPSHOT_FILE, now });
+      const unexplained = report.failures.filter(f => !cases.some(c => f.startsWith(`[${c.tool}: ${c.name}]`)));
+      expect(unexplained, report.stderr).toEqual([]);
+      for (const c of cases) if (report.failures.some(f => f.startsWith(`[${c.tool}: ${c.name}]`))) moved.add(c.name);
+    }
+
+    // A case that reads the date but is not listed would fail the release run on main, which no pull request runs;
+    // a listed case that does not would be left out of it for nothing
+    expect([...moved].sort()).toEqual([...CLOCK_CASES].sort());
+  }, 240000);
+});
+
 describe('runParity on resources against the TypeScript server', () => {
   const expectedPages = async () => JSON.parse(await readFile(expectedFileOf(CASE_GROUPS.find(g => g.name === 'page-resource')!), 'utf8')) as Record<string, ToolResult>;
   const named = (name: string) => pageResourceCases.find(c => c.name === `page resource: ${name}`)!;

@@ -126,6 +126,11 @@ export interface ParityOptions {
   /** Milliseconds to wait for each MCP request */
   timeoutMs?: number;
   /**
+   * The instant the server reads as "now" (`LOGSEQ_MCP_NOW`), in milliseconds since 1970-01-01 UTC. Default
+   * {@link PARITY_NOW_MS}. A test moves it to see which cases read the date (scripts/parity/clock-cases.ts, #359).
+   */
+  now?: number;
+  /**
    * The most to wait, per case, for the LogSeq calls a tool made at once to reach the stub after its
    * result came back (#340). Default 2000; 0 reads the call log at once, which is for a test of the wait.
    */
@@ -393,12 +398,12 @@ export const PARITY_TZ = 'America/New_York';
  * every home and config directory a server could look in for a fallback config (`~/.logseq-mcp/`)
  * moved to `home`, an empty temp dir.
  */
-export function sandboxedEnv(configPath: string, home: string): Record<string, string> {
+export function sandboxedEnv(configPath: string, home: string, now: number = PARITY_NOW_MS): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   delete env.LOGSEQ_MCP_TIPS;
   env.LOGSEQ_MCP_CONFIG = configPath;
-  env.LOGSEQ_MCP_NOW = String(PARITY_NOW_MS);
+  env.LOGSEQ_MCP_NOW = String(now);
   env.TZ = PARITY_TZ;
   env.HOME = home;
   env.USERPROFILE = home;
@@ -452,7 +457,8 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     unperturbedCases = cases,
     snapshotFile,
     timeoutMs = 30000,
-    settleMs = 2000
+    settleMs = 2000,
+    now
   } = options;
   const failures: string[] = [];
   const results: Record<string, ToolResult> = {};
@@ -478,7 +484,7 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     command: server.command,
     args: server.args,
     cwd: server.cwd,
-    env: sandboxedEnv(configPath, home),
+    env: sandboxedEnv(configPath, home, now),
     stderr: 'pipe'
   });
   transport.stderr?.on('data', (chunk: Buffer) => {
