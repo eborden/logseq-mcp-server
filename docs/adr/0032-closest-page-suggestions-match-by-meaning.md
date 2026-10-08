@@ -92,7 +92,7 @@ This ADR restates ADR-0025's and ADR-0031's decisions, so that the rules that bi
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-08
 
