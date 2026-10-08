@@ -182,7 +182,7 @@ pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> S
 /// `renderQueryContext`: context for a natural-language query: the topics found, each topic's
 /// context one heading level down, and the keyword search results when the query named no topic.
 pub fn render_query_context(context: &Value, compact: bool) -> String {
-    let query = context.get("query").and_then(Value::as_str).unwrap_or("undefined");
+    let query = context.get("query").and_then(Value::as_str).unwrap_or_default();
     let mut lines: Vec<String> = vec![format!("# Context for: {query}"), String::new()];
     let topics: Vec<&str> = array(context, "extractedTopics").iter().filter_map(Value::as_str).collect();
     if !topics.is_empty() {
@@ -223,9 +223,9 @@ pub fn render_query_context(context: &Value, compact: bool) -> String {
 pub fn render_network(network: &Value) -> String {
     let nodes = array(network, "nodes");
     let depth_of = |node: &Value| node.get("depth").and_then(Value::as_i64);
-    let name_of = |node: &Value| node.get("name").and_then(Value::as_str).unwrap_or("undefined").to_owned();
+    let name_of = |node: &Value| node.get("name").and_then(Value::as_str).unwrap_or_default().to_owned();
     let root = nodes.iter().find(|node| depth_of(node) == Some(0));
-    let title = root.map(name_of).unwrap_or_else(|| network.get("concept").and_then(Value::as_str).unwrap_or("undefined").to_owned());
+    let title = root.map(name_of).unwrap_or_else(|| network.get("concept").and_then(Value::as_str).unwrap_or_default().to_owned());
     let mut lines: Vec<String> = vec![format!("# Concept network: [[{title}]]"), String::new()];
     if let Some(note) = resolved_from_line(network.get("resolvedFrom")) {
         lines.push(note);
@@ -487,5 +487,14 @@ mod tests {
         );
         let none = json!({"query": "hit", "extractedTopics": [], "contexts": [], "searchResults": []});
         assert_eq!(render_query_context(&none, false), "# Context for: hit\n\n## Search results (0)\n\n(no matches)\n");
+    }
+
+    #[test]
+    fn a_missing_query_name_or_concept_writes_nothing_where_javascript_wrote_undefined() {
+        // the server sets all three on every result, so these inputs are not reached
+        assert_eq!(render_query_context(&json!({"extractedTopics": [], "contexts": []}), false), "# Context for:\n\n(no results)\n");
+        let nameless = json!({"nodes": [{"depth": 0}], "edges": []});
+        assert_eq!(render_network(&nameless), "# Concept network: [[]]\n\n(no linked pages)\n");
+        assert_eq!(render_network(&json!({"nodes": [], "edges": []})), "# Concept network: [[]]\n\n(no linked pages)\n");
     }
 }
