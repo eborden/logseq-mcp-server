@@ -24,6 +24,19 @@ use std::fmt;
 
 use serde_json::{Map, Value};
 
+/// A whole number a JSON value holds, as an id or a `YYYYMMDD` day is: `5` and `5.0` alike (JSON text has
+/// no difference between them for a JavaScript runtime), up to 2^53, where an f64 stops holding every whole
+/// number, as a JavaScript number does. The one test every reader of an id and the check on the wire share,
+/// so what the check accepts is never read as absent.
+pub(crate) fn whole_number(value: &Value) -> Option<i64> {
+    let Value::Number(number) = value else { return None };
+    const MAX: i64 = 9_007_199_254_740_992;
+    match number.as_i64() {
+        Some(whole) => (-MAX..=MAX).contains(&whole).then_some(whole),
+        None => number.as_f64().filter(|n| n.fract() == 0.0 && n.abs() <= MAX as f64).map(|n| n as i64),
+    }
+}
+
 /// The method a Datalog answer reports in a [`ResponseError`].
 pub const DATALOG_METHOD: &str = "logseq.DB.datascriptQuery";
 
@@ -116,9 +129,9 @@ impl Reader {
 
     /// A value that must be a whole number: a `:db/id`.
     pub(crate) fn id_value(&self, value: &Value) -> Parsed<i64> {
-        let n = self.number_value(value)?;
-        // 2^53 is where an f64 stops holding every whole number, as a JavaScript number does
-        if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 { Ok(n as i64) } else { Err(self.mismatch("int", Some(value))) }
+        self.number_value(value)?;
+        // The test the readers use ([`whole_number`]), so a value that passes here is never read as absent
+        whole_number(value).ok_or_else(|| self.mismatch("int", Some(value)))
     }
 
     /// A field that may be absent and, when present, must be a whole number: a `:db/id`.

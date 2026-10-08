@@ -204,8 +204,8 @@ async fn fetch_journals(client: &LogseqClient, query: crate::edn::Query) -> Resu
             .iter()
             .map(|pulled| {
                 let page = camelize_keys(pulled);
-                let id = page.get("id").and_then(Value::as_i64);
-                let day = page.get("journalDay").and_then(Value::as_i64).unwrap_or(0);
+                let id = page.get("id").and_then(crate::wire::whole_number);
+                let day = page.get("journalDay").and_then(crate::wire::whole_number).unwrap_or(0);
                 Journal { page, id, day }
             })
             .collect(),
@@ -263,7 +263,7 @@ fn trees_of(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> (HashMap<i64, 
         .into_iter()
         .map(|mut block| {
             let Some(refs) = block.get("refs").and_then(Value::as_array) else { return block };
-            if let Some(id) = block.get("id").and_then(Value::as_i64) {
+            if let Some(id) = block.get("id").and_then(crate::wire::whole_number) {
                 refs_by_block.insert(id, extract_concept_refs(&block));
             }
             // `refs.map(ref => ({ id: entityId(ref) }))`: a ref with no id is `{}`

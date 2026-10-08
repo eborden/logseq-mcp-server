@@ -77,7 +77,7 @@ pub fn unique_by_id(blocks: Vec<Value>) -> Vec<Value> {
     let mut unique: Vec<Value> = Vec::with_capacity(blocks.len());
     for block in blocks {
         // `check_block` made the id a whole number
-        let id = block.get("id").and_then(Value::as_i64).unwrap_or_default();
+        let id = block.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
         match places.get(&id) {
             Some(&at) => unique[at] = block,
             None => {
@@ -261,6 +261,12 @@ mod tests {
 
     fn places(entries: &[Entry]) -> Vec<(Option<i64>, Vec<usize>)> {
         entries.iter().map(|e| (e.date, e.blocks.clone())).collect()
+    }
+
+    #[test]
+    fn blocks_with_float_valued_whole_ids_are_told_apart() {
+        let (a, b) = (json!({"id": 5.0, "uuid": "a"}), json!({"id": 6.0, "uuid": "b"}));
+        assert_eq!(unique_by_id(vec![a.clone(), b.clone()]), [a, b]);
     }
 
     #[test]

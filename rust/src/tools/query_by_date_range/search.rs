@@ -53,7 +53,7 @@ impl BlockMatcher {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .any(|reference| reference.get("id").and_then(Value::as_i64).is_some_and(|id| self.page_ids.contains(&id)))
+            .any(|reference| reference.get("id").and_then(crate::wire::whole_number).is_some_and(|id| self.page_ids.contains(&id)))
     }
 
     /// `(?<![\p{L}\p{N}])(?:name|name...)(?![\p{L}\p{N}])` with the `iu` flags, as a test: some name
