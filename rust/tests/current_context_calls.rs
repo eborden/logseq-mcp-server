@@ -100,7 +100,7 @@ async fn nothing_open_costs_the_three_editor_calls_with_no_arguments() {
     assert!(logseq.seen.lock().unwrap().iter().all(|call| call["args"] == json!([])));
     assert_eq!(
         js::json_stringify(&context.into_value()),
-        r#"{"page":null,"message":"No page is open in LogSeq (for example the All Pages view is showing)."}"#
+        r#"{"message":"No page is open in LogSeq (for example the All Pages view is showing).","page":null}"#
     );
 }
 
