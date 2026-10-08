@@ -98,7 +98,9 @@ mod tests {
         let method = DATALOG_METHOD;
         assert_eq!(problem(connected_rows(&json!({}))), "(response): Invalid input: expected array, received object");
         assert_eq!(problem(connected_rows(&json!([1]))), "[0]: Invalid input: expected tuple, received number");
-        assert_eq!(problem(connected_rows(&json!([[10, 20]]))), "[0][2]: Invalid input: expected string, received undefined");
+        // zod's tuple length rule (`Reader::rows`, #344): two cells short is `Too small` before any cell is read, one short is read
+        assert_eq!(problem(connected_rows(&json!([[10, 20]]))), "[0]: Too small: expected array to have >7 items");
+        assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", false, "outbound"]]))), "[0][6]: Invalid input: expected number, received undefined");
         assert_eq!(problem(connected_rows(&json!([["a", 20, "b", "B", false, "outbound", 1]]))), "[0][0]: Invalid input: expected number, received string");
         assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", "no", "outbound", 1]]))), "[0][4]: Invalid input: expected boolean, received string");
         assert_eq!(
