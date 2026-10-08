@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use crate::errors::{AmbiguousPage, Candidate};
+use crate::tool::result_value;
 
 /// A warning: the result was cut or is partial, and what to do about it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -68,14 +69,10 @@ pub fn ambiguous_page_result(error: &AmbiguousPage) -> String {
     Value::Object(result).to_string()
 }
 
-/// One candidate page as the results show it (`PageCandidate`).
+/// One candidate page as the results show it (`PageCandidate`): `name`, `originalName`, `matchedBy`,
+/// `reason`.
 pub fn candidate(candidate: &Candidate) -> Value {
-    json!({
-        "name": candidate.name,
-        "originalName": candidate.original_name,
-        "matchedBy": candidate.matched_by.as_str(),
-        "reason": candidate.reason,
-    })
+    result_value(candidate)
 }
 
 #[cfg(test)]
