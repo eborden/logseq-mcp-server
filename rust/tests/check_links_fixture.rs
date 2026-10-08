@@ -549,3 +549,57 @@ async fn the_prose_check_matches_the_reference_on_seeded_random_pairs_including_
     // Most pairs differ, so the comparison is mostly of positions and excerpts, not of `{"ok":true}`
     assert!(differing > PAIRS, "only {differing} of {} pairs differ", PAIRS * 2);
 }
+
+// ---------------------------------------------------------------- the excerpt window, written out
+
+/// `firstDifference` of two texts, through the tool. No expectation here comes from `reference_prose`: the
+/// window's edges are written out by hand, as an anchor that shares no algorithm with the reference.
+async fn first_difference(before: &str, after: &str) -> Value {
+    let logseq = mock_logseq(vec![]).await;
+    check_links(&client(&logseq), before, after).await.unwrap()["prose"]["firstDifference"].clone()
+}
+
+#[tokio::test]
+async fn an_excerpt_keeps_thirty_characters_before_the_difference_and_cuts_the_thirty_first() {
+    let lead = "x".repeat(30);
+    // exactly 30 before the difference: no ellipsis
+    assert_eq!(
+        first_difference(&format!("{lead}A"), &format!("{lead}B")).await,
+        json!({"line": 1, "column": 31, "before": format!("{lead}A"), "after": format!("{lead}B")})
+    );
+    // 31 before: the first is cut, behind `...`
+    let lead = "x".repeat(31);
+    assert_eq!(
+        first_difference(&format!("{lead}A"), &format!("{lead}B")).await,
+        json!({"line": 1, "column": 32, "before": format!("...{}A", "x".repeat(30)), "after": format!("...{}B", "x".repeat(30))})
+    );
+}
+
+#[tokio::test]
+async fn an_excerpt_keeps_fifty_characters_from_the_difference_on_and_cuts_the_fifty_first() {
+    // exactly 50 from the difference on (the difference and 49 more): no ellipsis
+    let tail = "y".repeat(49);
+    assert_eq!(
+        first_difference(&format!("A{tail}"), &format!("B{tail}")).await,
+        json!({"line": 1, "column": 1, "before": format!("A{tail}"), "after": format!("B{tail}")})
+    );
+    // 51: the last is cut, before `...`
+    let tail = "y".repeat(50);
+    assert_eq!(
+        first_difference(&format!("A{tail}"), &format!("B{tail}")).await,
+        json!({"line": 1, "column": 1, "before": format!("A{}...", "y".repeat(49)), "after": format!("B{}...", "y".repeat(49))})
+    );
+}
+
+#[tokio::test]
+async fn an_excerpt_stops_at_the_line_it_is_on_and_a_line_and_column_count_from_one_in_characters() {
+    assert_eq!(
+        first_difference("one\ntwo three\nfour", "one\ntwo THREE\nfour").await,
+        json!({"line": 2, "column": 5, "before": "two three", "after": "two THREE"})
+    );
+    // an emoji is one column
+    assert_eq!(
+        first_difference("\u{1F600}\u{1F600} Cafe", "\u{1F600}\u{1F600} Cafx").await,
+        json!({"line": 1, "column": 7, "before": "\u{1F600}\u{1F600} Cafe", "after": "\u{1F600}\u{1F600} Cafx"})
+    );
+}
