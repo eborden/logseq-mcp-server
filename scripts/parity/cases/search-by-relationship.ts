@@ -295,6 +295,27 @@ export const searchByRelationshipCases: ParityCase[] = [
     ]
   },
   {
+    // zod's tuple rule (#344): a row two cells short is "Too small" at the row, before any cell is read.
+    // No string in the answer, so the self-check can perturb it into an error of another kind
+    name: 'relationship aliases: an alias row two cells short',
+    tool: TOOL,
+    arguments: { ...base, relationship_type: 'references' },
+    steps: [
+      [resolveExact(ATLAS, 'Atlas', pulled(ATLAS_WITH_ALIAS)), resolveExact(BOB, 'Bob')],
+      [query(aliasSetsQuery([10]), [], [[]])]
+    ]
+  },
+  {
+    // One cell short is read, with the member as undefined, so the error is at the cell and not the row
+    name: 'relationship aliases: an alias row one cell short',
+    tool: TOOL,
+    arguments: { ...base, relationship_type: 'references' },
+    steps: [
+      [resolveExact(ATLAS, 'Atlas', pulled(ATLAS_WITH_ALIAS)), resolveExact(BOB, 'Bob')],
+      [query(aliasSetsQuery([10]), [], [[10]])]
+    ]
+  },
+  {
     // A group of 60 is cut to the page and 49 aliases, by name, and the cut is said once for both topics
     name: 'relationship aliases: a group past the cap',
     tool: TOOL,
