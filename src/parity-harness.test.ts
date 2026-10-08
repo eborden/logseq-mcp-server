@@ -625,6 +625,38 @@ describe('the server environment', () => {
   }, 60000);
 });
 
+describe('runParity on a server that returns before its other calls are sent (#340)', () => {
+  const lateCase: ParityCase = {
+    name: 'late calls',
+    tool: 'late_calls',
+    arguments: {},
+    steps: [
+      ['getCurrentPage', 'getCurrentBlock', 'getSelectedBlocks'].map(name => ({ method: `logseq.Editor.${name}`, args: [], response: null }))
+    ]
+  };
+  // The fake lists only its own tool, so tools/list fails the snapshot; the cases' own failures are what this asks about
+  const caseFailures = (failures: string[]) => failures.filter(f => f.startsWith('[late_calls: '));
+
+  it('sees all three calls of each case, because it waits for them before it reads the log', async () => {
+    const report = await runParity({
+      server: viteNodeCommand('late-calls-server.ts'),
+      cases: [lateCase, { ...lateCase, name: 'late calls again' }],
+      snapshotFile: SNAPSHOT_FILE
+    });
+    expect(caseFailures(report.failures)).toEqual([]);
+  }, 60000);
+
+  it('would fail without the wait: the calls come after the result, and the next case would find them', async () => {
+    const report = await runParity({
+      server: viteNodeCommand('late-calls-server.ts'),
+      cases: [lateCase, { ...lateCase, name: 'late calls again' }],
+      snapshotFile: SNAPSHOT_FILE,
+      settleMs: 0
+    });
+    expect(caseFailures(report.failures).join('\n')).toMatch(/\[late_calls: late calls\] LogSeq calls, step 1 of 1: expected the 3 calls/);
+  }, 60000);
+});
+
 describe('the parity command line (--tested-tools-only, #125)', () => {
   it('reads the flag with the server command intact, in any mode', () => {
     expect(parseCommandLine(['--tested-tools-only', '--', 'x', 'a', '--b'])).toEqual({
