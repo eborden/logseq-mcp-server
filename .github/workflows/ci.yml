@@ -55,6 +55,36 @@ jobs:
       - name: Guard tests
         run: npx vitest run tests/guards
 
+  # Shell glue is linted (#381): ShellCheck on every tracked *.sh, and actionlint on the workflows, which runs
+  # ShellCheck on each run: block too. Any finding fails the job. ShellCheck is the runner's own (its version is
+  # printed). actionlint is a release binary, pinned by version and by the SHA-256 of the tarball (from the
+  # release's actionlint_<version>_checksums.txt); to bump it, change both and read that file.
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ACTIONLINT_VERSION: '1.7.12'
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: ShellCheck the shell scripts
+        run: |
+          shellcheck --version
+          git ls-files -z '*.sh' | xargs -0 --no-run-if-empty shellcheck
+
+      - name: Install actionlint (pinned by checksum)
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --output "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check -
+          tar --extract --gzip --file "${RUNNER_TEMP}/${archive}" --directory "${RUNNER_TEMP}" actionlint
+
+      - name: Lint the workflows and their run blocks
+        run: '"${RUNNER_TEMP}/actionlint" -color'
+
   # The golden files, scripts/parity/expected, are the tool contract (BR-0004, ADR-0031): the parity test (cargo test,
   # rust/tests/parity.rs) holds the Rust server to them, so a change to one is a change to what the tools promise. A pull request that changes any of
   # them fails here unless it carries the `golden-change` label, which goes on only after the maintainer's explicit OK,
