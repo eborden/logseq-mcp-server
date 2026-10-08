@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
+import { CASE_GROUPS, allCases, expectedFileOf } from '../scripts/parity/case-groups.js';
 import {
   compareCalls,
   compareResult,
@@ -126,8 +127,11 @@ describe('the stub LogSeq', () => {
 
 describe('the parity cases', () => {
   it('have an expected result each, recorded from the TypeScript server', async () => {
-    const expected = await loadExpected();
-    expect(Object.keys(expected).sort()).toEqual(getPageOutlineCases.map(c => c.name).sort());
+    for (const group of CASE_GROUPS) {
+      const expected = JSON.parse(await readFile(expectedFileOf(group), 'utf8')) as Record<string, ToolResult>;
+      expect(Object.keys(expected).sort(), group.name).toEqual(group.cases.map(c => c.name).sort());
+    }
+    expect(new Set(allCases().map(c => c.name)).size).toBe(allCases().length);
   });
 
   it('read the tools/list snapshot that src/tool-list.test.ts writes', async () => {

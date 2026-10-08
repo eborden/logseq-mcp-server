@@ -18,13 +18,12 @@
 // Exit code 0 when everything matches (for --self-check: when both halves behave), 1 otherwise.
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
+import { CASE_GROUPS, allCases, expectedFileOf, type CaseGroup } from './parity/case-groups.js';
 import { compareResult, perturbCases, runParity, type ParityReport, type ToolResult } from './parity/harness.js';
 import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
 import { parseCommandLine } from './parity/command-line.js';
 import { REPO_ROOT, SNAPSHOT_FILE } from './parity/ts-server.js';
 
-export const EXPECTED_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'get-page-outline.json');
 /** The TypeScript server's tools/list in the snapshot's shape; it must match the snapshot exactly. */
 export const EXPECTED_TOOL_LIST_FILE = join(REPO_ROOT, 'scripts', 'parity', 'expected', 'tool-list.json');
 
@@ -66,28 +65,45 @@ function printChanges(previous: Record<string, ToolResult> | undefined, next: Re
   console.log(changed === 0 ? 'no case changed' : `${changed} case(s) changed; review the JSON diff before committing`);
 }
 
+/** Each group's recorded results, merged: case names are unique across groups. */
+async function readExpected(groups: readonly CaseGroup[]): Promise<Record<string, ToolResult>> {
+  const merged: Record<string, ToolResult> = {};
+  for (const group of groups) {
+    const file = expectedFileOf(group);
+    const expected = await readJson<Record<string, ToolResult>>(file);
+    if (!expected) throw new Error(`no expected results at ${file}; record them with --record`);
+    Object.assign(merged, expected);
+  }
+  return merged;
+}
+
 async function main(): Promise<number> {
   const { mode, server, onlyTestedTools } = parseCommandLine(process.argv.slice(2));
-  const cases = getPageOutlineCases;
+  const cases = allCases();
   const snapshotFile = SNAPSHOT_FILE;
 
   if (mode === 'record') {
     const report = await runParity({ server, cases, snapshotFile });
     print('record', report);
     if (report.failures.length > 0) return 1;
-    printChanges(await readJson(EXPECTED_FILE), report.results);
+    for (const group of CASE_GROUPS) {
+      const results = Object.fromEntries(group.cases.map(c => [c.name, report.results[c.name]]));
+      printChanges(await readJson(expectedFileOf(group)), results);
+    }
     const previousTools = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
     const toolChanges = previousTools ? compareToolLists(previousTools, report.toolList ?? []) : ['no recorded tool list yet'];
     for (const line of toolChanges) console.log(`tools/list changed: ${line}`);
-    await writeFile(EXPECTED_FILE, `${JSON.stringify(report.results, null, 2)}\n`);
+    for (const group of CASE_GROUPS) {
+      const results = Object.fromEntries(group.cases.map(c => [c.name, report.results[c.name]]));
+      await writeFile(expectedFileOf(group), `${JSON.stringify(results, null, 2)}\n`);
+      console.log(`wrote ${Object.keys(results).length} results to ${expectedFileOf(group)}`);
+    }
     await writeFile(EXPECTED_TOOL_LIST_FILE, `${JSON.stringify(report.toolList, null, 2)}\n`);
-    console.log(`wrote ${Object.keys(report.results).length} results to ${EXPECTED_FILE}`);
     console.log(`wrote ${report.toolList?.length ?? 0} tools to ${EXPECTED_TOOL_LIST_FILE}`);
     return 0;
   }
 
-  const expected = await readJson<Record<string, ToolResult>>(EXPECTED_FILE);
-  if (!expected) throw new Error(`no expected results at ${EXPECTED_FILE}; record them with --record`);
+  const expected = await readExpected(CASE_GROUPS);
   const expectedToolList = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
   if (!expectedToolList) throw new Error(`no expected tool list at ${EXPECTED_TOOL_LIST_FILE}; record it with --record`);
   if (mode === 'check') {
