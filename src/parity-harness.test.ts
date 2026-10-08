@@ -224,8 +224,8 @@ describe('compareToolLists', () => {
     const cases: Array<[string, ProjectedTool[], string]> = [
       ['bound', withSchema(tools, 'logseq_check_links', s => { s.properties.after.maxLength = 50001; }),
         'logseq_check_links.inputSchema.properties.after.maxLength: expected 50000, got 50001'],
-      ['type', withSchema(tools, 'logseq_build_context', s => { s.properties.max_blocks.type = 'integer'; }),
-        'logseq_build_context.inputSchema.properties.max_blocks.type: expected "number", got "integer"'],
+      ['type', withSchema(tools, 'logseq_build_context', s => { s.properties.max_blocks.type = 'number'; }),
+        'logseq_build_context.inputSchema.properties.max_blocks.type: expected "integer", got "number"'],
       ['enum value', withSchema(tools, 'logseq_get_page', s => { s.properties.format.enum = ['json', 'md']; }),
         'logseq_get_page.inputSchema.properties.format.enum[1]: expected "markdown", got "md"'],
       ['required field', withSchema(tools, 'logseq_build_context', s => { s.required = []; }),
