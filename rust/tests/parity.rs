@@ -246,8 +246,9 @@ fn a_json_tool_result_is_compared_by_deep_equality() {
     assert_eq!(same(r#"{"a":1,"b":[1,2],"c":{"x":"y","z":2}}"#), Vec::<String>::new());
     // Key order is ignored, at every depth
     assert_eq!(same(r#"{"c":{"z":2,"x":"y"},"b":[1,2],"a":1}"#), Vec::<String>::new());
-    // Numbers compare by value
-    assert_eq!(same(r#"{"a":1.0,"b":[1,2],"c":{"x":"y","z":2}}"#), Vec::<String>::new());
+    // Numbers compare by value: 1.0 is the number 1, and a server that wrote it that way is still not minified
+    let spelled = same(r#"{"a":1.0,"b":[1,2],"c":{"x":"y","z":2}}"#);
+    assert!(spelled.len() == 1 && spelled[0].contains("not minified"), "{spelled:?}");
     // Array order is kept
     assert!(!same(r#"{"a":1,"b":[2,1],"c":{"x":"y","z":2}}"#).is_empty());
     // A different value, a missing key and an extra key are different results
@@ -294,6 +295,12 @@ fn a_json_tool_result_has_to_be_minified() {
         let failures = compare_results(&expected, &tool_result(layout), &[]);
         assert!(failures.iter().any(|f| f.contains("not minified")), "{layout:?} passed: {failures:?}");
     }
+    // A spelling JSON.stringify would not have written is not minified either (the Node harness agrees)
+    for spelling in [r#"{"a":1,"b":[1.0,2]}"#, r#"{"a":1,"b":[1e0,2]}"#, r#"{"a":1,"b":[1,2],"c":"\u0041"}"#, r#"{"a":1,"b":[1,2],"c":"\/"}"#] {
+        assert!(!minified_failures(&tool_result(spelling)).is_empty(), "{spelling} passed");
+    }
+    // What JSON.stringify writes is minified, the number corners included
+    assert_eq!(minified_failures(&tool_result(r#"{"a":1e+21,"b":[0.1,1.5e-7],"c":"é😀\u0001\n\""}"#)), Vec::<String>::new());
     // Whitespace inside a string is the value's, not layout
     let spaced = tool_result(r#"{"a":"x  y\n"}"#);
     assert_eq!(compare_results(&spaced, &spaced, &[]), Vec::<String>::new());
