@@ -152,6 +152,8 @@ export async function startRustServer(binary: string, config: LogseqMCPConfig, c
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   delete env.LOGSEQ_MCP_NOW;
+  // The TypeScript paths run with tips on; the config's `tips` or a caller's LOGSEQ_MCP_TIPS must not change that
+  env.LOGSEQ_MCP_TIPS = '1';
   env.LOGSEQ_MCP_CONFIG = configPath;
   env.HOME = home;
   env.USERPROFILE = home;
