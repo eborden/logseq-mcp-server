@@ -4,18 +4,21 @@
 
 A model reads a tool result from the top, so the order of its keys carries meaning. Every tool lists the keys of a result in the same sequence of four categories, and a new key goes in the category it belongs to:
 
-1. **What was answered.** The echo of the request and how a name was resolved (the topic asked about, the page an alias stood for). The reader learns first whether the result is about what it asked.
-2. **What must not be missed.** Whether the result is complete, what was cut or left out, warnings, how much exists in all, and a short overview of what the result holds. This comes before the data, so the reader knows how far to trust the data before reading it. Within it, the yes-or-no completeness flags come first, then the warnings that explain them, then the counts.
+1. **What was answered, and how the server interpreted the request.** The echo of the request and anything the server worked out from it: a name resolved, topics extracted, a range normalized, a default applied. The reader learns first whether the result is about what it asked.
+2. **What must not be missed.** Whether the result is complete, what was cut or left out, warnings, how much exists in all, and a short overview of what the result holds. This comes before the data, so the reader knows how far to trust the data before reading it. Within it, the yes-or-no completeness flags come first, then the warnings that explain them, then the counts, then the overview. A one-line verdict on the whole result, such as a pass/fail or a "nothing is open" message, counts as the overview.
 3. **The data.**
-4. **Optional guidance.** Advice the reader may ignore, such as next-step tips. It comes last because nothing depends on it ([BR-0009 (tips-are-advisory)](0009-tips-are-advisory.md)).
+4. **Optional guidance and metadata.** Anything the reader may safely ignore, such as next-step tips. It comes last because nothing depends on it ([BR-0009 (tips-are-advisory)](0009-tips-are-advisory.md)).
+
+Moving an existing key to its category's position is not a shape change under BR-0004, and a new key placed in its category's position is additive.
 
 The sequence is the same in every tool and does not depend on which optional keys are present: an absent key leaves the others in order.
 
 - **An error** stands alone as the whole answer, and anything added to it later comes after.
 - **An ambiguous-name answer** follows the sequence like any other result: that it is ambiguous and for which name, then the completeness keys, then the candidates as the data.
 - **A result that is a bare array** keeps the array as its first content block, with the meta block after it ([BR-0006 (no-silent-truncation)](0006-no-silent-truncation.md)). The meta block follows the same sequence inside itself: what was answered, what must not be missed, then guidance.
-- **Envelopes the server builds** (a warning, a resolution record, a meta block) follow the same logic: say what it is first, the detail next, the remedy last.
-- **A LogSeq entity with additions** keeps its own fields together, in the order LogSeq gives them ([BR-0004 (additive-tool-contracts)](0004-additive-tool-contracts.md)), as the data. The server's additions go by category: resolution and completeness before the entity, data the server built from it after.
+- **Envelopes the server builds** (a warning, a resolution record, a meta block) follow the same logic: say what it is first, the detail next, the remedy last. So do the records the server builds as data (a graph node, a timeline entry, an outline block, a slim block), in their own fields: identity first, then state, then content, then optional extras.
+- **A LogSeq entity with additions** keeps its own fields together as the data, and this rule decides to keep them in the order LogSeq gives them, with none renamed or rebuilt ([BR-0004 (additive-tool-contracts)](0004-additive-tool-contracts.md)). The server's additions go by category: resolution and completeness before the entity, data the server built from it after.
+- **Known exception.** A result that is a bare array can't put its completeness signal before the data without changing its shape, so it keeps the signal in the meta block after the array.
 
 The rule leaves alone the order of fields inside a LogSeq entity or any record passed through, the order of items in an array (each tool's own sort rule decides that), and Markdown output.
 
@@ -36,4 +39,4 @@ reviewer: A new key in a tool result goes in the position of its category, and a
 
 | Date | Change | Issue/PR |
 |---|---|---|
-| 2026-10-08 | Introduced. | #377 |
+| 2026-10-08 | Introduced. | #378 |
