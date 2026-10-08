@@ -1,5 +1,5 @@
-//! A stand-in for LogSeq's HTTP API (#124): it replays canned answers keyed
-//! by method and query text, records every call it gets, and fails loud on any call it has no answer for.
+//! A stand-in for LogSeq's HTTP API (#124): it replays canned answers keyed by the whole call (method, query text
+//! without layout, and inputs), records every call it gets, and fails loud on any call it has no answer for.
 //! It listens on 127.0.0.1 with a port the OS picks, never LogSeq's 12315, and checks a token made fresh for
 //! each run, so a server pointed at it can't reach a real graph by mistake (BR-0001).
 
@@ -39,9 +39,8 @@ fn stringify(value: &Value) -> String {
     js::json_stringify(value)
 }
 
-/// What a call is looked up by: the method, plus the query text for a Datalog query or the args for any
-/// other method. The inputs of a query are not in the key; the comparison reads them separately, so a wrong
-/// input shows as a diff rather than as a missing answer.
+/// A call as a failure message names it: the method, plus the query text for a Datalog query or the args for any
+/// other method. The inputs of a query are not in it; `canonical` has them.
 pub fn call_key(method: &str, args: &[Value]) -> String {
     match args.first() {
         Some(Value::String(query)) if method == DATASCRIPT_QUERY => format!("{method} {}", normalize_query(query)),
@@ -64,9 +63,10 @@ pub fn canonical(method: &str, args: &[Value]) -> String {
 
 #[derive(Default)]
 struct State {
-    /// Answers left for each key, used up in order, so one query asked twice can get two answers. Each keeps the
-    /// call it answers, so calls made at once with one query and different inputs get their own answers
-    pending: HashMap<String, VecDeque<(String, Value)>>,
+    /// Answers left for each call, by its `canonical` form (method, query text without layout, inputs), used up in
+    /// the order they were listed, so one call asked twice gets its two answers in the recorded order (ADR-0034
+    /// Decision 5). A call whose canonical form is not here, or is used up, has no answer and is a failure
+    pending: HashMap<String, VecDeque<Value>>,
     log: Vec<Call>,
     failures: Vec<String>,
     /// Requests received and not yet answered
@@ -121,11 +121,7 @@ impl Stub {
         let mut state = self.state.lock().unwrap();
         state.pending.clear();
         for call in calls {
-            state
-                .pending
-                .entry(call_key(&call.method, &call.args))
-                .or_default()
-                .push_back((canonical(&call.method, &call.args), call.response.clone()));
+            state.pending.entry(canonical(&call.method, &call.args)).or_default().push_back(call.response.clone());
         }
         state.log.clear();
         state.failures.clear();
@@ -247,13 +243,10 @@ fn serve(mut stream: TcpStream, state: &Mutex<State>, token: &str) {
     let answer = {
         let mut state = state.lock().unwrap();
         state.log.push(Call { method: call_method, args: args.clone() });
-        // The answer listed for exactly this call when there is one: two calls sent at once with one query and
-        // different inputs (a step's calls are a set) reach the stub in either order. Otherwise the next in line,
-        // and the comparison of the calls reports the wrong input
-        let answer = state.pending.get_mut(&key).and_then(|answers| {
-            let at = answers.iter().position(|(listed, _)| *listed == wanted).unwrap_or(0);
-            answers.remove(at).map(|(_, response)| response)
-        });
+        // Only a call that a recorded call answers is answered: its method, query text (layout aside) and every input
+        // equal, and the next answer listed for it. A call with a changed input, or one more than were recorded, has
+        // none and fails the case, whatever the server does with the error (ADR-0034 Decision 5)
+        let answer = state.pending.get_mut(&wanted).and_then(VecDeque::pop_front);
         if answer.is_none() {
             let inputs = stringify(&Value::Array(args.iter().skip(1).cloned().collect()));
             state.failures.push(format!("no canned response for {key} (inputs {inputs})"));

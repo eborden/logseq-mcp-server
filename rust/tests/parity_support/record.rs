@@ -16,6 +16,9 @@
 //! - refuses to run when `CI` is set, in a release build (which ignores `LOGSEQ_MCP_NOW`) and for any value of
 //!   `PARITY_RECORD` but `1`;
 //! - records every case and the whole tool list, never a part of them;
+//! - lowers a case's call ceiling (`call-ceilings.json`, ADR-0034 Decision 5) to the number of calls the server made
+//!   when that is fewer, gives a case with no ceiling the number it made, and never raises one: a case that made
+//!   more calls than its ceiling is a failure, and nothing is recorded;
 //! - writes nothing when a case's LogSeq calls are wrong, when the server fails a case, or when a recorded
 //!   closest-names list would break rules 3 to 6 of ADR-0032 or the recorded set would lack a case they require.
 //!
@@ -23,14 +26,14 @@
 //! `tests/parity_record.rs` tests each rule without a server, and the whole recorder end to end against a copy of
 //! some of the files.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use logseq_mcp_server::js;
 use serde_json::{Value, json};
 
-use super::cases::{Case, case_of, group_files_in, load_cases_for_recording, load_tool_list_in};
+use super::cases::{Case, case_of, group_files_in, load_cases_for_recording, load_ceilings_in, load_tool_list_in, render_ceilings};
 use super::compare::{compare_results, compare_tool_lists};
 use super::server::{PARITY_NOW_MS, Run, run_parity};
 use super::suggestion_rules::{candidates_of, check_reference_lists, missing_required_cases};
@@ -155,6 +158,41 @@ pub fn render_tool_list(tools: &[Value]) -> String {
     format!("{}\n", serde_json::to_string_pretty(&Value::Array(tools.to_vec())).expect("a tool list serializes"))
 }
 
+/// The call ceilings as they will be written.
+#[derive(Debug)]
+pub struct CeilingPlan {
+    /// Every recorded ceiling, the lowered ones and the new ones included
+    pub ceilings: BTreeMap<String, usize>,
+    /// One line for each ceiling that moves, and how
+    pub changes: Vec<String>,
+}
+
+/// What recording does to the call ceilings (ADR-0034 Decision 5): a case that made fewer calls than its ceiling
+/// has it lowered to that number, so a saved call can't be spent again without asking; a case with no ceiling
+/// takes the number it made; every other ceiling is as it was. Nothing is ever raised, and a ceiling for a case
+/// this run didn't have (a copy of some of the files) is kept.
+pub fn plan_ceilings(recorded: &BTreeMap<String, usize>, cases: &[Case], made: &HashMap<String, usize>) -> Result<CeilingPlan, String> {
+    let mut ceilings = recorded.clone();
+    let mut changes = Vec::new();
+    for case in cases {
+        let Some(&count) = made.get(&case.name) else {
+            return Err(format!("the server made no calls to count for the case {:?}", case.name));
+        };
+        match recorded.get(&case.name) {
+            None => {
+                changes.push(format!("new ceiling: {} is {count}", case.name));
+                ceilings.insert(case.name.clone(), count);
+            }
+            Some(&ceiling) if count < ceiling => {
+                changes.push(format!("ceiling lowered: {} {ceiling} to {count}", case.name));
+                ceilings.insert(case.name.clone(), count);
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(CeilingPlan { ceilings, changes })
+}
+
 /// What a recording did.
 #[derive(Debug, Default)]
 pub struct RecordReport {
@@ -211,6 +249,11 @@ pub fn record_goldens(dir: &Path, require_suggestion_cases: bool) -> Result<Reco
             writes.push((dir.join("tool-list.json"), render_tool_list(&plan.tools)));
         }
         None => out.lines.push("tools/list: no change in meaning; the file is left as it is".to_owned()),
+    }
+    let ceilings = plan_ceilings(&load_ceilings_in(dir, true), &cases, &report.call_counts)?;
+    if !ceilings.changes.is_empty() {
+        out.lines.extend(ceilings.changes.iter().map(|line| format!("  - {line}")));
+        writes.push((dir.join("call-ceilings.json"), render_ceilings(&ceilings.ceilings)));
     }
     for (path, text) in writes {
         fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;

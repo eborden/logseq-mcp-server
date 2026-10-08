@@ -1,13 +1,14 @@
 //! The parity cases, read from `tests/data/parity/*.json`, and the perturbation the self-check applies.
 //!
 //! Those files are the only source of the cases and of the golden results (#379): each group file holds its
-//! cases, one per line, and each case holds its stub answers, its MCP request, its expected call steps and the
-//! golden result under `expected`. A case is added or edited by hand, and `PARITY_RECORD=1 cargo test --test
+//! cases, one per line, and each case holds its stub answers, its MCP request, its recorded calls (as `steps`) and
+//! the golden result under `expected`. A case is added or edited by hand, and `PARITY_RECORD=1 cargo test --test
 //! parity_record -- --nocapture` (`record.rs`) fills in or rewrites the `expected` of the cases whose result
-//! changed in meaning. `tool-list.json` is the recorded `tools/list` and `clock-cases.json` lists the cases that
-//! read today's date; neither is a group file.
+//! changed in meaning. `tool-list.json` is the recorded `tools/list`, `clock-cases.json` lists the cases that
+//! read today's date, and `call-ceilings.json` holds each case's call ceiling (ADR-0034 Decision 5), apart from
+//! the call fixtures so that adding or rewriting a fixture can't raise it. None of the three is a group file.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +17,7 @@ use serde_json::{Map, Value, json};
 const RECORD: &str = "record it: PARITY_RECORD=1 cargo test --test parity_record -- --nocapture";
 
 /// The files in the data folder that are not case groups.
-pub const NOT_GROUPS: [&str; 2] = ["tool-list", "clock-cases"];
+pub const NOT_GROUPS: [&str; 3] = ["tool-list", "clock-cases", "call-ceilings"];
 
 /// A LogSeq call the server should make, with the answer the stub gives.
 #[derive(Debug, Clone)]
@@ -49,9 +50,14 @@ pub struct Case {
     pub name: String,
     pub tool: String,
     pub arguments: Value,
-    /// Steps run in order; the calls of one step are the ones the recorded server made at once, and are
-    /// compared as a set
+    /// The recorded calls, as the retired server made them: steps in order, the calls of one step made at once.
+    /// The grouping and the order are history (ADR-0034 Decision 5): the comparison reads them as the calls the
+    /// stub can answer. The answers to one query are given in the order they are listed here.
     pub steps: Vec<Vec<Canned>>,
+    /// The most LogSeq calls the server may make for this case (ADR-0011, ADR-0034 Decision 5). It is read from
+    /// `call-ceilings.json`, never from the case, so a fixture added or rewritten can't raise it. For the
+    /// recorder, a case with no entry yet has as many as it records calls.
+    pub ceiling: usize,
     /// The answer for the last call in the self-check, in place of the suffixed strings
     pub perturbed: Option<Value>,
     pub request: Request,
@@ -99,7 +105,7 @@ fn canned_of(call: &Value, case: &str) -> Canned {
 pub fn case_of(group: &str, value: &Value, require_expected: bool) -> Case {
     let object = value.as_object().expect("a case is an object");
     let name = text_of(object, "name", "?").to_owned();
-    let steps = object
+    let steps: Vec<Vec<Canned>> = object
         .get("steps")
         .and_then(Value::as_array)
         .unwrap_or_else(|| panic!("case {name:?} has no steps"))
@@ -129,11 +135,13 @@ pub fn case_of(group: &str, value: &Value, require_expected: bool) -> Case {
         None if require_expected => panic!("case {name:?} has no golden result\n{RECORD}"),
         None => Value::Null,
     };
+    let ceiling: usize = steps.iter().map(Vec::len).sum();
     Case {
         group: group.to_owned(),
         tool: text_of(object, "tool", &name).to_owned(),
         arguments: object.get("arguments").cloned().unwrap_or_else(|| json!({})),
         steps,
+        ceiling,
         perturbed: object.get("perturbed").cloned(),
         request,
         expected,
@@ -176,16 +184,52 @@ pub fn group_files_in(dir: &Path) -> Vec<GroupFile> {
         .collect()
 }
 
+/// Each case's call ceiling by case name: `call-ceilings.json` of a folder, an object of whole numbers. The file
+/// may be absent only for the recorder (`record`), which then gives the cases their first ceilings.
+pub fn load_ceilings_in(dir: &Path, record: bool) -> BTreeMap<String, usize> {
+    let file = dir.join("call-ceilings.json");
+    if record && !file.exists() {
+        return BTreeMap::new();
+    }
+    let object = read_json(&file);
+    let object = object.as_object().unwrap_or_else(|| panic!("{} is not an object of ceilings by case name", file.display()));
+    object
+        .iter()
+        .map(|(name, ceiling)| {
+            let ceiling = ceiling.as_u64().unwrap_or_else(|| panic!("the call ceiling of {name:?} is not a whole number: {ceiling}"));
+            (name.clone(), usize::try_from(ceiling).expect("a ceiling fits a usize"))
+        })
+        .collect()
+}
+
+/// The text of `call-ceilings.json`: the ceilings by case name, sorted, one to a line.
+pub fn render_ceilings(ceilings: &BTreeMap<String, usize>) -> String {
+    format!("{}\n", serde_json::to_string_pretty(ceilings).expect("ceilings serialize"))
+}
+
 fn cases_in(dir: &Path, require_expected: bool) -> Vec<Case> {
+    // The recorder (`require_expected` false) may meet a case with no ceiling and gives it one. A run may not: a
+    // case without a ceiling, or a ceiling without a case, is a failure, so a ceiling can't be dropped or left behind
+    let ceilings = load_ceilings_in(dir, !require_expected);
     let mut cases = Vec::new();
     for group in group_files_in(dir) {
         for case in &group.cases {
-            cases.push(case_of(&group.name, case, require_expected));
+            let mut case = case_of(&group.name, case, require_expected);
+            match ceilings.get(&case.name) {
+                Some(ceiling) => case.ceiling = *ceiling,
+                None if require_expected => panic!("case {:?} has no call ceiling in call-ceilings.json\n{RECORD}", case.name),
+                None => {}
+            }
+            cases.push(case);
         }
     }
     let mut names = HashSet::new();
     for case in &cases {
         assert!(names.insert(case.name.as_str()), "duplicate parity case name {:?}", case.name);
+    }
+    if require_expected {
+        let stale: Vec<&String> = ceilings.keys().filter(|name| !names.contains(name.as_str())).collect();
+        assert!(stale.is_empty(), "call-ceilings.json holds a ceiling for case(s) that don't exist: {stale:?}");
     }
     assert!(!cases.is_empty(), "no parity cases were read from {}", dir.display());
     cases
@@ -194,6 +238,11 @@ fn cases_in(dir: &Path, require_expected: bool) -> Vec<Case> {
 /// Every case of every group, in the order of the group files' names.
 pub fn load_cases() -> Vec<Case> {
     cases_in(&data_dir(), true)
+}
+
+/// The same for another folder (a test's copy of some of the files).
+pub fn load_cases_in(dir: &Path) -> Vec<Case> {
+    cases_in(dir, true)
 }
 
 /// The cases of a folder for the recorder: one with no golden result yet is allowed, and has `Value::Null`.

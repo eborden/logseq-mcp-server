@@ -4,7 +4,8 @@
 //! before that harness was retired.
 //!
 //! The rules:
-//! - the LogSeq calls: in order, a step's calls as a set, nothing after the last step (`compare_calls`);
+//! - the LogSeq calls (`compare_calls`, ADR-0034 Decision 5): each call made matches a recorded call, in any order, a
+//!   query asked twice is matched in the recorded order, at most the case's ceiling are made, and all are reads;
 //! - a result: its keys and content blocks, a JSON text by deep equality and minified, every other text byte for
 //!   byte, a resource's `contents`, a prompt's messages, a JSON-RPC error (`compare_results`);
 //! - `tools/list` by meaning (ADR-0031): the normalization of a schema and the failures it still reports;
@@ -13,7 +14,7 @@
 mod parity_support;
 
 use parity_support::cases::{Canned, Case, Request, load_cases, load_tool_list};
-use parity_support::compare::{check_wrong_lists, compare_calls, compare_results, compare_tool_lists, normalize_schema};
+use parity_support::compare::{check_wrong_lists, compare_calls, compare_results, compare_tool_lists, is_read_method, normalize_schema};
 use parity_support::stub::{Call, DATASCRIPT_QUERY};
 use parity_support::suggestion_rules::{
     GUIDANCE, REQUIRED_CASES, candidates_of, check_list, check_reference_list, check_reference_lists, fold, matches_of, missing_required_cases, parse_not_found,
@@ -56,50 +57,104 @@ fn permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
 }
 
 #[test]
-fn sequential_calls_are_in_order_and_concurrent_ones_in_any_order() {
+fn the_calls_may_be_made_in_any_order_and_in_any_grouping() {
     let (a, b, c) = (q("[:find ?a]", "\"alice\""), q("[:find ?b]", "\"bob\""), editor("getAllPages"));
-    assert_eq!(compare_calls(&[vec![a.clone()], vec![b.clone(), c.clone()]], &made_all(&[&a, &c, &b])), Vec::<String>::new());
-    assert_eq!(compare_calls(&[vec![a.clone()], vec![b.clone()]], &made_all(&[&b, &a])).len(), 2, "two steps made the other way round");
-}
-
-#[test]
-fn the_calls_of_a_concurrent_step_may_arrive_in_every_order_and_a_later_step_still_follows_them() {
-    // A tool that fails on the first of several concurrent answers returns before the rest arrive (#340)
-    let (a, b, c, d) = (q("[:find ?a]", "\"alice\""), q("[:find ?b]", "\"bob\""), editor("getAllPages"), editor("getSelectedBlocks"));
-    let step = vec![a.clone(), c.clone(), d.clone()];
-    let orders = permutations(&step);
-    assert_eq!(orders.len(), 6);
-    for arrival in orders {
-        let mut calls: Vec<Call> = arrival.iter().map(made).collect();
-        calls.push(made(&b));
-        assert_eq!(compare_calls(&[step.clone(), vec![b.clone()]], &calls), Vec::<String>::new());
-    }
-}
-
-#[test]
-fn a_concurrent_step_wants_every_call_once_with_its_inputs_whatever_the_arrival_order() {
-    let (a, c, d) = (q("[:find ?a]", "\"alice\""), editor("getAllPages"), editor("getSelectedBlocks"));
-    let step = vec![vec![a.clone(), c.clone(), d.clone()]];
-    // One missing, one doubled in its place, one with another input, one extra: each fails in every order
-    let wrong: Vec<Vec<Canned>> = vec![vec![d.clone(), a.clone()], vec![c.clone(), a.clone(), a.clone()], vec![d.clone(), c.clone(), q("[:find ?a]", "\"Alice\"")], vec![a.clone(), c.clone(), d.clone(), d.clone()]];
-    for got in wrong {
-        for order in permutations(&got) {
-            let calls: Vec<Call> = order.iter().map(made).collect();
-            assert!(!compare_calls(&step, &calls).is_empty(), "{order:?} passed");
+    // However the recorded server grouped them, and in whatever order they arrive
+    for steps in [vec![vec![a.clone()], vec![b.clone(), c.clone()]], vec![vec![a.clone(), b.clone(), c.clone()]], vec![vec![a.clone()], vec![b.clone()], vec![c.clone()]]] {
+        for order in permutations(&[&a, &b, &c]) {
+            assert_eq!(compare_calls(&steps, 3, &made_all(&order)), Vec::<String>::new());
         }
     }
 }
 
 #[test]
-fn a_changed_input_a_missing_call_and_an_extra_one_are_each_one_failure() {
+fn a_recorded_call_never_made_is_not_a_failure_and_fewer_calls_than_the_ceiling_pass() {
+    let (a, b, c) = (q("[:find ?a]", "\"alice\""), q("[:find ?b]", "\"bob\""), editor("getAllPages"));
+    let steps = [vec![a.clone()], vec![b.clone(), c.clone()]];
+    assert_eq!(compare_calls(&steps, 3, &made_all(&[&a, &c])), Vec::<String>::new());
+    assert_eq!(compare_calls(&steps, 3, &made_all(&[&b])), Vec::<String>::new());
+    assert_eq!(compare_calls(&steps, 3, &[]), Vec::<String>::new());
+    // A ceiling below the recorded count (a call saved, the ceiling lowered) leaves the extra fixture unused
+    assert_eq!(compare_calls(&steps, 2, &made_all(&[&a, &b])), Vec::<String>::new());
+}
+
+#[test]
+fn a_call_no_recorded_call_answers_fails_the_case_whatever_else_is_true() {
     let (a, b) = (q("[:find ?a]", "\"alice\""), q("[:find ?b]", "\"bob\""));
-    assert_eq!(compare_calls(&[vec![a.clone()]], &made_all(&[&q("[:find ?a]", "\"Alice\"")])).len(), 1);
-    assert_eq!(compare_calls(&[vec![a.clone()], vec![b.clone()]], &made_all(&[&a])).len(), 1);
-    let extra = compare_calls(&[vec![a.clone()]], &made_all(&[&a, &b]));
-    assert_eq!(extra.len(), 1);
-    assert!(extra[0].contains("1 call(s) after the last step"), "{extra:?}");
-    // A different query is a different call
-    assert_eq!(compare_calls(&[vec![q("[:find ?a]", "\"x\"")]], &made_all(&[&q("[:find ?b]", "\"x\"")])).len(), 1);
+    let steps = [vec![a.clone()]];
+    // Another input, another query, another method: each is one failure, with the ceiling out of the way
+    for wrong in [q("[:find ?a]", "\"Alice\""), b.clone(), editor("getAllPages")] {
+        let failures = compare_calls(&steps, 9, &made_all(&[&a, &wrong]));
+        assert_eq!(failures.len(), 1, "{wrong:?}: {failures:?}");
+        assert!(failures[0].contains("no recorded call answers"), "{failures:?}");
+    }
+    // The call a case does record, made in place of the wrong one, passes
+    assert!(compare_calls(&steps, 9, &made_all(&[&a])).is_empty());
+    // An input added, or taken away
+    let mut more = a.clone();
+    more.args.push(json!("extra"));
+    assert_eq!(compare_calls(&steps, 9, &made_all(&[&more])).len(), 1);
+    let mut fewer = a.clone();
+    fewer.args.pop();
+    assert_eq!(compare_calls(&steps, 9, &made_all(&[&fewer])).len(), 1);
+}
+
+#[test]
+fn a_query_asked_more_than_it_was_recorded_has_no_recorded_call_left_to_answer_it() {
+    let a = q("[:find ?a]", "\"alice\"");
+    let steps = [vec![a.clone()], vec![a.clone()]];
+    assert_eq!(compare_calls(&steps, 2, &made_all(&[&a, &a])), Vec::<String>::new());
+    // The third is answered by nothing, and is over the ceiling too: two failures
+    let third = compare_calls(&steps, 2, &made_all(&[&a, &a, &a]));
+    assert_eq!(third.len(), 2, "{third:?}");
+    assert!(third.iter().any(|f| f.contains("no recorded call answers")) && third.iter().any(|f| f.contains("ceiling")), "{third:?}");
+    // And with room under the ceiling, it is still the third that fails
+    assert_eq!(compare_calls(&steps, 9, &made_all(&[&a, &a, &a])).len(), 1);
+}
+
+#[test]
+fn more_calls_than_the_ceiling_fail_even_when_each_matches_a_recorded_call() {
+    let (a, b) = (q("[:find ?a]", "\"alice\""), q("[:find ?b]", "\"bob\""));
+    let steps = [vec![a.clone(), b.clone()]];
+    assert_eq!(compare_calls(&steps, 2, &made_all(&[&a, &b])), Vec::<String>::new());
+    let over = compare_calls(&steps, 1, &made_all(&[&a, &b]));
+    assert_eq!(over.len(), 1);
+    assert!(over[0].contains("2 call(s), over the case's ceiling of 1"), "{over:?}");
+    // A ceiling of nothing allows nothing
+    assert_eq!(compare_calls(&steps, 0, &made_all(&[&a])).len(), 1);
+    assert_eq!(compare_calls(&steps, 0, &[]), Vec::<String>::new());
+}
+
+#[test]
+fn every_call_is_a_read_the_recorded_ones_and_the_made_ones() {
+    for read in ["logseq.DB.datascriptQuery", "logseq.DB.q", "logseq.Editor.getPage", "logseq.Editor.getAllPages", "logseq.Editor.getPageLinkedReferences", "logseq.App.getCurrentGraph"] {
+        assert!(is_read_method(read), "{read} is a read");
+    }
+    for write in [
+        "logseq.Editor.insertBlock",
+        "logseq.Editor.updateBlock",
+        "logseq.Editor.createPage",
+        "logseq.Editor.deletePage",
+        "logseq.Editor.removeBlock",
+        "logseq.Editor.upsertBlockProperty",
+        "logseq.App.setCurrentGraphConfigs",
+        "logseq.Editor.get",
+        "logseq.Editor.getting",
+        "getPage",
+        "",
+    ] {
+        assert!(!is_read_method(write), "{write:?} is not a read");
+    }
+    let insert = Canned { method: "logseq.Editor.insertBlock".into(), args: vec![json!("page"), json!("text")], response: json!({"id": 1}) };
+    // A recorded write fails the case, though the server made it exactly as recorded and within the ceiling
+    let recorded = compare_calls(&[vec![insert.clone()]], 1, &made_all(&[&insert]));
+    assert!(recorded.iter().any(|f| f.contains("recorded call") && f.contains("not a read")), "{recorded:?}");
+    assert!(recorded.iter().any(|f| f.contains("made a call that is not a read")), "{recorded:?}");
+    // A write the server made, with every recorded call a read, fails
+    let a = q("[:find ?a]", "\"alice\"");
+    let made = compare_calls(&[vec![a.clone()]], 9, &made_all(&[&a, &insert]));
+    assert_eq!(made.len(), 1, "{made:?}");
+    assert!(made[0].contains("not a read"), "{made:?}");
 }
 
 // ---- a result: keys, blocks and texts
@@ -805,6 +860,7 @@ fn a_reference_that_breaks_a_rule_is_not_recorded() {
         tool: "logseq_get_page".into(),
         arguments: json!({}),
         steps: vec![vec![Canned { method: "logseq.Editor.getAllPages".into(), args: vec![], response: Value::Array(pages.clone()) }]],
+        ceiling: 1,
         perturbed: None,
         request: Request::Tool,
         expected,
