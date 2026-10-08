@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::{Map, Value, json};
 
 use super::cases::{Case, Request};
-use super::compare::{compare_calls, compare_results, compare_tool_lists};
+use super::compare::{compare_calls, compare_results, compare_tool_lists, stale_ceiling};
 use super::stub::Stub;
 use super::suggestion_rules::{candidates_of, check_reference_lists, missing_required_cases};
 
@@ -375,6 +375,13 @@ pub fn run_parity_with(run: &Run, launch: &dyn Fn(&Path, &Path, i64) -> Server) 
             let made = stub.calls();
             failures.extend(compare_calls(&case.steps, case.ceiling, &made).into_iter().map(|f| format!("{prefix} LogSeq calls, {f}")));
             call_counts.insert(case.name.clone(), made.len());
+            // A saved call has to lower the ceiling in the same change (ADR-0034 Decision 5), or a later one could spend it with
+            // no OK. Only the real run is judged: a perturbed answer can change what the server asks, and a case whose ceiling
+            // the self-check changed has been made to fail on purpose
+            let as_committed = judged.get(case.name.as_str()).is_some_and(|committed| committed.steps == case.steps && committed.ceiling == case.ceiling);
+            if !run.record && as_committed {
+                failures.extend(stale_ceiling(case.ceiling, made.len()).into_iter().map(|f| format!("{prefix} LogSeq calls, {f}")));
+            }
             if !run.record {
                 let candidates = candidates_of(judged.get(case.name.as_str()).copied().unwrap_or(case));
                 failures.extend(compare_results(&case.expected, &result, &candidates).into_iter().map(|f| format!("{prefix} result {f}")));

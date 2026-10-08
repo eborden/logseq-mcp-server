@@ -20,7 +20,7 @@ const RECORD: &str = "record it: PARITY_RECORD=1 cargo test --test parity_record
 pub const NOT_GROUPS: [&str; 3] = ["tool-list", "clock-cases", "call-ceilings"];
 
 /// A LogSeq call the server should make, with the answer the stub gives.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Canned {
     pub method: String,
     pub args: Vec<Value>,

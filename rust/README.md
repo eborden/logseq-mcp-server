@@ -109,15 +109,17 @@ the server to this:
   that matches none fails the case, whatever the server does with the error, so a best-effort path that swallows it
   still fails. A query asked twice is matched to its recorded answers in the recorded order, and a call asked more
   often than it was recorded has no answer left.
-- At most the case's ceiling of calls are made (ADR-0011). Fewer pass, and a recorded call the server never makes is
-  not a failure.
+- At most the case's ceiling of calls are made (ADR-0011). A recorded call the server never makes is not a failure
+  by itself, but a run of the cases as committed that makes **fewer** calls than the ceiling fails until the ceiling
+  is lowered (below), so a saved call can't be spent again later without asking.
 - Every recorded call is a read, and so is every call made (BR-0002, `is_read_method`).
 - The order of the calls, their grouping into the `steps` of a case and whether they ran at once are not compared.
 
 The ceiling is in `tests/data/parity/call-ceilings.json`, a case name to a number, apart from the fixtures, so adding
 or rewriting a fixture can't raise it. It starts at the number of calls the case records, and no ceiling may exceed
 that number. A PR that makes fewer calls lowers it: `PARITY_RECORD=1 cargo test --test parity_record -- --nocapture`
-does it for every case that made fewer calls than its ceiling. Lowering needs no OK. **Raising a ceiling, or adding one, needs the
+does it for every case that made fewer calls than its ceiling, and the failure for a ceiling above the calls made
+names that command. Lowering needs no OK. **Raising a ceiling, or adding one, needs the
 maintainer's explicit OK**, and the second step of the `golden-files` job in `ci.yml` fails a PR that does either
 unless it carries the `golden-change` label, which only the maintainer adds. The recorder never raises one.
 
@@ -130,7 +132,8 @@ real LogSeq:
    answers with the union of the old answers, a narrowed one with a subset), not from what the server happens to need,
    and show that derivation in the PR.
 2. Run `cd rust && cargo test --locked --test parity --test parity_self_check`. It must pass with no `expected` edited
-   and no ceiling raised. If the case now makes fewer calls, lower its ceiling with the recorder (above) or by hand.
+   and no ceiling raised. If the case now makes fewer calls, the run fails with "under the case's ceiling": lower the
+   ceiling with the recorder (above) or by hand.
 3. Run the integration suite against this worktree's fixture graph, which shows that the query is right on LogSeq (the
    parity answers are made up, so the parity test can't): `npx tsx scripts/logseq-instance.ts start`, then
    `npm run test:integration`, then `npx tsx scripts/logseq-instance.ts stop`.
