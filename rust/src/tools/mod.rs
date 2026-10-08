@@ -13,6 +13,8 @@ pub mod build_context;
 pub mod check_links;
 pub mod get_backlinks;
 pub mod get_block;
+pub mod get_concept_evolution;
+pub mod get_concept_network;
 pub mod get_context_for_query;
 pub mod get_current_context;
 pub mod get_graph_info;
@@ -31,6 +33,8 @@ pub fn list() -> Vec<Tool> {
         check_links::definition(),
         get_backlinks::definition(),
         get_block::definition(),
+        get_concept_evolution::definition(),
+        get_concept_network::definition(),
         get_context_for_query::definition(),
         get_current_context::definition(),
         get_graph_info::definition(),
@@ -57,6 +61,8 @@ pub async fn call(
         check_links::NAME => Some(check_links::call(client, tips_enabled, arguments).await),
         get_backlinks::NAME => Some(get_backlinks::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
+        get_concept_evolution::NAME => Some(get_concept_evolution::call(client, tips_enabled, arguments).await),
+        get_concept_network::NAME => Some(get_concept_network::call(client, tips_enabled, arguments).await),
         get_context_for_query::NAME => Some(get_context_for_query::call(client, tips_enabled, arguments).await),
         get_current_context::NAME => Some(get_current_context::call(client, tips_enabled, arguments).await),
         get_graph_info::NAME => Some(get_graph_info::call(client, tips_enabled, arguments).await),
