@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
 import {
   compareCalls,
@@ -14,7 +14,7 @@ import {
   type ToolResult
 } from '../scripts/parity/harness.js';
 import { callKey, DATASCRIPT_QUERY, LOGSEQ_PORT, startStubLogseq, type CannedCall } from '../scripts/parity/stub-logseq.js';
-import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer } from '../scripts/parity/ts-server.js';
+import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer, viteNodeCommand } from '../scripts/parity/ts-server.js';
 
 /**
  * The differential parity harness (#124, ADR-0025 Decision 2). The end-to-end tests start the
@@ -114,6 +114,27 @@ describe('the parity cases', () => {
     const entry = readSnapshotEntry(await readFile(SNAPSHOT_FILE, 'utf8'), TOOL_LIST_SNAPSHOT_KEY);
     expect(entry).toContain('"name": "logseq_get_page_outline"');
   });
+});
+
+describe('the server environment', () => {
+  it('gives the server a sandboxed home, so a server that ignores LOGSEQ_MCP_CONFIG finds no fallback config', async () => {
+    const report = await runParity({
+      server: viteNodeCommand('env-report-server.ts'),
+      cases: [{ name: 'env', tool: 'report_env', arguments: {}, steps: [] }],
+      snapshotFile: SNAPSHOT_FILE
+    });
+    const text = report.results.env?.content?.[0]?.text;
+    expect(typeof text, report.failures.join('\n')).toBe('string');
+    const env = JSON.parse(text as string) as Record<string, string | null>;
+
+    const dir = dirname(env.LOGSEQ_MCP_CONFIG!);
+    expect(dir).toContain('logseq-parity-');
+    expect(env.HOME).toBe(join(dir, 'home'));
+    expect(env.HOME).not.toBe(homedir());
+    expect(env.USERPROFILE).toBe(env.HOME);
+    expect(env.XDG_CONFIG_HOME).toBe(join(env.HOME!, '.config'));
+    expect(env.CFFIXED_USER_HOME).toBe(process.platform === 'darwin' ? env.HOME : null);
+  }, 60000);
 });
 
 describe('runParity against the TypeScript server', () => {
