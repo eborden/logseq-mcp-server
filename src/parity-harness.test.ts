@@ -10,6 +10,7 @@ import {
   readSnapshotEntry,
   runParity,
   serializeLikeVitest,
+  toolsCalledBy,
   TOOL_LIST_SNAPSHOT_KEY,
   type ParityCase,
   type ToolResult
@@ -285,6 +286,24 @@ describe('compareToolLists', () => {
     expect(compareToolLists(tools, nullable)).toEqual([
       'logseq_build_context.inputSchema.properties.topic_name.type: expected "string", got ["string","null"]'
     ]);
+  });
+});
+
+describe('toolsCalledBy (a server with only some tools, #125)', () => {
+  it('keeps the reference entries for the tools the cases call, and fails any other tool the server lists', async () => {
+    const tools = await loadToolList();
+    const reference = toolsCalledBy(tools, getPageOutlineCases);
+    expect(reference.map(t => t.name)).toEqual(['logseq_get_page_outline']);
+    // a server listing just that tool, as the reference has it, is the same
+    expect(compareToolLists(reference, reference)).toEqual([]);
+    // a second tool it shouldn't have is reported, and so is a change to the tool it has
+    const extra = tools.find(t => t.name === 'logseq_get_page') as ProjectedTool;
+    expect(compareToolLists(reference, [...reference, extra])).toEqual(['logseq_get_page: not in the reference']);
+    expect(compareToolLists(reference, [{ ...reference[0], title: 'Outline' }])).toEqual([
+      'logseq_get_page_outline.title: expected "Get Page Outline", got "Outline"'
+    ]);
+    // without the option every other tool is missing
+    expect(compareToolLists(tools, reference)).toHaveLength(tools.length - 1);
   });
 });
 
