@@ -24,19 +24,27 @@ Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts o
    Tips are on by default: seven tools (`search_blocks`, `get_page`, `get_page_outline`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `list_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
 
    Some tools also accept `name`, `page` (and `page_name` or `uuid` where it fits) in place of their canonical parameter (`page_name`, `topic_name`, `concept_name`, `block_uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
-4. Connect it to your MCP client (next section). Needs Node 22.12 or newer.
+4. Connect it to your MCP client (next section). The server is a Rust binary you build from a clone, which needs the Rust toolchain that `rust/rust-toolchain.toml` pins (rustup reads it). Node is only for the repo's tooling and tests.
 
 ## Install
 
-The package runs straight from npm with `npx`, so there is nothing to install globally. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+The server is a Rust binary. There is no npm package or release binary yet: how it ships is open (#350, #355). Until then, build it from a clone. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+
+```bash
+git clone https://github.com/eborden/logseq-mcp-server
+cd logseq-mcp-server
+git checkout feature/rust-spike       # `main` still has the TypeScript server until the Rust branch merges
+cd rust
+cargo build --release --locked        # rust/target/release/logseq-mcp-server
+```
 
 ### Claude Code
 
 ```bash
-claude mcp add logseq -- npx -y logseq-mcp-server
+claude mcp add logseq -- /absolute/path/to/logseq-mcp-server/rust/target/release/logseq-mcp-server
 ```
 
-Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills.
+Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills (stale for now, see there).
 
 ### Claude Desktop
 
@@ -46,26 +54,15 @@ Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Su
 {
   "mcpServers": {
     "logseq": {
-      "command": "npx",
-      "args": ["-y", "logseq-mcp-server"]
+      "command": "/absolute/path/to/logseq-mcp-server/rust/target/release/logseq-mcp-server"
     }
   }
 }
 ```
 
-### From a clone
-
-Build it as shown under [Install as a Claude Code plugin](#install-as-a-claude-code-plugin), then point the client at the built file:
-
-```bash
-claude mcp add logseq -- node /absolute/path/to/logseq-mcp-server/dist/index.js
-```
-
-In Claude Desktop, use `"command": "node"` with that path in `args`.
-
-The first npm release has not been published yet (see [Publishing](#publishing)), so until then use a clone.
-
 ## Install as a Claude Code plugin
+
+> **Stale until #350 and #355.** This section and [Publishing](#publishing) describe how the TypeScript server was packaged and published. The plugin manifest still starts `node dist/index.js`, `dist/` no longer builds (`npm run build` stops with a pointer to the Rust build), and nothing here has been updated for the Rust binary. Use the clone install above for now.
 
 The repo is both a Claude Code plugin and its own marketplace. The plugin bundles the MCP server and the `logseq-skills` workflows.
 
@@ -200,6 +197,8 @@ Gets: All journal entries in date range
 ```
 
 ## Publishing
+
+> **Stale until #350 and #355**, as above: this is the npm flow of the TypeScript server, which is retired. How the Rust binary is published needs its own decision.
 
 For the maintainer. Nothing publishes automatically: `.github/workflows/publish.yml` runs only when started by hand from the Actions tab, and only on `main`.
 
