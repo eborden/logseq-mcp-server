@@ -441,7 +441,7 @@ Track how a concept appears and evolves over time.
 - `start_date` (optional): Start date in YYYYMMDD format
 - `end_date` (optional): End date in YYYYMMDD format
 - `group_by` (optional): Grouping level: 'day', 'week', 'month'
-- `max_entries` (optional): Most mentions kept in `timeline` (default: **100**, max: **500**; a larger value is clamped to 500, floored, not rejected). Dates narrow only dated mentions: a mention on a non-journal page has no date and passes every `start_date` and `end_date`, so no date range reaches it
+- `max_entries` (optional): Most mentions kept in `timeline` (default: **100**, max: **500**; a larger value is clamped to 500, not rejected; a fraction is rejected). Dates narrow only dated mentions: a mention on a non-journal page has no date and passes every `start_date` and `end_date`, so no date range reaches it
 
 **Returns:**
 - Timeline of mentions
