@@ -75,10 +75,9 @@ jobs:
         run: cargo test --locked
 
       # The parity harness (#124) holds the binary just built to the TypeScript server: each tool
-      # result byte for byte, the LogSeq calls and `tools/list` by meaning (ADR-0031). It starts its
-      # own stub LogSeq on a random local port, so nothing here contacts a LogSeq. The flag is for
-      # the spike's one tool: it compares `tools/list` for the tools the cases call, and the server
-      # must list those and no others.
+      # result, prompt and resource byte for byte, the LogSeq calls and `tools/list` by meaning
+      # (ADR-0031). The server lists all 16 tools, so the whole `tools/list` is compared (#316). It
+      # starts its own stub LogSeq on a random local port, so nothing here contacts a LogSeq.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -91,7 +90,7 @@ jobs:
 
       - name: Parity with the TypeScript server
         working-directory: .
-        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --tested-tools-only "$PWD/rust/target/debug/logseq-mcp-server"
+        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts "$PWD/rust/target/debug/logseq-mcp-server"
 
       # The slowest step (thin LTO, one codegen unit), and nothing in CI uses its output: the
       # startup and footprint measurements (#126) build the release binary locally. It runs on a

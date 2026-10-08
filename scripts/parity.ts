@@ -1,13 +1,15 @@
 // Differential parity harness (#124, ADR-0031): run a server against the stub LogSeq and compare
-// its tools/list (by meaning, #292), its logseq_get_page_outline results (byte for byte) and its
+// its tools/list (by meaning, #292), its tool, prompt and resource results (byte for byte) and its
 // LogSeq calls with the TypeScript server's. Synthetic fixtures only; it never contacts a real LogSeq.
 //
 //   npx tsx scripts/parity.ts                      # the TypeScript server against its recorded results
 //   npx tsx scripts/parity.ts -- ./my-server --x   # any other server command
-//   npx tsx scripts/parity.ts --tested-tools-only -- rust/target/debug/logseq-mcp-server
-//                                                  # a server with only some tools, e.g. the Rust spike (#125):
-//                                                  # tools/list is compared for the tools the cases call, and the
-//                                                  # server must list those and no others
+//   npx tsx scripts/parity.ts -- rust/target/debug/logseq-mcp-server
+//                                                  # the Rust server (CI does this, and compares the whole tools/list)
+//   npx tsx scripts/parity.ts --tested-tools-only -- ./my-server
+//                                                  # for local use, a server with only some tools: tools/list is
+//                                                  # compared for the tools the cases call, and the server must
+//                                                  # list those and no others (CI doesn't use it since #316)
 //   npx tsx scripts/parity.ts --record             # re-record the expected results from the TypeScript server
 //   npx tsx scripts/parity.ts --self-check         # passes as is, and fails on every perturbed case
 //
