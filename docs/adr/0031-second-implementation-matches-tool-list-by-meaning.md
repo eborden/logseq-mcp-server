@@ -8,13 +8,13 @@ The maintainer, 2026-10-08, on #122: "let's copy semantics that are important, n
 
 ## Decision
 
-This ADR restates ADR-0025 and changes only its Decision 2, and ADR-0025 is marked superseded by it. Everything else in ADR-0025 stands: the spike and its go/no-go (Decision 1), the per-toolchain re-scoping of the process docs and its interim rule (Decision 3), and the separate decision to retire TypeScript (Decision 4), with their Context and Consequences.
+This ADR restates ADR-0025 and changes only its Decision 2, and ADR-0025 is marked superseded by it. Everything else in ADR-0025 stands: the spike and its go/no-go (Decision 1), the per-toolchain re-scoping of the process docs and its interim rule (Decision 3), and the separate decision to retire TypeScript (Decision 4), with their Context and Consequences. Where ADR-0025 says its go/no-go (#127) marks "this ADR" `deprecated` or leaves it accepted, that now applies to this ADR, the live record of all four decisions. The classification of each ADR under Decision 3 (#128) likewise works from this ADR.
 
 **Decision 2, as changed: the TypeScript tool contract is the specification.**
 
 - **`tools/list` is compared by meaning.** Until TypeScript is retired, a second implementation must emit the same `tools/list` contract as the TypeScript server, checked by the parity harness (#292). Both lists are normalized the same way before they are compared, and only these differences are treated as serialization, not meaning:
-  1. **`$ref` resolution.** A `$ref` into `$defs` or `definitions` is replaced by what it points at, and the definitions are dropped. A `$ref` with sibling keywords, or an `allOf` of one schema, is merged into one schema; a clash stays an `allOf`, so it still shows as a difference.
-  2. **Null on optional fields.** A property that isn't in `required` loses the null it also accepts (`[T, "null"]`, a null branch of `anyOf` or `oneOf`, `null` in `enum`), since a client leaves out an argument it doesn't set. A required property keeps its null.
+  1. **`$ref` resolution.** A `$ref` into `$defs` or `definitions` is replaced by what it points at, and the definitions are dropped. A `$ref` with sibling keywords, or an `allOf` of one schema, is merged into one schema; a clash stays an `allOf`, so it still shows as a difference. Only local JSON-pointer refs (`#` or `#/...`) are resolved. An anchor-style (`#Foo`), non-local, recursive or dangling `$ref` isn't resolved and is reported as a difference.
+  2. **Null on optional fields.** A **top-level** property of `inputSchema` that isn't in `required` loses the null it also accepts (`[T, "null"]`, a null branch of `anyOf` or `oneOf`, `null` in `enum`), because the TypeScript server treats an explicit top-level `null` as absent (`withoutNulls` in `parseArgs`, `src/utils/parse-args.ts`). A required property, and any property of a nested object or of an object inside `items`, keeps its null, since the TypeScript server rejects a `null` there.
   3. **Non-validating annotation keywords.** The `$schema`, `format` and `title` keywords inside a schema are dropped. A property named `format`, and the tool's own `title` and `annotations`, are kept.
   4. **Numbers by value.** `50`, `50.0` and `5e1` are the same number.
   5. **Set-like `required`.** `required` is compared as a set, and object key order never matters.
@@ -40,3 +40,5 @@ Date: 2026-10-08
 
 - test: `src/tool-list.test.ts` (the TypeScript server's byte-exact snapshot, size budget and description cap, unchanged from ADR-0016)
 - none-yet: #292 (the parity harness's comparison of `tools/list` by meaning; it lands on `feature/rust-spike` and becomes a `test:` line when the spike merges to `main`)
+- none-yet: #124 (adds the differential harness that holds the Rust server to the TypeScript contract; covers Decision 2)
+- reviewer: a PR that adds Rust code checks it against every ADR by intent and against Decision 3's interim rule (Decision 3 has no mechanical guard; #128 adds the per-ADR scope lines)
