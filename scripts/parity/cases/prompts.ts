@@ -5,7 +5,7 @@
 // The harness fixes the clock at Tuesday 2025-03-11 in America/New_York (PARITY_NOW_MS), so "this week" is
 // the week of Monday 2025-03-10, in progress, and "this month" is March 2025, in progress.
 //
-// Not here: a week whose Monday is in year 99 (a deliberate difference, see below), an argument that is not a string, or a request with no name. The TypeScript SDK checks those
+// Not here: an argument that is not a string, or a request with no name. The TypeScript SDK checks those
 // before a prompt sees the request and answers -32603 with the zod issues; the Rust server answers an
 // InvalidParams error with its own words (#316).
 import type { ParityCase } from '../harness.js';
@@ -51,10 +51,14 @@ export const promptsCases: ParityCase[] = [
   get('weekly_summary for a month of 13', 'weekly_summary', { week: '2025-13-01' }),
   get('weekly_summary for a day of 0', 'weekly_summary', { week: '2025-03-00' }),
   get('weekly_summary for a date with short parts', 'weekly_summary', { week: '2025-3-5' }),
-  // suspected TS bug: a year below 100 is read as 19xx, so the calendar check never matches
+  // A year below 100 is a real year (#299; the TypeScript server read it as 19xx, and rejected the week).
   get('weekly_summary for a year below 100', 'weekly_summary', { week: '0050-03-04' }),
-  // Not here: `week` of 0100-01-01 to 0100-01-03, whose Monday is in year 99. TS reads year 99 as 1999 while it shifts
-  // to Friday and says "through 2000-01-01"; Rust says 0100-01-01 on purpose (#299, a unit test in prompts.rs).
+  get('weekly_summary for a week whose Monday is in year 99', 'weekly_summary', { week: '0100-01-01' }),
+  get('weekly_summary for the first Monday of year 0', 'weekly_summary', { week: '0000-01-03' }),
+  get('weekly_summary for a three-digit year', 'weekly_summary', { week: '0500-03-04' }),
+  // 0000-01-01 is a Saturday: its week starts and ends in year -1, which a YYYYMMDD day cannot hold, so it is the one
+  // day 0000-01-01 (#299)
+  get('weekly_summary for a week that starts before year 0', 'weekly_summary', { week: '0000-01-01' }),
   get('weekly_summary with a quoted word in the error', 'weekly_summary', { week: 'the "next" one' }),
   get('weekly_summary with an argument it does not have', 'weekly_summary', { weak: 'last' }),
   get('weekly_summary with its argument and one it does not have', 'weekly_summary', { week: 'last', topic: 'atlas' }),
@@ -78,10 +82,11 @@ export const promptsCases: ParityCase[] = [
   get('monthly_summary for month 0', 'monthly_summary', { month: '2025-00' }),
   get('monthly_summary for a month of one digit', 'monthly_summary', { month: '2025-3' }),
   get('monthly_summary for a day instead of a month', 'monthly_summary', { month: '2025-03-01' }),
-  // suspected TS bug: a year below 100 is read as 19xx and nothing rejects it
+  // A year below 100 is a real year, written with four digits (#299; the TypeScript server read it as 19xx, and cut a
+  // three-digit year to "100-03-")
   get('monthly_summary for a year below 100', 'monthly_summary', { month: '0050-03' }),
-  // suspected TS bug: `iso(first).slice(0, 7)` of a three-digit year stops after the hyphen
   get('monthly_summary for a three-digit year', 'monthly_summary', { month: '0100-03' }),
+  get('monthly_summary for year 0', 'monthly_summary', { month: '0000-02' }),
   get('monthly_summary with an argument it does not have', 'monthly_summary', { week: 'last' }),
 
   // ---- continue_on
@@ -118,12 +123,12 @@ export const promptsCases: ParityCase[] = [
   get('prioritize_tasks with a focus of 201 characters', 'prioritize_tasks', { focus: longText(201) }),
   get('prioritize_tasks with an argument it does not have', 'prioritize_tasks', { topic: 'atlas' }),
 
-  // suspected TS bug: the SDK's zod `record` parse drops a `__proto__` key with a string value (assigning a string
-  // to it is a no-op), so the prompt never sees it. `JSON.parse` makes it an own key, which an object literal
-  // would not, and `JSON.stringify` sends it.
-  get('continue_on ignores a __proto__ argument', 'continue_on', JSON.parse('{"topic":"atlas","__proto__":"x"}') as Record<string, string>),
-  get('continue_on with only a __proto__ argument has no topic', 'continue_on', JSON.parse('{"__proto__":"x"}') as Record<string, string>),
-  get('continue_on rejects a constructor argument beside a __proto__ one', 'continue_on', JSON.parse('{"topic":"atlas","constructor":"z","__proto__":"y"}') as Record<string, string>),
+  // `__proto__` is an argument like any other (#299; the TypeScript SDK's zod `record` parse dropped it, since assigning
+  // a string to it is a no-op). `JSON.parse` makes it an own key, which an object literal would not, and
+  // `JSON.stringify` sends it.
+  get('continue_on rejects a __proto__ argument', 'continue_on', JSON.parse('{"topic":"atlas","__proto__":"x"}') as Record<string, string>),
+  get('continue_on with only a __proto__ argument', 'continue_on', JSON.parse('{"__proto__":"x"}') as Record<string, string>),
+  get('continue_on rejects a constructor argument and a __proto__ one', 'continue_on', JSON.parse('{"topic":"atlas","constructor":"z","__proto__":"y"}') as Record<string, string>),
 
   // ---- the name
   get('an unknown prompt', 'nope'),
