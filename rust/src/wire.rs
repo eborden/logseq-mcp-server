@@ -85,6 +85,8 @@ impl Reader {
         result
     }
 
+    // PARITY(#299): zod's wording for a wrong type (`Invalid input: expected X, received Y`) in the error
+    // message — drop if Rust becomes the only server.
     pub(crate) fn mismatch(&self, expected: &str, found: Option<&Value>) -> Issue {
         self.issue(format!("Invalid input: expected {expected}, received {}", kind(found)))
     }
@@ -210,6 +212,8 @@ impl Reader {
         for (i, item) in items.iter().enumerate() {
             rows.push(self.at(Part::Index(i), |r| match item {
                 Value::Array(cells) if cells.len() > width => {
+                    // PARITY(#299): zod's wording, which says `<N items` where N is the most allowed (suspected
+                    // TS bug: off by one) — drop if Rust becomes the only server.
                     Err(r.issue(format!("Too big: expected array to have <{width} items")))
                 }
                 Value::Array(cells) => read_row(r, cells),
@@ -259,6 +263,8 @@ pub struct EntityRef {
     pub db_id: Option<i64>,
 }
 
+// PARITY(#299): `entity?.id || entity?.['db/id']`, so an id of 0 falls through to `db/id` (suspected TS bug:
+// `??` was meant) — drop if Rust becomes the only server.
 /// `entityId`: `id`, else `db/id` when `id` is absent or zero (`entity?.id || entity?.['db/id']`).
 pub(crate) fn entity_id(id: Option<i64>, db_id: Option<i64>) -> Option<i64> {
     id.filter(|id| *id != 0).or(db_id)

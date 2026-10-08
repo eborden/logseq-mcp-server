@@ -27,6 +27,14 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 | `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and an approximation of `localeCompare` |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
 
+## Parity-only code
+
+Code that exists only to reproduce the TypeScript server's exact bytes or quirks, and that a
+Rust-only server wouldn't need, carries a comment `// PARITY(#299): <what it copies> — drop if Rust
+becomes the only server.` Where the copied behavior is a suspected TypeScript bug, the comment says
+so. `grep -rn 'PARITY(#299)' rust/src` lists them. Real safeguards (the 200-block cap, BR-0011,
+the page resolver) are not tagged.
+
 ## Build and test
 
 `rust-toolchain.toml` pins the compiler, and CI (`.github/workflows/rust.yml`) uses the same one.

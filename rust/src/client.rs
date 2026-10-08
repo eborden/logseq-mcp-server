@@ -179,6 +179,8 @@ impl LogseqClient {
     }
 }
 
+// PARITY(#299): writes an API error value as a JavaScript template literal would (`[object Object]`, `a,b`) —
+// drop if Rust becomes the only server.
 /// What a JavaScript template literal makes of the `error` value, as in `${responseData.error}`.
 fn js_string(value: &Value) -> String {
     match value {

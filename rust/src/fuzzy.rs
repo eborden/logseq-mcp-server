@@ -22,6 +22,11 @@
 //! The tests compare this against the library itself: `tests/data/fuzzysort-oracle.json` holds
 //! what fuzzysort 3.1.0 returned for made-up names and searches, scores included.
 
+// PARITY(#299): the whole module copies fuzzysort 3.1.0's matching, scoring and result order, so
+// the closest names in a "no such page" message are the same three the TypeScript server gives. A
+// Rust-only server could use any matcher (and the accent stripping and UTF-16 counting below only
+// exist to reproduce its scores) — drop if Rust becomes the only server.
+
 use icu_normalizer::DecomposingNormalizer;
 use icu_properties::CodePointMapData;
 use icu_properties::props::Script;
@@ -39,6 +44,9 @@ pub struct Match {
 /// The best `limit` of `targets` for `search`, best first. As `fuzzysort.go(search, targets,
 /// { key, limit, threshold })` returns them, with equal scores in the order its priority queue
 /// leaves them. An empty target never matches, nor does an empty search.
+// PARITY(#299): no score threshold, because the TypeScript call passes `threshold: -10000`, which
+// fuzzysort turns into NaN and never compares true (suspected TS bug: it reads as a cutoff and
+// is none) — drop if Rust becomes the only server.
 pub fn go(search: &str, targets: &[&str], limit: usize) -> Vec<Match> {
     if search.is_empty() || limit == 0 {
         return Vec::new();
@@ -81,6 +89,8 @@ struct LowerInfo {
 }
 
 /// `/\p{Script=Latin}+/gu` replaced by its NFD, then every U+0300..U+036F removed.
+// PARITY(#299): fuzzysort strips accents only from Latin-script runs, and leaves the rest of
+// `toLowerCase()`'s output as it is — drop if Rust becomes the only server.
 fn remove_accents(text: &str) -> String {
     let script = CodePointMapData::<Script>::new();
     let nfd = DecomposingNormalizer::new_nfd();
@@ -442,6 +452,8 @@ fn index_of(haystack: &[u16], needle: &[u16], from: usize) -> Option<usize> {
 /// leaves equal scores in is part of what a search returns, so it is copied and not replaced
 /// with `BinaryHeap`. `poll` fills a slot from the end of the heap and moves the smaller child
 /// up to a leaf before sifting the new top back up.
+// PARITY(#299): a copy of fuzzysort's heap so equal scores come out in the order it leaves them,
+// where `BinaryHeap` would pick another — drop if Rust becomes the only server.
 #[derive(Default)]
 struct Queue {
     heap: Vec<Match>,
