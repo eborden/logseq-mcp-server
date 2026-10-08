@@ -48,8 +48,9 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0029-mutation-cache-miss-plan-uses-the-prs-own-diff](0029-mutation-cache-miss-plan-uses-the-prs-own-diff.md) | Plan the mutation cache-miss run from the PR's own diff, and ask for a weekly run only for a left-out changed source | superseded by 0033-rust-mutation-testing-ratchet |
 | [0030-nightly-check-resets-a-stale-mutation-cache](0030-nightly-check-resets-a-stale-mutation-cache.md) | Reset a stale mutation cache with a nightly check that dispatches at most one weekly run a night | deprecated |
 | [0031-second-implementation-matches-tool-list-by-meaning](0031-second-implementation-matches-tool-list-by-meaning.md) | Hold a second implementation to the tools/list contract by meaning, not by bytes | superseded by 0032-closest-page-suggestions-match-by-meaning |
-| [0032-closest-page-suggestions-match-by-meaning](0032-closest-page-suggestions-match-by-meaning.md) | Hold a Rust implementation to the TypeScript tool contract: by meaning for tools/list and closest-name suggestions, byte for byte for the rest | accepted |
+| [0032-closest-page-suggestions-match-by-meaning](0032-closest-page-suggestions-match-by-meaning.md) | Hold a Rust implementation to the TypeScript tool contract: by meaning for tools/list and closest-name suggestions, byte for byte for the rest | superseded by 0034-golden-results-are-the-contract |
 | [0033-rust-mutation-testing-ratchet](0033-rust-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the Rust crate with cargo-mutants | accepted |
+| [0034-golden-results-are-the-contract](0034-golden-results-are-the-contract.md) | Make the recorded golden results the contract, compared by meaning, with LogSeq calls held to a bounded count | proposed |
 
 ## File naming rule
 
