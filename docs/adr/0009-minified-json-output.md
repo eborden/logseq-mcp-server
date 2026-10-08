@@ -24,5 +24,5 @@ Date: 2026-01-23
 
 ## Mechanical enforcement
 
-- ci: `.github/workflows/ci.yml` (the parity step compares every tool result, and the error and ambiguous-page results, byte for byte with `scripts/parity/expected`, which holds minified JSON, so layout whitespace fails it: `compareResult` in `scripts/parity/harness.ts`)
+- test: `rust/tests/parity.rs` (every tool result, and the error and ambiguous-page results, is compared with `scripts/parity/expected` (exported to `rust/tests/data/parity/`), which holds minified JSON, and each JSON result has to be minified, so layout whitespace fails it: `compare_results` and `minified_failures` in `rust/tests/parity_support/compare.rs`)
 - test: `rust/src/tool.rs` (`results_keep_key_order_as_json_stringify_does`: results keep their keys in insertion order, as `JSON.stringify` writes them)

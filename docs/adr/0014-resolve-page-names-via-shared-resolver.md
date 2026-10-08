@@ -34,5 +34,5 @@ Date: 2026-10-05
 ## Mechanical enforcement
 
 - test: `rust/src/resolve/mod.rs` (resolver order, ambiguity, not-found routes)
-- test: `rust/tests/get_page_block_calls.rs` (candidates, resolvedFrom and guidance reach the tool's result; the parity step holds what a client receives through MCP)
+- test: `rust/tests/get_page_block_calls.rs` (candidates, resolvedFrom and guidance reach the tool's result; `rust/tests/parity.rs` holds what a client receives through MCP)
 - test: `tests/integration/page-resolution.test.ts` (against a live graph)
