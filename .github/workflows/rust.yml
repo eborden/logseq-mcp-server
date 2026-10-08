@@ -37,21 +37,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # rustup is on the runner image. The version comes from rust/rust-toolchain.toml, which
-      # rustup reads in this directory, so CI and local builds use the same compiler.
-      - name: Install the pinned toolchain
-        run: rustup toolchain install --profile minimal "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
-
-      - name: Cache cargo downloads and build output
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Installs the toolchain rust/rust-toolchain.toml names (rust-src-dir points it there), so
+      # CI and local builds use the same compiler, and caches through Swatinem/rust-cache (which
+      # the action pins by SHA itself). Its key covers the rustc version, Cargo.lock and the job,
+      # and it caches only the dependencies' build output, not this crate's, so a cache never
+      # holds a stale build of our code or another toolchain's.
+      # Warnings don't fail the build during the spike: build-warnings is v2's switch for that
+      # (it defaults to deny), and rustflags is left empty.
+      - name: Set up the Rust toolchain and cache
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            rust/target
-          key: rust-${{ runner.os }}-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}
-          restore-keys: |
-            rust-${{ runner.os }}-
+          rust-src-dir: rust
+          cache-workspaces: rust
+          rustflags: ""
+          build-warnings: warn
+
+      # The action falls back to stable if it misses the toolchain file; fail loudly instead.
+      - name: Check the compiler is the pinned one
+        run: |
+          expected="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustc --version | grep -q "^rustc ${expected} " || { rustc --version; echo "expected rustc ${expected}" >&2; exit 1; }
 
       - name: Build (debug)
         run: cargo build --locked
