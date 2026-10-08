@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatMs2, percentile, summarizeLatency } from '../scripts/measure-latency/stats.js';
+import { formatMs2, percentile, summarizeLatency } from '../../scripts/measure-latency/stats.js';
 
 /** The arithmetic behind scripts/measure-latency.ts. */
 describe('percentile', () => {
