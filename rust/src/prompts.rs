@@ -176,6 +176,10 @@ pub fn resolve_week(week: Option<&str>, today: CalendarDate) -> Result<WeekRange
             iso(monday)
         )));
     }
+    // A deliberate difference from the TypeScript server (#299): a week whose Monday falls in year 99 (`week` of
+    // 0100-01-01 to 0100-01-03). There `shiftDays` builds `new Date(99, ...)`, which JavaScript reads as 1999, so
+    // TypeScript's Friday is 2000-01-01 and its end_date 20000101. Here the Friday is the next day of the calendar,
+    // 0100-01-01 (end_date 1000101). Copying it would put a Friday nine hundred years from its Monday.
     let friday = monday.shifted(4);
     let end = if friday > today { today } else { friday };
     Ok(WeekRange {
@@ -504,6 +508,17 @@ mod tests {
         assert!(!week(None, date(2025, 3, 14)).unwrap().partial);
         assert_eq!(week(None, date(2025, 3, 15)).unwrap().end, 20250314);
         assert_eq!(week(None, date(2025, 3, 16)).unwrap().monday, "2025-03-10");
+    }
+
+    #[test]
+    fn a_week_whose_monday_is_in_year_99_ends_on_the_calendars_friday() {
+        // Deliberate difference (#299): TypeScript reads year 99 as 1999 while it shifts the Monday to Friday and answers
+        // "through 2000-01-01" (end_date 20000101). The calendar has Friday 0100-01-01.
+        let week = week(Some("0100-01-01"), TUESDAY).unwrap();
+        assert_eq!(
+            (week.monday.as_str(), week.start, week.end_iso.as_str(), week.end, week.partial),
+            ("99-12-28", 991228, "100-01-01", 1000101, false)
+        );
     }
 
     #[test]
