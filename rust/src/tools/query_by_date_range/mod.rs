@@ -372,7 +372,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         Some(term) if !journals.is_empty() => resolve_alias_set_by_name(client, term).await?,
         _ => None,
     };
-    let matcher = search_term.map(|term| BlockMatcher::new(term, alias_set.as_ref())).transpose()?;
+    let matcher = search_term.map(|term| BlockMatcher::new(term, alias_set.as_ref()));
 
     let mut all_entries: Vec<Entry> = Vec::new();
     let mut total_blocks = 0;
