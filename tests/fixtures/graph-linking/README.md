@@ -8,7 +8,7 @@ which is what allows it to live in a public repository.
 
 ```
 pages/       13 pages, each engineered for one rule
-pages.txt    the page names, as the `name` of each `logseq_list_pages` entry (the unit tests build their fake graph from it). `Priya Raghavan` is not listed: it is an alias, so the tool returns it as `{ name: "Priya", aliases: ["Priya Raghavan"] }` (#171)
+pages.txt    the page names, as the `name` of each `logseq_list_pages` entry (`rust/tests/check_links_fixture.rs` builds its stub graph from it). `Priya Raghavan` is not listed: it is an alias, so the tool returns it as `{ name: "Priya", aliases: ["Priya Raghavan"] }` (#171)
 journals/    2024_03_11.md  the unlinked input
 expected/    2024_03_11.md  the only correct result
 negative/    deliberate defects the gate must reject
@@ -118,12 +118,13 @@ the note's does not. `unresolved-only.md` isolates check 3 by keeping the prose 
 
 ## Running
 
-The TypeScript unit test that ran `checkLinks` on `expected/` and on each file in `negative/` against a fake graph
-built from `pages.txt` went with the TypeScript server (#356). Its last version is `10103c8:src/tools/check-links.test.ts`.
-It passed `expected/` and failed each negative case on the checks in the table above. It also covered the bare variant: its
+`rust/tests/check_links_fixture.rs` runs `logseq_check_links` over this fixture against a stub LogSeq built from
+`pages.txt` (plus the one alias the pages declare, `Priya Raghavan`), in `cd rust && cargo test --locked --test check_links_fixture`.
+It passes `expected/` and fails each negative case on the checks in the table above. It also covers the bare variant: its
 expected result passes the gate, no page in the overlaid graph other than `Devon` mentions him, and its `expected/` differs
-from the base one in the `Devon` ref alone, so the two cannot drift apart. Nothing runs the fixture until #369 ports that test
-to a Rust test against a stub LogSeq.
+from the base one in the `Devon` ref alone, so the two cannot drift apart. A negative case that starts to pass fails the test.
+The test is the port of the TypeScript `check-links` unit test that ran the fixture before the TypeScript server went
+(#356, #369); that test's last version is in commit `10103c8`.
 
 The shell script that used to be the gate, `skills/logseq-skills/scripts/check-link-safety.sh`,
 was retired in #142. The tool runs the same checks, plus one the script lacked: every ref in the
