@@ -1,10 +1,11 @@
 //! MCP resources (the Rust side of `src/resources.ts`). Read-only, like everything here (BR-0002).
-//! So far one: `logseq://page/{name}`, one page as Markdown text, through the same lookup as
+//! Two: `logseq://page/{name}`, one page as Markdown text, through the same lookup as
 //! `logseq_get_page` (aliases, ISO dates, case-insensitive names) and the same renderer
 //! (`crate::markdown`, never a second one).
 //!
-//! The reading guide (`logseq://guide`) is not here yet: it lists the tools and prompts, so it
-//! comes with them (#316). Until then `resources/list` is empty and the guide is an unknown URI.
+//! The reading guide (`logseq://guide`) is the server `instructions` plus a one-line index of the tools and
+//! prompts, for hosts that let a user attach a resource to a conversation or that don't pass `instructions`
+//! to the model.
 
 use rmcp::ErrorData;
 use rmcp::model::{ErrorCode, ReadResourceResult, Resource, ResourceContents, ResourceTemplate};
@@ -13,8 +14,11 @@ use serde_json::Value;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::js;
+use crate::instructions::SERVER_INSTRUCTIONS;
 use crate::markdown::{PageRenderOptions, render_page};
-use crate::tools::get_page::get_page;
+use crate::mcp_error::mcp_error;
+use crate::prompts;
+use crate::tools::{self, get_page::get_page};
 
 const PAGE_URI_PREFIX: &str = "logseq://page/";
 pub const PAGE_URI_TEMPLATE: &str = "logseq://page/{name}";
@@ -28,12 +32,77 @@ pub const MAX_PAGE_CHARS: usize = 50_000;
 
 const MARKDOWN: &str = "text/markdown";
 
-/// What `resources/read` lists as available, in the "Unknown resource" message. #316 adds the guide.
-const AVAILABLE: &str = PAGE_URI_TEMPLATE;
+pub const GUIDE_URI: &str = "logseq://guide";
 
-/// `resources/list`: none until the guide (#316).
+/// What `resources/read` lists as available, in the "Unknown resource" message.
+const AVAILABLE: &str = "logseq://guide, logseq://page/{name}";
+
+/// `resources/list`: the reading guide.
 pub fn list() -> Vec<Resource> {
-    Vec::new()
+    vec![
+        Resource::new(GUIDE_URI, "guide")
+            .with_title("LogSeq reading guide")
+            .with_description("How to read this server's results, which tool to start with, and an index of tools and prompts.")
+            .with_mime_type(MARKDOWN),
+    ]
+}
+
+/// The tools in the order `TOOL_DESCRIPTIONS` (`src/tool-descriptions.ts`) lists them, which the guide follows
+/// (`tools/list` has its own order). A test checks it names every tool once.
+const GUIDE_TOOL_ORDER: [&str; 16] = [
+    "logseq_list_pages",
+    "logseq_get_current_context",
+    "logseq_get_graph_info",
+    "logseq_get_page",
+    "logseq_get_page_outline",
+    "logseq_get_block",
+    "logseq_get_backlinks",
+    "logseq_search_blocks",
+    "logseq_query_by_property",
+    "logseq_query_by_date_range",
+    "logseq_build_context",
+    "logseq_get_context_for_query",
+    "logseq_get_concept_network",
+    "logseq_search_by_relationship",
+    "logseq_get_concept_evolution",
+    "logseq_check_links",
+];
+
+/// The reading guide as Markdown (`buildGuide`): the server instructions, then one line per tool (the first
+/// line of its description, which is what it does), per prompt and per resource.
+pub fn build_guide() -> String {
+    let tools = tools::list();
+    let tool_lines: Vec<String> = GUIDE_TOOL_ORDER
+        .iter()
+        .map(|name| {
+            let tool = tools.iter().find(|tool| tool.name == *name).expect("every tool in the guide order is registered");
+            let description = tool.description.as_deref().unwrap_or_default();
+            // `summaryLine`: `description.split('\n', 1)[0].trim()`
+            format!("- {name}: {}", js::trim(description.split('\n').next().unwrap_or_default()))
+        })
+        .collect();
+    let prompt_lines: Vec<String> =
+        prompts::list().iter().map(|prompt| format!("- {}: {}", prompt.name, prompt.description.as_deref().unwrap_or_default())).collect();
+    [
+        "# LogSeq MCP guide".to_owned(),
+        String::new(),
+        SERVER_INSTRUCTIONS.to_owned(),
+        String::new(),
+        "## Tools".to_owned(),
+        String::new(),
+        tool_lines.join("\n"),
+        String::new(),
+        "## Prompts".to_owned(),
+        String::new(),
+        prompt_lines.join("\n"),
+        String::new(),
+        "## Resources".to_owned(),
+        String::new(),
+        format!("- {GUIDE_URI}: this guide"),
+        format!("- {PAGE_URI_TEMPLATE}: one page as text (URL-encode the name; aliases and ISO dates work)"),
+        String::new(),
+    ]
+    .join("\n")
 }
 
 /// `resources/templates/list`: the page template.
@@ -44,14 +113,6 @@ pub fn templates() -> Vec<ResourceTemplate> {
             .with_description("One page and its blocks as Markdown text. The name is case-insensitive and may be an alias or an ISO date (2025-01-01) for a journal.")
             .with_mime_type(MARKDOWN),
     ]
-}
-
-// PARITY(#299): the TypeScript SDK's `McpError` writes "MCP error <code>: " before its message, so that is
-// what goes on the wire, and the SDK sends no `data` (the `{ uri }` the resource code builds never leaves
-// the server; suspected TS bug) — drop if Rust becomes the only server.
-/// A JSON-RPC error as the TypeScript server sends an `McpError`.
-fn mcp_error(code: ErrorCode, message: &str) -> ErrorData {
-    ErrorData::new(code, format!("MCP error {}: {message}", code.0), None)
 }
 
 /// `decodeURIComponent`: every `%XX` becomes its byte, and the bytes must be UTF-8. `None` is the
@@ -115,6 +176,9 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
 
 /// `resources/read`.
 pub async fn read(client: &LogseqClient, uri: &str) -> Result<ReadResourceResult, ErrorData> {
+    if uri == GUIDE_URI {
+        return Ok(ReadResourceResult::new(vec![ResourceContents::text(build_guide(), uri).with_mime_type(MARKDOWN)]));
+    }
     if uri.starts_with(PAGE_URI_PREFIX) {
         return read_page(client, uri).await;
     }
@@ -186,6 +250,41 @@ mod tests {
                 "mimeType": "text/markdown",
             }])
         );
-        assert!(list().is_empty());
+    }
+
+    #[test]
+    fn the_guide_is_the_one_resource_listed() {
+        assert_eq!(
+            serde_json::to_value(list()).unwrap(),
+            json!([{
+                "uri": "logseq://guide",
+                "name": "guide",
+                "title": "LogSeq reading guide",
+                "description": "How to read this server's results, which tool to start with, and an index of tools and prompts.",
+                "mimeType": "text/markdown",
+            }])
+        );
+    }
+
+    #[test]
+    fn the_guide_order_names_every_tool_once() {
+        let mut ordered: Vec<&str> = GUIDE_TOOL_ORDER.to_vec();
+        ordered.sort_unstable();
+        let mut listed: Vec<String> = tools::list().iter().map(|tool| tool.name.to_string()).collect();
+        listed.sort_unstable();
+        assert_eq!(ordered, listed);
+    }
+
+    #[test]
+    fn the_guide_has_the_instructions_and_an_index_of_tools_prompts_and_resources() {
+        let guide = build_guide();
+        assert!(guide.starts_with(&format!("# LogSeq MCP guide\n\n{SERVER_INSTRUCTIONS}\n\n## Tools\n\n- logseq_list_pages: List non-journal pages")));
+        assert!(guide.contains("\n- logseq_check_links: Check a [[link]] pass."));
+        assert!(guide.contains("\n\n## Prompts\n\n- weekly_summary: Summarize a Monday-to-Friday week"));
+        assert!(guide.ends_with(
+            "\n\n## Resources\n\n- logseq://guide: this guide\n- logseq://page/{name}: one page as text (URL-encode the name; aliases and ISO dates work)\n"
+        ));
+        // each tool is one line: the description's first line only
+        assert_eq!(guide.matches("\n- logseq_").count(), 16);
     }
 }
