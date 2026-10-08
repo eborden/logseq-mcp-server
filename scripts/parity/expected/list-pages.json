@@ -71,6 +71,14 @@
       }
     ]
   },
+  "names with characters collation ignores": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"pages\":[{\"name\":\"❤️ a\"},{\"name\":\"❤ b\"},{\"name\":\"❤️ b\"},{\"name\":\"❤ c\"},{\"name\":\"ctl y\"},{\"name\":\"ctl\\u0001 z\"},{\"name\":\"lrm‪ one\"},{\"name\":\"lrm two\"}],\"total\":8}"
+      }
+    ]
+  },
   "limit cuts the list and says how to page": {
     "content": [
       {
