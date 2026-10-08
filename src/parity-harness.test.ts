@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -10,6 +12,7 @@ import {
   compareResult,
   perturbCases,
   readSnapshotEntry,
+  runCase,
   runParity,
   serializeLikeVitest,
   toolsCalledBy,
@@ -114,6 +117,25 @@ describe('compareResult on a resource', () => {
     expect(compareResult(error, structuredClone(error))).toEqual([]);
     expect(compareResult(error, { error: { code: -32602, message: 'MCP error -32002: No page' } })).toHaveLength(1);
     expect(compareResult(error, { error: { ...(error.error as object), data: { uri: 'x' } } })).toHaveLength(1);
+  });
+});
+
+describe('runCase on a resource read that fails', () => {
+  const read = (uri: string): ParityCase => ({ name: 'n', tool: 't', arguments: {}, readResource: uri, steps: [] });
+  const failing = (error: unknown) => ({ readResource: async () => { throw error; } }) as unknown as Client;
+
+  it('records the error a server sent as the result of the case', async () => {
+    const result = await runCase(failing(new McpError(-32002, 'No page', { uri: 'x' })), read('logseq://page/x'), 1000);
+    expect(result).toEqual({ error: { code: -32002, message: 'MCP error -32002: No page', data: { uri: 'x' } } });
+  });
+
+  it('does not record the client\'s own timeout or closed connection, which say nothing about the server\'s answer', async () => {
+    for (const code of [ErrorCode.RequestTimeout, ErrorCode.ConnectionClosed]) {
+      const error = new McpError(code, 'client side');
+      await expect(runCase(failing(error), read('logseq://page/x'), 1000), String(code)).rejects.toBe(error);
+    }
+    const other = new Error('boom');
+    await expect(runCase(failing(other), read('logseq://page/x'), 1000)).rejects.toBe(other);
   });
 });
 

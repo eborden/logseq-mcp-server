@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { format } from '@vitest/pretty-format';
 import { compareToolLists, type ProjectedTool } from './tool-list-compare.js';
 import { toolListForSnapshot } from './tool-list-projection.js';
@@ -272,14 +272,15 @@ export function toolsCalledBy(tools: readonly ProjectedTool[], cases: readonly P
 }
 
 /** One case's request: a tool call, or (`readResource`, `listResourceTemplates`) a resource request. */
-async function runCase(client: Client, c: ParityCase, timeout: number): Promise<ToolResult> {
+export async function runCase(client: Client, c: ParityCase, timeout: number): Promise<ToolResult> {
   if (c.listResourceTemplates) return toToolResult(await client.listResourceTemplates(undefined, { timeout }));
   if (c.readResource !== undefined) {
     try {
       return toToolResult(await client.readResource({ uri: c.readResource }, { timeout }));
     } catch (error) {
-      // A JSON-RPC error is a result of the case, as a tool's `isError` is
-      if (!(error instanceof McpError)) throw error;
+      // A JSON-RPC error the server sent is a result of the case, as a tool's `isError` is. The client's own
+      // failures (a timeout, a closed connection) are McpErrors too, but they say nothing about the server's answer
+      if (!(error instanceof McpError) || error.code === ErrorCode.RequestTimeout || error.code === ErrorCode.ConnectionClosed) throw error;
       return { error: { code: error.code, message: error.message, ...(error.data === undefined ? {} : { data: error.data }) } };
     }
   }
