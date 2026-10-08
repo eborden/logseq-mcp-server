@@ -13,11 +13,16 @@ export function parseCommandLine(argv: string[]): {
   server: ServerCommand;
   onlyTestedTools: boolean;
 } {
+  // The command follows `--`. vite-node, which CI runs this with from the lockfile, swallows every
+  // `--` before the script sees its arguments, so without one the command starts at the first
+  // argument that is not a flag.
   const dashes = argv.indexOf('--');
-  const allFlags = dashes === -1 ? argv : argv.slice(0, dashes);
+  const bare = argv.findIndex(arg => !arg.startsWith('-'));
+  const commandAt = dashes !== -1 ? dashes + 1 : bare;
+  const allFlags = dashes !== -1 ? argv.slice(0, dashes) : bare === -1 ? argv : argv.slice(0, bare);
   const onlyTestedTools = allFlags.includes('--tested-tools-only');
   const flags = allFlags.filter(flag => flag !== '--tested-tools-only');
-  const command = dashes === -1 ? [] : argv.slice(dashes + 1);
+  const command = commandAt === -1 ? [] : argv.slice(commandAt);
   const modes = flags.map(flag => {
     if (flag === '--record') return 'record' as const;
     if (flag === '--perturb') return 'perturb' as const;

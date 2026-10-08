@@ -437,6 +437,19 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
     expect(parseCommandLine([])).toMatchObject({ mode: 'check', onlyTestedTools: false, server: typescriptServer() });
   });
 
+  it('finds the server command without a `--`, which vite-node removes from the arguments', () => {
+    expect(parseCommandLine(['--tested-tools-only', '/bin/server', '--b', 'c'])).toEqual({
+      mode: 'check',
+      server: { command: '/bin/server', args: ['--b', 'c'] },
+      onlyTestedTools: true
+    });
+    expect(parseCommandLine(['--self-check', '/bin/server'])).toMatchObject({ mode: 'self-check', server: { command: '/bin/server' } });
+    // only flags: the TypeScript server
+    expect(parseCommandLine(['--self-check'])).toMatchObject({ mode: 'self-check', server: typescriptServer() });
+    // a candidate still can't record, with or without the `--`
+    expect(() => parseCommandLine(['--record', '/bin/server'])).toThrow(/a candidate can't record its own reference/);
+  });
+
   it('refuses --record with the flag, since a reference must hold every tool, and a candidate can not record', () => {
     expect(() => parseCommandLine(['--record', '--tested-tools-only'])).toThrow(/--record needs the whole tools\/list, so it can't take --tested-tools-only/);
     expect(() => parseCommandLine(['--tested-tools-only', '--record'])).toThrow(/--record needs the whole tools\/list/);
