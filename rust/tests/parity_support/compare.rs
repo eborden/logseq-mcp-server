@@ -12,7 +12,8 @@
 //! - [`minified_failures`] holds every JSON tool result to ADR-0009 separately, so deep equality can't let
 //!   layout whitespace through: the text is parsed, written again as `JSON.stringify` writes it (`js::json_stringify`), and
 //!   has to be as long.
-//! - [`compare_calls`] holds the LogSeq calls to a case's steps: in order, a step's calls as a set, nothing after.
+//! - [`compare_calls`] holds the LogSeq calls to a case's recorded calls and its ceiling (ADR-0034 Decision 5): each
+//!   call made matches a recorded call, in any order, and there are at most as many as the ceiling.
 //! - [`compare_tool_lists`] holds `tools/list` to the recorded list by meaning (ADR-0031, #292).
 
 use std::collections::BTreeSet;
@@ -250,32 +251,41 @@ pub fn compare_results(expected: &Value, actual: &Value, candidates: &[String]) 
     failures
 }
 
-/// Compare the calls a server made with a case's steps: each step's calls must be the next ones made, in any
-/// order within the step, and nothing may follow the last step.
-pub fn compare_calls(steps: &[Vec<Canned>], actual: &[Call]) -> Vec<String> {
+/// Whether a LogSeq API method only reads (BR-0002): a Datalog query, the simple-query DSL, or a `get...` method of
+/// the Editor or App API. It is an allowlist, so a method nobody has classified is not a read.
+pub fn is_read_method(method: &str) -> bool {
+    if method == "logseq.DB.datascriptQuery" || method == "logseq.DB.q" {
+        return true;
+    }
+    ["logseq.Editor.get", "logseq.App.get"].iter().any(|prefix| method.strip_prefix(prefix).and_then(|rest| rest.chars().next()).is_some_and(|c| c.is_ascii_uppercase()))
+}
+
+/// Compare the calls a server made with a case's recorded calls and its ceiling (ADR-0034 Decision 5, ADR-0011):
+/// - every call made matches a recorded call in method, query text (layout aside) and inputs, and a recorded call
+///   answers one made call (a query asked twice is matched to its recorded calls in the recorded order). A call
+///   that matches none fails, whatever the server did with the error;
+/// - at most `ceiling` calls are made. Fewer pass, and so does a recorded call that was never made;
+/// - every call, recorded or made, is a read (BR-0002);
+/// - the order of the calls, and their grouping into steps, are not compared.
+pub fn compare_calls(steps: &[Vec<Canned>], ceiling: usize, actual: &[Call]) -> Vec<String> {
     let mut failures = Vec::new();
-    let mut at = 0;
-    for (s, step) in steps.iter().enumerate() {
-        let mut want: Vec<String> = step.iter().map(|c| canonical(&c.method, &c.args)).collect();
-        want.sort();
-        let mut got: Vec<String> = actual.iter().skip(at).take(step.len()).map(|c| canonical(&c.method, &c.args)).collect();
-        got.sort();
-        at += step.len();
-        if want != got {
-            let list = |calls: &[String]| calls.iter().map(|c| format!("    {c}")).collect::<Vec<_>>().join("\n");
-            let expected = if step.len() == 1 { "the call".to_owned() } else { format!("the {} calls (any order)", step.len()) };
-            failures.push(format!(
-                "step {} of {}: expected {expected}\n{}\n  got\n{}",
-                s + 1,
-                steps.len(),
-                list(&want),
-                if got.is_empty() { "    nothing".to_owned() } else { list(&got) }
-            ));
+    for call in steps.iter().flatten().filter(|c| !is_read_method(&c.method)) {
+        failures.push(format!("the recorded call {} is not a read (BR-0002)", canonical(&call.method, &call.args)));
+    }
+    // The recorded calls not yet used by a call made, in the recorded order
+    let mut unused: Vec<String> = steps.iter().flatten().map(|c| canonical(&c.method, &c.args)).collect();
+    for call in actual {
+        let made = canonical(&call.method, &call.args);
+        if !is_read_method(&call.method) {
+            failures.push(format!("the server made a call that is not a read (BR-0002): {made}"));
+        } else if let Some(at) = unused.iter().position(|recorded| *recorded == made) {
+            unused.remove(at);
+        } else {
+            failures.push(format!("the server made a call no recorded call answers: {made}"));
         }
     }
-    if actual.len() > at {
-        let rest: Vec<String> = actual[at..].iter().map(|c| format!("    {}", canonical(&c.method, &c.args))).collect();
-        failures.push(format!("{} call(s) after the last step:\n{}", actual.len() - at, rest.join("\n")));
+    if actual.len() > ceiling {
+        failures.push(format!("the server made {} call(s), over the case's ceiling of {ceiling} (ADR-0011)", actual.len()));
     }
     failures
 }

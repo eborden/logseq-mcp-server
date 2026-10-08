@@ -285,14 +285,20 @@ pub struct Report {
     pub stderr: String,
     /// What the server answered for each case that got an answer, by case name
     pub results: HashMap<String, Value>,
+    /// How many LogSeq calls the server made for each case that got an answer, by case name (the recorder lowers a
+    /// case's ceiling to it)
+    pub call_counts: HashMap<String, usize>,
     /// The server's `tools/list` in the recorded projection
     pub tool_list: Vec<Value>,
 }
 
 /// A fresh empty folder for the run, under the target directory cargo gives integration tests.
 pub fn scratch_dir(label: &str) -> PathBuf {
+    // The clock alone isn't unique: tests of one process run in threads, and a coarse clock gives two the same reading
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{label}-{}-{nanos:x}", std::process::id()));
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{label}-{}-{nanos:x}-{n}", std::process::id()));
     fs::create_dir_all(dir.join("home")).expect("create the scratch folder");
     dir
 }
@@ -308,6 +314,7 @@ pub fn run_parity(run: &Run) -> Report {
 pub fn run_parity_with(run: &Run, launch: &dyn Fn(&Path, &Path, i64) -> Server) -> Report {
     let mut failures = Vec::new();
     let mut results = HashMap::new();
+    let mut call_counts = HashMap::new();
     let mut tool_list = Vec::new();
     let mut names = HashSet::new();
     for case in run.cases {
@@ -365,7 +372,9 @@ pub fn run_parity_with(run: &Run, launch: &dyn Fn(&Path, &Path, i64) -> Server) 
             // A tool that fails on the first of several concurrent answers returns before the rest arrive (#340)
             stub.settle(case.call_count(), run.settle_ms);
             failures.extend(stub.failures().into_iter().map(|f| format!("{prefix} stub: {f}")));
-            failures.extend(compare_calls(&case.steps, &stub.calls()).into_iter().map(|f| format!("{prefix} LogSeq calls, {f}")));
+            let made = stub.calls();
+            failures.extend(compare_calls(&case.steps, case.ceiling, &made).into_iter().map(|f| format!("{prefix} LogSeq calls, {f}")));
+            call_counts.insert(case.name.clone(), made.len());
             if !run.record {
                 let candidates = candidates_of(judged.get(case.name.as_str()).copied().unwrap_or(case));
                 failures.extend(compare_results(&case.expected, &result, &candidates).into_iter().map(|f| format!("{prefix} result {f}")));
@@ -383,5 +392,5 @@ pub fn run_parity_with(run: &Run, launch: &dyn Fn(&Path, &Path, i64) -> Server) 
     drop(server);
     drop(stub);
     let _ = fs::remove_dir_all(&dir);
-    Report { failures, stderr, results, tool_list }
+    Report { failures, stderr, results, call_counts, tool_list }
 }
