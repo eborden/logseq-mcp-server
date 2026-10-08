@@ -19,6 +19,10 @@ pub const TIPS_ENV: &str = "LOGSEQ_MCP_TIPS";
 /// Environment variable that fixes the instant the tools read as "now", in milliseconds since
 /// 1970-01-01 UTC (`Date.now()`'s count). Only the parity harness sets it, so a result that depends on
 /// today's date (`last_n`, a preset) is the same on every day. Unset, the system clock is read.
+///
+/// A test hook, so it exists in debug builds only (`cfg!(debug_assertions)`): a release binary
+/// ignores it, whatever it holds, as the TypeScript server has no such hook in production. The
+/// parity job runs the debug binary.
 pub const NOW_ENV: &str = "LOGSEQ_MCP_NOW";
 
 const TIPS_ON_VALUES: [&str; 4] = ["1", "true", "on", "yes"];
@@ -132,8 +136,14 @@ fn tips(raw: Option<&str>) -> Result<TipsOverride, ConfigError> {
 }
 
 /// `LOGSEQ_MCP_NOW`: a whole number of milliseconds since 1970-01-01 UTC, or unset (blank counts as
-/// unset) for the system clock. The message echoes the value, which holds no secret.
+/// unset) for the system clock. The message echoes the value, which holds no secret. A release build
+/// ignores the variable, even a bad value (see [`NOW_ENV`]).
 fn clock(raw: Option<&str>) -> Result<Clock, ConfigError> {
+    // PARITY(#299): the hook is for the parity harness, so a release build never reads it - drop if Rust
+    // becomes the only server.
+    if !cfg!(debug_assertions) {
+        return Ok(Clock::System);
+    }
     let text = crate::js::trim(raw.unwrap_or_default());
     if text.is_empty() {
         return Ok(Clock::System);
@@ -243,6 +253,15 @@ mod tests {
         assert!(text.contains("LOGSEQ_MCP_CONFIG"), "{text}");
     }
 
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_release_build_ignores_the_variable_whatever_it_holds() {
+        for value in ["1741750200000", "yesterday", ""] {
+            assert_eq!(env(&[(NOW_ENV, value)], home()).unwrap().clock, Clock::System, "{value:?}");
+        }
+    }
+
+    #[cfg(debug_assertions)]
     #[test]
     fn the_clock_is_the_system_one_unless_an_instant_is_fixed() {
         assert_eq!(env(&[], home()).unwrap().clock, Clock::System);
