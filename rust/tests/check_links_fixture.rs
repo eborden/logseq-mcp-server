@@ -550,6 +550,36 @@ async fn the_prose_check_matches_the_reference_on_seeded_random_pairs_including_
     assert!(differing > PAIRS, "only {differing} of {} pairs differ", PAIRS * 2);
 }
 
+// ---------------------------------------------------------------- an empty after
+
+#[tokio::test]
+async fn an_empty_after_against_a_non_empty_before_fails_check_1_and_asks_logseq_nothing() {
+    let logseq = mock_logseq(vec![]).await;
+
+    let result = check_links(&client(&logseq), "Alice met Bob", "").await.unwrap();
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["prose"], json!({"ok": false, "firstDifference": {"line": 1, "column": 1, "before": "Alice met Bob", "after": ""}}));
+    assert_eq!(result["brackets"], json!({"ok": true, "opens": 0, "closes": 0}));
+    assert_eq!(result["refs"], json!({"ok": true, "resolved": [], "unresolved": [], "ambiguous": []}));
+    assert_eq!(result["refsPreserved"], json!({"ok": true, "removed": []}));
+    assert_eq!(result["totals"], json!({"refsBefore": 0, "refsAfter": 0, "terms": 0}));
+    assert_eq!(result["warnings"], json!([]));
+    assert_eq!(result["hasMore"], false);
+    assert!(methods(&logseq).is_empty());
+}
+
+#[tokio::test]
+async fn two_empty_texts_pass_with_no_call() {
+    let logseq = mock_logseq(vec![]).await;
+
+    let result = check_links(&client(&logseq), "", "").await.unwrap();
+
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["totals"], json!({"refsBefore": 0, "refsAfter": 0, "terms": 0}));
+    assert!(methods(&logseq).is_empty());
+}
+
 // ---------------------------------------------------------------- the excerpt window, written out
 
 /// `firstDifference` of two texts, through the tool. No expectation here comes from `reference_prose`: the
