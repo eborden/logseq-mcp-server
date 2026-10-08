@@ -86,6 +86,11 @@ export interface ParityOptions {
   snapshotFile: string;
   /** Milliseconds to wait for each MCP request */
   timeoutMs?: number;
+  /**
+   * The most to wait, per case, for the LogSeq calls a tool made at once to reach the stub after its
+   * result came back (#340). Default 2000; 0 reads the call log at once, which is for a test of the wait.
+   */
+  settleMs?: number;
 }
 
 export interface ParityReport {
@@ -308,7 +313,7 @@ export async function runCase(client: Client, c: ParityCase, timeout: number): P
  * against the snapshot byte for byte when there is no `expectedToolList`.
  */
 export async function runParity(options: ParityOptions): Promise<ParityReport> {
-  const { server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, timeoutMs = 30000 } = options;
+  const { server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, timeoutMs = 30000, settleMs = 2000 } = options;
   const failures: string[] = [];
   const results: Record<string, ToolResult> = {};
   let toolList: ProjectedTool[] | undefined;
@@ -369,10 +374,15 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
       try {
         result = await runCase(client, c, timeoutMs);
       } catch (error) {
+        // The calls of this case aren't compared, so wait only for requests already in flight; a server that
+        // died would otherwise cost every remaining case the wait
+        await stub.settle(0, { maxMs: settleMs });
         failures.push(`${prefix} the call failed: ${(error as Error).message}`);
         continue;
       }
       results[c.name] = result;
+      // A tool that fails on the first of several concurrent answers returns before the rest arrive (#340)
+      await stub.settle(c.steps.flat().length, { maxMs: settleMs });
       for (const f of stub.failures()) failures.push(`${prefix} stub: ${f}`);
       for (const f of compareCalls(c.steps, stub.calls())) failures.push(`${prefix} LogSeq calls, ${f}`);
       if (expected) {
