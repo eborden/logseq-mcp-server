@@ -15,6 +15,7 @@ export const SNAPSHOT_FILE = join(REPO_ROOT, 'src', '__snapshots__', 'tool-list.
 
 /** A command that runs one of the TypeScript files in this folder from source. */
 export function viteNodeCommand(file: string): ServerCommand {
+  // #259: vite-node is a transitive dependency of vitest 3 that vitest 4 drops; move this launcher with it
   const viteNode = createRequire(import.meta.url).resolve('vite-node/vite-node.mjs');
   return { command: process.execPath, args: [viteNode, join(here, file)], cwd: REPO_ROOT };
 }
