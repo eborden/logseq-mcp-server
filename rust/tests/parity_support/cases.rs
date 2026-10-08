@@ -207,3 +207,35 @@ pub fn perturb_value(value: &Value) -> Value {
     let out = visit(value, &mut changed);
     if changed { out } else { json!({"error": "parity harness: perturbed answer"}) }
 }
+
+/// One row of the table both comparators are held to (`tests/data/comparator-cases.json`): two results and
+/// whether the comparator calls them the same.
+#[derive(Debug)]
+pub struct ComparatorRow {
+    pub name: String,
+    pub expected: Value,
+    pub actual: Value,
+    /// `true` for "same", `false` for "differs"
+    pub same: bool,
+}
+
+/// The shared table. The Node harness's comparator is held to the same rows by
+/// `tests/guards/comparator-table.test.ts`, so the two can't drift apart.
+pub fn load_comparator_table() -> Vec<ComparatorRow> {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("data").join("comparator-cases.json");
+    read_json(&file)
+        .as_array()
+        .expect("the comparator table is a list")
+        .iter()
+        .map(|row| ComparatorRow {
+            name: row["name"].as_str().expect("a row has a name").to_owned(),
+            expected: row["expected"].clone(),
+            actual: row["actual"].clone(),
+            same: match row["verdict"].as_str() {
+                Some("same") => true,
+                Some("differs") => false,
+                other => panic!("row {:?}: the verdict is {other:?}", row["name"]),
+            },
+        })
+        .collect()
+}
