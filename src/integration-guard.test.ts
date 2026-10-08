@@ -134,3 +134,35 @@ describe('integration suites', () => {
     }
   });
 });
+
+// A suite that imports a tool's function from src/tools/, or createServer, runs the TypeScript server
+// even when LOGSEQ_MCP_SERVER=rust, and nothing says so (#352). The helpers take the same names.
+describe('integration suites reach the tools through the helpers', () => {
+  const helperSource = readFileSync(join(integrationDir, 'helpers', 'tools.ts'), 'utf-8');
+  const helperNames = new Set([...helperSource.matchAll(/^export const (\w+)/gm)].map(match => match[1]));
+  const files = testFiles(integrationDir);
+
+  /** Names a source imports from the module paths that match `from`, as written (`as` renames dropped). */
+  function importedFrom(source: string, from: RegExp): string[] {
+    return [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'([^']+)'/g)]
+      .filter(match => from.test(match[2]))
+      .flatMap(match => match[1].split(',').map(name => name.trim().split(/\s+as\s+/)[0].replace(/^type\s+/, '')))
+      .filter(Boolean);
+  }
+
+  it('finds the helper functions', () => {
+    expect(helperNames.size).toBeGreaterThanOrEqual(19);
+    expect(helperNames.has('getPage')).toBe(true);
+  });
+
+  it.each(files.map(path => [relative(repoRoot, path), path]))('%s imports no tool function from src/tools/', (_label, path) => {
+    const source = readFileSync(path, 'utf-8');
+    const direct = importedFrom(source, /\/src\/tools\/[\w-]+\.js$/).filter(name => helperNames.has(name));
+    expect(direct, 'import these from helpers/tools.js').toEqual([]);
+  });
+
+  it.each(files.map(path => [relative(repoRoot, path), path]))('%s does not build the TypeScript server itself', (_label, path) => {
+    const source = readFileSync(path, 'utf-8');
+    expect(importedFrom(source, /\/src\/index\.js$/), 'use connectMcp from helpers/server-under-test.js').not.toContain('createServer');
+  });
+});
