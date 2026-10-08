@@ -307,7 +307,7 @@ pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_
         };
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // PARITY(#299): a `null` answer is read as "no connected pages", so the network looks empty when LogSeq
-        // didn't answer (suspected TS bug, BR-0011) — fix per #346, in both servers.
+        // didn't answer (suspected TS bug, BR-0011) — fix per #345, in both servers.
         let rows = connected_rows(&answer)?.unwrap_or_default();
 
         let mut candidates: HashMap<i64, Candidate> = HashMap::new();
