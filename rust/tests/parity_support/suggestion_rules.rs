@@ -1,5 +1,5 @@
 //! The closest-name rules of ADR-0032 (closest-page-suggestions-match-by-meaning), Decision 3 (#335), as
-//! `scripts/parity/suggestion-rules.ts` states them. The list of names after `Closest:` in a page-not-found
+//! the ADR states them. The list of names after `Closest:` in a page-not-found
 //! message is held to rules, not bytes: the recorded lists are the TypeScript matcher's, which no server now
 //! has.
 //!

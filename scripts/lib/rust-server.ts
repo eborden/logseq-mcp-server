@@ -83,7 +83,7 @@ async function startForwarder(client: LogseqClient, token: string): Promise<Http
 
 /** The environment a server process runs in: its own home, so there is no `~/.logseq-mcp/config.json` to fall back on (BR-0001). */
 function serverEnv(configPath: string, home: string, options: ConnectOptions): Record<string, string> {
-  // Like the parity harness (scripts/parity/harness.ts)
+  // Like scripts/lib/sandboxed-env.ts
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   delete env.LOGSEQ_MCP_TIPS;

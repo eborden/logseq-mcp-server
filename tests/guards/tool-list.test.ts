@@ -108,7 +108,7 @@ describe('tools/list guardrails', () => {
     });
   });
   describe('what the recorded list keeps true (ADR-0010, ADR-0020, BR-0008, BR-0012)', () => {
-    // A re-record from Rust (`--record-from-rust`, #299) rewrites the recorded list, and the by-meaning comparison
+    // A re-record from Rust (`PARITY_RECORD=1`, #299) rewrites the recorded list, and the by-meaning comparison
     // passes whatever it says. These hold what the TypeScript tests asserted directly, so a re-record that drops
     // one fails here.
     it('advertises default: true on every slim_results parameter', () => {

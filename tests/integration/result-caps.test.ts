@@ -31,7 +31,7 @@ import { connectMcp } from './helpers/server-under-test.js';
  * describe block per capped tool; later cap PRs add theirs here.
  *
  * Where a maximum is out of reach of the fixture (below), the cut at it is held by the Rust server's own tests: the
- * parity cases in scripts/parity/cases/ feed a mock more rows than the fixture holds (for example `limit at the maximum
+ * parity cases in rust/tests/data/parity/ feed a mock more rows than the fixture holds (for example `limit at the maximum
  * with matches left` in search-blocks.ts, 520 matches, and `caps: max_pages above the maximum` in get-backlinks.ts, 101
  * source pages), and the Rust unit tests do the same (rust/src/tools/query_by_date_range/cap.rs, 1,001 blocks;
  * rust/src/truncation.rs). They replaced the TypeScript unit tests, which fed 600 matches, 1,100 blocks, 150 pages

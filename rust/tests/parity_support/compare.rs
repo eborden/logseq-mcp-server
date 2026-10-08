@@ -1,5 +1,5 @@
 //! The comparator: every rule that decides whether the server's answer is the recorded one lives here, and
-//! nowhere else in the parity test (`scripts/parity/harness.ts` and `tool-list-compare.ts`, #371).
+//! nowhere else in the parity test (#371, #379).
 //!
 //! - [`compare_results`] is the entry for a tool, prompt or resource result: structure equal, the closest
 //!   names of a page-not-found message by the rules of ADR-0032 (`suggestion_rules.rs`), every text as below,

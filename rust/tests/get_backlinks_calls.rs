@@ -1,6 +1,6 @@
 //! The backlinks tool's LogSeq traffic against a mock LogSeq on a local port: how many calls it
 //! makes, in which order, with which inputs, and what it answers. The parity harness
-//! (`scripts/parity.ts`) checks the same calls and the result bytes against the TypeScript
+//! (`parity.rs`) checks the same calls and the result bytes against the TypeScript
 //! server. Every page and block here is made up (BR-0001).
 //!
 //! The mock is the one `get_page_outline_calls.rs` has: each test file is its own crate, and
