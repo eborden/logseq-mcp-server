@@ -5,7 +5,7 @@ import { typescriptServer } from './ts-server.js';
 
 export const USAGE =
   'usage: npx tsx scripts/parity.ts [--perturb | --self-check] [-- <server command> [args...]]\n' +
-  '       npx tsx scripts/parity.ts --tested-tools-only -- <server command> [args...]   (a server with only some tools)\n' +
+  '       npx tsx scripts/parity.ts --tested-tools-only -- <server command> [args...]   (a server with only some tools, for local use)\n' +
   '       npx tsx scripts/parity.ts --record   (TypeScript server only; review the JSON diff; never in CI)';
 
 export function parseCommandLine(argv: string[]): {

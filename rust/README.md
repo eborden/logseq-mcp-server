@@ -5,8 +5,10 @@ The LogSeq MCP server in Rust, beside the TypeScript one in `src/`. It's a bound
 go/no-go call (#127). The TypeScript server is the one that ships, and its tool contract is the
 specification this crate must match.
 
-It has the skeleton (#123): the LogSeq HTTP client, EDN-encoded Datalog inputs, the config file
-and an MCP stdio server. The first tool is `logseq_get_page_outline` (#125), which exercises the
+It lists all 16 tools, the five prompts, the reading guide and the page resource, and the server
+`instructions`, and the parity harness holds each to the TypeScript server's output (#316). It began
+as a skeleton (#123): the LogSeq HTTP client, EDN-encoded Datalog inputs, the config file
+and an MCP stdio server. The first tool was `logseq_get_page_outline` (#125), which exercises the
 pieces most likely to differ between implementations: the shared page resolver, a Datalog query
 bound with `:in`, a capped result with a warning, sibling order by the `:block/left` chain, and
 2 API calls. `logseq_get_backlinks` (#307) adds the alias groups (#69) and a result that is the Editor API's own entities, kept as sent. The Markdown renderer (#310) is `src/markdown.rs`, behind `format: "markdown"` on `logseq_get_page` and `logseq_get_block` and the `logseq://page/{name}` resource.
@@ -17,8 +19,9 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 | `src/config.rs` | The config file, parsed once. Its errors never show a file value (ADR-0003) |
 | `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as `src/client.ts` |
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
-| `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`, and the resource requests. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
-| `src/markdown.rs`, `src/resources.rs` | The one Markdown renderer (`markdown.ts`: title, resolved-from note, page properties and the pre-block rule, the block outline with its cap, a single block, the warnings/hasMore/tips footer); `compact`, `show_uuid` and `show_page` on the outline are the context tools' (#312). And the resources (`resources.ts`): `resources/templates/list` and `resources/read` of `logseq://page/{name}`, cut at `MAX_PAGE_CHARS`. `resources/list` is empty and the guide is an unknown URI until the prompts land (#316) |
+| `src/server.rs` | rmcp `ServerHandler`: `initialize` (the name, `serverInfo.version` from `../package.json` and the `instructions`), `tools/list`, `tools/call`, and the prompt and resource requests. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
+| `src/prompts.rs`, `src/instructions.rs`, `src/mcp_error.rs` | The five prompts (`prompts.ts`: `prompts/list` and `prompts/get`, each one short user message that names the tools; arguments are strings, an unknown or malformed one is `InvalidParams`; the week and month come from the server's clock, never read inside a builder). The server `instructions` (`instructions.ts`, byte for byte; a unit test reads the TypeScript file and fails if they drift). And the JSON-RPC error the TypeScript SDK's `McpError` sends, shared by the prompts and the resources |
+| `src/markdown.rs`, `src/resources.rs` | The one Markdown renderer (`markdown.ts`: title, resolved-from note, page properties and the pre-block rule, the block outline with its cap, a single block, the warnings/hasMore/tips footer); `compact`, `show_uuid` and `show_page` on the outline are the context tools' (#312). And the resources (`resources.ts`): `resources/templates/list` and `resources/read` of `logseq://page/{name}`, cut at `MAX_PAGE_CHARS`. `resources/list` and the reading guide `logseq://guide` (the instructions plus a one-line index of the tools, prompts and resources) are here too |
 | `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type (every named type written in place: the MCP SDK's client drops `$defs`), argument parsing at the boundary, and the TypeScript server's result shapes |
 | `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125), `get_backlinks/` (#307), `get_graph_info/`, `list_pages/` and `search_blocks/` (#306), `get_block/` and `get_page/` (#308), `query_by_date_range/` (#311), `build_context/` and `get_context_for_query/` (#312), `search_by_relationship/` and `check_links/` (#314), `get_concept_network/` and `get_concept_evolution/` (#313) |
 | `src/markdown_context.rs`, `src/compact.rs`, `src/snippet.rs` | Markdown for the context tools (`markdown-context.ts`: a topic's blocks, related pages and references by source page, and a query's topics and keyword hits, and a concept network's pages by depth and its links, #313); `compact` JSON (`compact.ts`: a block is `{ uuid, snippet }`, a page `{ id, name, originalName }`); and the first-line snippet (`snippet.ts`), also the outline's |
@@ -65,8 +68,8 @@ compares the tool result byte for byte, the LogSeq calls and `tools/list` by mea
 with what the TypeScript server did. From the repo root, after `npm ci` and `cargo build`:
 
 ```bash
-node node_modules/vite-node/vite-node.mjs scripts/parity.ts --tested-tools-only "$PWD/rust/target/debug/logseq-mcp-server"
-node node_modules/vite-node/vite-node.mjs scripts/parity.ts --self-check --tested-tools-only "$PWD/rust/target/debug/logseq-mcp-server"
+node node_modules/vite-node/vite-node.mjs scripts/parity.ts "$PWD/rust/target/debug/logseq-mcp-server"
+node node_modules/vite-node/vite-node.mjs scripts/parity.ts --self-check "$PWD/rust/target/debug/logseq-mcp-server"
 ```
 
 The runner is the `vite-node` that `npm ci` installs from the lockfile (CI uses the same; `npx tsx`
@@ -80,8 +83,11 @@ date in UTC fails. The Rust server reads the variable itself; the TypeScript one
 `scripts/parity/run-ts-server.ts`, which replaces `Date` before the server runs, so no server code
 changes.
 
-`--tested-tools-only` is for a server with only some tools: `tools/list` is compared for the tools
-the cases call, and the server must list those and no others. Fixtures are made up (BR-0001).
+The whole `tools/list` is compared, and the cases cover every tool, `prompts/list`, `prompts/get`,
+`resources/list` and `resources/read` (the guide, a page and the unknown-URI error). CI runs exactly
+this. `--tested-tools-only` is still there for local use with a server that has only some tools:
+`tools/list` is compared for the tools the cases call, and the server must list those and no others.
+Fixtures are made up (BR-0001).
 
 ## Running it
 
