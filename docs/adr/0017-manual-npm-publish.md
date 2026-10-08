@@ -32,3 +32,4 @@ Date: 2026-10-05
 - test: `tests/guards/package-metadata.test.ts` (prepublishOnly runs the build, and files includes dist, README.md and LICENSE)
 - test: `tests/rust-guards/version.test.ts` (the plugin manifest carries the same version as package.json)
 - test: `tests/guards/adr-workflow-guards.test.ts` (publish.yml triggers only on workflow_dispatch, the dry_run input defaults to true and the Publish step runs npm publish --dry-run when it is set, every job is gated to refs/heads/main, and no other workflow runs npm publish)
+- reviewer: This ADR and its guards describe the retired TypeScript server's npm packaging. How the Rust binary is shipped and published is open (#350, #355), and until a decision lands the npm publish path here does not build or publish the server.

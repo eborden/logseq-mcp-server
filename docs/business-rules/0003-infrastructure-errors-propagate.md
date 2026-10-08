@@ -2,7 +2,7 @@
 
 ## Statement
 
-Don't turn errors into empty results. A dropped connection must not look like "no data". Re-throw infrastructure errors (`isInfrastructureError`: LogSeq not running, auth, timeout) and unexpected ones. Only an empty result is "none", and expected partial results go in a `warnings` field.
+Don't turn errors into empty results. A dropped connection must not look like "no data". Propagate infrastructure errors (`LogseqError::is_infrastructure` in `rust/src/client.rs`: LogSeq not running, auth, timeout) and unexpected ones as errors. Only an empty result is "none", and expected partial results go in a `warnings` field.
 
 ## Rationale
 
@@ -18,7 +18,7 @@ test: `rust/tests/context_calls.rs`
 test: `rust/src/server.rs`
 
 `rust/tests/get_page_outline_calls.rs` pins the resolver's error paths: a refused connection or a LogSeq error from the namespace-leaf query, and a refused connection at the suggestion lookup, are the error and never "page not found", while an error answered by the suggestion lookup is a missing page with no suggestions (suggestions are best effort) and an unreadable answer is a response error. `rust/src/server.rs` pins that a failed call reaches the MCP caller as an `isError` result, and `tests/integration/auth-error.test.ts` pins that a rejected token reaches the caller with an actionable message, against a real LogSeq.
-reviewer: A new `catch` re-throws infrastructure errors and never maps an error to an empty result. A `catch` that rethrows unchanged or swallows the error is a defect: either add context, convert to a typed error, or delete it.
+reviewer: A new error arm on a `Result` from a LogSeq call (`match`, `.ok()`, `unwrap_or_default()`) propagates infrastructure errors and never maps an error to an empty result. An arm that swallows the error is a defect: either propagate it with `?`, add context, convert it to a typed `ToolError`, or delete the arm.
 
 ## Changelog
 
@@ -27,3 +27,4 @@ reviewer: A new `catch` re-throws infrastructure errors and never maps an error 
 | 2026-10-05 | Introduced in `build_context` and `get_context_for_query`. | #29 |
 | 2026-10-05 | Extended to `get_page` and its page lookups. | #35 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the Rust server's call-count tests and the integration suite with the TypeScript server's removal. Statement unchanged. Added the outline's resolver error paths (leaf query, suggestion lookup). | #370 |
+| 2026-10-08 | Statement and reviewer line: the TypeScript wording ("re-throw", `isInfrastructureError`, `catch`) is the Rust crate's (propagate, `LogseqError::is_infrastructure`, an error arm). The rule is unchanged. | #372 |

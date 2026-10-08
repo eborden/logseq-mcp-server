@@ -40,13 +40,12 @@ Add an `offset` so a client can fetch the rest. Foundations 4.6 and 4.11."
 
 ## Where it lands
 <!-- Files and anchors, so overlap with other open PRs can be checked before running in
-parallel. Each new DatalogQueryBuilder method gets its own anchor and its own new test file. -->
+parallel. Each tool gets its own directory and its own new test file. -->
 | Area | File | Note |
 |---|---|---|
-| Query builder | `src/datalog/queries.ts` | new method after `pageOutlineBlocks` |
-| Tool | `src/tools/<name>.ts` | |
-| Args schema | `src/tool-args.ts` | |
-| Tests | `src/tools/<name>.test.ts` (new) | |
+| Queries | `rust/src/tools/<name>/queries.rs` | |
+| Tool | `rust/src/tools/<name>/mod.rs` | `NAME`, `definition`, `call`; registered in `rust/src/tools/mod.rs` |
+| Tests | `rust/tests/<name>_calls.rs` (new) | |
 
 ## Design sketch
 <!--
@@ -66,20 +65,20 @@ sequenceDiagram
   T-->>C: { blocks, meta: { hasMore, howToFetchAll } }
 ```
 
-```typescript
+```rust
 // Additive only: existing callers see no change.
-interface OutlineArgs { page: string; offset?: number }
+struct OutlineArgs { page: String, offset: Option<u64> }
 ```
 -->
 
 ## Constraints that apply
 <!-- Keep the ones this change can hit. Delete the rest. Each links to its source in CLAUDE.md or foundations. -->
-- [ ] Inputs parsed with zod at the boundary (`src/tool-args.ts`, `parseArgs`)
-- [ ] Strings bound with `:in`, ids embedded only through `groundIds`; page names lowercased
+- [ ] Inputs parsed at the boundary (`Arguments` in `rust/src/args.rs`; the `inputSchema` generated from the argument type)
+- [ ] Strings bound with `:in`, ids embedded only through `ground_ids`; page names lowercased (`PageName`)
 - [ ] Calls and result sizes are bounded; any cap reports `ResultMeta` (BR-0006, ADR-0011)
 - [ ] No per-page crawls: one batched query, or `ground`-batched queries (Pattern 4)
 - [ ] Infrastructure errors propagate; `null` is not `[]` (BR-0003, BR-0011)
-- [ ] Tool contract changes are additive (foundations 4.3); `tools/list` snapshot reviewed (ADR-0016)
+- [ ] Tool contract changes are additive (foundations 4.3); recorded `tools/list` diff reviewed (ADR-0016)
 - [ ] Output is read-only, minified JSON; nothing writes to stdout (BR-0002, ADR-0009, ADR-0004)
 - [ ] No graph data in code, tests, fixtures or docs (BR-0001); fixtures use made-up names
 
@@ -91,8 +90,9 @@ interface OutlineArgs { page: string; offset?: number }
 ## Verification
 <!-- Exact commands and the numbers the PR must report (approximate, no names). -->
 ```bash
-npx tsc --noEmit
-npx vitest run src
+(cd rust && cargo test --locked)
+npx vite-node scripts/parity.ts && npx vite-node scripts/parity.ts --self-check
+npm run typecheck && npx vitest run tests/guards tests/rust-guards
 npx tsx scripts/logseq-instance.ts start && npm run test:integration && npx tsx scripts/logseq-instance.ts stop
 npx tsx scripts/measure-api-calls.ts   # report calls for: <tool>
 ```

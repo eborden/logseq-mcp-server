@@ -2,7 +2,7 @@
 
 ## Statement
 
-Don't report success you haven't verified. Tool outputs, status fields, summaries and notes must report what actually happened, not what was intended. Report what the tool did, including that nothing matched. Error messages guide recovery and stay actionable (`PageNotFoundError` suggests close matches). Partial and truncated results say so through `ResultMeta` `warnings`.
+Don't report success you haven't verified. Tool outputs, status fields, summaries and notes must report what actually happened, not what was intended. Report what the tool did, including that nothing matched. Error messages guide recovery and stay actionable (`PageNotFound` suggests close matches). Partial and truncated results say so through `ResultMeta` `warnings`.
 
 ## Rationale
 
@@ -17,3 +17,4 @@ reviewer: Tool outputs, status fields, summaries and PR notes describe what actu
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced as a hard rule in the foundations doc. | #38 |
+| 2026-10-08 | Statement: the TypeScript error name `PageNotFoundError` is the Rust crate's `PageNotFound`. The rule is unchanged. | #372 |
