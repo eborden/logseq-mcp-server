@@ -130,12 +130,21 @@ async function stopRust(session: ForwarderSession): Promise<void> {
   await rm(session.dir, { recursive: true, force: true });
 }
 
-/** Note which test is about to reach the Rust server, for a count of tests that did. */
-export function recordUsage(): void {
+function appendUsage(...fields: string[]): void {
   const file = process.env[USAGE_ENV]?.trim();
   if (!file) return;
   const { testPath, currentTestName } = expect.getState();
-  appendFileSync(file, `${testPath ?? ''}\t${currentTestName ?? ''}\n`);
+  appendFileSync(file, `${[...fields.slice(0, 1), testPath ?? '', currentTestName ?? '', ...fields.slice(1)].join('\t')}\n`);
+}
+
+/** Note which test is about to reach the Rust server, for a count of tests that did. */
+export function recordUsage(): void {
+  appendUsage('rust');
+}
+
+/** Note that a call in a Rust run stayed on the TypeScript function, and why, so the run can say what did not reach Rust. */
+export function recordFallback(fn: string, reason: string): void {
+  appendUsage('ts-fallback', fn, reason);
 }
 
 /**
