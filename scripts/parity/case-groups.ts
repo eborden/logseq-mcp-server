@@ -2,8 +2,10 @@
 // under scripts/parity/expected/, so a tool's re-record touches only its own JSON (#306). Case names
 // are unique across every group (runParity refuses a duplicate).
 import { join } from 'node:path';
+import { buildContextCases } from './cases/build-context.js';
 import { getBacklinksCases } from './cases/get-backlinks.js';
 import { getBlockCases } from './cases/get-block.js';
+import { getContextForQueryCases } from './cases/get-context-for-query.js';
 import { getCurrentContextCases } from './cases/get-current-context.js';
 import { getGraphInfoCases } from './cases/get-graph-info.js';
 import { getPageCases } from './cases/get-page.js';
@@ -24,8 +26,10 @@ export interface CaseGroup {
 }
 
 export const CASE_GROUPS: CaseGroup[] = [
+  { name: 'build-context', cases: buildContextCases },
   { name: 'get-backlinks', cases: getBacklinksCases },
   { name: 'get-block', cases: getBlockCases },
+  { name: 'get-context-for-query', cases: getContextForQueryCases },
   { name: 'get-current-context', cases: getCurrentContextCases },
   { name: 'get-graph-info', cases: getGraphInfoCases },
   { name: 'get-page', cases: getPageCases },
