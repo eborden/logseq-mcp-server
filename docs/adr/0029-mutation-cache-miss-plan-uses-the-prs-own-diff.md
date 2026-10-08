@@ -30,9 +30,9 @@ This ADR replaces ADR-0028's plan inputs and its advice to the author, and ADR-0
 
 ## Status
 
-accepted
+superseded by 0033-rust-mutation-testing-ratchet
 
-Date: 2026-10-07
+Date: 2026-10-08
 
 ## Mechanical enforcement
 
