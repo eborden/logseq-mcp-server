@@ -1,10 +1,8 @@
 //! Markdown for the context tools (#43; the Rust side of `src/utils/markdown-context.ts`), built on
-//! the shared pieces in `crate::markdown`: `build_context` and `get_context_for_query` here, and the
-//! concept network when its tool is ported. Same conventions: `[[Page]]` links, `- ` bullets,
+//! the shared pieces in `crate::markdown`: `build_context` and `get_context_for_query` here, and
+//! the concept network (`render_network`, #313). Same conventions: `[[Page]]` links, `- ` bullets,
 //! `((uuid))` refs untouched. Warnings, `hasMore` and tips are not rendered here; the tool adds
 //! them with `with_footer`.
-//!
-//! Not ported yet: `renderNetwork`, which comes with `get_concept_network`.
 
 use std::collections::HashMap;
 
@@ -220,6 +218,72 @@ pub fn render_query_context(context: &Value, compact: bool) -> String {
     format!("{}\n", parts.join("\n\n"))
 }
 
+/// `renderNetwork`: a concept network: the pages grouped by distance from the root, then one line per
+/// linked pair. `A -> B` means blocks on A reference B, `A <- B` that blocks on B reference A, and
+/// `A <-> B (out/in)` both; the number is the reference count. `A` is always the page closer to the
+/// root.
+pub fn render_network(network: &Value) -> String {
+    let nodes = array(network, "nodes");
+    let depth_of = |node: &Value| node.get("depth").and_then(Value::as_i64);
+    let name_of = |node: &Value| node.get("name").and_then(Value::as_str).unwrap_or("undefined").to_owned();
+    let root = nodes.iter().find(|node| depth_of(node) == Some(0));
+    let title = root.map(name_of).unwrap_or_else(|| network.get("concept").and_then(Value::as_str).unwrap_or("undefined").to_owned());
+    let mut lines: Vec<String> = vec![format!("# Concept network: [[{title}]]"), String::new()];
+    if let Some(note) = resolved_from_line(network.get("resolvedFrom")) {
+        lines.push(note);
+        lines.push(String::new());
+    }
+
+    // The pages by depth, each depth's pages in the order of `nodes`
+    let mut by_depth: Vec<(i64, Vec<String>)> = Vec::new();
+    for node in nodes {
+        let Some(depth) = depth_of(node).filter(|depth| *depth != 0) else { continue };
+        let link = format!("[[{}]]", name_of(node));
+        match by_depth.iter_mut().find(|(seen, _)| *seen == depth) {
+            Some((_, names)) => names.push(link),
+            None => by_depth.push((depth, vec![link])),
+        }
+    }
+    if by_depth.is_empty() {
+        lines.push("(no linked pages)".to_owned());
+        lines.push(String::new());
+    }
+    by_depth.sort_by_key(|(depth, _)| *depth);
+    for (depth, names) in &by_depth {
+        lines.push(format!("## Depth {depth} ({})", names.len()));
+        lines.push(String::new());
+        lines.push(names.join(", "));
+        lines.push(String::new());
+    }
+
+    let names: HashMap<i64, String> = nodes.iter().filter_map(|node| Some((id_of(Some(node))?, name_of(node)))).collect();
+    let number = |edge: &Value, key: &str| edge.get(key).and_then(Value::as_i64).unwrap_or(0);
+    let links: Vec<String> = array(network, "edges")
+        .iter()
+        .filter_map(|edge| {
+            let from = names.get(&number(edge, "from"))?;
+            let to = names.get(&number(edge, "to"))?;
+            let (outbound, inbound) = (number(edge, "outbound"), number(edge, "inbound"));
+            let link = if outbound > 0 && inbound > 0 {
+                format!("<-> [[{to}]] ({outbound}/{inbound})")
+            } else if outbound > 0 {
+                format!("-> [[{to}]] ({outbound})")
+            } else {
+                format!("<- [[{to}]] ({inbound})")
+            };
+            Some(format!("- [[{from}]] {link}"))
+        })
+        .collect();
+    if !links.is_empty() {
+        lines.push(format!("## Links ({})", links.len()));
+        lines.push(String::new());
+        lines.extend(links);
+        lines.push(String::new());
+    }
+
+    format!("{}\n", js::trim_end(&lines.join("\n")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,6 +421,58 @@ mod tests {
             "# Context for: what about [[Atlas]]?\n\nTopics: [[Atlas]]\n\n## Atlas\n\n### Blocks (1)\n\n- x\n"
         );
         assert_eq!(render_query_context(&json!({"query": "q", "extractedTopics": [], "contexts": []}), false), "# Context for: q\n\n(no results)\n");
+    }
+
+    fn network() -> Value {
+        json!({
+            "concept": "atlas",
+            "resolvedFrom": {"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"},
+            "nodes": [
+                {"id": 10, "name": "Project Atlas", "depth": 0},
+                {"id": 20, "name": "Bob", "depth": 1},
+                {"id": 30, "name": "Carol", "depth": 2},
+                {"id": 40, "name": "Dave", "depth": 1},
+            ],
+            "edges": [
+                {"from": 10, "to": 20, "type": "reference", "count": 5, "outbound": 3, "inbound": 2},
+                {"from": 10, "to": 40, "type": "reference", "count": 1, "outbound": 1, "inbound": 0},
+                {"from": 20, "to": 30, "type": "backlink", "count": 4, "outbound": 0, "inbound": 4},
+                {"from": 20, "to": 99, "type": "reference", "count": 1, "outbound": 1, "inbound": 0},
+            ],
+            "truncated": false,
+        })
+    }
+
+    #[test]
+    fn a_network_is_its_pages_by_depth_then_one_line_per_linked_pair() {
+        assert_eq!(
+            render_network(&network()),
+            "# Concept network: [[Project Atlas]]\n\
+             \n\
+             (resolved from \"atlas\", matched by alias)\n\
+             \n\
+             ## Depth 1 (2)\n\
+             \n\
+             [[Bob]], [[Dave]]\n\
+             \n\
+             ## Depth 2 (1)\n\
+             \n\
+             [[Carol]]\n\
+             \n\
+             ## Links (3)\n\
+             \n\
+             - [[Project Atlas]] <-> [[Bob]] (3/2)\n\
+             - [[Project Atlas]] -> [[Dave]] (1)\n\
+             - [[Bob]] <- [[Carol]] (4)\n"
+        );
+    }
+
+    #[test]
+    fn a_network_with_no_neighbours_says_so_and_has_no_links_section() {
+        let alone = json!({"concept": "atlas", "nodes": [{"id": 10, "name": "Atlas", "depth": 0}], "edges": []});
+        assert_eq!(render_network(&alone), "# Concept network: [[Atlas]]\n\n(no linked pages)\n");
+        // no node at depth 0: the name asked for is the title
+        assert!(render_network(&json!({"concept": "atlas", "nodes": [], "edges": []})).starts_with("# Concept network: [[atlas]]\n"));
     }
 
     #[test]
