@@ -173,8 +173,20 @@ async fn infrastructure_and_shape_errors_are_errors_and_not_an_empty_context() {
     .await;
     let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
     assert!(matches!(&error, ToolError::Logseq(_)), "{error}");
+    // `Promise.all` lets the other fetches finish after one fails, so TypeScript always makes all three calls
+    assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS]);
 
     let logseq = mock_logseq(&[(GET_CURRENT_PAGE, json!(null)), (GET_CURRENT_BLOCK, json!(null)), (GET_SELECTED_BLOCKS, json!({"id": 1}))]).await;
     let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
     assert!(matches!(&error, ToolError::Response(response) if response.method == GET_SELECTED_BLOCKS), "{error}");
+    assert_eq!(methods(&logseq).len(), 3);
+}
+
+#[tokio::test]
+async fn with_two_answers_wrong_the_error_is_the_first_in_a_fixed_order() {
+    // TypeScript reports whichever arrives first; Rust reports the page, then the block, then the selection
+    let logseq = mock_logseq(&[(GET_CURRENT_PAGE, json!(5)), (GET_CURRENT_BLOCK, json!({"id": 1})), (GET_SELECTED_BLOCKS, json!({"id": 1}))]).await;
+    let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
+    assert!(matches!(&error, ToolError::Response(response) if response.method == GET_CURRENT_PAGE), "{error}");
+    assert_eq!(methods(&logseq).len(), 3);
 }
