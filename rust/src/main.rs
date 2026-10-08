@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use logseq_mcp_server::client::LogseqClient;
@@ -20,8 +19,9 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // ~/.logseq-mcp/config.json, or the file LOGSEQ_MCP_CONFIG names
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let config_path = resolve_config_path(std::env::var(CONFIG_PATH_ENV).ok().as_deref(), &home)?;
+    // home_dir falls back to the passwd entry when HOME is unset, as Node's os.homedir() does.
+    let home = std::env::home_dir();
+    let config_path = resolve_config_path(std::env::var(CONFIG_PATH_ENV).ok().as_deref(), home.as_deref())?;
     let config = load_config(&config_path)?;
 
     let server = LogseqServer::new(LogseqClient::new(&config));
