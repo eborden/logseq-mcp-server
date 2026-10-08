@@ -79,6 +79,14 @@
       }
     ]
   },
+  "names from several scripts": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"pages\":[{\"name\":\"_draft\"},{\"name\":\"2025\"},{\"name\":\"Alpha\"},{\"name\":\"apple\"},{\"name\":\"stone\"},{\"name\":\"ﬆone\"},{\"name\":\"Strasse\"},{\"name\":\"Straße\"},{\"name\":\"Zebra\"},{\"name\":\"αλφα\"},{\"name\":\"Σigma\"},{\"name\":\"Ωmega\"},{\"name\":\"бета\"},{\"name\":\"Бета\"},{\"name\":\"Яблоко\"},{\"name\":\"שלום\"},{\"name\":\"한국어\"},{\"name\":\"ひらがな\"},{\"name\":\"日本語\"}],\"total\":19}"
+      }
+    ]
+  },
   "limit cuts the list and says how to page": {
     "content": [
       {

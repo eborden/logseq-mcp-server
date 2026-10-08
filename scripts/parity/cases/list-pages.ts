@@ -147,6 +147,41 @@ export const listPagesCases: ParityCase[] = [
     ]
   },
   {
+    // ICU puts the scripts one after another (symbols and digits, Latin, Greek, Cyrillic, Hebrew, Hangul, kana,
+    // Han), where code points would put the Latin ligature U+FB06 and the sharp s after every Greek letter
+    // and "Straße" apart from "Strasse"
+    name: 'names from several scripts',
+    tool: 'logseq_list_pages',
+    arguments: {},
+    steps: [
+      [
+        getAllPages(
+          [
+            '日本語',
+            'Яблоко',
+            'Ωmega',
+            'Zebra',
+            'ﬆone',
+            'ひらがな',
+            'Straße',
+            'бета',
+            'שלום',
+            'αλφα',
+            '한국어',
+            'Strasse',
+            'Бета',
+            'stone',
+            '2025',
+            'apple',
+            '_draft',
+            'Σigma',
+            'Alpha'
+          ].map((name, i) => page(named(700 + i, name)))
+        )
+      ]
+    ]
+  },
+  {
     name: 'limit cuts the list and says how to page',
     tool: 'logseq_list_pages',
     arguments: { limit: 4 },
