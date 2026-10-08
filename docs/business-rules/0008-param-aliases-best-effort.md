@@ -12,8 +12,9 @@ An alias that leaked into the advertised schema, or replaced a required canonica
 
 test: `rust/src/params.rs`
 test: `tests/guards/tool-list.test.ts`
+test: `rust/tests/parity.rs`
 
-Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity step of CI holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
+Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity test, `rust/tests/parity.rs`, holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
 
 ## Changelog
 
