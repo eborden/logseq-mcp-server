@@ -50,5 +50,6 @@ export const suggestionsCases: ParityCase[] = [
   // An accent on the input side, in the second word, against a name that has none
   missing('an accent in the input', 'menu café', ['Cafe Menu', 'Bob', 'Project Atlas']),
   // A letter that NFD doesn't split: the fold leaves it, so the unaccented input covers nothing
-  missing('a letter with no decomposition', 'bjorn', ['Bjørn', 'Bob', 'Project Atlas'])
+  // (the self-check lists a page that covers it, as in the case above)
+  missing('a letter with no decomposition', 'bjorn', ['Bjørn', 'Bob', 'Project Atlas'], { perturbed: [{ originalName: 'Bjorn Notes' }] })
 ];
