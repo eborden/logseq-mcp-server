@@ -21,6 +21,7 @@ pub mod escape;
 pub mod fuzzy;
 pub mod js;
 pub mod meta;
+pub mod output_format;
 pub mod params;
 pub mod resolve;
 pub mod server;
