@@ -99,6 +99,7 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
     let refs_preserved = check_refs_preserved(before, after);
 
     let mut terms: Vec<String> = link_counts(after).into_iter().map(|(term, _)| term).collect();
+    // PARITY(#299): orders by UTF-16 code unit, as JavaScript's `<` does — drop if Rust becomes the only server.
     terms.sort_by(|x, y| compare_code_units(x, y));
     let distinct_keys: std::collections::HashSet<String> = terms.iter().map(|term| key_of(term)).collect();
     if distinct_keys.len() > MAX_LINK_TERMS {
