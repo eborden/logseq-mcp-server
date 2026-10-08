@@ -4,8 +4,7 @@
 
 use serde_json::{Value, json};
 
-use crate::tips::suggest_call;
-use crate::tools::search_blocks::tips::{Kind, suggest_topic};
+use crate::tips::{Kind, suggest_call, suggest_topic};
 
 /// A read of the page or topic most matches are on, or no tip when nothing matched.
 pub fn property_tips(results: &[Value]) -> Vec<String> {
