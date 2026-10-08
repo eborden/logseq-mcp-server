@@ -25,5 +25,5 @@ Date: 2025-11-24
 
 ## Mechanical enforcement
 
-- test: `src/tools/build-context.test.ts` (a page with no blocks and no references returns empty lists)
-- test: `src/tools/get-concept-network.test.ts` (a page with no connections returns the root alone)
+- test: `tests/integration/context-building.test.ts` (a page with no blocks returns an empty context, and a page with one empty block returns that block)
+- test: `tests/integration/graph-tools.test.ts` (a page with no connections returns the root alone)

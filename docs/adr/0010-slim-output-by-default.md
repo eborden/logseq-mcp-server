@@ -29,7 +29,8 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/index.slim-default.test.ts` (omitted means slim, false means full, every tool that advertises slim_results defaults to slim, the schema advertises default: true)
-- test: `src/utils/slim-entities.test.ts`
+- test: `tests/integration/slim-default.test.ts` (omitted means slim, false means full, through MCP against a live graph)
+- ci: `.github/workflows/ci.yml` (the parity step holds every tool's `slim_results` schema, which advertises default: true, to the recorded `tools/list`)
+- test: `rust/src/slim.rs` (what a slim block and a slim page keep and leave out)
 
-The default itself is the `slim_results` schema default in `src/tool-args.ts`.
+The default itself is the `slim_results` default in each tool's argument type in `rust/src/tools/`.

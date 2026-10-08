@@ -33,6 +33,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/utils/result-meta.test.ts` (hasMore only with a way to continue)
-- test: `src/truncation-meta.test.ts` (the array stays the first block and a meta block follows, through MCP)
-- test: `src/index.slim-default.test.ts` (empty hasMore and warnings stay in slim output)
+- test: `rust/src/meta.rs` (hasMore only with a way to continue)
+- test: `tests/integration/result-caps.test.ts` (the array stays the first block and a meta block follows, through MCP, for every capped tool)
+- test: `tests/integration/slim-default.test.ts` (empty hasMore and warnings stay in slim output)

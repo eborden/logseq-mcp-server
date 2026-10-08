@@ -24,13 +24,9 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-Partial coverage today comes from the `InvalidParameterError` tests in `src/index.aliases.test.ts` and `src/tools/query-by-property.test.ts`, and the config tests in `src/config.test.ts`. None of them checks that every input is parsed.
-
-Tool arguments are covered since #60, by `src/index.args.guard.test.ts`. It checks two things.
-- For every parameter in tools/list, it sends a wrong-typed value and requires an error naming the parameter, with no LogSeq call. A new parameter of a type the test has no sample for fails until a case is added.
-- It reads the source of `src/index.ts`. The only allowed use of the alias-folded `args` is `parseArgs(<schema>, args)`, one call per tool, and `as any` is not allowed.
-
-LogSeq responses (#62) and the config file (#63) are not covered yet.
+Tool arguments are parsed into a typed value in one place per tool. In Rust, each tool's input schema is generated from the type its arguments are parsed into (`rust/src/tool.rs`), so the two can't drift, and the parser rejects a wrong-typed value with an error that names the parameter before any LogSeq call (`rust/src/args.rs`). LogSeq's answers are parsed into typed values at the boundary and a mismatch is a `ResponseError`, never "no data" (`rust/src/wire.rs`), and the config file is parsed once (`rust/src/config.rs`). The TypeScript guard that read `src/index.ts` for raw uses of `args` went with the TypeScript server (#356).
 
 - reviewer: New code that reads tool arguments, LogSeq responses, config or disk content parses them into a typed value before any work.
-- test: `src/index.args.guard.test.ts`
+- test: `rust/src/tool.rs` (the schema comes from the type that parses the arguments, parsing ignores unknown fields, treats null as absent and never coerces)
+- test: `rust/src/args.rs` (a wrong-typed value is refused with a message that names the parameter)
+- test: `rust/tests/get_page_block_calls.rs` (a bad argument is refused before any call)

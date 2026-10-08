@@ -37,9 +37,8 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/client.test.ts` (exact arguments sent to callAPI for strings with quotes, backslashes and newlines)
-- test: `src/datalog/queries.test.ts` (the query builders keep hostile names out of the query text, and groundIds rejects non-integers)
-- test: `tests/integration/datalog-inputs.test.ts` (runs hostile names and groundIds against a live graph)
-- test: `src/datalog/queries.refs.test.ts` (groundUuids rejects malformed uuids before building any text)
-- test: `src/utils/escape-regex.test.ts`
-- reviewer: A new DatalogQueryBuilder method returns { query, inputs } and binds strings with :in.
+- test: `rust/src/client.rs` (`sends_datalog_inputs_as_edn_after_the_query`: the exact arguments sent for strings with quotes, backslashes and newlines)
+- test: `rust/src/edn.rs` (names are quoted and escaped as one string, ground ids must be positive integers, and block uuids must be strict)
+- test: `tests/integration/datalog-inputs.test.ts` (runs hostile names through every page-taking tool against a live graph)
+- test: `rust/src/escape.rs` (every regex metacharacter is escaped)
+- reviewer: A new query builder returns its query text and its inputs apart, and binds strings with :in.

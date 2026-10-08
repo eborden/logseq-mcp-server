@@ -26,5 +26,5 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/tool-list.test.ts` (fails for any tool whose description lacks "Can't find")
+- test: `tests/guards/tool-list.test.ts` (fails for any tool in the recorded list whose description lacks "Can't find")
 - reviewer: A PR that changes what a tool can return also updates that tool's "Can't find" line.

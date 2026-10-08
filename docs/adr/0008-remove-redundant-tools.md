@@ -32,8 +32,8 @@ Date: 2025-11-24
 
 ## Mechanical enforcement
 
-The tool-list snapshot lists every tool by name, so adding or removing one shows up in review. The snapshot cannot tell that a new tool overlaps an old one, so overlap is a review judgment.
+The recorded tool list (`scripts/parity/expected/tool-list.json`) names every tool, so adding or removing one shows up in review as a JSON diff, and the parity harness fails a server whose `tools/list` differs from it by meaning. The list cannot tell that a new tool overlaps an old one, so overlap is a review judgment.
 
-- test: `src/tool-list.test.ts` (snapshot of every tool name, description and schema)
-- test: `src/index.test.ts` (asserts the exact tool count)
+- test: `tests/guards/tool-list.test.ts` (the recorded list names 16 tools, once each)
+- ci: `.github/workflows/ci.yml` (the parity step holds the Rust server's `tools/list` to the recorded one by meaning)
 - reviewer: Before adding a tool, check whether an existing tool already covers the behaviour with a parameter.

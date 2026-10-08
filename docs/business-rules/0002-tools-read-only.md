@@ -12,9 +12,10 @@ MCP clients retry, and LLMs call the same tool twice. A read-only tool makes tha
 
 ## Mechanical enforcement
 
-test: `src/index.test.ts`
+test: `tests/guards/tool-list.test.ts`
+test: `rust/src/server.rs`
 
-The `tool annotations` tests fail unless every registered tool sets `readOnlyHint: true` and a title, and pin the `destructiveHint`, `idempotentHint` and `openWorldHint` values of each tool.
+The recorded `tools/list` test fails unless every tool sets `readOnlyHint: true` and a title, and pins the `destructiveHint`, `idempotentHint` and `openWorldHint` values of each tool. `tools_list_returns_every_tool_read_only` checks the same on the Rust server's own list.
 
 ## Changelog
 
@@ -22,3 +23,4 @@ The `tool annotations` tests fail unless every registered tool sets `readOnlyHin
 |---|---|---|
 | 2026-10-05 | Introduced as read-only annotations on every tool. | #28 |
 | 2026-10-05 | Restated as a hard rule and a re-runnable-calls principle in the foundations doc. | #38 |
+| 2026-10-08 | Mechanical enforcement: the annotation tests of the TypeScript server are replaced by the guard over the recorded tool list and the Rust server's own test. Statement unchanged. | #369 |

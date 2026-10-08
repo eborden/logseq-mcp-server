@@ -27,8 +27,9 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-The tool-list snapshot records every tool's name, description, annotations and input schema, so a rename, removal or new required parameter appears as a snapshot diff that a reviewer must accept deliberately.
+The recorded `tools/list` (`scripts/parity/expected/tool-list.json`) records every tool's name, description, annotations and input schema, and the parity step of CI holds the Rust server to it by meaning (ADR-0031), so a rename, removal or new required parameter fails until a reviewer accepts the change to the recorded file deliberately.
 
-- test: `src/tool-list.test.ts` (snapshot at src/__snapshots__/tool-list.test.ts.snap)
-- test: `src/index.aliases.test.ts` (the canonical parameter stays required for every aliased tool)
+- test: `tests/guards/tool-list.test.ts` (the recorded list is the one the guardrails of ADR-0015 and ADR-0016 hold)
+- ci: `.github/workflows/ci.yml` (the parity step holds `tools/list` to the recorded one by meaning, including the canonical parameter staying required for every aliased tool)
+- test: `rust/src/params.rs` (an alias is folded into the canonical name, and a conflicting alias is refused)
 - reviewer: A PR that renames or removes a tool, parameter or result field says so and includes a migration note.

@@ -36,6 +36,4 @@ Date: 2026-10-07
 
 ## Mechanical enforcement
 
-- test: `src/mutation-ci.test.ts` (the files come from the diff against the PR base while a blind spot comes from the long diff, a new test's imports are not mutated while an edited test's are, the raise a new test comes with is, a left-out changed source is still in `leftToWeeklyByGroup`, and the summary asks for a weekly run before merging only for a changed source)
-- test: `src/mutation-ratchet.test.ts` (the annotation and summary line ask for a weekly run before merging only when a changed source is among the files left over)
-- ci: `.github/workflows/ci.yml` (the `mutation` job)
+- none-yet: #364 (the Stryker job, its scripts and its workflows were removed by #356; the Rust ratchet of ADR-0033 is the successor mechanism)

@@ -38,7 +38,7 @@ Date: 2026-10-08
 
 ## Mechanical enforcement
 
-- test: `src/tool-list.test.ts` (the TypeScript server's byte-exact snapshot, size budget and description cap, unchanged from ADR-0016)
+- test: `tests/guards/tool-list.test.ts` (the recorded `tools/list`: size budget and description cap, unchanged from ADR-0016; the TypeScript server's byte-exact snapshot went with that server, #356)
 - none-yet: #292 (the parity harness's comparison of `tools/list` by meaning; it lands on `feature/rust-spike` and becomes a `test:` line when the spike merges to `main`)
 - none-yet: #124 (adds the differential harness that holds the Rust server to the TypeScript contract; covers Decision 2)
 - reviewer: a PR that adds Rust code checks it against every ADR by intent and against Decision 3's interim rule (Decision 3 has no mechanical guard; #128 adds the per-ADR scope lines)

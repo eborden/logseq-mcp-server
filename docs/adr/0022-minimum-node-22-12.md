@@ -26,6 +26,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/package-metadata.test.ts` (engines.node is exactly >=22.12.0; it does not read the toolchain's own floor)
-- test: `src/adr-workflow-guards.test.ts` (every ci.yml job that runs the unit tests covers the floor's major and Node 24 and nothing below the floor, the lockfile root carries the same engines.node, and the floor is vite's lowest supported version in that major)
-- ci: `.github/workflows/ci.yml` (type-check and unit tests on Node 22 and 24 for every PR and push to main)
+- test: `tests/guards/package-metadata.test.ts` (engines.node is exactly >=22.12.0; it does not read the toolchain's own floor)
+- test: `tests/guards/adr-workflow-guards.test.ts` (every ci.yml job that runs the tooling's guard tests covers the floor's major and Node 24 and nothing below the floor, the lockfile root carries the same engines.node, and the floor is vite's lowest supported version in that major)
+- ci: `.github/workflows/ci.yml` (type-check and the guard tests of the TypeScript tooling that holds the repo's rules and the parity harness, on Node 22 and 24 for every PR and push)

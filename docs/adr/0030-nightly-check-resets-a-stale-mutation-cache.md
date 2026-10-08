@@ -31,5 +31,4 @@ Date: 2026-10-07
 
 ## Mechanical enforcement
 
-- test: `src/mutation-ci.test.ts` (`nightlyDecision`: a current cache gives no dispatch, a stale one does, an in-flight or recent run gives none; and the workflow tests pin `.github/workflows/mutation-nightly.yml`'s schedule, permissions and dispatch target)
-- ci: `.github/workflows/mutation-nightly.yml`
+- none-yet: #364 (the Stryker job, its scripts and its workflows were removed by #356; the Rust ratchet of ADR-0033 is the successor mechanism)

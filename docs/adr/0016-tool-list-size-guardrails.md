@@ -40,5 +40,5 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/tool-list.test.ts` (token budget, description cap, no stale allowances, snapshot)
+- test: `tests/guards/tool-list.test.ts` (token budget, description cap, no stale allowances), with the exact text held by the recorded `tools/list` in `scripts/parity/expected/tool-list.json` and the parity step of CI (by meaning, ADR-0031, not byte for byte)
 - reviewer: A PR that raises TOOL_LIST_BUDGET_CHARS explains in its description why the growth is worth it.

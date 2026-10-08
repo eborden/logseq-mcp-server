@@ -120,4 +120,4 @@ Date: 2026-10-06
 
 ## Mechanical enforcement
 
-- ci: `.github/workflows/ci.yml` + `mutation-baseline.json` (the `mutation` job runs `scripts/mutation-ratchet.ts` on every PR and push to main, and `.github/workflows/mutation-weekly.yml` runs it on the full cold run). #206 holds the strengthen and prune work.
+- none-yet: #364 (the Stryker job, its scripts and its workflows were removed by #356; the Rust ratchet of ADR-0033 is the successor mechanism)

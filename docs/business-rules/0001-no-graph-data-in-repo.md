@@ -17,7 +17,7 @@ The repo and its GitHub project are public, and some paths still reach real data
 
 ## Mechanical enforcement
 
-- test: `src/repo-hygiene.test.ts` (fails when a raw-output file from the integration tests or the probe and measure scripts is tracked, or when .gitignore stops ignoring one)
+- test: `tests/guards/repo-hygiene.test.ts` (fails when a raw-output file from the integration tests or the probe and measure scripts is tracked, or when .gitignore stops ignoring one)
 - reviewer: The privacy grep of the diff, commit messages, PR body and review comments and replies (CLAUDE.md, Verification before merge) finds no names, content or dates from the graph. This stays the fallback for names typed into code, docs or GitHub text, which the test can't see.
 
 Real names can't be listed in a repo check without publishing them. A local hook that reads names from the graph at run time can check diffs and GitHub text without that.
@@ -32,3 +32,4 @@ Real names can't be listed in a repo check without publishing them. A local hook
 | 2026-10-05 | Restated as a hard rule in the foundations doc. | #38 |
 | 2026-10-05 | Enforcement: the tracked raw-output test replaces `none-yet: #95`, the reviewer step stays as the fallback, and the local hook is tracked as `none-yet: #98`. | #99, #103 |
 | 2026-10-06 | Rationale only: the integration tests and the probe no longer read the personal graph, so it names the paths that still can. Statement unchanged. | #158 |
+| 2026-10-08 | Mechanical enforcement: the test that checks tracked raw-output files moved from `src/` to `tests/guards/` with the TypeScript server's removal. Statement unchanged. | #369 |

@@ -12,14 +12,13 @@ A reader that gets rewritten `content` can't tell what the author wrote, and a s
 
 ## Mechanical enforcement
 
-One resolver serves every tool: `resolveBlockRefs` in `src/utils/resolve-refs.ts`, with one Datalog query per nesting level and `seen` tracked per path, so siblings that share a target both resolve. A new tool that returns blocks should call the resolver rather than add its own.
+One resolver serves every tool: `resolve_block_refs` in `rust/src/resolve_refs/mod.rs`, with one Datalog query per nesting level and `seen` tracked per path, so siblings that share a target both resolve. A new tool that returns blocks should call the resolver rather than add its own.
 
-test: `src/utils/resolve-refs.test.ts`
-test: `src/utils/resolve-refs.detail.test.ts`
-test: `src/index.resolve-refs.test.ts`
-test: `src/tools/get-block.resolve-refs.test.ts`
+test: `rust/tests/resolve_refs_calls.rs`
+test: `rust/tests/get_page_block_calls.rs`
+test: `tests/integration/resolve-refs.test.ts`
 test: `tests/integration/fixture-only/resolve-refs-missing.test.ts`
-reviewer: A new tool that returns blocks should call `resolveBlockRefs` rather than resolve refs itself.
+reviewer: A new tool that returns blocks should call `resolve_block_refs` rather than resolve refs itself.
 
 ## Changelog
 
@@ -28,3 +27,4 @@ reviewer: A new tool that returns blocks should call `resolveBlockRefs` rather t
 | 2026-10-05 | Introduced. | #54 |
 | 2026-10-05 | Added a `test:` enforcement line for the fixture-only suite that checks a ref or embed of a missing block comes back `missing`. | #145 |
 | 2026-10-07 | Added the `unavailable` status, for a ref whose lookup LogSeq answered with `null` (until now `depth_limit`, #265), "unavailable refs" to the Statement's list of warnings, and a `test:` line for the suite that pins it. | #286 |
+| 2026-10-08 | Mechanical enforcement: the resolver and its tests are the Rust crate's, and the integration suite's, with the TypeScript server's removal. Statement unchanged. | #369 |

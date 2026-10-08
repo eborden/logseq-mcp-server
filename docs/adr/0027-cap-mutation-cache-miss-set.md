@@ -37,5 +37,4 @@ Date: 2026-10-06
 
 ## Mechanical enforcement
 
-- test: `src/mutation-ci.test.ts` (the cap boundary, the entries left out, the summary text and the one `BASE_SHA` shared by the plan and the ratchet)
-- ci: `.github/workflows/ci.yml` (the `mutation` job)
+- none-yet: #364 (the Stryker job, its scripts and its workflows were removed by #356; the Rust ratchet of ADR-0033 is the successor mechanism)

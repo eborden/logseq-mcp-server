@@ -30,8 +30,8 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/client.test.ts` (the LogSeqAuthError message never includes the token)
-- test: `src/index.test.ts` (the same through the MCP caller)
+- test: `rust/src/client.rs` (`a_401_is_an_auth_error_that_never_shows_the_token`, and the config's `Debug` output redacts the token in `rust/src/config.rs`)
+- test: `tests/integration/auth-error.test.ts` (the same through the MCP caller, against a real LogSeq that rejects a bogus token)
 - reviewer: No token, key or password appears in a diff, fixture, log line or error message.
 
 Not mechanised yet, and no issue is open for it: secret scanning of commits and PRs (for example GitHub secret scanning or a scanner in CI).

@@ -33,6 +33,6 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/utils/resolve-page.test.ts` (resolver order, ambiguity, not-found guidance, error propagation)
-- test: `src/index.page-resolution.test.ts` (candidates, resolvedFrom and guidance reach the caller through MCP, including names given under a parameter alias)
+- test: `rust/src/resolve/mod.rs` (resolver order, ambiguity, not-found routes)
+- test: `rust/tests/get_page_block_calls.rs` (candidates, resolvedFrom and guidance reach the caller through MCP)
 - test: `tests/integration/page-resolution.test.ts` (against a live graph)

@@ -28,5 +28,5 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/adr-0018-plugin-layout.test.ts` (skills/logseq-skills/SKILL.md is the real skill and .claude/skills/logseq-skills a relative symlink to it, plugin.json declares mcpServers inline, no root .mcp.json is tracked, and no skill hard-codes an mcp__ prefix outside the line that explains host prefixes)
-- test: `src/version.test.ts` (the plugin manifest and the marketplace entry carry the package.json version)
+- test: `tests/guards/adr-0018-plugin-layout.test.ts` (skills/logseq-skills/SKILL.md is the real skill and .claude/skills/logseq-skills a relative symlink to it, plugin.json declares mcpServers inline, no root .mcp.json is tracked, and no skill hard-codes an mcp__ prefix outside the line that explains host prefixes)
+- test: `tests/rust-guards/version.test.ts` (the server, the plugin manifest and the marketplace entry carry the package.json version)

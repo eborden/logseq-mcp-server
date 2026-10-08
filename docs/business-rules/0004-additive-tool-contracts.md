@@ -10,11 +10,11 @@ An MCP client, a skill, or a prompt that names a tool and its parameters is a co
 
 ## Mechanical enforcement
 
-test: `src/tool-list.test.ts`
-test: `src/__snapshots__/tool-list.test.ts.snap`
+test: `tests/guards/tool-list.test.ts`
+test: `scripts/parity/expected/tool-list.json`
 
-The snapshot test fails on any change to a tool's name, title, annotation, description or input schema, so a rename or removal can't land unseen. Update the snapshot only for additive changes and call out the diff in the PR. The snapshot can't tell an additive change from a breaking one, so a reviewer still checks the diff.
-reviewer: A snapshot diff in `src/__snapshots__/tool-list.test.ts.snap` only adds optional parameters, tools or result fields.
+The parity step of CI fails on any difference in meaning between the Rust server's `tools/list` and the recorded one in a tool's name, title, annotation, description or input schema, so a rename or removal can't land unseen. Change the recorded file only for additive changes and call out the diff in the PR. The comparison can't tell an additive change from a breaking one, so a reviewer still checks the diff.
+reviewer: A diff of `scripts/parity/expected/tool-list.json` only adds optional parameters, tools or result fields.
 
 ## Changelog
 
@@ -22,3 +22,4 @@ reviewer: A snapshot diff in `src/__snapshots__/tool-list.test.ts.snap` only add
 |---|---|---|
 | 2026-10-05 | Introduced as a hard rule in the foundations doc. | #38 |
 | 2026-10-05 | Tool-list snapshot added as the mechanism. | #47 |
+| 2026-10-08 | Mechanical enforcement: the tool-list snapshot of the TypeScript server is replaced by the recorded tool list, which the parity harness compares by meaning (ADR-0031). Statement unchanged. | #369 |
