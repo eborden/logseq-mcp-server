@@ -1,4 +1,5 @@
-// Compare two `tools/list` payloads by meaning, not by bytes (#292). The `.snap` file stays the
+// Compare two `tools/list` payloads by meaning, not by bytes (#292; the rules below are those of
+// ADR-0031 (second-implementation-matches-tool-list-by-meaning) Decision 2). The `.snap` file stays the
 // byte-exact guard on the TypeScript server (src/tool-list.test.ts, ADR-0016); another server is
 // judged on what its schemas accept, so it needn't copy how zod happens to write them.
 //

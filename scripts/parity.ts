@@ -1,4 +1,4 @@
-// Differential parity harness (#124, ADR-0025): run a server against the stub LogSeq and compare
+// Differential parity harness (#124, ADR-0031): run a server against the stub LogSeq and compare
 // its tools/list (by meaning, #292), its logseq_get_page_outline results (byte for byte) and its
 // LogSeq calls with the TypeScript server's. Synthetic fixtures only; it never contacts a real LogSeq.
 //
