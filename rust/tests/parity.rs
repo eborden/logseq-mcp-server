@@ -22,7 +22,7 @@
 
 mod parity_support;
 
-use parity_support::cases::{Case, load_cases, load_clock_cases, load_tool_list, perturb_value, without_clock_cases};
+use parity_support::cases::{Case, load_cases, load_clock_cases, load_comparator_table, load_tool_list, perturb_value, without_clock_cases};
 use parity_support::compare::{compare_calls, compare_results, compare_tool_lists, minified_failures, normalize_schema, same_text, values_equal};
 use parity_support::server::{PARITY_NOW_MS, Run, run_parity};
 use parity_support::stub::Call;
@@ -407,5 +407,23 @@ fn every_wrong_closest_name_list_is_caught() {
     assert!(not_caught.is_empty(), "not caught: {not_caught:?}");
     for (label, count) in WRONG_LIST_LABELS.iter().zip(applied) {
         assert!(count > 0, "no recorded case a wrong list of the kind {label:?} applies to");
+    }
+}
+
+// ---- the table both comparators are held to
+
+#[test]
+fn the_comparator_gives_the_verdict_of_every_row_of_the_shared_table() {
+    let table = load_comparator_table();
+    let wrong: Vec<String> = table
+        .iter()
+        .filter(|row| compare_results(&row.expected, &row.actual, &[]).is_empty() != row.same)
+        .map(|row| format!("{}: expected the verdict {}", row.name, if row.same { "same" } else { "differs" }))
+        .collect();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert!(table.iter().any(|row| row.same) && table.iter().any(|row| !row.same), "the table needs rows of both verdicts");
+    // What is the same is the same both ways round
+    for row in table.iter().filter(|row| row.same) {
+        assert!(compare_results(&row.actual, &row.expected, &[]).is_empty(), "{}: same one way, different the other", row.name);
     }
 }
