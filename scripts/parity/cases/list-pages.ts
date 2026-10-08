@@ -130,6 +130,23 @@ export const listPagesCases: ParityCase[] = [
     steps: [[getAllPages([page(named(301, 'caf\u{e9}')), page(named(302, 'café')), page(named(303, 'cafe​'))])]]
   },
   {
+    // ICU ignores some characters completely: an emoji's variation selector (U+FE0F, which an emoji name
+    // typed on a phone carries), bidi embeddings and controls. So "\u2764\ufe0f a" sorts before "\u2764 b"
+    // by its letter, where comparing the selector itself would put it after the space
+    name: 'names with characters collation ignores',
+    tool: 'logseq_list_pages',
+    arguments: {},
+    steps: [
+      [
+        getAllPages(
+          ['\u2764 b', '\u2764\ufe0f a', '\u2764 c', '\u2764\ufe0f b', 'lrm two', 'lrm\u202a one', 'ctl\u0001 z', 'ctl y'].map((name, i) =>
+            page(named(600 + i, name))
+          )
+        )
+      ]
+    ]
+  },
+  {
     name: 'limit cuts the list and says how to page',
     tool: 'logseq_list_pages',
     arguments: { limit: 4 },
