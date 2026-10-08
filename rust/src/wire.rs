@@ -181,14 +181,15 @@ impl Reader {
         })
     }
 
-    pub(crate) fn entity_refs(&mut self, map: &Map<String, Value>, key: &'static str) -> Parsed<()> {
+    /// An optional array of references; how many it holds (0 when absent).
+    pub(crate) fn entity_refs(&mut self, map: &Map<String, Value>, key: &'static str) -> Parsed<usize> {
         self.at(Part::Key(key), |r| match map.get(key) {
-            None => Ok(()),
+            None => Ok(0),
             Some(Value::Array(items)) => {
                 for (i, item) in items.iter().enumerate() {
                     r.at(Part::Index(i), |r| r.entity_ref(Some(item)))?;
                 }
-                Ok(())
+                Ok(items.len())
             }
             Some(other) => Err(r.mismatch("array", Some(other))),
         })

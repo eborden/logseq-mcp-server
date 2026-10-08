@@ -16,6 +16,9 @@ pub struct PulledPage {
     original_name: Option<String>,
     /// The page is backed by a file. A page that only exists as a link target has none (a stub).
     pub has_file: bool,
+    /// The page has at least one `:block/alias` link (`hasAliasLinks`). LogSeq stores each alias
+    /// in both directions, so a page without any has no aliases and the alias lookup is skipped.
+    pub has_alias_links: bool,
 }
 
 impl PulledPage {
@@ -50,7 +53,7 @@ impl Reader {
         self.boolean(map, "journal?")?;
         self.boolean(map, "journal")?;
         let file = self.optional_entity_ref(map, "file")?;
-        self.entity_refs(map, "alias")?;
+        let alias_links = self.entity_refs(map, "alias")?;
         self.optional_entity_ref(map, "namespace")?;
         self.map_field(map, "properties")?;
         // pagePulledKeys
@@ -71,7 +74,36 @@ impl Reader {
             name,
             original_name: camel.filter(|name| !name.is_empty()).or(original_name),
             has_file: file.is_some(),
+            has_alias_links: alias_links > 0,
         })
+    }
+
+    /// `pageLikeSchema`, checked and not kept: a page of either spelling, every field optional.
+    /// The Editor API's fields (`originalName`, `journalDay`, `createdAt`, `updatedAt`) sit
+    /// between the shared fields and the pulled ones in the schema, so a mismatch is reported in
+    /// that order.
+    pub(crate) fn page_like_check(&mut self, value: Option<&Value>) -> Parsed<()> {
+        let map = self.object(value)?;
+        self.id(map, "id")?;
+        self.string(map, "name")?;
+        self.string(map, "uuid")?;
+        self.boolean(map, "journal?")?;
+        self.boolean(map, "journal")?;
+        self.optional_entity_ref(map, "file")?;
+        self.entity_refs(map, "alias")?;
+        self.optional_entity_ref(map, "namespace")?;
+        self.map_field(map, "properties")?;
+        self.string(map, "originalName")?;
+        self.number(map, "journalDay")?;
+        self.number(map, "createdAt")?;
+        self.number(map, "updatedAt")?;
+        self.id(map, "db/id")?;
+        self.string(map, "original-name")?;
+        self.number(map, "journal-day")?;
+        self.number(map, "created-at")?;
+        self.number(map, "updated-at")?;
+        self.map_field(map, "properties-text-values")?;
+        Ok(())
     }
 }
 
@@ -94,6 +126,21 @@ pub fn resolver_rows(answer: &Value) -> Result<Option<Vec<ResolverRow>>, Respons
                 Some(value) => r.string_value(value).map(Some),
             })?;
             Ok(ResolverRow { page, via })
+        })
+        .map_err(|issue| to_error(DATALOG_METHOD, issue))
+}
+
+/// `responses.aliasSetRows`: `[startId, member]` per row, the alias group of each start page.
+pub fn alias_set_rows(answer: &Value) -> Result<Option<Vec<(f64, PulledPage)>>, ResponseError> {
+    let mut reader = Reader::default();
+    reader
+        .rows(answer, 2, |r, cells| {
+            let start = r.at(Part::Index(0), |r| match cells.first() {
+                Some(value) => r.number_value(value),
+                None => Err(r.mismatch("number", None)),
+            })?;
+            let member = r.at(Part::Index(1), |r| r.pulled_page(cells.get(1)))?;
+            Ok((start, member))
         })
         .map_err(|issue| to_error(DATALOG_METHOD, issue))
 }
