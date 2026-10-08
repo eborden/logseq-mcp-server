@@ -279,7 +279,14 @@ const FANOUT_100 = pagesOf(130, 2000, 'wide');
 /** 100 neighbours of the root (the last a journal), and 5 of them with 100 neighbours of their own. */
 const DEEP_FIRST = pagesOf(99, 3000, 'first');
 const DEEP_JOURNAL: Page = { id: 3999, name: 'dec 31st, 2024', originalName: 'Dec 31st, 2024', journalDay: 20241231 };
-const DEEP_SECOND = (source: Page, k: number) => pagesOf(100, 5000 + k * 100, `second ${k}`).map(page => row(source.id, page, 'outbound', 1));
+const DEEP_SECOND = (source: Page, k: number, n = 100) => pagesOf(n, (n > 100 ? 40000 : 5000) + k * 200, `second ${k}`).map(page => row(source.id, page, 'outbound', 1));
+
+/** 100 neighbours of the root, and 5 of them with 120 neighbours of their own: past the fanout cap of 100 too. */
+const WIDE_FIRST = pagesOf(100, 3000, 'first');
+
+/** 50 neighbours of the root, each with 12 pages of its own: 600 candidates at depth 2. */
+const SPREAD_FIRST = pagesOf(50, 3000, 'spread');
+const SPREAD_SECOND = (source: Page, k: number) => pagesOf(12, 20000 + k * 12, `spread ${k}`).map(page => row(source.id, page, 'outbound', 1));
 
 export const getConceptNetworkCases: ParityCase[] = [
   ...SHAPES,
@@ -327,6 +334,30 @@ export const getConceptNetworkCases: ParityCase[] = [
         rows: DEEP_FIRST.slice(0, 5).flatMap((page, k) => DEEP_SECOND(page, k))
       }
     ])
+  ),
+  call(
+    // Both caps at their maxima at once, at depth 2: neither can be raised, and only the depth can narrow the walk
+    'both caps at their maxima',
+    { max_nodes: 500, max_fanout: 100 },
+    walk(ATLAS, [
+      { ids: [10], rows: WIDE_FIRST.map(page => row(10, page, 'outbound', 2)) },
+      { ids: WIDE_FIRST.map(page => page.id), rows: WIDE_FIRST.slice(0, 5).flatMap((page, k) => DEEP_SECOND(page, k, 120)) }
+    ])
+  ),
+  call(
+    // The node budget alone cut, and it holds far more than 500 pages' worth: the raise is the maximum, not a count
+    'max_nodes raised to its maximum is the only suggestion',
+    { max_nodes: 100, max_fanout: 99 },
+    walk(ATLAS, [
+      { ids: [10], rows: SPREAD_FIRST.map(page => row(10, page, 'outbound', 2)) },
+      { ids: SPREAD_FIRST.map(page => page.id), rows: SPREAD_FIRST.flatMap((page, k) => SPREAD_SECOND(page, k)) }
+    ])
+  ),
+  call(
+    // Both caps cut, neither at its maximum, and the suggestion is past 500: each is raised, with no `expand_journals` part
+    'a suggestion past 500 with both caps below their maxima',
+    { max_nodes: 50, max_fanout: 99, max_depth: 1 },
+    walk(ATLAS, [{ ids: [10], rows: pagesOf(600, 30000, 'broad').map(page => row(10, page, 'outbound', 1)) }])
   ),
   call(
     // Limits past the maxima are the maxima: nothing here is cut
