@@ -1,3 +1,4 @@
+// TODO(#296): cite ADR-0031 (PR #297) here in place of ADR-0025 Decision 2 once it is accepted.
 // The differential parity harness (#124, ADR-0025 Decision 2). It runs a server command over
 // stdio, points it at the stub LogSeq through a temporary LOGSEQ_MCP_CONFIG, and checks three
 // things against what the TypeScript server does:

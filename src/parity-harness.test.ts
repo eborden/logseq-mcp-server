@@ -313,7 +313,12 @@ describe('normalizeSchema', () => {
     // One schema with a leaf at each position; `leaf` is the plain form, `quirkyLeaf` the same meaning
     const nest = (leaf: (n: number) => Schema): Schema => ({
       type: 'object',
-      properties: { a: { type: 'array', items: leaf(1), prefixItems: [leaf(2)], contains: leaf(3) } },
+      properties: {
+        a: { type: 'array', items: leaf(1), prefixItems: [leaf(2)], contains: leaf(3), unevaluatedItems: leaf(17) },
+        // Draft 2019-09 and earlier: a list of `items`, then `additionalItems`
+        b: { type: 'array', items: [leaf(18)], additionalItems: leaf(19) }
+      },
+      unevaluatedProperties: leaf(20),
       additionalProperties: leaf(4),
       patternProperties: { '^x': leaf(5) },
       propertyNames: leaf(6),
@@ -338,7 +343,7 @@ describe('normalizeSchema', () => {
     expect(JSON.stringify(normalizeSchema(quirkyForm))).not.toMatch(/"\$ref"|"definitions"|"format"|"title"|"\$schema"/);
 
     const tool = (inputSchema: unknown): ProjectedTool => ({ name: 'x', inputSchema });
-    for (let n = 1; n <= 16; n++) {
+    for (let n = 1; n <= 20; n++) {
       const changed = structuredClone(quirkyForm);
       changed.definitions[`L${n}`].maxLength = 99;
       expect(compareToolLists([tool(plain)], [tool(changed)]), `position ${n}`).toEqual([expect.stringMatching(new RegExp(`maxLength: expected ${n}, got 99$`))]);
