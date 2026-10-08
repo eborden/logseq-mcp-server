@@ -9,6 +9,7 @@
 //! queries and wire types, `fuzzy` (the resolver's suggestions), the errors, `ResultMeta`
 //! (`meta`), tips, the JavaScript rules the output depends on (`js`) and the tool helpers (`tool`).
 
+pub mod args;
 pub mod client;
 pub mod config;
 pub mod edn;
