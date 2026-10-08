@@ -92,10 +92,20 @@ jobs:
         working-directory: .
         run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts "$PWD/rust/target/debug/logseq-mcp-server"
 
-      # The slowest step (thin LTO, one codegen unit), and nothing in CI uses its output: the
-      # startup and footprint measurements (#126) build the release binary locally. It runs on a
-      # push to main and by hand, but both only work once this file is on main. Until then the
+      # The slowest step (thin LTO, one codegen unit). Only the parity step below uses its output:
+      # the startup and footprint measurements (#126) build the release binary locally. It runs on
+      # a push to main and by hand, but both only work once this file is on main. Until then the
       # release profile is checked locally: `cd rust && cargo build --release --locked`.
       - name: Build (release)
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: cargo build --release --locked
+
+      # The same harness against the release binary (#359): the debug build above proves the logic,
+      # this proves the optimised build (thin LTO, one codegen unit, stripped) answers the same. It
+      # needs the release build, so it runs under the same condition. A release build ignores
+      # LOGSEQ_MCP_NOW (rust/src/env.rs), so --real-clock leaves out the cases that read today's date
+      # (scripts/parity/clock-cases.ts); the debug run above still holds the server to every one.
+      - name: Parity with the TypeScript server (release binary)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        working-directory: .
+        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --real-clock "$PWD/rust/target/release/logseq-mcp-server"
