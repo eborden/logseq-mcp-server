@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { format } from '@vitest/pretty-format';
+import { toolListForSnapshot } from './tool-list-projection.js';
 import { DATASCRIPT_QUERY, normalizeQuery, startStubLogseq, type CannedCall, type LogseqCall } from './stub-logseq.js';
 
 /** One tool call and the LogSeq traffic it should cause. Fixtures are synthetic only (BR-0001). */
@@ -67,19 +67,6 @@ export interface ParityReport {
 
 /** Key of the tools/list snapshot in the snapshot file (src/tool-list.test.ts). */
 export const TOOL_LIST_SNAPSHOT_KEY = 'tools/list guardrails > matches the tool list snapshot 1';
-
-/** The tools/list payload in the shape src/tool-list.test.ts snapshots it. */
-export function toolListForSnapshot(tools: Tool[]) {
-  return [...tools]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(({ name, annotations, description, inputSchema }) => ({
-      name,
-      title: annotations?.title,
-      annotations,
-      description,
-      inputSchema
-    }));
-}
 
 /**
  * Serialize a value as vitest writes it into a `.snap` file: pretty-format with vitest's snapshot
