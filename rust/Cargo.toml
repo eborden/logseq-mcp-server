@@ -40,6 +40,13 @@ icu_properties = { version = "2.2", default-features = false, features = ["compi
 # orders ideographs by block (code point) and Node by radical and stroke. The maintainer accepted that
 # difference (#299, `js::locale_compare`).
 icu_collator = { version = "2.3", default-features = false, features = ["compiled_data"] }
+# `query_by_date_range`'s whole-word test of an alias group's other names (`src/tools/query_by_date_range/search.rs`),
+# where the JavaScript server compares them with a `iu` regular expression: `(?i)` is simple Unicode case
+# folding, as that flag is. (rust-lang/regex, MIT OR Apache-2.0, maintained by BurntSushi, 1.13.1 of Jul 2026.)
+# Only `std` and `unicode-case`: no `perf` (no aho-corasick), no `unicode-perl`, `-gencat` or `-script`, since the
+# word test stays on icu_properties and the pattern is a literal. It builds regex, regex-automata and regex-syntax;
+# aho-corasick is locked as their optional dependency but not built, and memchr is already locked.
+regex = { version = "1.13", default-features = false, features = ["std", "unicode-case"] }
 # The closest page names for a missing page (`src/fuzzy.rs`, ADR-0032): a maintained fuzzy matcher
 # (helix-editor/nucleo, MPL-2.0, accepted next to this repo's MIT licence by the maintainer on 2026-10-08)
 # in place of a port of fuzzysort. 0.3.1 doesn't compile with these two features off (`CaseMatching` and
