@@ -30,33 +30,38 @@ import { connectMcp } from './helpers/server-under-test.js';
  * maximum, whatever the caller asks for, and a cut is reported in meta. One
  * describe block per capped tool; later cap PRs add theirs here.
  *
+ * Where a maximum is out of reach of the fixture (below), the cut at it is held by the Rust server's own tests: the
+ * parity cases in scripts/parity/cases/ feed a mock more rows than the fixture holds (for example `limit at the maximum
+ * with matches left` in search-blocks.ts, 520 matches, and `caps: max_pages above the maximum` in get-backlinks.ts, 101
+ * source pages), and the Rust unit tests do the same (rust/src/tools/query_by_date_range/cap.rs, 1,001 blocks;
+ * rust/src/truncation.rs). They replaced the TypeScript unit tests, which fed 600 matches, 1,100 blocks, 150 pages
+ * and 80 blocks.
+ *
  * Against the fixture graph. Read-only. Its ~494 blocks (478 of them with the letter e) are fewer than
  * search_blocks' maximum of 500, so through MCP only the cut below the maximum
- * and the clamp can be seen; the cut at the maximum is covered by the Rust unit tests, which feed the tool
- * 600 matches (#356 dropped the integration test that lowered the maximum, which only a direct call to the
- * TypeScript function could do). The keyword `neighbour` matches 190 blocks (the hub fixture), past
+ * and the clamp can be seen; the cut at the maximum is the parity cases' (#356 dropped the integration test that
+ * lowered the maximum, which only a direct call to the TypeScript function could do). The keyword `neighbour` matches 190 blocks (the hub fixture), past
  * get_context_for_query's maximum of 100. list_pages needs more than 200
  * non-journal pages, which the hub fixture's pages supply. Assertions on page
  * names compare booleans or counts, so a failure prints no names from the graph.
  * get_concept_evolution's maximum of 500 mentions is out of reach: the hub page has
  * ~140 mentions, the most of any fixture page. Through MCP only the default cut and
- * the clamp can be seen; the cut at 500 is covered by the unit tests, which feed the
- * tool 600 mentions.
+ * the clamp can be seen; the cut at 500 is covered by the Rust unit tests.
  * query_by_date_range's default of 200 blocks and maximum of 1000 are out of reach the
  * same way: the fixture's journals hold well under 200 blocks. The test passes small
- * caps through MCP (the same code, a smaller bound), and the unit tests feed the tool
- * 1,100 blocks for the cut at the maximum.
+ * caps through MCP (the same code, a smaller bound), and the Rust unit tests feed the tool
+ * 1,001 blocks for the cut at the maximum.
  * get_backlinks' maximums of 100 pages and 50 blocks per page are out of reach the same way:
  * the hub has 61 source pages and no page has more than 12 linking blocks. Source pages are ranked by
  * linking blocks (#178), so the pages a cut keeps are the same names on every run. Through MCP the
  * default cuts, the values below the maximum and the clamp can be seen; the cut at each
- * maximum is covered by the unit tests, which feed the tool 150 pages and 80 blocks.
+ * maximum is covered by the parity cases (101 source pages, `max_pages: 150`, blocks past the per-page maximum).
  * query_by_property's default of 100 and maximum of 500 are out of reach too: no property value sits
- * on more than a few fixture blocks. Through MCP small limits stand in for the default, and the unit
- * tests feed the tool 600 matches for the cut at the maximum.
+ * on more than a few fixture blocks. Through MCP small limits stand in for the default, and the parity cases
+ * (`limit at the maximum with matches left`) hold the cut at the maximum.
  * search_by_relationship's default of 50 and maximum of 500 are out of reach as well: no pair of fixture
  * topics returns more than a dozen results. Small limits stand in for the default through MCP, and the
- * unit tests feed the tool 600 results for the cut at the maximum.
+ * parity case `relationship cut: limit past the maximum` holds the cut at the maximum.
  */
 
 interface Meta {
@@ -652,7 +657,7 @@ describe('result caps (#61)', () => {
     // No fixture property value sits on more than a handful of blocks, so the default of 100 and
     // the maximum of 500 are out of reach. Through MCP small limits see the same code with a
     // smaller bound, and the clamp shows above the maximum; the cut at 500 is covered by the
-    // unit tests, which feed the tool 600 matches.
+    // parity cases (`limit at the maximum with matches left`).
     const KEY = 'type';
     const VALUE = 'project';
 
@@ -718,8 +723,8 @@ describe('result caps (#61)', () => {
   describe('logseq_search_by_relationship limit (default 50, max 500)', () => {
     // No pair of fixture topics returns more than a dozen results, so the default of 50 and the
     // maximum of 500 are out of reach. Through MCP small limits see the same code with a smaller
-    // bound, and the clamp shows above the maximum; the cut at 500 is covered by the unit tests,
-    // which feed the tool 600 results. The pairs below are the fixture's: see tests/fixtures/README.md
+    // bound, and the clamp shows above the maximum; the cut at 500 is covered by the parity
+    // case `relationship cut: limit past the maximum`. The pairs below are the fixture's: see tests/fixtures/README.md
     // for the crowded topic, and the alias-sets and semantic-search suites for the others.
     const CASES: Array<{ label: string; args: Record<string, unknown>; aliased?: boolean; nested?: boolean }> = [
       { label: 'references', args: { topic_a: 'busy source', topic_b: 'popular topic', relationship_type: 'references' } },
