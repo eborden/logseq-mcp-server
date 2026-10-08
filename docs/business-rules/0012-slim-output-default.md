@@ -10,7 +10,7 @@ Slim blocks leave out empty fields: a blank `pageName`, properties with no value
 
 Full entities carry fields the model never uses, and they fill its finite context window. Dropping the `hasMore: false` signal would make "nothing was cut" indistinguishable from "unknown". Introduced in #42.
 
-The default lives in the `slim_results` argument schema in `src/tool-args.ts`, which defaults it to `DEFAULT_SLIM_RESULTS` (`src/utils/slim-entities.ts`); the handlers pass the parsed boolean on. The tool functions themselves still default to full, so internal callers (for example `get_context_for_query`'s keyword search) are unchanged.
+The default lives in `DEFAULT_SLIM_RESULTS` (`rust/src/slim.rs`): each tool that takes `slim_results` reads the argument with it as the default and advertises `default: true` in its schema. Internal callers are unchanged: `get_context_for_query`'s keyword search reads full blocks itself (`full_blocks_with_context`).
 
 ## Mechanical enforcement
 
@@ -27,3 +27,4 @@ test: `tests/guards/tool-list.test.ts`
 | 2026-10-05 | Introduced. | #72 |
 | 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #121 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertion for the `slim_results` default. | #370 |
+| 2026-10-08 | Rationale only: where the default lives is the Rust crate's (`DEFAULT_SLIM_RESULTS` in `rust/src/slim.rs`, read by each tool's `slim_results` argument) and not the TypeScript argument schema. Statement unchanged. | #372 |
