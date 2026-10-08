@@ -15,9 +15,9 @@
 // answering the harness's made-up Project Atlas page. It never contacts port 12315 and never
 // reads ~/.logseq-mcp/config.json (BR-0001). Memory is read with `ps`, so macOS or Linux only.
 //
-// The first run of each server is a warm-up and is reported apart: it pays for cold file caches
-// and, on macOS, the first-launch check of a binary the OS has not seen. The runs alternate between
-// the servers so a drift in machine load hits both.
+// The first run of each server is a warm-up and is reported apart, so first-launch costs (on
+// macOS, the OS's check of a binary it has not seen; page-cache effects) stay out of the medians. The runs alternate between
+// the servers, and the order flips every other run, so a drift in machine load hits both alike.
 import { execFile } from 'node:child_process';
 import { cp, lstat, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -154,7 +154,9 @@ async function main(): Promise<void> {
 
     const results: Record<'rust' | 'node', ProbeResult[]> = { rust: [], node: [] };
     for (let run = 0; run <= options.runs; run++) {
-      for (const which of ['rust', 'node'] as const) results[which].push(await measure(servers[which]));
+      // The order flips on odd runs, so neither server always follows the other
+      const order = run % 2 === 0 ? (['rust', 'node'] as const) : (['node', 'rust'] as const);
+      for (const which of order) results[which].push(await measure(servers[which]));
     }
 
     console.log(`\nnode ${process.version}, ${process.platform}-${process.arch}, ${options.runs} runs per server, ${options.settleMs} ms settle before each memory reading\n`);
