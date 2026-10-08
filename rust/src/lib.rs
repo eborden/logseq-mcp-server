@@ -9,3 +9,4 @@ pub mod edn;
 pub mod env;
 pub mod js;
 pub mod server;
+pub mod wire;
