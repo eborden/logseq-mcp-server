@@ -95,7 +95,8 @@ jobs:
   # `arguments`, resource or prompt request, and `expected`, key order and layout aside. A case's stub answers and expected
   # calls (`steps`) don't: re-recording a call is not a change to the contract (ADR-0034 Decision 5). The recorder (`PARITY_RECORD=1`, rust/tests/parity_record.rs) writes a result only when
   # it changed in meaning, so a re-record that changes nothing doesn't trip this, and neither does moving a file without
-  # changing a result. The clock list (clock-cases.json) is not a golden.
+  # changing a result. The clock list (clock-cases.json) is not a golden. The call ceilings (call-ceilings.json) are
+  # checked by the second step, below.
   #
   # The labels come in through env:, never into the script text. The base is the first parent of the merge commit that
   # was checked out, so it is the base tip this HEAD was built on even when the base moved after the event, and a
@@ -130,7 +131,7 @@ jobs:
           cases_at() {
             git ls-tree -r --name-only "$1" -- "$dir" | while IFS= read -r file; do
               case "$file" in
-                "$dir/clock-cases.json" | "$dir/tool-list.json") continue ;;
+                "$dir/clock-cases.json" | "$dir/tool-list.json" | "$dir/call-ceilings.json") continue ;;
               esac
               file_cases "$1" "$file"
             done | sorted
@@ -143,7 +144,7 @@ jobs:
             # Name the files whose own goldens changed
             while IFS= read -r file; do
               case "$file" in
-                "$dir/clock-cases.json" | "$dir/tool-list.json" | "") continue ;;
+                "$dir/clock-cases.json" | "$dir/tool-list.json" | "$dir/call-ceilings.json" | "") continue ;;
               esac
               if [ "$(file_cases "$base" "$file" | sorted)" != "$(file_cases HEAD "$file" | sorted)" ]; then
                 changed="${changed}${file}"$'\n'
@@ -166,6 +167,44 @@ jobs:
           echo "::error::This PR changes the golden results, which are the tool contract: ${files}"
           printf '%s' "$changed"
           echo "::error::They change only with the maintainer's explicit OK, recorded on the PR. Once it is, the maintainer adds the golden-change label."
+          exit 1
+
+      # A call ceiling is the most LogSeq calls a tool may make for a case (ADR-0034 Decision 5, ADR-0011). It is stored apart
+      # from the call fixtures, in call-ceilings.json, so a fixture added or rewritten can't raise it. A PR that makes fewer calls
+      # lowers it, which needs no OK. A PR that raises one, or gives a case a ceiling, costs LogSeq more, so it is held like a
+      # golden change: it fails here unless it carries the same `golden-change` label, which goes on only after the maintainer's
+      # explicit OK. A base with no file yet (the PR that introduced it) has nothing to raise.
+      - name: Check the call ceilings
+        env:
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          base="$(git rev-parse HEAD^1)"
+          file=rust/tests/data/parity/call-ceilings.json
+          if ! old="$(git show "${base}:${file}" 2> /dev/null)"; then
+            echo "The base has no ${file}, so no ceiling is raised."
+            exit 0
+          fi
+          new="$(git show "HEAD:${file}" 2> /dev/null || echo 'missing')"
+          if ! printf '%s' "$new" | jq -e 'type == "object"' > /dev/null 2>&1; then
+            raised="    ${file} is missing, or not an object of ceilings by case name, at HEAD"
+          elif ! printf '%s' "$old" | jq -e 'type == "object"' > /dev/null 2>&1; then
+            raised="$(printf '%s' "$new" | jq -r 'keys[] | "    " + .')"
+          else
+            # Higher than at the base, new, or not a number at all: the cases are listed by name, indented so a name can't read as a workflow command
+            raised="$(jq -n -r --argjson old "$old" --argjson new "$new" '$new | to_entries[] | select((.value | type) != "number" or .value > (($old[.key] | numbers) // -1)) | "    \(.key): \($old[.key] // "none") -> \(.value)"')"
+          fi
+          if [ -z "$raised" ]; then
+            echo "No call ceiling was raised."
+            exit 0
+          fi
+          if printf '%s' "$PR_LABELS" | jq -e 'index("golden-change")' > /dev/null; then
+            echo "The golden-change label is on this PR; the maintainer's recorded OK covers these call ceilings:"
+            printf '%s\n' "$raised"
+            exit 0
+          fi
+          echo "::error::This PR raises a call ceiling, or adds one, in ${file}: a tool may then make more LogSeq calls for a case (ADR-0034, ADR-0011)"
+          printf '%s\n' "$raised"
+          echo "::error::A ceiling is raised only with the maintainer's explicit OK, recorded on the PR. Once it is, the maintainer adds the golden-change label."
           exit 1
 
   build-and-test:
