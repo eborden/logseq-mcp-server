@@ -219,9 +219,16 @@ function startServer(name: 'rust' | 'node', command: string, args: string[], env
   const failers = new Set<(error: Error) => void>();
   let buffer = '';
   let nextId = 1;
-  child.once('exit', () => {
-    for (const fail of [...failers]) fail(new Error(`${name} exited\n${server.stderr.trim()}`));
-  });
+  // Set once the server has exited or failed to start: a call made after that rejects at once instead of waiting out its timeout
+  let exited: Error | undefined;
+  const die = (error: Error) => {
+    exited ??= error;
+    for (const fail of [...failers]) fail(exited);
+  };
+  child.once('exit', () => die(new Error(`${name} exited\n${server.stderr.trim()}`)));
+  // A failed spawn (a binary that is not executable) or a write to a server that has just died is an event, and unhandled it would kill this process before `finally` cleans up
+  child.once('error', error => die(new Error(`${name} failed: ${error.message}\n${server.stderr.trim()}`)));
+  child.stdin!.on('error', () => {});
   child.stderr!.on('data', (chunk: Buffer) => {
     server.stderr += chunk.toString('utf8');
   });
@@ -241,6 +248,7 @@ function startServer(name: 'rust' | 'node', command: string, args: string[], env
   const write = (message: Record<string, unknown>) => child.stdin!.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
   server.call = (method, params) =>
     new Promise((resolveCall, reject) => {
+      if (exited) return reject(exited);
       const id = nextId++;
       const timer = setTimeout(() => reject(new Error(`${name}: no response to ${method} in 20 s\n${server.stderr.trim()}`)), 20000);
       const started = performance.now();
@@ -260,6 +268,7 @@ function startServer(name: 'rust' | 'node', command: string, args: string[], env
     });
   server.notify = method => write({ method });
   server.stop = async () => {
+    if (exited) return;
     child.stdin!.end();
     for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
       if (child.exitCode !== null || child.signalCode !== null) return;
@@ -373,8 +382,9 @@ async function main(): Promise<void> {
       process.exitCode = 1;
     }
   } finally {
-    for (const server of servers) await server.stop();
-    await stub?.close();
+    // Each step on its own, so a failing stop can't skip the others or leave the temp dir behind
+    for (const server of servers) await server.stop().catch(() => {});
+    await stub?.close().catch(() => {});
     await rm(work, { recursive: true, force: true });
   }
 }
