@@ -1,12 +1,11 @@
-//! Run the server binary against the stub LogSeq and collect what it answers (`runParity` in
-//! `scripts/parity/harness.ts`, #371): one process for every case, MCP over stdio, the config pointed at the
-//! stub through a temporary `LOGSEQ_MCP_CONFIG`, the clock fixed.
+//! Run the server binary against the stub LogSeq and collect what it answers (#371): one process for every
+//! case, MCP over stdio, the config pointed at the stub through a temporary `LOGSEQ_MCP_CONFIG`, the clock fixed.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -28,7 +27,8 @@ pub const PARITY_NOW_MS: i64 = 1_741_750_200_000;
 /// The time zone every server under test runs in (`TZ`): one with daylight saving, and not UTC.
 pub const PARITY_TZ: &str = "America/New_York";
 
-const TIMEOUT: Duration = Duration::from_secs(30);
+/// The most to wait for the answer to one request.
+pub const TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The server binary cargo built for this test.
 pub fn server_binary() -> PathBuf {
@@ -52,37 +52,57 @@ enum Failure {
 
 /// The server process and the client end of its stdio.
 pub struct Server {
-    child: Child,
-    stdin: ChildStdin,
+    child: Option<Child>,
+    stdin: Box<dyn Write + Send>,
     lines: Receiver<String>,
     next_id: i64,
     stderr: Arc<Mutex<String>>,
+    timeout: Duration,
 }
 
 impl Server {
-    pub fn start(config_path: &Path, home: &Path, now_ms: i64) -> Server {
+    /// The command that runs the server binary the way every run does: its config is the stub's, the clock and
+    /// the time zone are fixed, and every home and config directory a server could look in for a fallback
+    /// config (`~/.logseq-mcp/`) is the empty temp dir `home`, so a server that ignores the variable finds no
+    /// config and can't reach a real LogSeq (BR-0001). Tips are left at their default.
+    pub fn command(config_path: &Path, home: &Path, now_ms: i64) -> Command {
         let mut command = Command::new(server_binary());
         command
             .env_remove("LOGSEQ_MCP_TIPS")
             .env("LOGSEQ_MCP_CONFIG", config_path)
             .env("LOGSEQ_MCP_NOW", now_ms.to_string())
             .env("TZ", PARITY_TZ)
-            // Every home and config directory a server could look in for a fallback config (`~/.logseq-mcp/`) is an
-            // empty temp dir, so a server that ignores the variable finds no config and can't reach a real LogSeq (BR-0001)
             .env("HOME", home)
             .env("USERPROFILE", home)
-            .env("XDG_CONFIG_HOME", home.join(".config"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .env("XDG_CONFIG_HOME", home.join(".config"));
         // macOS looks the home folder up by user, not $HOME, unless this is set (see scripts/logseq-instance)
         if cfg!(target_os = "macos") {
             command.env("CFFIXED_USER_HOME", home);
         }
-        let mut child = command.spawn().expect("start the server binary");
+        command
+    }
+
+    /// Start the server binary.
+    pub fn start(config_path: &Path, home: &Path, now_ms: i64) -> Server {
+        Server::spawn(Server::command(config_path, home, now_ms))
+    }
+
+    /// Start any command that speaks MCP over stdio.
+    pub fn spawn(mut command: Command) -> Server {
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = command.spawn().expect("start the server");
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
-        let stderr_pipe = child.stderr.take().unwrap();
+        let stderr: Box<dyn Read + Send> = Box::new(child.stderr.take().unwrap());
+        Server::from_parts(Box::new(stdin), Box::new(stdout), Some(stderr), Some(child))
+    }
+
+    /// A server that is a pair of streams, for a stand-in a test runs in its own thread.
+    pub fn from_streams(stdin: impl Write + Send + 'static, stdout: impl Read + Send + 'static) -> Server {
+        Server::from_parts(Box::new(stdin), Box::new(stdout), None, None)
+    }
+
+    fn from_parts(stdin: Box<dyn Write + Send>, stdout: Box<dyn Read + Send>, stderr_pipe: Option<Box<dyn Read + Send>>, child: Option<Child>) -> Server {
         let (sender, lines) = channel();
         thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
@@ -93,16 +113,24 @@ impl Server {
             }
         });
         let stderr = Arc::new(Mutex::new(String::new()));
-        let sink = Arc::clone(&stderr);
-        thread::spawn(move || {
-            for line in BufReader::new(stderr_pipe).lines() {
-                let Ok(line) = line else { return };
-                let mut text = sink.lock().unwrap();
-                text.push_str(&line);
-                text.push('\n');
-            }
-        });
-        Server { child, stdin, lines, next_id: 0, stderr }
+        if let Some(pipe) = stderr_pipe {
+            let sink = Arc::clone(&stderr);
+            thread::spawn(move || {
+                for line in BufReader::new(pipe).lines() {
+                    let Ok(line) = line else { return };
+                    let mut text = sink.lock().unwrap();
+                    text.push_str(&line);
+                    text.push('\n');
+                }
+            });
+        }
+        Server { child, stdin, lines, next_id: 0, stderr, timeout: TIMEOUT }
+    }
+
+    /// The most to wait for the answer to one request.
+    pub fn with_timeout(mut self, timeout: Duration) -> Server {
+        self.timeout = timeout;
+        self
     }
 
     pub fn stderr(&self) -> String {
@@ -127,9 +155,9 @@ impl Server {
         }
         self.send(&message).map_err(Failure::Transport)?;
         loop {
-            let line = match self.lines.recv_timeout(TIMEOUT) {
+            let line = match self.lines.recv_timeout(self.timeout) {
                 Ok(line) => line,
-                Err(RecvTimeoutError::Timeout) => return Err(Failure::Transport(format!("{method} timed out after {TIMEOUT:?}"))),
+                Err(RecvTimeoutError::Timeout) => return Err(Failure::Transport(format!("{method} timed out after {:?}", self.timeout))),
                 Err(RecvTimeoutError::Disconnected) => return Err(Failure::Transport(format!("the server closed its output during {method}"))),
             };
             let Ok(reply) = serde_json::from_str::<Value>(&line) else {
@@ -149,7 +177,7 @@ impl Server {
         }
     }
 
-    fn initialize(&mut self) -> Result<(), String> {
+    pub fn initialize(&mut self) -> Result<(), String> {
         let params = json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "logseq-parity-test", "version": "1.0.0"}});
         match self.request("initialize", Some(params)) {
             Ok(_) => self.notify("notifications/initialized"),
@@ -159,7 +187,7 @@ impl Server {
     }
 
     /// `tools/list`, in the recorded projection: each tool's name, title, annotations, description and input schema.
-    fn tool_list(&mut self) -> Result<Vec<Value>, String> {
+    pub fn tool_list(&mut self) -> Result<Vec<Value>, String> {
         let result = self.request("tools/list", None).map_err(|f| match f {
             Failure::Rpc(e) => e.message,
             Failure::Transport(e) => e,
@@ -185,7 +213,7 @@ impl Server {
 
     /// One case's request. A JSON-RPC error is a result of the case for a prompt or a resource, as a tool's
     /// `isError` is; for a tool call or a listing it is a failure.
-    fn run_case(&mut self, case: &Case) -> Result<Value, CaseError> {
+    pub fn run_case(&mut self, case: &Case) -> Result<Value, CaseError> {
         let (method, params, errors_are_results) = match &case.request {
             Request::ListResourceTemplates => ("resources/templates/list", None, false),
             Request::ListResources => ("resources/list", None, false),
@@ -216,16 +244,19 @@ impl Server {
 }
 
 /// Why a case got no result.
-struct CaseError {
-    message: String,
+#[derive(Debug)]
+pub struct CaseError {
+    pub message: String,
     /// The server stopped answering (a timeout, a closed pipe): the cases after it can't run either, so the run ends
-    server_gone: bool,
+    pub server_gone: bool,
 }
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -241,6 +272,10 @@ pub struct Run<'a> {
     pub now_ms: i64,
     /// The most to wait, per case, for the LogSeq calls a tool made at once to reach the stub after its result came back
     pub settle_ms: u64,
+    /// Collect what the server answers instead of comparing it with the golden results and the recorded tool
+    /// list (the recorder, `record.rs`). The calls are still compared, so a recording is never made from a case
+    /// whose LogSeq traffic is wrong.
+    pub record: bool,
 }
 
 pub struct Report {
@@ -248,12 +283,16 @@ pub struct Report {
     pub failures: Vec<String>,
     /// The server's stderr, to explain a failure (everything the stub serves is synthetic)
     pub stderr: String,
+    /// What the server answered for each case that got an answer, by case name
+    pub results: HashMap<String, Value>,
+    /// The server's `tools/list` in the recorded projection
+    pub tool_list: Vec<Value>,
 }
 
 /// A fresh empty folder for the run, under the target directory cargo gives integration tests.
-fn scratch_dir() -> PathBuf {
+pub fn scratch_dir(label: &str) -> PathBuf {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("parity-{}-{nanos:x}", std::process::id()));
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{label}-{}-{nanos:x}", std::process::id()));
     fs::create_dir_all(dir.join("home")).expect("create the scratch folder");
     dir
 }
@@ -261,18 +300,26 @@ fn scratch_dir() -> PathBuf {
 /// Run every case against one server process and report what differs from the golden results, the recorded
 /// calls and the recorded tool list.
 pub fn run_parity(run: &Run) -> Report {
+    run_parity_with(run, &|config_path, home, now_ms| Server::start(config_path, home, now_ms))
+}
+
+/// [`run_parity`] with a server of the caller's making: it is given the config file the stub is written into,
+/// the empty home and the clock.
+pub fn run_parity_with(run: &Run, launch: &dyn Fn(&Path, &Path, i64) -> Server) -> Report {
     let mut failures = Vec::new();
+    let mut results = HashMap::new();
+    let mut tool_list = Vec::new();
     let mut names = HashSet::new();
     for case in run.cases {
         assert!(names.insert(case.name.as_str()), "duplicate parity case name {:?}", case.name);
     }
-    let judged: std::collections::HashMap<&str, &Case> = run.unperturbed.iter().map(|c| (c.name.as_str(), c)).collect();
+    let judged: HashMap<&str, &Case> = run.unperturbed.iter().map(|c| (c.name.as_str(), c)).collect();
 
     let stub = Stub::start();
-    let dir = scratch_dir();
+    let dir = scratch_dir("parity");
     let config_path = dir.join("config.json");
     fs::write(&config_path, json!({"apiUrl": stub.api_url, "authToken": stub.auth_token}).to_string()).unwrap();
-    let mut server = Server::start(&config_path, &dir.join("home"), run.now_ms);
+    let mut server = launch(&config_path, &dir.join("home"), run.now_ms);
     stub.load([]);
 
     'run: {
@@ -281,7 +328,12 @@ pub fn run_parity(run: &Run) -> Report {
             break 'run;
         }
         match server.tool_list() {
-            Ok(tools) => failures.extend(compare_tool_lists(run.expected_tool_list, &tools).into_iter().map(|f| format!("tools/list differs in meaning, {f}"))),
+            Ok(tools) => {
+                if !run.record {
+                    failures.extend(compare_tool_lists(run.expected_tool_list, &tools).into_iter().map(|f| format!("tools/list differs in meaning, {f}")));
+                }
+                tool_list = tools;
+            }
             Err(error) => {
                 failures.push(format!("harness: {error}"));
                 break 'run;
@@ -314,16 +366,22 @@ pub fn run_parity(run: &Run) -> Report {
             stub.settle(case.call_count(), run.settle_ms);
             failures.extend(stub.failures().into_iter().map(|f| format!("{prefix} stub: {f}")));
             failures.extend(compare_calls(&case.steps, &stub.calls()).into_iter().map(|f| format!("{prefix} LogSeq calls, {f}")));
-            let candidates = candidates_of(judged.get(case.name.as_str()).copied().unwrap_or(case));
-            failures.extend(compare_results(&case.expected, &result, &candidates).into_iter().map(|f| format!("{prefix} result {f}")));
+            if !run.record {
+                let candidates = candidates_of(judged.get(case.name.as_str()).copied().unwrap_or(case));
+                failures.extend(compare_results(&case.expected, &result, &candidates).into_iter().map(|f| format!("{prefix} result {f}")));
+            }
+            results.insert(case.name.clone(), result);
         }
-        // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0032)
-        failures.extend(check_reference_lists(run.unperturbed));
-        failures.extend(missing_required_cases(run.unperturbed));
+        // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0032).
+        // A recording checks the results it is about to write, which `record.rs` does once the run is over.
+        if !run.record {
+            failures.extend(check_reference_lists(run.unperturbed));
+            failures.extend(missing_required_cases(run.unperturbed));
+        }
     }
     let stderr = server.stderr();
     drop(server);
     drop(stub);
     let _ = fs::remove_dir_all(&dir);
-    Report { failures, stderr }
+    Report { failures, stderr, results, tool_list }
 }
