@@ -11,8 +11,10 @@
 //!
 //! The page and its blocks are the entities the Editor API sent, key order and spelling included
 //! (BR-0004). The result adds `resolvedFrom` when the name wasn't an exact one, then `children`,
-//! then (with `resolve_refs`) `hasMore` and `warnings`. `format: "markdown"` is not written yet
-//! (#310).
+//! then (with `resolve_refs`) `hasMore` and `warnings`.
+//!
+//! With `format: "markdown"` the same page is rendered by `crate::markdown` into one text block,
+//! its warnings, `hasMore` and tips in a footer, and no separate tips block. The calls are the same.
 
 mod tips;
 mod wire;
@@ -26,7 +28,8 @@ use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, PageNotFound, ToolError};
 use crate::js;
-use crate::output_format::{OutputFormat, require_json};
+use crate::markdown::{FooterMeta, PageRenderOptions, render_page, with_footer};
+use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::{ResolvedPage, require_page};
 use crate::resolve_refs::{resolve_block_refs, with_meta};
@@ -84,13 +87,15 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let args = read_args(arguments.as_ref())?;
-    require_json(args.format)?;
     let page = get_page(client, &args.page_name, args.include_children, args.resolve_refs).await?;
+    let tips = if tips_enabled { page_tips(&page, &args.page_name, args.include_children) } else { Vec::new() };
+    if args.format == Some(OutputFormat::Markdown) {
+        let body = render_page(&page, PageRenderOptions { blocks_fetched: args.include_children, ..Default::default() });
+        return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&page, &tips)))]));
+    }
     let mut content = vec![ContentBlock::text(js::json_stringify(&page))];
-    if tips_enabled {
-        if let Some(tips) = tips_content(&page_tips(&page, &args.page_name, args.include_children)) {
-            content.push(ContentBlock::text(tips));
-        }
+    if let Some(tips) = tips_content(&tips) {
+        content.push(ContentBlock::text(tips));
     }
     Ok(success_result(content))
 }
