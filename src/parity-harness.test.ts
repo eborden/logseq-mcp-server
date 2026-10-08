@@ -19,7 +19,7 @@ import { compareToolLists, normalizeSchema, type ProjectedTool } from '../script
 import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer, viteNodeCommand } from '../scripts/parity/ts-server.js';
 
 /**
- * The differential parity harness (#124, ADR-0025 Decision 2). The end-to-end tests start the
+ * The differential parity harness (#124, ADR-0031 Decision 2). The end-to-end tests start the
  * TypeScript server over stdio, as the harness would start the Rust one, so they take a few
  * seconds each.
  */
