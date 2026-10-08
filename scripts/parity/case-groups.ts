@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { getGraphInfoCases } from './cases/get-graph-info.js';
 import { getPageOutlineCases } from './cases/get-page-outline.js';
 import { listPagesCases } from './cases/list-pages.js';
+import { queryByPropertyCases } from './cases/query-by-property.js';
 import { searchBlocksCases } from './cases/search-blocks.js';
 import type { ParityCase } from './harness.js';
 import { REPO_ROOT } from './ts-server.js';
@@ -19,6 +20,7 @@ export const CASE_GROUPS: CaseGroup[] = [
   { name: 'get-graph-info', cases: getGraphInfoCases },
   { name: 'get-page-outline', cases: getPageOutlineCases },
   { name: 'list-pages', cases: listPagesCases },
+  { name: 'query-by-property', cases: queryByPropertyCases },
   { name: 'search-blocks', cases: searchBlocksCases }
 ];
 
