@@ -16,6 +16,32 @@ use crate::js;
 /// The largest whole number a JavaScript number holds exactly, and so the largest `z.int()` takes.
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 
+// A string, number or boolean, as a tool that takes any of the three receives it. The tool's schema
+// is generated from this type, so it advertises the three (`anyOf`).
+//
+// No doc comments here: schemars would write each into the schema as a description, and the field
+// that holds a `Scalar` has its own. The schema is inlined, not a `$ref` into `$defs`: the MCP SDK
+// client the parity harness lists tools with drops `$defs`, so a `$ref` there can't be compared.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+#[schemars(inline)]
+pub enum Scalar {
+    Text(String),
+    Number(f64),
+    Flag(bool),
+}
+
+impl Scalar {
+    /// `String(value)`, as JavaScript writes it: a number as `Number#toString` does (`3`, not `3.0`).
+    pub fn to_js_string(&self) -> String {
+        match self {
+            Scalar::Text(text) => text.clone(),
+            Scalar::Number(number) => js::number_to_string(*number),
+            Scalar::Flag(flag) => flag.to_string(),
+        }
+    }
+}
+
 /// A tool's arguments as sent: unknown keys are ignored and `null` counts as absent.
 pub struct Arguments<'a> {
     args: Option<&'a JsonObject>,
@@ -59,6 +85,23 @@ impl<'a> Arguments<'a> {
             None => Ok(default),
             Some(Value::Bool(flag)) => Ok(*flag),
             Some(other) => Err(wrong(param, other, format!("true or false, not {}", kind_of(other)), Some(format!("{param}: true")))),
+        }
+    }
+
+    /// A required string, number or boolean (`z.union([z.string(), z.number(), z.boolean()])`).
+    pub fn required_scalar(&self, param: &str) -> Result<Scalar, InvalidParameter> {
+        const KINDS: &str = "a string, a number or a boolean";
+        match self.sent(param) {
+            Some(Value::String(text)) => Ok(Scalar::Text(text.clone())),
+            Some(Value::Number(number)) => Ok(Scalar::Number(number.as_f64().expect("a JSON number is finite"))),
+            Some(Value::Bool(flag)) => Ok(Scalar::Flag(*flag)),
+            None => Err(InvalidParameter {
+                param: param.to_owned(),
+                value: "missing".to_owned(),
+                expected: format!("{KINDS} (required)"),
+                example: Some(format!("{param}: \"...\"")),
+            }),
+            Some(other) => Err(wrong(param, other, format!("{KINDS}, not {}", kind_of(other)), Some(format!("{param}: \"...\"")))),
         }
     }
 
@@ -189,6 +232,38 @@ mod tests {
         assert_eq!(bad(json!(9007199254740992u64)), "Invalid parameter 'limit': 9007199254740992\n\nExpected: Too big: expected int to be <9007199254740991");
         assert_eq!(bad(json!(1e300)), "Invalid parameter 'limit': 1e+300\n\nExpected: Too big: expected int to be <9007199254740991");
         assert_eq!(bad(json!(-1e300)), "Invalid parameter 'limit': -1e+300\n\nExpected: Too small: expected int to be >-9007199254740991");
+    }
+
+    #[test]
+    fn a_scalar_is_a_string_a_number_or_a_boolean_and_is_written_as_javascript_writes_it() {
+        let read = |value: Value| {
+            let args = arguments(json!({"property_value": value}));
+            Arguments::new(Some(&args)).required_scalar("property_value")
+        };
+        assert_eq!(read(json!("a")).unwrap(), Scalar::Text("a".into()));
+        assert_eq!(read(json!("")).unwrap().to_js_string(), "");
+        assert_eq!(read(json!(3)).unwrap().to_js_string(), "3");
+        assert_eq!(read(json!(3.0)).unwrap().to_js_string(), "3");
+        assert_eq!(read(json!(2.5)).unwrap().to_js_string(), "2.5");
+        assert_eq!(read(json!(1e21)).unwrap().to_js_string(), "1e+21");
+        assert_eq!(read(json!(true)).unwrap().to_js_string(), "true");
+        assert_eq!(read(json!(false)).unwrap().to_js_string(), "false");
+        let bad = |value: Value| message(read(value).unwrap_err());
+        assert_eq!(
+            bad(json!(["a"])),
+            "Invalid parameter 'property_value': [\"a\"]\n\nExpected: a string, a number or a boolean, not an array\nExample: property_value: \"...\""
+        );
+        assert_eq!(
+            bad(json!({"a": 1})),
+            "Invalid parameter 'property_value': {\"a\":1}\n\nExpected: a string, a number or a boolean, not an object\nExample: property_value: \"...\""
+        );
+        assert_eq!(
+            message(Arguments::new(None).required_scalar("property_value").unwrap_err()),
+            "Invalid parameter 'property_value': missing\n\nExpected: a string, a number or a boolean (required)\nExample: property_value: \"...\""
+        );
+        // `null` is absent
+        let args = arguments(json!({"property_value": null}));
+        assert!(Arguments::new(Some(&args)).required_scalar("property_value").is_err());
     }
 
     #[test]
