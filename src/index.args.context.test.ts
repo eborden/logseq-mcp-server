@@ -362,7 +362,7 @@ describe('values that pass the parser keep their old meaning', () => {
 
   it('build_context: a fractional max_blocks is rejected before any call, not cut down (#293)', async () => {
     expect(await rejection('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).toContain(
-      "Invalid parameter 'max_blocks': 1.5\n\nExpected: an integer, not a number"
+      "Invalid parameter 'max_blocks': 1.5\n\nExpected: an integer, not a fraction"
     );
   });
 

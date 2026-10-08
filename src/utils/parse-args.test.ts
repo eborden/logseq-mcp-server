@@ -147,10 +147,19 @@ describe('parseArgs', () => {
       );
     });
 
-    it('says an integer is expected, with an integer for the example', () => {
+    it('says an integer is expected, not a fraction, with an integer for the example', () => {
       expect(messageFor(z.object({ v: z.int() }), { v: 1.5 })).toBe(
-        "Invalid parameter 'v': 1.5\n\nExpected: an integer, not a number\nExample: v: 5"
+        "Invalid parameter 'v': 1.5\n\nExpected: an integer, not a fraction\nExample: v: 5"
       );
+      expect(messageFor(z.object({ v: z.int() }), { v: -0.1 })).toContain('Expected: an integer, not a fraction\n');
+    });
+
+    it('calls only a finite non-whole number a fraction', () => {
+      for (const v of ['5', '2.5', NaN, Infinity, -Infinity, true]) {
+        expect(messageFor(z.object({ v: z.int() }), { v }), String(v)).not.toContain('fraction');
+      }
+      // Only where an integer was expected: elsewhere 2.5 is just a number
+      expect(messageFor(z.object({ v: z.string() }), { v: 2.5 })).toContain('Expected: a string, not a number\n');
     });
 
     it('gives no Example: line for a type with no sample value', () => {
@@ -283,6 +292,8 @@ describe('toInputSchema', () => {
       bounded: z.int().min(1).max(10),
       floored: z.int().min(0),
       fraction: z.number().min(-1),
+      // A plain number bounded by the same values keeps them: only integers lose the range
+      wide: z.number().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
     });
 
     expect(toInputSchema(counts).properties).toEqual({
@@ -290,6 +301,7 @@ describe('toInputSchema', () => {
       bounded: { type: 'integer', minimum: 1, maximum: 10 },
       floored: { type: 'integer', minimum: 0 },
       fraction: { type: 'number', minimum: -1 },
+      wide: { type: 'number', minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
     });
   });
 });
