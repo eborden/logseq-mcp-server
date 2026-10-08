@@ -79,6 +79,19 @@ impl<'a> Arguments<'a> {
         }
     }
 
+    /// An optional string that must be one of `values` (`z.enum([...]).optional()`). Whatever else
+    /// is sent, a number or a list as much as a wrong word, is "one of ..." with the last value
+    /// as the example, as zod's `invalid_value` is.
+    pub fn optional_enum(&self, param: &str, values: &[&'static str]) -> Result<Option<&'static str>, InvalidParameter> {
+        let Some(sent) = self.sent(param) else { return Ok(None) };
+        if let Some(value) = sent.as_str().and_then(|text| values.iter().find(|value| **value == text)) {
+            return Ok(Some(value));
+        }
+        let shown: Vec<String> = values.iter().map(|value| js::json_stringify(&Value::from(*value))).collect();
+        let example = values.last().map(|last| format!("{param}: {}", js::json_stringify(&Value::from(*last))));
+        Err(wrong(param, sent, format!("one of {}", shown.join(", ")), example))
+    }
+
     /// A boolean with a default (`z.boolean().default(..)`).
     pub fn boolean(&self, param: &str, default: bool) -> Result<bool, InvalidParameter> {
         match self.sent(param) {
@@ -200,6 +213,25 @@ mod tests {
             message(read.optional_string("name_contains").unwrap_err()),
             "Invalid parameter 'name_contains': [\"a\"]\n\nExpected: a string, not an array\nExample: name_contains: \"...\""
         );
+    }
+
+    #[test]
+    fn an_enum_takes_one_of_its_words_and_says_so_for_anything_else() {
+        const FORMATS: &[&str] = &["json", "markdown"];
+        let read = |value: Value| {
+            let args = arguments(json!({"format": value}));
+            Arguments::new(Some(&args)).optional_enum("format", FORMATS)
+        };
+        assert_eq!(read(json!("markdown")).unwrap(), Some("markdown"));
+        assert_eq!(read(Value::Null).unwrap(), None);
+        assert_eq!(Arguments::new(None).optional_enum("format", FORMATS).unwrap(), None);
+        // each message is the one the TypeScript server's zod schema gives, whatever was sent
+        for (sent, shown) in [(json!("xml"), "\"xml\""), (json!(5), "5"), (json!(true), "true"), (json!(["json"]), "[\"json\"]"), (json!({}), "{}")] {
+            assert_eq!(
+                message(read(sent).unwrap_err()),
+                format!("Invalid parameter 'format': {shown}\n\nExpected: one of \"json\", \"markdown\"\nExample: format: \"markdown\"")
+            );
+        }
     }
 
     #[test]
