@@ -245,7 +245,8 @@ export const getCurrentContextCases: ParityCase[] = [
     perturbed: [BOB_ROW]
   },
   {
-    // The page name a block gets is the lookup's, even when the open page has another name for the id
+    // A focused and a selected block on the open page both take its name from the open page, with no lookup
+    // (TypeScript never pulls an id it already has)
     name: 'current context: a block on the open page takes its name from it',
     tool: TOOL,
     arguments: {},
