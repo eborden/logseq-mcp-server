@@ -6,8 +6,7 @@
 // A read is `logseq_get_page` with its blocks (two calls for an exact name) rendered by the same
 // Markdown renderer, cut at 50,000 characters. `tool` is only the label the cases are reported under.
 //
-// Not here: `logseq://guide`, `resources/list` and an unknown URI. The guide lists the prompts and
-// tools, so the Rust server doesn't have it until #316.
+// Not here: `logseq://guide`, `resources/list` and an unknown URI. They are in resources.ts (#316).
 import type { ParityCase } from '../harness.js';
 import {
   ALICE,

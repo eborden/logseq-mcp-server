@@ -45,6 +45,15 @@ export interface ParityCase {
   readResource?: string;
   /** List the resource templates (`resources/templates/list`) instead of calling `tool` */
   listResourceTemplates?: boolean;
+  /** List the resources (`resources/list`) instead of calling `tool` */
+  listResources?: boolean;
+  /** List the prompts (`prompts/list`) instead of calling `tool` */
+  listPrompts?: boolean;
+  /**
+   * Get this prompt (`prompts/get`) instead of calling `tool`. The result is `{ description, messages }`, or
+   * `{ error: { code, message } }` for a JSON-RPC error, as for `readResource`.
+   */
+  getPrompt?: { name: string; arguments?: Record<string, string> };
 }
 
 /**
@@ -77,7 +86,7 @@ export interface ParityOptions {
    */
   expectedToolList?: ProjectedTool[];
   /**
-   * For a server that implements only some tools (the Rust spike has one, #125): compare its
+   * For a server that implements only some tools (a work in progress; CI no longer uses it, #316): compare its
    * tools/list with the reference's entries for the tools the cases call, and nothing else. The
    * server must list exactly those. The recorded list is still checked against the snapshot whole.
    */
@@ -211,6 +220,27 @@ function keyDifferences(where: string, expected: object, actual: object): string
   ];
 }
 
+/** A prompt's messages: the text of each byte for byte, and anything else equal. */
+function compareMessages(expected: readonly unknown[], actual: readonly unknown[]): string[] {
+  if (expected.length !== actual.length) return [`expected ${expected.length} message(s), got ${actual.length}`];
+  const failures: string[] = [];
+  const textOf = (message: unknown): unknown => (message as { content?: { text?: unknown } } | null)?.content?.text;
+  expected.forEach((want, i) => {
+    const got = actual[i];
+    if (stable(want) === stable(got)) return;
+    const wantText = textOf(want);
+    const gotText = textOf(got);
+    if (typeof wantText === 'string' && typeof gotText === 'string' && wantText !== gotText) {
+      const at = firstCharDifference(wantText, gotText);
+      const around = (t: string) => JSON.stringify(t.slice(Math.max(0, at - 40), at + 40));
+      failures.push(`messages[${i}] text differs at character ${at}:\n  expected: ${around(wantText)}\n  actual:   ${around(gotText)}`);
+    } else {
+      failures.push(`messages[${i}]: expected ${stable(want)}, got ${stable(got)}`);
+    }
+  });
+  return failures;
+}
+
 /**
  * Compare a result with the expected one: the same top-level keys, the same content blocks with
  * the same fields, each `text` byte for byte (ADR-0009), and every other value equal.
@@ -219,6 +249,10 @@ export function compareResult(expected: ToolResult, actual: ToolResult): string[
   const failures = keyDifferences('the result', expected, actual);
   for (const key of Object.keys(expected)) {
     if (key === 'content' || key === 'contents' || !(key in actual)) continue;
+    if (key === 'messages' && Array.isArray(expected[key]) && Array.isArray(actual[key])) {
+      failures.push(...compareMessages(expected[key] as unknown[], actual[key] as unknown[]));
+      continue;
+    }
     if (stable(expected[key]) !== stable(actual[key])) {
       failures.push(`${key}: expected ${stable(expected[key])}, got ${stable(actual[key])}`);
     }
@@ -291,19 +325,24 @@ export function toolsCalledBy(tools: readonly ProjectedTool[], cases: readonly P
   return tools.filter(tool => called.has(tool.name));
 }
 
-/** One case's request: a tool call, or (`readResource`, `listResourceTemplates`) a resource request. */
+/** A request whose JSON-RPC error is a result of the case, as a tool's `isError` is. */
+async function recordingErrors(request: Promise<Record<string, unknown>>): Promise<ToolResult> {
+  try {
+    return toToolResult(await request);
+  } catch (error) {
+    // The client's own failures (a timeout, a closed connection) are McpErrors too, but they say nothing about the server's answer
+    if (!(error instanceof McpError) || error.code === ErrorCode.RequestTimeout || error.code === ErrorCode.ConnectionClosed) throw error;
+    return { error: { code: error.code, message: error.message, ...(error.data === undefined ? {} : { data: error.data }) } };
+  }
+}
+
+/** One case's request: a tool call, or (`readResource`, `listResources`, `listResourceTemplates`, `listPrompts`, `getPrompt`) another request. */
 export async function runCase(client: Client, c: ParityCase, timeout: number): Promise<ToolResult> {
   if (c.listResourceTemplates) return toToolResult(await client.listResourceTemplates(undefined, { timeout }));
-  if (c.readResource !== undefined) {
-    try {
-      return toToolResult(await client.readResource({ uri: c.readResource }, { timeout }));
-    } catch (error) {
-      // A JSON-RPC error the server sent is a result of the case, as a tool's `isError` is. The client's own
-      // failures (a timeout, a closed connection) are McpErrors too, but they say nothing about the server's answer
-      if (!(error instanceof McpError) || error.code === ErrorCode.RequestTimeout || error.code === ErrorCode.ConnectionClosed) throw error;
-      return { error: { code: error.code, message: error.message, ...(error.data === undefined ? {} : { data: error.data }) } };
-    }
-  }
+  if (c.listResources) return toToolResult(await client.listResources(undefined, { timeout }));
+  if (c.listPrompts) return toToolResult(await client.listPrompts(undefined, { timeout }));
+  if (c.getPrompt) return recordingErrors(client.getPrompt(c.getPrompt, { timeout }));
+  if (c.readResource !== undefined) return recordingErrors(client.readResource({ uri: c.readResource }, { timeout }));
   return toToolResult(await client.callTool({ name: c.tool, arguments: c.arguments }, undefined, { timeout }));
 }
 
