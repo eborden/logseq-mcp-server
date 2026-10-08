@@ -46,6 +46,23 @@ pub fn namespace_leaf_pages(leaf: &PageName) -> Query {
     }
 }
 
+/// The name and alias routes of [`resolve_page`] for many names at once (`linkTargets`, #146), as
+/// `[page, via, name]` rows: `via` is `"name"` for the page with that `:block/name`, `"alias"` for a page
+/// whose `:block/alias` points at it. The name rides along so each row can be matched to the term it
+/// answers. The names go in as one string collection (`:in $ [?n ...]`), never as query text, and are
+/// lowercase by construction. `:block/file` is pulled so a file-less stub can be told from a written page.
+pub fn link_targets(names: &[PageName]) -> Query {
+    assert!(!names.is_empty(), "linkTargets needs at least one page name");
+    Query {
+        text: "[:find (pull ?page [:db/id :block/name :block/original-name :block/file]) ?via ?n :in $ [?n ...] :where \
+               (or-join [?n ?page ?via] \
+               (and [?page :block/name ?n] [(ground \"name\") ?via]) \
+               (and [?stub :block/name ?n] [?page :block/alias ?stub] [(ground \"alias\") ?via]))]"
+            .to_owned(),
+        inputs: vec![DatalogInput::PageNames(names.to_vec())],
+    }
+}
+
 /// One alias link between two pages, followed in either direction (`aliasHop`).
 fn alias_hop(from: &str, to: &str) -> String {
     format!("(or-join [{from} {to}] [{from} :block/alias {to}] [{to} :block/alias {from}])")
@@ -162,6 +179,15 @@ mod tests {
         let dated = resolve_page(&PageName::new("2025-01-01"), Some(JournalDay::parse(20250101_u32).unwrap()));
         assert_eq!(dated.inputs[1].to_edn(), "20250101");
         assert!(dated.text.contains(":in $ ?n ?day"));
+    }
+
+    #[test]
+    fn the_link_targets_bind_the_names_as_one_collection() {
+        let query = link_targets(&[PageName::new("Alice"), PageName::new("Project \"Atlas\"")]);
+        assert_eq!(query.inputs, vec![DatalogInput::PageNames(vec![PageName::new("alice"), PageName::new("project \"atlas\"")])]);
+        assert_eq!(query.inputs[0].to_edn(), r#"["alice","project \"atlas\""]"#);
+        assert!(!query.text.contains("alice"), "no name is embedded in the text");
+        assert!(query.text.contains(":in $ [?n ...] :where"));
     }
 
     #[test]

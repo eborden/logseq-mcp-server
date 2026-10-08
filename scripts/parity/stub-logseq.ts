@@ -48,6 +48,16 @@ export interface StubLogseq {
   load(calls: readonly CannedCall[]): void;
   /** Every call since the last `load`, in the order the requests arrived. */
   calls(): LogseqCall[];
+  /**
+   * Wait for the calls a tool sent at the same moment as the one whose answer it acted on (#340). A
+   * tool that makes calls at once and fails on the first answer returns before the others reach the
+   * stub; reading the log then misses them, and they land in the next case's log. It resolves when
+   * no request is being read or answered and either at least `expected` calls have arrived since
+   * the last `load`, or no request has started for `quietMs` (a server that makes fewer calls than
+   * the case lists is a failure the comparison reports, so this is the cost of a miss). `maxMs`
+   * is a backstop for a server that keeps calling; 0 doesn't wait at all. Never fails.
+   */
+  settle(expected: number, options?: { quietMs?: number; maxMs?: number }): Promise<void>;
   /** Calls the stub could not answer, wrong tokens and malformed requests since the last `load`. */
   failures(): string[];
   close(): Promise<void>;
@@ -74,8 +84,13 @@ export async function startStubLogseq(): Promise<StubLogseq> {
   let pending = new Map<string, unknown[]>();
   let log: LogseqCall[] = [];
   let failures: string[] = [];
+  // Requests received and not yet answered, and when the last one came (`settle`)
+  let inFlight = 0;
+  let lastStart = 0;
 
   const server: Server = createServer((req, res) => {
+    inFlight++;
+    lastStart = Date.now();
     void (async () => {
       if (req.method !== 'POST' || req.url !== '/api') {
         failures.push(`unexpected request ${req.method} ${req.url}`);
@@ -102,10 +117,14 @@ export async function startStubLogseq(): Promise<StubLogseq> {
         return send(res, 200, { error: 'parity stub: no canned response for this call' });
       }
       send(res, 200, answers.shift());
-    })().catch(error => {
-      failures.push(`stub error: ${(error as Error).message}`);
-      if (!res.headersSent) send(res, 500, { error: 'parity stub: internal error' });
-    });
+    })()
+      .catch(error => {
+        failures.push(`stub error: ${(error as Error).message}`);
+        if (!res.headersSent) send(res, 500, { error: 'parity stub: internal error' });
+      })
+      .finally(() => {
+        inFlight--;
+      });
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -131,6 +150,15 @@ export async function startStubLogseq(): Promise<StubLogseq> {
       failures = [];
     },
     calls: () => [...log],
+    async settle(expected, { quietMs = 200, maxMs = 2000 } = {}) {
+      const began = Date.now();
+      for (;;) {
+        const now = Date.now();
+        const quiet = now - Math.max(lastStart, began) >= quietMs;
+        if ((inFlight === 0 && (log.length >= expected || quiet)) || now - began >= maxMs) return;
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+    },
     failures: () => [...failures],
     close: () =>
       new Promise((resolve, reject) => {

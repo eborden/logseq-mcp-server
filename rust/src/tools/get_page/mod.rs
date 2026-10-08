@@ -17,7 +17,7 @@
 //! its warnings, `hasMore` and tips in a footer, and no separate tips block. The calls are the same.
 
 mod tips;
-mod wire;
+pub mod wire;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
