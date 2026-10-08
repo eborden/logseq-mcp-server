@@ -20,6 +20,7 @@ pub mod list_pages;
 pub mod query_by_date_range;
 pub mod query_by_property;
 pub mod search_blocks;
+pub mod search_by_relationship;
 
 /// Every tool, as `tools/list` shows them.
 pub fn list() -> Vec<Tool> {
@@ -35,6 +36,7 @@ pub fn list() -> Vec<Tool> {
         query_by_date_range::definition(),
         query_by_property::definition(),
         search_blocks::definition(),
+        search_by_relationship::definition(),
     ]
 }
 
@@ -58,6 +60,7 @@ pub async fn call(
         query_by_date_range::NAME => Some(query_by_date_range::call(client, tips_enabled, clock, arguments).await),
         query_by_property::NAME => Some(query_by_property::call(client, tips_enabled, arguments).await),
         search_blocks::NAME => Some(search_blocks::call(client, tips_enabled, arguments).await),
+        search_by_relationship::NAME => Some(search_by_relationship::call(client, tips_enabled, arguments).await),
         _ => None,
     }
 }
