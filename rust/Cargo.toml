@@ -37,6 +37,11 @@ icu_properties = { version = "2.2", default-features = false, features = ["compi
 [dev-dependencies]
 tokio = { version = "1.47", default-features = false, features = ["rt", "macros", "net", "io-util", "time"] }
 
+[profile.dev]
+# Backtraces keep file and line, and the build and its cache shrink (#302). Full debug info is
+# only needed under a debugger.
+debug = "line-tables-only"
+
 [profile.release]
 # Startup time and footprint are what the spike measures (#126).
 lto = "thin"
