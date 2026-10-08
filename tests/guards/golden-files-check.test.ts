@@ -12,7 +12,9 @@ import { promisify } from 'util';
 // group file holds the cases beside their goldens. A golden answers a request, so the request is compared with it (a case's
 // name, tool, arguments, resource or prompt request, and result), and a case's stub answers and expected calls are not: a
 // re-recorded call is not a change to the contract (ADR-0034 Decision 5). These guards keep the check in ci.yml, and
-// run its script against a scratch repository, so a reworded step can't quietly stop checking.
+// run its script against a scratch repository, so a reworded step can't quietly stop checking. A second step holds the call
+// ceilings (rust/tests/data/parity/call-ceilings.json, ADR-0034 Decision 5) the same way: a ceiling that is raised or new
+// needs the same label, and a lowered one needs none.
 
 const exec = promisify(execFile);
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -35,10 +37,15 @@ function runBlock(stepName: string): string {
 }
 
 const DATA = 'rust/tests/data/parity';
+const CEILING_FILE = `${DATA}/call-ceilings.json`;
 
 /** A group file as the recorder writes it: one case to a line. */
 const group = (name: string, cases: Array<Record<string, unknown>>): string =>
   `{"group":${JSON.stringify(name)},"cases":[\n${cases.map(c => `  ${JSON.stringify(c)}`).join(',\n')}\n]}\n`;
+
+/** The ceilings file as the base commit holds it, and a file of the same form with these numbers. */
+const ceilings = (numbers: Record<string, unknown>): string => `${JSON.stringify(numbers, null, 2)}\n`;
+const CEILINGS = ceilings({ alice: 1, bob: 2 });
 
 const aCase = (over: Record<string, unknown> = {}) => ({
   name: 'alice',
@@ -75,7 +82,7 @@ describe('the golden-files job in ci.yml', () => {
     const script = runBlock('Check the golden files');
 
     /** A repository whose base commit holds one group file, a tool list and a clock list, and whose next commit makes `changes` (a text, or null to delete the file). */
-    async function scratch(changes: Record<string, string | null>): Promise<string> {
+    async function scratch(changes: Record<string, string | null>, withCeilings = true): Promise<string> {
       const dir = mkdtempSync(join(tmpdir(), 'golden-files-'));
       const git = (...args: string[]) => exec('git', args, { cwd: dir });
       await git('init', '-q', '-b', 'main');
@@ -85,6 +92,7 @@ describe('the golden-files job in ci.yml', () => {
       writeFileSync(join(dir, DATA, 'get-page.json'), group('get-page', [aCase(), aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]));
       writeFileSync(join(dir, DATA, 'tool-list.json'), '[\n  {\n    "name": "logseq_get_page"\n  }\n]\n');
       writeFileSync(join(dir, DATA, 'clock-cases.json'), '[]\n');
+      if (withCeilings) writeFileSync(join(dir, DATA, 'call-ceilings.json'), CEILINGS);
       writeFileSync(join(dir, 'README.md'), 'base\n');
       await git('add', '.');
       await git('commit', '-q', '-m', 'base');
@@ -103,10 +111,10 @@ describe('the golden-files job in ci.yml', () => {
     }
 
     /** The script's exit status and output, run without blocking the worker (a blocked one misses vitest's heartbeat under load) */
-    async function run(made: Promise<string>, labels: string[]) {
+    async function run(made: Promise<string>, labels: string[], text = script) {
       const dir = await made;
       try {
-        const result = await exec('bash', ['-e', '-c', script], { cwd: dir, env: { ...process.env, PR_LABELS: JSON.stringify(labels) } }).then(
+        const result = await exec('bash', ['-e', '-c', text], { cwd: dir, env: { ...process.env, PR_LABELS: JSON.stringify(labels) } }).then(
           ({ stdout, stderr }) => ({ status: 0, out: `${stdout}${stderr}` }),
           (error: { code?: number; stdout?: string; stderr?: string }) => ({ status: error.code ?? -1, out: `${error.stdout ?? ''}${error.stderr ?? ''}` })
         );
@@ -241,6 +249,89 @@ describe('the golden-files job in ci.yml', () => {
 
     it('no longer watches the old folder, which is gone', async () => {
       expect((await run(scratch({ 'scripts/parity/expected/get-page.json': '{"a":1}\n' }), [])).status).toBe(0);
+    });
+
+    it('leaves the call ceilings to its own step: a raised one is no change to a golden result', async () => {
+      expect((await run(scratch({ [CEILING_FILE]: ceilings({ alice: 9, bob: 2 }) }), [])).status).toBe(0);
+      expect((await run(scratch({ [CEILING_FILE]: null }), [])).status).toBe(0);
+    });
+
+    describe('its call-ceilings step, run against a scratch repository', { timeout: 30000 }, () => {
+      const ceilingScript = runBlock('Check the call ceilings');
+      const check = (made: Promise<string>, labels: string[]) => run(made, labels, ceilingScript);
+
+      it('is a step of the golden-files job, reading the labels through env, and never a `${{ }}` in its text', () => {
+        const job = workflow.slice(workflow.indexOf('\n  golden-files:'), workflow.indexOf('\n  build-and-test:'));
+        expect(job).toContain('- name: Check the call ceilings');
+        expect(ceilingScript).toContain('HEAD^1');
+        expect(ceilingScript).toContain(CEILING_FILE);
+        expect(ceilingScript).toContain('golden-change');
+        expect(ceilingScript).toContain('PR_LABELS');
+        expect(ceilingScript).not.toContain('${{');
+      });
+
+      it('passes when no ceiling changed, label or not', async () => {
+        expect((await check(scratch({ 'README.md': 'changed\n' }), [])).status).toBe(0);
+        expect((await check(scratch({ 'README.md': 'changed\n' }), ['golden-change'])).status).toBe(0);
+      });
+
+      it('passes a lowered ceiling and a ceiling that went with its case, with no label: a change that makes fewer calls needs no OK', async () => {
+        expect((await check(scratch({ [CEILING_FILE]: ceilings({ alice: 0, bob: 1 }) }), [])).status).toBe(0);
+        expect((await check(scratch({ [CEILING_FILE]: ceilings({ alice: 1 }) }), [])).status).toBe(0);
+        expect((await check(scratch({ [CEILING_FILE]: ceilings({}) }), [])).status).toBe(0);
+      });
+
+      it('passes a file written another way with the same numbers, and a change to the call fixtures alone', async () => {
+        expect((await check(scratch({ [CEILING_FILE]: '{"bob":2,"alice":1}' }), [])).status).toBe(0);
+        const more = aCase({ steps: [[{ method: 'logseq.Editor.getPage', args: ['alice'], response: { id: 1 } }, { method: 'logseq.Editor.getPage', args: ['bob'], response: { id: 2 } }]] });
+        expect((await check(scratch({ [`${DATA}/get-page.json`]: group('get-page', [more, aCase({ name: 'bob', arguments: { page_name: 'Bob' } })]) }), [])).status).toBe(0);
+      });
+
+      it('fails a raised ceiling without the label, and names the case and both numbers', async () => {
+        const { status, out } = await check(scratch({ [CEILING_FILE]: ceilings({ alice: 1, bob: 3 }) }), ['task']);
+        expect(status).toBe(1);
+        expect(out).toContain('bob: 2 -> 3');
+        expect(out).not.toContain('alice');
+        expect(out).toContain('golden-change');
+      });
+
+      it('passes a raised ceiling that carries the golden-change label, and still lists it', async () => {
+        const { status, out } = await check(scratch({ [CEILING_FILE]: ceilings({ alice: 5, bob: 2 }) }), ['golden-change']);
+        expect(status).toBe(0);
+        expect(out).toContain('alice: 1 -> 5');
+      });
+
+      it('does not take a label that merely contains the name', async () => {
+        expect((await check(scratch({ [CEILING_FILE]: ceilings({ alice: 2, bob: 2 }) }), ['golden-change-later'])).status).toBe(1);
+      });
+
+      it('fails a ceiling for a case that had none, since it is a ceiling that did not exist', async () => {
+        const { status, out } = await check(scratch({ [CEILING_FILE]: ceilings({ alice: 1, bob: 2, carol: 0 }) }), []);
+        expect(status).toBe(1);
+        expect(out).toContain('carol: none -> 0');
+      });
+
+      it('fails a value that is not a number, so a ceiling can not be written as something that compares low', async () => {
+        for (const value of ['"9"', 'null', 'true', '[9]']) {
+          expect((await check(scratch({ [CEILING_FILE]: `{"alice":${value},"bob":2}` }), [])).status, value).toBe(1);
+        }
+      });
+
+      it('fails when the file is deleted, or is not an object of ceilings', async () => {
+        expect((await check(scratch({ [CEILING_FILE]: null }), [])).status).toBe(1);
+        expect((await check(scratch({ [CEILING_FILE]: 'not json\n' }), [])).status).toBe(1);
+        expect((await check(scratch({ [CEILING_FILE]: '[1,2]\n' }), [])).status).toBe(1);
+      });
+
+      it('passes when the base has no file yet, which is the pull request that introduces it', async () => {
+        expect((await check(scratch({ [CEILING_FILE]: ceilings({ alice: 1, bob: 2, carol: 3 }) }, false), [])).status).toBe(0);
+      });
+
+      it('prints a case name indented, so a name can not read as a workflow command', async () => {
+        const { out } = await check(scratch({ [CEILING_FILE]: ceilings({ alice: 1, bob: 2, '::set-output name=x::y': 9 }) }), []);
+        expect(out).toContain('    ::set-output name=x::y: none -> 9');
+        expect(out.split('\n').filter(line => line.startsWith('::set-output'))).toEqual([]);
+      });
     });
   });
 });
