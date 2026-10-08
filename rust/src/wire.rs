@@ -114,19 +114,18 @@ impl Reader {
         }
     }
 
+    /// A value that must be a whole number: a `:db/id`.
+    pub(crate) fn id_value(&self, value: &Value) -> Parsed<i64> {
+        let n = self.number_value(value)?;
+        // 2^53 is where an f64 stops holding every whole number, as a JavaScript number does
+        if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 { Ok(n as i64) } else { Err(self.mismatch("int", Some(value))) }
+    }
+
     /// A field that may be absent and, when present, must be a whole number: a `:db/id`.
     pub(crate) fn id(&mut self, map: &Map<String, Value>, key: &'static str) -> Parsed<Option<i64>> {
         self.at(Part::Key(key), |r| match map.get(key) {
             None => Ok(None),
-            Some(value) => {
-                let n = r.number_value(value)?;
-                // 2^53 is where an f64 stops holding every whole number, as a JavaScript number does
-                if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 {
-                    Ok(Some(n as i64))
-                } else {
-                    Err(r.mismatch("int", Some(value)))
-                }
-            }
+            Some(value) => r.id_value(value).map(Some),
         })
     }
 

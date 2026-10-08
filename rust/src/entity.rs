@@ -19,9 +19,9 @@ use serde_json::Value;
 
 use crate::wire::{Parsed, Part, Reader, entity_id};
 
-/// A number a JSON value holds, as the whole number the id of an entity is.
+/// A whole number a JSON value holds, as the id of an entity is.
 fn whole(value: Option<&Value>) -> Option<i64> {
-    value.and_then(Value::as_f64).map(|n| n as i64)
+    value.and_then(Value::as_i64)
 }
 
 /// `entityId`: the id of an entity or of a reference to one, in either spelling. A zero or missing
@@ -58,9 +58,9 @@ pub fn journal_flag(page: Option<&Value>) -> Option<bool> {
 }
 
 /// `journalDayOf`: the `YYYYMMDD` journal day of a page, in either spelling.
-pub fn journal_day_of(page: Option<&Value>) -> Option<f64> {
+pub fn journal_day_of(page: Option<&Value>) -> Option<i64> {
     let map = page?.as_object()?;
-    map.get("journalDay").and_then(Value::as_f64).or_else(|| map.get("journal-day").and_then(Value::as_f64))
+    whole(map.get("journalDay")).or_else(|| whole(map.get("journal-day")))
 }
 
 impl Reader {
@@ -228,8 +228,8 @@ mod tests {
         assert_eq!(journal_flag(Some(&json!({"journal?": false, "journal": true}))), Some(false));
         assert_eq!(journal_flag(Some(&json!({"journal": true}))), Some(true));
         assert_eq!(journal_flag(Some(&json!({}))), None);
-        assert_eq!(journal_day_of(Some(&json!({"journal-day": 20250101}))), Some(20250101.0));
-        assert_eq!(journal_day_of(Some(&json!({"journalDay": 20250102, "journal-day": 1}))), Some(20250102.0));
+        assert_eq!(journal_day_of(Some(&json!({"journal-day": 20250101}))), Some(20250101));
+        assert_eq!(journal_day_of(Some(&json!({"journalDay": 20250102, "journal-day": 1}))), Some(20250102));
     }
 
     #[test]

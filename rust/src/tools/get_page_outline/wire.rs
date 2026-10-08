@@ -61,15 +61,6 @@ impl Reader {
         }
         Ok(OutlineBlock { id, db_id, uuid, content, left_id: left.and_then(|l| l.id), parent })
     }
-
-    fn id_value(&self, value: &Value) -> Parsed<i64> {
-        let n = self.number_value(value)?;
-        if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 {
-            Ok(n as i64)
-        } else {
-            Err(self.mismatch("int", Some(value)))
-        }
-    }
 }
 
 /// `responses.outlineRows`: `[block | null]` per row. A `null` cell is `None`, which the outline

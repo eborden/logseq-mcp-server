@@ -163,7 +163,7 @@ impl QueryContext {
 
     /// `summary.totalPages`: the distinct pages, by `id`, among every topic's page and related pages.
     fn total_pages(&self) -> usize {
-        let id = |page: &Value| page.get("id").and_then(Value::as_f64).map(f64::to_bits);
+        let id = |page: &Value| page.get("id").and_then(Value::as_i64);
         let mut pages = HashSet::new();
         for context in &self.contexts {
             pages.insert(id(&context.main_page));

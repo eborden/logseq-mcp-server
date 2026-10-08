@@ -114,7 +114,7 @@ pub fn order_siblings<T>(siblings: Vec<T>, id: impl Fn(&T) -> i64, left: impl Fn
 
 /// A number a JSON value holds, as the whole number an entity id is.
 fn number_id(value: Option<&Value>) -> Option<i64> {
-    value.and_then(Value::as_f64).map(|n| n as i64)
+    value.and_then(Value::as_i64)
 }
 
 /// `node.<key>?.id` of a block's `parent`, `page` or `left`: the `id` the reference carries.
