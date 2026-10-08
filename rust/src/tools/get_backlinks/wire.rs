@@ -137,6 +137,8 @@ mod tests {
         assert_eq!(problem(linked_references(json!({}))), format!("{method} (response): Invalid input: expected array, received object"));
         assert_eq!(problem(linked_references(json!([1]))), format!("{method} [0]: Invalid input: expected tuple, received number"));
         assert_eq!(problem(linked_references(json!([[null]]))), format!("{method} [0][1]: Invalid input: expected array, received undefined"));
+        // zod's tuple length rule, from `Reader::rows`: two cells short is `Too small` before any cell is read
+        assert_eq!(problem(linked_references(json!([[]]))), format!("{method} [0]: Too small: expected array to have >2 items"));
         assert_eq!(
             problem(linked_references(json!([[{"id": "a"}, []]]))),
             format!("{method} [0][0].id: Invalid input: expected number, received string")
