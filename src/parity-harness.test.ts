@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
@@ -189,23 +190,30 @@ describe('the stub LogSeq', () => {
     }
   });
 
+  const post = (stub: { apiUrl: string; authToken: string }, method: string) =>
+    fetch(`${stub.apiUrl}/api`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${stub.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method, args: [] })
+    });
+  const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+  const EDITOR = ['getCurrentPage', 'getCurrentBlock', 'getSelectedBlocks'].map(name => `logseq.Editor.${name}`);
+
   it('settles once every call of a step has arrived, though the first answer came back long before (#340)', async () => {
     const stub = await startStubLogseq();
     try {
-      const names = ['getCurrentPage', 'getCurrentBlock', 'getSelectedBlocks'];
-      stub.load(names.map(name => ({ method: `logseq.Editor.${name}`, args: [], response: null })));
-      const post = (method: string) =>
-        fetch(`${stub.apiUrl}/api`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${stub.authToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method, args: [] })
-        });
+      stub.load(EDITOR.map(method => ({ method, args: [], response: null })));
       // The first call is answered at once, as a tool that fails on the first answer would return; the others arrive late, last one first
-      await post('logseq.Editor.getCurrentPage');
-      const late = [post('logseq.Editor.getSelectedBlocks'), new Promise<void>(r => setTimeout(r, 40)).then(() => post('logseq.Editor.getCurrentBlock'))];
-      expect(stub.calls().length).toBeLessThan(3);
-      await stub.settle(3);
-      expect(stub.calls().map(call => call.method).sort()).toEqual(names.map(name => `logseq.Editor.${name}`).sort());
+      await post(stub, EDITOR[0]);
+      const late = [post(stub, EDITOR[2]), wait(40).then(() => post(stub, EDITOR[1]))];
+      let settled = false;
+      const settling = stub.settle(3).then(() => {
+        settled = true;
+      });
+      await wait(15);
+      expect(settled, 'the third call has not come yet').toBe(false);
+      await settling;
+      expect([...stub.calls().map(call => call.method)].sort()).toEqual([...EDITOR].sort());
       expect(stub.failures()).toEqual([]);
       await Promise.all(late);
     } finally {
@@ -213,14 +221,70 @@ describe('the stub LogSeq', () => {
     }
   });
 
-  it('gives up waiting for calls that never come, so a server that makes too few shows as a failed comparison', async () => {
+  it('does not settle while a request is still being read, even when the listed calls have all come (#340)', async () => {
+    const stub = await startStubLogseq();
+    try {
+      stub.load([{ method: EDITOR[0], args: [], response: null }]);
+      await post(stub, EDITOR[0]);
+      // An extra call whose body is written slowly: the count is already reached, one request is mid-body
+      const body = JSON.stringify({ method: EDITOR[1], args: [] });
+      const request = httpRequest(`${stub.apiUrl}/api`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${stub.authToken}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+      });
+      request.on('response', response => response.resume());
+      request.write(body.slice(0, 5));
+      await wait(20);
+      let settled = false;
+      const settling = stub.settle(1).then(() => {
+        settled = true;
+      });
+      await wait(60);
+      expect(settled, 'one request is still being read').toBe(false);
+      request.end(body.slice(5));
+      await settling;
+      expect(stub.calls().map(call => call.method)).toEqual([EDITOR[0], EDITOR[1]]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it('gives up after a quiet period when calls never come, so a server that makes too few shows as a failed comparison', async () => {
     const stub = await startStubLogseq();
     try {
       stub.load([]);
       const started = Date.now();
-      await stub.settle(2, 30);
-      expect(Date.now() - started).toBeLessThan(1000);
+      await stub.settle(2, { quietMs: 30, maxMs: 5000 });
+      const waited = Date.now() - started;
+      expect(waited).toBeGreaterThanOrEqual(30);
+      expect(waited).toBeLessThan(1000);
       expect(stub.calls()).toEqual([]);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it('waits no longer than maxMs for a server that keeps calling, and not at all for 0', async () => {
+    const stub = await startStubLogseq();
+    try {
+      stub.load([]);
+      let calling = true;
+      const keepCalling = (async () => {
+        while (calling) {
+          await post(stub, 'logseq.Editor.getCurrentPage');
+          await wait(10);
+        }
+      })();
+      const started = Date.now();
+      await stub.settle(1000, { quietMs: 100, maxMs: 300 });
+      const waited = Date.now() - started;
+      expect(waited).toBeGreaterThanOrEqual(300);
+      expect(waited).toBeLessThan(1500);
+      const startedAgain = Date.now();
+      await stub.settle(1000, { quietMs: 100, maxMs: 0 });
+      expect(Date.now() - startedAgain).toBeLessThan(100);
+      calling = false;
+      await keepCalling;
     } finally {
       await stub.close();
     }
