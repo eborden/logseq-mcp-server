@@ -74,10 +74,10 @@ pub fn parse_args<T: DeserializeOwned>(arguments: Option<JsonObject>) -> Result<
     serde_json::from_value(Value::Object(present))
 }
 
-// PARITY(#299): the TypeScript result has no `isError` key, and an absent one differs from `false` on the wire
-// — drop if Rust becomes the only server.
-/// A result with no `isError` key, as the TypeScript server's has none: an absent `isError` and
-/// `isError: false` are different results on the wire (rmcp's own `success` writes the latter).
+/// A result with no `isError` key, as the recorded results have none: an absent `isError` and
+/// `isError: false` are different results on the wire (rmcp's own `success` writes the latter). Kept
+/// because an absent `isError` is valid MCP, and writing `false` would change every success result in
+/// `scripts/parity/expected/` to save two lines.
 pub fn success_result(content: Vec<ContentBlock>) -> CallToolResult {
     let mut result = CallToolResult::success(content);
     result.is_error = None;

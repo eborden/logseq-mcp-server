@@ -139,8 +139,8 @@ fn tips(raw: Option<&str>) -> Result<TipsOverride, ConfigError> {
 /// unset) for the system clock. The message echoes the value, which holds no secret. A release build
 /// ignores the variable, even a bad value (see [`NOW_ENV`]).
 fn clock(raw: Option<&str>) -> Result<Clock, ConfigError> {
-    // PARITY(#299): the hook is for the parity harness, so a release build never reads it - drop if Rust
-    // becomes the only server.
+    // A test hook, kept: the parity cases and the cargo parity test run on a fixed clock through this
+    // variable, which is why only a debug build reads it.
     if !cfg!(debug_assertions) {
         return Ok(Clock::System);
     }

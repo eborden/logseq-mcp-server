@@ -298,14 +298,11 @@ pub struct PageRenderOptions<'a> {
 /// an alias, date or namespace leaf.
 pub fn resolved_from_line(resolved_from: Option<&Value>) -> Option<String> {
     let map = resolved_from?.as_object()?;
-    // PARITY(#299): `JSON.stringify(undefined)` and `String(undefined)` are both "undefined", which is how
-    // JavaScript writes a missing value here (the server sets both fields, so this is not reached) — drop if
-    // Rust becomes the only server.
-    let name = map.get("name").map_or_else(|| "undefined".to_owned(), js::json_stringify);
-    let matched_by = match map.get("matchedBy") {
-        Some(Value::String(text)) => text.clone(),
-        Some(other) => js::json_stringify(other),
-        None => "undefined".to_owned(),
+    // The server sets both fields, so a map without them has no note to write.
+    let name = js::json_stringify(map.get("name")?);
+    let matched_by = match map.get("matchedBy")? {
+        Value::String(text) => text.clone(),
+        other => js::json_stringify(other),
     };
     Some(format!("(resolved from {name}, matched by {matched_by})"))
 }
@@ -381,9 +378,8 @@ impl FooterMeta {
                     .iter()
                     .map(|warning| FooterWarning {
                         code: text(warning.get("code")),
-                        // PARITY(#299): JavaScript writes a missing value in a template literal as "undefined" (the
-                        // server gives every warning a message, so this is not reached) — drop if Rust becomes the only server.
-                        message: warning.get("message").and_then(Value::as_str).unwrap_or("undefined").to_owned(),
+                        // the server gives every warning a message
+                        message: warning.get("message").and_then(Value::as_str).unwrap_or_default().to_owned(),
                         how_to_fetch_all: text(warning.get("howToFetchAll")),
                     })
                     .collect()
@@ -633,7 +629,8 @@ mod tests {
         let alice = json!({"originalName": "Alice", "resolvedFrom": {"name": "Al \"x\"", "matchedBy": "alias", "resolvedTo": "Alice"}});
         assert_eq!(page(alice, false), "# Alice\n\n(resolved from \"Al \\\"x\\\"\", matched by alias)\n");
         assert_eq!(resolved_from_line(Some(&json!("x"))), None);
-        assert_eq!(resolved_from_line(Some(&json!({}))).unwrap(), "(resolved from undefined, matched by undefined)");
+        assert_eq!(resolved_from_line(Some(&json!({}))), None);
+        assert_eq!(resolved_from_line(Some(&json!({"name": "x"}))), None);
     }
 
     #[test]
