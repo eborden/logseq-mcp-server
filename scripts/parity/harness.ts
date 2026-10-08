@@ -116,6 +116,11 @@ export interface ParityOptions {
    * real case set, off for a test that runs a few cases of its own.
    */
   requireSuggestionCases?: boolean;
+  /**
+   * The cases as committed, when `cases` are a perturbed copy (the self-check): the closest names are judged against
+   * their candidates, not the perturbed ones, so a server that reads the fixture lists names that aren't candidates.
+   */
+  unperturbedCases?: readonly ParityCase[];
   /** The vitest snapshot file holding the tools/list snapshot */
   snapshotFile: string;
   /** Milliseconds to wait for each MCP request */
@@ -444,6 +449,7 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     onlyTestedTools,
     bySuggestionRules,
     requireSuggestionCases,
+    unperturbedCases = cases,
     snapshotFile,
     timeoutMs = 30000,
     settleMs = 2000
@@ -458,6 +464,8 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     if (names.has(c.name)) throw new Error(`duplicate parity case name ${JSON.stringify(c.name)}`);
     names.add(c.name);
   }
+
+  const judged = new Map(unperturbedCases.map(c => [c.name, c]));
 
   const stub = await startStubLogseq();
   const dir = await mkdtemp(join(tmpdir(), 'logseq-parity-'));
@@ -523,7 +531,7 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
         const want = expected[c.name];
         if (!want) failures.push(`${prefix} no expected result recorded; run with --record`);
         else {
-          const differences = bySuggestionRules ? compareResultBySuggestionRules(want, result, candidatesOf(c.steps)) : compareResult(want, result);
+          const differences = bySuggestionRules ? compareResultBySuggestionRules(want, result, candidatesOf(judged.get(c.name)?.steps ?? c.steps)) : compareResult(want, result);
           for (const f of differences) failures.push(`${prefix} result ${f}`);
         }
       }
@@ -535,8 +543,8 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
     }
     // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0032)
     const reference = expected ?? results;
-    failures.push(...checkReferenceLists(cases, reference));
-    if (requireSuggestionCases) failures.push(...missingRequiredCases(cases, reference));
+    failures.push(...checkReferenceLists(unperturbedCases, reference));
+    if (requireSuggestionCases) failures.push(...missingRequiredCases(unperturbedCases, reference));
   } catch (error) {
     failures.push(`harness: ${(error as Error).message}`);
   } finally {
