@@ -20,11 +20,9 @@ const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 // is generated from this type, so it advertises the three (`anyOf`).
 //
 // No doc comments here: schemars would write each into the schema as a description, and the field
-// that holds a `Scalar` has its own. The schema is inlined, not a `$ref` into `$defs`: the MCP SDK
-// client the parity harness lists tools with drops `$defs`, so a `$ref` there can't be compared.
+// that holds a `Scalar` has its own. `tool::input_schema` writes it in place, not as a `$ref`.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
-#[schemars(inline)]
 pub enum Scalar {
     Text(String),
     Number(f64),
