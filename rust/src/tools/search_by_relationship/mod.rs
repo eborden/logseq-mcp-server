@@ -317,7 +317,7 @@ async fn walk(client: &LogseqClient, seeds: &[i64], targets: &HashSet<i64>, max_
         let query = queries::neighbor_pages(&ids);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // PARITY(#299): a `null` answer is read as no neighbours, so the walk ends "not connected" when LogSeq
-        // didn't answer (suspected TS bug, BR-0011) — drop if Rust becomes the only server.
+        // didn't answer (suspected TS bug, BR-0011) — fix per #342, in both servers.
         let neighbors = wire::id_rows(&answer)?.unwrap_or_default();
 
         if neighbors.iter().any(|id| targets.contains(id)) {
@@ -343,7 +343,7 @@ fn member_ids(set: &AliasSet) -> Vec<i64> {
 async fn fetch_tree(client: &LogseqClient, name: &str) -> Result<Vec<Value>, ToolError> {
     let answer = client.call_api("logseq.Editor.getPageBlocksTree", &[Value::from(name)]).await?;
     // PARITY(#299): a `null` tree is read as a page with no blocks, with no warning (suspected TS bug, BR-0011) —
-    // drop if Rust becomes the only server.
+    // fix per #342, in both servers.
     Ok(wire::blocks(&answer)?.unwrap_or_default())
 }
 
@@ -499,7 +499,7 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
 async fn fetch_blocks(client: &LogseqClient, query: crate::edn::Query) -> Result<Vec<Value>, ToolError> {
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
     // PARITY(#299): a `null` answer is read as no rows, so the search finds nothing when LogSeq didn't answer
-    // (suspected TS bug, BR-0011) — drop if Rust becomes the only server.
+    // (suspected TS bug, BR-0011) — fix per #342, in both servers.
     Ok(wire::block_rows(&answer)?.unwrap_or_default().into_iter().map(Value::Object).collect())
 }
 
