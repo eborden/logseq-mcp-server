@@ -27,3 +27,4 @@ reviewer: A diff of `rust/tests/data/parity/tool-list.json` only adds optional p
 | 2026-10-08 | Mechanical enforcement: the tool-list snapshot of the TypeScript server is replaced by the recorded tool list, which the parity harness compares by meaning (ADR-0031). Statement unchanged. Added the live-list guard. | #370 |
 | 2026-10-08 | Rationale only: the tool-list snapshot is the recorded `tools/list` the parity harness compares by meaning. Statement unchanged. | #372 |
 | 2026-10-08 | Mechanical enforcement: the parity check of the recorded `tools/list` is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
+| 2026-10-08 | Mechanical enforcement: the recorded `tools/list` moved from `scripts/parity/expected/tool-list.json` to `rust/tests/data/parity/tool-list.json`, so the `test:` and `reviewer:` lines name the new path. Same tiers, same file. Statement unchanged. | #388 |
