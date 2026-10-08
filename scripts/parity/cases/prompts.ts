@@ -55,7 +55,9 @@ export const promptsCases: ParityCase[] = [
   get('weekly_summary for a year below 100', 'weekly_summary', { week: '0050-03-04' }),
   get('weekly_summary for a week whose Monday is in year 99', 'weekly_summary', { week: '0100-01-01' }),
   get('weekly_summary for the first Monday of year 0', 'weekly_summary', { week: '0000-01-03' }),
-  // 0000-01-01 is a Saturday: its week starts in year -1, which a YYYYMMDD day cannot hold
+  get('weekly_summary for a three-digit year', 'weekly_summary', { week: '0500-03-04' }),
+  // 0000-01-01 is a Saturday: its week starts and ends in year -1, which a YYYYMMDD day cannot hold, so it is the one
+  // day 0000-01-01 (#299)
   get('weekly_summary for a week that starts before year 0', 'weekly_summary', { week: '0000-01-01' }),
   get('weekly_summary with a quoted word in the error', 'weekly_summary', { week: 'the "next" one' }),
   get('weekly_summary with an argument it does not have', 'weekly_summary', { weak: 'last' }),
