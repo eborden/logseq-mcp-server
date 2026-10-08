@@ -101,7 +101,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 - **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, spawns a separate reviewer subagent for each PR it opens (see Code review) and updates the board.
 - Pick unblocked items from *Ready* (no open blocked-by issue, see "Plans live in issues"). Run in parallel only items with no blocked-by edge between them and no file overlap.
 - Each subagent works in its own git worktree branched from `origin/main`.
-- Run subagents in parallel only when their files don't overlap. Give each a distinct anchor for new `DatalogQueryBuilder` methods and its own new test file.
+- Run subagents in parallel only when their files don't overlap. Give each its own tool directory (`rust/src/tools/<tool>/`, with its queries in its own `queries.rs`) and its own new test file.
 - Subagents open PRs and don't merge. They stage files by explicit path and never commit `node_modules`, `dist`, local settings or draft docs.
 
 ### PR conventions
@@ -118,7 +118,7 @@ These need the `project` scope: `gh auth refresh -s project`.
    ```bash
    gh api repos/eborden/logseq-mcp-server/pulls/<n>/reviews --input review.json
    # review.json: {"event": "COMMENT", "body": "...",
-   #   "comments": [{"path": "src/x.ts", "line": 12, "side": "RIGHT", "body": "..."}]}
+   #   "comments": [{"path": "rust/src/x.rs", "line": 12, "side": "RIGHT", "body": "..."}]}
    ```
    Use `event: COMMENT`, never `REQUEST_CHANGES` or `APPROVE`. Every PR is opened by the same GitHub account as the reviewer, and GitHub rejects those two events on your own PR.
 3. A fixer subagent (the author or a fresh one) handles each thread. It either fixes it and replies with the commit SHA, or replies with a concrete reason for not changing it.
@@ -255,14 +255,14 @@ Every constraint below marked **Verified** is reproduced by `npx tsx scripts/pro
 
 **Verified.** The "0 results" recorded in commit c108174 matches the bare-string case: the original example passed `'my-page'` unquoted. Why strings were once embedded and are now bound with `:in`: [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md), which supersedes ADR-0006.
 
-**Current practice:** string parameters go through `:in`. `LogseqClient.executeDatalogQuery(query, ...inputs)` sends each input as `JSON.stringify(value)` (a JSON string literal is also a valid EDN string literal), and every `DatalogQueryBuilder` method returns `{ query, inputs }`:
-```typescript
-const { query, inputs } = DatalogQueryBuilder.getPage(pageName); // inputs: [pageName.toLowerCase()]
-await client.executeDatalogQuery(query, ...inputs);
-// query: [:find (pull ?page [*]) :in $ ?page-name :where [?page :block/name ?page-name]]
+**Current practice:** string parameters go through `:in`. `LogseqClient::execute_datalog_query(query, inputs)` (`rust/src/client.rs`) sends each input as its JSON text (a JSON string literal is also a valid EDN string literal), and every query builder returns a `Query { text, inputs }` (`rust/src/edn.rs`). An input is a `DatalogInput`, a type that says what the value means, and a `PageName` is lowercase by construction:
+```rust
+let query = get_page_blocks(&PageName::new(page_name)); // inputs: [DatalogInput::PageName(..)], lowercased
+client.execute_datalog_query(&query.text, &query.inputs).await?;
+// text: [:find (pull ?block [*]) :in $ ?page-name :where [?page :block/name ?page-name] [?block :block/page ?page]]
 ```
 
-Pass raw values as inputs. The client does the EDN encoding, so never `JSON.stringify` an input yourself (it would be encoded twice). See constraint 6 for what is still embedded.
+Pass typed inputs. `DatalogInput::to_edn` does the EDN encoding, so never JSON-encode a string yourself (it would be encoded twice). See constraint 6 for what is still embedded.
 
 ---
 
@@ -275,7 +275,7 @@ Pass raw values as inputs. The client does the EDN encoding, so never `JSON.stri
 | `clojure.string/includes?` | Works, including on `:block/content` |
 | `re-pattern` + `re-find`, e.g. `"(?i)foo"` | Works (case-insensitive matching) |
 
-**Verified.** Lowercase in TypeScript (`pageName.toLowerCase()`) and pass the result as an `:in` input, as in constraint 1. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
+**Verified.** Lowercase in Rust (`PageName::new` does it) and pass the result as an `:in` input, as in constraint 1. Use `includes?` or `re-find` to filter content inside a query instead of fetching every page's blocks.
 
 **DON'T** call `clojure.string/lower-case` in a query. It fails with:
 ```
@@ -327,14 +327,14 @@ Empty pages are common: in a journal-heavy graph, most non-journal pages may hav
 **Verified.**
 
 **DO:**
-```typescript
-await client.callAPI('logseq.DB.datascriptQuery', [datalogQuery]);
+```rust
+client.execute_datalog_query(&query.text, &query.inputs).await?; // calls logseq.DB.datascriptQuery
 ```
 
 **Don't** treat a `null` from `DB.q` as "no results". It usually means the wrong dialect was sent.
 
 **References:**
-- Implemented in: `executeDatalogQuery()` in `src/client.ts`
+- Implemented in: `LogseqClient::execute_datalog_query` in `rust/src/client.rs`
 
 ---
 
@@ -350,7 +350,7 @@ Page entity:
   :db/id              - Numeric ID
 ```
 
-Lowercase the name before passing it as an `:in` input, so `getPage('Alice')`, `getPage('alice')` and `getPage('ALICE')` all find `alice` (Pattern 3 below). This matches LogSeq's own UI, which lowercases before lookup. Every builder in `src/datalog/queries.ts` does it.
+Lowercase the name before passing it as an `:in` input, so a lookup for `Alice`, `alice` or `ALICE` finds `alice` (Pattern 3 below). This matches LogSeq's own UI, which lowercases before lookup. `PageName::new` (`rust/src/edn.rs`) does it, and the query builders take a `PageName`, not a string, so none can skip it.
 
 ---
 
@@ -362,12 +362,12 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 [?p :block/name "foo "bar"]   →  LogSeq API error: Unexpected EOF reading string starting ""]].
 ```
 
-**Verified.** `JSON.stringify(value)` produces a valid EDN string literal for quotes, backslashes and newlines, and the escaped form runs correctly.
+**Verified.** A JSON string literal (what `serde_json` writes, and `JSON.stringify` in the scripts) is a valid EDN string literal for quotes, backslashes and newlines, and the escaped form runs correctly.
 
-**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. All of `src/datalog/queries.ts` works this way ([ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)).
+**DO:** pass strings as `:in` inputs (constraint 1). The client does the escaping, and the value is never part of the query text, so there is nothing to inject into. Every `queries.rs` in `rust/src` works this way ([ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)).
 
-- Numeric IDs are still embedded, in `ground` vectors, because collection `:in` inputs are unprobed. Build them with `DatalogQueryBuilder.groundIds(ids)`, which throws unless every id passes `Number.isInteger`. Bind the ids straight to the entity variable (`groundIds(ids, '?p')` followed by a pattern on `?p`). `[?p :db/id ?id]` matches nothing, and a query whose only clause is the `ground` binding errors.
-- If you ever must embed a string literal, use `JSON.stringify(value)`. A string used inside `re-pattern` also needs regex metacharacters escaped first (#4).
+- Numeric IDs are still embedded, in `ground` vectors, because collection `:in` inputs are unprobed. Build them with `ground_ids(&ids, "?p")` (`rust/src/edn.rs`), which takes `PageId`s: a `PageId` is only ever a positive whole number, so nothing else can reach the query text. Bind the ids straight to the entity variable (`ground_ids(&ids, "?p")` followed by a pattern on `?p`). `[?p :db/id ?id]` matches nothing, and a query whose only clause is the `ground` binding errors.
+- If you ever must embed a string literal, write it with `serde_json::to_string`. A string used inside `re-pattern` also needs regex metacharacters escaped first (`rust/src/escape.rs`, #4).
 
 ---
 
@@ -385,7 +385,7 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 **Verified** (`scripts/probe-constraints.ts`). The sketch in #18 used plain strings and would match nothing.
 
-**Current practice:** `DatalogQueryBuilder.groundUuids(uuids, '?u')` embeds `#uuid "..."` literals. It throws unless every uuid matches the strict 8-4-4-4-12 hex pattern first, and that pattern rules out quotes, brackets and whitespace, so nothing can escape the literal. Page names for embeds still go through `:in $ [?n ...]` (a string collection works for names), with the or-join head `[?e ?n]`. Block uuids come back from pulls as plain strings. See `DatalogQueryBuilder.refTargets` and `src/utils/resolve-refs.ts`.
+**Current practice:** `ground_uuids(&uuids, "?u")` (`rust/src/edn.rs`) embeds `#uuid "..."` literals. It takes `BlockUuid`s, and `BlockUuid::parse` accepts only the strict 8-4-4-4-12 hex pattern (lowercase), which rules out quotes, brackets and whitespace, so nothing can escape the literal. Page names for embeds still go through `:in $ [?n ...]` (a string collection works for names), with the or-join head `[?e ?n]`. Block uuids come back from pulls as plain strings. See `ref_targets` in `rust/src/resolve_refs/queries.rs` and `rust/src/resolve_refs/mod.rs`.
 
 ---
 
@@ -395,12 +395,12 @@ Embedding a string that contains `"` in the query text produces a malformed quer
 
 When related data might not exist (pages without blocks, pages without connections), split into separate queries instead of an `or-join` (constraint 3):
 
-1. Query the main entity. If it's absent, throw (page-taking tools throw `PageNotFoundError` through the resolver).
-2. Query the related data. An empty result is a valid answer: `(results || []).map(r => r[0])`.
+1. Query the main entity. If it's absent, fail (page-taking tools return `ToolError::PageNotFound` through the resolver).
+2. Query the related data. An empty result is a valid answer: an empty `Vec`, not an error. (`null` is its own case, BR-0011.)
 
 Why, and what it costs: [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md).
 
-**Used in:** `buildContextForTopic` in `src/tools/build-context.ts`: page query, blocks query, then linked references via `getPageLinkedReferences`.
+**Used in:** `rust/src/tools/build_context/mod.rs`: page query, blocks query, then linked references via `logseq.Editor.getPageLinkedReferences`.
 
 ---
 
@@ -408,32 +408,32 @@ Why, and what it costs: [ADR-0007 (two-query-pattern-for-optional-data)](docs/ad
 
 Instead of recursive queries or N sequential API calls, use BFS with one batched query per depth level:
 
-```typescript
-let currentFrontier = [rootId];
+```rust
+let mut frontier = vec![root_id];
 
-for (let depth = 1; depth <= maxDepth; depth++) {
-  // Query ALL pages at current depth in ONE call
-  const { query, inputs } = DatalogQueryBuilder.connectedPages(currentFrontier);
-  const results = await client.executeDatalogQuery(query, ...inputs);
+for depth in 1..=max_depth {
+    // Query ALL pages at current depth in ONE call
+    let query = connected_pages(&page_ids(&frontier)?);
+    let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
 
-  // Process results for next depth
-  currentFrontier = extractNewPages(results);
+    // Process results for next depth
+    frontier = new_pages(connected_rows(&answer)?);
 }
 ```
 
-**Performance:** at most maxDepth + 1 calls, asserted by a unit test. Depth 2 from a hub with ~100 neighbours takes 3 calls, down from ~120.
+**Performance:** at most max_depth + 1 calls, asserted by a call-count test (`rust/tests/concept_calls.rs`). Depth 2 from a hub with ~100 neighbours takes 3 calls, down from ~120.
 
-> **Implemented in `get-concept-network.ts` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `maxNodes` 50 (root included) and `maxFanout` 15 new pages per page. Journal pages are leaves unless `expandJournals` is set, and `truncated: true` is set whenever a cap bites. MCP clients set them with `max_nodes` (≤ 500), `max_fanout` (≤ 100) and `expand_journals` on `logseq_get_concept_network`. Why every walk is capped: [ADR-0011 (bounded-calls-and-results)](docs/adr/0011-bounded-calls-and-results.md).
+> **Implemented in `rust/src/tools/get_concept_network/` (#3).** Caps matter: journal pages link to almost everything, and an uncapped depth-2 walk from one hub reached ~550 nodes once outbound links were followed. Defaults are `max_nodes` 50 (root included) and `max_fanout` 15 new pages per page. Journal pages are leaves unless `expand_journals` is set, and `truncated: true` is set whenever a cap bites. MCP clients set them with `max_nodes` (≤ 500), `max_fanout` (≤ 100) and `expand_journals` on `logseq_get_concept_network`. Why every walk is capped: [ADR-0011 (bounded-calls-and-results)](docs/adr/0011-bounded-calls-and-results.md).
 
-**Real implementation:** `DatalogQueryBuilder.connectedPages` and `getConceptNetwork`. When the root has aliases, depth 1 uses `connectedPagesGrouped` instead, so one query covers every name in the alias group (#69). One `or-join` covers both directions (outbound: blocks on the source page that ref another page; inbound: blocks on another page that ref the source). Frontier ids are bound with `groundIds` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
+**Real implementation:** `connected_pages` (`queries.rs`) and `get_concept_network` (`mod.rs`) in `rust/src/tools/get_concept_network/`. When the root has aliases, depth 1 uses `connected_pages_grouped` instead, so one query covers every name in the alias group (#69). One `or-join` covers both directions (outbound: blocks on the source page that ref another page; inbound: blocks on another page that ref the source). Frontier ids are bound with `ground_ids` directly to the entity variable (see constraint 6), and each page pair gets one edge with a reference count.
 
 ---
 
 ### Pattern 3: Case-Insensitive Lookup
 
-Always lowercase page names in TypeScript before passing them as `:in` inputs, to match `:block/name` (constraints 1, 2 and 5).
+Always lowercase page names before passing them as `:in` inputs, to match `:block/name` (constraints 1, 2 and 5). A `PageName` does it by construction, so build one and pass it on.
 
-**Used in:** `conceptNetwork()`, `getPage()`, `getPageBlocks()` and `getBlocksReferencingPage()` in `src/datalog/queries.ts`.
+**Used in:** every query builder that takes a page name (the `queries.rs` files under `rust/src/tools/` and `rust/src/resolve/`).
 
 **Also case-insensitive:** `search_by_relationship` matches `:block/refs` against lowercased names (#7), and `search_blocks` uses a `(?i)` regex (#4).
 
@@ -455,7 +455,8 @@ The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
 - A feature-flagged dual HTTP/Datalog implementation, replaced by Datalog only (df7503a, 37fe0d6): [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md)
 - Strings embedded in query text, later bound with `:in` once probing showed it works: [ADR-0006](docs/adr/0006-embed-strings-in-datalog-queries.md), superseded by [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)
 - Pages without blocks, fixed by splitting queries (d6c3151): [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md)
-- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 16 registered in `src/index.ts` today.
+- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 16 registered in `rust/src/tools/mod.rs` today.
+- A Rust implementation beside the TypeScript server (ADR-0025, ADR-0031, #122), held to its results byte for byte, then the TypeScript server removed after the Go on #349 (#356, last version at `10103c8`)
 - Oct 2026: a review of 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers set the roadmap in GitHub issues #3–#18. Probing the Datalog constraints and measuring API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`) corrected constraints 1, 2 and 4.
 
 ### Lessons Learned
@@ -472,60 +473,60 @@ The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
 Quick reference checklist for future work:
 
 **Queries**
-- [ ] Pre-lowercase page names before passing them to queries
-- [ ] Pass strings as `:in` inputs, never embedded in the query text. Pass raw values: `executeDatalogQuery` EDN-encodes them (a bare string would be read as a symbol).
-- [ ] Embed numeric IDs only through `DatalogQueryBuilder.groundIds`, which checks `Number.isInteger`
+- [ ] Build page names as `PageName`, which lowercases them, before they reach a query
+- [ ] Pass strings as `:in` inputs (`DatalogInput`), never embedded in the query text. `execute_datalog_query` EDN-encodes them (a bare string would be read as a symbol).
+- [ ] Embed numeric IDs only through `ground_ids`, which takes `PageId`s
 - [ ] Don't use `clojure.string/lower-case`. `includes?`, `starts-with?`, `re-pattern` and `re-find` work.
 - [ ] Split queries when data might be empty (don't rely on or-join with ground nil)
 - [ ] Send Datalog to `logseq.DB.datascriptQuery`. `logseq.DB.q` takes the simple query DSL and returns `null` for Datalog.
-- [ ] Handle empty arrays from queries gracefully (`(results || [])`)
+- [ ] Handle empty arrays from queries gracefully (an empty `Vec`; `null` is its own case)
 - [ ] Page names in `:block/name` are lowercase, not original casing
 - [ ] Use `[(ground [id1 id2 id3]) [?id ...]]` for batch queries
 - [ ] Never crawl `getAllPages` + one call per page (Pattern 4)
 - [ ] `:with` can't name a variable that's also aggregated in `:find` (error: `:find and :with should not use same variables`)
-- [ ] Match `:block/uuid` with `#uuid "..."` literals via `groundUuids`; strings never match (constraint 7)
+- [ ] Match `:block/uuid` with `#uuid "..."` literals via `ground_uuids`; strings never match (constraint 7)
 - [ ] Remember: LogSeq Datalog ≠ Standard DataScript
 
 **Data shapes** (verified by `scripts/probe-constraints.ts`)
-- [ ] `:block/journal-day` is an integer `YYYYMMDD` (e.g. `20260422`). Parse its digits; never pass it to `new Date()`.
+- [ ] `:block/journal-day` is an integer `YYYYMMDD` (e.g. `20260422`). Parse its digits (`JournalDay::parse`); never treat it as a timestamp.
 - [ ] A scheduled or deadline date does not put `:block/journal-day` on a block (#140; probed on the fixture, LogSeq 0.10.15: `SCHEDULED`, `DEADLINE` and both, on journal and non-journal pages, 0 of 6). What does carry it is a block LogSeq **creates in the app** on a journal page, whatever its text (today's empty first block; blocks added with `Editor.insertBlock`, scheduled or not); no block on a file-backed page of the ~146-page fixture carries it, on LogSeq 0.10.15 (the `insertBlock` result is a hand check on a throwaway copy that the probe does not repeat, since it never writes). A query for journal pages must still require `[?page :block/name]`, or those blocks match as duplicate "pages" for the same day. The same query without it returns one extra row on a fresh fixture instance, the auto-created block of today's journal.
 - [ ] `logseq.Editor.getBlock` returns `page` and `parent` as bare `{id}` objects. Resolve them; don't expect names.
 - [ ] `:block/path-refs` includes refs inherited from ancestor blocks. Use it for "anything under a block tagged X".
 - [ ] A nested pull works on refs: `(pull ?block [* {:block/refs [:db/id :block/name :block/original-name :block/journal? :block/journal-day]}])` returns each ref as a page map in the same call (`query_by_date_range` uses it for `topConcepts`). A ref to a block (`((uuid))`) has no `name`, and journal pages carry `journal?` true and `journal-day`.
 - [ ] `:block/updated-at` is missing on some pages (roughly 1 in 10 pages lacked it in testing). Use `get-else` with a default.
 - [ ] Many pages are empty link targets with no blocks or file. Test with them.
-- [ ] Read LogSeq through `callParsed` / `queryParsed` (`src/utils/parse-response.ts`), never a bare `client.callAPI` / `executeDatalogQuery` in a tool (#202). Each checks the response against a schema from `src/response-schemas.ts` and throws `LogSeqResponseError` (method and path, never a value) when a field the code reads is missing or mistyped. The schemas name only the fields the code reads (extra keys pass, as LogSeq adds them), say `.nullable()` where LogSeq may answer `null` (a tool still treats `null` as its own case, BR-0011), and keep the key spelling LogSeq sent: the check returns the response itself, not a rebuilt copy, because full output carries `original-name` for a pulled page and `originalName` for an Editor API one and BR-0004 forbids renaming either. A new field a tool reads goes in the schema first; a block or page reached through a hot path (thousands of rows) must stay small, since each declared field costs time: re-run `npx tsx scripts/measure-parse-time.ts`. A mock in a unit test must look like LogSeq's answer (a block has `id` and `uuid`; `getPage` answers a page or `null`, never `undefined` or `[]`), or the parse fails.
-- [ ] Resolve page names with `requirePage`, not `getPage`: [BR-0010 (page-names-resolved-via-resolver)](docs/business-rules/0010-page-names-resolved-via-resolver.md)
-- [ ] An alias group is the pages that name one thing (#69). `alias:: x` stores `:block/alias` in **both directions** between the declaring page and the stub `x`, and LogSeq keeps a group of three or more as a **clique** (every page links every other), with no self-links. A reference points at whichever page entity the block named, so `[[Jordan]]` and `[[Jordan Rivera]]` are refs to different pages. Any tool that follows links to a page must use the whole group: `resolveAliasSet(s)` in `src/utils/alias-set.ts` (one Datalog query for any number of pages, two hops, bound with `groundIds`; it makes no call for a page whose pulled entity has no `alias` key, which relies on the symmetry above). Don't write the same variable twice in one pattern to test for a self-link (`[?p :block/alias ?p]` matched every link). A runaway query blocks LogSeq's HTTP API until it finishes, so bind every variable in a new `or-join` before running it. `getPageLinkedReferences` spans the group for the declaring page but not exactly for the stub (a few ids differ), which is why the aliased path uses `linkedReferencesOfPages` (same block set as the Editor call for the declaring page, symmetric for every name). A tool that unions names reports them as `resolvedAliases` (original case, sorted; in `meta` for a bare-array result, keyed by topic in `search_by_relationship`), absent when the page has no aliases. Re-run the probe after LogSeq upgrades: its "must be 0" lines are what the resolver assumes.
+- [ ] Read LogSeq through the typed readers of `rust/src/wire.rs`, never a `Value` picked apart inside a tool (#202). The wire types live beside the code that reads them (the resolver's in `rust/src/resolve/wire.rs`, a tool's in its own `wire.rs`). A reader checks the answer against the fields the code reads and returns a `ResponseError` (method and path, never a value) when one is missing or mistyped. The types name only the fields the code reads (extra keys pass, as LogSeq adds them), give `None` where LogSeq may answer `null` (a tool still treats `null` as its own case, BR-0011), and keep the key spelling LogSeq sent: an entity stays the `Value` LogSeq sent, not a rebuilt copy, because full output carries `original-name` for a pulled page and `originalName` for an Editor API one and BR-0004 forbids renaming either (`rust/src/entity.rs` reads both). A new field a tool reads goes in the wire type first; a type reached through a hot path (thousands of rows) must stay small, since each declared field costs time. A mock in a test must look like LogSeq's answer (a block has `id` and `uuid`; `getPage` answers a page or `null`, never `[]`), or the parse fails (`rust/tests/common/mod.rs` has the mock LogSeq).
+- [ ] Resolve page names with `require_page` (`rust/src/resolve/mod.rs`), not a lookup of your own: [BR-0010 (page-names-resolved-via-resolver)](docs/business-rules/0010-page-names-resolved-via-resolver.md)
+- [ ] An alias group is the pages that name one thing (#69). `alias:: x` stores `:block/alias` in **both directions** between the declaring page and the stub `x`, and LogSeq keeps a group of three or more as a **clique** (every page links every other), with no self-links. A reference points at whichever page entity the block named, so `[[Jordan]]` and `[[Jordan Rivera]]` are refs to different pages. Any tool that follows links to a page must use the whole group: `resolve_alias_set` in `rust/src/resolve/alias.rs` (one Datalog query for any number of pages, two hops, bound with `ground_ids`; it makes no call for a page whose pulled entity has no `alias` key, which relies on the symmetry above). Don't write the same variable twice in one pattern to test for a self-link (`[?p :block/alias ?p]` matched every link). A runaway query blocks LogSeq's HTTP API until it finishes, so bind every variable in a new `or-join` before running it. `getPageLinkedReferences` spans the group for the declaring page but not exactly for the stub (a few ids differ), which is why the aliased path uses `linked_references_of_pages` (`rust/src/resolve/queries.rs`; same block set as the Editor call for the declaring page, symmetric for every name). A tool that unions names reports them as `resolvedAliases` (original case, sorted; in `meta` for a bare-array result, keyed by topic in `search_by_relationship`), absent when the page has no aliases. Re-run the probe after LogSeq upgrades: its "must be 0" lines are what the resolver assumes.
 - [ ] `:block/properties` is a map keyed by **keywords**, lowercase and dashed. `[(get ?props ?key) ?v]` needs a keyword: a string key, or a string `:in` input, matches nothing. Build it with `[(keyword ?key) ?kw]` from a string `:in` input. The Editor API returns the same keys camelCase.
 - [ ] A property value is a string, number or boolean, or an array (a set) for multi-value properties and page refs. `(str ?v)` of a set is `#{...}`, so match scalars with `str` and set elements with `contains?`. `string?`, `coll?`, `seq` and `clojure.string/join` are unavailable.
 - [ ] Page entities and their first (pre-)block both carry `:block/properties`. Require `[?b :block/page]` to get blocks only.
 
 **HTTP API behaviour** (verified)
-- [ ] An unknown method returns **HTTP 200** with body `{"error": "MethodNotExist: ..."}`. Always check the body; `client.ts` does.
-- [ ] A bad token returns HTTP 401. `client.ts` maps it to `LogSeqAuthError` (the message never contains the token).
-- [ ] A hung request is aborted after `timeoutMs` (config field, default 30000, applied per `callAPI` call) and surfaces as `LogSeqTimeoutError`.
+- [ ] An unknown method returns **HTTP 200** with body `{"error": "MethodNotExist: ..."}`. Always check the body; `rust/src/client.rs` does.
+- [ ] A bad token returns HTTP 401. `client.rs` maps it to `LogseqError::Auth` (the message never contains the token).
+- [ ] A hung request is aborted after `timeoutMs` (config field, default 30000, applied per `call_api` call) and surfaces as `LogseqError::Timeout`.
 - [ ] `logseq.Editor.getEditingBlockSelection` doesn't exist. Use `getSelectedBlocks`, which returns `null` when nothing is selected.
 - [ ] Without `includeChildren`, Editor API blocks carry `children` as unfetched `["uuid", "<id>"]` tuples, not block entities. `getCurrentPage` can return `null` while `getCurrentBlock` returns a block, or return a block when zoomed in. `get_current_context` handles all three.
-- [ ] `LOGSEQ_MCP_CONFIG=<absolute path>` replaces `~/.logseq-mcp/config.json` for the server (`resolveConfigPath` in `src/config.ts`; a relative path is a `ConfigValidationError`). Load the config through `resolveConfigPath()`, never a hard-coded path. The integration tests and the probe use `resolveFixtureConfigPath()` (`tests/integration/helpers/instance-config.ts`) instead, which has no fallback to `~/.logseq-mcp/config.json`. `scripts/logseq-instance.ts start` prints the value for this worktree's instance (#118).
+- [ ] `LOGSEQ_MCP_CONFIG=<absolute path>` replaces `~/.logseq-mcp/config.json` for the server (read once, in `Env::from_process` in `rust/src/env.rs`; a relative path is a `ConfigError::Validation`). Nothing else reads an environment variable or the home directory (`rust/tests/env_reads.rs`), and the config path is never hard-coded. The integration tests and the probe use `resolveFixtureConfigPath()` (`tests/integration/helpers/instance-config.ts`) instead, which has no fallback to `~/.logseq-mcp/config.json`. `scripts/logseq-instance.ts start` prints the value for this worktree's instance (#118).
 - [ ] A fresh LogSeq profile opens the demo graph with no API server. Seeding it takes the localStorage keys `current-repo` and `http-server-enabled` plus an empty graph cache file, and isolating `~/.logseq` takes both HOME and `CFFIXED_USER_HOME`. Details: `scripts/logseq-instance/local-storage.ts` and `instance.ts`. The API answers CORS `*` and can run commands, so an instance's token is random per start and never committed.
 - [ ] LogSeq writes to the graph it opens: it rewrites `logseq/config.edn` and adds `logseq/bak/`, today's journal and `pages/contents.md`. The instance therefore opens a copy, `.logseq-instance/graph/`, made fresh on every `start` without `logseq/bak/`, and the committed fixture is only read (#151). `stop` leaves the copy for inspection.
 
 **Tool behaviour**
-- [ ] Don't turn errors into empty results; re-throw infrastructure errors: [BR-0003 (infrastructure-errors-propagate)](docs/business-rules/0003-infrastructure-errors-propagate.md)
+- [ ] Don't turn errors into empty results; propagate infrastructure errors: [BR-0003 (infrastructure-errors-propagate)](docs/business-rules/0003-infrastructure-errors-propagate.md)
 - [ ] Never cut results silently; any cap reports `ResultMeta`: [BR-0006 (no-silent-truncation)](docs/business-rules/0006-no-silent-truncation.md)
 - [ ] `null` from an API call is not `[]`: [BR-0011 (null-is-not-empty)](docs/business-rules/0011-null-is-not-empty.md)
-- [ ] `resolve_refs` is opt-in and non-lossy; one resolver, `resolveBlockRefs`: [BR-0007 (resolve-refs-non-lossy)](docs/business-rules/0007-resolve-refs-non-lossy.md)
-- [ ] Guidance for the model (#44) lives outside the tools. Server `instructions` are in `src/instructions.ts`. Next-step tips: [BR-0009 (tips-are-advisory)](docs/business-rules/0009-tips-are-advisory.md). Parameter aliases: [BR-0008 (param-aliases-best-effort)](docs/business-rules/0008-param-aliases-best-effort.md). Every tool description needs a "Can't find" line ([ADR-0015 (tool-descriptions-state-limits)](docs/adr/0015-tool-descriptions-state-limits.md)).
-- [ ] Prompts and resources (#46) live in `src/prompts.ts` and `src/resources.ts`; `index.ts` only declares the capabilities and calls `registerPrompts` and `registerResources`. Both are read-only. A prompt returns one short user message naming the tools to call, defers to the `logseq-skills` workflow rather than copying it, quotes any argument it embeds, and rejects unknown or malformed arguments as `InvalidParams`. Tests check that a prompt names only existing tools, so a tool rename fails them. `serverInfo.version` is read from `package.json` (`src/version.ts`), and a test keeps `.claude-plugin/plugin.json` on the same version.
-- [ ] Publishing (#46) is manual: `.github/workflows/publish.yml` runs only on `workflow_dispatch`, needs the `NPM_TOKEN` secret, and defaults to a dry run. Never publish, tag or release from a session. Why: [ADR-0017 (manual-npm-publish)](docs/adr/0017-manual-npm-publish.md).
+- [ ] `resolve_refs` is opt-in and non-lossy; one resolver, `resolve_block_refs`: [BR-0007 (resolve-refs-non-lossy)](docs/business-rules/0007-resolve-refs-non-lossy.md)
+- [ ] Guidance for the model (#44) lives outside the tools. Server `instructions` are in `rust/src/instructions.rs`. Next-step tips: [BR-0009 (tips-are-advisory)](docs/business-rules/0009-tips-are-advisory.md). Parameter aliases: [BR-0008 (param-aliases-best-effort)](docs/business-rules/0008-param-aliases-best-effort.md). Every tool description needs a "Can't find" line ([ADR-0015 (tool-descriptions-state-limits)](docs/adr/0015-tool-descriptions-state-limits.md)).
+- [ ] Prompts and resources (#46) live in `rust/src/prompts.rs` and `rust/src/resources.rs`; `rust/src/server.rs` only declares the capabilities and routes the requests. Both are read-only. A prompt returns one short user message naming the tools to call, defers to the `logseq-skills` workflow rather than copying it, quotes any argument it embeds, and rejects unknown or malformed arguments as `InvalidParams`. A test in `rust/src/prompts.rs` checks that a prompt names only existing tools, so a tool rename fails it. `serverInfo.version` is read from `package.json` (`rust/src/server.rs`), and `tests/rust-guards/version.test.ts` keeps `.claude-plugin/plugin.json` on the same version.
+- [ ] Publishing (#46) is manual: `.github/workflows/publish.yml` runs only on `workflow_dispatch`, needs the `NPM_TOKEN` secret, and defaults to a dry run. Never publish, tag or release from a session. Why: [ADR-0017 (manual-npm-publish)](docs/adr/0017-manual-npm-publish.md). The workflow and the npm packaging in `package.json` are the TypeScript server's and stale until #350 and #355 decide how the Rust binary ships; the rule stands for whatever replaces them.
 - [ ] Slim output is the default: [BR-0012 (slim-output-default)](docs/business-rules/0012-slim-output-default.md)
-- [ ] Output format (#43). `get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` take `format: "json" | "markdown"` (default `json`, unchanged). Markdown is one plain text content block, not JSON-escaped, rendered by the one shared renderer in `src/utils/markdown.ts` (`markdown-context.ts` for the context and network tools). `logseq://page/{name}` renders through the same `renderPage`: never add a second renderer. Layout: page properties as `key:: value` (the page's pre-block text verbatim when the tree has one, so `[[refs]]` and hyphenated keys survive; only when there is no pre-block does `renderProperties` rebuild them from the map: kebab-case keys, multi-value as `[[a]], [[b]]`; never rewrite a pre-block), blocks as tab-indented `- ` bullets, `((uuid))` refs untouched, `resolvedContent` on a `[resolved]` line under its block, related pages as `[[links]]`, references grouped by source page, and a footer after `---` for `warnings`, `hasMore` and tips (tips ride in the footer, not a second content block). Full Markdown omits block uuids on purpose (they bloat every bullet; `compact` adds them), with one exception: keyword search hits in `get_context_for_query` always end with `((uuid)) (in [[Page]])`, since for a query with no topic they are the whole answer and would otherwise be a dead end. That needs one extra batched page query, made only for `format: "markdown"` (`hitPages`). An ambiguous name stays a structured JSON result in both formats; errors stay JSON `{error}`. `format` and `compact` are parsed at the boundary, like every tool argument (#60): the schemas in `src/tool-args.ts`, parsed by `parseArgs` in `src/utils/parse-args.ts`. Bad values are rejected with `InvalidParameterError`. Markdown renders the full result, uncapped except the resource's `MAX_PAGE_CHARS`.
-- [ ] `compact` (#43) exists on `build_context` and `get_context_for_query` only: block bodies become a first-line snippet (`firstLineSnippet`, 80 characters) plus the block's `((uuid))`; in JSON a block is `{ uuid, snippet }` and pages are `{ id, name, originalName }` (`src/utils/compact.ts`). `summary`, `totals`, `warnings` and `hasMore` stay. It is off for `get_page` and `get_block` (the outline tool covers that), and for `get_concept_network`, which already carries no bodies. Compact skips `resolve_refs`, and `build_context` says so with a `resolve_refs_ignored_in_compact` warning (resolving would put the bodies back and defeat compact; the warning names `compact: false` and `get_block` as the ways to get resolved text). `get_context_for_query` has no `resolve_refs`. For blocks shorter than the uuid, compact can be larger than the full markdown; it pays off on long blocks.
-- [ ] `logseq_get_page_outline` (#43): top-level `{ uuid, snippet, childCount }` (direct children only), in two calls. The query (`DatalogQueryBuilder.pageOutlineBlocks`) binds the resolved page id and returns the top-level blocks plus their direct children in one `or-join`; the tool counts children per parent in TypeScript and orders siblings by the `:block/left` chain. Capped at `MAX_OUTLINE_BLOCKS` (200) with an `outline_truncated` warning and no `howToFetchAll` (an outline cannot be paged; `hasMore` stays false). It is the step before `get_block` in the server `instructions`.
-- [ ] Tool results are minified JSON (`JSON.stringify(result)` with no spacing argument). The parity step of CI fails if any tool adds layout whitespace (it compares each result byte for byte). `format: "markdown"` is the opt-in plain text exception (#43). Pretty output would need an opt-in parameter and an exemption there. Why: [ADR-0009 (minified-json-output)](docs/adr/0009-minified-json-output.md).
-- [ ] The config file is parsed once by one zod schema in `src/config.ts` (#63). Its failures are typed (`ConfigFileNotFoundError`, `ConfigInvalidJsonError`, `ConfigValidationError` with `field`, all `ConfigError`); tell them apart by class, never by message text. No config error message shows a config-file value or the file's text, since either can be the token ([ADR-0003 (no-secrets-in-source)](docs/adr/0003-no-secrets-in-source.md)): V8's `JSON.parse` messages sometimes quote the file, and those are replaced. Only the `LOGSEQ_MCP_TIPS` error echoes its value, which holds no secret.
-- [ ] Never write to stdout (`console.log`, `console.info`, `console.debug`, `process.stdout`). It's the MCP stdio channel; log with `console.error`. `rust/tests/no_stdout.rs` fails on any hit in `rust/src` (#82). Never log graph data either: [ADR-0004 (stderr-only-logging)](docs/adr/0004-stderr-only-logging.md).
+- [ ] Output format (#43). `get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` take `format: "json" | "markdown"` (default `json`, unchanged). Markdown is one plain text content block, not JSON-escaped, rendered by the one shared renderer in `rust/src/markdown.rs` (`markdown_context.rs` for the context and network tools). `logseq://page/{name}` renders through the same `render_page`: never add a second renderer. Layout: page properties as `key:: value` (the page's pre-block text verbatim when the tree has one, so `[[refs]]` and hyphenated keys survive; only when there is no pre-block does `render_properties` rebuild them from the map: kebab-case keys, multi-value as `[[a]], [[b]]`; never rewrite a pre-block), blocks as tab-indented `- ` bullets, `((uuid))` refs untouched, `resolvedContent` on a `[resolved]` line under its block, related pages as `[[links]]`, references grouped by source page, and a footer after `---` for `warnings`, `hasMore` and tips (tips ride in the footer, not a second content block). Full Markdown omits block uuids on purpose (they bloat every bullet; `compact` adds them), with one exception: keyword search hits in `get_context_for_query` always end with `((uuid)) (in [[Page]])`, since for a query with no topic they are the whole answer and would otherwise be a dead end. That needs one extra batched page query, made only for `format: "markdown"` (`hitPages`). An ambiguous name stays a structured JSON result in both formats; errors stay JSON `{error}`. `format` and `compact` are parsed at the boundary, like every tool argument (#60): read through `Arguments` (`rust/src/args.rs`), with the `inputSchema` generated from the same argument type. Bad values are rejected with an `InvalidParameter` error. Markdown renders the full result, uncapped except the resource's `MAX_PAGE_CHARS`.
+- [ ] `compact` (#43) exists on `build_context` and `get_context_for_query` only: block bodies become a first-line snippet (`rust/src/snippet.rs`, 80 characters) plus the block's `((uuid))`; in JSON a block is `{ uuid, snippet }` and pages are `{ id, name, originalName }` (`rust/src/compact.rs`). `summary`, `totals`, `warnings` and `hasMore` stay. It is off for `get_page` and `get_block` (the outline tool covers that), and for `get_concept_network`, which already carries no bodies. Compact skips `resolve_refs`, and `build_context` says so with a `resolve_refs_ignored_in_compact` warning (resolving would put the bodies back and defeat compact; the warning names `compact: false` and `get_block` as the ways to get resolved text). `get_context_for_query` has no `resolve_refs`. For blocks shorter than the uuid, compact can be larger than the full markdown; it pays off on long blocks.
+- [ ] `logseq_get_page_outline` (#43): top-level `{ uuid, snippet, childCount }` (direct children only), in two calls. The query (`page_outline_blocks` in `rust/src/tools/get_page_outline/queries.rs`) binds the resolved page id and returns the top-level blocks plus their direct children in one `or-join`; the tool counts children per parent in Rust and orders siblings by the `:block/left` chain. Capped at `MAX_OUTLINE_BLOCKS` (200) with an `outline_truncated` warning and no `howToFetchAll` (an outline cannot be paged; `hasMore` stays false). It is the step before `get_block` in the server `instructions`.
+- [ ] Tool results are minified JSON (compact `serde_json` output, no layout whitespace). The parity step of CI fails if any tool adds layout whitespace (it compares each result byte for byte). `format: "markdown"` is the opt-in plain text exception (#43). Pretty output would need an opt-in parameter and an exemption there. Why: [ADR-0009 (minified-json-output)](docs/adr/0009-minified-json-output.md).
+- [ ] The config file is parsed once, by `load_config` in `rust/src/config.rs` (#63), into a typed `Config`. Its failures are `ConfigError` variants; tell them apart by variant, never by message text. No config error message shows a config-file value or the file's text, since either can be the token ([ADR-0003 (no-secrets-in-source)](docs/adr/0003-no-secrets-in-source.md)): a JSON parser's message sometimes quotes the file, and those are replaced. Only the `LOGSEQ_MCP_TIPS` error echoes its value, which holds no secret.
+- [ ] Never write to stdout (`println!`, `print!`, `dbg!`, `io::stdout`). It's the MCP stdio channel; log with `eprintln!`. `rust/tests/no_stdout.rs` fails on any hit in `rust/src` (#82). Never log graph data either: [ADR-0004 (stderr-only-logging)](docs/adr/0004-stderr-only-logging.md).
 
 ---
 
