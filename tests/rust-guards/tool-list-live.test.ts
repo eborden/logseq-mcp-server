@@ -10,7 +10,7 @@ import { startLiveServer, type LiveServer } from './live-server.js';
 
 /**
  * ADR-0016's size budget and description cap, over the Rust server's own `tools/list`: the payload every session
- * loads. `tests/guards/tool-list.test.ts` holds the recorded list (`scripts/parity/expected/tool-list.json`) to the
+ * loads. `tests/guards/tool-list.test.ts` holds the recorded list (`rust/tests/data/parity/tool-list.json`) to the
  * same limits, but the server spells its schemas its own way (`format: "uint32"` on every count and so on, which the
  * parity step's by-meaning comparison drops on purpose), so the recorded list is smaller than the payload a client
  * gets. It was 18,763 characters when the live one was 19,383.

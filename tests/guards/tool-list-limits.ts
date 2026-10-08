@@ -1,6 +1,6 @@
 /**
  * The limits ADR-0016 puts on the `tools/list` payload, shared by the two tests that hold a list to them:
- * `tests/guards/tool-list.test.ts` (the recorded list, scripts/parity/expected/tool-list.json) and
+ * `tests/guards/tool-list.test.ts` (the recorded list, rust/tests/data/parity/tool-list.json) and
  * `tests/rust-guards/tool-list-live.test.ts` (the Rust server's own list, which is what a client receives).
  */
 

@@ -1,7 +1,8 @@
-// A stand-in for LogSeq's HTTP API (#124). It replays canned responses keyed by method and
-// query text, records every call it gets, and fails loud on any call it has no answer for.
-// It listens on 127.0.0.1 with a port the OS picks, never LogSeq's 12315, and checks a token
-// made fresh for each run, so a server pointed at it can't reach a real graph by mistake.
+// A stand-in for LogSeq's HTTP API, for the Node tooling that runs the server (the measure scripts and the
+// guard tests that start the binary). It replays canned responses keyed by method and query text, records
+// every call it gets, and fails loud on any call it has no answer for. It listens on 127.0.0.1 with a port
+// the OS picks, never LogSeq's 12315, and checks a token made fresh for each run, so a server pointed at it
+// can't reach a real graph by mistake. The parity test has its own, in Rust (rust/tests/parity_support/stub.rs).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
@@ -22,16 +23,13 @@ export interface CannedCall extends LogseqCall {
   response: unknown;
 }
 
-/**
- * Collapse whitespace runs to one space. A query's indentation is how the TypeScript source
- * happens to lay it out, not part of what LogSeq is asked, so it is not part of the contract.
- */
+/** Collapse whitespace runs to one space. A query's indentation is how the source happens to lay it out. */
 export const normalizeQuery = (query: string): string => query.replace(/\s+/g, ' ').trim();
 
 /**
  * What a call is looked up by: the method, plus the query text for a Datalog query or the
- * args for any other method. The inputs of a query are not in the key; the harness compares
- * them separately, so a wrong input shows as a diff rather than as a missing answer.
+ * args for any other method. The inputs of a query are not in the key, so a caller that compares them
+ * separately sees a wrong input as a difference rather than as a missing answer.
  */
 export function callKey(call: LogseqCall): string {
   if (call.method === DATASCRIPT_QUERY && typeof call.args[0] === 'string') {
@@ -94,11 +92,11 @@ export async function startStubLogseq(): Promise<StubLogseq> {
     void (async () => {
       if (req.method !== 'POST' || req.url !== '/api') {
         failures.push(`unexpected request ${req.method} ${req.url}`);
-        return send(res, 404, { error: 'parity stub: only POST /api exists' });
+        return send(res, 404, { error: 'stub: only POST /api exists' });
       }
       if (req.headers.authorization !== `Bearer ${authToken}`) {
         failures.push('request with a wrong or missing auth token');
-        return send(res, 401, { error: 'parity stub: bad token' });
+        return send(res, 401, { error: 'stub: bad token' });
       }
       let call: LogseqCall;
       try {
@@ -107,20 +105,20 @@ export async function startStubLogseq(): Promise<StubLogseq> {
         call = { method: body.method, args: body.args };
       } catch (error) {
         failures.push(`malformed request body (${(error as Error).message})`);
-        return send(res, 400, { error: 'parity stub: malformed body' });
+        return send(res, 400, { error: 'stub: malformed body' });
       }
       log.push(call);
       const answers = pending.get(callKey(call));
       if (!answers || answers.length === 0) {
         failures.push(`no canned response for ${callKey(call)} (inputs ${JSON.stringify(call.args.slice(1))})`);
         // LogSeq answers an unknown method with HTTP 200 and an error body; the stub does the same
-        return send(res, 200, { error: 'parity stub: no canned response for this call' });
+        return send(res, 200, { error: 'stub: no canned response for this call' });
       }
       send(res, 200, answers.shift());
     })()
       .catch(error => {
         failures.push(`stub error: ${(error as Error).message}`);
-        if (!res.headersSent) send(res, 500, { error: 'parity stub: internal error' });
+        if (!res.headersSent) send(res, 500, { error: 'stub: internal error' });
       })
       .finally(() => {
         inFlight--;
@@ -134,7 +132,7 @@ export async function startStubLogseq(): Promise<StubLogseq> {
   const { port } = server.address() as AddressInfo;
   if (port === LOGSEQ_PORT) {
     await new Promise(resolve => server.close(resolve));
-    throw new Error(`parity stub got port ${LOGSEQ_PORT}, LogSeq's own; refusing to run there`);
+    throw new Error(`stub got port ${LOGSEQ_PORT}, LogSeq's own; refusing to run there`);
   }
 
   return {

@@ -4,7 +4,7 @@
 //   cd rust && cargo build --release --locked       # the Rust server; the script does not build it
 //   npx tsx scripts/measure-latency.ts [--iterations 30] [--warmup 3] [--rust-binary <path>]
 //
-// The server runs over MCP stdio against the parity harness's stub LogSeq (scripts/parity/stub-logseq.ts)
+// The server runs over MCP stdio against a stub LogSeq (scripts/lib/stub-logseq.ts)
 // on a random local port with a fresh token, through a temp LOGSEQ_MCP_CONFIG and an empty temp home. It
 // never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Every page, block and
 // name is made up, and the output is aggregates only.
@@ -22,15 +22,14 @@
 // server actually made. The first result of every parity case is checked against the recorded one, and
 // every call of every case against the case's steps, so a number is never for a call that failed.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { CASE_GROUPS, expectedFileOf } from './parity/case-groups.js';
-import { compareCalls, compareResult, sandboxedEnv, toToolResult, type ParityCase, type ToolResult } from './parity/harness.js';
-import { pulledPage, uuid, ATLAS } from './parity/ref-fixtures.js';
-import { REPO_ROOT } from './parity/server-command.js';
-import { LOGSEQ_PORT, startStubLogseq, type CannedCall, type StubLogseq } from './parity/stub-logseq.js';
+import { callMismatches, loadParityCase, REPO_ROOT, resultMismatches, type ParityCase, type ToolResult } from './lib/parity-cases.js';
+import { sandboxedEnv } from './lib/sandboxed-env.js';
+import { LOGSEQ_PORT, startStubLogseq, type CannedCall, type StubLogseq } from './lib/stub-logseq.js';
+import { pulledPage, uuid, ATLAS } from './measure-latency/fixtures.js';
 import { formatMs2, summarizeLatency } from './measure-latency/stats.js';
 
 const USAGE = 'usage: npx tsx scripts/measure-latency.ts [--iterations <n>] [--warmup <n>] [--rust-binary <path>]';
@@ -62,16 +61,10 @@ function parseOptions(argv: string[]): Options {
 
 // ---- the cases
 
-/** The parity case with this name, and the recorded result for it. */
+/** The parity case with this name (rust/tests/data/parity), and the recorded result for it. */
 async function parityCase(name: string): Promise<{ case: ParityCase; expected: ToolResult }> {
-  for (const group of CASE_GROUPS) {
-    const found = group.cases.find(c => c.name === name);
-    if (!found) continue;
-    const expected = JSON.parse(await readFile(expectedFileOf(group), 'utf8')) as Record<string, ToolResult>;
-    if (!expected[name]) throw new Error(`no recorded result for parity case ${JSON.stringify(name)}`);
-    return { case: found, expected: expected[name] };
-  }
-  throw new Error(`no parity case named ${JSON.stringify(name)}; scripts/measure-latency.ts picks cases by name`);
+  const found = loadParityCase(name);
+  return { case: found, expected: found.expected };
 }
 
 /** One happy-path parity case per tool: the name of the case, which is also its label in the report. */
@@ -336,14 +329,14 @@ async function main(): Promise<void> {
         const made = live.calls().length;
         // Every call, the large cases included, against the case's steps: the method and inputs of each call, in order
         // (the calls within a step as a set). A server that skips a step or sends other inputs times a different workload.
-        for (const mismatch of compareCalls(measured.steps, live.calls())) callProblems.add(`${server.name}: ${mismatch.slice(0, 300)}`);
+        for (const mismatch of callMismatches(measured.steps, live.calls())) callProblems.add(`${server.name}: ${mismatch.slice(0, 300)}`);
         const failures = live.failures();
         const result = response.result as ToolResult | undefined;
         if (failures.length > 0) throw new Error(`${server.name}: ${measured.label}: the stub saw ${failures.length} call(s) it had no answer for\n${failures.join('\n')}`);
         if (response.error || !result || result.isError) throw new Error(`${server.name}: ${measured.label} did not return a result: ${JSON.stringify(response.error ?? result?.content ?? response).slice(0, 400)}`);
         const outcome = outcomes[server.name];
         if (outcome.first === undefined) {
-          outcome.first = toToolResult(result);
+          outcome.first = JSON.parse(JSON.stringify(result)) as ToolResult;
           outcome.bytes = Buffer.byteLength(textOf(outcome.first));
         }
         if (timed) {
@@ -360,7 +353,7 @@ async function main(): Promise<void> {
         const outcome = outcomes[name];
         if (outcome.calls[0] !== expectedCalls) problems.push(`${name} made ${outcome.calls[0]} LogSeq call(s), the case lists ${expectedCalls}`);
         if (new Set(outcome.calls).size !== 1) problems.push(`${name} made a varying number of calls: ${[...new Set(outcome.calls)].join(', ')}`);
-        if (measured.expected) problems.push(...compareResult(measured.expected, outcome.first).slice(0, 2).map(p => `${name} result differs from the recorded one: ${p.slice(0, 120)}`));
+        if (measured.expected) problems.push(...resultMismatches(measured.expected, outcome.first).slice(0, 2).map(p => `${name} result differs from the recorded one: ${p.slice(0, 120)}`));
       }
       rows.push({ measured, rust: outcomes.rust, expectedCalls, problems });
     }

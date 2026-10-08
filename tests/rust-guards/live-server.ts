@@ -1,13 +1,13 @@
 // The Rust server as a client sees it, for the guards that read its own `tools/list` and its answers to bad arguments
-// (#356): the binary over MCP stdio against the parity harness's stub LogSeq, which answers nothing it was not given and
+// (#356): the binary over MCP stdio against a stub LogSeq (scripts/lib/stub-logseq.ts), which answers nothing it was not given and
 // records every call. Nothing here contacts a LogSeq or reads ~/.logseq-mcp/config.json (BR-0001).
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { sandboxedEnv } from '../../scripts/parity/harness.js';
-import { startStubLogseq, type StubLogseq } from '../../scripts/parity/stub-logseq.js';
+import { sandboxedEnv } from '../../scripts/lib/sandboxed-env.js';
+import { startStubLogseq, type StubLogseq } from '../../scripts/lib/stub-logseq.js';
 import { requireRustBinary, rustBinaryPath } from '../../scripts/lib/rust-binary.js';
 
 export interface LiveServer {
