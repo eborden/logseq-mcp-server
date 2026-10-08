@@ -9,7 +9,7 @@ use crate::client::LogseqClient;
 use crate::dates::Clock;
 use crate::errors::ToolError;
 
-pub mod build_context;
+pub mod check_links;
 pub mod get_backlinks;
 pub mod get_block;
 pub mod get_concept_evolution;
@@ -27,7 +27,7 @@ pub mod search_blocks;
 /// Every tool, as `tools/list` shows them.
 pub fn list() -> Vec<Tool> {
     vec![
-        build_context::definition(),
+        check_links::definition(),
         get_backlinks::definition(),
         get_block::definition(),
         get_concept_evolution::definition(),
@@ -53,7 +53,7 @@ pub async fn call(
     arguments: Option<JsonObject>,
 ) -> Option<Result<CallToolResult, ToolError>> {
     match name {
-        build_context::NAME => Some(build_context::call(client, tips_enabled, arguments).await),
+        check_links::NAME => Some(check_links::call(client, tips_enabled, arguments).await),
         get_backlinks::NAME => Some(get_backlinks::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
         get_concept_evolution::NAME => Some(get_concept_evolution::call(client, tips_enabled, arguments).await),
