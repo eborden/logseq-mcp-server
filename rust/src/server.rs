@@ -356,10 +356,10 @@ mod tests {
     }
 
     /// Runs the server over an in-memory pipe and sends it raw JSON-RPC lines, so the test sees
-    /// what a client sees on stdio. The API URL points at a closed port: nothing reaches LogSeq.
-    async fn exchange(requests: &[Value]) -> Vec<Value> {
+    /// what a client sees on stdio. `api_url` should be [`closed_port_url`]: nothing reaches LogSeq.
+    async fn exchange(api_url: &str, requests: &[Value]) -> Vec<Value> {
         let client = LogseqClient::new(&Config {
-            api_url: "http://127.0.0.1:9".into(),
+            api_url: api_url.into(),
             auth_token: "unused".into(),
             timeout_ms: Some(2000.0),
             tips: None,
@@ -384,6 +384,12 @@ mod tests {
         responses
     }
 
+    /// A local URL nothing listens on: bound to get a free port, then closed.
+    async fn closed_port_url() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    }
+
     fn initialize() -> Value {
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-06-18",
@@ -396,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_reports_the_name_version_and_instructions() {
-        let responses = exchange(&[initialize()]).await;
+        let responses = exchange(&closed_port_url().await, &[initialize()]).await;
         let result = &responses[0]["result"];
         assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
         assert_eq!(result["serverInfo"]["version"], SERVER_VERSION.as_str());
@@ -407,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn tools_list_returns_the_one_stub_tool() {
-        let responses = exchange(&[
+        let responses = exchange(&closed_port_url().await, &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
@@ -422,7 +428,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_call_is_an_error_result_not_a_protocol_error() {
-        let responses = exchange(&[
+        let api_url = closed_port_url().await;
+        let responses = exchange(&api_url, &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": PING_TOOL, "arguments": {}}}),
@@ -432,7 +439,7 @@ mod tests {
         let ping = &responses[1]["result"];
         assert_eq!(ping["isError"], true);
         let text: Value = serde_json::from_str(ping["content"][0]["text"].as_str().unwrap()).unwrap();
-        assert!(text["error"].as_str().unwrap().starts_with("Cannot connect to LogSeq at http://127.0.0.1:9"), "{text}");
+        assert!(text["error"].as_str().unwrap().starts_with(&format!("Cannot connect to LogSeq at {api_url}")), "{text}");
         let unknown = &responses[2]["result"];
         assert_eq!(unknown["isError"], true);
         assert_eq!(unknown["content"][0]["text"], r#"{"error":"Unknown tool: logseq_nope"}"#);
