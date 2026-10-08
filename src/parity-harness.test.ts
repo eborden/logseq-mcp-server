@@ -1139,6 +1139,17 @@ describe('the closest-name rules (ADR-0032, #335)', () => {
       // an input that folds to nothing has no exact or prefix hit to put first
       expect(checkList('Bob, Alice, Alice Notes', '   ', PAGES)).toEqual([]);
     });
+
+    it('rule 4 judges the order among the names listed: which of several exact or prefix hits are listed is open', () => {
+      const cafes = ['Café', 'Cafe', 'Café Notes', 'Café Bar'];
+      // "Cafe" is an exact match that is not listed, and "Café" is one that is, first: nothing listed is out of order
+      expect(checkList('Café, Café Notes, Café Bar', 'cafe', cafes)).toEqual([]);
+      // a listed exact match after a prefix match
+      expect(checkList('Café Notes, Café Bar, Café', 'cafe', cafes).join('\n')).toContain('rule 4: the prefix match "Café Notes" is listed before the exact match "Café"');
+      expect(checkList('Café Notes, Café Bar, Cafe', 'cafe', ['Cafe', 'Café Notes', 'Café Bar', 'Café Cup']).join('\n')).toContain('rule 4');
+      // no exact match listed at all, because the matcher left it out: only prefix matches, all in order
+      expect(checkList('Café Notes, Café Bar, Café Cup', 'cafe', ['Cafe', 'Café Notes', 'Café Bar', 'Café Cup'])).toEqual([]);
+    });
   });
 
   describe('the rest of a result', () => {
