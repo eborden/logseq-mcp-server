@@ -202,8 +202,9 @@ fn local_date(epoch_ms: i64) -> CalendarDate {
     CalendarDate { year: local.tm_year + 1900, month: (local.tm_mon + 1) as u32, day: local.tm_mday as u32 }
 }
 
-// PARITY(#299): a host with no C library time zone support reads its date in UTC, where the TypeScript
-// server reads the local one — drop if Rust becomes the only server.
+// A known difference from the TypeScript server (listed in #299): where there is no `localtime_r` (not a
+// unix host), "today" is the UTC day, and the TypeScript server reads the local one everywhere. A real
+// local-time implementation would replace this, not remove it.
 #[cfg(not(unix))]
 fn local_date(epoch_ms: i64) -> CalendarDate {
     utc_date(epoch_ms)
