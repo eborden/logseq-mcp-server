@@ -37,7 +37,7 @@ import {
   searchBlocksWithMeta as tsSearchBlocksWithMeta,
 } from '../../../src/tools/search-blocks.js';
 import { searchByRelationship as tsSearchByRelationship } from '../../../src/tools/search-by-relationship.js';
-import { closeSessions, isRust, rustSession } from './server-under-test.js';
+import { closeSessions, isRust, recordFallback, rustSession } from './server-under-test.js';
 
 /**
  * The tool functions the integration suites call (#352), with the signatures and results of the
@@ -209,6 +209,9 @@ export const searchBlocksWithMeta = ((
   maxLimit?: number
 ) => {
   // The tool's maximum is fixed; only a direct call can lower it (the cut at the maximum, result-caps)
+  if (isRust() && maxLimit !== undefined && maxLimit !== MAX_SEARCH_LIMIT) {
+    recordFallback('searchBlocksWithMeta', `maxLimit ${maxLimit}, which only a direct call can set`);
+  }
   if (!isRust() || (maxLimit !== undefined && maxLimit !== MAX_SEARCH_LIMIT)) {
     return tsSearchBlocksWithMeta(client, query, limit, includeContext, slimResults as false, maxLimit);
   }
@@ -226,6 +229,9 @@ export const searchBlocks = ((
   slimResults?: boolean
 ) => {
   // A direct call has no maximum (`searchBlocks` lifts it); the tool clamps `limit` to MAX_SEARCH_LIMIT
+  if (isRust() && limit !== undefined && limit > MAX_SEARCH_LIMIT) {
+    recordFallback('searchBlocks', `limit ${limit} is past the tool's maximum of ${MAX_SEARCH_LIMIT}`);
+  }
   if (!isRust() || (limit !== undefined && limit > MAX_SEARCH_LIMIT)) {
     return tsSearchBlocks(client, query, limit, includeContext, slimResults as false);
   }
@@ -261,12 +267,10 @@ export const getConceptNetwork = ((
   // The tool caps `max_nodes`, `max_fanout` and the depth; only a direct call can lift them (the walk with no fanout cap)
   const { maxNodes, maxFanout } = options;
   const beyondTool = (value: number | undefined, max: number) => value !== undefined && !(value <= max);
-  if (
-    !isRust() ||
-    beyondTool(maxNodes, MAX_NODES_LIMIT) ||
-    beyondTool(maxFanout, MAX_FANOUT_LIMIT) ||
-    beyondTool(maxDepth, TOOL_MAX_DEPTH)
-  ) {
+  const beyond =
+    beyondTool(maxNodes, MAX_NODES_LIMIT) || beyondTool(maxFanout, MAX_FANOUT_LIMIT) || beyondTool(maxDepth, TOOL_MAX_DEPTH);
+  if (isRust() && beyond) recordFallback('getConceptNetwork', 'maxNodes, maxFanout or maxDepth past the tool\'s maximum');
+  if (!isRust() || beyond) {
     return tsGetConceptNetwork(client, conceptName, maxDepth, options);
   }
   return callTool(client, 'logseq_get_concept_network', {
@@ -286,6 +290,7 @@ export const searchByRelationship = ((
   maxDistance?: number,
   options: Parameters<typeof tsSearchByRelationship>[5] = {}
 ) => {
+  if (isRust() && options.maxFrontier !== undefined) recordFallback('searchByRelationship', 'maxFrontier, which the tool has no argument for');
   if (!isRust() || options.maxFrontier !== undefined) {
     return tsSearchByRelationship(client, topicA, topicB, relationshipType, maxDistance, options);
   }
@@ -315,6 +320,7 @@ export const getContextForQuery = ((
   options: Parameters<typeof tsGetContextForQuery>[2] = {}
 ) => {
   // `hitPages` names the page of each hit for Markdown; the JSON tool leaves it off
+  if (isRust() && options.hitPages) recordFallback('getContextForQuery', 'hitPages, which the JSON tool leaves off');
   if (!isRust() || options.hitPages) return tsGetContextForQuery(client, query, options);
   return callTool(client, 'logseq_get_context_for_query', {
     query,
