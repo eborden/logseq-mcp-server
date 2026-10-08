@@ -45,3 +45,6 @@ tests/fixtures/graph/journals/20[3-9][0-9]_*
 # They hold source and test text and are large; never commit them.
 .stryker-tmp/
 reports/mutation/
+
+# Cargo build output of the Rust spike (ADR-0025, #123). Large, and rebuilt from rust/Cargo.lock.
+rust/target/
