@@ -121,6 +121,24 @@
       }
     ]
   },
+  "relationship aliases: an alias row two cells short": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.DB.datascriptQuery in a shape this server can't read: [0]: Too small: expected array to have >2 items\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "relationship aliases: an alias row one cell short": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.DB.datascriptQuery in a shape this server can't read: [0][1]: Invalid input: expected object, received undefined\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
   "relationship aliases: a group past the cap": {
     "content": [
       {
