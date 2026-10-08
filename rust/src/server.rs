@@ -230,25 +230,42 @@ mod tests {
         out
     }
 
-    fn normalize(value: &Value, defs: &Value) -> Value {
-        match value {
-            Value::Object(map) => {
-                let mut out = JsonObject::new();
-                for (key, value) in map {
-                    if !matches!(key.as_str(), "format" | "title" | "$schema" | "$ref") {
-                        out.insert(key.clone(), normalize(value, defs));
-                    }
+    /// One schema, normalized. Keywords are dropped only here, at schema positions: the keys of
+    /// `properties` and `$defs` are names (a parameter may be called `format` or `title`), so
+    /// their values are walked as schemas but the keys are kept.
+    fn normalize(schema: &Value, defs: &Value) -> Value {
+        let Value::Object(map) = schema else { return value_by_meaning(schema) };
+        let mut out = JsonObject::new();
+        for (key, value) in map {
+            let normalized = match key.as_str() {
+                "format" | "title" | "$schema" | "$ref" => continue,
+                "properties" | "$defs" => Value::Object(
+                    value.as_object().unwrap().iter().map(|(name, sub)| (name.clone(), normalize(sub, defs))).collect(),
+                ),
+                "items" | "not" | "additionalProperties" => normalize(value, defs),
+                "anyOf" | "oneOf" | "allOf" => {
+                    Value::Array(value.as_array().unwrap().iter().map(|sub| normalize(sub, defs)).collect())
                 }
-                if let Some(Value::String(reference)) = map.get("$ref") {
-                    let def = &defs[reference.strip_prefix("#/$defs/").unwrap()];
-                    for (key, value) in normalize(def, defs).as_object().unwrap() {
-                        out.entry(key.clone()).or_insert(value.clone());
-                    }
-                }
-                Value::Object(out)
+                // Values, not schemas: enum, default, const, required, type, description.
+                _ => value_by_meaning(value),
+            };
+            out.insert(key.clone(), normalized);
+        }
+        if let Some(Value::String(reference)) = map.get("$ref") {
+            let def = &defs[reference.strip_prefix("#/$defs/").unwrap()];
+            for (key, value) in normalize(def, defs).as_object().unwrap() {
+                out.entry(key.clone()).or_insert(value.clone());
             }
-            Value::Array(items) => Value::Array(items.iter().map(|item| normalize(item, defs)).collect()),
+        }
+        Value::Object(out)
+    }
+
+    /// A JSON value with every number compared by value (`50` and `50.0` are equal).
+    fn value_by_meaning(value: &Value) -> Value {
+        match value {
             Value::Number(n) => json!(n.as_f64().unwrap()),
+            Value::Array(items) => Value::Array(items.iter().map(value_by_meaning).collect()),
+            Value::Object(map) => Value::Object(map.iter().map(|(k, v)| (k.clone(), value_by_meaning(v))).collect()),
             other => other.clone(),
         }
     }
@@ -285,24 +302,41 @@ mod tests {
         assert_eq!(meaning(&schema_of::<PingArgs>()), meaning(&json!({"type": "object", "properties": {}, "required": []})));
     }
 
+    /// The TypeScript snapshot's schema for fields of each kind in [`SampleArgs`]
+    /// (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
+    fn typescript_sample_schema() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "page_name": {"type": "string", "description": "The page to read."},
+                "include_children": {"type": "boolean", "default": false, "description": "Include child blocks"},
+                "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text"},
+                "limit": {"type": "number", "description": "Most names to return"},
+                "max_nodes": {"type": "number", "default": 50, "description": "Maximum pages in the network (default: 50, max: 500)"},
+            },
+            "required": ["page_name"],
+        })
+    }
+
     #[test]
     fn the_schema_comes_from_the_type_that_parses_the_arguments_and_means_the_typescript_contract() {
-        // The right-hand side is the TypeScript snapshot's schema for fields of each kind
-        // (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
-        assert_eq!(
-            meaning(&schema_of::<SampleArgs>()),
-            meaning(&json!({
-                "type": "object",
-                "properties": {
-                    "page_name": {"type": "string", "description": "The page to read."},
-                    "include_children": {"type": "boolean", "default": false, "description": "Include child blocks"},
-                    "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text"},
-                    "limit": {"type": "number", "description": "Most names to return"},
-                    "max_nodes": {"type": "number", "default": 50, "description": "Maximum pages in the network (default: 50, max: 500)"},
-                },
-                "required": ["page_name"],
-            }))
-        );
+        assert_eq!(meaning(&schema_of::<SampleArgs>()), meaning(&typescript_sample_schema()));
+    }
+
+    #[test]
+    fn a_parameter_named_like_a_keyword_is_compared_not_dropped() {
+        // `format` is a parameter here, not the JSON Schema keyword: it must survive normalizing.
+        let ours = meaning(&schema_of::<SampleArgs>());
+        assert_eq!(ours["properties"]["format"]["enum"], json!(["json", "markdown"]));
+        let mut other_enum = typescript_sample_schema();
+        other_enum["properties"]["format"]["enum"] = json!(["json", "html"]);
+        assert_ne!(ours, meaning(&other_enum));
+        let mut other_description = typescript_sample_schema();
+        other_description["properties"]["format"]["description"] = json!("something else");
+        assert_ne!(ours, meaning(&other_description));
+        let mut no_format = typescript_sample_schema();
+        no_format["properties"].as_object_mut().unwrap().remove("format");
+        assert_ne!(ours, meaning(&no_format));
     }
 
     #[test]
