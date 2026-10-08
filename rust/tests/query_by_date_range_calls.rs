@@ -30,7 +30,7 @@ fn args() -> Args {
     }
 }
 
-fn range(start: f64, end: f64) -> Args {
+fn range(start: i64, end: i64) -> Args {
     Args { start_date: Some(start), end_date: Some(end), ..args() }
 }
 
@@ -54,7 +54,7 @@ fn result_of(json: &str) -> Value {
 #[tokio::test]
 async fn a_range_costs_two_calls_whatever_its_length() {
     let logseq = mock_logseq(vec![json!([page(1, 20250101), page(2, 20250102)]), json!([block(11, 1, "a"), block(12, 2, "b")])]).await;
-    let found = query_journals(&client(&logseq), &range(20250101.0, 20250131.0), TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &range(20250101, 20250131), TODAY).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery"]);
     assert_eq!(inputs(&logseq, 0), ["20250101", "20250131"]);
     assert_eq!(inputs(&logseq, 1), ["20250101", "20250131"]);
@@ -64,7 +64,7 @@ async fn a_range_costs_two_calls_whatever_its_length() {
 #[tokio::test]
 async fn a_range_with_no_journal_makes_one_call_and_never_asks_for_blocks() {
     let logseq = mock_logseq(vec![json!([])]).await;
-    let found = query_journals(&client(&logseq), &Args { search_term: Some("atlas".into()), ..range(20250101.0, 20250107.0) }, TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &Args { search_term: Some("atlas".into()), ..range(20250101, 20250107) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 1);
     assert_eq!(result_of(&found.json)["entries"], json!([]));
 }
@@ -72,14 +72,14 @@ async fn a_range_with_no_journal_makes_one_call_and_never_asks_for_blocks() {
 #[tokio::test]
 async fn a_search_term_adds_one_query_for_its_alias_group_and_an_empty_one_adds_none() {
     let logseq = mock_logseq(vec![json!([page(1, 20250101)]), json!([block(11, 1, "Atlas notes")]), json!([])]).await;
-    let found = query_journals(&client(&logseq), &Args { search_term: Some("Atlas".into()), ..range(20250101.0, 20250101.0) }, TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &Args { search_term: Some("Atlas".into()), ..range(20250101, 20250101) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 3);
     // the name is bound lowercase, as a JSON string
     assert_eq!(inputs(&logseq, 2), ["\"atlas\""]);
     assert_eq!(result_of(&found.json)["summary"]["totalBlocks"], 1);
 
     let logseq = mock_logseq(vec![json!([page(1, 20250101)]), json!([block(11, 1, "Atlas notes")])]).await;
-    query_journals(&client(&logseq), &Args { search_term: Some(String::new()), ..range(20250101.0, 20250101.0) }, TODAY).await.unwrap();
+    query_journals(&client(&logseq), &Args { search_term: Some(String::new()), ..range(20250101, 20250101) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
 }
 
@@ -105,7 +105,7 @@ async fn a_preset_is_resolved_against_today_before_the_call() {
 #[tokio::test]
 async fn a_selection_that_is_refused_makes_no_call() {
     let logseq = mock_logseq(vec![]).await;
-    for bad in [args(), Args { last_n: Some(1), preset: Some(DatePreset::Today), ..args() }, range(20250107.0, 20250101.0), range(2025.0, 20250101.0)] {
+    for bad in [args(), Args { last_n: Some(1), preset: Some(DatePreset::Today), ..args() }, range(20250107, 20250101), range(2025, 20250101)] {
         let error = query_journals(&client(&logseq), &bad, TODAY).await.unwrap_err();
         assert!(matches!(error, ToolError::InvalidParameter(_)), "{error}");
     }
@@ -115,7 +115,7 @@ async fn a_selection_that_is_refused_makes_no_call() {
 #[tokio::test]
 async fn resolve_refs_adds_at_most_the_levels_of_refs_and_none_when_no_block_has_one() {
     let logseq = mock_logseq(vec![json!([page(1, 20250101)]), json!([block(11, 1, "no ref here")])]).await;
-    let found = query_journals(&client(&logseq), &Args { resolve_refs: true, ..range(20250101.0, 20250101.0) }, TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &Args { resolve_refs: true, ..range(20250101, 20250101) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
     let result = result_of(&found.json);
     assert_eq!((&result["hasMore"], &result["warnings"]), (&json!(false), &json!([])));
@@ -127,7 +127,7 @@ async fn resolve_refs_adds_at_most_the_levels_of_refs_and_none_when_no_block_has
         json!([[{"id": 777, "uuid": "00000000-0000-4000-8000-000000000777", "content": "the target", "page": {"id": 5}}]]),
     ])
     .await;
-    let found = query_journals(&client(&logseq), &Args { resolve_refs: true, ..range(20250101.0, 20250101.0) }, TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &Args { resolve_refs: true, ..range(20250101, 20250101) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 3);
     assert!(found.json.contains("\"resolvedContent\":\"see the target\""), "{}", found.json);
 }
@@ -136,19 +136,19 @@ async fn resolve_refs_adds_at_most_the_levels_of_refs_and_none_when_no_block_has
 async fn the_outline_never_resolves_refs() {
     let reference = format!("see (({}))", "00000000-0000-4000-8000-000000000777");
     let logseq = mock_logseq(vec![json!([page(1, 20250101)]), json!([block(11, 1, &reference)])]).await;
-    query_journals(&client(&logseq), &Args { resolve_refs: true, include_content: false, ..range(20250101.0, 20250101.0) }, TODAY).await.unwrap();
+    query_journals(&client(&logseq), &Args { resolve_refs: true, include_content: false, ..range(20250101, 20250101) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
 }
 
 #[tokio::test]
 async fn a_null_answer_is_a_warning_and_never_an_empty_range() {
     let logseq = mock_logseq(vec![Value::Null]).await;
-    let found = query_journals(&client(&logseq), &range(20250101.0, 20250103.0), TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &range(20250101, 20250103), TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 1);
     assert_eq!(result_of(&found.json)["warnings"][0]["code"], "journals_unavailable");
 
     let logseq = mock_logseq(vec![json!([page(1, 20250101)]), Value::Null]).await;
-    let found = query_journals(&client(&logseq), &range(20250101.0, 20250103.0), TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &range(20250101, 20250103), TODAY).await.unwrap();
     let result = result_of(&found.json);
     assert_eq!(result["warnings"][0]["code"], "blocks_unavailable");
     // the day is still an entry, with no blocks, which is what the warning is for
@@ -158,6 +158,6 @@ async fn a_null_answer_is_a_warning_and_never_an_empty_range() {
 #[tokio::test]
 async fn a_failed_call_is_an_error_and_never_an_empty_result() {
     let logseq = mock_logseq(vec![]).await;
-    let error = query_journals(&client(&logseq), &range(20250101.0, 20250103.0), TODAY).await.unwrap_err();
+    let error = query_journals(&client(&logseq), &range(20250101, 20250103), TODAY).await.unwrap_err();
     assert!(matches!(error, ToolError::Logseq(_)), "{error}");
 }

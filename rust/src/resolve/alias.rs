@@ -168,15 +168,15 @@ pub async fn resolve_alias_sets(client: &LogseqClient, pages: &[&PulledPage]) ->
     // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
     let rows = wire::alias_set_rows(&answer)?.unwrap_or_default();
 
-    let mut by_start: HashMap<u64, Vec<AliasMember>> = HashMap::new();
+    let mut by_start: HashMap<i64, Vec<AliasMember>> = HashMap::new();
     for (start_id, page) in rows {
         if let Some(member) = AliasMember::of(&page) {
-            by_start.entry(start_id.to_bits()).or_default().push(member);
+            by_start.entry(start_id).or_default().push(member);
         }
     }
     Ok(starts
         .into_iter()
-        .map(|set| match set.members.first().and_then(|start| by_start.get(&(start.id as f64).to_bits()).map(|found| (start, found))) {
+        .map(|set| match set.members.first().and_then(|start| by_start.get(&start.id).map(|found| (start, found))) {
             Some((start, found)) => build_set(start.clone(), found.clone()),
             None => set,
         })

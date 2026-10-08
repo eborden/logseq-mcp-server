@@ -63,12 +63,23 @@ impl<'a> Arguments<'a> {
         }
     }
 
-    /// An optional number (`z.number().optional()`): any finite number, a fraction too. A date is one,
-    /// checked as `YYYYMMDD` by the tool, not here.
-    pub fn optional_number(&self, param: &str) -> Result<Option<f64>, InvalidParameter> {
+    /// An optional whole number, negative or not: a `YYYYMMDD` date, which the schema calls a number
+    /// (`z.number().optional()`) and the tool then reads as an integer. A fraction, or a number past
+    /// the largest safe integer, is worded as [`Arguments::optional_count`] words it.
+    pub fn optional_whole(&self, param: &str) -> Result<Option<i64>, InvalidParameter> {
+        self.optional_whole_or(param, |value, why| not_whole(param, value, why))
+    }
+
+    /// [`Arguments::optional_whole`] with the tool's own words for a number that is no whole number
+    /// in the safe range: `unusable` gets the value and why it failed.
+    pub fn optional_whole_or(
+        &self,
+        param: &str,
+        unusable: impl FnOnce(&Value, NotWhole) -> InvalidParameter,
+    ) -> Result<Option<i64>, InvalidParameter> {
         match self.sent(param) {
             None => Ok(None),
-            Some(Value::Number(number)) => Ok(Some(number.as_f64().expect("a JSON number is finite"))),
+            Some(value @ Value::Number(number)) => whole(number).map(Some).map_err(|why| unusable(value, why)),
             Some(other) => Err(wrong(param, other, format!("a number, not {}", kind_of(other)), Some(format!("{param}: 5")))),
         }
     }
@@ -175,20 +186,43 @@ fn count(param: &str, value: &Value, min: u64) -> Result<u64, InvalidParameter> 
         // zod reports `number` as what was expected of anything that isn't one
         return Err(wrong(param, value, format!("a number, not {}", kind_of(value)), Some(format!("{param}: 5"))));
     };
-    let n = number.as_f64().expect("a JSON number is finite");
-    if n.fract() != 0.0 {
-        return Err(wrong(param, value, "an integer, not a fraction".to_owned(), Some(format!("{param}: 5"))));
-    }
-    if n > MAX_SAFE_INTEGER {
-        return Err(wrong(param, value, "Too big: expected int to be <9007199254740991".to_owned(), None));
-    }
-    if n < -MAX_SAFE_INTEGER {
-        return Err(wrong(param, value, "Too small: expected int to be >-9007199254740991".to_owned(), None));
-    }
-    if n < min as f64 {
+    let n = whole(number).map_err(|why| not_whole(param, value, why))?;
+    if n < min as i64 {
         return Err(wrong(param, value, format!("at least {min}"), Some(format!("{param}: {min}"))));
     }
     Ok(n as u64)
+}
+
+/// Why a number is not one `z.int()` takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotWhole {
+    Fraction,
+    TooBig,
+    TooSmall,
+}
+
+/// `z.int()`: a whole number from -(2^53 - 1) to 2^53 - 1, the range a JavaScript number holds exactly.
+fn whole(number: &serde_json::Number) -> Result<i64, NotWhole> {
+    let n = number.as_f64().expect("a JSON number is finite");
+    if n.fract() != 0.0 {
+        return Err(NotWhole::Fraction);
+    }
+    if n > MAX_SAFE_INTEGER {
+        return Err(NotWhole::TooBig);
+    }
+    if n < -MAX_SAFE_INTEGER {
+        return Err(NotWhole::TooSmall);
+    }
+    Ok(n as i64)
+}
+
+/// zod's words for a number `z.int()` refuses.
+fn not_whole(param: &str, value: &Value, why: NotWhole) -> InvalidParameter {
+    match why {
+        NotWhole::Fraction => wrong(param, value, "an integer, not a fraction".to_owned(), Some(format!("{param}: 5"))),
+        NotWhole::TooBig => wrong(param, value, "Too big: expected int to be <9007199254740991".to_owned(), None),
+        NotWhole::TooSmall => wrong(param, value, "Too small: expected int to be >-9007199254740991".to_owned(), None),
+    }
 }
 
 fn wrong(param: &str, value: &Value, expected: String, example: Option<String>) -> InvalidParameter {
@@ -232,21 +266,38 @@ mod tests {
     }
 
     #[test]
-    fn a_number_is_any_number_and_nothing_else() {
-        let args = arguments(json!({"a": 20250101, "b": 1.5, "c": "5", "d": true, "e": null}));
+    fn a_whole_number_is_read_as_an_integer_and_a_fraction_is_refused() {
+        let args = arguments(json!({"a": 20250101, "b": 1.5, "c": "5", "d": true, "e": null, "f": 20250101.0, "g": -3, "h": 1e300}));
         let read = Arguments::new(Some(&args));
-        assert_eq!(read.optional_number("a").unwrap(), Some(20250101.0));
-        assert_eq!(read.optional_number("b").unwrap(), Some(1.5));
-        assert_eq!(read.optional_number("e").unwrap(), None);
-        assert_eq!(read.optional_number("missing").unwrap(), None);
+        assert_eq!(read.optional_whole("a").unwrap(), Some(20_250_101));
+        assert_eq!(read.optional_whole("f").unwrap(), Some(20_250_101));
+        assert_eq!(read.optional_whole("g").unwrap(), Some(-3));
+        assert_eq!(read.optional_whole("e").unwrap(), None);
+        assert_eq!(read.optional_whole("missing").unwrap(), None);
         assert_eq!(
-            message(read.optional_number("c").unwrap_err()),
+            message(read.optional_whole("b").unwrap_err()),
+            "Invalid parameter 'b': 1.5\n\nExpected: an integer, not a fraction\nExample: b: 5"
+        );
+        assert_eq!(
+            message(read.optional_whole("h").unwrap_err()),
+            "Invalid parameter 'h': 1e+300\n\nExpected: Too big: expected int to be <9007199254740991"
+        );
+        assert_eq!(
+            message(read.optional_whole("c").unwrap_err()),
             "Invalid parameter 'c': \"5\"\n\nExpected: a number, not a string\nExample: c: 5"
         );
         assert_eq!(
-            message(read.optional_number("d").unwrap_err()),
+            message(read.optional_whole("d").unwrap_err()),
             "Invalid parameter 'd': true\n\nExpected: a number, not a boolean\nExample: d: 5"
         );
+        // a tool can word the refusal itself, and still gets the value and why
+        let own = read.optional_whole_or("b", |value, why| InvalidParameter {
+            param: "b".to_owned(),
+            value: js::json_stringify(value),
+            expected: format!("{why:?}"),
+            example: None,
+        });
+        assert_eq!(message(own.unwrap_err()), "Invalid parameter 'b': 1.5\n\nExpected: Fraction");
     }
 
     #[test]

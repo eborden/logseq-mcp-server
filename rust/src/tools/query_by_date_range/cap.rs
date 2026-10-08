@@ -6,7 +6,6 @@ use serde_json::Value;
 
 use super::Entry;
 use crate::block_budget::{Budget, count_blocks, take_blocks};
-use crate::js::number_to_string;
 use crate::meta::ResultWarning;
 use crate::truncation::LARGE_RESULT_NOTE;
 
@@ -31,9 +30,9 @@ pub struct BlockCut {
     /// Blocks there were before the cut, counted the way the cap counts them
     pub total: usize,
     /// Day of the last entry kept; `None` when nothing was kept
-    pub ends_at: Option<f64>,
+    pub ends_at: Option<i64>,
     /// The first day dropped; `None` when the last kept day was the last entry
-    pub next_day: Option<f64>,
+    pub next_day: Option<i64>,
     /// The last kept day lost blocks
     pub split_day: bool,
     /// Blocks kept on the days before the last kept one: 0 means that day alone filled the cap
@@ -96,8 +95,8 @@ pub struct TruncationOptions {
     pub nested: bool,
     /// `last_n` order: newest first, so the way on is older days
     pub newest_first: bool,
-    pub start: f64,
-    pub end: f64,
+    pub start: i64,
+    pub end: i64,
     /// The `max_blocks` the caller asked for, before it was clamped
     pub requested: u64,
 }
@@ -128,16 +127,16 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
     let max = MAX_DATE_RANGE_BLOCKS;
     let at_max = shown >= max;
     let direction = if newest_first { "older" } else { "later" };
-    let day = |value: f64| number_to_string(value);
+    let day = |value: i64| value.to_string();
     // The dates that read on from `day`: the same end of the range, or for `last_n` (newest first) the same start
-    let from = |value: f64| {
+    let from = |value: i64| {
         if newest_first {
             format!("start_date {}, end_date {}", day(start), day(value))
         } else {
             format!("start_date {}, the same end_date ({})", day(value), day(end))
         }
     };
-    let call_again = |value: f64| format!("Call again with {} and the same max_blocks", from(value));
+    let call_again = |value: i64| format!("Call again with {} and the same max_blocks", from(value));
 
     // Facts go in the message. The way forward goes in howToFetchAll, or in the message when
     // nothing can be fetched (no howToFetchAll, so hasMore is false).
@@ -243,17 +242,17 @@ mod tests {
         json!({"id": id, "children": kids})
     }
 
-    fn entry(date: f64, blocks: Vec<Value>) -> Entry {
+    fn entry(date: i64, blocks: Vec<Value>) -> Entry {
         Entry { date, page: Default::default(), blocks }
     }
 
     fn options(nested: bool) -> TruncationOptions {
-        TruncationOptions { nested, newest_first: false, start: 20250101.0, end: 20250110.0, requested: 5 }
+        TruncationOptions { nested, newest_first: false, start: 20250101, end: 20250110, requested: 5 }
     }
 
     #[test]
     fn at_or_below_the_cap_nothing_is_cut() {
-        let entries = [entry(20250101.0, vec![block(1, 1)]), entry(20250102.0, vec![block(2, 0)])];
+        let entries = [entry(20250101, vec![block(1, 1)]), entry(20250102, vec![block(2, 0)])];
         assert!(cap_entries(&entries, 3, true).is_none());
         assert!(cap_entries(&entries, 5, true).is_none());
         // top-level only: 2 blocks
@@ -262,9 +261,9 @@ mod tests {
 
     #[test]
     fn a_cap_between_days_drops_the_later_days_and_names_the_first_one_dropped() {
-        let entries = [entry(20250101.0, vec![block(1, 1)]), entry(20250102.0, vec![block(2, 0)]), entry(20250103.0, vec![])];
+        let entries = [entry(20250101, vec![block(1, 1)]), entry(20250102, vec![block(2, 0)]), entry(20250103, vec![])];
         let cut = cap_entries(&entries, 2, true).unwrap();
-        assert_eq!((cut.total, cut.ends_at, cut.next_day, cut.split_day, cut.kept_before, cut.last_day_total), (3, Some(20250101.0), Some(20250102.0), false, 0, 2));
+        assert_eq!((cut.total, cut.ends_at, cut.next_day, cut.split_day, cut.kept_before, cut.last_day_total), (3, Some(20250101), Some(20250102), false, 0, 2));
         assert_eq!(cut.entries.len(), 1);
         let warning = blocks_truncated(&cut, 2, &options(true));
         assert_eq!(
@@ -279,28 +278,28 @@ mod tests {
 
     #[test]
     fn a_cut_inside_a_later_day_that_fits_says_the_day_repeats_its_kept_blocks() {
-        let entries = [entry(20250101.0, vec![block(1, 0)]), entry(20250102.0, vec![block(2, 0), block(3, 0)]), entry(20250103.0, vec![block(4, 0)])];
+        let entries = [entry(20250101, vec![block(1, 0)]), entry(20250102, vec![block(2, 0), block(3, 0)]), entry(20250103, vec![block(4, 0)])];
         let cut = cap_entries(&entries, 2, true).unwrap();
-        assert_eq!((cut.ends_at, cut.next_day, cut.split_day, cut.kept_before), (Some(20250102.0), Some(20250103.0), true, 1));
+        assert_eq!((cut.ends_at, cut.next_day, cut.split_day, cut.kept_before), (Some(20250102), Some(20250103), true, 1));
         let warning = blocks_truncated(&cut, 2, &options(true));
         assert_eq!(
             warning.how_to_fetch_all.as_deref(),
             Some("Call again with start_date 20250102, the same end_date (20250110) and the same max_blocks to read the later days (day 20250102 repeats its kept blocks), or add a search_term.")
         );
         // with no day after it, the call reads the rest of that day
-        let entries = [entry(20250101.0, vec![block(1, 0)]), entry(20250102.0, vec![block(2, 0), block(3, 0)])];
+        let entries = [entry(20250101, vec![block(1, 0)]), entry(20250102, vec![block(2, 0), block(3, 0)])];
         let cut = cap_entries(&entries, 2, true).unwrap();
         assert!(blocks_truncated(&cut, 2, &options(true)).how_to_fetch_all.unwrap().contains("to read the rest of day 20250102 (it repeats its kept blocks)"));
     }
 
     #[test]
     fn a_partial_block_is_said_so_and_a_cap_of_zero_keeps_nothing() {
-        let entries = [entry(20250101.0, vec![block(1, 3)])];
+        let entries = [entry(20250101, vec![block(1, 3)])];
         let cut = cap_entries(&entries, 2, true).unwrap();
         assert!(cut.partial_block);
         assert!(blocks_truncated(&cut, 2, &options(true)).message.contains("; a kept block shows fewer children than it has (childrenTruncated)"));
         let cut = cap_entries(&entries, 0, true).unwrap();
-        assert_eq!((cut.entries.len(), cut.ends_at, cut.next_day), (0, None, Some(20250101.0)));
+        assert_eq!((cut.entries.len(), cut.ends_at, cut.next_day), (0, None, Some(20250101)));
         let warning = blocks_truncated(&cut, 0, &options(true));
         assert_eq!(warning.message, "Showing 0 of 4 blocks (nested ones counted; oldest day first).");
         assert_eq!(
@@ -311,7 +310,7 @@ mod tests {
 
     #[test]
     fn a_day_alone_filling_the_cap_is_read_whole_at_a_higher_cap() {
-        let entries = [entry(20250101.0, vec![block(1, 5)]), entry(20250102.0, vec![block(2, 0)])];
+        let entries = [entry(20250101, vec![block(1, 5)]), entry(20250102, vec![block(2, 0)])];
         let cut = cap_entries(&entries, 3, true).unwrap();
         let warning = blocks_truncated(&cut, 3, &options(true));
         assert_eq!(
@@ -332,7 +331,7 @@ mod tests {
     fn a_later_day_over_what_is_left_of_the_cap_is_read_from_its_own_start_then_on() {
         // 1, 5 and 1 top-level blocks, a cap of 3: the second day is cut after earlier days were kept
         let rows = |first: i64, n: i64| (first..first + n).map(|id| block(id, 0)).collect::<Vec<_>>();
-        let entries = [entry(20250101.0, rows(1, 1)), entry(20250102.0, rows(10, 5)), entry(20250103.0, rows(20, 1))];
+        let entries = [entry(20250101, rows(1, 1)), entry(20250102, rows(10, 5)), entry(20250103, rows(20, 1))];
         let warning = blocks_truncated(&cap_entries(&entries, 3, false).unwrap(), 3, &options(false));
         assert_eq!(
             warning.message,
@@ -350,7 +349,7 @@ mod tests {
 
     #[test]
     fn newest_first_pages_on_to_older_days() {
-        let entries = [entry(20250109.0, vec![block(1, 0)]), entry(20250108.0, vec![block(2, 0)])];
+        let entries = [entry(20250109, vec![block(1, 0)]), entry(20250108, vec![block(2, 0)])];
         let cut = cap_entries(&entries, 1, true).unwrap();
         let warning = blocks_truncated(&cut, 1, &TruncationOptions { newest_first: true, ..options(true) });
         assert_eq!(warning.message, "Showing 1 of 2 blocks (nested ones counted; newest day first; the entries end at 20250109).");
@@ -361,7 +360,7 @@ mod tests {
     }
 
     fn big_day(n: usize) -> Entry {
-        entry(20250101.0, (0..n as i64).map(|i| block(i + 1, 0)).collect())
+        entry(20250101, (0..n as i64).map(|i| block(i + 1, 0)).collect())
     }
 
     #[test]
@@ -390,7 +389,7 @@ mod tests {
              Add a search_term to narrow it."
         );
         // with a later day, page past it
-        let entries = [big_day(1200), entry(20250102.0, vec![block(1, 0)])];
+        let entries = [big_day(1200), entry(20250102, vec![block(1, 0)])];
         let warning = blocks_truncated(&cap_entries(&entries, 1000, true).unwrap(), 1000, &options(true));
         assert_eq!(
             warning.how_to_fetch_all.unwrap(),
@@ -400,7 +399,7 @@ mod tests {
 
     #[test]
     fn the_outline_counts_top_level_blocks_only() {
-        let entries = [entry(20250101.0, vec![block(1, 9), block(2, 9)])];
+        let entries = [entry(20250101, vec![block(1, 9), block(2, 9)])];
         assert!(cap_entries(&entries, 2, false).is_none());
         let cut = cap_entries(&entries, 1, false).unwrap();
         assert_eq!((cut.total, cut.entries[0].blocks.len()), (2, 1));

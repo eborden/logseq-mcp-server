@@ -73,8 +73,8 @@ fn compare_concepts(a: &TopConcept, b: &TopConcept) -> Ordering {
 struct Tally {
     name: String,
     count: usize,
-    /// The days, by the bits of their `YYYYMMDD` number
-    days: HashSet<u64>,
+    /// The days, as `YYYYMMDD` numbers
+    days: HashSet<i64>,
 }
 
 /// `rollUpTopConcepts`: the concepts the returned blocks reference, best first, at most `limit`.
@@ -85,23 +85,23 @@ struct Tally {
 /// `entries` are the returned journal days, each with its block trees; `refs_by_block` is
 /// [`extract_concept_refs`] output keyed by block id.
 pub fn roll_up_top_concepts<'a>(
-    entries: impl IntoIterator<Item = (f64, &'a [Value])>,
+    entries: impl IntoIterator<Item = (i64, &'a [Value])>,
     refs_by_block: &HashMap<i64, Vec<ConceptRef>>,
     limit: u64,
 ) -> Vec<TopConcept> {
     if limit == 0 {
         return Vec::new();
     }
-    fn visit(blocks: &[Value], date: f64, refs_by_block: &HashMap<i64, Vec<ConceptRef>>, order: &mut Vec<i64>, tally: &mut HashMap<i64, Tally>) {
+    fn visit(blocks: &[Value], date: i64, refs_by_block: &HashMap<i64, Vec<ConceptRef>>, order: &mut Vec<i64>, tally: &mut HashMap<i64, Tally>) {
         for block in blocks {
-            let block_id = block.get("id").and_then(Value::as_f64).map(|id| id as i64);
+            let block_id = block.get("id").and_then(Value::as_i64);
             for concept in block_id.and_then(|id| refs_by_block.get(&id)).into_iter().flatten() {
                 let slot = tally.entry(concept.id).or_insert_with(|| {
                     order.push(concept.id);
                     Tally { name: concept.name.clone(), count: 0, days: HashSet::new() }
                 });
                 slot.count += 1;
-                slot.days.insert(date.to_bits());
+                slot.days.insert(date);
             }
             visit(block.get("children").and_then(Value::as_array).map_or(&[], Vec::as_slice), date, refs_by_block, order, tally);
         }
@@ -181,7 +181,7 @@ mod tests {
         ]);
         let day1 = vec![json!({"id": 1, "children": [{"id": 2, "children": []}]})];
         let day2 = vec![json!({"id": 3, "children": []}), json!({"id": 4, "children": []})];
-        roll_up_top_concepts([(20250101.0, day1.as_slice()), (20250102.0, day2.as_slice())], &by_block, limit)
+        roll_up_top_concepts([(20250101, day1.as_slice()), (20250102, day2.as_slice())], &by_block, limit)
     }
 
     fn summary(concepts: &[TopConcept]) -> Vec<(String, usize, usize)> {

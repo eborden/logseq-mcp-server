@@ -68,7 +68,7 @@ fn default_max_entries() -> u32 {
 /// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
 /// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
 /// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them. The tool
-/// does no range check on the dates: 0 or an absent date is no bound, and any other number is compared
+/// does no range check on the dates: 0 or an absent date is no bound, and any other whole number is compared
 /// with each block's `YYYYMMDD` day.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[allow(dead_code)]
@@ -76,9 +76,11 @@ pub struct Args {
     /// Concept to track (page name, alias or ISO date)
     pub concept_name: String,
     /// Optional start date in YYYYMMDD format
-    pub start_date: Option<f64>,
+    #[schemars(with = "Option<f64>")]
+    pub start_date: Option<i64>,
     /// Optional end date in YYYYMMDD format
-    pub end_date: Option<f64>,
+    #[schemars(with = "Option<f64>")]
+    pub end_date: Option<i64>,
     /// Optional grouping period
     pub group_by: Option<GroupBy>,
     /// Max mentions, oldest first (default: 100, max: 500)
@@ -97,8 +99,8 @@ struct Request {
 fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
     let read = Arguments::new(arguments);
     let concept_name = read.required_string("concept_name")?;
-    let start_date = read.optional_number("start_date")?;
-    let end_date = read.optional_number("end_date")?;
+    let start_date = read.optional_whole("start_date")?;
+    let end_date = read.optional_whole("end_date")?;
     let group_by = read.optional_enum("group_by", GROUP_BY_VALUES)?.and_then(GroupBy::from_word);
     let max_entries = read.count_or("max_entries", 0, DEFAULT_MAX_ENTRIES)?;
     Ok(Request { concept_name, options: Options { start_date, end_date, group_by, max_entries } })
@@ -123,9 +125,9 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Options {
     /// `YYYYMMDD`; 0 or absent is no bound
-    pub start_date: Option<f64>,
+    pub start_date: Option<i64>,
     /// `YYYYMMDD`; 0 or absent is no bound
-    pub end_date: Option<f64>,
+    pub end_date: Option<i64>,
     pub group_by: Option<GroupBy>,
     /// Mentions kept, clamped to 0..500. The timeline's order decides which: oldest first, mentions
     /// with no date last.
@@ -142,8 +144,8 @@ impl Default for Options {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Summary {
     pub total_mentions: usize,
-    pub earliest: Option<f64>,
-    pub latest: Option<f64>,
+    pub earliest: Option<i64>,
+    pub latest: Option<i64>,
     pub journal_mentions: usize,
     pub non_journal_mentions: usize,
 }
@@ -160,7 +162,7 @@ pub struct ConceptEvolution {
     /// How many mentions there were, when the timeline cut some
     pub total_mentions_before_cut: Option<usize>,
     /// `{ date, blocks }` per day, oldest first, the undated last
-    pub timeline: Vec<(Option<f64>, Vec<Value>)>,
+    pub timeline: Vec<(Option<i64>, Vec<Value>)>,
     /// Period key to blocks, in the order the periods were first met; present when `group_by` was given
     pub grouped_timeline: Option<Vec<(String, Vec<Value>)>>,
     pub summary: Summary,
@@ -306,11 +308,11 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
     });
 
     // Summary over every mention found
-    let dates: Vec<f64> = filtered.iter().filter_map(day_of).collect();
+    let dates: Vec<i64> = filtered.iter().filter_map(day_of).collect();
     let summary = Summary {
         total_mentions: total,
-        earliest: dates.iter().copied().reduce(f64::min),
-        latest: dates.iter().copied().reduce(f64::max),
+        earliest: dates.iter().copied().min(),
+        latest: dates.iter().copied().max(),
         journal_mentions: dates.len(),
         non_journal_mentions: total - dates.len(),
     };
@@ -379,11 +381,13 @@ mod tests {
         assert_eq!(request.concept_name, "Atlas");
         assert_eq!(
             request.options,
-            Options { start_date: Some(20250101.0), end_date: None, group_by: Some(GroupBy::Week), max_entries: 7 }
+            Options { start_date: Some(20250101), end_date: None, group_by: Some(GroupBy::Week), max_entries: 7 }
         );
         assert_eq!(read_args(args(json!({"concept_name": "a"})).as_ref()).unwrap().options, Options::default());
-        // a date is any number, a fraction too; the tool does no range check on it
-        assert!(read_args(args(json!({"concept_name": "a", "end_date": 2.5})).as_ref()).is_ok());
+        // a date is a whole number, which the tool does no range check on; a fraction is no date
+        assert!(read_args(args(json!({"concept_name": "a", "end_date": 2})).as_ref()).is_ok());
+        let error = read_args(args(json!({"concept_name": "a", "end_date": 2.5})).as_ref()).unwrap_err();
+        assert_eq!(error.to_string(), "Invalid parameter 'end_date': 2.5\n\nExpected: an integer, not a fraction\nExample: end_date: 5");
         let error = read_args(args(json!({"concept_name": "a", "group_by": "year", "max_entries": -1})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'group_by': \"year\""), "{error}");
         let error = read_args(args(json!({"concept_name": "a", "max_entries": -1})).as_ref()).unwrap_err();
@@ -406,9 +410,9 @@ mod tests {
             resolved_aliases: Some(vec!["Atlas".into(), "Project Atlas".into()]),
             warnings: vec![ResultWarning { code: "entries_truncated".into(), message: "m".into(), how_to_fetch_all: None }],
             total_mentions_before_cut: Some(9),
-            timeline: vec![(Some(20250101.0), vec![mention(1, Some(20250101))]), (None, vec![mention(2, None)])],
+            timeline: vec![(Some(20250101), vec![mention(1, Some(20250101))]), (None, vec![mention(2, None)])],
             grouped_timeline: Some(vec![("20250101".into(), vec![mention(1, Some(20250101))])]),
-            summary: Summary { total_mentions: 9, earliest: Some(20250101.0), latest: Some(20250101.0), journal_mentions: 1, non_journal_mentions: 8 },
+            summary: Summary { total_mentions: 9, earliest: Some(20250101), latest: Some(20250101), journal_mentions: 1, non_journal_mentions: 8 },
         }
     }
 

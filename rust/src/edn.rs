@@ -178,9 +178,9 @@ impl JournalDay {
 pub struct DayBound(i64);
 
 impl DayBound {
-    /// `Number.isInteger(value)`, up to the largest whole number a JavaScript number holds exactly.
-    pub fn from_number(value: f64) -> Option<DayBound> {
-        (value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_991.0).then_some(DayBound(value as i64))
+    /// Any whole number: `assertJournalBounds`'s `Number.isInteger` check is the `i64` type itself.
+    pub fn new(value: i64) -> DayBound {
+        DayBound(value)
     }
 
     pub fn get(self) -> i64 {

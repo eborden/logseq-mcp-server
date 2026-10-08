@@ -131,23 +131,21 @@ pub struct PropertyResults {
 }
 
 /// A block's id as the sort reads it.
-fn block_id(block: &Map<String, Value>) -> f64 {
-    block.get("id").and_then(Value::as_f64).unwrap_or(0.0)
+fn block_id(block: &Map<String, Value>) -> i64 {
+    block.get("id").and_then(Value::as_i64).unwrap_or(0)
 }
 
 // PARITY(#299): the sort reads only `page.id`, so a page spelled `db/id`, which LogSeq never sends for a
 // nested pull, sorts as page 0 (suspected TS bug: read it as `entityId` does) - drop if Rust becomes the only
 // server.
 /// `a.page?.id ?? 0`: the id of the page a block sits on, 0 when it carries none.
-fn page_id(block: &Map<String, Value>) -> f64 {
-    block.get("page").and_then(|page| page.get("id")).and_then(Value::as_f64).unwrap_or(0.0)
+fn page_id(block: &Map<String, Value>) -> i64 {
+    block.get("page").and_then(|page| page.get("id")).and_then(Value::as_i64).unwrap_or(0)
 }
 
 /// `(a.page?.id ?? 0) - (b.page?.id ?? 0) || a.id - b.id`: page id, then block id.
 fn by_page_then_block(a: &Map<String, Value>, b: &Map<String, Value>) -> Ordering {
-    let by_page = page_id(a) - page_id(b);
-    let difference = if by_page != 0.0 { by_page } else { block_id(a) - block_id(b) };
-    difference.partial_cmp(&0.0).unwrap_or(Ordering::Equal)
+    page_id(a).cmp(&page_id(b)).then_with(|| block_id(a).cmp(&block_id(b)))
 }
 
 /// Query blocks whose property `property_key` equals `property_value`: the first `limit` of them
@@ -239,8 +237,8 @@ mod tests {
     fn blocks_sort_by_page_id_then_block_id_and_a_block_with_no_page_sorts_as_page_zero() {
         let mut blocks = vec![block(9, Some(20)), block(5, Some(20)), block(7, Some(10)), block(8, None), block(6, None)];
         blocks.sort_by(by_page_then_block);
-        let ids: Vec<f64> = blocks.iter().map(block_id).collect();
-        assert_eq!(ids, [6.0, 8.0, 7.0, 5.0, 9.0]);
+        let ids: Vec<i64> = blocks.iter().map(block_id).collect();
+        assert_eq!(ids, [6, 8, 7, 5, 9]);
     }
 
     #[test]

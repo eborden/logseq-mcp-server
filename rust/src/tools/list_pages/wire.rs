@@ -49,13 +49,13 @@ fn entity(page: &Value) -> ListedEntity {
     let alias_ids = page
         .get("alias")
         .and_then(Value::as_array)
-        .map(|links| links.iter().filter_map(|link| link.get("id").and_then(Value::as_f64)).map(|id| id as i64).collect())
+        .map(|links| links.iter().filter_map(|link| link.get("id").and_then(Value::as_i64)).collect())
         .unwrap_or_default();
     let name = page["name"].as_str().expect("a checked page has a name");
     // `page.originalName || page.name`: the Editor API's spelling only, and an empty one counts as missing
     let display_name = page.get("originalName").and_then(Value::as_str).filter(|name| !name.is_empty()).unwrap_or(name);
     ListedEntity {
-        id: page["id"].as_f64().expect("a checked page has an id") as i64,
+        id: page["id"].as_i64().expect("a checked page has an id"),
         name: name.to_owned(),
         display_name: display_name.to_owned(),
         journal: journal_flag(Some(page)).unwrap_or(false),

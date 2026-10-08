@@ -15,7 +15,6 @@
 mod tips;
 mod wire;
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
@@ -192,8 +191,8 @@ fn rank_name(backlink: &Backlink) -> String {
     first_present([field(backlink.page.as_object(), "name"), field(backlink.block_page(), "name")]).map(js_string).unwrap_or_default()
 }
 
-fn rank_id(backlink: &Backlink) -> f64 {
-    first_present([field(backlink.page.as_object(), "id"), field(backlink.block_page(), "id")]).and_then(Value::as_f64).unwrap_or(0.0)
+fn rank_id(backlink: &Backlink) -> i64 {
+    first_present([field(backlink.page.as_object(), "id"), field(backlink.block_page(), "id")]).and_then(Value::as_i64).unwrap_or(0)
 }
 
 /// `rankBacklinks`: source pages ranked by how many blocks link the target, most first (#178).
@@ -202,13 +201,13 @@ fn rank_id(backlink: &Backlink) -> f64 {
 /// group's is by name, and neither says which pages link most. The blocks of each page keep the
 /// order they came in. Costs no call.
 pub fn rank_backlinks(results: Vec<Backlink>) -> Vec<Backlink> {
-    let mut keyed: Vec<(String, f64, Backlink)> = results.into_iter().map(|b| (rank_name(&b), rank_id(&b), b)).collect();
+    let mut keyed: Vec<(String, i64, Backlink)> = results.into_iter().map(|b| (rank_name(&b), rank_id(&b), b)).collect();
     keyed.sort_by(|a, b| {
         b.2.blocks
             .len()
             .cmp(&a.2.blocks.len())
             .then_with(|| compare_code_units(&a.0, &b.0))
-            .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal))
+            .then_with(|| a.1.cmp(&b.1))
     });
     keyed.into_iter().map(|(_, _, backlink)| backlink).collect()
 }
@@ -349,29 +348,29 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
     struct Group {
         page: Map<String, Value>,
         /// Blocks by id, in the order each id first came
-        blocks: Vec<(f64, Map<String, Value>)>,
-        index: HashMap<u64, usize>,
+        blocks: Vec<(i64, Map<String, Value>)>,
+        index: HashMap<i64, usize>,
     }
     let mut groups: Vec<Group> = Vec::new();
-    let mut by_page: HashMap<u64, usize> = HashMap::new();
+    let mut by_page: HashMap<i64, usize> = HashMap::new();
     for row in rows.into_iter().flatten() {
         let mut block = camelize_block(&row);
         // A block with no page id has no source page
-        let Some(page_id) = block.get("page").and_then(Value::as_object).and_then(|page| page.get("id")).and_then(Value::as_f64) else {
+        let Some(page_id) = block.get("page").and_then(Value::as_object).and_then(|page| page.get("id")).and_then(Value::as_i64) else {
             continue;
         };
-        let at = *by_page.entry(page_id.to_bits()).or_insert_with(|| {
+        let at = *by_page.entry(page_id).or_insert_with(|| {
             let page = block.get("page").and_then(Value::as_object).expect("checked above");
             groups.push(Group { page: camelize_keys(page), blocks: Vec::new(), index: HashMap::new() });
             groups.len() - 1
         });
         let group = &mut groups[at];
         block.insert("page".to_owned(), Value::Object(group.page.clone()));
-        let block_id = block.get("id").and_then(Value::as_f64).unwrap_or(f64::NAN);
-        match group.index.get(&block_id.to_bits()) {
+        let block_id = block.get("id").and_then(Value::as_i64).unwrap_or_default();
+        match group.index.get(&block_id) {
             Some(&i) => group.blocks[i].1 = block,
             None => {
-                group.index.insert(block_id.to_bits(), group.blocks.len());
+                group.index.insert(block_id, group.blocks.len());
                 group.blocks.push((block_id, block));
             }
         }
@@ -379,7 +378,7 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
     groups
         .into_iter()
         .map(|mut group| {
-            group.blocks.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(Ordering::Equal));
+            group.blocks.sort_by_key(|(id, _)| *id);
             Backlink { page: Value::Object(group.page), blocks: group.blocks.into_iter().map(|(_, block)| Value::Object(block)).collect() }
         })
         .collect()
@@ -406,8 +405,8 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
     // `String(a.page.name).localeCompare(String(b.page.name)) || a.page.id - b.page.id`
     groups.sort_by(|a, b| {
         let name = |backlink: &Backlink| backlink.page.get("name").map_or_else(|| "undefined".to_owned(), js_string);
-        let id = |backlink: &Backlink| backlink.page.get("id").and_then(Value::as_f64).unwrap_or(f64::NAN);
-        js::locale_compare(&name(a), &name(b)).then_with(|| id(a).total_cmp(&id(b)))
+        let id = |backlink: &Backlink| backlink.page.get("id").and_then(Value::as_i64).unwrap_or_default();
+        js::locale_compare(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
     });
     Ok(Some(groups))
 }
@@ -488,9 +487,9 @@ mod tests {
     #[test]
     fn a_tuple_with_no_page_ranks_and_names_itself_by_its_first_block() {
         let nameless = Backlink { page: Value::Null, blocks: vec![json!({"id": 1, "uuid": "u", "page": {"id": 7, "name": "z", "originalName": "Z"}})] };
-        assert_eq!((rank_name(&nameless), rank_id(&nameless), source_name(&nameless)), ("z".to_owned(), 7.0, "Z".to_owned()));
+        assert_eq!((rank_name(&nameless), rank_id(&nameless), source_name(&nameless)), ("z".to_owned(), 7, "Z".to_owned()));
         let bare = Backlink { page: Value::Null, blocks: vec![] };
-        assert_eq!((rank_name(&bare), rank_id(&bare), source_name(&bare)), (String::new(), 0.0, "unknown page".to_owned()));
+        assert_eq!((rank_name(&bare), rank_id(&bare), source_name(&bare)), (String::new(), 0, "unknown page".to_owned()));
         let id_only = Backlink { page: json!({"id": 5}), blocks: vec![] };
         assert_eq!(source_name(&id_only), "5");
     }

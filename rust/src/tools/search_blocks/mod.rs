@@ -123,8 +123,8 @@ impl SearchResults {
 }
 
 /// A block's id as the sort reads it (`b.id - a.id`).
-fn block_id(block: &Value) -> f64 {
-    block.get("id").and_then(Value::as_f64).unwrap_or(0.0)
+fn block_id(block: &Value) -> i64 {
+    block.get("id").and_then(Value::as_i64).unwrap_or(0)
 }
 
 /// The id of the page a block sits on (`blockPageId`): undefined when the block carries no page.
@@ -179,8 +179,8 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<Ve
         // BR-0011 asks for a warning that the context is unavailable (suspected TS bug) — fix per #326, in both servers.
         for row in wire::page_rows(&answer)?.unwrap_or_default() {
             let page = pulled_page_to_entity(row.as_object().expect("a checked page is an object"));
-            if let Some(id) = page.get("id").and_then(Value::as_f64) {
-                page_by_id.insert(id as i64, page);
+            if let Some(id) = page.get("id").and_then(Value::as_i64) {
+                page_by_id.insert(id, page);
             }
         }
     }
@@ -235,7 +235,7 @@ pub async fn find_blocks(client: &LogseqClient, query: &str) -> Result<Option<Ve
     let answer = client.execute_datalog_query(&search.text, &search.inputs).await?;
     let Some(mut matches) = wire::hits(&answer)? else { return Ok(None) };
     // Ids are unique, and a sort that keeps ties in order
-    matches.sort_by(|a, b| block_id(b).total_cmp(&block_id(a)));
+    matches.sort_by_key(|block| std::cmp::Reverse(block_id(block)));
     Ok(Some(matches))
 }
 

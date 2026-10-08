@@ -158,8 +158,8 @@ async fn an_exact_name_costs_four_calls_the_resolver_the_tree_the_page_and_the_m
     assert_eq!(args_of(&logseq, 3)[1], "\"project atlas\"");
     assert!(!args_of(&logseq, 3)[0].as_str().unwrap().contains("atlas"));
     // oldest first, the page's own undated block last
-    let dates: Vec<Option<f64>> = evolution.timeline.iter().map(|(date, _)| *date).collect();
-    assert_eq!(dates, [Some(20250101.0), Some(20250310.0), None]);
+    let dates: Vec<Option<i64>> = evolution.timeline.iter().map(|(date, _)| *date).collect();
+    assert_eq!(dates, [Some(20250101), Some(20250310), None]);
     // the tree's block carries the page the Editor API gave
     assert_eq!(evolution.timeline[2].1[0]["page"], editor_page());
 }
