@@ -32,7 +32,7 @@ This ADR restates ADR-0025 and changes only its Decision 2, and ADR-0025 is mark
 
 ## Status
 
-accepted
+superseded by 0032-closest-page-suggestions-match-by-meaning
 
 Date: 2026-10-08
 
