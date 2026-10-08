@@ -185,6 +185,21 @@ describe('parseArgs', () => {
       expect(message).not.toContain('Example:');
     });
 
+    it('says a number below its minimum must be at least it, with the minimum as the example (#293)', () => {
+      expect(messageFor(z.object({ v: z.int().min(1) }), { v: 0 })).toBe(
+        "Invalid parameter 'v': 0\n\nExpected: at least 1\nExample: v: 1"
+      );
+      expect(messageFor(z.object({ v: z.number().min(0) }), { v: -0.5 })).toBe(
+        "Invalid parameter 'v': -0.5\n\nExpected: at least 0\nExample: v: 0"
+      );
+    });
+
+    it('keeps the zod message, with no Example:, for an exclusive minimum', () => {
+      const positive = z.object({ v: z.number().gt(0) });
+
+      expect(messageFor(positive, { v: 0 })).toBe(`Invalid parameter 'v': 0\n\nExpected: ${zodMessage(positive, { v: 0 })}`);
+    });
+
     it('keeps the zod message for an issue of another kind, and gives it no Example:', () => {
       const tooShort = z.object({ v: z.string().min(3) });
 
