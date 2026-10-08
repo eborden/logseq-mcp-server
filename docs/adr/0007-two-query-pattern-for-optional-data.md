@@ -27,4 +27,4 @@ Date: 2025-11-24
 
 - test: `tests/integration/context-building.test.ts` (a page with no blocks returns an empty context, and a page with one empty block returns that block)
 - test: `tests/integration/graph-tools.test.ts` (a page with no connections returns the root alone)
-- test: `rust/tests/parity.rs` (the parity cases `build_context: a page with no blocks and no links` in `rust/tests/data/parity/build-context.json` and `a page nothing links to or from` in `rust/tests/data/parity/get-concept-network.json` run in `cargo test`, and `compare_results` in `rust/tests/parity_support/compare.rs` holds their results to the recorded ones)
+- test: `rust/tests/parity.rs` (the parity cases `build_context: a page with no blocks and no links` in `rust/tests/data/parity/build-context.json` and `network: a page nothing links to or from` in `rust/tests/data/parity/get-concept-network.json` run in `cargo test`, and `compare_results` in `rust/tests/parity_support/compare.rs` holds their results to the recorded ones)
