@@ -28,6 +28,7 @@ use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
 use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
+use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, blocks_inline_max, capped_truncation_warning};
@@ -172,7 +173,7 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<Ve
     let mut page_by_id: HashMap<i64, Map<String, Value>> = HashMap::new();
     if !page_ids.is_empty() {
         let ids = page_ids.iter().map(|&id| PageId::new(id)).collect::<Result<Vec<_>, _>>()?;
-        let query = queries::pages_by_ids(&ids);
+        let query = pages_by_ids(&ids);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // PARITY(#299): a `null` answer is read as no pages, so every block silently loses its context, where
         // BR-0011 asks for a warning that the context is unavailable (suspected TS bug) — fix per #326, in both servers.
