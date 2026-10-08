@@ -266,6 +266,15 @@ describe('compareToolLists', () => {
     expect(compareToolLists(tools, noFormat)).toEqual([
       expect.stringMatching(/^logseq_get_page\.inputSchema\.properties\.format: expected \{.*"enum":\["json","markdown"\].*\}, got nothing$/)
     ]);
+    // The five tools with a `format` parameter: its enum and description still count
+    const withFormat = tools.filter(t => 'format' in ((t.inputSchema as Schema).properties ?? {})).map(t => t.name);
+    expect(withFormat).toHaveLength(5);
+    for (const name of withFormat) {
+      const enumChanged = withSchema(tools, name, s => { s.properties.format.enum = ['json']; });
+      expect(compareToolLists(tools, enumChanged), name).toEqual([`${name}.inputSchema.properties.format.enum: expected ["json","markdown"], got ["json"]`]);
+      const described = quirky(withSchema(tools, name, s => { s.properties.format.description = 'other'; }));
+      expect(compareToolLists(tools, described), name).toEqual([expect.stringMatching(new RegExp(`^${name}\\.inputSchema\\.properties\\.format\\.description: expected ".+", got "other"$`))]);
+    }
     const nullable = withSchema(tools, 'logseq_build_context', s => { s.properties.topic_name.type = ['string', 'null']; });
     expect(compareToolLists(tools, nullable)).toEqual([
       'logseq_build_context.inputSchema.properties.topic_name.type: expected "string", got ["string","null"]'
@@ -279,6 +288,55 @@ describe('normalizeSchema', () => {
     const before = structuredClone(schema);
     expect(normalizeSchema(schema)).toEqual({ type: 'object', properties: { a: { type: 'string' } }, required: ['a', 'b'] });
     expect(schema).toEqual(before);
+  });
+
+  it('keeps parameter names in the name maps, even when a name is a keyword', () => {
+    const schema = {
+      properties: { format: { type: 'string', format: 'x' }, title: { type: 'string' }, $schema: { type: 'number' }, $ref: { type: 'boolean' } },
+      patternProperties: { '^title$': { type: 'string', title: 'T' } },
+      dependentSchemas: { format: { required: ['b', 'a'] } }
+    };
+    expect(normalizeSchema(schema)).toEqual({
+      properties: { format: { type: 'string' }, title: { type: 'string' }, $schema: { type: 'number' }, $ref: { type: 'boolean' } },
+      patternProperties: { '^title$': { type: 'string' } },
+      dependentSchemas: { format: { required: ['a', 'b'] } }
+    });
+  });
+
+  it('normalizes quirks under every subschema position, and still sees a real difference there', () => {
+    // One schema with a leaf at each position; `leaf` is the plain form, `quirkyLeaf` the same meaning
+    const nest = (leaf: (n: number) => Schema): Schema => ({
+      type: 'object',
+      properties: { a: { type: 'array', items: leaf(1), prefixItems: [leaf(2)], contains: leaf(3) } },
+      additionalProperties: leaf(4),
+      patternProperties: { '^x': leaf(5) },
+      propertyNames: leaf(6),
+      dependentSchemas: { a: leaf(7) },
+      not: leaf(8),
+      anyOf: [leaf(9), { type: 'null', description: 'kept: not an optional property' }],
+      oneOf: [leaf(10), leaf(11)],
+      allOf: [leaf(12), leaf(13)],
+      if: leaf(14),
+      then: leaf(15),
+      else: leaf(16)
+    });
+    const leaf = (n: number): Schema => ({ type: 'string', maxLength: n, enum: ['p', 'q'] });
+    const defs: Schema = {};
+    const quirkyLeaf = (n: number): Schema => {
+      defs[`L${n}`] = { title: `L${n}`, format: 'f', enum: ['p', 'q'], maxLength: n, type: 'string' };
+      return { $ref: `#/definitions/L${n}` };
+    };
+    const plain = nest(leaf);
+    const quirkyForm = { $schema: 's', ...nest(quirkyLeaf), definitions: defs };
+    expect(normalizeSchema(quirkyForm)).toEqual(normalizeSchema(plain));
+    expect(JSON.stringify(normalizeSchema(quirkyForm))).not.toMatch(/"\$ref"|"definitions"|"format"|"title"|"\$schema"/);
+
+    const tool = (inputSchema: unknown): ProjectedTool => ({ name: 'x', inputSchema });
+    for (let n = 1; n <= 16; n++) {
+      const changed = structuredClone(quirkyForm);
+      changed.definitions[`L${n}`].maxLength = 99;
+      expect(compareToolLists([tool(plain)], [tool(changed)]), `position ${n}`).toEqual([expect.stringMatching(new RegExp(`maxLength: expected ${n}, got 99$`))]);
+    }
   });
 
   it('keeps clashing keywords of a $ref and its siblings as an allOf, so they still differ', () => {
