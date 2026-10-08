@@ -32,6 +32,9 @@ import { formatMb, formatMs, formatSummary, summarize } from './measure-footprin
 
 const execFileAsync = promisify(execFile);
 
+/** Longest `npm ci` or `tsc` may take before the script gives up; each takes well under a minute normally. */
+const STAGE_TIMEOUT_MS = 5 * 60 * 1000;
+
 const USAGE = 'usage: npx tsx scripts/measure-footprint.ts [--runs <n>] [--rust-binary <path>] [--settle-ms <ms>]';
 
 interface Options {
@@ -78,10 +81,12 @@ async function stageNodeServer(dir: string): Promise<{ dist: number; modules: nu
   await cp(join(REPO_ROOT, 'package.json'), join(dir, 'package.json'));
   await cp(join(REPO_ROOT, 'package-lock.json'), join(dir, 'package-lock.json'));
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  await execFileAsync(npm, ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: dir, maxBuffer: 1 << 24 });
+  // Bounded: npm ci reaches the registry, and a stalled connection would otherwise hang the script
+  await execFileAsync(npm, ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: dir, maxBuffer: 1 << 24, timeout: STAGE_TIMEOUT_MS });
   await execFileAsync(process.execPath, [join(REPO_ROOT, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', join(REPO_ROOT, 'tsconfig.json'), '--outDir', join(dir, 'dist')], {
     cwd: REPO_ROOT,
-    maxBuffer: 1 << 24
+    maxBuffer: 1 << 24,
+    timeout: STAGE_TIMEOUT_MS
   });
   return { dist: await treeBytes(join(dir, 'dist')), modules: await treeBytes(join(dir, 'node_modules')) };
 }
