@@ -5,7 +5,9 @@
 //   1. `tools/list`, by meaning (#292, tool-list-compare.ts) against the one recorded from the
 //      TypeScript server, which must itself match the ADR-0016 snapshot in
 //      src/__snapshots__/tool-list.test.ts.snap byte for byte;
-//   2. each case's tool result, byte for byte as the TypeScript server serialized it (ADR-0009);
+//   2. each case's tool result, byte for byte as the TypeScript server serialized it (ADR-0009); only
+//      the closest names of a page-not-found message are held to rules instead (ADR-0032, #335,
+//      suggestion-rules.ts), for a server other than the TypeScript one;
 //   3. the LogSeq calls and their inputs: the steps of a case in order, the calls within a step
 //      (ones the TypeScript code makes concurrently) as a set.
 // Any LogSeq call the stub has no answer for is a failure too.
@@ -18,6 +20,18 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { format } from '@vitest/pretty-format';
 import { compareToolLists, type ProjectedTool } from './tool-list-compare.js';
 import { toolListForSnapshot } from './tool-list-projection.js';
+import {
+  candidatesOf,
+  checkReferenceLists,
+  checkSuggestionRules,
+  describeSite,
+  missingRequiredCases,
+  notFoundSites,
+  readMessage,
+  withMessage,
+  wrongLists,
+  WRONG_LIST_LABELS
+} from './suggestion-rules.js';
 import { DATASCRIPT_QUERY, normalizeQuery, startStubLogseq, type CannedCall, type LogseqCall } from './stub-logseq.js';
 
 /** One tool call and the LogSeq traffic it should cause. Fixtures are synthetic only (BR-0001). */
@@ -91,6 +105,17 @@ export interface ParityOptions {
    * server must list exactly those. The recorded list is still checked against the snapshot whole.
    */
   onlyTestedTools?: boolean;
+  /**
+   * Hold the closest-name list of a page-not-found message to the rules of ADR-0032 instead of to the
+   * reference's bytes (#335). For any server other than the TypeScript one; the rest of every result is
+   * still byte for byte.
+   */
+  bySuggestionRules?: boolean;
+  /**
+   * Fail when the recorded cases lack one the ADR requires (an exact hit, a prefix hit, ...). On for the
+   * real case set, off for a test that runs a few cases of its own.
+   */
+  requireSuggestionCases?: boolean;
   /** The vitest snapshot file holding the tools/list snapshot */
   snapshotFile: string;
   /** Milliseconds to wait for each MCP request */
@@ -287,6 +312,62 @@ export function compareResult(expected: ToolResult, actual: ToolResult): string[
 }
 
 /**
+ * Compare a result with the reference where the reference holds a page-not-found message that lists
+ * closest names (ADR-0032, #335): that message is held to the rules, and the rest of the result, the
+ * message's frame included, byte for byte. A result with no such message is compared as {@link compareResult} does.
+ * `candidates` are the names the stub's `getAllPages` answer holds.
+ */
+export function compareResultBySuggestionRules(expected: ToolResult, actual: ToolResult, candidates: readonly string[]): string[] {
+  const failures: string[] = [];
+  let masked = actual;
+  for (const site of notFoundSites(expected)) {
+    const got = readMessage(actual, site);
+    // A result that holds no message there is a difference compareResult reports
+    if (got === undefined) continue;
+    const want = readMessage(expected, site)!;
+    for (const f of checkSuggestionRules(want, got, candidates)) failures.push(`${describeSite(site)} breaks ${f}`);
+    masked = withMessage(masked, site, want);
+  }
+  return [...failures, ...compareResult(expected, masked)];
+}
+
+/**
+ * The self-check of the closest-name rules: for each recorded case with a list, put each kind of wrong list
+ * in the reference's place and check that the rules fail it. It runs no server. Every kind has to apply to
+ * some case, or the check proves nothing about it.
+ */
+export function checkWrongLists(
+  cases: readonly Pick<ParityCase, 'name' | 'steps'>[],
+  expected: Readonly<Record<string, ToolResult>>
+): { lines: string[]; ok: boolean } {
+  const tried = new Map<string, { applied: number; caught: number }>(WRONG_LIST_LABELS.map(label => [label, { applied: 0, caught: 0 }]));
+  const lines: string[] = [];
+  for (const c of cases) {
+    const reference = expected[c.name];
+    if (!reference) continue;
+    const candidates = candidatesOf(c.steps);
+    for (const site of notFoundSites(reference)) {
+      for (const wrong of wrongLists(readMessage(reference, site)!, candidates)) {
+        const count = tried.get(wrong.label)!;
+        count.applied++;
+        if (compareResultBySuggestionRules(reference, withMessage(reference, site, wrong.message), candidates).length > 0) count.caught++;
+        else lines.push(`NOT CAUGHT: ${wrong.label} in "${c.name}"`);
+      }
+    }
+  }
+  let ok = lines.length === 0;
+  for (const [label, { applied, caught }] of tried) {
+    if (applied === 0) {
+      lines.push(`self-check, closest names, ${label}: no recorded case it applies to`);
+      ok = false;
+    } else {
+      lines.push(`self-check, closest names, ${label}: caught in ${caught} of ${applied} case(s)`);
+    }
+  }
+  return { lines, ok };
+}
+
+/**
  * The instant every server under test reads as "now" (`LOGSEQ_MCP_NOW`, milliseconds since 1970-01-01
  * UTC): 2025-03-12T03:30:00Z, which is still the evening of Tuesday 2025-03-11 in `PARITY_TZ`. A
  * result that depends on today's date (`last_n`, a preset) is then the same on every day, and a
@@ -352,7 +433,18 @@ export async function runCase(client: Client, c: ParityCase, timeout: number): P
  * against the snapshot byte for byte when there is no `expectedToolList`.
  */
 export async function runParity(options: ParityOptions): Promise<ParityReport> {
-  const { server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, timeoutMs = 30000, settleMs = 2000 } = options;
+  const {
+    server,
+    cases,
+    expected,
+    expectedToolList,
+    onlyTestedTools,
+    bySuggestionRules,
+    requireSuggestionCases,
+    snapshotFile,
+    timeoutMs = 30000,
+    settleMs = 2000
+  } = options;
   const failures: string[] = [];
   const results: Record<string, ToolResult> = {};
   let toolList: ProjectedTool[] | undefined;
@@ -427,7 +519,10 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
       if (expected) {
         const want = expected[c.name];
         if (!want) failures.push(`${prefix} no expected result recorded; run with --record`);
-        else for (const f of compareResult(want, result)) failures.push(`${prefix} result ${f}`);
+        else {
+          const differences = bySuggestionRules ? compareResultBySuggestionRules(want, result, candidatesOf(c.steps)) : compareResult(want, result);
+          for (const f of differences) failures.push(`${prefix} result ${f}`);
+        }
       }
     }
     if (expected) {
@@ -435,6 +530,10 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
         if (!names.has(name)) failures.push(`the expected file has a result for ${JSON.stringify(name)}, which is not a case`);
       }
     }
+    // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0032)
+    const reference = expected ?? results;
+    failures.push(...checkReferenceLists(cases, reference));
+    if (requireSuggestionCases) failures.push(...missingRequiredCases(cases, reference));
   } catch (error) {
     failures.push(`harness: ${(error as Error).message}`);
   } finally {
