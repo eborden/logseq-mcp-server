@@ -6,7 +6,7 @@ Tool names, parameter names, required fields and the shape of results are the co
 
 ## Rationale
 
-An MCP client, a skill, or a prompt that names a tool and its parameters is a consumer the server can't see. The schema is how it agrees with the server about reality. A silent rename or removal breaks those callers. The tool-list snapshot (#39) makes any change to a name, description or schema visible in review. Restated as a hard rule in the foundations doc (#38).
+An MCP client, a skill, or a prompt that names a tool and its parameters is a consumer the server can't see. The schema is how it agrees with the server about reality. A silent rename or removal breaks those callers. The recorded tool list (#39; now `scripts/parity/expected/tool-list.json`) makes any change to a name, description or schema visible in review. Restated as a hard rule in the foundations doc (#38).
 
 ## Mechanical enforcement
 
@@ -24,3 +24,4 @@ reviewer: A diff of `scripts/parity/expected/tool-list.json` only adds optional 
 | 2026-10-05 | Introduced as a hard rule in the foundations doc. | #38 |
 | 2026-10-05 | Tool-list snapshot added as the mechanism. | #47 |
 | 2026-10-08 | Mechanical enforcement: the tool-list snapshot of the TypeScript server is replaced by the recorded tool list, which the parity harness compares by meaning (ADR-0031). Statement unchanged. Added the live-list guard. | #370 |
+| 2026-10-08 | Rationale only: the tool-list snapshot is the recorded `tools/list` the parity harness compares by meaning. Statement unchanged. | #372 |
