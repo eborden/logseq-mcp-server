@@ -238,7 +238,7 @@ pub async fn suggest_pages(client: &LogseqClient, input: &str) -> Result<Vec<Str
     // A page with no original name has nothing to match against
     let names: Vec<String> = wire::page_names(&answer, GET_ALL_PAGES)?.unwrap_or_default().into_iter().flatten().collect();
     let targets: Vec<&str> = names.iter().map(String::as_str).collect();
-    Ok(fuzzy::go(input, &targets, MAX_SUGGESTIONS).into_iter().map(|found| names[found.index].clone()).collect())
+    Ok(fuzzy::go(input, &targets, MAX_SUGGESTIONS).into_iter().map(|index| names[index].clone()).collect())
 }
 
 /// Resolve a name that must be a page. Returns the one page, or fails with
