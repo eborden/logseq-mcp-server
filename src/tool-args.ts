@@ -86,8 +86,8 @@ export const getPageOutlineArgs = z.object({
 
 /**
  * Every count, limit, offset and depth parameter below is an integer with a minimum
- * (#293): 0 where an empty result means something (no blocks, only the totals), 1 where
- * it doesn't (`last_n`, the network caps, `max_distance`, `max_topics`). A fraction or a
+ * (#293): 0 where 0 means something (no blocks, only the totals, the root alone, no
+ * hops), 1 where it doesn't (`last_n`, `max_nodes`, `max_fanout`, `max_topics`). A fraction or a
  * smaller value is rejected by `parseArgs`. None has a schema maximum: the tools clamp a
  * larger value, and say so, as they always did (#61).
  *
@@ -147,12 +147,12 @@ export const queryByPropertyArgs = z.object({
 
 /**
  * The handler clamps `max_depth` to 3, `max_nodes` to 500 and `max_fanout` to 100. The
- * minimum of 1 is the floor the tool always applied to `max_nodes` and `max_fanout`;
- * a `max_depth` of 0 used to return the root alone (#293).
+ * minimum of 1 is the floor the tool always applied to `max_nodes` and `max_fanout`.
+ * A `max_depth` of 0 returns the root alone, as it always did (#293).
  */
 export const getConceptNetworkArgs = z.object({
   concept_name: z.string().describe('Root concept (page name, alias or ISO date)'),
-  max_depth: z.int().min(1).default(DEFAULT_MAX_DEPTH).describe('Maximum depth to traverse (default: 2, max: 3)'),
+  max_depth: z.int().min(0).default(DEFAULT_MAX_DEPTH).describe('Maximum depth to traverse (default: 2, max: 3)'),
   max_nodes: z
     .int()
     .min(1)
@@ -180,10 +180,10 @@ export const searchByRelationshipArgs = z.object({
     .describe(
       'Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)'
     ),
-  // No clamp. 0 or less used to walk no hops and report "not connected" (#293)
+  // No clamp. 0 walks no hops and finds no connection, as it always did (#293)
   max_distance: z
     .int()
-    .min(1)
+    .min(0)
     .default(DEFAULT_MAX_DISTANCE)
     .describe('Maximum graph distance for connected-within (default: 2)'),
   // The tool clamps it to 500 and reports the cut (#61)

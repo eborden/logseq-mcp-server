@@ -273,7 +273,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "max_depth": {
           "default": 2,
           "description": "Maximum depth to traverse (default: 2, max: 3)",
-          "minimum": 1,
+          "minimum": 0,
           "type": "integer",
         },
         "max_fanout": {
@@ -698,7 +698,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "max_distance": {
           "default": 2,
           "description": "Maximum graph distance for connected-within (default: 2)",
-          "minimum": 1,
+          "minimum": 0,
           "type": "integer",
         },
         "relationship_type": {

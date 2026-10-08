@@ -35,7 +35,7 @@ interface CountParam {
   tool: string;
   schema: z.ZodObject;
   param: string;
-  /** The schema's minimum: 0 where none (an empty list) has a meaning, 1 where it doesn't. */
+  /** The schema's minimum: 0 where 0 has a meaning (an empty list, the root alone, no hops), 1 where it doesn't. */
   min: 0 | 1;
   required: Record<string, unknown>;
   /** The largest value the tool uses, where it caps one. */
@@ -51,10 +51,10 @@ const COUNT_PARAMS: CountParam[] = [
   { tool: 'get_backlinks', schema: getBacklinksArgs, param: 'max_blocks_per_page', min: 0, required: PAGE, max: MAX_BLOCKS_PER_PAGE },
   { tool: 'search_blocks', schema: searchBlocksArgs, param: 'limit', min: 0, required: { query: 'x' }, max: MAX_SEARCH_LIMIT },
   { tool: 'query_by_property', schema: queryByPropertyArgs, param: 'limit', min: 0, required: PROPERTY, max: MAX_PROPERTY_LIMIT },
-  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_depth', min: 1, required: { concept_name: 'x' }, max: 3 },
+  { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_depth', min: 0, required: { concept_name: 'x' }, max: 3 },
   { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_nodes', min: 1, required: { concept_name: 'x' }, max: 500 },
   { tool: 'get_concept_network', schema: getConceptNetworkArgs, param: 'max_fanout', min: 1, required: { concept_name: 'x' }, max: 100 },
-  { tool: 'search_by_relationship', schema: searchByRelationshipArgs, param: 'max_distance', min: 1, required: RELATIONSHIP },
+  { tool: 'search_by_relationship', schema: searchByRelationshipArgs, param: 'max_distance', min: 0, required: RELATIONSHIP },
   {
     tool: 'search_by_relationship',
     schema: searchByRelationshipArgs,

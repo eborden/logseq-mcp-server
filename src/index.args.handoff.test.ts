@@ -136,6 +136,7 @@ describe('logseq_get_concept_network hand-off', () => {
     [4, 3],
     [100, 3],
     [1, 1],
+    [0, 0],
   ])('max_depth %j reaches the tool as %j (clamped to 3, not raised)', async (value, expected) => {
     const [, depth] = await network({ max_depth: value });
     expect(depth).toBe(expected);
@@ -183,7 +184,7 @@ describe('logseq_search_by_relationship hand-off', () => {
     expect(options).toEqual({ limit: value });
   });
 
-  it.each([1, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {
+  it.each([0, 1, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {
     const [, , , distance] = await relationship({ max_distance: value });
     expect(distance).toBe(value);
   });
@@ -486,14 +487,14 @@ async function rejectedBefore(name: string, args: Record<string, unknown>, mock:
 
 describe('a value below its minimum never reaches the tool (#293)', () => {
   it.each([
-    ['logseq_get_concept_network', { concept_name: 'Alice', max_depth: 0 }, 'max_depth', 1, mocks.getConceptNetwork],
+    ['logseq_get_concept_network', { concept_name: 'Alice', max_depth: -1 }, 'max_depth', 0, mocks.getConceptNetwork],
     ['logseq_get_concept_network', { concept_name: 'Alice', max_nodes: 0 }, 'max_nodes', 1, mocks.getConceptNetwork],
     ['logseq_get_concept_network', { concept_name: 'Alice', max_fanout: -1 }, 'max_fanout', 1, mocks.getConceptNetwork],
     [
       'logseq_search_by_relationship',
-      { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within', max_distance: 0 },
+      { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within', max_distance: -1 },
       'max_distance',
-      1,
+      0,
       mocks.searchByRelationship,
     ],
     [
