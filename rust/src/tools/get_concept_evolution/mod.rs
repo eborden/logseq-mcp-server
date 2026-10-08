@@ -22,19 +22,19 @@ mod wire;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::edn::{PageId, PageName};
 use crate::errors::ToolError;
 use crate::js;
-use crate::meta::{ResultMeta, ResultWarning};
+use crate::meta::ResultWarning;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{alias_set_warnings, resolve_alias_set};
 use crate::resolve::require_page;
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::resolved_from;
 use crate::tools::get_page::wire as page_wire;
 
@@ -168,57 +168,98 @@ pub struct ConceptEvolution {
     pub summary: Summary,
 }
 
+/// `totals`: how many mentions there were before the timeline cut some.
+#[derive(Serialize)]
+struct MentionTotals {
+    mentions: usize,
+}
+
+/// The completeness keys, there only when a warning applies (`totals` only with a cut).
+#[derive(Serialize)]
+struct Completeness<'a> {
+    #[serde(rename = "hasMore")]
+    has_more: bool,
+    warnings: &'a [ResultWarning],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    totals: Option<MentionTotals>,
+}
+
+/// One day of the timeline: its date (`null` for the undated mentions) and the mentions on it.
+#[derive(Serialize)]
+struct TimelineEntry<'a> {
+    date: Option<i64>,
+    blocks: &'a [Value],
+}
+
+/// The period keys of `groupedTimeline` as an object, in the order the periods were first met.
+struct GroupedTimeline<'a>(&'a [(String, Vec<Value>)]);
+
+impl Serialize for GroupedTimeline<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.0.iter().map(|(period, blocks)| (period, blocks)))
+    }
+}
+
+/// The span the mentions cover, `null` where there is no mention to bound it.
+#[derive(Serialize)]
+struct DateRange {
+    earliest: Option<i64>,
+    latest: Option<i64>,
+}
+
+/// `summary`: the counts over every mention found, in the order mentions, when, then the split.
+#[derive(Serialize)]
+struct SummaryOutput {
+    #[serde(rename = "totalMentions")]
+    total_mentions: usize,
+    #[serde(rename = "dateRange")]
+    date_range: DateRange,
+    #[serde(rename = "journalMentions")]
+    journal_mentions: usize,
+    #[serde(rename = "nonJournalMentions")]
+    non_journal_mentions: usize,
+}
+
+/// A result as written, in BR-0013's order: what was answered (`concept`, `resolvedFrom`, `resolvedAliases`), what
+/// must not be missed (`hasMore`, `warnings`, `totals`, then `summary`), then the data (`timeline`, `groupedTimeline`).
+#[derive(Serialize)]
+struct EvolutionOutput<'a> {
+    concept: &'a str,
+    #[serde(rename = "resolvedFrom", skip_serializing_if = "Option::is_none")]
+    resolved_from: Option<&'a Value>,
+    #[serde(rename = "resolvedAliases", skip_serializing_if = "Option::is_none")]
+    resolved_aliases: Option<&'a [String]>,
+    #[serde(flatten)]
+    completeness: Option<Completeness<'a>>,
+    summary: SummaryOutput,
+    timeline: Vec<TimelineEntry<'a>>,
+    #[serde(rename = "groupedTimeline", skip_serializing_if = "Option::is_none")]
+    grouped_timeline: Option<GroupedTimeline<'a>>,
+}
+
 impl ConceptEvolution {
-    /// The result as the TypeScript object is written: `concept`, `resolvedFrom`, `resolvedAliases`,
-    /// the meta (`hasMore`, `warnings` and `totals`, only when a warning applies), `timeline`,
-    /// `groupedTimeline`, `summary`.
+    /// The result in BR-0013's key order.
     pub fn to_value(&self) -> Value {
-        let mut out = Map::new();
-        out.insert("concept".into(), json!(self.concept));
-        if let Some(from) = &self.resolved_from {
-            out.insert("resolvedFrom".into(), from.clone());
-        }
-        if let Some(names) = &self.resolved_aliases {
-            out.insert("resolvedAliases".into(), json!(names));
-        }
-        if !self.warnings.is_empty() {
-            let totals: Vec<(&str, usize)> = self.total_mentions_before_cut.map(|total| ("mentions", total)).into_iter().collect();
-            let meta = serde_json::to_value(ResultMeta::new(self.warnings.clone(), &totals)).expect("a result meta serializes");
-            let Value::Object(meta) = meta else { unreachable!("a result meta is an object") };
-            for (key, value) in meta {
-                // `totals` is there only with a cut
-                if key == "totals" && self.total_mentions_before_cut.is_none() {
-                    continue;
-                }
-                out.insert(key, value);
-            }
-        }
-        out.insert(
-            "timeline".into(),
-            Value::Array(
-                self.timeline
-                    .iter()
-                    .map(|(date, blocks)| json!({"date": date.map_or(Value::Null, Value::from), "blocks": blocks}))
-                    .collect(),
-            ),
-        );
-        if let Some(grouped) = &self.grouped_timeline {
-            let mut object = Map::new();
-            for (key, blocks) in grouped {
-                object.insert(key.clone(), Value::Array(blocks.clone()));
-            }
-            out.insert("groupedTimeline".into(), Value::Object(object));
-        }
-        let mut summary = Map::new();
-        summary.insert("totalMentions".into(), json!(self.summary.total_mentions));
-        summary.insert(
-            "dateRange".into(),
-            json!({"earliest": self.summary.earliest.map_or(Value::Null, Value::from), "latest": self.summary.latest.map_or(Value::Null, Value::from)}),
-        );
-        summary.insert("journalMentions".into(), json!(self.summary.journal_mentions));
-        summary.insert("nonJournalMentions".into(), json!(self.summary.non_journal_mentions));
-        out.insert("summary".into(), Value::Object(summary));
-        Value::Object(out)
+        let totals = self.total_mentions_before_cut.map(|mentions| MentionTotals { mentions });
+        let completeness = (!self.warnings.is_empty()).then(|| Completeness {
+            has_more: self.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()),
+            warnings: &self.warnings,
+            totals,
+        });
+        result_value(&EvolutionOutput {
+            concept: &self.concept,
+            resolved_from: self.resolved_from.as_ref(),
+            resolved_aliases: self.resolved_aliases.as_deref(),
+            completeness,
+            summary: SummaryOutput {
+                total_mentions: self.summary.total_mentions,
+                date_range: DateRange { earliest: self.summary.earliest, latest: self.summary.latest },
+                journal_mentions: self.summary.journal_mentions,
+                non_journal_mentions: self.summary.non_journal_mentions,
+            },
+            timeline: self.timeline.iter().map(|(date, blocks)| TimelineEntry { date: *date, blocks }).collect(),
+            grouped_timeline: self.grouped_timeline.as_deref().map(GroupedTimeline),
+        })
     }
 }
 
@@ -339,7 +380,8 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::testing::{meaning, schema_of};
+    use crate::tool::testing::{keys, meaning, schema_of};
+    use serde_json::json;
 
     fn args(value: Value) -> Option<JsonObject> {
         value.as_object().cloned()
@@ -417,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn a_result_is_written_in_the_order_of_the_typescript_object() {
+    fn a_result_says_what_it_answered_what_may_be_missing_and_the_summary_before_the_timeline() {
         let text = js::json_stringify(&evolution().to_value());
         assert_eq!(
             text,
@@ -425,12 +467,26 @@ mod tests {
                 r#"{"concept":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,
                 r#""hasMore":false,"warnings":[{"code":"entries_truncated","message":"m"}],"totals":{"mentions":9},"#,
+                r#""summary":{"totalMentions":9,"dateRange":{"earliest":20250101,"latest":20250101},"journalMentions":1,"nonJournalMentions":8},"#,
                 r#""timeline":[{"date":20250101,"blocks":[{"id":1,"uuid":"u1","page":{"id":101,"journalDay":20250101}}]},"#,
                 r#"{"date":null,"blocks":[{"id":2,"uuid":"u2","page":{"id":102}}]}],"#,
-                r#""groupedTimeline":{"20250101":[{"id":1,"uuid":"u1","page":{"id":101,"journalDay":20250101}}]},"#,
-                r#""summary":{"totalMentions":9,"dateRange":{"earliest":20250101,"latest":20250101},"journalMentions":1,"nonJournalMentions":8}}"#
+                r#""groupedTimeline":{"20250101":[{"id":1,"uuid":"u1","page":{"id":101,"journalDay":20250101}}]}}"#
             )
         );
+    }
+
+    #[test]
+    fn the_order_of_a_result_does_not_depend_on_which_optional_keys_are_there() {
+        let all = ["concept", "resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "summary", "timeline", "groupedTimeline"];
+        assert_eq!(keys(&evolution().to_value()), all);
+        // a warning with no cut count has no `totals`; no warning has none of the three
+        let no_totals = ConceptEvolution { total_mentions_before_cut: None, ..evolution() };
+        assert_eq!(keys(&no_totals.to_value()), ["concept", "resolvedFrom", "resolvedAliases", "hasMore", "warnings", "summary", "timeline", "groupedTimeline"]);
+        let quiet = ConceptEvolution { warnings: vec![], total_mentions_before_cut: None, resolved_from: None, resolved_aliases: None, grouped_timeline: None, ..evolution() };
+        assert_eq!(keys(&quiet.to_value()), ["concept", "summary", "timeline"]);
+        let value = evolution().to_value();
+        assert_eq!(keys(&value["summary"]), ["totalMentions", "dateRange", "journalMentions", "nonJournalMentions"]);
+        assert_eq!(keys(&value["timeline"][0]), ["date", "blocks"]);
     }
 
     #[test]
@@ -447,7 +503,7 @@ mod tests {
         };
         assert_eq!(
             js::json_stringify(&plain.to_value()),
-            r#"{"concept":"atlas","timeline":[],"summary":{"totalMentions":0,"dateRange":{"earliest":null,"latest":null},"journalMentions":0,"nonJournalMentions":0}}"#
+            r#"{"concept":"atlas","summary":{"totalMentions":0,"dateRange":{"earliest":null,"latest":null},"journalMentions":0,"nonJournalMentions":0},"timeline":[]}"#
         );
         // an alias group's warning alone adds the meta, with no totals
         let aliased = ConceptEvolution { total_mentions_before_cut: None, ..evolution() };
