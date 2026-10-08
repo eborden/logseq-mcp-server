@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { appendFileSync } from 'fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { createServer as createHttpServer, type Server as HttpServer } from 'http';
@@ -49,9 +50,22 @@ interface ForwarderSession {
   dir: string;
 }
 
-/** Forwards the Rust server's LogSeq calls through `client.callAPI`, which keeps every wrapper on it. */
-async function startForwarder(client: LogseqClient): Promise<HttpServer> {
+/**
+ * Forwards the Rust server's LogSeq calls through `client.callAPI`, which keeps every wrapper on it.
+ *
+ * `client.callAPI` carries the instance's real token, so the forwarder is as sensitive as the
+ * instance: LogSeq's API answers CORS `*` and can run commands (#118). It answers 401 unless the
+ * request is `POST /api` with the bearer token generated for this run, which the Rust config holds.
+ */
+async function startForwarder(client: LogseqClient, token: string): Promise<HttpServer> {
   const http = createHttpServer((request, response) => {
+    const path = (request.url ?? '').split('?')[0];
+    if (request.method !== 'POST' || path !== '/api' || request.headers.authorization !== `Bearer ${token}`) {
+      request.resume();
+      response.writeHead(401, { 'Content-Length': 0 });
+      response.end();
+      return;
+    }
     const chunks: Buffer[] = [];
     request.on('data', chunk => chunks.push(chunk as Buffer));
     request.on('end', () => {
@@ -79,14 +93,16 @@ async function startForwarder(client: LogseqClient): Promise<HttpServer> {
 
 async function startRust(client: LogseqClient, options: ConnectOptions): Promise<ForwarderSession> {
   requireRustBinary();
-  const http = await startForwarder(client);
+  // Random for this run, so nothing that merely finds the port can use the forwarder
+  const token = randomBytes(32).toString('hex');
+  const http = await startForwarder(client, token);
   const { port } = http.address() as AddressInfo;
   const dir = await mkdtemp(join(tmpdir(), 'logseq-mcp-rust-'));
   const home = join(dir, 'home');
   await mkdir(home, { recursive: true });
   const configPath = join(dir, 'config.json');
   // The token is the forwarder's: the real one stays in the TypeScript client
-  await writeFile(configPath, JSON.stringify({ apiUrl: `http://127.0.0.1:${port}`, authToken: 'forwarder' }), { mode: 0o600 });
+  await writeFile(configPath, JSON.stringify({ apiUrl: `http://127.0.0.1:${port}`, authToken: token }), { mode: 0o600 });
 
   // Like the parity harness (scripts/parity/harness.ts): a home of its own, so there is no
   // ~/.logseq-mcp/config.json to fall back on (BR-0001)
