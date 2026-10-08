@@ -13,7 +13,7 @@ tool is #125.
 |---|---|
 | `src/config.rs` | `~/.logseq-mcp/config.json` (or `LOGSEQ_MCP_CONFIG`), parsed once. Its errors never show a file value (ADR-0003) |
 | `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as `src/client.ts` |
-| `src/edn.rs` | `DatalogInput`, the only values that can be bound to `:in` (ADR-0013) |
+| `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
 | `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`. Each input schema comes from the type that parses the arguments |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
 
