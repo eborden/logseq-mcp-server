@@ -4,7 +4,7 @@
 //! Tools are listed by hand rather than with rmcp's `#[tool]` macros, so every byte of a tool's
 //! definition is ours to match against the TypeScript snapshot (ADR-0016, ADR-0025 Decision 2).
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, GetPromptRequestParams, GetPromptResponse, Implementation,
@@ -25,11 +25,10 @@ use crate::tools;
 /// The server name the TypeScript server reports (`src/index.ts`).
 pub const SERVER_NAME: &str = "logseq-mcp-server";
 
-/// `version` from the repo's package.json, as `src/version.ts` reads it, so both servers report one version.
-pub static SERVER_VERSION: LazyLock<String> = LazyLock::new(|| {
-    let package: Value = serde_json::from_str(include_str!("../../package.json")).expect("package.json is JSON");
-    package["version"].as_str().expect("package.json has a version").to_owned()
-});
+/// The package's `version` in `Cargo.toml`, 1.0.0 as the TypeScript server's `serverInfo` was. Cargo owns it
+/// now; `tests/rust-guards/version.test.ts` keeps it equal to package.json and the plugin manifest until
+/// #355 changes how the server ships.
+pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone)]
 pub struct LogseqServer {
@@ -62,7 +61,7 @@ impl LogseqServer {
 impl ServerHandler for LogseqServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_prompts().enable_resources().build())
-            .with_server_info(Implementation::new(SERVER_NAME, SERVER_VERSION.as_str()))
+            .with_server_info(Implementation::new(SERVER_NAME, SERVER_VERSION))
             .with_instructions(SERVER_INSTRUCTIONS)
     }
 
@@ -133,8 +132,8 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     #[test]
-    fn the_version_is_package_json_s() {
-        assert!(SERVER_VERSION.split('.').count() == 3, "{}", *SERVER_VERSION);
+    fn the_version_is_the_cargo_packages() {
+        assert!(SERVER_VERSION.split('.').count() == 3, "{SERVER_VERSION}");
     }
 
     /// Runs the server over an in-memory pipe and sends it raw JSON-RPC lines, so the test sees
@@ -187,7 +186,7 @@ mod tests {
         let responses = exchange(&closed_port_url().await, &[initialize()]).await;
         let result = &responses[0]["result"];
         assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
-        assert_eq!(result["serverInfo"]["version"], SERVER_VERSION.as_str());
+        assert_eq!(result["serverInfo"]["version"], SERVER_VERSION);
         assert_eq!(result["instructions"], SERVER_INSTRUCTIONS);
         assert_eq!(result["protocolVersion"], "2025-06-18");
         assert!(result["capabilities"]["tools"].is_object());
