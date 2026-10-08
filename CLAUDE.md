@@ -230,6 +230,12 @@ Measured with `npx tsx scripts/measure-api-calls.ts` (Oct 2026, ~2k-page graph, 
 
 Re-run the script after changing any of these tools, and update this table.
 
+**Rust server (#353, Oct 2026).** `scripts/measure-api-calls.ts` ran the same cases on the TypeScript tool functions, the TypeScript server through MCP and the Rust server through MCP stdio, one run each. On the ~2k-page graph with a hub page, 38 cases (the tool rows above except `list_pages`, the `format: "markdown"` row and `compact`, plus the alias, ISO date, `resolve_refs` and not-found variants) gave the same call total and the same split by LogSeq method on all three, in every case. A missing page answers an error through MCP, with the same 4 calls. `list_pages` and `get_graph_info` were added to the script afterwards and checked on the fixture instance only: 1 call each (`getAllPages`, `App.getCurrentGraph`), the same on all three. The call counts of the `format: "markdown"` and `compact` rows were not measured for Rust; `scripts/measure-output-size.ts` (which covers both) gave byte-identical sizes for the TypeScript and Rust servers.
+
+Times were also about equal, but the machine was under heavy load for all three runs (1-minute load average ~11-13, and it never fell below 3 in the 20 minutes waited), so treat them as order of magnitude: a single-page tool takes a few ms to ~0.1s, and a depth-2 network or `build_context` ~0.2-0.7s, on either server, inside the run-to-run noise. Re-measure on a quiet machine before quoting a difference between the servers.
+
+The measure scripts drive the Rust server since the TypeScript one was retired (#356): `--server rust` is the default and the only value (the `ts` and `ts-mcp` paths are gone), and the binary is the one at `--rust-binary`, default `rust/target/release/logseq-mcp-server`, over MCP stdio. Build it with `cd rust && cargo build --release --locked`. The script counts calls with a forwarding proxy between the binary and LogSeq (`scripts/measure-server.ts`); the binary gets a temporary config with the same token, deleted afterwards. The proxy and the MCP layer add a little to each time.
+
 ## Critical LogSeq Datalog Constraints
 
 LogSeq's Datalog implementation (via `logseq.DB.datascriptQuery`) has significant limitations compared to standard DataScript. Understanding these constraints is essential for writing working queries.
@@ -611,6 +617,7 @@ Measured numbers are in "Current Implementation Status" under "Why Datalog?". Re
 ```bash
 npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
 npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
+npx tsx scripts/measure-api-calls.ts --rust-binary rust/target/debug/logseq-mcp-server  # another binary than the release build (both measure scripts take it)
 npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42), markdown and compact vs json (#43); bytes only, no names
 ```
 
