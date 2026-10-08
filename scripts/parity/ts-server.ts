@@ -13,7 +13,11 @@ export const REPO_ROOT = join(here, '..', '..');
 
 export const SNAPSHOT_FILE = join(REPO_ROOT, 'src', '__snapshots__', 'tool-list.test.ts.snap');
 
-export function typescriptServer(): ServerCommand {
+/** A command that runs one of the TypeScript files in this folder from source. */
+export function viteNodeCommand(file: string): ServerCommand {
   const viteNode = createRequire(import.meta.url).resolve('vite-node/vite-node.mjs');
-  return { command: process.execPath, args: [viteNode, join(here, 'run-ts-server.ts')], cwd: REPO_ROOT };
+  return { command: process.execPath, args: [viteNode, join(here, file)], cwd: REPO_ROOT };
 }
+
+/** The TypeScript server, the harness's reference. */
+export const typescriptServer = (): ServerCommand => viteNodeCommand('run-ts-server.ts');

@@ -6,7 +6,7 @@
 //   3. the LogSeq calls and their inputs: the steps of a case in order, the calls within a step
 //      (ones the TypeScript code makes concurrently) as a set.
 // Any LogSeq call the stub has no answer for is a failure too.
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -34,7 +34,12 @@ export interface ToolResult {
   isError: boolean;
 }
 
-/** The command that starts the server under test. It must speak MCP over stdio. */
+/**
+ * The command that starts the server under test. It must speak MCP over stdio and read its config
+ * from the file `LOGSEQ_MCP_CONFIG` names, which points it at the stub. Its home directory is a
+ * fresh temp dir (see {@link sandboxedEnv}), so a server that ignores the variable finds no config
+ * to fall back on and can't reach a real LogSeq (BR-0001).
+ */
 export interface ServerCommand {
   command: string;
   args: string[];
@@ -189,12 +194,21 @@ export function compareResult(expected: ToolResult, actual: ToolResult): string[
   return failures;
 }
 
-/** The caller's environment, with the config pointed at the stub and tips left at their default. */
-function serverEnv(configPath: string): Record<string, string> {
+/**
+ * The caller's environment, with the config pointed at the stub, tips left at their default, and
+ * every home and config directory a server could look in for a fallback config (`~/.logseq-mcp/`)
+ * moved to `home`, an empty temp dir.
+ */
+export function sandboxedEnv(configPath: string, home: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   delete env.LOGSEQ_MCP_TIPS;
   env.LOGSEQ_MCP_CONFIG = configPath;
+  env.HOME = home;
+  env.USERPROFILE = home;
+  env.XDG_CONFIG_HOME = join(home, '.config');
+  // macOS looks the home folder up by user, not $HOME, unless this is set (see scripts/logseq-instance)
+  if (process.platform === 'darwin') env.CFFIXED_USER_HOME = home;
   return env;
 }
 
@@ -217,13 +231,15 @@ export async function runParity(options: ParityOptions): Promise<ParityReport> {
   const stub = await startStubLogseq();
   const dir = await mkdtemp(join(tmpdir(), 'logseq-parity-'));
   const configPath = join(dir, 'config.json');
+  const home = join(dir, 'home');
+  await mkdir(home);
   await writeFile(configPath, JSON.stringify({ apiUrl: stub.apiUrl, authToken: stub.authToken }));
 
   const transport = new StdioClientTransport({
     command: server.command,
     args: server.args,
     cwd: server.cwd,
-    env: serverEnv(configPath),
+    env: sandboxedEnv(configPath, home),
     stderr: 'pipe'
   });
   transport.stderr?.on('data', (chunk: Buffer) => {
