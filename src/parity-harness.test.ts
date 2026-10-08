@@ -1161,6 +1161,25 @@ describe('the closest-name rules (ADR-0032, #335)', () => {
       expect(compareResultBySuggestionRules(ok, toolResult(message('x', 'Bob')), PAGES).join('\n')).toContain('content[0].text differs');
     });
 
+    it('fails an envelope that is not the minified serialization of its message, whatever the list says', () => {
+      const typo = 'Project Atlas, Project Zed, Project Quill';
+      const reference = toolResult(message('Projct', typo));
+      const text = (result: ToolResult) => result.content![0].text as string;
+      const withText = (t: string): ToolResult => ({ ...reference, content: [{ type: 'text', text: t }] });
+      // the same message, pretty-printed
+      const pretty = withText(JSON.stringify({ error: message('Projct', typo) }, null, 2));
+      expect(compareResultBySuggestionRules(reference, pretty, PAGES).join('\n')).toContain('content[0].text differs');
+      // the same message with its first letter escaped
+      const escaped = withText(text(reference).replace('No page', '\\u004eo page'));
+      expect(JSON.parse(text(escaped)).error).toBe(message('Projct', typo));
+      expect(compareResultBySuggestionRules(reference, escaped, PAGES).join('\n')).toContain('content[0].text differs');
+      // and a valid list in a reformatted envelope is no better
+      const reordered = withText(JSON.stringify({ error: message('Projct', 'Project Quill, Project Zed, Project Atlas') }, null, 2));
+      expect(compareResultBySuggestionRules(reference, reordered, PAGES).join('\n')).toContain('content[0].text differs');
+      // the minified one passes
+      expect(compareResultBySuggestionRules(reference, withText(JSON.stringify({ error: message('Projct', 'Project Quill, Project Zed, Project Atlas') })), PAGES)).toEqual([]);
+    });
+
     it('fails a result that has no message where the reference has one', () => {
       const failures = compareResultBySuggestionRules(toolResult(message('Projct', 'Project Atlas')), { content: [{ type: 'text', text: '{"name":"Alice"}' }] }, PAGES);
       expect(failures.join('\n')).toContain('content[0].text differs');

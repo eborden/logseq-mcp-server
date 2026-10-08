@@ -25,7 +25,6 @@ import { CASE_GROUPS, allCases, expectedFileOf, type CaseGroup } from './parity/
 import { checkWrongLists, compareResult, perturbCases, runParity, type ParityReport, type ToolResult } from './parity/harness.js';
 import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
 import { parseCommandLine } from './parity/command-line.js';
-import { hasClosestList } from './parity/suggestion-rules.js';
 import { REPO_ROOT, SNAPSHOT_FILE } from './parity/ts-server.js';
 
 /** The TypeScript server's tools/list in the snapshot's shape; it must match the snapshot exactly. */
@@ -122,7 +121,7 @@ async function main(): Promise<number> {
     return report.failures.length === 0 ? 0 : 1;
   }
   if (mode === 'perturb') {
-    const report = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
+    const report = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
     print('parity with perturbed fixtures', report);
     return report.failures.length === 0 ? 0 : 1;
   }
@@ -130,11 +129,8 @@ async function main(): Promise<number> {
   // self-check: the fixtures pass as they are, and every case with a LogSeq call fails once perturbed
   const clean = await runParity({ server, cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
   print('self-check, fixtures as committed', clean);
-  const perturbed = await runParity({ server, cases: perturbCases(cases), expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
-  // A server held to rules for its closest names (not bytes) rightly accepts a perturbed list of candidates it can
-  // read; those cases are covered by the wrong lists below instead
-  const byRules = (name: string): boolean => !isReference && hasClosestList(expected[name]);
-  const caught = cases.filter(c => c.steps.length > 0 && !byRules(c.name)).map(c => ({
+  const perturbed = await runParity({ server, cases: perturbCases(cases), unperturbedCases: cases, expected, expectedToolList, onlyTestedTools, snapshotFile, ...suggestions });
+  const caught = cases.filter(c => c.steps.length > 0).map(c => ({
     name: c.name,
     failures: perturbed.failures.filter(f => f.startsWith(`[${c.tool}: ${c.name}]`))
   }));
