@@ -4,11 +4,11 @@
 //!
 //! Both are checked against the TypeScript schemas and then kept as the values LogSeq sent: the
 //! tool's output carries each entity as it came (BR-0004), so a typed copy would only be thrown
-//! away. A private reader for `blockSchema` lives here until a second tool needs one.
+//! away. The schema checks are `entity.rs`'s.
 
 use serde_json::{Map, Value};
 
-use crate::wire::{DATALOG_METHOD, Part, Parsed, Reader, ResponseError, to_error};
+use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
 
 /// The method whose answer [`linked_references`] reads.
 pub const LINKED_REFERENCES_METHOD: &str = "logseq.Editor.getPageLinkedReferences";
@@ -33,53 +33,6 @@ impl Backlink {
     }
 }
 
-impl Reader {
-    /// `nestedPageSchema`: the page nested in a block, or one of its `refs`.
-    fn nested_page_check(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.number(map, "id")?;
-        self.number(map, "db/id")?;
-        self.string(map, "name")?;
-        self.string(map, "originalName")?;
-        self.string(map, "original-name")?;
-        self.boolean(map, "journal?")?;
-        self.boolean(map, "journal")?;
-        self.number(map, "journalDay")?;
-        self.number(map, "journal-day")?;
-        Ok(())
-    }
-
-    /// `blockSchema`: the fields the tools read from a block, in the schema's order.
-    fn block_check(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.at(Part::Key("id"), |r| match map.get("id") {
-            Some(id) => r.number_value(id).map(|_| ()),
-            None => Err(r.mismatch("number", None)),
-        })?;
-        self.required_string(map, "uuid")?;
-        self.string(map, "content")?;
-        self.at(Part::Key("page"), |r| match map.get("page") {
-            None => Ok(()),
-            some => r.nested_page_check(some),
-        })?;
-        self.optional_entity_ref(map, "parent")?;
-        self.optional_entity_ref(map, "left")?;
-        self.map_field(map, "properties")?;
-        self.string(map, "marker")?;
-        self.at(Part::Key("refs"), |r| match map.get("refs") {
-            None => Ok(()),
-            Some(Value::Array(items)) => {
-                for (i, item) in items.iter().enumerate() {
-                    r.at(Part::Index(i), |r| r.nested_page_check(Some(item)))?;
-                }
-                Ok(())
-            }
-            Some(other) => Err(r.mismatch("array", Some(other))),
-        })?;
-        Ok(())
-    }
-}
-
 /// `responses.linkedReferences`: `[page | null, blocks]` per source page, or `null`.
 pub fn linked_references(answer: Value) -> Result<Option<Vec<Backlink>>, ResponseError> {
     let mut reader = Reader::default();
@@ -87,12 +40,12 @@ pub fn linked_references(answer: Value) -> Result<Option<Vec<Backlink>>, Respons
         .rows(&answer, 2, |r, cells| {
             r.at(Part::Index(0), |r| match cells.first() {
                 Some(Value::Null) => Ok(()),
-                other => r.page_like_check(other),
+                other => r.check_page_like(other),
             })?;
             r.at(Part::Index(1), |r| match cells.get(1) {
                 Some(Value::Array(blocks)) => {
                     for (i, block) in blocks.iter().enumerate() {
-                        r.at(Part::Index(i), |r| r.block_check(Some(block)))?;
+                        r.at(Part::Index(i), |r| r.check_block(Some(block)))?;
                     }
                     Ok(())
                 }
@@ -126,7 +79,7 @@ pub fn block_rows(answer: Value) -> Result<Option<Vec<Option<Map<String, Value>>
         .rows(&answer, 1, |r, cells| {
             r.at(Part::Index(0), |r| match cells.first() {
                 Some(Value::Null) => Ok(()),
-                other => r.block_check(other),
+                other => r.check_block(other),
             })
         })
         .map_err(|issue| to_error(DATALOG_METHOD, issue))?;
