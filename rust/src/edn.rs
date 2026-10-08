@@ -94,13 +94,15 @@ impl PageName {
     }
 }
 
-/// A calendar date as LogSeq's `:block/journal-day` holds it: the integer `YYYYMMDD`, year
-/// 1 to 9999. Only a real date can be built (month 1-12, the month's day count, leap years).
+/// A calendar date as LogSeq's `:block/journal-day` holds it: the integer `YYYYMMDD`, always
+/// eight digits (`10000101..=99991231`, so year 1000 to 9999). Only a real date can be built
+/// (month 1-12, the month's day count, leap years).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct JournalDay(u32);
 
 /// What [`JournalDay::parse`] accepts: an integer (`20250101`) or exactly eight ASCII digits
-/// (`"20250101"`). A negative number, a timestamp or any other text has no digits to give.
+/// (`"20250101"`). Either way the value must have eight digits, so `10101` is not year 1 and
+/// `"00010101"` isn't either. A negative number, a timestamp or any other text has no digits.
 pub trait JournalDayDigits {
     fn digits(self) -> Option<u32>;
 }
@@ -125,7 +127,7 @@ impl JournalDayDigits for &str {
 
 impl JournalDay {
     pub fn from_ymd(year: u32, month: u32, day: u32) -> Result<Self, InvalidValue> {
-        let valid = (1..=9999).contains(&year) && (1..=12).contains(&month) && (1..=days_in_month(year, month)).contains(&day);
+        let valid = (1000..=9999).contains(&year) && (1..=12).contains(&month) && (1..=days_in_month(year, month)).contains(&day);
         if valid {
             Ok(JournalDay(year * 10000 + month * 100 + day))
         } else {
@@ -135,7 +137,10 @@ impl JournalDay {
 
     /// Parse `YYYYMMDD` from an integer or an eight-digit string.
     pub fn parse<D: JournalDayDigits + fmt::Display + Copy>(value: D) -> Result<Self, InvalidValue> {
-        let digits = value.digits().ok_or_else(|| InvalidValue::JournalDay(value.to_string()))?;
+        let digits = value
+            .digits()
+            .filter(|digits| (10000101..=99991231).contains(digits))
+            .ok_or_else(|| InvalidValue::JournalDay(value.to_string()))?;
         JournalDay::from_ymd(digits / 10000, digits / 100 % 100, digits % 100)
             .map_err(|_| InvalidValue::JournalDay(value.to_string()))
     }
@@ -280,7 +285,7 @@ mod tests {
 
     #[test]
     fn valid_journal_days_round_trip() {
-        for (y, m, d) in [(2025, 1, 1), (2024, 2, 29), (2000, 2, 29), (2025, 12, 31), (1, 1, 1), (9999, 12, 31)] {
+        for (y, m, d) in [(2025, 1, 1), (2024, 2, 29), (2000, 2, 29), (2025, 12, 31), (1000, 1, 1), (9999, 12, 31)] {
             let day = JournalDay::from_ymd(y, m, d).unwrap();
             assert_eq!(day.ymd(), (y, m, d));
             assert_eq!(JournalDay::parse(day.as_int()).unwrap(), day);
@@ -292,16 +297,17 @@ mod tests {
 
     #[test]
     fn invalid_journal_days_are_refused() {
-        for (y, m, d) in [(2025, 13, 1), (2025, 0, 1), (2025, 1, 0), (2025, 1, 32), (2025, 4, 31), (2025, 2, 29), (1900, 2, 29), (0, 1, 1), (10000, 1, 1)] {
+        for (y, m, d) in [(2025, 13, 1), (2025, 0, 1), (2025, 1, 0), (2025, 1, 32), (2025, 4, 31), (2025, 2, 29), (1900, 2, 29), (0, 1, 1), (1, 1, 1), (999, 12, 31), (10000, 1, 1)] {
             assert!(JournalDay::from_ymd(y, m, d).is_err(), "{y}-{m}-{d}");
         }
-        for value in [20251399_u32, 20250230, 0, 1735689600] {
+        // Fewer than eight digits is not an early year: 10101 would read as 0001-01-01.
+        for value in [10101_u32, 1010101, 9991231, 20251399, 20250230, 0, 1735689600, 100000101] {
             assert!(JournalDay::parse(value).is_err(), "{value}");
         }
-        for value in [-20250101_i64, 1735689600000, -1] {
+        for value in [-20250101_i64, 1735689600000, -1, 10101] {
             assert!(JournalDay::parse(value).is_err(), "{value}");
         }
-        for value in ["2025-01-01", "2025011", "202501011", " 20250101", "2025010a", "", "+2025010"] {
+        for value in ["00010101", "09991231", "2025-01-01", "2025011", "202501011", " 20250101", "2025010a", "", "+2025010"] {
             assert!(JournalDay::parse(value).is_err(), "{value:?}");
         }
         assert_eq!(
