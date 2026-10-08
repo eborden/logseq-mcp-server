@@ -303,6 +303,35 @@ mod tests {
         assert_eq!(range(DatePreset::YearToDate, date(2025, 1, 1)), (20250101, 20250101));
     }
 
+    /// The edges `resolveDatePreset` can get wrong: a day that borrows from the month before, a leap day, the last day
+    /// of a year, and the last day of a 30-day month reached from a 31-day one.
+    #[test]
+    fn presets_hold_at_month_and_year_edges_and_on_a_leap_day() {
+        // yesterday borrows from the month before, and from February's leap day
+        assert_eq!(range(DatePreset::Yesterday, date(2025, 3, 1)), (20250228, 20250228));
+        assert_eq!(range(DatePreset::Yesterday, date(2024, 3, 1)), (20240229, 20240229));
+        assert_eq!(range(DatePreset::Yesterday, date(2025, 5, 1)), (20250430, 20250430));
+        // a leap day is in its month and its year
+        assert_eq!(range(DatePreset::Today, date(2024, 2, 29)), (20240229, 20240229));
+        assert_eq!(range(DatePreset::ThisMonth, date(2024, 2, 29)), (20240201, 20240229));
+        assert_eq!(range(DatePreset::YearToDate, date(2024, 2, 29)), (20240101, 20240229));
+        // the last day of the year
+        assert_eq!(range(DatePreset::Yesterday, date(2025, 12, 31)), (20251230, 20251230));
+        assert_eq!(range(DatePreset::ThisYear, date(2025, 12, 31)), (20250101, 20251231));
+        assert_eq!(range(DatePreset::YearToDate, date(2025, 12, 31)), (20250101, 20251231));
+        assert_eq!(range(DatePreset::ThisMonth, date(2025, 12, 31)), (20251201, 20251231));
+        assert_eq!(range(DatePreset::LastMonth, date(2025, 12, 31)), (20251101, 20251130));
+        assert_eq!(range(DatePreset::YearToDate, date(2024, 12, 31)), (20240101, 20241231));
+        // the last day of a 30-day month, and a 31-day month's last day looking back at a 30-day one
+        assert_eq!(range(DatePreset::ThisMonth, date(2025, 4, 30)), (20250401, 20250430));
+        assert_eq!(range(DatePreset::LastMonth, date(2025, 4, 30)), (20250301, 20250331));
+        assert_eq!(range(DatePreset::LastMonth, date(2025, 5, 31)), (20250401, 20250430));
+        assert_eq!(range(DatePreset::ThisMonth, date(2025, 5, 31)), (20250501, 20250531));
+        // the week that crosses a leap day: 2024-03-01 is a Friday
+        assert_eq!(range(DatePreset::ThisWeek, date(2024, 3, 1)), (20240226, 20240303));
+        assert_eq!(range(DatePreset::LastWeek, date(2024, 3, 1)), (20240219, 20240225));
+    }
+
     #[test]
     fn a_preset_is_known_by_the_words_the_schema_lists() {
         for word in DATE_PRESET_VALUES {
