@@ -109,8 +109,8 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     let has_results = outcome.results.as_ref().is_some_and(|results| !results.is_empty());
     let text = js::json_stringify(&match outcome.results {
         Some(results) => Value::Array(results.into_iter().map(Backlink::into_value).collect()),
-        // PARITY(#299): LogSeq's `null` stays `null` but says nothing about it, where BR-0011 asks for a warning
-        // that the data was unavailable (suspected TS bug) — fix per #318, in both servers.
+        // PARITY(#299): LogSeq's null is passed through as the text `null` with no warning; BR-0011 only requires one
+        // when null becomes empty, so whether this needs one is open in #318 — drop if Rust becomes the only server.
         None => Value::Null,
     });
     let mut content = vec![ContentBlock::text(text)];
