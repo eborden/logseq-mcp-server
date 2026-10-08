@@ -144,7 +144,7 @@ async function main(): Promise<void> {
     for (const call of TOOL_CALLS) {
       await check(`tools/call ${call.name}`, async () => {
         if (!toolNames.includes(call.name)) return 'not listed';
-        return toolProblem(await mcp.callTool({ name: call.name, arguments: call.args }));
+        return toolProblem((await mcp.callTool({ name: call.name, arguments: call.args })) as { isError?: boolean; content?: unknown });
       });
     }
 
