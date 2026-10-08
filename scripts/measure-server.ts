@@ -16,7 +16,8 @@
  */
 import { createServer as createHttpServer, type Server as HttpServer } from 'http';
 import type { AddressInfo } from 'net';
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { rmSync } from 'fs';
+import { mkdir, mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { isAbsolute, join, resolve } from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -131,6 +132,21 @@ export async function startRustServer(binary: string, config: LogseqMCPConfig, c
   const home = join(dir, 'home');
   await mkdir(home, { recursive: true });
   const configPath = join(dir, 'config.json');
+  // The temp config holds the token, so it must not outlive the run, whatever ends it: a normal
+  // exit, a thrown error that reaches process.exit, or Ctrl-C and SIGTERM (which skip `finally`).
+  const removeDir = (): void => rmSync(dir, { recursive: true, force: true });
+  const onSignal = (signal: NodeJS.Signals): void => {
+    removeDir();
+    process.exit(signal === 'SIGINT' ? 130 : 143);
+  };
+  process.once('exit', removeDir);
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+  const unhook = (): void => {
+    process.off('exit', removeDir);
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  };
   await writeFile(configPath, JSON.stringify({ ...config, apiUrl: proxy?.url ?? config.apiUrl }), { mode: 0o600 });
 
   const env: Record<string, string> = {};
@@ -147,7 +163,8 @@ export async function startRustServer(binary: string, config: LogseqMCPConfig, c
     await mcp.connect(new StdioClientTransport({ command: binary, args: [], env, stderr: 'ignore' }));
   } catch (error) {
     await proxy?.close();
-    await rm(dir, { recursive: true, force: true });
+    removeDir();
+    unhook();
     throw error;
   }
   return {
@@ -156,7 +173,8 @@ export async function startRustServer(binary: string, config: LogseqMCPConfig, c
     close: async () => {
       await mcp.close();
       await proxy?.close();
-      await rm(dir, { recursive: true, force: true });
+      removeDir();
+      unhook();
     },
   };
 }
