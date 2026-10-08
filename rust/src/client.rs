@@ -198,6 +198,7 @@ fn js_string(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edn::{JournalDay, PageName};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -273,7 +274,10 @@ mod tests {
     #[tokio::test]
     async fn sends_datalog_inputs_as_edn_after_the_query() {
         let (url, server) = serve_once(ok("[[1]]")).await;
-        let inputs = [DatalogInput::from("my \"page\""), DatalogInput::from(20250101_i64)];
+        let inputs = [
+            DatalogInput::PageName(PageName::new("My \"Page\"")),
+            DatalogInput::JournalDay(JournalDay::parse(20250101_u32).unwrap()),
+        ];
         let rows = client(&url, None).execute_datalog_query("[:find ?p :in $ ?n ?d]", &inputs).await.unwrap();
         assert_eq!(rows, serde_json::json!([[1]]));
         assert_eq!(
