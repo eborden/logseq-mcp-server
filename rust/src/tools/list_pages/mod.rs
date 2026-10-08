@@ -152,7 +152,8 @@ struct Entry<'a> {
 /// zero-width space), and `getAllPages` order is not guaranteed, so a tie could put one name on two
 /// pages and drop the other.
 fn by_name(a: &ListedEntity, b: &ListedEntity) -> Ordering {
-    // PARITY(#299): `localeCompare`, then JavaScript's UTF-16 `<` — drop if Rust becomes the only server.
+    // PARITY(#299): `localeCompare`'s order, which follows the host's ICU (suspected TS bug) — replace with a fixed
+    // order if Rust becomes the only server, and keep the tie-break after it, which is what makes the order total.
     js::locale_compare(&a.name, &b.name).then_with(|| a.name.encode_utf16().cmp(b.name.encode_utf16()))
 }
 
