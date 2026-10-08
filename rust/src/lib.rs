@@ -3,5 +3,6 @@
 //! Stdout is the MCP stdio channel. Nothing in this crate prints to it; logs go to stderr
 //! (ADR-0004), and `tests/no_stdout.rs` fails on a `print!`/`println!` or a direct stdout write.
 
+pub mod client;
 pub mod config;
 pub mod edn;
