@@ -228,6 +228,88 @@ export const getPageOutlineCases: ParityCase[] = [
     ]
   },
   {
+    // `name` and `page` are accepted for `page_name` (BR-0008), and are not in the schema
+    name: 'parameter alias',
+    tool: 'logseq_get_page_outline',
+    arguments: { name: 'Bob' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"bob"'], [[pulled(BOB), 'name']])],
+      [query(outlineQuery(BOB.id), [], [row({ id: 701, parent: 20, left: 20, content: 'Bob owns the importer' })])]
+    ]
+  },
+  {
+    name: 'parameter aliases that disagree',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: 'Bob', page: 'Alice' },
+    steps: []
+  },
+  {
+    // `null` is the same as absent, so the required parameter is missing
+    name: 'missing page_name',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: null },
+    steps: []
+  },
+  {
+    // The snippet is cut at 77 UTF-16 units, which falls inside the emoji: the lone half is written
+    // as an escape, as JSON.stringify writes it
+    name: 'snippet cut inside an emoji',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: 'Bob' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"bob"'], [[pulled(BOB), 'name']])],
+      [
+        query(outlineQuery(BOB.id), [], [
+          row({ id: 711, parent: 20, left: 20, content: `${'x'.repeat(76)}\u{1F680} and then some more words after it` }),
+          row({ id: 712, parent: 20, left: 711, content: `${'y'.repeat(75)} \u{1F680} and more` })
+        ])
+      ]
+    ]
+  },
+  {
+    // A shape the server can't read is an error that names the path and no value (#202). The
+    // answer holds no text, so the self-check can perturb it into an error of another kind.
+    name: 'resolver row in a shape the server cannot read',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: 'Bob' },
+    steps: [[query(RESOLVE_BY_NAME, ['"bob"'], [[{ id: BOB.id, 'journal?': 1 }]])]]
+  },
+  {
+    // A stub nobody wrote (no file) that another page aliases gives way to that page
+    name: 'bare alias target',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: 'Bob' },
+    steps: [
+      [query(RESOLVE_BY_NAME, ['"bob"'], [[pulled(BOB), 'name'], [pulled(ALICE), 'alias']])],
+      [query(outlineQuery(ALICE.id), [], [row({ id: 721, parent: 40, left: 40, content: 'Alice, also known as Bob' })])]
+    ]
+  },
+  {
+    // Twelve pages declare the alias: ten are listed, in name order, and the cut is said
+    name: 'more candidates than the list holds',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: ' team ' },
+    steps: [
+      [
+        query(
+          RESOLVE_BY_NAME,
+          ['"team"'],
+          Array.from({ length: 12 }, (_, i): unknown[] => [
+            pulled({ id: 800 + i, name: `team page ${11 - i}`, originalName: `Team Page ${11 - i}`, file: true }),
+            'alias'
+          ])
+        )
+      ]
+    ]
+  },
+  {
+    // An ISO date nobody has a journal for: no leaf query and no suggestions
+    name: 'missing journal date',
+    tool: 'logseq_get_page_outline',
+    arguments: { page_name: '2031-12-31' },
+    steps: [[query(RESOLVE_WITH_DAY, ['"2031-12-31"', '20311231'], [])]]
+  },
+  {
     // An error from LogSeq is an error result, not an empty outline (BR-0003)
     name: 'LogSeq error from the resolver',
     tool: 'logseq_get_page_outline',
