@@ -55,7 +55,7 @@ impl DatePreset {
 
 /// A day of the proleptic Gregorian calendar, with no time zone. The fields are what
 /// `getFullYear()`, `getMonth() + 1` and `getDate()` give.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CalendarDate {
     pub year: i32,
     /// 1 to 12
@@ -76,6 +76,16 @@ impl CalendarDate {
     /// `parseInt` of the unpadded year gives the same number, so this is plain arithmetic.
     pub fn to_logseq_day(self) -> u32 {
         (self.year as u32) * 10_000 + self.month * 100 + self.day
+    }
+
+    /// The day `year`-`month`-`day` if the calendar has it, as `new Date(year, month - 1, day)` read back
+    /// through `getFullYear`, `getMonth` and `getDate` is that day (a 30th of February is none).
+    pub fn real(year: i32, month: u32, day: u32) -> Option<CalendarDate> {
+        if !(1..=12).contains(&month) || day == 0 {
+            return None;
+        }
+        let date = CalendarDate { year, month, day };
+        (CalendarDate::from_days(date.days()) == date).then_some(date)
     }
 
     /// Days since 1970-01-01 (Howard Hinnant's `days_from_civil`).
@@ -115,18 +125,18 @@ impl CalendarDate {
     }
 
     /// `mondayOf`: the Monday of the ISO week this day is in.
-    fn monday(self) -> CalendarDate {
+    pub fn monday(self) -> CalendarDate {
         self.shifted(-((self.weekday() + 6) % 7))
     }
 
     /// The first day of this month, `delta` months on (`new Date(year, month + delta, 1)`).
-    fn first_of_month(self, delta: i32) -> CalendarDate {
+    pub fn first_of_month(self, delta: i32) -> CalendarDate {
         let months = self.year * 12 + (self.month as i32 - 1) + delta;
         CalendarDate { year: months.div_euclid(12), month: months.rem_euclid(12) as u32 + 1, day: 1 }
     }
 
     /// The day before the first of the month `delta` months on (`new Date(year, month + delta, 0)`).
-    fn last_of_month_before(self, delta: i32) -> CalendarDate {
+    pub fn last_of_month_before(self, delta: i32) -> CalendarDate {
         self.first_of_month(delta).shifted(-1)
     }
 }
