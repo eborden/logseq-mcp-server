@@ -1,0 +1,62 @@
+name: Rust spike
+
+# The Rust implementation beside the TypeScript one (ADR-0025, #122). Kept apart from ci.yml so
+# the TypeScript jobs and the guards that read ci.yml (src/adr-workflow-guards.test.ts) stay as
+# they are. It builds and tests only; it never publishes (ADR-0017 covers npm, and a binary
+# release needs its own ADR first).
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      # serverInfo.version is read from package.json at build time (rust/src/server.rs).
+      - 'package.json'
+      - '.github/workflows/rust.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'rust/**'
+      - 'package.json'
+      - '.github/workflows/rust.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Cargo build and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rustup is on the runner image. The version comes from rust/rust-toolchain.toml, which
+      # rustup reads in this directory, so CI and local builds use the same compiler.
+      - name: Install the pinned toolchain
+        run: rustup toolchain install --profile minimal "$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+
+      - name: Cache cargo downloads and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            rust/target
+          key: rust-${{ runner.os }}-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}
+          restore-keys: |
+            rust-${{ runner.os }}-
+
+      - name: Build (debug)
+        run: cargo build --locked
+
+      - name: Unit tests
+        run: cargo test --locked
+
+      - name: Build (release)
+        run: cargo build --release --locked
