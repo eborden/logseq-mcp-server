@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'util';
 import { afterAll } from 'vitest';
 import type { LogseqClient } from '../../../src/client.js';
 import {
@@ -6,6 +7,7 @@ import {
   InvalidParameterError,
   PageNotFoundError,
 } from '../../../src/errors.js';
+import { ambiguousPageResult } from '../../../src/utils/resolve-page.js';
 import { buildContextForTopic as tsBuildContextForTopic } from '../../../src/tools/build-context.js';
 import { checkLinks as tsCheckLinks } from '../../../src/tools/check-links.js';
 import {
@@ -77,21 +79,54 @@ const compact = <T extends Record<string, unknown>>(args: T): Record<string, unk
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
 };
 
-/** The error a TypeScript function throws for a tool's error message, with the message the server sent. */
+/** The server's words for a page that wasn't found, split into the name and the closest names. */
+const NOT_FOUND = /^No page ("(?:[^"\\]|\\.)*")\.(?: Closest: (.*?)\.)? Try logseq_search_blocks/s;
+
+/**
+ * The error a TypeScript function throws for a tool's error message. A class with a constructor
+ * that takes what the message holds is built with it, and its message must be the server's, byte
+ * for byte, or this throws: a difference in the words is a difference in the server.
+ */
 function errorFor(message: string): Error {
-  const make = <E extends Error>(prototype: object, extra: Record<string, unknown> = {}): E => {
-    const error = new Error(message);
-    Object.setPrototypeOf(error, prototype);
-    error.name = (prototype as { constructor: { name: string } }).constructor.name;
-    return Object.assign(error, extra) as E;
+  const sameWords = (error: Error): Error => {
+    if (error.message !== message) {
+      throw new Error(`The error message differs from the TypeScript class's.\nserver: ${message}\nTypeScript: ${error.message}`);
+    }
+    return error;
   };
   if (message.startsWith('No page "')) {
-    const closest = message.match(/^No page ".*?"\. Closest: (.*)\. Try logseq_search_blocks/s)?.[1];
-    return make(PageNotFoundError.prototype, { suggestions: closest ? closest.split(', ') : [] });
+    const found = message.match(NOT_FOUND);
+    if (!found) throw new Error(`Unrecognised "no page" message: ${message}`);
+    const [, quoted, closest] = found;
+    return sameWords(new PageNotFoundError(JSON.parse(quoted) as string, closest ? closest.split(', ') : []));
   }
-  if (message.startsWith('Block not found: ')) return make(BlockNotFoundError.prototype);
-  if (message.startsWith("Invalid parameter '")) return make(InvalidParameterError.prototype);
+  const block = message.match(/^Block not found: "(.*)"\n\nTip: /s);
+  if (block) return sameWords(new BlockNotFoundError(block[1]));
+  if (message.startsWith("Invalid parameter '")) {
+    // Its constructor takes the parts the message was built from, so the class is applied to the message
+    const error = new Error(message);
+    Object.setPrototypeOf(error, InvalidParameterError.prototype);
+    error.name = 'InvalidParameterError';
+    return error;
+  }
   return new Error(message);
+}
+
+/**
+ * The `AmbiguousPageError` for the ambiguous-name result, which a tool returns instead of failing.
+ * The error is TypeScript's own, so what the server sent (the `ambiguous_page` warning, a
+ * `candidates_truncated` note, `hasMore`, `totals`) is held to what TypeScript builds from the same
+ * candidates, or this throws.
+ */
+function ambiguousError(value: Json): AmbiguousPageError {
+  const error = new AmbiguousPageError(value.pageName, value.candidates, value.totalCandidates);
+  const expected = JSON.parse(JSON.stringify(ambiguousPageResult(error)));
+  if (!isDeepStrictEqual(value, expected)) {
+    throw new Error(
+      `The ambiguous-name result differs from the TypeScript server's.\nserver: ${JSON.stringify(value)}\nTypeScript: ${JSON.stringify(expected)}`
+    );
+  }
+  return error;
 }
 
 async function callTool(
@@ -109,7 +144,7 @@ async function callTool(
   if (result.isError) throw errorFor((JSON.parse(first) as { error: string }).error);
   const value = JSON.parse(first) as Json;
   if (value && value.ambiguous === true && Array.isArray(value.candidates)) {
-    throw new AmbiguousPageError(value.pageName, value.candidates, value.totalCandidates);
+    throw ambiguousError(value);
   }
   const second = result.content[1]?.text;
   return { value, meta: second === undefined ? null : (JSON.parse(second) as { meta: Json }).meta };
