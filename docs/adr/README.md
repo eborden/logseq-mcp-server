@@ -41,12 +41,13 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0022-minimum-node-22-12](0022-minimum-node-22-12.md) | Require Node 22.12 or newer | accepted |
 | [0023-mit-license](0023-mit-license.md) | License the project under MIT | accepted |
 | [0024-baseline-test-before-skill-edits](0024-baseline-test-before-skill-edits.md) | Baseline-test a skill before editing it | accepted |
-| [0025-rust-implementation-alongside-typescript](0025-rust-implementation-alongside-typescript.md) | Explore a Rust implementation alongside TypeScript, and re-scope the process docs per toolchain | accepted |
+| [0025-rust-implementation-alongside-typescript](0025-rust-implementation-alongside-typescript.md) | Explore a Rust implementation alongside TypeScript, and re-scope the process docs per toolchain | superseded by 0031-second-implementation-matches-tool-list-by-meaning |
 | [0026-mutation-testing-ratchet](0026-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the unit suite | superseded by 0027-cap-mutation-cache-miss-set |
 | [0027-cap-mutation-cache-miss-set](0027-cap-mutation-cache-miss-set.md) | Cap the mutation job's cache-miss set and correct its audit claim | superseded by 0028-cap-mutation-cache-miss-set-by-mutant-budget |
 | [0028-cap-mutation-cache-miss-set-by-mutant-budget](0028-cap-mutation-cache-miss-set-by-mutant-budget.md) | Cap the mutation job's cache-miss set by an estimated mutant budget | superseded by 0029-mutation-cache-miss-plan-uses-the-prs-own-diff |
 | [0029-mutation-cache-miss-plan-uses-the-prs-own-diff](0029-mutation-cache-miss-plan-uses-the-prs-own-diff.md) | Plan the mutation cache-miss run from the PR's own diff, and ask for a weekly run only for a left-out changed source | accepted |
 | [0030-nightly-check-resets-a-stale-mutation-cache](0030-nightly-check-resets-a-stale-mutation-cache.md) | Reset a stale mutation cache with a nightly check that dispatches at most one weekly run a night | accepted |
+| [0031-second-implementation-matches-tool-list-by-meaning](0031-second-implementation-matches-tool-list-by-meaning.md) | Hold a second implementation to the tools/list contract by meaning, not by bytes | proposed |
 
 ## File naming rule
 
