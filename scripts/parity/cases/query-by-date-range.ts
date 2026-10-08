@@ -278,6 +278,17 @@ const cases: ParityCase[] = [
     ])
   }),
 
+  foldCase(
+    'a name whose simple fold is not its uppercase and lowercase: the long s t ligature',
+    [{ id: 31, name: '\ufb06op' }],
+    ['a \ufb05op here', 'a st op here']
+  ),
+  foldCase('names that are one Greek letter with accents, folded by the same rule', [{ id: 32, name: '\u0390' }, { id: 33, name: '\u03b0' }], [
+    'an \u1fd3 there',
+    'an \u1fe3 there',
+    'an i there'
+  ]),
+
   // ---- last_n
   lastNCase('last_n: the newest first, one query for the span between them', 2, {}, [JAN4, JAN1, JAN5, JAN2], [
     block({ id: 4001, page: JAN4.id, content: 'Planning #urgent', refs: [ref({ id: 12, name: 'urgent', originalName: 'urgent' })] }),
@@ -409,6 +420,23 @@ const cases: ParityCase[] = [
   refused('include_content that is not a boolean', { last_n: 1, include_content: 'no' }),
   refused('the first bad argument in schema order is the one named', { last_n: 0, preset: 'bogus', slim_results: 'x' })
 ];
+
+/**
+ * A search_term "orb" whose group holds `members` besides the term, and one block per text on January 2:
+ * the blocks that match are the ones saying a name in a case-folded spelling. U+FB05 folds to U+FB06,
+ * U+1FD3 to U+0390 and U+1FE3 to U+03B0 although each has a longer uppercase. (Each case has one script
+ * among its aliases, so `resolvedAliases` sorts the same wherever `localeCompare` is approximated.)
+ */
+function foldCase(name: string, members: Array<{ id: number; name: string }>, texts: string[]): ParityCase {
+  return rangeCase(name, 20250102, 20250102, { search_term: 'orb' }, {
+    pages: [journalRow(JAN2)],
+    blocks: texts.map((content, i) => block({ id: 2001 + i, page: JAN2.id, left: i === 0 ? JAN2.id : 2000 + i, content, refs: [] })),
+    alias: members.map(member => [
+      { id: 30, name: 'orb', 'original-name': 'Orb' },
+      { id: member.id, name: member.name, 'original-name': member.name }
+    ])
+  });
+}
 
 function presetCase(preset: string, start: number, end: number): ParityCase {
   return {

@@ -84,14 +84,19 @@ fn is_letter_or_number(c: char) -> bool {
 }
 
 // PARITY(#299): matches the group's other names with a case-insensitive Unicode regular expression, whose
-// case folding is approximated here by upper-then-lower case of a single character — drop if Rust becomes
-// the only server.
+// case folding is approximated here by upper-then-lower case of a single character, and three listed
+// exceptions — drop if Rust becomes the only server.
 /// A character as the `iu` flags of a JavaScript regular expression compare it: by simple case
 /// folding, so `ſ` and `s` are one. Folded as lowercase of uppercase when each is one character; a
 /// character whose case change is longer (`ß`, `İ`) or that has no simple fold (`ı`) stays as it is.
 fn fold(c: char) -> char {
-    if c == '\u{131}' {
-        return c; // dotless i has only a Turkic fold
+    match c {
+        '\u{131}' => return c, // dotless i has only a Turkic fold
+        // simple folds whose uppercase is several characters, so the rule below would leave them alone
+        '\u{fb05}' => return '\u{fb06}',
+        '\u{1fd3}' => return '\u{390}',
+        '\u{1fe3}' => return '\u{3b0}',
+        _ => {}
     }
     let mut upper = c.to_uppercase();
     let (Some(u), None) = (upper.next(), upper.next()) else { return c };
@@ -165,6 +170,10 @@ mod tests {
         assert_eq!(fold('\u{df}'), '\u{df}');
         assert_eq!(fold('K'), 'k');
         assert_eq!(fold('\u{3c2}'), '\u{3c3}');
+        // the three whose uppercase is longer than one character but which fold (CaseFolding.txt, S)
+        assert_eq!((fold('\u{fb05}'), fold('\u{fb06}')), ('\u{fb06}', '\u{fb06}'));
+        assert_eq!((fold('\u{1fd3}'), fold('\u{390}')), ('\u{390}', '\u{390}'));
+        assert_eq!((fold('\u{1fe3}'), fold('\u{3b0}')), ('\u{3b0}', '\u{3b0}'));
     }
 
     #[test]
