@@ -1,0 +1,123 @@
+{
+  "get_block: block without children": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Kickoff with [[Alice]] and [[Bob]]\",\"properties\":{\"1\":\"one\",\"2\":\"two\",\"10\":\"ten\",\"status\":\"doing\",\"owner\":\"Alice\"},\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"format\":\"markdown\",\"children\":[[\"uuid\",\"00000000-0000-4000-8000-000000000102\"]]}"
+      }
+    ]
+  },
+  "get_block: block with children": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Milestones – café 🚀\\n- ship the importer\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"format\":\"markdown\",\"children\":[{\"id\":102,\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"content\":\"Alice owns the schema\",\"page\":{\"id\":10},\"parent\":{\"id\":101},\"left\":{\"id\":101},\"format\":\"markdown\",\"children\":[{\"id\":104,\"uuid\":\"00000000-0000-4000-8000-000000000104\",\"content\":\"Draft\",\"page\":{\"id\":10},\"parent\":{\"id\":102},\"left\":{\"id\":102},\"format\":\"markdown\"}]},{\"id\":103,\"uuid\":\"00000000-0000-4000-8000-000000000103\",\"content\":\"Bob owns the importer\",\"page\":{\"id\":10},\"parent\":{\"id\":101},\"left\":{\"id\":101},\"format\":\"markdown\",\"children\":[]}]}"
+      }
+    ]
+  },
+  "get_block: uuid alias": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Found by the alias\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"format\":\"markdown\"}"
+      }
+    ]
+  },
+  "get_block: uuid alias with the same value as block_uuid": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Both names, one value\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"format\":\"markdown\"}"
+      }
+    ]
+  },
+  "get_block: uuid alias with another value than block_uuid": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'uuid': \\\"00000000-0000-4000-8000-000000000102\\\"\\n\\nExpected: the same value as 'block_uuid' (\\\"00000000-0000-4000-8000-000000000101\\\"), or only one of them. 'uuid' is an alias of 'block_uuid'\\nExample: block_uuid: \\\"00000000-0000-4000-8000-000000000101\\\"\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: block not found": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Block not found: \\\"no such \\\"block\\\"\\\"\\n\\nTip: Block UUIDs come from search results or page queries. Verify the UUID is correct.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: resolve_refs on a block with no ref": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"No refs here, just ((not a uuid)) text\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"format\":\"markdown\",\"hasMore\":false,\"warnings\":[]}"
+      }
+    ]
+  },
+  "get_block: block_uuid missing": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'block_uuid': missing\\n\\nExpected: a string (required)\\nExample: block_uuid: \\\"...\\\"\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: block_uuid is not a string": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'block_uuid': 42\\n\\nExpected: a string, not a number\\nExample: block_uuid: \\\"...\\\"\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: include_children is not a boolean": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'include_children': \\\"yes\\\"\\n\\nExpected: true or false, not a string\\nExample: include_children: true\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: resolve_refs is not a boolean": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'resolve_refs': [true]\\n\\nExpected: true or false, not an array\\nExample: resolve_refs: true\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: format is not a known one": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'format': \\\"xml\\\"\\n\\nExpected: one of \\\"json\\\", \\\"markdown\\\"\\nExample: format: \\\"markdown\\\"\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: a block that is not a block": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getBlock in a shape this server can't read: uuid: Invalid input: expected string, received undefined\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "get_block: a block with a mistyped field": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getBlock in a shape this server can't read: page.id: Invalid input: expected number, received string\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  }
+}
