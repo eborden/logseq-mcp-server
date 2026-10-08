@@ -24,9 +24,10 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-Tool arguments are parsed into a typed value in one place per tool. In Rust, each tool's input schema is generated from the type its arguments are parsed into (`rust/src/tool.rs`), so the two can't drift, and the parser rejects a wrong-typed value with an error that names the parameter before any LogSeq call (`rust/src/args.rs`). LogSeq's answers are parsed into typed values at the boundary and a mismatch is a `ResponseError`, never "no data" (`rust/src/wire.rs`), and the config file is parsed once (`rust/src/config.rs`). The TypeScript guard that read `src/index.ts` for raw uses of `args` went with the TypeScript server (#356).
+Tool arguments are parsed into a typed value in one place per tool. In Rust, each tool's input schema is generated from the type its arguments are parsed into (`rust/src/tool.rs`), so the two can't drift, and the parser rejects a wrong-typed value with an error that names the parameter before any LogSeq call (`rust/src/args.rs`). LogSeq's answers are parsed into typed values at the boundary and a mismatch is a `ResponseError`, never "no data" (`rust/src/wire.rs`), and the config file is parsed once (`rust/src/config.rs`). The TypeScript guard that read `src/index.ts` for raw uses of `args` went with the TypeScript server (#356); the sweep over the live schema, which sends each parameter a wrong-typed value, replaces what it and `src/index.args.guard.test.ts` held.
 
 - reviewer: New code that reads tool arguments, LogSeq responses, config or disk content parses them into a typed value before any work.
 - test: `rust/src/tool.rs` (the schema comes from the type that parses the arguments, parsing ignores unknown fields, treats null as absent and never coerces)
 - test: `rust/src/args.rs` (a wrong-typed value is refused with a message that names the parameter)
+- test: `tests/rust-guards/tool-arguments.test.ts` (for every parameter of every tool in the server's live `tools/list`, a wrong-typed value is refused with an error that names the parameter and no call to LogSeq; a new parameter is covered at once, and a kind the test has no sample for fails)
 - test: `rust/tests/get_page_block_calls.rs` (a bad argument is refused before any call)

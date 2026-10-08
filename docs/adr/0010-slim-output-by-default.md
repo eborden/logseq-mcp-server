@@ -30,7 +30,8 @@ Date: 2026-10-05
 ## Mechanical enforcement
 
 - test: `tests/integration/slim-default.test.ts` (omitted means slim, false means full, through MCP against a live graph)
-- ci: `.github/workflows/ci.yml` (the parity step holds every tool's `slim_results` schema, which advertises default: true, to the recorded `tools/list`)
+- test: `tests/guards/tool-list.test.ts` (every `slim_results` parameter of the recorded `tools/list` advertises default: true, so a re-record that drops it fails)
+- ci: `.github/workflows/ci.yml` (the parity step holds every tool's `slim_results` schema to the recorded `tools/list` by meaning: `compareToolLists` in `scripts/parity/tool-list-compare.ts`)
 - test: `rust/src/slim.rs` (what a slim block and a slim page keep and leave out)
 
 The default itself is the `slim_results` default in each tool's argument type in `rust/src/tools/`.

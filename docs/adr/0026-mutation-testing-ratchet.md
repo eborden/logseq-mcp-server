@@ -121,3 +121,5 @@ Date: 2026-10-06
 ## Mechanical enforcement
 
 - none-yet: #364 (the Stryker job, its scripts and its workflows were removed by #356; the Rust ratchet of ADR-0033 is the successor mechanism)
+
+Last enforced by mutation-ratchet.test.ts, mutation-ci.test.ts and the mutation workflows, as of commit 10103c8 (read them as 10103c8:src/ and 10103c8:.github/workflows/).

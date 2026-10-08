@@ -16,8 +16,9 @@ The default lives in the `slim_results` argument schema in `src/tool-args.ts`, w
 
 test: `tests/integration/slim-default.test.ts` (omitted means slim, false means full)
 test: `rust/src/slim.rs`
+test: `tests/guards/tool-list.test.ts`
 
-The parity step of CI holds the `slim_results` schema default (`default: true`) of every tool to the recorded `tools/list`.
+`tests/guards/tool-list.test.ts` asserts that every `slim_results` parameter of the recorded `tools/list` advertises `default: true`, and the parity step of CI holds the server's schema to that list.
 
 ## Changelog
 
@@ -25,4 +26,4 @@ The parity step of CI holds the `slim_results` schema default (`default: true`) 
 |---|---|---|
 | 2026-10-05 | Introduced. | #72 |
 | 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #121 |
-| 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate with the TypeScript server's removal. Statement unchanged. | #370 |
+| 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertion for the `slim_results` default. | #370 |

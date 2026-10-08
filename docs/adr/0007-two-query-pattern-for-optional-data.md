@@ -27,3 +27,4 @@ Date: 2025-11-24
 
 - test: `tests/integration/context-building.test.ts` (a page with no blocks returns an empty context, and a page with one empty block returns that block)
 - test: `tests/integration/graph-tools.test.ts` (a page with no connections returns the root alone)
+- ci: `.github/workflows/ci.yml` (the parity cases `build_context: a page with no blocks and no links` in `scripts/parity/cases/build-context.ts` and `a page nothing links to or from` in `scripts/parity/cases/get-concept-network.ts` run in CI, and `compareResult` in `scripts/parity/harness.ts` holds their results byte for byte)

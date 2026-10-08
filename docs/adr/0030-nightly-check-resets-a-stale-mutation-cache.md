@@ -31,4 +31,6 @@ Date: 2026-10-08
 
 ## Mechanical enforcement
 
-- none-yet: #364 (the Stryker job, its scripts and its workflows were removed by #356; the Rust ratchet of ADR-0033 is the successor mechanism)
+- reviewer: Deprecated with no replacement (ADR-0033 keeps no mutation results cache, so there is nothing to go stale); a PR that adds a mutation results cache needs its own ADR.
+
+Last enforced by mutation-ci.test.ts (`nightlyDecision`) and the nightly workflow, as of commit 10103c8 (read them as 10103c8:src/mutation-ci.test.ts and 10103c8:.github/workflows/mutation-nightly.yml).
