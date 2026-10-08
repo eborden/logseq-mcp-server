@@ -8,11 +8,12 @@ use rmcp::model::{CallToolResult, JsonObject, Tool};
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 
+pub mod get_graph_info;
 pub mod get_page_outline;
 
 /// Every tool, as `tools/list` shows them.
 pub fn list() -> Vec<Tool> {
-    vec![get_page_outline::definition()]
+    vec![get_graph_info::definition(), get_page_outline::definition()]
 }
 
 /// Run the tool called `name`, or `None` when there is none.
@@ -23,6 +24,7 @@ pub async fn call(
     arguments: Option<JsonObject>,
 ) -> Option<Result<CallToolResult, ToolError>> {
     match name {
+        get_graph_info::NAME => Some(get_graph_info::call(client, tips_enabled, arguments).await),
         get_page_outline::NAME => Some(get_page_outline::call(client, tips_enabled, arguments).await),
         _ => None,
     }
