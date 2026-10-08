@@ -100,13 +100,20 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: cargo build --release --locked
 
-      # The unit tests as compiled for the release profile (#359): the ones that exist only there, such as
-      # the release build ignoring LOGSEQ_MCP_NOW (`#[cfg(not(debug_assertions))]` in rust/src/env.rs), and
-      # the date logic as the shipped binary has it. Nothing runs these in a pull request, so they run with
-      # the release build.
+      # The library's unit tests with debug_assertions off (#359): the ones that exist only in a release
+      # build, such as the one holding that it ignores LOGSEQ_MCP_NOW (`#[cfg(not(debug_assertions))]` in
+      # rust/src/env.rs), and the date logic as the shipped profile compiles it. Nothing runs these in a pull
+      # request, so they run with the release build. `--lib` skips the integration tests, which spawn the
+      # binary and are covered by the debug run and the parity step. Turning LTO off and using 16 codegen
+      # units keeps this to a few minutes: the full release profile (thin LTO, one codegen unit) is what makes
+      # the build above slow, and neither setting changes what debug_assertions does. It rebuilds the
+      # dependencies once, since the profile differs from the one the release build used.
       - name: Unit tests (release)
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: cargo test --release --locked
+        env:
+          CARGO_PROFILE_RELEASE_LTO: 'off'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+        run: cargo test --release --locked --lib
 
       # The same harness against the release binary (#359): the debug build above proves the logic,
       # this proves the optimised build (thin LTO, one codegen unit, stripped) answers the same. It
