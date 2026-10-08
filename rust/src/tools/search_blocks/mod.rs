@@ -11,7 +11,8 @@
 //! output, entity fields, the truncation warnings and the tool helpers.
 
 mod queries;
-mod tips;
+// `tips` is shared with the property search, which suggests its next step the same way
+pub(crate) mod tips;
 mod wire;
 
 use std::collections::HashMap;
