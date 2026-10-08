@@ -214,7 +214,9 @@ mod tests {
     /// missing `required` read as `[]`. Key order never matters to `Value` equality.
     fn meaning(schema: &Value) -> Value {
         let defs = schema.get("$defs").cloned().unwrap_or(json!({}));
-        let required: Vec<Value> = schema.get("required").and_then(Value::as_array).cloned().unwrap_or_default();
+        // `required` is a set: its order means nothing, so compare it sorted.
+        let mut required: Vec<Value> = schema.get("required").and_then(Value::as_array).cloned().unwrap_or_default();
+        required.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
         let mut out = normalize(schema, &defs);
         let map = out.as_object_mut().unwrap();
         map.remove("$defs");
@@ -321,6 +323,14 @@ mod tests {
     #[test]
     fn the_schema_comes_from_the_type_that_parses_the_arguments_and_means_the_typescript_contract() {
         assert_eq!(meaning(&schema_of::<SampleArgs>()), meaning(&typescript_sample_schema()));
+    }
+
+    #[test]
+    fn required_is_compared_as_a_set() {
+        let a = json!({"type": "object", "properties": {}, "required": ["b", "a"]});
+        let b = json!({"type": "object", "properties": {}, "required": ["a", "b"]});
+        assert_eq!(meaning(&a), meaning(&b));
+        assert_ne!(meaning(&a), meaning(&json!({"type": "object", "properties": {}, "required": ["a"]})));
     }
 
     #[test]
