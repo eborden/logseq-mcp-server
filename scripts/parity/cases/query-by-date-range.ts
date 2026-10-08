@@ -346,6 +346,10 @@ const cases: ParityCase[] = [
     pages: [journalRow(JAN5)],
     blocks: topBlocks(JAN5, 6000, 8, 'row')
   }),
+  rangeCase('a later day that fits the maximum but not what is left of the cap: it is read from its own start, then on', 20250101, 20250103, { max_blocks: 3, include_content: false }, {
+    pages: [journalRow(JAN1), journalRow(JAN2), journalRow(JAN3)],
+    blocks: [...topBlocks(JAN1, 6000, 1), ...topBlocks(JAN2, 6100, 5, 'row'), ...topBlocks(JAN3, 6200, 1)]
+  }),
   rangeCase('a first day over the maximum cannot be read whole, and there is a later day to page to', 20250104, 20250105, { max_blocks: 2, include_content: false }, {
     pages: [journalRow(JAN4), journalRow(JAN5)],
     blocks: [...topBlocks(JAN4, 7000, 1001), ...topBlocks(JAN5, 9000, 2)]

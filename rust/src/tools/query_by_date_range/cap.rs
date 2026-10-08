@@ -329,6 +329,26 @@ mod tests {
     }
 
     #[test]
+    fn a_later_day_over_what_is_left_of_the_cap_is_read_from_its_own_start_then_on() {
+        // 1, 5 and 1 top-level blocks, a cap of 3: the second day is cut after earlier days were kept
+        let rows = |first: i64, n: i64| (first..first + n).map(|id| block(id, 0)).collect::<Vec<_>>();
+        let entries = [entry(20250101.0, rows(1, 1)), entry(20250102.0, rows(10, 5)), entry(20250103.0, rows(20, 1))];
+        let warning = blocks_truncated(&cap_entries(&entries, 3, false).unwrap(), 3, &options(false));
+        assert_eq!(
+            warning.message,
+            "Showing 3 of 7 blocks (top-level only; oldest day first; the entries end at 20250102). \
+             Day 20250102 holds 5 blocks, more than 3, so a query from it at this max_blocks reads only its first 3."
+        );
+        assert_eq!(
+            warning.how_to_fetch_all.unwrap(),
+            format!(
+                "To read it whole, call again with start_date 20250102, end_date 20250102 and max_blocks 5. {LARGE_RESULT_NOTE} \
+                 If it comes back saved, read the day in pieces with a search_term. Then continue with start_date 20250103, the same end_date (20250110) and max_blocks 3."
+            )
+        );
+    }
+
+    #[test]
     fn newest_first_pages_on_to_older_days() {
         let entries = [entry(20250109.0, vec![block(1, 0)]), entry(20250108.0, vec![block(2, 0)])];
         let cut = cap_entries(&entries, 1, true).unwrap();

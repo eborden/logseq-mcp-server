@@ -423,6 +423,14 @@
       }
     ]
   },
+  "date range: a later day that fits the maximum but not what is left of the cap: it is read from its own start, then on": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"dateRange\":{\"start\":20250101,\"end\":20250103},\"entries\":[{\"date\":20250101,\"pageName\":\"Jan 1st, 2025\",\"blockCount\":1,\"snippets\":[\"x\"]},{\"date\":20250102,\"pageName\":\"Jan 2nd, 2025\",\"blockCount\":2,\"snippets\":[\"row\",\"row\"]}],\"summary\":{\"totalDays\":3,\"totalBlocks\":7,\"topConcepts\":[]},\"hasMore\":true,\"warnings\":[{\"code\":\"blocks_truncated\",\"message\":\"Showing 3 of 7 blocks (top-level only; oldest day first; the entries end at 20250102). Day 20250102 holds 5 blocks, more than 3, so a query from it at this max_blocks reads only its first 3.\",\"howToFetchAll\":\"To read it whole, call again with start_date 20250102, end_date 20250102 and max_blocks 5. A result this large may be saved to a file by the host instead of shown; the server can't tell. If it comes back saved, read the day in pieces with a search_term. Then continue with start_date 20250103, the same end_date (20250103) and max_blocks 3.\"}],\"totals\":{\"blocks\":7,\"days\":3}}"
+      }
+    ]
+  },
   "date range: a first day over the maximum cannot be read whole, and there is a later day to page to": {
     "content": [
       {
