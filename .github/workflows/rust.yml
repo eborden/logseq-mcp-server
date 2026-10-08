@@ -10,6 +10,10 @@ on:
       - 'rust/**'
       # serverInfo.version is read from package.json at build time (rust/src/server.rs).
       - 'package.json'
+      # the parity harness and what it compares with
+      - 'scripts/parity.ts'
+      - 'scripts/parity/**'
+      - 'src/__snapshots__/tool-list.test.ts.snap'
       - '.github/workflows/rust.yml'
   # pull_request has no branch filter, so it runs on PRs into feature/rust-spike as well as main.
   push:
@@ -17,6 +21,9 @@ on:
     paths:
       - 'rust/**'
       - 'package.json'
+      - 'scripts/parity.ts'
+      - 'scripts/parity/**'
+      - 'src/__snapshots__/tool-list.test.ts.snap'
       - '.github/workflows/rust.yml'
 
 permissions:
@@ -63,6 +70,25 @@ jobs:
 
       - name: Unit tests
         run: cargo test --locked
+
+      # The parity harness (#124) holds the binary just built to the TypeScript server: each tool
+      # result byte for byte, the LogSeq calls and `tools/list` by meaning (ADR-0031). It starts its
+      # own stub LogSeq on a random local port, so nothing here contacts a LogSeq. The flag is for
+      # the spike's one tool: it compares `tools/list` for the tools the cases call, and the server
+      # must list those and no others.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install the harness's dependencies
+        working-directory: .
+        run: npm ci
+
+      - name: Parity with the TypeScript server
+        working-directory: .
+        run: npx tsx scripts/parity.ts --tested-tools-only -- "$PWD/rust/target/debug/logseq-mcp-server"
 
       - name: Build (release)
         run: cargo build --release --locked
