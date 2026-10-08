@@ -13,9 +13,6 @@ use serde_json::Value;
 /// The API URL when the file sets none (or a falsy one), as in `src/config.ts`.
 pub const DEFAULT_API_URL: &str = "http://127.0.0.1:12315";
 
-/// Environment variable naming another config file (#118).
-pub const CONFIG_PATH_ENV: &str = "LOGSEQ_MCP_CONFIG";
-
 /// What a field must be, the `<field> <problem>` tail of a [`ConfigError::Validation`] message.
 const AUTH_TOKEN_REQUIRED: &str = "is required";
 const NOT_A_STRING: &str = "must be a string";
@@ -59,7 +56,7 @@ pub enum ConfigError {
     FileNotFound { path: PathBuf },
     /// The file is not valid JSON. `detail` never quotes the file.
     InvalidJson { detail: String },
-    /// A field (or `LOGSEQ_MCP_CONFIG`) has a missing or wrong value. The message never shows
+    /// A field (or an environment variable, see `crate::env`) has a missing or wrong value. The message never shows
     /// a config-file value.
     Validation { field: String, problem: String },
     /// Any other read error (permissions, a directory), as it came.
@@ -153,37 +150,6 @@ fn is_truthy(value: &Value) -> bool {
 /// TypeScript, so a future parser message can't leak the token.
 fn json_error_detail(message: &str) -> String {
     if message.contains('"') { REDACTED_JSON_DETAIL.to_owned() } else { message.to_owned() }
-}
-
-/// `~/.logseq-mcp/config.json`, the config file unless `LOGSEQ_MCP_CONFIG` names another.
-pub fn default_config_path(home: &Path) -> PathBuf {
-    home.join(".logseq-mcp").join("config.json")
-}
-
-/// The config file to load. `LOGSEQ_MCP_CONFIG` overrides the default and must be absolute;
-/// an empty or blank value is ignored. The error echoes the value, a path with no secret.
-/// `home` is `std::env::home_dir()`; with no home directory the default path has no location,
-/// and reading a relative one against the client's working directory is refused instead.
-pub fn resolve_config_path(env_value: Option<&str>, home: Option<&Path>) -> Result<PathBuf, ConfigError> {
-    let raw = env_value.unwrap_or_default();
-    let path = raw.trim();
-    if path.is_empty() {
-        return match home {
-            Some(home) if home.is_absolute() => Ok(default_config_path(home)),
-            _ => Err(ConfigError::Validation {
-                field: CONFIG_PATH_ENV.to_owned(),
-                problem: "must be set to an absolute path, as there is no home directory to find ~/.logseq-mcp/config.json in"
-                    .to_owned(),
-            }),
-        };
-    }
-    if !Path::new(path).is_absolute() {
-        return Err(ConfigError::Validation {
-            field: CONFIG_PATH_ENV.to_owned(),
-            problem: format!("must be an absolute path (got \"{raw}\")"),
-        });
-    }
-    Ok(PathBuf::from(path))
 }
 
 #[cfg(test)]
@@ -334,39 +300,6 @@ mod tests {
         match result {
             Err(error @ ConfigError::InvalidJson { .. }) => assert!(!error.to_string().contains(TOKEN)),
             other => panic!("expected InvalidJson, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolves_the_config_path() {
-        let home = Some(Path::new("/home/alice"));
-        let default = PathBuf::from("/home/alice/.logseq-mcp/config.json");
-        assert_eq!(resolve_config_path(None, home).unwrap(), default);
-        assert_eq!(resolve_config_path(Some(""), home).unwrap(), default);
-        assert_eq!(resolve_config_path(Some("   "), home).unwrap(), default);
-        assert_eq!(
-            resolve_config_path(Some(" /tmp/instance/config.json "), home).unwrap(),
-            PathBuf::from("/tmp/instance/config.json")
-        );
-        assert_eq!(
-            resolve_config_path(Some("relative/config.json"), home).unwrap_err().to_string(),
-            "Configuration validation failed: LOGSEQ_MCP_CONFIG must be an absolute path (got \"relative/config.json\")"
-        );
-    }
-
-    #[test]
-    fn with_no_home_directory_the_config_path_must_be_set() {
-        assert_eq!(
-            resolve_config_path(Some("/tmp/instance/config.json"), None).unwrap(),
-            PathBuf::from("/tmp/instance/config.json")
-        );
-        for home in [None, Some(Path::new("")), Some(Path::new("relative"))] {
-            for env in [None, Some(" ")] {
-                match resolve_config_path(env, home) {
-                    Err(ConfigError::Validation { field, .. }) => assert_eq!(field, CONFIG_PATH_ENV),
-                    other => panic!("home {home:?}, env {env:?}: expected a validation error, got {other:?}"),
-                }
-            }
         }
     }
 }

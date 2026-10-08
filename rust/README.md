@@ -11,7 +11,8 @@ tool is #125.
 
 | File | What it holds |
 |---|---|
-| `src/config.rs` | `~/.logseq-mcp/config.json` (or `LOGSEQ_MCP_CONFIG`), parsed once. Its errors never show a file value (ADR-0003) |
+| `src/env.rs` | The environment, read once at startup into `Env`: `config_path` (`LOGSEQ_MCP_CONFIG` or `~/.logseq-mcp/config.json`, absolute by type) and `tips` (`LOGSEQ_MCP_TIPS`). Nothing else reads a variable (`tests/env_reads.rs`) |
+| `src/config.rs` | The config file, parsed once. Its errors never show a file value (ADR-0003) |
 | `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as `src/client.ts` |
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
 | `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`. Each input schema comes from the type that parses the arguments |
