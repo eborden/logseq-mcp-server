@@ -3,11 +3,14 @@
 // are unique across every group (runParity refuses a duplicate).
 import { join } from 'node:path';
 import { getBacklinksCases } from './cases/get-backlinks.js';
+import { getBlockCases } from './cases/get-block.js';
 import { getCurrentContextCases } from './cases/get-current-context.js';
 import { getGraphInfoCases } from './cases/get-graph-info.js';
+import { getPageCases } from './cases/get-page.js';
 import { getPageOutlineCases } from './cases/get-page-outline.js';
 import { listPagesCases } from './cases/list-pages.js';
 import { queryByPropertyCases } from './cases/query-by-property.js';
+import { resolveRefsCases } from './cases/resolve-refs.js';
 import { searchBlocksCases } from './cases/search-blocks.js';
 import type { ParityCase } from './harness.js';
 import { REPO_ROOT } from './ts-server.js';
@@ -20,11 +23,14 @@ export interface CaseGroup {
 
 export const CASE_GROUPS: CaseGroup[] = [
   { name: 'get-backlinks', cases: getBacklinksCases },
+  { name: 'get-block', cases: getBlockCases },
   { name: 'get-current-context', cases: getCurrentContextCases },
   { name: 'get-graph-info', cases: getGraphInfoCases },
+  { name: 'get-page', cases: getPageCases },
   { name: 'get-page-outline', cases: getPageOutlineCases },
   { name: 'list-pages', cases: listPagesCases },
   { name: 'query-by-property', cases: queryByPropertyCases },
+  { name: 'resolve-refs', cases: resolveRefsCases },
   { name: 'search-blocks', cases: searchBlocksCases }
 ];
 
