@@ -1,4 +1,4 @@
-//! The LogSeq traffic of `logseq_get_graph_info`, `logseq_list_pages` and `logseq_search_blocks`
+//! The LogSeq traffic of `logseq_get_graph_info`, `logseq_list_pages`, `logseq_search_blocks` and `logseq_query_by_property`
 //! against a mock LogSeq on a local port: how many calls each makes, with which inputs. The Rust
 //! side of the call counts in `CLAUDE.md` ("Current Implementation Status"); the parity harness
 //! (`scripts/parity.ts`) checks the same calls and the result bytes against the TypeScript server.
@@ -10,7 +10,8 @@ use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
 use logseq_mcp_server::js;
-use logseq_mcp_server::tools::{get_graph_info, list_pages, search_blocks};
+use logseq_mcp_server::args::Scalar;
+use logseq_mcp_server::tools::{get_graph_info, list_pages, query_by_property, search_blocks};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -174,4 +175,32 @@ async fn a_logseq_error_is_an_error_and_not_an_empty_result() {
     let logseq = mock_logseq(vec![json!({"error": "Query timed out"})]).await;
     let error = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, false, true).await.unwrap_err();
     assert_eq!(error.to_string(), "LogSeq API error: Query timed out");
+}
+
+#[tokio::test]
+async fn a_property_search_costs_one_query_and_binds_its_key_and_value() {
+    let logseq = mock_logseq(vec![json!([block(2, "a block\nstatus:: testing", 5), block(9, "another\nstatus:: testing", 5)])]).await;
+    let found = query_by_property::query_by_property_with_meta(&client(&logseq), "status", &Scalar::Text("test\"ing".into()), true, 100)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // one call, whatever the number of matches, and never a crawl of the pages
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
+    let seen = logseq.seen.lock().unwrap();
+    let query = seen[0]["args"][0].as_str().unwrap();
+    assert!(!query.contains("testing") && !query.contains("test\\\"ing"), "the value is never part of the query: {query}");
+    assert_eq!(found.results.len(), 2);
+    assert!(found.meta.is_none(), "nothing was cut, so there is no meta");
+}
+
+#[tokio::test]
+async fn a_bad_property_key_is_refused_before_any_call_and_a_null_answer_is_none() {
+    let logseq = mock_logseq(vec![json!(null)]).await;
+    let error = query_by_property::query_by_property_with_meta(&client(&logseq), "bad name", &Scalar::Text("x".into()), true, 100).await.unwrap_err();
+    assert!(error.to_string().contains("property_key"), "{error}");
+    assert!(methods(&logseq).is_empty());
+    // BR-0011: `null` is not an empty list
+    assert!(query_by_property::query_by_property_with_meta(&client(&logseq), "status", &Scalar::Text("x".into()), true, 100).await.unwrap().is_none());
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
 }
