@@ -2,13 +2,15 @@
 //! becomes one page, or the candidates when it is ambiguous, or "no such page" with the closest
 //! names. Every tool that takes a page goes through [`require_page`].
 //!
-//! Not ported yet: `resolveLinkTargets` (`check_links`). The alias groups (#69) are in [`alias`]:
-//! those of resolved pages, and that of a free-text name for a `search_term`.
+//! The names of a `[[link]]` pass resolve many at a time in [`link_targets`] (`resolveLinkTargets`,
+//! `check_links`). The alias groups (#69) are in [`alias`]: those of resolved pages, and that of a
+//! free-text name for a `search_term`.
 //!
 //! The resolver's own queries (`queries.rs`) and wire types (`wire.rs`) live in this directory,
 //! since only it reads them; a tool gets the page it resolved as a [`PulledPage`].
 
 pub mod alias;
+mod link_targets;
 mod queries;
 mod wire;
 
@@ -19,6 +21,7 @@ use crate::edn::{JournalDay, PageName, Query};
 use crate::errors::{AmbiguousPage, Candidate, MAX_CANDIDATES, MatchedBy, PageNotFound, ToolError};
 use crate::fuzzy;
 use crate::js;
+pub use self::link_targets::{LinkTargetResolutions, link_key, resolve_link_targets};
 pub use self::wire::PulledPage;
 use self::wire::ResolverRow;
 

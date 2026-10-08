@@ -106,6 +106,38 @@ pub fn resolver_rows(answer: &Value) -> Result<Option<Vec<ResolverRow>>, Respons
         .map_err(|issue| to_error(DATALOG_METHOD, issue))
 }
 
+/// One row of the link-target query: the page, the route that found it and the name it answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkTargetRow {
+    /// `None` is a `null` cell, which the caller skips
+    pub page: Option<PulledPage>,
+    /// `name` or `alias`
+    pub via: String,
+    /// The name asked for, when it is text (a row whose name isn't is skipped)
+    pub name: Option<String>,
+}
+
+/// `responses.linkTargetRows`: `[page | null, via, name]` per row. The name is `z.unknown()`, so any
+/// value passes and only text is kept.
+pub fn link_target_rows(answer: &Value) -> Result<Option<Vec<LinkTargetRow>>, ResponseError> {
+    let mut reader = Reader::default();
+    reader
+        .rows(answer, 3, |r, cells| {
+            // PARITY(#299): zod's rule for a tuple whose last cell is `z.unknown()` is that a row may leave that cell
+            // out but not the one before it, and then says `>3` (zod's own wording) — drop if Rust becomes the only server.
+            if cells.len() < 2 {
+                return Err(r.issue("Too small: expected array to have >3 items"));
+            }
+            let page = r.at(Part::Index(0), |r| match cells.first() {
+                Some(Value::Null) => Ok(None),
+                value => r.pulled_page(value).map(Some),
+            })?;
+            let via = r.at(Part::Index(1), |r| r.string_value(&cells[1]))?;
+            Ok(LinkTargetRow { page, via, name: cells.get(2).and_then(Value::as_str).map(str::to_owned) })
+        })
+        .map_err(|issue| to_error(DATALOG_METHOD, issue))
+}
+
 /// `responses.aliasSetRows`: `[startId, member]` per row, the alias group of each start page.
 pub fn alias_set_rows(answer: &Value) -> Result<Option<Vec<(f64, PulledPage)>>, ResponseError> {
     let mut reader = Reader::default();
@@ -209,6 +241,37 @@ mod tests {
         assert_eq!(rows[1].via, None);
         assert_eq!(rows[1].page.display_name(), "bob");
         assert!(!rows[1].page.has_file);
+    }
+
+    #[test]
+    fn a_link_target_row_is_a_page_a_route_and_a_name_of_any_kind() {
+        let rows = link_target_rows(&json!([
+            [{"id": 1, "name": "alice", "file": {"id": 9}}, "name", "alice"],
+            [null, "alias", "bob"],
+            [{"id": 3}, "name"],
+            [{"id": 4}, "name", 5]
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(rows[0].name.as_deref(), Some("alice"));
+        assert!(rows[0].page.as_ref().unwrap().has_file);
+        assert_eq!((rows[1].page.as_ref(), rows[1].via.as_str()), (None, "alias"));
+        // the name is `z.unknown()`: absent or not text, and the row is read all the same
+        assert_eq!((rows[2].name.as_deref(), rows[3].name.as_deref()), (None, None));
+        assert_eq!(link_target_rows(&Value::Null).unwrap(), None);
+    }
+
+    #[test]
+    fn a_link_target_row_is_wrong_in_zods_words() {
+        assert_eq!(problem(link_target_rows(&json!([[{"id": 1}, 5, "x"]]))), "[0][1]: Invalid input: expected string, received number");
+        assert_eq!(problem(link_target_rows(&json!([[{"id": 1}, null, "x"]]))), "[0][1]: Invalid input: expected string, received null");
+        assert_eq!(problem(link_target_rows(&json!([[{"id": "s"}, null]]))), "[0][0].id: Invalid input: expected number, received string");
+        assert_eq!(problem(link_target_rows(&json!([["x", "name"]]))), "[0][0]: Invalid input: expected object, received string");
+        // a row that leaves out the route as well as the name is too short, in zod's words
+        assert_eq!(problem(link_target_rows(&json!([[{"id": 1}]]))), "[0]: Too small: expected array to have >3 items");
+        assert_eq!(problem(link_target_rows(&json!([[]]))), "[0]: Too small: expected array to have >3 items");
+        assert_eq!(problem(link_target_rows(&json!([[{"id": 1}, "name", "x", "y"]]))), "[0]: Too big: expected array to have <3 items");
+        assert_eq!(problem(link_target_rows(&json!([5]))), "[0]: Invalid input: expected tuple, received number");
     }
 
     #[test]
