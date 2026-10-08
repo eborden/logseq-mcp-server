@@ -31,6 +31,9 @@ pub enum LogseqError {
     Api { message: String },
     /// The body was not JSON. Its text is not shown: it can hold graph data.
     InvalidBody { method: String },
+    /// `timeoutMs` is too large to be a timeout. TypeScript fails each call too, with Node's
+    /// own `RangeError` wording; this message is ours.
+    TimeoutTooLarge { timeout_ms: f64 },
 }
 
 impl LogseqError {
@@ -72,6 +75,10 @@ impl fmt::Display for LogseqError {
             LogseqError::InvalidBody { method } => {
                 write!(f, "LogSeq answered {method} with a body that is not JSON")
             }
+            LogseqError::TimeoutTooLarge { timeout_ms } => write!(
+                f,
+                "\"timeoutMs\" in ~/.logseq-mcp/config.json is too large to be a timeout ({timeout_ms}); use a smaller value (default 30000, per API call)"
+            ),
         }
     }
 }
@@ -89,10 +96,15 @@ pub struct LogseqClient {
     api_url: String,
     auth_token: String,
     timeout_ms: f64,
+    /// `None` when `timeout_ms` is too large for a `Duration` (it is positive and finite, so
+    /// that is the only way it fails). Each call then fails with [`LogseqError::TimeoutTooLarge`]
+    /// rather than panicking, as TypeScript's `AbortSignal.timeout` throws on every call.
+    timeout: Option<Duration>,
 }
 
 impl LogseqClient {
     pub fn new(config: &Config) -> Self {
+        let timeout_ms = config.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
         LogseqClient {
             // No proxy, whatever HTTP_PROXY or ALL_PROXY say: a proxy would see the token and
             // every query and answer (ADR-0003, BR-0001). Node's fetch ignores them too.
@@ -102,20 +114,22 @@ impl LogseqClient {
                 .expect("a client with no TLS and no proxy always builds"),
             api_url: config.api_url.clone(),
             auth_token: config.auth_token.clone(),
-            timeout_ms: config.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
+            timeout_ms,
+            timeout: Duration::try_from_secs_f64(timeout_ms / 1000.0).ok(),
         }
     }
 
     /// Call a LogSeq API method, e.g. `logseq.Editor.getBlock`. The response is returned as
     /// LogSeq sent it (it isn't wrapped); checking its shape is the caller's job.
     pub async fn call_api(&self, method: &str, args: &[Value]) -> Result<Value, LogseqError> {
+        let timeout = self.timeout.ok_or(LogseqError::TimeoutTooLarge { timeout_ms: self.timeout_ms })?;
         // A fresh timeout per call: it bounds each request, not a whole tool run.
         let response = self
             .http
             .post(format!("{}/api", self.api_url))
             .bearer_auth(&self.auth_token)
             .json(&ApiRequest { method, args })
-            .timeout(Duration::from_secs_f64(self.timeout_ms / 1000.0))
+            .timeout(timeout)
             .send()
             .await
             .map_err(|error| self.transport_error(error))?;
@@ -314,6 +328,15 @@ mod tests {
         assert!(matches!(error, LogseqError::Timeout { .. }), "{error:?}");
         assert!(error.is_infrastructure());
         assert!(error.to_string().starts_with(&format!("LogSeq at {url} did not respond within 100ms")));
+    }
+
+    #[tokio::test]
+    async fn a_timeout_too_large_for_a_duration_fails_the_call_without_panicking() {
+        // parse_config accepts any positive finite timeoutMs; 1e300 ms overflows a Duration.
+        let error = client("http://127.0.0.1:1", Some(1e300)).call_api("logseq.App.getCurrentGraph", &[]).await.unwrap_err();
+        assert!(matches!(error, LogseqError::TimeoutTooLarge { .. }), "{error:?}");
+        assert!(!error.is_infrastructure());
+        assert!(error.to_string().starts_with("\"timeoutMs\" in ~/.logseq-mcp/config.json is too large"));
     }
 
     #[tokio::test]
