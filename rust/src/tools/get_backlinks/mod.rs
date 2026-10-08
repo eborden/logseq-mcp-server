@@ -109,7 +109,9 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     let has_results = outcome.results.as_ref().is_some_and(|results| !results.is_empty());
     let text = js::json_stringify(&match outcome.results {
         Some(results) => Value::Array(results.into_iter().map(Backlink::into_value).collect()),
-        None => Value::Null, // BR-0011: LogSeq's `null` stays `null`, it is not `[]`
+        // PARITY(#299): LogSeq's `null` stays `null` but says nothing about it, where BR-0011 asks for a warning
+        // that the data was unavailable (suspected TS bug) — fix per #318, in both servers.
+        None => Value::Null,
     });
     let mut content = vec![ContentBlock::text(text)];
     let tips = if tips_enabled { backlink_tips(&page_name, has_results) } else { Vec::new() };
@@ -260,6 +262,8 @@ pub fn cap_backlinks(fetched: Vec<Backlink>, target: &str, max_pages: u64, max_b
             paging: None,
         });
         // The counts are in hand, so say where the cut fell: the dropped pages link the target no more than this
+        // PARITY(#299): the first dropped page's count has no "linking block(s)" after it, unlike the last kept
+        // page's (suspected TS inconsistency) — drop if Rust becomes the only server.
         let edge = match kept_count {
             0 => String::new(),
             n => format!(
@@ -392,7 +396,7 @@ async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_set: 
     let query = linked_references_of_pages(&alias_set.ids()?);
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
     // PARITY(#299): a `null` answer is read as "no rows", so the page looks like it has no backlinks when
-    // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #301-style change in both servers.
+    // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
     let rows = wire::block_rows(answer)?.unwrap_or_default();
     Ok(Some(group_by_source_page(rows)))
 }

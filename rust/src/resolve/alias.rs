@@ -85,6 +85,8 @@ impl AliasSet {
     }
 }
 
+// PARITY(#299): orders by UTF-16 code unit, as JavaScript's `<` does, which differs from code point order for
+// a character above U+FFFF against one in U+E000..U+FFFF — drop if Rust becomes the only server.
 /// `a < b ? -1 : a > b ? 1 : 0`: JavaScript compares strings by UTF-16 code unit.
 pub fn compare_code_units(a: &str, b: &str) -> Ordering {
     a.encode_utf16().cmp(b.encode_utf16())
@@ -162,7 +164,7 @@ pub async fn resolve_alias_sets(client: &LogseqClient, pages: &[&PulledPage]) ->
     let query = queries::alias_sets(&ids);
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
     // PARITY(#299): a `null` answer is read as "no rows", so the page looks like it has no aliases when
-    // LogSeq didn't answer (suspected TS bug, BR-0011) — drop if Rust becomes the only server.
+    // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
     let rows = wire::alias_set_rows(&answer)?.unwrap_or_default();
 
     let mut by_start: HashMap<u64, Vec<AliasMember>> = HashMap::new();
