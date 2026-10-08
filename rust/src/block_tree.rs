@@ -5,7 +5,9 @@
 //!
 //! It also puts sibling blocks in page order (`orderSiblings`): LogSeq doesn't store an order, each
 //! block says which block is to its `:block/left`, so the order is the chain those links make.
-//! `buildBlockTrees` stays with the tools that use it: nothing ported so far rebuilds a tree.
+//!
+//! [`build_block_trees`] rebuilds `getPageBlocksTree`-shaped trees from the flat blocks a Datalog
+//! query pulls, for a tool that reads blocks of many pages in one query (`query_by_date_range`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -108,6 +110,83 @@ pub fn order_siblings<T>(siblings: Vec<T>, id: impl Fn(&T) -> i64, left: impl Fn
 
     let mut slots: Vec<Option<T>> = siblings.into_iter().map(Some).collect();
     order.into_iter().map(|i| slots[i].take().expect("each sibling is placed once")).collect()
+}
+
+/// A number a JSON value holds, as the whole number an entity id is.
+fn number_id(value: Option<&Value>) -> Option<i64> {
+    value.and_then(Value::as_f64).map(|n| n as i64)
+}
+
+/// `node.<key>?.id` of a block's `parent`, `page` or `left`: the `id` the reference carries.
+fn reference_id(block: &Map<String, Value>, key: &str) -> Option<i64> {
+    number_id(block.get(key).and_then(|reference| reference.get("id")))
+}
+
+/// `buildBlockTrees`: `getPageBlocksTree`-shaped trees from flat Datalog blocks, by page id.
+///
+/// Mirrors the Editor API's output: camelCase keys, a `children` array on every block (empty for a
+/// leaf) and a 1-based `level`, after the keys the pull gave (`children` first, since it is made
+/// with the node, then `level`). Siblings are in the order of the `:block/left` chain. A block whose
+/// parent is not among `blocks` and is not a page in `page_ids` is treated as a root, so it is not
+/// lost, under the page its `page` names, else its parent; a block with neither is dropped.
+///
+/// Every page in `page_ids` has an entry, `[]` for a page with no blocks. A block whose own `id`
+/// is missing counts as id 0; every block the pull gives has one (`blockSchema`).
+pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> HashMap<i64, Vec<Value>> {
+    let mut nodes: Vec<Option<Map<String, Value>>> = blocks
+        .iter()
+        .map(|block| {
+            let mut node = camelize_block(block);
+            node.insert("children".to_owned(), Value::Array(Vec::new()));
+            Some(node)
+        })
+        .collect();
+    let ids: Vec<i64> = nodes.iter().map(|node| number_id(node.as_ref().and_then(|node| node.get("id"))).unwrap_or(0)).collect();
+    let node_ids: HashSet<i64> = ids.iter().copied().collect();
+    let lefts: Vec<Option<i64>> = nodes.iter().map(|node| node.as_ref().and_then(|node| reference_id(node, "left"))).collect();
+
+    let mut children_of: HashMap<i64, Vec<usize>> = HashMap::new();
+    let mut roots_of: HashMap<i64, Vec<usize>> = page_ids.iter().map(|&id| (id, Vec::new())).collect();
+    for (i, node) in nodes.iter().enumerate() {
+        let node = node.as_ref().expect("no node is taken yet");
+        let parent_id = reference_id(node, "parent");
+        match parent_id {
+            Some(parent) if node_ids.contains(&parent) && parent != ids[i] => children_of.entry(parent).or_default().push(i),
+            _ => {
+                // `node.page?.id ?? parentId`
+                let Some(page_id) = reference_id(node, "page").or(parent_id) else { continue };
+                roots_of.entry(page_id).or_default().push(i);
+            }
+        }
+    }
+
+    // `attach`: each node is in exactly one sibling list, so each is taken once
+    fn attach(
+        siblings: Vec<usize>,
+        level: u64,
+        nodes: &mut Vec<Option<Map<String, Value>>>,
+        ids: &[i64],
+        lefts: &[Option<i64>],
+        children_of: &mut HashMap<i64, Vec<usize>>,
+    ) -> Vec<Value> {
+        let ordered = order_siblings(siblings, |&i| ids[i], |&i| lefts[i]);
+        ordered
+            .into_iter()
+            .map(|i| {
+                let below = children_of.remove(&ids[i]).unwrap_or_default();
+                let children = attach(below, level + 1, nodes, ids, lefts, children_of);
+                let mut node = nodes[i].take().expect("a node is attached once");
+                node.insert("level".to_owned(), Value::from(level));
+                node.insert("children".to_owned(), Value::Array(children));
+                Value::Object(node)
+            })
+            .collect()
+    }
+
+    roots_of
+        .into_iter()
+        .map(|(page_id, roots)| (page_id, attach(roots, 1, &mut nodes, &ids, &lefts, &mut children_of)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -215,5 +294,59 @@ mod tests {
     fn a_sibling_that_shares_an_id_with_a_placed_one_is_dropped() {
         // suspected TS bug, kept: nothing is dropped, the doc says, yet the second 7 is
         assert_eq!(ordered(vec![(7, Some(1)), (7, Some(1))]), [7]);
+    }
+
+    fn flat(blocks: Vec<Value>) -> Vec<Map<String, Value>> {
+        blocks.into_iter().map(|block| block.as_object().cloned().unwrap()).collect()
+    }
+
+    fn block(id: i64, page: i64, parent: i64, left: i64) -> Value {
+        json!({"id": id, "uuid": format!("u{id}"), "content": format!("b{id}"), "page": {"id": page}, "parent": {"id": parent}, "left": {"id": left}, "path-refs": []})
+    }
+
+    #[test]
+    fn blocks_become_a_tree_per_page_in_the_order_of_the_left_chain() {
+        let trees = build_block_trees(
+            flat(vec![block(3, 10, 10, 2), block(21, 10, 2, 2), block(2, 10, 10, 1), block(1, 10, 10, 10), block(50, 20, 20, 20)]),
+            &[10, 20, 30],
+        );
+        let uuids = |blocks: &[Value]| blocks.iter().map(|b| b["uuid"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        // 1's left is the page, which is no sibling, so it heads the chain; 2 follows 1, 3 follows 2
+        assert_eq!(uuids(&trees[&10]), ["u1", "u2", "u3"]);
+        assert_eq!(uuids(trees[&10][1]["children"].as_array().unwrap()), ["u21"]);
+        assert_eq!(uuids(&trees[&20]), ["u50"]);
+        // a page asked for with no blocks has an empty tree
+        assert_eq!(trees[&30], Vec::<Value>::new());
+    }
+
+    #[test]
+    fn a_block_has_children_then_level_after_the_keys_of_the_pull_and_camelized_keys() {
+        let trees = build_block_trees(flat(vec![block(1, 10, 10, 10), block(2, 10, 1, 1)]), &[10]);
+        assert_eq!(
+            serde_json::to_string(&trees[&10][0]).unwrap(),
+            r#"{"id":1,"uuid":"u1","content":"b1","page":{"id":10},"parent":{"id":10},"left":{"id":10},"pathRefs":[],"children":[{"id":2,"uuid":"u2","content":"b2","page":{"id":10},"parent":{"id":1},"left":{"id":1},"pathRefs":[],"children":[],"level":2}],"level":1}"#
+        );
+    }
+
+    #[test]
+    fn a_block_whose_parent_is_not_among_the_blocks_is_a_root_and_one_with_no_page_is_dropped() {
+        // 7's parent (99) was not pulled: it is a root under its page
+        let trees = build_block_trees(flat(vec![block(7, 10, 99, 99)]), &[10]);
+        assert_eq!(trees[&10].len(), 1);
+        // no page: the parent id names the page; no page and no parent: nothing to attach it to
+        let no_page = json!({"id": 8, "uuid": "u8", "parent": {"id": 10}});
+        let nothing = json!({"id": 9, "uuid": "u9"});
+        let trees = build_block_trees(flat(vec![no_page, nothing]), &[10]);
+        assert_eq!(trees[&10].len(), 1);
+        assert_eq!(trees.len(), 1);
+    }
+
+    #[test]
+    fn a_block_that_is_its_own_parent_or_in_a_cycle_does_not_loop() {
+        let trees = build_block_trees(flat(vec![block(1, 10, 1, 1)]), &[10]);
+        assert_eq!(trees[&10].len(), 1);
+        // 2 and 3 are each other's parent: neither is a root, so both are lost, as in TypeScript
+        let trees = build_block_trees(flat(vec![block(2, 10, 3, 3), block(3, 10, 2, 2)]), &[10]);
+        assert!(trees[&10].is_empty());
     }
 }
