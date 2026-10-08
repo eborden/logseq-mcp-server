@@ -27,6 +27,7 @@ pub mod output_format;
 pub mod params;
 pub mod resolve;
 pub mod resolve_refs;
+pub mod resources;
 pub mod server;
 pub mod slim;
 pub mod tips;
