@@ -124,9 +124,10 @@ export function checkList(list: string, input: string, candidates: readonly stri
         `rule 4: the first ${k} name(s) must be exact or prefix matches of ${JSON.stringify(input)} (${show(both)}), got ${show(names)}`
       );
     }
+    // Among the names listed: which of more than three exact or prefix matches are listed is left unchecked (ADR-0032)
     names.forEach((name, at) => {
       if (!prefix.includes(name)) return;
-      const late = exact.filter(e => !names.slice(0, at).includes(e));
+      const late = names.slice(at + 1).filter(n => exact.includes(n));
       if (late.length > 0) failures.push(`rule 4: the prefix match ${JSON.stringify(name)} is listed before the exact match ${show(late)}`);
     });
   }
