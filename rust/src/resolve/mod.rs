@@ -2,12 +2,14 @@
 //! becomes one page, or the candidates when it is ambiguous, or "no such page" with the closest
 //! names. Every tool that takes a page goes through [`require_page`].
 //!
-//! Not ported, because the outline doesn't use it: `resolveLinkTargets` (`check_links`) and the
-//! alias groups (#69).
+//! Not ported yet: `resolveLinkTargets` (`check_links`) and `resolveAliasSetByName` (the alias
+//! group of a free-text name, for a `search_term`). The alias groups of resolved pages (#69) are
+//! in [`alias`].
 //!
 //! The resolver's own queries (`queries.rs`) and wire types (`wire.rs`) live in this directory,
 //! since only it reads them; a tool gets the page it resolved as a [`PulledPage`].
 
+pub mod alias;
 mod queries;
 mod wire;
 
@@ -35,6 +37,9 @@ pub struct ResolvedPage {
     pub matched_by: MatchedBy,
     /// The original-case name of the page
     pub original_name: String,
+    /// The name to hand to follow-up calls (`lookupName`). For an exact match it is the caller's
+    /// own trimmed text, otherwise the resolved page's lowercase name.
+    pub lookup_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,15 +97,15 @@ fn declaring_pages(pages: Vec<&PulledPage>) -> Vec<&PulledPage> {
     if written.is_empty() { pages } else { written }
 }
 
-fn found(page: &PulledPage, matched_by: MatchedBy) -> Resolution {
-    Resolution::Found(ResolvedPage { page: page.clone(), matched_by, original_name: page.display_name() })
+fn found(page: &PulledPage, matched_by: MatchedBy, lookup_name: String) -> Resolution {
+    Resolution::Found(ResolvedPage { page: page.clone(), matched_by, original_name: page.display_name(), lookup_name })
 }
 
 // PARITY(#299): an ambiguous result names the page as the caller typed it (untrimmed) while its reasons name
 // the trimmed one (suspected TS inconsistency) — drop if Rust becomes the only server.
 fn pick(pages: &[&PulledPage], matched_by: MatchedBy, reason: String, page_name: &str) -> Resolution {
     if let [page] = pages {
-        return found(page, matched_by);
+        return found(page, matched_by, page.lower_name());
     }
     let candidates = pages
         .iter()
@@ -155,7 +160,7 @@ fn resolve_from_rows(input: &str, name: &str, rows: &[ResolverRow]) -> Option<Re
         if is_stub && !other_journals.is_empty() {
             return Some(pick(&other_journals, MatchedBy::JournalDate, format!("journal page for {name}"), input));
         }
-        return Some(found(exact, MatchedBy::Name));
+        return Some(found(exact, MatchedBy::Name, name.to_owned()));
     }
     if !alias_sources.is_empty() {
         return Some(pick(&alias_sources, MatchedBy::Alias, alias_reason(), input));
