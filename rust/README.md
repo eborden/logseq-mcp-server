@@ -13,23 +13,21 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 
 | File | What it holds |
 |---|---|
-| `src/env.rs` | The environment, read once at startup into `Env`: `config_path` (`LOGSEQ_MCP_CONFIG` or `~/.logseq-mcp/config.json`, absolute by type) and `tips` (`LOGSEQ_MCP_TIPS`). Nothing else reads a variable (`tests/env_reads.rs`) |
+| `src/env.rs` | The environment, read once at startup into `Env`: `config_path` (`LOGSEQ_MCP_CONFIG` or `~/.logseq-mcp/config.json`, absolute by type), `tips` (`LOGSEQ_MCP_TIPS`) and `clock` (`LOGSEQ_MCP_NOW`, a fixed instant in milliseconds for the parity harness; unset is the system clock). Nothing else reads a variable (`tests/env_reads.rs`) |
 | `src/config.rs` | The config file, parsed once. Its errors never show a file value (ADR-0003) |
 | `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as `src/client.ts` |
 | `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
-| `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`, and the resource requests. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
-| `src/markdown.rs`, `src/resources.rs` | The one Markdown renderer (`markdown.ts`: title, resolved-from note, page properties and the pre-block rule, the block outline with its cap, a single block, the warnings/hasMore/tips footer); `compact`, `show_uuid` and `show_page` on the outline are the context tools' (#312). And the resources (`resources.ts`): `resources/templates/list` and `resources/read` of `logseq://page/{name}`, cut at `MAX_PAGE_CHARS`. `resources/list` is empty and the guide is an unknown URI until the prompts land (#316) |
-| `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type (every named type written in place: the MCP SDK's client drops `$defs`), argument parsing at the boundary, and the TypeScript server's result shapes |
-| `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125), `get_backlinks/` (#307), `get_graph_info/`, `list_pages/` and `search_blocks/` (#306), `get_block/` and `get_page/` (#308), `build_context/` and `get_context_for_query/` (#312) |
-| `src/markdown_context.rs`, `src/compact.rs`, `src/snippet.rs` | Markdown for the context tools (`markdown-context.ts`: a topic's blocks, related pages and references by source page, and a query's topics and keyword hits; the concept network's `renderNetwork` comes with that tool, #313); `compact` JSON (`compact.ts`: a block is `{ uuid, snippet }`, a page `{ id, name, originalName }`); and the first-line snippet (`snippet.ts`), also the outline's |
+| `src/server.rs` | rmcp `ServerHandler`: `initialize`, `tools/list`, `tools/call`. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
+| `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type, argument parsing at the boundary, and the TypeScript server's result shapes |
+| `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125), `get_backlinks/` (#307), `get_graph_info/`, `list_pages/` and `search_blocks/` (#306), `get_block/` and `get_page/` (#308), `query_by_date_range/` (#311) |
 | `src/args.rs` | `Arguments`: a tool's arguments read one by one in the order of its schema, `null` as absent, nothing coerced, a bad one worded as `parseArgs` words it (`an integer, not a fraction`, `at least 0`, zod's own `Too big`) |
 | `src/entity.rs`, `src/slim.rs` | A page or block as LogSeq spells it, in either key spelling (`entity-fields.ts`) with the checks of the entity schemas; and slim output (`slim-entities.ts`, BR-0012). Entities stay the `Value`s LogSeq sent, so a full result carries them as they came |
 | `src/truncation.rs`, `src/escape.rs` | The warnings a capped list carries (`result-meta.ts`) and regex escaping (`escape-regex.ts`) |
 | `src/wire.rs` | The reader every wire type is written with: LogSeq's answers parsed into typed values at the boundary (`src/response-schemas.ts`). A mismatch is a `ResponseError` naming the path in zod's words, never "no data" |
 | `src/resolve/` | The shared page resolver (BR-0010): exact name, alias, ISO date, namespace leaf, the closest names for a miss. Its queries and wire types are in the directory, since only it reads them. `resolve/alias.rs` holds the alias groups (#69): one query for any number of pages, none for a page with no alias link |
-| `src/pages_by_ids.rs` | The query that pulls full page entities for some ids (`getPagesByIds`), shared by `search_blocks` (`include_context`) and `get_current_context` (#327) |
-| `src/block_tree.rs` | `camelizeKeys` and `camelizeBlock`: a pulled block in the Editor API's spelling; and `orderSiblings`: sibling blocks in page order, by their `:block/left` chain |
-| `src/resolve_refs/`, `src/output_format.rs` | `((uuid))` refs and `{{embed}}`s resolved in returned blocks, one batched query per nesting level (BR-0007; `resolve-refs.ts`), with the ref and embed patterns written out since the crate has no regex engine; and the `format` parameter, `json` or `markdown` |
+| `src/block_tree.rs` | `camelizeKeys` and `camelizeBlock`: a pulled block in the Editor API's spelling; `orderSiblings`: sibling blocks in page order, by their `:block/left` chain; and `buildBlockTrees`: the trees of many pages from the flat blocks one query pulls |
+| `src/dates.rs`, `src/block_budget.rs` | Calendar dates (`date-utils.ts`, `date-presets.ts`): the eight presets as plain calendar arithmetic, and a `Clock` that reads today's date in the host's local zone through `localtime_r`, so it honours `TZ` as Node does. And `block-budget.ts`: cutting block trees to a count of blocks, nested ones included |
+| `src/resolve_refs/`, `src/output_format.rs` | `((uuid))` refs and `{{embed}}`s resolved in returned blocks, one batched query per nesting level (BR-0007; `resolve-refs.ts`), with the ref and embed patterns written out since the crate has no regex engine; and the `format` parameter, JSON only until the Markdown renderer lands (#310) |
 | `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (messages word for word as `src/errors.ts`), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
 | `src/fuzzy.rs` | fuzzysort 3.1.0's `go`, ported step for step, because the closest names are in an error message compared byte for byte. Tested against the library's own output (`tests/data/fuzzysort-oracle.json`) |
 | `src/js.rs` | The JavaScript rules the output depends on: `trim`, number formatting, `JSON.stringify` key order, UTF-16 strings and an approximation of `localeCompare` |
@@ -71,6 +69,13 @@ node node_modules/vite-node/vite-node.mjs scripts/parity.ts --self-check --teste
 The runner is the `vite-node` that `npm ci` installs from the lockfile (CI uses the same; `npx tsx`
 would download an unpinned package). It swallows `--`, so the server command follows the flags
 directly; `scripts/parity.ts -- <command>` still works under `npx tsx`.
+
+The harness runs both servers in one time zone (`America/New_York`) with one instant as "now"
+(`LOGSEQ_MCP_NOW`, 2025-03-12T03:30Z, which is still the evening of the 11th there): a result that
+depends on today's date (`last_n`, a preset) is then the same on every day, and a server that reads the
+date in UTC fails. The Rust server reads the variable itself; the TypeScript one is started through
+`scripts/parity/run-ts-server.ts`, which replaces `Date` before the server runs, so no server code
+changes.
 
 `--tested-tools-only` is for a server with only some tools: `tools/list` is compared for the tools
 the cases call, and the server must list those and no others. Fixtures are made up (BR-0001).
