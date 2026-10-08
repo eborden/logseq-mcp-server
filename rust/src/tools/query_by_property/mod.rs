@@ -7,11 +7,10 @@
 //! `:limit` (#61).
 //!
 //! This directory holds everything only the property search uses: its query (`queries.rs`), the
-//! answer it reads (`wire.rs`), the camelCase spelling it gives a pulled block (`camelize.rs`) and
-//! its tip (`tips.rs`). What it shares with other tools is outside it: slim output, entity
-//! fields, the truncation warnings and the tool helpers.
+//! answer it reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside
+//! it: slim output, entity fields, the camelCase spelling of a pulled block (`block_tree`), the
+//! truncation warnings and the tool helpers.
 
-mod camelize;
 mod queries;
 mod tips;
 mod wire;
@@ -24,6 +23,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::args::{Arguments, Scalar};
+use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::js;
@@ -32,7 +32,6 @@ use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, blocks_inline_max, capped_truncation_warning};
 
-use self::camelize::{camelize_block, camelize_keys};
 use self::queries::PropertyKey;
 use self::tips::property_tips;
 
