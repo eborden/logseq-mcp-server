@@ -1,0 +1,461 @@
+{
+  "build_context: exact name, blocks in page order, linking pages and blocks as sent": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"properties\":{\"1\":\"one\",\"2\":\"two\",\"type\":\"project\",\"tags\":[\"alpha\",\"beta\"]},\"created-at\":1735689600010},\"directBlocks\":[{\"id\":103,\"uuid\":\"00000000-0000-4000-8000-000000000103\",\"content\":\"Second top block, with a ((ref)) left as written\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":101},\"path-refs\":[]},{\"id\":102,\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"content\":\"Alice owns the schema\\nand a second line\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":101},\"left\":{\"id\":101},\"path-refs\":[]},{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Kickoff with [[Alice]] and [[Bob]]\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[],\"properties\":{\"1\":\"one\",\"2\":\"two\",\"status\":\"doing\"}}],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\",\"journal?\":false},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journal?\":true,\"journalDay\":20250101},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Project Atlas]] (201)\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}},{\"block\":{\"id\":202,\"uuid\":\"00000000-0000-4000-8000-000000000202\",\"content\":\"Bob again links [[Project Atlas]]\\nover two lines\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}},{\"block\":{\"id\":401,\"uuid\":\"00000000-0000-4000-8000-000000000401\",\"content\":\"Alice tags #[[Project Atlas]]\",\"format\":\"markdown\",\"page\":{\"id\":40},\"parent\":{\"id\":40},\"left\":{\"id\":40},\"properties\":{\"status\":\"done\"}},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\",\"journal?\":false}},{\"block\":{\"id\":301,\"uuid\":\"00000000-0000-4000-8000-000000000301\",\"content\":\"Journal mentions [[Project Atlas]]\",\"format\":\"markdown\",\"page\":{\"id\":30},\"parent\":{\"id\":30},\"left\":{\"id\":30},\"journal?\":true,\"journalDay\":20250101},\"sourcePage\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journal?\":true,\"journalDay\":20250101}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":3,\"totalRelatedPages\":3,\"totalReferences\":4,\"pageProperties\":{\"1\":\"one\",\"2\":\"two\",\"type\":\"project\",\"tags\":[\"alpha\",\"beta\"]}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":3,\"relatedPages\":3,\"references\":4}}"
+      }
+    ]
+  },
+  "build_context: a linking tuple with no page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Only block\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":50,\"name\":\"zed\",\"originalName\":\"Zed\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":51},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":501,\"uuid\":\"00000000-0000-4000-8000-000000000501\",\"content\":\"Mentions [[Project Atlas]] (501)\",\"format\":\"markdown\",\"page\":{\"id\":50,\"name\":\"zed\",\"originalName\":\"Zed\"},\"parent\":{\"id\":50},\"left\":{\"id\":50}},\"sourcePage\":{\"id\":50,\"name\":\"zed\",\"originalName\":\"Zed\"}},{\"block\":{\"id\":502,\"uuid\":\"00000000-0000-4000-8000-000000000502\",\"content\":\"No page name\",\"format\":\"markdown\",\"page\":{\"id\":51},\"parent\":{\"id\":51},\"left\":{\"id\":51}},\"sourcePage\":{\"id\":51}},{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Project Atlas]] (201)\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":3,\"totalReferences\":3,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":3,\"references\":3}}"
+      }
+    ]
+  },
+  "build_context: a page with no blocks and no links": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":0,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":0,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: caps below what there is": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"properties\":{\"1\":\"one\",\"2\":\"two\",\"type\":\"project\",\"tags\":[\"alpha\",\"beta\"]},\"created-at\":1735689600010},\"directBlocks\":[{\"id\":103,\"uuid\":\"00000000-0000-4000-8000-000000000103\",\"content\":\"Second top block, with a ((ref)) left as written\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":101},\"path-refs\":[]},{\"id\":102,\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"content\":\"Alice owns the schema\\nand a second line\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":101},\"left\":{\"id\":101},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Project Atlas]] (201)\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}},{\"block\":{\"id\":202,\"uuid\":\"00000000-0000-4000-8000-000000000202\",\"content\":\"Bob again links [[Project Atlas]]\\nover two lines\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}},{\"block\":{\"id\":401,\"uuid\":\"00000000-0000-4000-8000-000000000401\",\"content\":\"Alice tags #[[Project Atlas]]\",\"format\":\"markdown\",\"page\":{\"id\":40},\"parent\":{\"id\":40},\"left\":{\"id\":40},\"properties\":{\"status\":\"done\"}},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\",\"journal?\":false}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":2,\"totalRelatedPages\":1,\"totalReferences\":3,\"pageProperties\":{\"1\":\"one\",\"2\":\"two\",\"type\":\"project\",\"tags\":[\"alpha\",\"beta\"]}},\"hasMore\":true,\"warnings\":[{\"code\":\"blocks_truncated\",\"message\":\"Showing 2 of 4 blocks.\",\"howToFetchAll\":\"Set max_blocks to 4 (or higher) to get all 4.\"},{\"code\":\"references_truncated\",\"message\":\"Showing 3 of 6 references.\",\"howToFetchAll\":\"Set max_references to 6 (or higher) to get all 6.\"},{\"code\":\"related_pages_truncated\",\"message\":\"Showing 1 of 4 related pages.\",\"howToFetchAll\":\"Set max_related_pages to 4 (or higher) to get all 4.\"}],\"totals\":{\"blocks\":4,\"relatedPages\":4,\"references\":6}}"
+      }
+    ]
+  },
+  "build_context: ISO date of a journal": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"2025-01-01\",\"resolvedFrom\":{\"name\":\"2025-01-01\",\"matchedBy\":\"journal-date\",\"resolvedTo\":\"Jan 1st, 2025\"},\"mainPage\":{\"id\":30,\"uuid\":\"00000000-0000-4000-8000-000000000030\",\"name\":\"jan 1st, 2025\",\"original-name\":\"Jan 1st, 2025\",\"file\":{\"id\":5030},\"journal?\":true,\"journal-day\":20250101,\"created-at\":1735689600030},\"directBlocks\":[{\"id\":301,\"uuid\":\"00000000-0000-4000-8000-000000000301\",\"content\":\"Planned the day\",\"format\":\"markdown\",\"page\":{\"id\":30},\"parent\":{\"id\":30},\"left\":{\"id\":30},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\",\"journal?\":false},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":401,\"uuid\":\"00000000-0000-4000-8000-000000000401\",\"content\":\"Alice mentions [[Jan 1st, 2025]]\",\"format\":\"markdown\",\"page\":{\"id\":40},\"parent\":{\"id\":40},\"left\":{\"id\":40}},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\",\"journal?\":false}}],\"temporalContext\":{\"isJournal\":true,\"date\":20250101},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":1,\"totalReferences\":1,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":1,\"references\":1}}"
+      }
+    ]
+  },
+  "build_context: namespace leaf": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"retro\",\"resolvedFrom\":{\"name\":\"retro\",\"matchedBy\":\"namespace-leaf\",\"resolvedTo\":\"Project Atlas/Retro\"},\"mainPage\":{\"id\":60,\"uuid\":\"00000000-0000-4000-8000-000000000060\",\"name\":\"project atlas/retro\",\"original-name\":\"Project Atlas/Retro\",\"file\":{\"id\":5060},\"journal?\":false,\"created-at\":1735689600060},\"directBlocks\":[{\"id\":601,\"uuid\":\"00000000-0000-4000-8000-000000000601\",\"content\":\"What went well\",\"format\":\"markdown\",\"page\":{\"id\":60},\"parent\":{\"id\":60},\"left\":{\"id\":60},\"path-refs\":[]}],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: a page with aliases covers the whole group": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Atlas\",\"resolvedFrom\":{\"name\":\"Atlas\",\"matchedBy\":\"alias\",\"resolvedTo\":\"Project Atlas\"},\"resolvedAliases\":[\"Atlas\",\"Project Atlas\"],\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"alias\":[{\"id\":11}],\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"On the page asked about\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]},{\"id\":102,\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"content\":\"Second on the page asked about\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":101},\"path-refs\":[]},{\"id\":1101,\"uuid\":\"00000000-0000-4000-8000-000000001101\",\"content\":\"On the stub\",\"format\":\"markdown\",\"page\":{\"id\":11},\"parent\":{\"id\":11},\"left\":{\"id\":11},\"path-refs\":[]},{\"id\":1102,\"uuid\":\"00000000-0000-4000-8000-000000001102\",\"content\":\"Second on the stub\",\"format\":\"markdown\",\"page\":{\"id\":11},\"parent\":{\"id\":11},\"left\":{\"id\":1101},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journalDay\":20250101},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":401,\"uuid\":\"00000000-0000-4000-8000-000000000401\",\"content\":\"Mentions [[Atlas]] (401)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":40},\"left\":{\"id\":40},\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},{\"block\":{\"id\":405,\"uuid\":\"00000000-0000-4000-8000-000000000405\",\"content\":\"Mentions [[Atlas]] (405)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":40},\"left\":{\"id\":40},\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Atlas]] (201)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":20},\"left\":{\"id\":20},\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}},{\"block\":{\"id\":301,\"uuid\":\"00000000-0000-4000-8000-000000000301\",\"content\":\"Mentions [[Atlas]] (301)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":30},\"left\":{\"id\":30},\"page\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journalDay\":20250101}},\"sourcePage\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journalDay\":20250101}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":4,\"totalRelatedPages\":3,\"totalReferences\":4,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":4,\"relatedPages\":3,\"references\":4}}"
+      }
+    ]
+  },
+  "build_context: no blocks and no links anywhere in the alias group": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Atlas\",\"resolvedFrom\":{\"name\":\"Atlas\",\"matchedBy\":\"alias\",\"resolvedTo\":\"Project Atlas\"},\"resolvedAliases\":[\"Atlas\",\"Project Atlas\"],\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"alias\":[{\"id\":11}],\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":0,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":0,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: an alias link whose group is the page alone": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"alias\":[{\"id\":11}],\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Only block\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Project Atlas]] (201)\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":1,\"totalReferences\":1,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":1,\"references\":1}}"
+      }
+    ]
+  },
+  "build_context: resolve_refs in the blocks and the linking blocks": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"See ((00000000-0000-4000-8000-000000000002)) for the plan\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[],\"resolvedContent\":\"See plan from the end of the chain\\nover two lines for the plan\",\"resolvedRefs\":[{\"uuid\":\"00000000-0000-4000-8000-000000000002\",\"content\":\"plan from the end of the chain\\nover two lines\",\"page\":\"Project Atlas\",\"status\":\"ok\"},{\"uuid\":\"00000000-0000-4000-8000-000000000004\",\"content\":\"the end of the chain\",\"page\":\"Project Atlas\",\"status\":\"ok\"}]},{\"id\":102,\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"content\":\"Plain\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":101},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Cites ((00000000-0000-4000-8000-000000000003)) in passing\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20},\"resolvedContent\":\"Cites the cited text in passing\",\"resolvedRefs\":[{\"uuid\":\"00000000-0000-4000-8000-000000000003\",\"content\":\"the cited text\",\"page\":\"Project Atlas\",\"status\":\"ok\"}]},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":2,\"totalRelatedPages\":1,\"totalReferences\":1,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":2,\"relatedPages\":1,\"references\":1}}"
+      }
+    ]
+  },
+  "build_context: resolve_refs skipped under compact": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"name\":\"project atlas\",\"originalName\":\"Project Atlas\"},\"directBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"snippet\":\"See ((00000000-0000-4000-8000-000000000002)) for the plan\"},{\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"snippet\":\"Plain\"}],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"snippet\":\"Cites ((00000000-0000-4000-8000-000000000003)) in passing\"},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":2,\"totalRelatedPages\":1,\"totalReferences\":1,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[{\"code\":\"resolve_refs_ignored_in_compact\",\"message\":\"compact output has no block bodies, so resolve_refs was skipped. Set compact to false for resolved text, or read a block with logseq_get_block and resolve_refs.\"}],\"totals\":{\"blocks\":2,\"relatedPages\":1,\"references\":1}}"
+      }
+    ]
+  },
+  "build_context: resolve_refs past the depth limit": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"See ((00000000-0000-4000-8000-000000000002)) for the plan\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[],\"resolvedContent\":\"See mid end ((00000000-0000-4000-8000-000000000004)) for the plan\",\"resolvedRefs\":[{\"uuid\":\"00000000-0000-4000-8000-000000000002\",\"content\":\"mid end ((00000000-0000-4000-8000-000000000004))\",\"page\":\"Project Atlas\",\"status\":\"ok\"},{\"uuid\":\"00000000-0000-4000-8000-000000000003\",\"content\":\"end ((00000000-0000-4000-8000-000000000004))\",\"page\":\"Project Atlas\",\"status\":\"ok\"},{\"uuid\":\"00000000-0000-4000-8000-000000000004\",\"content\":null,\"page\":null,\"status\":\"depth_limit\"}]},{\"id\":102,\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"content\":\"Plain\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":101},\"path-refs\":[]}],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":2,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":true,\"warnings\":[{\"code\":\"refs_depth_limit\",\"message\":\"1 reference(s) were not followed because they are more than 2 levels deep. They are left as written.\",\"howToFetchAll\":\"Fetch each ref whose status is \\\"depth_limit\\\" with logseq_get_block (its uuid) or logseq_get_page (its page).\"}],\"totals\":{\"blocks\":2,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: compact": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"name\":\"project atlas\",\"originalName\":\"Project Atlas\"},\"directBlocks\":[{\"uuid\":\"00000000-0000-4000-8000-000000000103\",\"snippet\":\"Second top block, with a ((ref)) left as written\"},{\"uuid\":\"00000000-0000-4000-8000-000000000102\",\"snippet\":\"Alice owns the schema\"},{\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"snippet\":\"Kickoff with [[Alice]] and [[Bob]]\"}],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\"},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"snippet\":\"Mentions [[Project Atlas]] (201)\"},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}},{\"block\":{\"uuid\":\"00000000-0000-4000-8000-000000000202\",\"snippet\":\"Bob again links [[Project Atlas]]\"},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}},{\"block\":{\"uuid\":\"00000000-0000-4000-8000-000000000401\",\"snippet\":\"Alice tags #[[Project Atlas]]\"},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},{\"block\":{\"uuid\":\"00000000-0000-4000-8000-000000000301\",\"snippet\":\"Journal mentions [[Project Atlas]]\"},\"sourcePage\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\"}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":3,\"totalRelatedPages\":3,\"totalReferences\":4,\"pageProperties\":{\"1\":\"one\",\"2\":\"two\",\"type\":\"project\",\"tags\":[\"alpha\",\"beta\"]}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":3,\"relatedPages\":3,\"references\":4}}"
+      }
+    ]
+  },
+  "build_context: caps at 0": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":0,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":true,\"warnings\":[{\"code\":\"blocks_truncated\",\"message\":\"Showing 0 of 3 blocks.\",\"howToFetchAll\":\"Set max_blocks to 3 (or higher) to get all 3.\"},{\"code\":\"references_truncated\",\"message\":\"Showing 0 of 4 references.\",\"howToFetchAll\":\"Set max_references to 4 (or higher) to get all 4.\"},{\"code\":\"related_pages_truncated\",\"message\":\"Showing 0 of 3 related pages.\",\"howToFetchAll\":\"Set max_related_pages to 3 (or higher) to get all 3.\"}],\"totals\":{\"blocks\":3,\"relatedPages\":3,\"references\":4}}"
+      }
+    ]
+  },
+  "build_context: temporal context left out": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"2025-01-01\",\"resolvedFrom\":{\"name\":\"2025-01-01\",\"matchedBy\":\"journal-date\",\"resolvedTo\":\"Jan 1st, 2025\"},\"mainPage\":{\"id\":30,\"uuid\":\"00000000-0000-4000-8000-000000000030\",\"name\":\"jan 1st, 2025\",\"original-name\":\"Jan 1st, 2025\",\"file\":{\"id\":5030},\"journal?\":true,\"journal-day\":20250101,\"created-at\":1735689600030},\"directBlocks\":[],\"relatedPages\":[],\"references\":[],\"summary\":{\"totalBlocks\":0,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":0,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: more blocks than the inline estimate": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":1000,\"uuid\":\"00000000-0000-4000-8000-000000001000\",\"content\":\"Entry 1\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]},{\"id\":1001,\"uuid\":\"00000000-0000-4000-8000-000000001001\",\"content\":\"Entry 2\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1000},\"path-refs\":[]},{\"id\":1002,\"uuid\":\"00000000-0000-4000-8000-000000001002\",\"content\":\"Entry 3\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1001},\"path-refs\":[]},{\"id\":1003,\"uuid\":\"00000000-0000-4000-8000-000000001003\",\"content\":\"Entry 4\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1002},\"path-refs\":[]},{\"id\":1004,\"uuid\":\"00000000-0000-4000-8000-000000001004\",\"content\":\"Entry 5\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1003},\"path-refs\":[]},{\"id\":1005,\"uuid\":\"00000000-0000-4000-8000-000000001005\",\"content\":\"Entry 6\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1004},\"path-refs\":[]},{\"id\":1006,\"uuid\":\"00000000-0000-4000-8000-000000001006\",\"content\":\"Entry 7\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1005},\"path-refs\":[]},{\"id\":1007,\"uuid\":\"00000000-0000-4000-8000-000000001007\",\"content\":\"Entry 8\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1006},\"path-refs\":[]},{\"id\":1008,\"uuid\":\"00000000-0000-4000-8000-000000001008\",\"content\":\"Entry 9\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1007},\"path-refs\":[]},{\"id\":1009,\"uuid\":\"00000000-0000-4000-8000-000000001009\",\"content\":\"Entry 10\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1008},\"path-refs\":[]},{\"id\":1010,\"uuid\":\"00000000-0000-4000-8000-000000001010\",\"content\":\"Entry 11\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1009},\"path-refs\":[]},{\"id\":1011,\"uuid\":\"00000000-0000-4000-8000-000000001011\",\"content\":\"Entry 12\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1010},\"path-refs\":[]},{\"id\":1012,\"uuid\":\"00000000-0000-4000-8000-000000001012\",\"content\":\"Entry 13\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1011},\"path-refs\":[]},{\"id\":1013,\"uuid\":\"00000000-0000-4000-8000-000000001013\",\"content\":\"Entry 14\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1012},\"path-refs\":[]},{\"id\":1014,\"uuid\":\"00000000-0000-4000-8000-000000001014\",\"content\":\"Entry 15\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1013},\"path-refs\":[]},{\"id\":1015,\"uuid\":\"00000000-0000-4000-8000-000000001015\",\"content\":\"Entry 16\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1014},\"path-refs\":[]},{\"id\":1016,\"uuid\":\"00000000-0000-4000-8000-000000001016\",\"content\":\"Entry 17\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1015},\"path-refs\":[]},{\"id\":1017,\"uuid\":\"00000000-0000-4000-8000-000000001017\",\"content\":\"Entry 18\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1016},\"path-refs\":[]},{\"id\":1018,\"uuid\":\"00000000-0000-4000-8000-000000001018\",\"content\":\"Entry 19\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1017},\"path-refs\":[]},{\"id\":1019,\"uuid\":\"00000000-0000-4000-8000-000000001019\",\"content\":\"Entry 20\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1018},\"path-refs\":[]},{\"id\":1020,\"uuid\":\"00000000-0000-4000-8000-000000001020\",\"content\":\"Entry 21\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1019},\"path-refs\":[]},{\"id\":1021,\"uuid\":\"00000000-0000-4000-8000-000000001021\",\"content\":\"Entry 22\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1020},\"path-refs\":[]},{\"id\":1022,\"uuid\":\"00000000-0000-4000-8000-000000001022\",\"content\":\"Entry 23\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1021},\"path-refs\":[]},{\"id\":1023,\"uuid\":\"00000000-0000-4000-8000-000000001023\",\"content\":\"Entry 24\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1022},\"path-refs\":[]},{\"id\":1024,\"uuid\":\"00000000-0000-4000-8000-000000001024\",\"content\":\"Entry 25\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1023},\"path-refs\":[]},{\"id\":1025,\"uuid\":\"00000000-0000-4000-8000-000000001025\",\"content\":\"Entry 26\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1024},\"path-refs\":[]},{\"id\":1026,\"uuid\":\"00000000-0000-4000-8000-000000001026\",\"content\":\"Entry 27\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1025},\"path-refs\":[]},{\"id\":1027,\"uuid\":\"00000000-0000-4000-8000-000000001027\",\"content\":\"Entry 28\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1026},\"path-refs\":[]},{\"id\":1028,\"uuid\":\"00000000-0000-4000-8000-000000001028\",\"content\":\"Entry 29\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1027},\"path-refs\":[]},{\"id\":1029,\"uuid\":\"00000000-0000-4000-8000-000000001029\",\"content\":\"Entry 30\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1028},\"path-refs\":[]},{\"id\":1030,\"uuid\":\"00000000-0000-4000-8000-000000001030\",\"content\":\"Entry 31\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1029},\"path-refs\":[]},{\"id\":1031,\"uuid\":\"00000000-0000-4000-8000-000000001031\",\"content\":\"Entry 32\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1030},\"path-refs\":[]},{\"id\":1032,\"uuid\":\"00000000-0000-4000-8000-000000001032\",\"content\":\"Entry 33\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1031},\"path-refs\":[]},{\"id\":1033,\"uuid\":\"00000000-0000-4000-8000-000000001033\",\"content\":\"Entry 34\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1032},\"path-refs\":[]},{\"id\":1034,\"uuid\":\"00000000-0000-4000-8000-000000001034\",\"content\":\"Entry 35\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1033},\"path-refs\":[]},{\"id\":1035,\"uuid\":\"00000000-0000-4000-8000-000000001035\",\"content\":\"Entry 36\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1034},\"path-refs\":[]},{\"id\":1036,\"uuid\":\"00000000-0000-4000-8000-000000001036\",\"content\":\"Entry 37\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1035},\"path-refs\":[]},{\"id\":1037,\"uuid\":\"00000000-0000-4000-8000-000000001037\",\"content\":\"Entry 38\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1036},\"path-refs\":[]},{\"id\":1038,\"uuid\":\"00000000-0000-4000-8000-000000001038\",\"content\":\"Entry 39\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1037},\"path-refs\":[]},{\"id\":1039,\"uuid\":\"00000000-0000-4000-8000-000000001039\",\"content\":\"Entry 40\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1038},\"path-refs\":[]},{\"id\":1040,\"uuid\":\"00000000-0000-4000-8000-000000001040\",\"content\":\"Entry 41\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1039},\"path-refs\":[]},{\"id\":1041,\"uuid\":\"00000000-0000-4000-8000-000000001041\",\"content\":\"Entry 42\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1040},\"path-refs\":[]},{\"id\":1042,\"uuid\":\"00000000-0000-4000-8000-000000001042\",\"content\":\"Entry 43\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1041},\"path-refs\":[]},{\"id\":1043,\"uuid\":\"00000000-0000-4000-8000-000000001043\",\"content\":\"Entry 44\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1042},\"path-refs\":[]},{\"id\":1044,\"uuid\":\"00000000-0000-4000-8000-000000001044\",\"content\":\"Entry 45\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1043},\"path-refs\":[]},{\"id\":1045,\"uuid\":\"00000000-0000-4000-8000-000000001045\",\"content\":\"Entry 46\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1044},\"path-refs\":[]},{\"id\":1046,\"uuid\":\"00000000-0000-4000-8000-000000001046\",\"content\":\"Entry 47\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1045},\"path-refs\":[]},{\"id\":1047,\"uuid\":\"00000000-0000-4000-8000-000000001047\",\"content\":\"Entry 48\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1046},\"path-refs\":[]},{\"id\":1048,\"uuid\":\"00000000-0000-4000-8000-000000001048\",\"content\":\"Entry 49\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1047},\"path-refs\":[]},{\"id\":1049,\"uuid\":\"00000000-0000-4000-8000-000000001049\",\"content\":\"Entry 50\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":1048},\"path-refs\":[]}],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":50,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":true,\"warnings\":[{\"code\":\"blocks_truncated\",\"message\":\"Showing 50 of 201 blocks.\",\"howToFetchAll\":\"Set max_blocks to 201 (or higher) to get all 201. A result this large may be saved to a file by the host instead of shown; the server can't tell.\"}],\"totals\":{\"blocks\":201,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: name with spaces and capitals": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"  Project ATLAS \",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Only block\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]}],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: parameter alias": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Only block\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]}],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: an alias group past the cap": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"resolvedAliases\":[\"Member 00\",\"Member 01\",\"Member 02\",\"Member 03\",\"Member 04\",\"Member 05\",\"Member 06\",\"Member 07\",\"Member 08\",\"Member 09\",\"Member 10\",\"Member 11\",\"Member 12\",\"Member 13\",\"Member 14\",\"Member 15\",\"Member 16\",\"Member 17\",\"Member 18\",\"Member 19\",\"Member 20\",\"Member 21\",\"Member 22\",\"Member 23\",\"Member 24\",\"Member 25\",\"Member 26\",\"Member 27\",\"Member 28\",\"Member 29\",\"Member 30\",\"Member 31\",\"Member 32\",\"Member 33\",\"Member 34\",\"Member 35\",\"Member 36\",\"Member 37\",\"Member 38\",\"Member 39\",\"Member 40\",\"Member 41\",\"Member 42\",\"Member 43\",\"Member 44\",\"Member 45\",\"Member 46\",\"Member 47\",\"Member 48\",\"Project Atlas\"],\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"alias\":[{\"id\":100}],\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Only block\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Atlas]] (201)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":20},\"left\":{\"id\":20},\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":1,\"totalReferences\":1,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[{\"code\":\"alias_set_truncated\",\"message\":\"The alias group of \\\"Project Atlas\\\" has more than 50 pages; only the page itself and 49 aliases were used, so references written under the other names are missing. The maximum cannot be raised.\"}],\"totals\":{\"blocks\":1,\"relatedPages\":1,\"references\":1}}"
+      }
+    ]
+  },
+  "build_context: the aliased linking pages are in order of name": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Atlas\",\"resolvedFrom\":{\"name\":\"Atlas\",\"matchedBy\":\"alias\",\"resolvedTo\":\"Project Atlas\"},\"resolvedAliases\":[\"Atlas\",\"Project Atlas\"],\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"alias\":[{\"id\":11}],\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":1101,\"uuid\":\"00000000-0000-4000-8000-000000001101\",\"content\":\"On the stub\",\"format\":\"markdown\",\"page\":{\"id\":11},\"parent\":{\"id\":11},\"left\":{\"id\":11},\"path-refs\":[]}],\"relatedPages\":[{\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":41,\"name\":\"alice notes\",\"originalName\":\"Alice Notes\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":21,\"name\":\"carol\",\"originalName\":\"Carol\"},\"relationshipType\":\"inbound\"},{\"page\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journalDay\":20250101},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":411,\"uuid\":\"00000000-0000-4000-8000-000000000411\",\"content\":\"Mentions [[Atlas]] (411)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":40},\"left\":{\"id\":40},\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},{\"block\":{\"id\":412,\"uuid\":\"00000000-0000-4000-8000-000000000412\",\"content\":\"Mentions [[Atlas]] (412)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":40},\"left\":{\"id\":40},\"page\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},\"sourcePage\":{\"id\":40,\"name\":\"alice\",\"originalName\":\"Alice\"}},{\"block\":{\"id\":421,\"uuid\":\"00000000-0000-4000-8000-000000000421\",\"content\":\"Mentions [[Atlas]] (421)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":41},\"left\":{\"id\":41},\"page\":{\"id\":41,\"name\":\"alice notes\",\"originalName\":\"Alice Notes\"}},\"sourcePage\":{\"id\":41,\"name\":\"alice notes\",\"originalName\":\"Alice Notes\"}},{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Atlas]] (201)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":20},\"left\":{\"id\":20},\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\"}},{\"block\":{\"id\":211,\"uuid\":\"00000000-0000-4000-8000-000000000211\",\"content\":\"Mentions [[Atlas]] (211)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":21},\"left\":{\"id\":21},\"page\":{\"id\":21,\"name\":\"carol\",\"originalName\":\"Carol\"}},\"sourcePage\":{\"id\":21,\"name\":\"carol\",\"originalName\":\"Carol\"}},{\"block\":{\"id\":301,\"uuid\":\"00000000-0000-4000-8000-000000000301\",\"content\":\"Mentions [[Atlas]] (301)\",\"format\":\"markdown\",\"pathRefs\":[{\"id\":11}],\"parent\":{\"id\":30},\"left\":{\"id\":30},\"page\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journalDay\":20250101}},\"sourcePage\":{\"id\":30,\"name\":\"jan 1st, 2025\",\"originalName\":\"Jan 1st, 2025\",\"journalDay\":20250101}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":5,\"totalReferences\":6,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":5,\"references\":6}}"
+      }
+    ]
+  },
+  "build_context: no such page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"No page \\\"Projct Atlas\\\". Closest: Project Atlas. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: a name two pages declare is ambiguous": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ambiguous\":true,\"pageName\":\"al\",\"candidates\":[{\"name\":\"alice\",\"originalName\":\"Alice\",\"matchedBy\":\"alias\",\"reason\":\"declares alias \\\"al\\\"\"},{\"name\":\"alice notes\",\"originalName\":\"Alice Notes\",\"matchedBy\":\"alias\",\"reason\":\"declares alias \\\"al\\\"\"}],\"totalCandidates\":2,\"hasMore\":false,\"warnings\":[{\"code\":\"ambiguous_page\",\"message\":\"\\\"al\\\" matches 2 pages: \\\"Alice\\\" (declares alias \\\"al\\\"); \\\"Alice Notes\\\" (declares alias \\\"al\\\"). Repeat the call with the exact name of one of them.\"}],\"totals\":{\"candidates\":2}}"
+      }
+    ]
+  },
+  "build_context: the blocks query answers null": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[],\"relatedPages\":[{\"page\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false},\"relationshipType\":\"inbound\"}],\"references\":[{\"block\":{\"id\":201,\"uuid\":\"00000000-0000-4000-8000-000000000201\",\"content\":\"Mentions [[Project Atlas]] (201)\",\"format\":\"markdown\",\"page\":{\"id\":20},\"parent\":{\"id\":20},\"left\":{\"id\":20}},\"sourcePage\":{\"id\":20,\"name\":\"bob\",\"originalName\":\"Bob\",\"journal?\":false}}],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":0,\"totalRelatedPages\":1,\"totalReferences\":1,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":0,\"relatedPages\":1,\"references\":1}}"
+      }
+    ]
+  },
+  "build_context: the linked references answer null": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Project Atlas\",\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[{\"id\":101,\"uuid\":\"00000000-0000-4000-8000-000000000101\",\"content\":\"Only block\",\"format\":\"markdown\",\"page\":{\"id\":10},\"parent\":{\"id\":10},\"left\":{\"id\":10},\"path-refs\":[]}],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":1,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":1,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: the aliased queries answer null": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"topic\":\"Atlas\",\"resolvedFrom\":{\"name\":\"Atlas\",\"matchedBy\":\"alias\",\"resolvedTo\":\"Project Atlas\"},\"resolvedAliases\":[\"Atlas\",\"Project Atlas\"],\"mainPage\":{\"id\":10,\"uuid\":\"00000000-0000-4000-8000-000000000010\",\"name\":\"project atlas\",\"original-name\":\"Project Atlas\",\"file\":{\"id\":5010},\"alias\":[{\"id\":11}],\"journal?\":false,\"created-at\":1735689600010},\"directBlocks\":[],\"relatedPages\":[],\"references\":[],\"temporalContext\":{\"isJournal\":false},\"summary\":{\"totalBlocks\":0,\"totalRelatedPages\":0,\"totalReferences\":0,\"pageProperties\":{}},\"hasMore\":false,\"warnings\":[],\"totals\":{\"blocks\":0,\"relatedPages\":0,\"references\":0}}"
+      }
+    ]
+  },
+  "build_context: LogSeq error from the blocks query": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq API error: Query timed out\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: LogSeq error from the linked references": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq API error: Query timed out\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: blocks in a shape the server cannot read": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.DB.datascriptQuery in a shape this server can't read: [0][0].uuid: Invalid input: expected string, received undefined\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: linked references in a shape the server cannot read": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"LogSeq answered logseq.Editor.getPageLinkedReferences in a shape this server can't read: [0][0].id: Invalid input: expected number, received string\\n\\nSteps to fix:\\n1. Check which LogSeq version is running. This server is tested against LogSeq 0.10.x, and a different version may name or type fields differently\\n2. If the version is right, report this on the project's GitHub issues with the method name and the path above (leave out page names and block text)\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: a negative cap": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'max_blocks': -1\\n\\nExpected: at least 0\\nExample: max_blocks: 0\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: a fraction for a cap": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'max_references': 2.5\\n\\nExpected: an integer, not a fraction\\nExample: max_references: 5\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: no topic": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'topic_name': missing\\n\\nExpected: a string (required)\\nExample: topic_name: \\\"...\\\"\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: a topic that is not text": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'topic_name': 5\\n\\nExpected: a string, not a number\\nExample: topic_name: \\\"...\\\"\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: format is not a known one": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'format': \\\"xml\\\"\\n\\nExpected: one of \\\"json\\\", \\\"markdown\\\"\\nExample: format: \\\"markdown\\\"\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context: compact is not a boolean": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"Invalid parameter 'compact': \\\"yes\\\"\\n\\nExpected: true or false, not a string\\nExample: compact: true\"}"
+      }
+    ],
+    "isError": true
+  },
+  "build_context markdown: exact name, blocks in page order, linking pages and blocks as sent": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n1:: one\n2:: two\ntype:: project\ntags:: [[alpha]], [[beta]]\n\n## Blocks (3)\n\n- Kickoff with [[Alice]] and [[Bob]]\n\t- Alice owns the schema\n\t  and a second line\n- Second top block, with a ((ref)) left as written\n\n## Related pages (3)\n\n[[Bob]], [[Alice]], [[Jan 1st, 2025]]\n\n## References (4)\n\n### [[Bob]]\n\n- Mentions [[Project Atlas]] (201)\n- Bob again links [[Project Atlas]]\n  over two lines\n\n### [[Alice]]\n\n- Alice tags #[[Project Atlas]]\n\n### [[Jan 1st, 2025]]\n\n- Journal mentions [[Project Atlas]]\n"
+      }
+    ]
+  },
+  "build_context markdown: a linking tuple with no page": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (1)\n\n- Only block\n\n## Related pages (3)\n\n[[Zed]], [[]], [[Bob]]\n\n## References (3)\n\n### [[Zed]]\n\n- Mentions [[Project Atlas]] (501)\n\n### [[]]\n\n- No page name\n\n### [[Bob]]\n\n- Mentions [[Project Atlas]] (201)\n"
+      }
+    ]
+  },
+  "build_context markdown: a page with no blocks and no links": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n(this page has no blocks)\n"
+      }
+    ]
+  },
+  "build_context markdown: caps below what there is": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n1:: one\n2:: two\ntype:: project\ntags:: [[alpha]], [[beta]]\n\n## Blocks (2 of 4)\n\n- Alice owns the schema\n  and a second line\n- Second top block, with a ((ref)) left as written\n\n## Related pages (1 of 4)\n\n[[Bob]]\n\n## References (3 of 6)\n\n### [[Bob]]\n\n- Mentions [[Project Atlas]] (201)\n- Bob again links [[Project Atlas]]\n  over two lines\n\n### [[Alice]]\n\n- Alice tags #[[Project Atlas]]\n\n---\nWarnings:\n- blocks_truncated: Showing 2 of 4 blocks. Set max_blocks to 4 (or higher) to get all 4.\n- references_truncated: Showing 3 of 6 references. Set max_references to 6 (or higher) to get all 6.\n- related_pages_truncated: Showing 1 of 4 related pages. Set max_related_pages to 4 (or higher) to get all 4.\nhasMore: true\n"
+      }
+    ]
+  },
+  "build_context markdown: ISO date of a journal": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Jan 1st, 2025\n\n(resolved from \"2025-01-01\", matched by journal-date)\n\nJournal: 20250101\n\n## Blocks (1)\n\n- Planned the day\n\n## Related pages (1)\n\n[[Alice]]\n\n## References (1)\n\n### [[Alice]]\n\n- Alice mentions [[Jan 1st, 2025]]\n"
+      }
+    ]
+  },
+  "build_context markdown: namespace leaf": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas/Retro\n\n(resolved from \"retro\", matched by namespace-leaf)\n\n## Blocks (1)\n\n- What went well\n"
+      }
+    ]
+  },
+  "build_context markdown: a page with aliases covers the whole group": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n(resolved from \"Atlas\", matched by alias)\n\n## Blocks (4)\n\n- On the page asked about\n- Second on the page asked about\n- On the stub\n- Second on the stub\n\n## Related pages (3)\n\n[[Alice]], [[Bob]], [[Jan 1st, 2025]]\n\n## References (4)\n\n### [[Alice]]\n\n- Mentions [[Atlas]] (401)\n- Mentions [[Atlas]] (405)\n\n### [[Bob]]\n\n- Mentions [[Atlas]] (201)\n\n### [[Jan 1st, 2025]]\n\n- Mentions [[Atlas]] (301)\n"
+      }
+    ]
+  },
+  "build_context markdown: no blocks and no links anywhere in the alias group": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n(resolved from \"Atlas\", matched by alias)\n\n(this page has no blocks)\n"
+      }
+    ]
+  },
+  "build_context markdown: an alias link whose group is the page alone": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (1)\n\n- Only block\n\n## Related pages (1)\n\n[[Bob]]\n\n## References (1)\n\n### [[Bob]]\n\n- Mentions [[Project Atlas]] (201)\n"
+      }
+    ]
+  },
+  "build_context markdown: resolve_refs in the blocks and the linking blocks": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (2)\n\n- See ((00000000-0000-4000-8000-000000000002)) for the plan\n  [resolved] See plan from the end of the chain\n    over two lines for the plan\n- Plain\n\n## Related pages (1)\n\n[[Bob]]\n\n## References (1)\n\n### [[Bob]]\n\n- Cites ((00000000-0000-4000-8000-000000000003)) in passing\n  [resolved] Cites the cited text in passing\n"
+      }
+    ]
+  },
+  "build_context markdown: resolve_refs skipped under compact": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (2)\n\n- See ((00000000-0000-4000-8000-000000000002)) for the plan ((00000000-0000-4000-8000-000000000101))\n- Plain ((00000000-0000-4000-8000-000000000102))\n\n## Related pages (1)\n\n[[Bob]]\n\n## References (1)\n\n### [[Bob]]\n\n- Cites ((00000000-0000-4000-8000-000000000003)) in passing ((00000000-0000-4000-8000-000000000201))\n\n---\nWarnings:\n- resolve_refs_ignored_in_compact: compact output has no block bodies, so resolve_refs was skipped. Set compact to false for resolved text, or read a block with logseq_get_block and resolve_refs.\n"
+      }
+    ]
+  },
+  "build_context markdown: resolve_refs past the depth limit": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (2)\n\n- See ((00000000-0000-4000-8000-000000000002)) for the plan\n  [resolved] See mid end ((00000000-0000-4000-8000-000000000004)) for the plan\n- Plain\n\n---\nWarnings:\n- refs_depth_limit: 1 reference(s) were not followed because they are more than 2 levels deep. They are left as written. Fetch each ref whose status is \"depth_limit\" with logseq_get_block (its uuid) or logseq_get_page (its page).\nhasMore: true\n"
+      }
+    ]
+  },
+  "build_context markdown: compact": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n1:: one\n2:: two\ntype:: project\ntags:: [[alpha]], [[beta]]\n\n## Blocks (3)\n\n- Kickoff with [[Alice]] and [[Bob]] ((00000000-0000-4000-8000-000000000101))\n\t- Alice owns the schema ((00000000-0000-4000-8000-000000000102))\n- Second top block, with a ((ref)) left as written ((00000000-0000-4000-8000-000000000103))\n\n## Related pages (3)\n\n[[Bob]], [[Alice]], [[Jan 1st, 2025]]\n\n## References (4)\n\n### [[Bob]]\n\n- Mentions [[Project Atlas]] (201) ((00000000-0000-4000-8000-000000000201))\n- Bob again links [[Project Atlas]] ((00000000-0000-4000-8000-000000000202))\n\n### [[Alice]]\n\n- Alice tags #[[Project Atlas]] ((00000000-0000-4000-8000-000000000401))\n\n### [[Jan 1st, 2025]]\n\n- Journal mentions [[Project Atlas]] ((00000000-0000-4000-8000-000000000301))\n"
+      }
+    ]
+  },
+  "build_context markdown: the pre-block is the properties": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\ntype:: project\nstatus:: active\n\n## Blocks (2)\n\n- Body block\n"
+      }
+    ]
+  },
+  "build_context markdown: properties come from the page map": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n1:: one\n2:: two\ntype:: project\ntags:: [[alpha]], [[beta]]\n\n## Blocks (1)\n\n- Body block\n"
+      }
+    ]
+  },
+  "build_context markdown: caps and a long first line, compact": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n1:: one\n2:: two\ntype:: project\ntags:: [[alpha]], [[beta]]\n\n## Blocks (2 of 3)\n\n- A long first line that goes on and on that goes on and on that goes on and on... ((00000000-0000-4000-8000-000000000099))\n- Second top block, with a ((ref)) left as written ((00000000-0000-4000-8000-000000000103))\n\n## Related pages (3)\n\n[[Bob]], [[Alice]], [[Jan 1st, 2025]]\n\n## References (1 of 4)\n\n### [[Bob]]\n\n- Mentions [[Project Atlas]] (201) ((00000000-0000-4000-8000-000000000201))\n\n---\nWarnings:\n- blocks_truncated: Showing 2 of 3 blocks. Set max_blocks to 3 (or higher) to get all 3.\n- references_truncated: Showing 1 of 4 references. Set max_references to 4 (or higher) to get all 4.\nhasMore: true\n"
+      }
+    ]
+  },
+  "build_context markdown: resolve_refs shows the resolved text under the block": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (2)\n\n- See ((00000000-0000-4000-8000-000000000002)) for the plan\n  [resolved] See plan from the end of the chain\n    over two lines for the plan\n- Plain\n\n## Related pages (1)\n\n[[Bob]]\n\n## References (1)\n\n### [[Bob]]\n\n- Cites ((00000000-0000-4000-8000-000000000003)) in passing\n  [resolved] Cites the cited text in passing\n"
+      }
+    ]
+  },
+  "build_context markdown: a cap and a way to get the rest in the footer": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (50 of 201)\n\n- Entry 1\n- Entry 2\n- Entry 3\n- Entry 4\n- Entry 5\n- Entry 6\n- Entry 7\n- Entry 8\n- Entry 9\n- Entry 10\n- Entry 11\n- Entry 12\n- Entry 13\n- Entry 14\n- Entry 15\n- Entry 16\n- Entry 17\n- Entry 18\n- Entry 19\n- Entry 20\n- Entry 21\n- Entry 22\n- Entry 23\n- Entry 24\n- Entry 25\n- Entry 26\n- Entry 27\n- Entry 28\n- Entry 29\n- Entry 30\n- Entry 31\n- Entry 32\n- Entry 33\n- Entry 34\n- Entry 35\n- Entry 36\n- Entry 37\n- Entry 38\n- Entry 39\n- Entry 40\n- Entry 41\n- Entry 42\n- Entry 43\n- Entry 44\n- Entry 45\n- Entry 46\n- Entry 47\n- Entry 48\n- Entry 49\n- Entry 50\n\n---\nWarnings:\n- blocks_truncated: Showing 50 of 201 blocks. Set max_blocks to 201 (or higher) to get all 201. A result this large may be saved to a file by the host instead of shown; the server can't tell.\nhasMore: true\n"
+      }
+    ]
+  },
+  "build_context markdown: an alias group, the page asked about first": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n(resolved from \"Atlas\", matched by alias)\n\n## Blocks (4)\n\n- On the page asked about ((00000000-0000-4000-8000-000000000101))\n- Second on the page asked about ((00000000-0000-4000-8000-000000000102))\n- On the stub ((00000000-0000-4000-8000-000000001101))\n- Second on the stub ((00000000-0000-4000-8000-000000001102))\n\n## Related pages (3)\n\n[[Alice]], [[Bob]], [[Jan 1st, 2025]]\n\n## References (4)\n\n### [[Alice]]\n\n- Mentions [[Atlas]] (401) ((00000000-0000-4000-8000-000000000401))\n- Mentions [[Atlas]] (405) ((00000000-0000-4000-8000-000000000405))\n\n### [[Bob]]\n\n- Mentions [[Atlas]] (201) ((00000000-0000-4000-8000-000000000201))\n\n### [[Jan 1st, 2025]]\n\n- Mentions [[Atlas]] (301) ((00000000-0000-4000-8000-000000000301))\n"
+      }
+    ]
+  },
+  "build_context markdown: a name two pages declare is ambiguous": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"ambiguous\":true,\"pageName\":\"al\",\"candidates\":[{\"name\":\"alice\",\"originalName\":\"Alice\",\"matchedBy\":\"alias\",\"reason\":\"declares alias \\\"al\\\"\"},{\"name\":\"alice notes\",\"originalName\":\"Alice Notes\",\"matchedBy\":\"alias\",\"reason\":\"declares alias \\\"al\\\"\"}],\"totalCandidates\":2,\"hasMore\":false,\"warnings\":[{\"code\":\"ambiguous_page\",\"message\":\"\\\"al\\\" matches 2 pages: \\\"Alice\\\" (declares alias \\\"al\\\"); \\\"Alice Notes\\\" (declares alias \\\"al\\\"). Repeat the call with the exact name of one of them.\"}],\"totals\":{\"candidates\":2}}"
+      }
+    ]
+  },
+  "build_context markdown: a block whose parent was cut": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Project Atlas\n\n## Blocks (1 of 2)\n\n- Child of a block not shown\n\n---\nWarnings:\n- blocks_truncated: Showing 1 of 2 blocks. Set max_blocks to 2 (or higher) to get all 2.\nhasMore: true\n"
+      }
+    ]
+  }
+}
