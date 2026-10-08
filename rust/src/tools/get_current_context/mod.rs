@@ -156,7 +156,7 @@ pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // PARITY(#299): a `null` answer is read as no pages, so every block silently loses its page name and the
         // result may say no page is open, where BR-0011 asks for a warning that the names are unavailable
-        // (suspected TS bug) — fix in both servers.
+        // (suspected TS bug) — fix per #326, in both servers.
         for pulled in wire::page_rows(&answer)?.unwrap_or_default().into_iter().flatten() {
             if let Some(id) = id_of(Some(&pulled)) {
                 page_names.insert(id, page_display_name(Some(&pulled)));
