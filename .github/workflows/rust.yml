@@ -100,6 +100,14 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: cargo build --release --locked
 
+      # The unit tests as compiled for the release profile (#359): the ones that exist only there, such as
+      # the release build ignoring LOGSEQ_MCP_NOW (`#[cfg(not(debug_assertions))]` in rust/src/env.rs), and
+      # the date logic as the shipped binary has it. Nothing runs these in a pull request, so they run with
+      # the release build.
+      - name: Unit tests (release)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: cargo test --release --locked
+
       # The same harness against the release binary (#359): the debug build above proves the logic,
       # this proves the optimised build (thin LTO, one codegen unit, stripped) answers the same. It
       # needs the release build, so it runs under the same condition. A release build ignores
