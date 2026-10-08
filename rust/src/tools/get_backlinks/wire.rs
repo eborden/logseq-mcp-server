@@ -6,8 +6,10 @@
 //! tool's output carries each entity as it came (BR-0004), so a typed copy would only be thrown
 //! away. The schema checks are `entity.rs`'s.
 
+use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
+use crate::tool::result_value;
 use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
 
 /// The method whose answer [`linked_references`] reads.
@@ -29,7 +31,14 @@ impl Backlink {
 
     /// The tuple as the Editor API sends it.
     pub fn into_value(self) -> Value {
-        Value::Array(vec![self.page, Value::Array(self.blocks)])
+        result_value(&self)
+    }
+}
+
+/// `[page, blocks]`: a tuple is an array of two, the page first (BR-0013 keeps an entity as LogSeq sent it).
+impl Serialize for Backlink {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (&self.page, &self.blocks).serialize(serializer)
     }
 }
 
