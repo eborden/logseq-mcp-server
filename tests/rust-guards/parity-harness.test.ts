@@ -14,6 +14,7 @@ import {
   checkWrongLists,
   compareCalls,
   compareResult,
+  minifiedFailures,
   compareResultBySuggestionRules,
   PARITY_NOW_MS,
   PARITY_TZ,
@@ -113,12 +114,30 @@ describe('compareCalls', () => {
 describe('compareResult', () => {
   const result: ToolResult = { content: [{ type: 'text', text: '{"page":"Alice"}' }] };
 
-  it('compares text byte for byte', () => {
+  it('compares a JSON text by deep equality: key order ignored, array order kept, numbers by value (#371)', () => {
+    const many: ToolResult = { content: [{ type: 'text', text: '{"a":1,"b":[1,2],"c":{"x":"y"}}' }] };
+    const textOf = (text: string): ToolResult => ({ content: [{ type: 'text', text }] });
     expect(compareResult(result, structuredClone(result))).toEqual([]);
-    // Same JSON value, different bytes: still a difference (ADR-0009)
-    expect(compareResult(result, { content: [{ type: 'text', text: '{"page": "Alice"}' }] })).toEqual([
-      expect.stringContaining('differs at character 8')
-    ]);
+    expect(compareResult(many, textOf('{"c":{"x":"y"},"b":[1,2],"a":1.0}'))).toEqual([]);
+    expect(compareResult(many, textOf('{"a":1,"b":[2,1],"c":{"x":"y"}}'))).toEqual([expect.stringContaining('differs at character')]);
+    expect(compareResult(many, textOf('{"a":1,"b":[1,2]}'))).toEqual([expect.stringContaining('differs at character')]);
+  });
+
+  it('compares a text that is not JSON (markdown), a resource and a prompt byte for byte', () => {
+    const markdown: ToolResult = { content: [{ type: 'text', text: '# Alice\n- a block\n' }] };
+    expect(compareResult(markdown, { content: [{ type: 'text', text: '# Alice\n- a block' }] })).toEqual([expect.stringContaining('differs at character')]);
+    const resource: ToolResult = { contents: [{ uri: 'logseq://x', text: '{"a":1,"b":2}' }] };
+    expect(compareResult(resource, { contents: [{ uri: 'logseq://x', text: '{"b":2,"a":1}' }] })).toEqual([expect.stringContaining('differs at character')]);
+    const prompt: ToolResult = { messages: [{ role: 'user', content: { type: 'text', text: '{"a":1,"b":2}' } }] };
+    expect(compareResult(prompt, { messages: [{ role: 'user', content: { type: 'text', text: '{"b":2,"a":1}' } }] })).toEqual([expect.stringContaining('differs at character')]);
+  });
+
+  it('holds a JSON tool result to minified, which deep equality alone would let through (ADR-0009)', () => {
+    // Same JSON value, different bytes: equal, and not minified
+    expect(compareResult(result, { content: [{ type: 'text', text: '{"page": "Alice"}' }] })).toEqual([]);
+    expect(minifiedFailures({ content: [{ type: 'text', text: '{"page": "Alice"}' }] })).toEqual([expect.stringContaining('not minified')]);
+    expect(compareResultBySuggestionRules(result, { content: [{ type: 'text', text: '{"page": "Alice"}' }] }, [])).toEqual([expect.stringContaining('not minified')]);
+    expect(minifiedFailures({ content: [{ type: 'text', text: '{"page":"Alice  B"}' }, { type: 'text', text: '# not json' }] })).toEqual([]);
   });
 
   it('tells an absent isError from isError: false, and compares the number of content blocks', () => {
@@ -1189,11 +1208,11 @@ describe('the closest-name rules (ADR-0032, #335)', () => {
       const withText = (t: string): ToolResult => ({ ...reference, content: [{ type: 'text', text: t }] });
       // the same message, pretty-printed
       const pretty = withText(JSON.stringify({ error: message('Projct', typo) }, null, 2));
-      expect(compareResultBySuggestionRules(reference, pretty, PAGES).join('\n')).toContain('content[0].text differs');
+      expect(compareResultBySuggestionRules(reference, pretty, PAGES).join('\n')).toContain('not minified');
       // the same message with its first letter escaped
       const escaped = withText(text(reference).replace('No page', '\\u004eo page'));
       expect(JSON.parse(text(escaped)).error).toBe(message('Projct', typo));
-      expect(compareResultBySuggestionRules(reference, escaped, PAGES).join('\n')).toContain('content[0].text differs');
+      expect(compareResultBySuggestionRules(reference, escaped, PAGES).join('\n')).toContain('not minified');
       // and a valid list in a reformatted envelope is no better
       const reordered = withText(JSON.stringify({ error: message('Projct', 'Project Quill, Project Zed, Project Atlas') }, null, 2));
       expect(compareResultBySuggestionRules(reference, reordered, PAGES).join('\n')).toContain('content[0].text differs');

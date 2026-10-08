@@ -5,9 +5,11 @@
 //   1. `tools/list`, by meaning (#292, tool-list-compare.ts) against the recorded list
 //      (scripts/parity/expected/tool-list.json); tests/guards/tool-list.test.ts holds that list to the
 //      ADR-0015, ADR-0016 and ADR-0008 guardrails;
-//   2. each case's tool result, byte for byte as the TypeScript server serialized it (ADR-0009); only
-//      the closest names of a page-not-found message are held to rules instead (ADR-0032, #335,
-//      suggestion-rules.ts);
+//   2. each case's tool result. A JSON tool result (`content`) is compared by deep equality, as the cargo test
+//      rust/tests/parity.rs does (#371, the maintainer's decision): key order ignored, array order kept, numbers by
+//      value, and it has to be minified (ADR-0009) whatever its key order. Everything else is byte for byte: a
+//      markdown result, a prompt's messages, a resource read, the frame of a page-not-found message. Only the
+//      closest names of a page-not-found message are held to rules instead (ADR-0032, #335, suggestion-rules.ts);
 //   3. the LogSeq calls and their inputs: the steps of a case in order, the calls within a step
 //      (ones the recorded server made concurrently) as a set.
 // Any LogSeq call the stub has no answer for is a failure too.
@@ -199,6 +201,43 @@ function stable(value: unknown): string {
   );
 }
 
+/** A text that is a JSON object or array, parsed (a tool's JSON result is always one; a markdown result isn't JSON). */
+function jsonContainer(text: string): object | undefined {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value !== null && typeof value === 'object' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether two texts of a tool result's `content` are the same: by deep equality when both are JSON (key order
+ * ignored, array order kept, numbers by value), byte for byte otherwise (markdown). The only place a tool
+ * result's text is compared (#371).
+ */
+export function sameToolText(expected: string, actual: string): boolean {
+  const want = jsonContainer(expected);
+  const got = jsonContainer(actual);
+  return want !== undefined && got !== undefined ? stable(want) === stable(got) : expected === actual;
+}
+
+/**
+ * The JSON texts of a tool result's `content` that are not minified (ADR-0009): one that parses as JSON and is not
+ * as long as the same value written compactly has layout whitespace in it. Deep equality alone would let it through.
+ */
+export function minifiedFailures(result: ToolResult): string[] {
+  const failures: string[] = [];
+  (result.content ?? []).forEach((block, i) => {
+    const text = block.text;
+    const value = typeof text === 'string' ? jsonContainer(text) : undefined;
+    if (typeof text === 'string' && value !== undefined && JSON.stringify(value).length !== text.length) {
+      failures.push(`content[${i}].text is JSON that is not minified (ADR-0009): ${text.length} characters, ${JSON.stringify(value).length} written compactly`);
+    }
+  });
+  return failures;
+}
+
 /** Keys one object has and the other lacks, as failure lines. */
 function keyDifferences(where: string, expected: object, actual: object): string[] {
   const want = new Set(Object.keys(expected));
@@ -234,7 +273,8 @@ function compareMessages(expected: readonly unknown[], actual: readonly unknown[
 
 /**
  * Compare a result with the expected one: the same top-level keys, the same content blocks with
- * the same fields, each `text` byte for byte (ADR-0009), and every other value equal.
+ * the same fields, each `text` the same by `sameToolText` (`content`) or byte for byte (`contents`), and every
+ * other value equal.
  */
 export function compareResult(expected: ToolResult, actual: ToolResult): string[] {
   const failures = keyDifferences('the result', expected, actual);
@@ -263,7 +303,8 @@ export function compareResult(expected: ToolResult, actual: ToolResult): string[
       for (const key of Object.keys(want)) {
         if (!(key in got)) continue;
         if (key === 'text' && typeof want.text === 'string' && typeof got.text === 'string') {
-          if (want.text !== got.text) {
+          // A tool result's text is JSON or markdown; a resource's is whatever it renders, byte for byte
+          if (list === 'content' ? !sameToolText(want.text, got.text) : want.text !== got.text) {
             const at = firstCharDifference(want.text, got.text);
             const around = (t: string) => JSON.stringify(t.slice(Math.max(0, at - 40), at + 40));
             failures.push(`${list}[${i}].text differs at character ${at}:\n  expected: ${around(want.text)}\n  actual:   ${around(got.text)}`);
@@ -297,7 +338,7 @@ export function compareResultBySuggestionRules(expected: ToolResult, actual: Too
     for (const f of checkSuggestionRules(want, got, candidates)) failures.push(`${describeSite(site)} breaks ${f}`);
     masked = withMessage(masked, site, want);
   }
-  return [...failures, ...compareResult(expected, masked)];
+  return [...failures, ...compareResult(expected, masked), ...minifiedFailures(actual)];
 }
 
 /**
