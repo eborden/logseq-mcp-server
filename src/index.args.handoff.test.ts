@@ -8,7 +8,7 @@ import { DEFAULT_LIST_PAGES_LIMIT, DEFAULT_LIST_PAGES_OFFSET } from './tools/lis
 /**
  * What each handler hands its tool function (#60): the
  * defaults, every clamp at and above its limit, and the values that pass through
- * unclamped (negative and fractional numbers). The tool functions are mocked, so
+ * unclamped (negative numbers; fractions are rejected first, #293). The tool functions are mocked, so
  * these pin the handler alone. The clamps are safeguards: `max_depth` <= 3,
  * `max_nodes` <= 500, `max_fanout` <= 100.
  */
@@ -136,7 +136,6 @@ describe('logseq_get_concept_network hand-off', () => {
     [100, 3],
     [0, 0],
     [-1, -1],
-    [1.5, 1.5],
   ])('max_depth %j reaches the tool as %j (clamped to 3, not raised)', async (value, expected) => {
     const [, depth] = await network({ max_depth: value });
     expect(depth).toBe(expected);
@@ -149,7 +148,6 @@ describe('logseq_get_concept_network hand-off', () => {
     [1, 1],
     [0, 0],
     [-5, -5],
-    [2.5, 2.5],
   ])('max_nodes %j reaches the tool as %j (clamped to 500; the tool floors it at 1)', async (value, expected) => {
     const [, , options] = await network({ max_nodes: value });
     expect((options as { maxNodes: unknown }).maxNodes).toBe(expected);
@@ -160,7 +158,6 @@ describe('logseq_get_concept_network hand-off', () => {
     [101, 100],
     [1, 1],
     [-1, -1],
-    [2.5, 2.5],
   ])('max_fanout %j reaches the tool as %j (clamped to 100; the tool floors it at 1)', async (value, expected) => {
     const [, , options] = await network({ max_fanout: value });
     expect((options as { maxFanout: unknown }).maxFanout).toBe(expected);
@@ -184,12 +181,12 @@ describe('logseq_search_by_relationship hand-off', () => {
     expect(await relationship({})).toEqual(['Alice', 'Bob', 'connected-within', 2, { limit: 50 }]);
   });
 
-  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (the tool clamps it)', async value => {
+  it.each([5, 0, -1, 100_000])('limit %j passes through (the tool clamps it)', async value => {
     const [, , , , options] = await relationship({ limit: value });
     expect(options).toEqual({ limit: value });
   });
 
-  it.each([0, -1, 1.5, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {
+  it.each([0, -1, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {
     const [, , , distance] = await relationship({ max_distance: value });
     expect(distance).toBe(value);
   });
@@ -211,7 +208,7 @@ describe('logseq_search_blocks hand-off', () => {
     expect(await search({})).toEqual(['alice', undefined, false, true]);
   });
 
-  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (it has no clamp)', async value => {
+  it.each([5, 0, -1, 100_000])('limit %j passes through (it has no clamp)', async value => {
     const [, limit] = await search({ limit: value });
     expect(limit).toBe(value);
   });
@@ -238,7 +235,7 @@ describe('logseq_query_by_property hand-off', () => {
     ).toEqual(['status', 'active', false, 100]);
   });
 
-  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (the tool clamps it)', async value => {
+  it.each([5, 0, -1, 100_000])('limit %j passes through (the tool clamps it)', async value => {
     const [, , , limit] = await handedOff(
       'logseq_query_by_property',
       { property_key: 'status', property_value: 'active', limit: value },
@@ -255,7 +252,6 @@ describe('logseq_get_context_for_query hand-off', () => {
   it.each([
     [{ max_topics: 3 }, { maxTopics: 3 }],
     [{ max_topics: -1 }, { maxTopics: -1 }],
-    [{ max_topics: 2.5 }, { maxTopics: 2.5 }],
     [{ max_search_results: 50 }, { maxSearchResults: 50 }],
     [{ max_search_results: -1 }, { maxSearchResults: -1 }],
   ])('%j passes through as %j (no clamp)', async (args, expected) => {
@@ -336,7 +332,6 @@ describe('logseq_query_by_date_range hand-off', () => {
 
   it.each([
     [{ last_n: -1 }, { lastN: -1 }],
-    [{ last_n: 2.5 }, { lastN: 2.5 }],
     [{ top_concepts_limit: -1, last_n: 1 }, { topConceptsLimit: -1 }],
   ])('%j reaches the tool as %j, which owns the range checks', async (args, expected) => {
     const [options] = await range(args);
@@ -376,7 +371,6 @@ describe('logseq_build_context hand-off', () => {
     [{ max_blocks: 5 }, { maxBlocks: 5 }],
     [{ max_blocks: 0 }, { maxBlocks: 0 }],
     [{ max_blocks: -1 }, { maxBlocks: -1 }],
-    [{ max_blocks: 2.5 }, { maxBlocks: 2.5 }],
     [{ max_blocks: 100_000 }, { maxBlocks: 100_000 }],
     [{ max_related_pages: 0 }, { maxRelatedPages: 0 }],
     [{ max_related_pages: -1 }, { maxRelatedPages: -1 }],
