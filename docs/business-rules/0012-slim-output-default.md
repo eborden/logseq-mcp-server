@@ -14,8 +14,10 @@ The default lives in the `slim_results` argument schema in `src/tool-args.ts`, w
 
 ## Mechanical enforcement
 
-test: `src/index.slim-default.test.ts` (omitted means slim, false means full, the schema advertises default: true on every slim_results parameter)
-test: `src/utils/slim-entities.test.ts`
+test: `tests/integration/slim-default.test.ts` (omitted means slim, false means full)
+test: `rust/src/slim.rs`
+
+The parity step of CI holds the `slim_results` schema default (`default: true`) of every tool to the recorded `tools/list`.
 
 ## Changelog
 
@@ -23,3 +25,4 @@ test: `src/utils/slim-entities.test.ts`
 |---|---|---|
 | 2026-10-05 | Introduced. | #72 |
 | 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #121 |
+| 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate with the TypeScript server's removal. Statement unchanged. | #369 |

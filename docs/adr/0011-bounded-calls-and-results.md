@@ -30,7 +30,8 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/client.test.ts` (the default and configured timeoutMs reach AbortSignal.timeout, including against a server that never answers)
-- test: `src/tools/get-concept-network.test.ts` (maxNodes default and exact stop, truncation flag and warning)
+- test: `rust/src/client.rs` (`a_hung_call_times_out`: the configured timeoutMs bounds a call against a server that never answers)
+- test: `rust/tests/concept_calls.rs` (the depth limit and the caps cost no extra call, and a depth that admits nothing ends the walk)
+- test: `tests/integration/graph-tools.test.ts` (maxNodes and maxFanout defaults and exact stop on the hub, truncation flag and warning)
 - reviewer: A new loop over graph data has a cap, and a new tool result has a default and a maximum.
 - none-yet: #61

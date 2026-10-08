@@ -33,7 +33,4 @@ Date: 2026-10-07
 
 ## Mechanical enforcement
 
-- test: `src/mutation-ci.test.ts` (the budget boundary, the priority order, first-fit, the fallback for a file with no count, the counts read from a Stryker-shaped incremental file, the summary text, and the workflow order: restore, then plan, then the step that deletes the file, and the one `BASE_SHA` shared by the plan and the ratchet)
-- test: `src/mutation-ratchet.test.ts` (the warning and summary line for files left to the weekly run, by group, and the changed-source gate: no artifact, a run started from the PR branch with another ref, a ref that only contains the SHA, an expired artifact, an artifact from another workflow, a failed run, a successful run on the head, a failed look-up, and only baseline or test-import left-outs)
-- ci: `.github/workflows/ci.yml` (the `mutation` job and its `actions: read`)
-- ci: `.github/workflows/mutation-weekly.yml` (the report artifact `mutation-report-<sha>`, named from the checked-out commit, and its retention, which the gate relies on; `src/mutation-ci.test.ts` pins both)
+- none-yet: #364 (the Stryker job, its scripts and its workflows were removed by #356; the Rust ratchet of ADR-0033 is the successor mechanism)

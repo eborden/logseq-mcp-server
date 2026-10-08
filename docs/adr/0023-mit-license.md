@@ -23,4 +23,4 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/package-metadata.test.ts` (package.json license is MIT and the LICENSE file starts with the MIT header, and ships in files)
+- test: `tests/guards/package-metadata.test.ts` (package.json license is MIT and the LICENSE file starts with the MIT header, and ships in files)

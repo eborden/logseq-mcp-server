@@ -30,6 +30,7 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `src/index.test.ts` (every tool is readOnlyHint: true with a title, and carries the other hints, with the non-idempotent exception pinned)
-- test: `src/resources.test.ts` (reading a resource never calls a write method on LogSeq)
-- test: `src/prompts.test.ts`
+- test: `tests/guards/tool-list.test.ts` (every tool in the recorded `tools/list` is readOnlyHint: true with a title, and carries the other hints, with the non-idempotent exception pinned)
+- test: `rust/src/server.rs` (`tools_list_returns_every_tool_read_only`: the Rust server lists every tool read-only)
+- test: `rust/tests/page_resource_calls.rs` (reading a resource makes only the calls the test lists, none of them a write method on LogSeq)
+- test: `rust/src/prompts.rs` (a prompt returns one message that names only tools the server has, and makes no call)

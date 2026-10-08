@@ -10,12 +10,13 @@ An alias that leaked into the advertised schema, or replaced a required canonica
 
 ## Mechanical enforcement
 
-test: `src/index.aliases.test.ts`
+test: `rust/src/params.rs`
 
-Tests pin that a conflicting alias and canonical value throws, that the canonical name stays `required` for every aliased tool, and that no input schema advertises an alias.
+Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and that the recorded `tools/list` (held by the parity step of CI) keeps the canonical name `required` and advertises no alias.
 
 ## Changelog
 
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #56 |
+| 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. | #369 |

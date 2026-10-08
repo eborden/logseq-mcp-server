@@ -12,24 +12,24 @@ A tool that resolved through an alias, ISO date or namespace leaf must say so: `
 
 ## Mechanical enforcement
 
-One resolver serves every page-taking tool: `requirePage` in `src/utils/resolve-page.ts`. Tools call it, not `getPage`.
+One resolver serves every page-taking tool: `require_page` in `rust/src/resolve/mod.rs`. Tools call it, not a lookup of their own.
 
-test: `src/utils/resolve-page.test.ts`
-test: `src/index.page-resolution.test.ts`
-reviewer: A new page-taking tool resolves its page name with `requirePage` (`src/utils/resolve-page.ts`), not `getPage`.
+test: `rust/src/resolve/mod.rs`
+test: `tests/integration/page-resolution.test.ts`
+reviewer: A new page-taking tool resolves its page name with `require_page` (`rust/src/resolve/mod.rs`), not a lookup of its own.
 
 Link-following tools are alias-aware too (#69, #92): references written under any name of a page's alias group count as references to that page. These tests pin it per tool:
 
-test: `src/tools/get-backlinks.aliases.test.ts`
-test: `src/tools/build-context.aliases.test.ts`
-test: `src/tools/get-concept-evolution.aliases.test.ts`
-test: `src/tools/get-concept-network.aliases.test.ts`
-test: `src/tools/get-context-for-query.aliases.test.ts`
-test: `src/tools/query-by-date-range.aliases.test.ts`
-test: `src/tools/search-by-relationship.aliases.test.ts`
+test: `rust/tests/get_backlinks_calls.rs`
+test: `rust/tests/context_calls.rs`
+test: `rust/tests/concept_calls.rs`
+test: `rust/tests/query_by_date_range_calls.rs`
+test: `rust/tests/search_by_relationship_calls.rs`
+test: `tests/integration/alias-sets.test.ts`
 
 ## Changelog
 
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #57 |
+| 2026-10-08 | Mechanical enforcement: the resolver and the per-tool alias tests are the Rust crate's and the integration suite's, with the TypeScript server's removal. Statement unchanged. | #369 |

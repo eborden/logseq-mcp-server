@@ -24,4 +24,5 @@ Date: 2026-01-23
 
 ## Mechanical enforcement
 
-- test: `src/index.minified.test.ts` (runs every tool through the MCP server, plus the error and ambiguous-page results, and fails on layout whitespace)
+- ci: `.github/workflows/ci.yml` (the parity step compares every tool result, and the error and ambiguous-page results, byte for byte with `scripts/parity/expected`, which holds minified JSON, so layout whitespace fails it)
+- test: `rust/src/tool.rs` (`results_keep_key_order_as_json_stringify_does`: results keep their keys in insertion order, as `JSON.stringify` writes them)

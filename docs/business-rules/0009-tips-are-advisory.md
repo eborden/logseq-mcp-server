@@ -10,7 +10,7 @@ Tips are a convenience for the model. If a result needed them to be correct or c
 
 ## Mechanical enforcement
 
-test: `src/index.tips.test.ts`
+test: `rust/src/tips.rs`
 reviewer: No tool result field, and no truncation or correctness signal, is carried only by `meta.tips`.
 
 ## Changelog
@@ -18,3 +18,4 @@ reviewer: No tool result field, and no truncation or correctness signal, is carr
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-05 | Introduced. | #56 |
+| 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. | #369 |
