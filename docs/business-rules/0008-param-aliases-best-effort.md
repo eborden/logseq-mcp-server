@@ -23,3 +23,4 @@ Tests pin that a conflicting alias and canonical value is refused, that the alia
 | 2026-10-05 | Introduced. | #56 |
 | 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertions for the canonical parameter and the absent aliases. | #370 |
 | 2026-10-08 | Statement: the TypeScript path and error name (`src/utils/param-aliases.ts`, `InvalidParameterError`) are the Rust crate's (`rust/src/params.rs`, `InvalidParameter`). The rule is unchanged. | #372 |
+| 2026-10-08 | Mechanical enforcement: the parity check the recorded `tools/list` is held to is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
