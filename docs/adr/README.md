@@ -47,7 +47,8 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0028-cap-mutation-cache-miss-set-by-mutant-budget](0028-cap-mutation-cache-miss-set-by-mutant-budget.md) | Cap the mutation job's cache-miss set by an estimated mutant budget | superseded by 0029-mutation-cache-miss-plan-uses-the-prs-own-diff |
 | [0029-mutation-cache-miss-plan-uses-the-prs-own-diff](0029-mutation-cache-miss-plan-uses-the-prs-own-diff.md) | Plan the mutation cache-miss run from the PR's own diff, and ask for a weekly run only for a left-out changed source | accepted |
 | [0030-nightly-check-resets-a-stale-mutation-cache](0030-nightly-check-resets-a-stale-mutation-cache.md) | Reset a stale mutation cache with a nightly check that dispatches at most one weekly run a night | accepted |
-| [0031-second-implementation-matches-tool-list-by-meaning](0031-second-implementation-matches-tool-list-by-meaning.md) | Hold a second implementation to the tools/list contract by meaning, not by bytes | accepted |
+| [0031-second-implementation-matches-tool-list-by-meaning](0031-second-implementation-matches-tool-list-by-meaning.md) | Hold a second implementation to the tools/list contract by meaning, not by bytes | superseded by 0032-closest-page-suggestions-match-by-meaning |
+| [0032-closest-page-suggestions-match-by-meaning](0032-closest-page-suggestions-match-by-meaning.md) | Hold a second implementation to the closest-name suggestions by rule, not by bytes | proposed |
 
 ## File naming rule
 
