@@ -247,6 +247,8 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
     let answer = client.call_api(page_wire::PAGE_METHOD, &[Value::from(lookup_name.as_str())]).await?;
     let concept_page = page_wire::page(&answer)?;
     let mut tree = tree;
+    // PARITY(#299): a `null` page leaves the tree's blocks with their bare `{ id }` page, so they lose their day and
+    // become undated mentions with no warning (suspected TS bug, BR-0011) — fix per #345, in both servers.
     if let (Some(blocks), Some(page)) = (tree.as_mut(), concept_page.as_ref()) {
         for block in blocks {
             if let Value::Object(map) = block {
@@ -267,12 +269,12 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
     };
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
     // PARITY(#299): a `null` answer is read as "no mentions", so the concept looks unmentioned when LogSeq didn't
-    // answer (suspected TS bug, BR-0011) — fix per #346, in both servers.
+    // answer (suspected TS bug, BR-0011) — fix per #345, in both servers.
     let mentions = block_rows(&answer)?.unwrap_or_default();
 
     // Combine and deduplicate
     // PARITY(#299): a `null` block tree is read as "no blocks on the page", as a missing mention list is
-    // (suspected TS bug, BR-0011) — fix per #346, in both servers.
+    // (suspected TS bug, BR-0011) — fix per #345, in both servers.
     let all_blocks: Vec<Value> = tree.unwrap_or_default().into_iter().chain(mentions).collect();
     let unique = unique_by_id(all_blocks);
 
