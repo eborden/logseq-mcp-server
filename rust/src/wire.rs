@@ -196,12 +196,30 @@ impl Reader {
     }
 
     /// An answer that is `null` or a list of rows, each row a tuple of `width` cells (`rows(...)`
-    /// in TypeScript). A row longer than `width` is wrong, and a shorter one is read with its
-    /// missing cells as `undefined`, which each cell's parser accepts or not.
+    /// in TypeScript), none of them optional. See [`Reader::rows_with_optional_tail`].
     pub(crate) fn rows<T>(
         &mut self,
         answer: &Value,
         width: usize,
+        read_row: impl Fn(&mut Reader, &[Value]) -> Parsed<T>,
+    ) -> Parsed<Option<Vec<T>>> {
+        self.rows_with_optional_tail(answer, width, 0, read_row)
+    }
+
+    /// `rows`, for a tuple whose last `optional_tail` cells are `.optional()` (`z.string().optional()`).
+    /// zod 4 doesn't count `z.unknown()` as optional in a tuple, so such a cell is not in the tail.
+    ///
+    /// The length is checked before any cell is read, as zod 4's tuple does:
+    /// - longer than `width` is `Too big`;
+    /// - shorter than `width` minus the optional tail minus one is `Too small`, whatever the cells
+    ///   would have said;
+    /// - anything between is read with its missing cells as `undefined`, which each cell's own
+    ///   parser accepts or not.
+    pub(crate) fn rows_with_optional_tail<T>(
+        &mut self,
+        answer: &Value,
+        width: usize,
+        optional_tail: usize,
         read_row: impl Fn(&mut Reader, &[Value]) -> Parsed<T>,
     ) -> Parsed<Option<Vec<T>>> {
         let items = match answer {
@@ -209,6 +227,7 @@ impl Reader {
             Value::Array(items) => items,
             other => return Err(self.mismatch("array", Some(other))),
         };
+        let shortest = (width - optional_tail).saturating_sub(1);
         let mut rows = Vec::with_capacity(items.len());
         for (i, item) in items.iter().enumerate() {
             rows.push(self.at(Part::Index(i), |r| match item {
@@ -217,6 +236,12 @@ impl Reader {
                     // off-by-one, passed through by the TS server, so not a TS bug) — drop if Rust becomes the
                     // only server.
                     Err(r.issue(format!("Too big: expected array to have <{width} items")))
+                }
+                Value::Array(cells) if cells.len() < shortest => {
+                    // PARITY(#299): zod's wording, which says `>N items` where N is the width, though a row one
+                    // cell short of that still passes the length check (zod's own off-by-one, passed through by
+                    // the TS server, so not a TS bug) — drop if Rust becomes the only server.
+                    Err(r.issue(format!("Too small: expected array to have >{width} items")))
                 }
                 Value::Array(cells) => read_row(r, cells),
                 other => Err(r.mismatch("tuple", Some(other))),
