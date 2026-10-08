@@ -32,6 +32,14 @@ The rule states an intent, not a layout. Which key belongs to which category, an
 
 ## Mechanical enforcement
 
+test: `rust/src/tools/build_context/mod.rs` (the order of a topic context, with and without its optional keys)
+test: `rust/src/tools/get_context_for_query/mod.rs` (the order of a query result and of a warning)
+test: `rust/src/tools/get_concept_network/mod.rs` (the order of a network)
+test: `rust/src/tools/get_concept_evolution/mod.rs` (the order of an evolution result, its summary and a timeline entry)
+test: `rust/src/tools/list_pages/mod.rs` (the order of a page list)
+test: `rust/src/tools/get_current_context/mod.rs` (the order of the current context)
+test: `rust/src/tools/check_links/mod.rs` (the order of the check result and its nested records)
+test: `rust/src/resolve_refs/mod.rs` (the order of a `resolvedRefs` entry)
 none-yet: #299 (a later wave gives each tool a typed output whose declaration order is its wire order, and pins that order with a unit test per tool)
 reviewer: A new key in a tool result goes in the position of its category, and an optional key does not move the others.
 
@@ -40,3 +48,4 @@ reviewer: A new key in a tool result goes in the position of its category, and a
 | Date | Change | Issue/PR |
 |---|---|---|
 | 2026-10-08 | Introduced. | #378 |
+| 2026-10-08 | Enforcement: unit tests pin the key order of the first tools' typed outputs (additive; the `none-yet` line stays for the other tools). | #398 |
