@@ -124,7 +124,7 @@ Date: 2026-10-08
 - test: `rust/tests/parity_support/compare.rs` (the one comparator: JSON results by deep equality with array order kept, every other text byte for byte, the minified check, and the `tools/list` normalization)
 - test: `rust/tests/parity_support/suggestion_rules.rs` (the closest-name rules 1 to 6 and the recorded-case coverage of Decision 4)
 - test: `rust/tests/parity_self_check.rs` (each case fails when the stub's answer is perturbed, so the comparison can fail)
-- ci: `.github/workflows/ci.yml` (the golden-files job fails a pull request that changes a golden file unless it carries the `golden-change` label, which goes on only after the maintainer's OK; the cargo job runs the parity test)
+- ci: `.github/workflows/ci.yml` (the golden-files job fails a pull request that changes a golden result, or the request that produces it (a case's `tool`, `arguments` or resource or prompt request), unless it carries the `golden-change` label, which goes on only after the maintainer's OK; a case's stub answers and expected calls are exempt, as Decision 5 says; the cargo job runs the parity test)
 - test: `tests/guards/golden-files-check.test.ts` (keeps the golden-files check in the workflow from being reworded away)
 - test: `tests/guards/tool-list.test.ts` (the size budget and description cap over the recorded `tools/list`)
 - test: `tests/rust-guards/tool-list-live.test.ts` (the same budget and cap over the list the server sends)
