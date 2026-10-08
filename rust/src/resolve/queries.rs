@@ -5,7 +5,7 @@
 //! The text is the TypeScript text with its whitespace collapsed; LogSeq doesn't care how a query
 //! is laid out and the parity harness compares it collapsed.
 
-use crate::edn::{DatalogInput, JournalDay, PageName, Query};
+use crate::edn::{DatalogInput, JournalDay, PageId, PageName, Query, ground_ids};
 
 /// The resolver's first query, which covers three routes at once. Each row is `[page, via]`:
 /// - `"name"`: the page whose `:block/name` is the name;
@@ -46,9 +46,82 @@ pub fn namespace_leaf_pages(leaf: &PageName) -> Query {
     }
 }
 
+/// One alias link between two pages, followed in either direction (`aliasHop`).
+fn alias_hop(from: &str, to: &str) -> String {
+    format!("(or-join [{from} {to}] [{from} :block/alias {to}] [{to} :block/alias {from}])")
+}
+
+/// Every page within two alias links (`ALIAS_MAX_HOPS`) of `start`, in either direction
+/// (`aliasClosure`). `start` itself comes back too (a link and its mirror form a cycle), so the
+/// caller de-duplicates. The two hops are unrolled because rules can't be passed, and a third
+/// hop turns a 7-page group into a ~0.4s query.
+fn alias_closure(start: &str, member: &str) -> String {
+    format!(
+        "(or-join [{start} {member}] {} (and {} {}))",
+        alias_hop(start, member),
+        alias_hop(start, "?alias-mid"),
+        alias_hop("?alias-mid", member)
+    )
+}
+
+/// The alias groups of several pages in one query (`aliasSets`): rows are `[startId, member]`,
+/// one per page in the start page's group, the start page itself included whenever it has an
+/// alias at all. A page with no aliases has no rows. The ids are embedded through [`ground_ids`].
+pub fn alias_sets(starts: &[PageId]) -> Query {
+    assert!(!starts.is_empty(), "aliasSets needs at least one page id");
+    Query {
+        text: format!(
+            "[:find ?start (pull ?m [:db/id :block/name :block/original-name]) :where {} {}]",
+            ground_ids(starts, "?start"),
+            alias_closure("?start", "?m")
+        ),
+        inputs: Vec::new(),
+    }
+}
+
+/// The linked references of a whole alias group (`linkedReferencesOfPages`), the way
+/// `logseq.Editor.getPageLinkedReferences` counts them for one page: blocks whose
+/// `:block/path-refs` hold any of the pages (so children of a block that links the page count),
+/// except blocks that sit on one of the pages themselves. Rows are `[block]`, with the block's
+/// page pulled as `{id, name, original-name, journal-day}`, the keys the Editor call gives a
+/// source page.
+pub fn linked_references_of_pages(pages: &[PageId]) -> Query {
+    assert!(!pages.is_empty(), "linkedReferencesOfPages needs at least one page id");
+    Query {
+        text: format!(
+            "[:find (pull ?block [* {{:block/page [:db/id :block/name :block/original-name :block/journal-day]}}]) \
+             :where {} [?block :block/path-refs ?p] [?block :block/page ?source] (not {})]",
+            ground_ids(pages, "?p"),
+            ground_ids(pages, "?source")
+        ),
+        inputs: Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_alias_sets_query_embeds_only_the_ids_and_unrolls_two_hops() {
+        let query = alias_sets(&[PageId::new(10).unwrap(), PageId::new(11).unwrap()]);
+        assert!(query.inputs.is_empty());
+        assert_eq!(
+            query.text,
+            "[:find ?start (pull ?m [:db/id :block/name :block/original-name]) :where [(ground [10 11]) [?start ...]] \
+             (or-join [?start ?m] (or-join [?start ?m] [?start :block/alias ?m] [?m :block/alias ?start]) \
+             (and (or-join [?start ?alias-mid] [?start :block/alias ?alias-mid] [?alias-mid :block/alias ?start]) \
+             (or-join [?alias-mid ?m] [?alias-mid :block/alias ?m] [?m :block/alias ?alias-mid])))]"
+        );
+    }
+
+    #[test]
+    fn linked_references_exclude_the_group_s_own_blocks() {
+        let query = linked_references_of_pages(&[PageId::new(3).unwrap(), PageId::new(4).unwrap()]);
+        assert!(query.inputs.is_empty());
+        assert!(query.text.contains(":where [(ground [3 4]) [?p ...]] [?block :block/path-refs ?p]"));
+        assert!(query.text.ends_with("(not [(ground [3 4]) [?source ...]])]"));
+    }
 
     #[test]
     fn the_resolver_binds_the_lowercased_name_and_the_day() {
