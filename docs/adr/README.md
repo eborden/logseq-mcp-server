@@ -48,7 +48,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0029-mutation-cache-miss-plan-uses-the-prs-own-diff](0029-mutation-cache-miss-plan-uses-the-prs-own-diff.md) | Plan the mutation cache-miss run from the PR's own diff, and ask for a weekly run only for a left-out changed source | accepted |
 | [0030-nightly-check-resets-a-stale-mutation-cache](0030-nightly-check-resets-a-stale-mutation-cache.md) | Reset a stale mutation cache with a nightly check that dispatches at most one weekly run a night | accepted |
 | [0031-second-implementation-matches-tool-list-by-meaning](0031-second-implementation-matches-tool-list-by-meaning.md) | Hold a second implementation to the tools/list contract by meaning, not by bytes | superseded by 0032-closest-page-suggestions-match-by-meaning |
-| [0032-closest-page-suggestions-match-by-meaning](0032-closest-page-suggestions-match-by-meaning.md) | Hold a second implementation to the closest-name suggestions by rule, not by bytes | proposed |
+| [0032-closest-page-suggestions-match-by-meaning](0032-closest-page-suggestions-match-by-meaning.md) | Hold a Rust implementation to the TypeScript tool contract: by meaning for tools/list and closest-name suggestions, byte for byte for the rest | proposed |
 
 ## File naming rule
 
