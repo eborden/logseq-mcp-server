@@ -114,7 +114,7 @@ This ADR restates what it keeps from ADR-0025, ADR-0031 and ADR-0032, so that th
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-08
 
