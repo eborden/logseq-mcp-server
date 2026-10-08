@@ -54,7 +54,8 @@ import { closeSessions, isRust, rustSession } from './server-under-test.js';
  *
  * What the Rust server cannot take through MCP stays on TypeScript in both modes: a limit that
  * only a direct call can lower (`searchBlocksWithMeta` with a `maxLimit`) or lift
- * (`getConceptNetwork` past the tool's `max_nodes` and `max_fanout`), and `maxFrontier` and
+ * (`getConceptNetwork` past the tool's `max_nodes`, `max_fanout` and depth of 3, `searchBlocks` past its
+ * `limit` maximum), and `maxFrontier` and
  * `hitPages`. `src/tools/*` internals such as the resolver have no tool, so a suite that tests them
  * runs them as before.
  */
@@ -223,10 +224,13 @@ export const searchBlocks = ((
   limit?: number,
   includeContext?: boolean,
   slimResults?: boolean
-) =>
-  isRust()
-    ? searchBlocksOverMcp(client, query, limit, includeContext, slimResults).then(({ value }) => value)
-    : tsSearchBlocks(client, query, limit, includeContext, slimResults as false)) as typeof tsSearchBlocks;
+) => {
+  // A direct call has no maximum (`searchBlocks` lifts it); the tool clamps `limit` to MAX_SEARCH_LIMIT
+  if (!isRust() || (limit !== undefined && limit > MAX_SEARCH_LIMIT)) {
+    return tsSearchBlocks(client, query, limit, includeContext, slimResults as false);
+  }
+  return searchBlocksOverMcp(client, query, limit, includeContext, slimResults).then(({ value }) => value);
+}) as typeof tsSearchBlocks;
 
 export const queryByPropertyWithMeta = either(
   tsQueryByPropertyWithMeta,
@@ -245,16 +249,24 @@ export const queryByProperty = either(tsQueryByProperty, async (client, property
   (await queryByPropertyWithMeta(client, propertyName, propertyValue, slimResults, limit)).results
 );
 
+/** The deepest walk the tool does: its handler runs `getConceptNetwork` with `Math.min(max_depth, 3)` (src/index.ts) */
+const TOOL_MAX_DEPTH = 3;
+
 export const getConceptNetwork = ((
   client: LogseqClient,
   conceptName: string,
   maxDepth?: number,
   options: Parameters<typeof tsGetConceptNetwork>[3] = {}
 ) => {
-  // The tool caps `max_nodes` and `max_fanout`; only a direct call can lift them (the walk with no fanout cap)
+  // The tool caps `max_nodes`, `max_fanout` and the depth; only a direct call can lift them (the walk with no fanout cap)
   const { maxNodes, maxFanout } = options;
   const beyondTool = (value: number | undefined, max: number) => value !== undefined && !(value <= max);
-  if (!isRust() || beyondTool(maxNodes, MAX_NODES_LIMIT) || beyondTool(maxFanout, MAX_FANOUT_LIMIT)) {
+  if (
+    !isRust() ||
+    beyondTool(maxNodes, MAX_NODES_LIMIT) ||
+    beyondTool(maxFanout, MAX_FANOUT_LIMIT) ||
+    beyondTool(maxDepth, TOOL_MAX_DEPTH)
+  ) {
     return tsGetConceptNetwork(client, conceptName, maxDepth, options);
   }
   return callTool(client, 'logseq_get_concept_network', {
