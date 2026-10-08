@@ -161,6 +161,49 @@ describe('runCase on a resource read that fails', () => {
   });
 });
 
+describe('compareResult on a prompt', () => {
+  const message = (text: string) => ({ role: 'user', content: { type: 'text', text } });
+  const got: ToolResult = { description: 'Weekly', messages: [message('Write a summary\nSteps:')] };
+
+  it('compares the text of each message byte for byte, and everything else by value', () => {
+    expect(compareResult(got, structuredClone(got))).toEqual([]);
+    expect(compareResult(got, { ...got, messages: [message('Write a summary\nSteps: ')] })).toEqual([
+      expect.stringContaining('messages[0] text differs at character 22')
+    ]);
+    expect(compareResult(got, { ...got, messages: [message('Write a summary\nSteps:'), message('more')] })).toEqual([
+      'expected 1 message(s), got 2'
+    ]);
+    expect(compareResult(got, { ...got, messages: [{ role: 'assistant', content: message('Write a summary\nSteps:').content }] })).toEqual([
+      expect.stringContaining('messages[0]: expected')
+    ]);
+    expect(compareResult(got, { ...got, description: 'Monthly' })).toEqual(['description: expected "Weekly", got "Monthly"']);
+  });
+});
+
+describe('runCase on the prompt and resource requests', () => {
+  const fake = (calls: string[]) =>
+    ({
+      listPrompts: async () => (calls.push('listPrompts'), { prompts: [] }),
+      listResources: async () => (calls.push('listResources'), { resources: [] }),
+      getPrompt: async (params: unknown) => {
+        calls.push(`getPrompt ${JSON.stringify(params)}`);
+        throw new McpError(-32602, 'Unknown prompt', undefined);
+      }
+    }) as unknown as Client;
+  const base = { name: 'n', tool: 't', arguments: {}, steps: [] };
+
+  it('makes the request the case names and records a server error as its result', async () => {
+    const calls: string[] = [];
+    const client = fake(calls);
+    expect(await runCase(client, { ...base, listPrompts: true }, 1000)).toEqual({ prompts: [] });
+    expect(await runCase(client, { ...base, listResources: true }, 1000)).toEqual({ resources: [] });
+    expect(await runCase(client, { ...base, getPrompt: { name: 'x', arguments: { a: 'b' } } }, 1000)).toEqual({
+      error: { code: -32602, message: 'MCP error -32602: Unknown prompt' }
+    });
+    expect(calls).toEqual(['listPrompts', 'listResources', 'getPrompt {"name":"x","arguments":{"a":"b"}}']);
+  });
+});
+
 describe('the stub LogSeq', () => {
   it('answers by method and query text, checks the token, and fails loud on an unknown call', async () => {
     const stub = await startStubLogseq();
