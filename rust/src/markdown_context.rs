@@ -149,11 +149,9 @@ pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> S
             .map(|entry| {
                 let link = page_link(entry.get("page").unwrap_or(&Value::Null));
                 match entry.get("relationshipType").and_then(Value::as_str) {
-                    Some("inbound") => link,
-                    // PARITY(#299): JavaScript writes a missing value in a template literal as "undefined" (the
-                    // server sets `relationshipType` on every entry, so this is not reached) — drop if Rust
-                    // becomes the only server.
-                    other => format!("{link} ({})", other.unwrap_or("undefined")),
+                    // the server sets `relationshipType` on every entry
+                    Some("inbound") | None => link,
+                    Some(other) => format!("{link} ({other})"),
                 }
             })
             .collect();
