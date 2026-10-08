@@ -25,7 +25,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
 import { sandboxedEnv } from './parity/harness.js';
-import { REPO_ROOT } from './parity/ts-server.js';
+import { REPO_ROOT } from './parity/server-command.js';
 import { startStubLogseq, type StubLogseq } from './parity/stub-logseq.js';
 import { probeServer, type ProbeResult, type ServerProcess } from './measure-footprint/probe.js';
 import { formatMb, formatMs, formatSummary, summarize } from './measure-footprint/stats.js';

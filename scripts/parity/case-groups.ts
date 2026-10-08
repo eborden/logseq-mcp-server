@@ -25,7 +25,7 @@ import { searchBlocksCases } from './cases/search-blocks.js';
 import { searchByRelationshipCases } from './cases/search-by-relationship.js';
 import { suggestionsCases } from './cases/suggestions.js';
 import type { ParityCase } from './harness.js';
-import { REPO_ROOT } from './ts-server.js';
+import { REPO_ROOT } from './server-command.js';
 
 export interface CaseGroup {
   /** The stem of the cases file and of its expected file */
