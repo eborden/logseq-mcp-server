@@ -32,13 +32,15 @@ mod wire;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use serde_json::{Map, Value, json};
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::block_tree::order_siblings;
 use crate::client::LogseqClient;
 use crate::edn::{BlockUuid, PageName};
 use crate::errors::ToolError;
 use crate::meta::ResultWarning;
+use crate::tool::result_value;
 
 use self::queries::{EMBED_DESCENDANT_LEVELS, ref_targets};
 use self::tokens::{Kind, Token, clean_content, scan};
@@ -282,32 +284,20 @@ async fn fetch_levels(client: &LogseqClient, root_texts: Vec<String>, options: O
     Ok(store)
 }
 
-/// One resolved ref, as `resolvedRefs` lists it (`ResolvedRef`).
+/// One resolved ref, as `resolvedRefs` lists it (`ResolvedRef`): which target it is (`uuid`, `embed`), what it
+/// resolved to (`content`, `page`), then `status`. `uuid` and `embed` are left out where they don't apply; `content`
+/// and `page` are `null` when the target has none.
+#[derive(Serialize)]
 struct ResolvedRef {
     /// The target's uuid; none for a page embed
+    #[serde(skip_serializing_if = "Option::is_none")]
     uuid: Option<String>,
     /// `block` or `page` for an embed; none for a plain ref
+    #[serde(skip_serializing_if = "Option::is_none")]
     embed: Option<&'static str>,
     content: Option<String>,
     page: Option<String>,
     status: &'static str,
-}
-
-impl ResolvedRef {
-    /// Key order is the TypeScript object's: `uuid`, `embed`, `content`, `page`, `status`.
-    fn to_value(&self) -> Value {
-        let mut entry = Map::new();
-        if let Some(uuid) = &self.uuid {
-            entry.insert("uuid".into(), json!(uuid));
-        }
-        if let Some(embed) = self.embed {
-            entry.insert("embed".into(), json!(embed));
-        }
-        entry.insert("content".into(), json!(self.content));
-        entry.insert("page".into(), json!(self.page));
-        entry.insert("status".into(), json!(self.status));
-        Value::Object(entry)
-    }
 }
 
 /// `dedupeRefs`: one entry per embed kind, target and status.
@@ -520,7 +510,7 @@ impl<'a> Renderer<'a> {
             let mut refs = Vec::new();
             let resolved = self.render(content, &path, 1, &mut refs);
             out.insert("resolvedContent".into(), Value::String(resolved));
-            out.insert("resolvedRefs".into(), Value::Array(dedupe_refs(refs).iter().map(ResolvedRef::to_value).collect()));
+            out.insert("resolvedRefs".into(), result_value(&dedupe_refs(refs)));
         }
         if let Some(children) = map.get("children").and_then(Value::as_array) {
             out.insert("children".into(), Value::Array(children.iter().map(|child| self.annotate(child)).collect()));
@@ -588,4 +578,27 @@ pub fn with_meta(mut result: Map<String, Value>, warnings: &[ResultWarning]) -> 
     result.insert("hasMore".into(), Value::Bool(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())));
     result.insert("warnings".into(), serde_json::to_value(warnings).expect("warnings serialize"));
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::testing::keys;
+
+    #[test]
+    fn a_resolved_ref_names_its_target_then_what_it_resolved_to_then_its_status() {
+        let block = ResolvedRef { uuid: Some("u".into()), embed: Some("block"), content: Some("c".into()), page: Some("P".into()), status: "resolved" };
+        assert_eq!(keys(&result_value(&block)), ["uuid", "embed", "content", "page", "status"]);
+        // a plain ref has no `embed`, and a page embed has no `uuid`
+        let plain = ResolvedRef { embed: None, ..block };
+        assert_eq!(keys(&result_value(&plain)), ["uuid", "content", "page", "status"]);
+        let page = ResolvedRef { uuid: None, embed: Some("page"), content: Some("c".into()), page: Some("P".into()), status: "resolved" };
+        assert_eq!(keys(&result_value(&page)), ["embed", "content", "page", "status"]);
+    }
+
+    #[test]
+    fn a_target_with_no_content_or_page_says_null_and_does_not_leave_the_key_out() {
+        let missing = ResolvedRef { uuid: Some("u".into()), embed: None, content: None, page: None, status: "missing" };
+        assert_eq!(serde_json::to_string(&missing).unwrap(), r#"{"uuid":"u","content":null,"page":null,"status":"missing"}"#);
+    }
 }
