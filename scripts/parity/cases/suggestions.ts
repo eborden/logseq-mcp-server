@@ -44,5 +44,11 @@ export const suggestionsCases: ParityCase[] = [
   // A quote and a backslash in the input and a name: the message is read decoded, not as escaped
   missing('a name with a quote and a backslash', 'say "hi"', ['Say "hi" \\ bye', 'Bob']),
   // A name made of capitals and accents, which the fold treats as the input typed in lowercase
-  missing('capitals and accents', 'cafe', ['Café Notes', 'CAFÉ', 'Bob'])
+  missing('capitals and accents', 'cafe', ['Café Notes', 'CAFÉ', 'Bob']),
+  // Letters of Latin Extended Additional (stacked accents), which a matcher's own accent table can get wrong
+  missing('stacked accents in a name', 'nguyen', ['Nguyễn', 'Bob', 'Project Atlas']),
+  // An accent on the input side, in the second word, against a name that has none
+  missing('an accent in the input', 'menu café', ['Cafe Menu', 'Bob', 'Project Atlas']),
+  // A letter that NFD doesn't split: the fold leaves it, so the unaccented input covers nothing
+  missing('a letter with no decomposition', 'bjorn', ['Bjørn', 'Bob', 'Project Atlas'])
 ];
