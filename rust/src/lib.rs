@@ -8,6 +8,7 @@
 //! (`edn`), the LogSeq reader (`wire`), the page resolver (`resolve`, BR-0010) with its own
 //! queries and wire types, `fuzzy` (the resolver's suggestions), the errors, `ResultMeta`
 //! (`meta`), tips, the JavaScript rules the output depends on (`js`) and the tool helpers (`tool`).
+//! Block refs and embeds are resolved by `resolve_refs`.
 
 pub mod args;
 pub mod block_tree;
@@ -24,6 +25,7 @@ pub mod meta;
 pub mod output_format;
 pub mod params;
 pub mod resolve;
+pub mod resolve_refs;
 pub mod server;
 pub mod slim;
 pub mod tips;
