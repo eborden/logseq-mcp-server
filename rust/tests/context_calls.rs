@@ -123,7 +123,7 @@ async fn each_topic_costs_what_build_context_costs_and_a_missing_one_is_a_warnin
     let context = get_context_for_query(&client(&logseq), "about [[Gone]] and #bob", 5, 20, false).await.unwrap();
     assert_eq!(methods(&logseq).len(), 6);
     assert_eq!(context.contexts.len(), 1);
-    assert_eq!(context.warnings[0]["code"], "topic_not_found");
+    assert_eq!(context.warnings[0].code, "topic_not_found");
     // the topic's own caps are 10 blocks, 5 related pages and 10 references
     assert_eq!(args_of(&logseq, 4)[1], "\"bob\"");
 }

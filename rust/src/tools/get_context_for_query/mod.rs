@@ -16,20 +16,20 @@ use std::collections::HashSet;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::compact::compact_query_context;
-use crate::errors::ToolError;
+use crate::errors::{Candidate, ToolError};
 use crate::js;
 use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::render_query_context;
-use crate::meta::candidate;
+use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
-use crate::tool::{input_schema, read_only_annotations, success_result};
-use crate::tools::build_context::{Caps, TopicContext, build_context_for_topic};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
+use crate::tools::build_context::{Caps, TopicContext, TopicContextOutput, build_context_for_topic};
 use crate::tools::search_blocks::{find_blocks, full_blocks_with_context};
 use crate::truncation::{CappedTruncation, capped_truncation_warning};
 
@@ -136,6 +136,44 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     Ok(success_result(vec![ContentBlock::text(js::json_stringify(&shown))]))
 }
 
+/// A warning of a query's result (`QueryWarning`): `code` and `message` first, then the detail (`topic`, and for
+/// an ambiguous topic its `candidates`), then the remedy (`howToFetchAll`), each only where it applies (BR-0013).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct QueryWarning {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidates: Option<Vec<Candidate>>,
+    #[serde(rename = "totalCandidates", skip_serializing_if = "Option::is_none")]
+    pub total_candidates: Option<usize>,
+    #[serde(rename = "howToFetchAll", skip_serializing_if = "Option::is_none")]
+    pub how_to_fetch_all: Option<String>,
+}
+
+impl QueryWarning {
+    fn new(code: &str, message: String) -> Self {
+        QueryWarning { code: code.to_owned(), message, topic: None, candidates: None, total_candidates: None, how_to_fetch_all: None }
+    }
+
+    fn about(mut self, topic: &str) -> Self {
+        self.topic = Some(topic.to_owned());
+        self
+    }
+
+    fn how_to_fetch_all(mut self, how: String) -> Self {
+        self.how_to_fetch_all = Some(how);
+        self
+    }
+}
+
+impl From<ResultWarning> for QueryWarning {
+    fn from(warning: ResultWarning) -> Self {
+        QueryWarning { how_to_fetch_all: warning.how_to_fetch_all, ..QueryWarning::new(&warning.code, warning.message) }
+    }
+}
+
 /// A query's context (`QueryContext`). Each topic's `hasMore`, `warnings` and `totals` are not
 /// repeated: its advice names `logseq_build_context` parameters, so it is rolled up into `warnings`.
 #[derive(Debug, Clone, PartialEq)]
@@ -145,15 +183,43 @@ pub struct QueryContext {
     pub contexts: Vec<TopicContext>,
     /// The keyword hits, when the query named no topic and had a keyword to search
     pub search_results: Option<Vec<Value>>,
-    /// Each as the TypeScript object is written (`QueryWarning`): `topic`, `candidates` and
-    /// `totalCandidates` only where they apply
-    pub warnings: Vec<Value>,
+    pub warnings: Vec<QueryWarning>,
+}
+
+/// What the result holds (`summary`): the topics, the blocks of every topic and the hits, the distinct pages.
+#[derive(Serialize)]
+struct QuerySummary {
+    #[serde(rename = "totalTopics")]
+    total_topics: usize,
+    #[serde(rename = "totalBlocks")]
+    total_blocks: usize,
+    #[serde(rename = "totalPages")]
+    total_pages: usize,
+}
+
+/// A query's result as written, in BR-0013's order: what was answered (`query`, `extractedTopics`), what must not
+/// be missed (`hasMore`, `warnings`, `summary`), then the data (`contexts`, `searchResults`).
+#[derive(Serialize)]
+struct QueryContextOutput<'a> {
+    query: &'a str,
+    #[serde(rename = "extractedTopics")]
+    extracted_topics: &'a [String],
+    #[serde(rename = "hasMore")]
+    has_more: bool,
+    warnings: &'a [QueryWarning],
+    summary: QuerySummary,
+    // PARITY(#299): a topic's own warnings are dropped here, and only `topic_truncated` says it was cut, so the
+    // `alias_set_truncated` warning of a topic whose alias group was cut is never shown (suspected TS bug) —
+    // drop if Rust becomes the only server.
+    contexts: Vec<TopicContextOutput<'a>>,
+    #[serde(rename = "searchResults", skip_serializing_if = "Option::is_none")]
+    search_results: Option<&'a [Value]>,
 }
 
 impl QueryContext {
     /// `hasMore`: some warning says how to fetch what it cut.
     pub fn has_more(&self) -> bool {
-        self.warnings.iter().any(|warning| warning.get("howToFetchAll").is_some())
+        self.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())
     }
 
     /// `summary.totalBlocks`: the blocks of every topic, then the keyword hits.
@@ -172,26 +238,17 @@ impl QueryContext {
         pages.len()
     }
 
-    /// The result as the TypeScript object is written: `query`, `extractedTopics`, `contexts`,
-    /// `searchResults`, `warnings`, `hasMore`, `summary`.
+    /// The result in BR-0013's key order.
     pub fn to_value(&self) -> Value {
-        let mut out = Map::new();
-        out.insert("query".into(), json!(self.query));
-        out.insert("extractedTopics".into(), json!(self.extracted_topics));
-        // PARITY(#299): a topic's own warnings are dropped here, and only `topic_truncated` says it was cut, so the
-        // `alias_set_truncated` warning of a topic whose alias group was cut is never shown (suspected TS bug) —
-        // drop if Rust becomes the only server.
-        out.insert("contexts".into(), Value::Array(self.contexts.iter().map(|context| context.to_value(false)).collect()));
-        if let Some(results) = &self.search_results {
-            out.insert("searchResults".into(), Value::Array(results.clone()));
-        }
-        out.insert("warnings".into(), Value::Array(self.warnings.clone()));
-        out.insert("hasMore".into(), json!(self.has_more()));
-        out.insert(
-            "summary".into(),
-            json!({"totalTopics": self.contexts.len(), "totalBlocks": self.total_blocks(), "totalPages": self.total_pages()}),
-        );
-        Value::Object(out)
+        result_value(&QueryContextOutput {
+            query: &self.query,
+            extracted_topics: &self.extracted_topics,
+            has_more: self.has_more(),
+            warnings: &self.warnings,
+            summary: QuerySummary { total_topics: self.contexts.len(), total_blocks: self.total_blocks(), total_pages: self.total_pages() },
+            contexts: self.contexts.iter().map(|context| context.output(false)).collect(),
+            search_results: self.search_results.as_deref(),
+        })
     }
 }
 
@@ -257,39 +314,30 @@ fn keywords(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// A warning object, keys in the order given.
-fn warning(entries: Vec<(&str, Value)>) -> Value {
-    Value::Object(entries.into_iter().map(|(key, value)| (key.to_owned(), value)).collect())
-}
-
-fn topic_warning(context: &TopicContext, topic: &str) -> Value {
+/// The warning for a topic whose context was cut by `TOPIC_CAPS`: what was cut, and the `logseq_build_context` call
+/// that fetches it.
+fn topic_warning(context: &TopicContext, topic: &str) -> QueryWarning {
     let totals = context.totals;
-    warning(vec![
-        ("code", json!("topic_truncated")),
-        ("topic", json!(topic)),
-        (
-            "message",
-            json!(format!(
-                "Context for \"{topic}\" is capped: showing {}/{} blocks, {}/{} references, {}/{} related pages.",
-                context.direct_blocks.len(),
-                totals.blocks,
-                context.references.len(),
-                totals.references,
-                context.related_pages.len(),
-                totals.related_pages
-            )),
+    QueryWarning::new(
+        "topic_truncated",
+        format!(
+            "Context for \"{topic}\" is capped: showing {}/{} blocks, {}/{} references, {}/{} related pages.",
+            context.direct_blocks.len(),
+            totals.blocks,
+            context.references.len(),
+            totals.references,
+            context.related_pages.len(),
+            totals.related_pages
         ),
-        (
-            "howToFetchAll",
-            json!(format!(
-                "Call logseq_build_context with topic_name {} and raise max_blocks ({}), max_references ({}) and max_related_pages ({}).",
-                js::json_stringify(&json!(topic)),
-                totals.blocks,
-                totals.references,
-                totals.related_pages
-            )),
-        ),
-    ])
+    )
+    .about(topic)
+    .how_to_fetch_all(format!(
+        "Call logseq_build_context with topic_name {} and raise max_blocks ({}), max_references ({}) and max_related_pages ({}).",
+        js::json_stringify(&json!(topic)),
+        totals.blocks,
+        totals.references,
+        totals.related_pages
+    ))
 }
 
 /// `getContextForQuery`: the context for a natural-language query.
@@ -311,14 +359,13 @@ pub async fn get_context_for_query(
 ) -> Result<QueryContext, ToolError> {
     let extracted_topics = extract_topics(query);
     let mut contexts = Vec::new();
-    let mut warnings: Vec<Value> = Vec::new();
+    let mut warnings: Vec<QueryWarning> = Vec::new();
 
     if extracted_topics.len() as u64 > max_topics {
-        warnings.push(warning(vec![
-            ("code", json!("topics_truncated")),
-            ("message", json!(format!("Found {} topics; only the first {max_topics} were used.", extracted_topics.len()))),
-            ("howToFetchAll", json!(format!("Set max_topics to {} (or higher) to use all of them.", extracted_topics.len()))),
-        ]));
+        warnings.push(
+            QueryWarning::new("topics_truncated", format!("Found {} topics; only the first {max_topics} were used.", extracted_topics.len()))
+                .how_to_fetch_all(format!("Set max_topics to {} (or higher) to use all of them.", extracted_topics.len())),
+        );
     }
 
     for topic in extracted_topics.iter().take(max_topics as usize) {
@@ -331,24 +378,20 @@ pub async fn get_context_for_query(
             }
             // A missing topic page is an expected partial result: skip it and say so. Everything else
             // (connection, timeout, auth, unexpected) propagates.
-            Err(ToolError::PageNotFound(_)) => warnings.push(warning(vec![
-                ("code", json!("topic_not_found")),
-                ("topic", json!(topic)),
-                ("message", json!(format!("No page found for topic \"{topic}\"; it was skipped."))),
-            ])),
+            Err(ToolError::PageNotFound(_)) => {
+                warnings.push(QueryWarning::new("topic_not_found", format!("No page found for topic \"{topic}\"; it was skipped.")).about(topic))
+            }
             // An ambiguous topic is skipped the same way, but its candidates are kept so the caller can
             // retry logseq_build_context with the one it means.
             Err(ToolError::AmbiguousPage(ambiguous)) => {
-                warnings.push(warning(vec![
-                    ("code", json!("ambiguous_page")),
-                    ("message", json!(ambiguous.to_string())),
-                    ("topic", json!(topic)),
-                    ("candidates", Value::Array(ambiguous.candidates.iter().map(candidate).collect())),
-                    ("totalCandidates", json!(ambiguous.total_candidates)),
-                ]));
+                warnings.push(QueryWarning {
+                    candidates: Some(ambiguous.candidates.clone()),
+                    total_candidates: Some(ambiguous.total_candidates),
+                    ..QueryWarning::new("ambiguous_page", ambiguous.to_string()).about(topic)
+                });
                 // A cut list is reported by a warning, not by hasMore: no parameter fetches the rest
                 if let Some(note) = ambiguous.truncation_note() {
-                    warnings.push(warning(vec![("code", json!("candidates_truncated")), ("topic", json!(topic)), ("message", json!(note))]));
+                    warnings.push(QueryWarning::new("candidates_truncated", note).about(topic));
                 }
             }
             Err(error) => return Err(error),
@@ -382,7 +425,7 @@ pub async fn get_context_for_query(
             let kept_count = (max_search_results.min(MAX_SEARCH_RESULTS) as usize).min(hits.len());
             if hits.len() > kept_count {
                 warnings.push(
-                    serde_json::to_value(capped_truncation_warning(CappedTruncation {
+                    capped_truncation_warning(CappedTruncation {
                         what: "keyword hits",
                         shown: kept_count,
                         total: hits.len(),
@@ -393,8 +436,8 @@ pub async fn get_context_for_query(
                         code: "search_results_truncated",
                         inline_max: None,
                         paging: None,
-                    }))
-                    .expect("a warning serializes"),
+                    })
+                    .into(),
                 );
             }
             let kept: Vec<Value> = hits.into_iter().take(kept_count).collect();
@@ -410,7 +453,7 @@ pub async fn get_context_for_query(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::testing::{meaning, schema_of};
+    use crate::tool::testing::{keys, meaning, schema_of};
 
     fn args(value: Value) -> Option<JsonObject> {
         value.as_object().cloned()
@@ -514,11 +557,70 @@ mod tests {
             totals: crate::tools::build_context::Totals { blocks: 12, related_pages: 5, references: 30 },
         };
         assert_eq!(
-            js::json_stringify(&topic_warning(&context, "Atlas \"x\"")),
+            js::json_stringify(&result_value(&topic_warning(&context, "Atlas \"x\""))),
             concat!(
-                r#"{"code":"topic_truncated","topic":"Atlas \"x\"","message":"Context for \"Atlas \"x\"\" is capped: showing 10/12 blocks, 10/30 references, 5/5 related pages.","#,
+                r#"{"code":"topic_truncated","message":"Context for \"Atlas \"x\"\" is capped: showing 10/12 blocks, 10/30 references, 5/5 related pages.","#,
+                r#""topic":"Atlas \"x\"","#,
                 r#""howToFetchAll":"Call logseq_build_context with topic_name \"Atlas \\\"x\\\"\" and raise max_blocks (12), max_references (30) and max_related_pages (5)."}"#
             )
         );
+    }
+
+    #[test]
+    fn a_warning_says_what_it_is_first_then_the_detail_then_the_remedy() {
+        let candidate = Candidate { name: "alice".into(), original_name: "Alice".into(), matched_by: crate::errors::MatchedBy::Alias, reason: "r".into() };
+        let every_key = QueryWarning {
+            candidates: Some(vec![candidate]),
+            total_candidates: Some(1),
+            ..QueryWarning::new("c", "m".into()).about("t").how_to_fetch_all("h".into())
+        };
+        assert_eq!(keys(&result_value(&every_key)), ["code", "message", "topic", "candidates", "totalCandidates", "howToFetchAll"]);
+        assert_eq!(keys(&result_value(&QueryWarning::new("c", "m".into()))), ["code", "message"]);
+        assert_eq!(keys(&result_value(&QueryWarning::new("c", "m".into()).about("t"))), ["code", "message", "topic"]);
+        // a candidate page keeps its identity first
+        let ambiguous = result_value(&every_key);
+        assert_eq!(keys(&ambiguous["candidates"][0]), ["name", "originalName", "matchedBy", "reason"]);
+        // a warning that came from a result's own meta carries no topic
+        let from_meta: QueryWarning = ResultWarning { how_to_fetch_all: Some("h".into()), ..ResultWarning::new("c", "m".into()) }.into();
+        assert_eq!(keys(&result_value(&from_meta)), ["code", "message", "howToFetchAll"]);
+    }
+
+    fn topic(name: &str, id: i64) -> TopicContext {
+        TopicContext {
+            topic: name.into(),
+            resolved_from: None,
+            resolved_aliases: None,
+            main_page: json!({"id": id}),
+            direct_blocks: vec![json!({"id": 5})],
+            related_pages: vec![json!({"id": 2})],
+            references: Vec::new(),
+            temporal_context: None,
+            warnings: vec![ResultWarning::new("alias_set_truncated", "m".into())],
+            totals: crate::tools::build_context::Totals { blocks: 1, related_pages: 1, references: 0 },
+        }
+    }
+
+    #[test]
+    fn a_query_result_says_what_it_answered_what_may_be_missing_then_the_data() {
+        let mut context = QueryContext {
+            query: "[[a]]".into(),
+            extracted_topics: vec!["a".into()],
+            contexts: vec![topic("a", 1)],
+            search_results: None,
+            warnings: vec![QueryWarning::new("topic_not_found", "m".into()).about("b")],
+        };
+        let value = context.to_value();
+        assert_eq!(keys(&value), ["query", "extractedTopics", "hasMore", "warnings", "summary", "contexts"]);
+        assert_eq!(value["hasMore"], false);
+        assert_eq!(value["summary"], json!({"totalTopics": 1, "totalBlocks": 1, "totalPages": 2}));
+        // a topic's own meta is not repeated: its warnings are rolled up, and its counts are the summary's
+        assert_eq!(keys(&value["contexts"][0]), ["topic", "summary", "mainPage", "directBlocks", "relatedPages", "references"]);
+        // the hits come last, and a warning with a remedy sets hasMore
+        context.search_results = Some(vec![json!({"id": 9})]);
+        context.warnings.push(QueryWarning::new("topics_truncated", "m".into()).how_to_fetch_all("h".into()));
+        let value = context.to_value();
+        assert_eq!(keys(&value), ["query", "extractedTopics", "hasMore", "warnings", "summary", "contexts", "searchResults"]);
+        assert_eq!(value["hasMore"], true);
+        assert_eq!(value["summary"]["totalBlocks"], 2);
     }
 }
