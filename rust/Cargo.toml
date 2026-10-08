@@ -34,6 +34,12 @@ icu_normalizer = { version = "2.2", default-features = false, features = ["compi
 # character. Also already in the tree, under idna_adapter, with the same features and version.
 icu_properties = { version = "2.2", default-features = false, features = ["compiled_data"] }
 
+# The local calendar day (`localtime_r`), which `new Date()`'s local components give the TypeScript
+# server and no standard library function does. Already in the tree (tokio, mio and socket2 use it),
+# at the locked version, so it adds no build and no download. Unix only: elsewhere the date is UTC.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tokio = { version = "1.47", default-features = false, features = ["rt", "macros", "net", "io-util", "time"] }
 
