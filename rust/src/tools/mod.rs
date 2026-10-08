@@ -9,8 +9,10 @@ use crate::client::LogseqClient;
 use crate::errors::ToolError;
 
 pub mod get_backlinks;
+pub mod get_block;
 pub mod get_current_context;
 pub mod get_graph_info;
+pub mod get_page;
 pub mod get_page_outline;
 pub mod list_pages;
 pub mod query_by_property;
@@ -20,8 +22,10 @@ pub mod search_blocks;
 pub fn list() -> Vec<Tool> {
     vec![
         get_backlinks::definition(),
+        get_block::definition(),
         get_current_context::definition(),
         get_graph_info::definition(),
+        get_page::definition(),
         get_page_outline::definition(),
         list_pages::definition(),
         query_by_property::definition(),
@@ -38,8 +42,10 @@ pub async fn call(
 ) -> Option<Result<CallToolResult, ToolError>> {
     match name {
         get_backlinks::NAME => Some(get_backlinks::call(client, tips_enabled, arguments).await),
+        get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
         get_current_context::NAME => Some(get_current_context::call(client, tips_enabled, arguments).await),
         get_graph_info::NAME => Some(get_graph_info::call(client, tips_enabled, arguments).await),
+        get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),
         get_page_outline::NAME => Some(get_page_outline::call(client, tips_enabled, arguments).await),
         list_pages::NAME => Some(list_pages::call(client, tips_enabled, arguments).await),
         query_by_property::NAME => Some(query_by_property::call(client, tips_enabled, arguments).await),
