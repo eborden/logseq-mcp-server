@@ -15,14 +15,16 @@
 //! differ by source (Editor API camelCase, Datalog kebab-case, `children` that are unfetched
 //! `["uuid", "<id>"]` tuples rather than blocks).
 //!
-//! Not ported yet: `compact`, and `showUuid` and `showPage` on the outline. Only the tools that
-//! take them use them (`build_context`, `get_context_for_query`), and they come with those tools.
+//! The outline also takes `compact` (titles and ids: a first-line snippet and the block's
+//! `((uuid))`), `show_uuid` (the `((uuid))` after a block's text) and `show_page` (`(in [[Page]])`
+//! after it). Only the context tools use them (`crate::markdown_context`).
 //!
 //! Lengths and cuts are in UTF-16 code units, as JavaScript counts them (see `js`).
 
 use serde_json::{Map, Value};
 
 use crate::js;
+use crate::snippet::Snippet;
 
 /// Shown after the start of a first block that alone exceeds the limit.
 pub const TRUNCATED_BLOCK_MARKER: &str = "\n[This block is longer than the limit and was truncated here.]";
@@ -51,10 +53,18 @@ fn is_pre_block(block: &Map<String, Value>) -> bool {
 /// What [`render_outline`] takes.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OutlineOptions {
+    /// Titles and ids only: each block is its first-line snippet followed by its `((uuid))`
+    pub compact: bool,
     /// Stop after this many characters (UTF-16 code units) and report `cut`. Unlimited when `None`.
     pub max_chars: Option<usize>,
     /// Leave out pre-blocks, whose text is the page properties already rendered above
     pub skip_pre_blocks: bool,
+    /// Append `((uuid))` to each block. Compact output always has it. Used for search hits, which
+    /// would otherwise be a dead end.
+    pub show_uuid: bool,
+    /// Append `(in [[Page]])` to each block whose page name is known (`context.page`, or a `page`
+    /// entity with a name)
+    pub show_page: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,13 +79,51 @@ fn length(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
+/// `blockPageLink`: the page a block sits on, as a link, when its name is known: a search hit's
+/// `context.page`, or a `page` entity with a name.
+fn block_page_link(block: &Map<String, Value>) -> Option<String> {
+    let from_context = block.get("context").and_then(|context| context.get("page"));
+    [from_context, block.get("page")]
+        .into_iter()
+        .flatten()
+        .find(|page| page.is_object() && !page_title(page, None).is_empty())
+        .map(page_link)
+}
+
+/// `pageLink`: `[[Title]]`, the way a page is linked in LogSeq.
+pub fn page_link(page: &Value) -> String {
+    format!("[[{}]]", page_title(page, None))
+}
+
 /// One block as a bullet: `content`, with its continuation lines and `resolvedContent` indented under it.
-fn bullet_text(block: &Map<String, Value>, depth: usize) -> String {
+/// Compact, it is the first-line snippet and the block's `((uuid))` on one line.
+fn bullet_text(block: &Map<String, Value>, depth: usize, options: &OutlineOptions) -> String {
     let indent = "\t".repeat(depth);
+    let uuid = non_empty(block.get("uuid"));
+    let page = if options.show_page { block_page_link(block) } else { None };
+    if options.compact {
+        // PARITY(#299): a snippet cut inside an emoji ends in a lone surrogate in TypeScript, which a Rust string
+        // can't hold: it ends in U+FFFD here (suspected TS bug: `slice` should cut by code point) — drop if Rust
+        // becomes the only server.
+        let snippet = Snippet::of(block.get("content").and_then(Value::as_str)).to_string_lossy();
+        let parts = [Some(snippet), uuid.map(|uuid| format!("(({uuid}))")), page.map(|page| format!("(in {page})"))];
+        let text: Vec<String> = parts.into_iter().flatten().filter(|part| !part.is_empty()).collect();
+        return js::trim_end(&format!("{indent}- {}", text.join(" "))).to_owned();
+    }
+    let handle: Vec<String> = [uuid.filter(|_| options.show_uuid).map(|uuid| format!("(({uuid}))")), page.map(|page| format!("(in {page})"))]
+        .into_iter()
+        .flatten()
+        .collect();
+    let handle = handle.join(" ");
     let content = block.get("content").and_then(Value::as_str).unwrap_or("");
     let mut lines = Vec::new();
     for (i, line) in content.split('\n').enumerate() {
-        lines.push(if i == 0 { format!("{indent}- {line}") } else { format!("{indent}  {line}") });
+        lines.push(match (i, handle.is_empty()) {
+            // The handle goes on the first line, so it stays with the bullet however long the block is
+            (0, true) => format!("{indent}- {line}"),
+            (0, false) => format!("{indent}- {line} {handle}"),
+            _ => format!("{indent}  {line}"),
+        });
     }
     // `content` is never changed; the resolved text is shown beside it, not in place of it
     if let Some(resolved) = block.get("resolvedContent").and_then(Value::as_str).filter(|resolved| *resolved != content) {
@@ -104,7 +152,7 @@ struct Walk {
     out: Vec<String>,
     left: usize,
     cut: bool,
-    skip_pre_blocks: bool,
+    options: OutlineOptions,
 }
 
 impl Walk {
@@ -115,10 +163,10 @@ impl Walk {
             }
             // Not a block object (an unfetched `["uuid", "<id>"]` tuple, say): skipped
             let Some(block) = block.as_object() else { continue };
-            if self.skip_pre_blocks && is_pre_block(block) {
+            if self.options.skip_pre_blocks && is_pre_block(block) {
                 continue;
             }
-            let text = bullet_text(block, depth);
+            let text = bullet_text(block, depth, &self.options);
             let size = length(&text) + 1;
             if size > self.left {
                 self.cut = true;
@@ -143,7 +191,7 @@ impl Walk {
 /// through `cut`; the caller owns the notice. Children that are not block objects (unfetched
 /// `["uuid", "<id>"]` tuples) are skipped.
 pub fn render_outline(blocks: &[Value], options: OutlineOptions) -> Outline {
-    let mut walk = Walk { out: Vec::new(), left: options.max_chars.unwrap_or(usize::MAX), cut: false, skip_pre_blocks: options.skip_pre_blocks };
+    let mut walk = Walk { out: Vec::new(), left: options.max_chars.unwrap_or(usize::MAX), cut: false, options };
     walk.walk(blocks, 0);
     Outline { lines: walk.out, cut: walk.cut }
 }
@@ -283,7 +331,7 @@ pub fn render_page(page: &Value, options: PageRenderOptions<'_>) -> String {
     }
 
     // The pre-block is the page properties, which are rendered above from its own text
-    let outline = render_outline(blocks, OutlineOptions { max_chars: options.max_chars, skip_pre_blocks: props.from_pre_block });
+    let outline = render_outline(blocks, OutlineOptions { max_chars: options.max_chars, skip_pre_blocks: props.from_pre_block, ..Default::default() });
     let body = if !outline.lines.is_empty() || outline.cut { outline.lines.join("\n") } else { "(this page has no blocks)".to_owned() };
     let notice = match options.cut_notice {
         Some(notice) if outline.cut => format!("\n\n{notice}"),
@@ -648,5 +696,50 @@ mod tests {
         assert_eq!(meta.warnings, [warning(Some("refs_truncated"), "m", Some("do it")), warning(None, "n", None)]);
         assert!(meta.has_more);
         assert_eq!(FooterMeta::of_result(&json!({"hasMore": "true", "warnings": {}}), &[]), FooterMeta::default());
+    }
+
+    fn outline_with(blocks: Value, options: OutlineOptions) -> Vec<String> {
+        render_outline(blocks.as_array().unwrap(), options).lines
+    }
+
+    #[test]
+    fn compact_is_the_first_line_and_the_uuid_on_one_line_with_children_below() {
+        let blocks = json!([
+            {"uuid": UUID_A, "content": "  \n  First line  \nsecond", "children": [{"uuid": "u2", "content": "child"}]},
+            {"uuid": UUID_A, "content": ""},
+            {"content": "no uuid"},
+            {"content": "", "resolvedContent": "not shown"},
+        ]);
+        let compact = OutlineOptions { compact: true, ..Default::default() };
+        // the bullet of a block with nothing to show is a bare dash, as `trimEnd` leaves it
+        assert_eq!(
+            outline_with(blocks, compact),
+            [format!("- First line (({UUID_A}))"), "\t- child ((u2))".to_owned(), format!("- (({UUID_A}))"), "- no uuid".to_owned(), "-".to_owned()]
+        );
+        let long = json!([{"uuid": "u", "content": "x".repeat(100)}]);
+        assert_eq!(outline_with(long, compact), [format!("- {}... ((u))", "x".repeat(77))]);
+    }
+
+    #[test]
+    fn a_uuid_goes_on_the_first_line_of_a_block_and_a_page_after_it() {
+        let hit = json!({"uuid": UUID_A, "content": "a hit\nover two lines", "context": {"page": {"originalName": "Alice"}}, "page": {"id": 5, "name": "bob"}});
+        let both = OutlineOptions { show_uuid: true, show_page: true, ..Default::default() };
+        assert_eq!(outline_with(json!([hit.clone()]), both), [format!("- a hit (({UUID_A})) (in [[Alice]])\n  over two lines")]);
+        // the search hit's own page wins over the block's, and the block's is used when there is none
+        let on_page = json!({"uuid": "u", "content": "x", "page": {"id": 5, "name": "bob", "original-name": "Bob"}});
+        assert_eq!(outline_with(json!([on_page.clone()]), OutlineOptions { show_page: true, ..Default::default() }), ["- x (in [[Bob]])"]);
+        assert_eq!(outline_with(json!([on_page]), OutlineOptions { show_uuid: true, ..Default::default() }), ["- x ((u))"]);
+        // a page with no name is no page to name, and a block with no uuid has none to show
+        let nameless = json!({"content": "x", "page": {"id": 5}, "context": {"page": {}}});
+        assert_eq!(outline_with(json!([nameless]), both), ["- x"]);
+        // both are off by default
+        assert_eq!(outline_with(json!([hit]), OutlineOptions::default()), ["- a hit\n  over two lines"]);
+    }
+
+    #[test]
+    fn compact_names_the_page_only_when_asked_to() {
+        let block = json!({"uuid": "u", "content": "x", "context": {"page": {"originalName": "Alice"}}});
+        assert_eq!(outline_with(json!([block.clone()]), OutlineOptions { compact: true, ..Default::default() }), ["- x ((u))"]);
+        assert_eq!(outline_with(json!([block]), OutlineOptions { compact: true, show_page: true, ..Default::default() }), ["- x ((u)) (in [[Alice]])"]);
     }
 }

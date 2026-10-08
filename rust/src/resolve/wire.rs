@@ -19,6 +19,9 @@ pub struct PulledPage {
     /// The page has at least one `:block/alias` link (`hasAliasLinks`). LogSeq stores each alias
     /// in both directions, so a page without any has no aliases and the alias lookup is skipped.
     pub has_alias_links: bool,
+    /// The entity as LogSeq sent it, whole (`pull [*]`), for a tool whose result carries the page
+    /// (BR-0004). `Null` for a page built without one.
+    pub raw: Value,
 }
 
 impl PulledPage {
@@ -75,6 +78,7 @@ impl Reader {
             original_name: camel.filter(|name| !name.is_empty()).or(original_name),
             has_file: file.is_some(),
             has_alias_links: alias_links > 0,
+            raw: value.cloned().unwrap_or(Value::Null),
         })
     }
 }
