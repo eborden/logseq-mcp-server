@@ -1,11 +1,14 @@
-//! Values bound to a Datalog query's `:in` variables (ADR-0013).
+//! Values that go into a Datalog query: the inputs bound to its `:in` variables (ADR-0013), and
+//! the few literals still embedded in its text (`ground` vectors of entity ids and `#uuid`s).
 //!
 //! Each value's type says what it means, and only a valid one can be built, so the checks the
-//! TypeScript builders make at run time (`toLowerCase()` before every `:block/name` lookup)
-//! happen once, where the value is parsed, and a query builder can't skip them:
+//! TypeScript builders make at run time (`toLowerCase()` before every `:block/name` lookup,
+//! `groundIds`' `Number.isInteger`, `groundUuids`' pattern) happen once, where the value is
+//! parsed, and a query builder can't skip them:
 //! - [`PageName`] is lowercased when it is made (constraint 5), so a `:block/name` lookup can't
 //!   be sent mixed case. There is no way to get one from a `String` without lowercasing it.
 //! - [`JournalDay`] is a real calendar date, written as LogSeq's `YYYYMMDD` integer.
+//! - [`PageId`] is a positive `:db/id`; [`BlockUuid`] is a strict 8-4-4-4-12 hex uuid, lowercase.
 //!
 //! LogSeq reads every input after the query string as EDN, so a bare string is read as a symbol
 //! and matches nothing. Each input is sent as its JSON text: a JSON string literal is a valid EDN
@@ -53,6 +56,8 @@ impl DatalogInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvalidValue {
     JournalDay(String),
+    PageId(i64),
+    BlockUuid(String),
 }
 
 impl fmt::Display for InvalidValue {
@@ -60,6 +65,11 @@ impl fmt::Display for InvalidValue {
         match self {
             InvalidValue::JournalDay(value) => {
                 write!(f, "Invalid journal day: {value} (expected a calendar date as YYYYMMDD)")
+            }
+            InvalidValue::PageId(value) => write!(f, "Invalid entity id: {value} (expected a positive integer)"),
+            InvalidValue::BlockUuid(value) => {
+                let shown = serde_json::to_string(value).expect("a string serializes");
+                write!(f, "Invalid block uuid: {shown} (expected 8-4-4-4-12 hex digits)")
             }
         }
     }
@@ -150,6 +160,68 @@ fn days_in_month(year: u32, month: u32) -> u32 {
     }
 }
 
+/// An entity's `:db/id`, here a page's. DataScript ids are positive, so zero and negatives are
+/// refused. Embedded in query text through [`ground_ids`], never bound with `:in`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PageId(u64);
+
+impl PageId {
+    pub fn new(id: i64) -> Result<Self, InvalidValue> {
+        u64::try_from(id).ok().filter(|&id| id > 0).map(PageId).ok_or(InvalidValue::PageId(id))
+    }
+
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// A block uuid: 8-4-4-4-12 hex digits, any case on input, lowercase once parsed (as
+/// `groundUuids` writes it). The pattern leaves out quotes, brackets and whitespace, so an
+/// embedded `#uuid "..."` literal can't be ended early. A string that isn't one can't become one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlockUuid(String);
+
+impl BlockUuid {
+    pub fn parse(value: &str) -> Result<Self, InvalidValue> {
+        let bytes = value.as_bytes();
+        let valid = bytes.len() == 36
+            && bytes.iter().enumerate().all(|(i, &b)| match i {
+                8 | 13 | 18 | 23 => b == b'-',
+                _ => b.is_ascii_hexdigit(),
+            });
+        if valid { Ok(BlockUuid(value.to_ascii_lowercase())) } else { Err(InvalidValue::BlockUuid(value.to_owned())) }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A `ground` clause binding each id to `variable`, as `DatalogQueryBuilder.groundIds` writes it:
+/// `[(ground [1 2 3]) [?p ...]]`. Bind it straight to the entity variable (CLAUDE.md
+/// constraint 6). `variable` is part of the query, not input, so it must be a `?name`.
+pub fn ground_ids(ids: &[PageId], variable: &str) -> String {
+    assert_logic_variable(variable);
+    let ids: Vec<String> = ids.iter().map(|id| id.get().to_string()).collect();
+    format!("[(ground [{}]) [{variable} ...]]", ids.join(" "))
+}
+
+/// A `ground` clause of `#uuid` literals, as `DatalogQueryBuilder.groundUuids` writes it:
+/// `[(ground [#uuid "…" #uuid "…"]) [?u ...]]`. `:block/uuid` holds uuid values, so a string
+/// never matches (constraint 7); the literal is what does.
+pub fn ground_uuids(uuids: &[BlockUuid], variable: &str) -> String {
+    assert_logic_variable(variable);
+    let literals: Vec<String> = uuids.iter().map(|uuid| format!("#uuid \"{}\"", uuid.as_str())).collect();
+    format!("[(ground [{}]) [{variable} ...]]", literals.join(" "))
+}
+
+fn assert_logic_variable(variable: &str) {
+    let valid = variable.len() > 1
+        && variable.starts_with('?')
+        && variable[1..].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    assert!(valid, "a Datalog variable is written in the query: {variable:?}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +308,61 @@ mod tests {
             JournalDay::parse(20251399_u32).unwrap_err().to_string(),
             "Invalid journal day: 20251399 (expected a calendar date as YYYYMMDD)"
         );
+    }
+
+    #[test]
+    fn page_ids_are_positive() {
+        assert_eq!(PageId::new(42).unwrap().get(), 42);
+        assert_eq!(PageId::new(i64::MAX).unwrap().get(), i64::MAX as u64);
+        for id in [0, -1, i64::MIN] {
+            assert_eq!(PageId::new(id), Err(InvalidValue::PageId(id)));
+        }
+        assert_eq!(InvalidValue::PageId(0).to_string(), "Invalid entity id: 0 (expected a positive integer)");
+    }
+
+    #[test]
+    fn block_uuids_are_strict_and_lowercased() {
+        let uuid = BlockUuid::parse("6512ABCD-0000-4ABC-8DEF-0123456789AB").unwrap();
+        assert_eq!(uuid.as_str(), "6512abcd-0000-4abc-8def-0123456789ab");
+        assert_eq!(BlockUuid::parse(uuid.as_str()).unwrap(), uuid);
+        for bad in [
+            "",
+            "6512abcd00004abc8def0123456789ab",
+            "6512abcd-0000-4abc-8def-0123456789a",
+            "6512abcd-0000-4abc-8def-0123456789abc",
+            "6512abcg-0000-4abc-8def-0123456789ab",
+            " 6512abcd-0000-4abc-8def-0123456789ab",
+            "6512abcd-0000-4abc-8def-0123456789ab\n",
+            "6512abcd-0000-4abc-8def\"0123456789ab",
+            "{6512abcd-0000-4abc-8def-0123456789ab}",
+            "6512abcd-0000-4abc-8def-0123456789aé",
+        ] {
+            assert!(BlockUuid::parse(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            BlockUuid::parse("x\"y").unwrap_err().to_string(),
+            r#"Invalid block uuid: "x\"y" (expected 8-4-4-4-12 hex digits)"#
+        );
+    }
+
+    #[test]
+    fn ground_clauses_match_the_typescript_builders() {
+        let ids = [PageId::new(12).unwrap(), PageId::new(345).unwrap()];
+        assert_eq!(ground_ids(&ids, "?p"), "[(ground [12 345]) [?p ...]]");
+        assert_eq!(ground_ids(&[], "?id"), "[(ground []) [?id ...]]");
+        let uuids = [
+            BlockUuid::parse("6512ABCD-0000-4abc-8def-0123456789ab").unwrap(),
+            BlockUuid::parse("00000000-0000-0000-0000-000000000000").unwrap(),
+        ];
+        assert_eq!(
+            ground_uuids(&uuids, "?u"),
+            r#"[(ground [#uuid "6512abcd-0000-4abc-8def-0123456789ab" #uuid "00000000-0000-0000-0000-000000000000"]) [?u ...]]"#
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a Datalog variable")]
+    fn a_ground_variable_must_be_a_logic_variable() {
+        ground_ids(&[], "?p]) (evil");
     }
 }
