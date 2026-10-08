@@ -4,16 +4,22 @@
 //!
 //! Not ported, because the outline doesn't use it: `resolveLinkTargets` (`check_links`) and the
 //! alias groups (#69).
+//!
+//! The resolver's own queries (`queries.rs`) and wire types (`wire.rs`) live in this directory,
+//! since only it reads them; a tool gets the page it resolved as a [`PulledPage`].
+
+mod queries;
+mod wire;
 
 use std::collections::HashSet;
 
 use crate::client::LogseqClient;
-use crate::edn::{JournalDay, PageName};
+use crate::edn::{JournalDay, PageName, Query};
 use crate::errors::{AmbiguousPage, Candidate, MAX_CANDIDATES, MatchedBy, PageNotFound, ToolError};
 use crate::fuzzy;
 use crate::js;
-use crate::queries::{self, Query};
-use crate::wire::{self, PulledPage, ResolverRow};
+pub use self::wire::PulledPage;
+use self::wire::ResolverRow;
 
 /// How many "did you mean" names a not-found message carries.
 const MAX_SUGGESTIONS: usize = 3;
