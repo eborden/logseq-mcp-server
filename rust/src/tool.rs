@@ -52,15 +52,6 @@ pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     Arc::new(schema)
 }
 
-/// `withEmptyRequired`: a tool whose arguments are all optional still lists `"required": []`, as
-/// three TypeScript tools do (`logseq_get_graph_info`, `logseq_get_current_context`,
-/// `logseq_list_pages`), for clients that insist on the key. A generated `required` wins.
-pub fn with_empty_required(schema: Arc<JsonObject>) -> Arc<JsonObject> {
-    let mut schema = (*schema).clone();
-    schema.entry("required").or_insert_with(|| json!([]));
-    Arc::new(schema)
-}
-
 /// Parse a tool's arguments at the boundary (ADR-0019). As in `parseArgs`: unknown fields are
 /// ignored and nothing is coerced (`"5"` is not `5`). `null` means absent because this drops
 /// every `null` before serde sees it, so a defaulted non-`Option` field (`#[serde(default)]

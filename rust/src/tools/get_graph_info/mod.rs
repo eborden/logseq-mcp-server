@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::js;
-use crate::tool::{input_schema, read_only_annotations, success_result, with_empty_required};
+use crate::tool::{input_schema, read_only_annotations, success_result};
 
 pub const NAME: &str = "logseq_get_graph_info";
 
@@ -28,7 +28,7 @@ pub struct Args {}
 
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
-    Tool::new(NAME, DESCRIPTION, with_empty_required(input_schema::<Args>()))
+    Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
         .with_title("Get Graph Info")
         .with_annotations(read_only_annotations("Get Graph Info"))
 }

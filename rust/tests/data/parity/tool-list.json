@@ -336,9 +336,9 @@
     },
     "description": "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n**Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_build_context or logseq_get_page.\n\n**Can't find:** anything not open right now. Returns page: null with a message when no page is open.",
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "required": []
+      "properties": {}
     }
   },
   {
@@ -353,9 +353,9 @@
     },
     "description": "Get the connected graph's name and filesystem path.\n\n**Use when:** confirming which graph is attached or debugging paths.\n**Can't find:** anything about content. See logseq_list_pages and logseq_build_context.",
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
-      "properties": {},
-      "required": []
+      "properties": {}
     }
   },
   {
@@ -436,26 +436,31 @@
     },
     "description": "List non-journal pages as { name, aliases? }, filtered by name_contains (substring of name or alias). Aliases nest under pages.\n\n**Use when:** unsure which pages exist or what the user calls something.\n**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.\n**Next:** logseq_get_page.",
     "inputSchema": {
-      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "name_contains": {
           "description": "Filter pages whose name or alias contains this text (case-insensitive)",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "limit": {
           "description": "Max pages (default: 200, max: 1000)",
-          "default": 200,
           "type": "integer",
-          "minimum": 0
+          "format": "uint64",
+          "minimum": 0,
+          "default": 200
         },
         "offset": {
           "description": "Pages to skip, in name order; shifts if the graph changes",
-          "default": 0,
           "type": "integer",
-          "minimum": 0
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
         }
       },
-      "required": []
+      "type": "object"
     }
   },
   {
