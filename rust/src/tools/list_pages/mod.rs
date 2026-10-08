@@ -25,7 +25,7 @@ use crate::errors::ToolError;
 use crate::js;
 use crate::meta::ResultWarning;
 use crate::tips::tips_content;
-use crate::tool::{input_schema, read_only_annotations, success_result, with_empty_required};
+use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, capped_truncation_warning};
 
 use self::tips::list_pages_tips;
@@ -77,7 +77,7 @@ fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
 
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
-    Tool::new(NAME, DESCRIPTION, with_empty_required(input_schema::<Args>()))
+    Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
         .with_title("List Pages")
         .with_annotations(read_only_annotations("List Pages"))
 }
