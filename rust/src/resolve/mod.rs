@@ -196,8 +196,7 @@ pub async fn resolve_page(client: &LogseqClient, input: &str) -> Result<Resoluti
 
     let answer = run(client, &queries::resolve_page(&page_name, journal_day)).await?;
     // PARITY(#299): a `null` answer is read as "no rows", so the page is reported as not found
-    // when LogSeq didn't answer (suspected TS bug, BR-0011: #301) — drop if Rust becomes the only
-    // server.
+    // when LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #301, in both servers.
     let rows = wire::resolver_rows(&answer)?.unwrap_or_default();
     if let Some(resolution) = resolve_from_rows(input, name, &rows) {
         return Ok(resolution);
@@ -206,7 +205,7 @@ pub async fn resolve_page(client: &LogseqClient, input: &str) -> Result<Resoluti
     // Last resort, and only for names that are not dates
     if journal_day.is_none() {
         let answer = run(client, &queries::namespace_leaf_pages(&page_name)).await?;
-        // PARITY(#299): the same `null` as "no rows" for the leaf lookup (suspected TS bug, BR-0011: #301).
+        // PARITY(#299): the same `null` as "no rows" for the leaf lookup (suspected TS bug, BR-0011) — fix per #301.
         let rows = wire::page_rows(&answer)?.unwrap_or_default();
         let leaves = distinct_pages(rows.iter().collect());
         if !leaves.is_empty() {
