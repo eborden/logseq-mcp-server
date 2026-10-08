@@ -64,8 +64,8 @@ a free local port.
 ## Parity with the TypeScript server
 
 The parity harness (#124) starts a server over stdio against a stub LogSeq on a random port, and
-compares the tool result byte for byte, the LogSeq calls and `tools/list` by meaning (ADR-0031)
-with what the TypeScript server did. From the repo root, after `npm ci` and `cargo build`:
+compares the tool result byte for byte, the LogSeq calls and `tools/list` by meaning, and the closest
+names of a page-not-found message by rule (ADR-0032), with what the TypeScript server did. From the repo root, after `npm ci` and `cargo build`:
 
 ```bash
 node node_modules/vite-node/vite-node.mjs scripts/parity.ts "$PWD/rust/target/debug/logseq-mcp-server"
@@ -88,6 +88,13 @@ The whole `tools/list` is compared, and the cases cover every tool, `prompts/lis
 this. `--tested-tools-only` is still there for local use with a server that has only some tools:
 `tools/list` is compared for the tools the cases call, and the server must list those and no others.
 Fixtures are made up (BR-0001).
+
+The closest names after `Closest:` in a page-not-found message are not compared byte for byte for the
+Rust server (ADR-0032 Decision 3, `scripts/parity/suggestion-rules.ts`): the harness checks the message
+frame, that the list is one to three distinct page names, that exact and prefix matches come first, that
+every name covers every word typed, and that there are as many as there are to list, up to three. The
+TypeScript run still compares its own bytes. The harness fails when the recorded cases lack one the ADR
+requires, and `--self-check` feeds it wrong lists to be sure they fail.
 
 ## Running it
 

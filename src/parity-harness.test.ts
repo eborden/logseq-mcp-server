@@ -10,8 +10,10 @@ import { queryByDateRangeCases } from '../scripts/parity/cases/query-by-date-ran
 import { pageResourceCases } from '../scripts/parity/cases/page-resource.js';
 import { CASE_GROUPS, allCases, expectedFileOf } from '../scripts/parity/case-groups.js';
 import {
+  checkWrongLists,
   compareCalls,
   compareResult,
+  compareResultBySuggestionRules,
   PARITY_NOW_MS,
   PARITY_TZ,
   perturbCases,
@@ -24,6 +26,21 @@ import {
   type ParityCase,
   type ToolResult
 } from '../scripts/parity/harness.js';
+import { suggestionsCases } from '../scripts/parity/cases/suggestions.js';
+import {
+  candidatesOf,
+  checkList,
+  checkReferenceList,
+  checkReferenceLists,
+  fold,
+  GUIDANCE,
+  matchesOf,
+  missingRequiredCases,
+  parseNotFound,
+  REQUIRED_CASES,
+  requiredKindsOf,
+  splitList
+} from '../scripts/parity/suggestion-rules.js';
 import { parseCommandLine } from '../scripts/parity/command-line.js';
 import { callKey, DATASCRIPT_QUERY, LOGSEQ_PORT, startStubLogseq, type CannedCall } from '../scripts/parity/stub-logseq.js';
 import { compareToolLists, normalizeSchema, type ProjectedTool } from '../scripts/parity/tool-list-compare.js';
@@ -705,19 +722,23 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
     expect(parseCommandLine(['--tested-tools-only', '--', 'x', 'a', '--b'])).toEqual({
       mode: 'check',
       server: { command: 'x', args: ['a', '--b'] },
-      onlyTestedTools: true
+      onlyTestedTools: true,
+      isReference: false
     });
     expect(parseCommandLine(['--self-check', '--tested-tools-only', '--', 'x'])).toMatchObject({ mode: 'self-check', onlyTestedTools: true });
     expect(parseCommandLine(['--perturb', '--', 'x'])).toMatchObject({ mode: 'perturb', onlyTestedTools: false });
     // no flag and no command: the TypeScript server, compared on the whole tools/list
-    expect(parseCommandLine([])).toMatchObject({ mode: 'check', onlyTestedTools: false, server: typescriptServer() });
+    expect(parseCommandLine([])).toMatchObject({ mode: 'check', onlyTestedTools: false, server: typescriptServer(), isReference: true });
+    // any command after `--` is a candidate, held to the rules for the closest names
+    expect(parseCommandLine(['--', 'x'])).toMatchObject({ isReference: false });
   });
 
   it('finds the server command without a `--`, which vite-node removes from the arguments', () => {
     expect(parseCommandLine(['--tested-tools-only', '/bin/server', '--b', 'c'])).toEqual({
       mode: 'check',
       server: { command: '/bin/server', args: ['--b', 'c'] },
-      onlyTestedTools: true
+      onlyTestedTools: true,
+      isReference: false
     });
     expect(parseCommandLine(['--self-check', '/bin/server'])).toMatchObject({ mode: 'self-check', server: { command: '/bin/server' } });
     // only flags: the TypeScript server
@@ -949,3 +970,227 @@ describe('runParity on resources against the TypeScript server', () => {
   }, 60000);
 });
 
+
+/**
+ * The closest-name rules of ADR-0032 (#335). Every name is made up. A "result" is a tool result as the TypeScript
+ * server prints it (`{"error": <message>}`, minified) or a JSON-RPC error of the page resource.
+ */
+describe('the closest-name rules (ADR-0032, #335)', () => {
+  const message = (input: string, list?: string) => `No page ${JSON.stringify(input)}.${list === undefined ? '' : ` Closest: ${list}.`} ${GUIDANCE}`;
+  const toolResult = (text: string): ToolResult => ({ content: [{ type: 'text', text: JSON.stringify({ error: text }) }], isError: true });
+  const resourceError = (text: string): ToolResult => ({ error: { code: -32002, message: `MCP error -32002: MCP error -32002: ${text}` } });
+  const PAGES = ['Alice', 'Alice Notes', 'Alicia Cole', 'Bob', 'Project Atlas', 'Project Zed', 'Project Quill'];
+
+  /** The rule failures of a server that printed `list` where the reference printed `reference`, for the input */
+  const judge = (input: string, reference: string | undefined, list: string | undefined, candidates: string[] = PAGES) =>
+    compareResultBySuggestionRules(toolResult(message(input, reference)), toolResult(message(input, list)), candidates);
+
+  describe('the fold, the sets and the message', () => {
+    it('folds by trimming, dropping accents and lowercasing', () => {
+      expect(fold('  Café Ünï  ')).toBe('cafe uni');
+      expect(matchesOf('cafe', ['CAFÉ', 'Café Notes', 'Coffee', 'Bob'])).toEqual({
+        exact: ['CAFÉ'],
+        prefix: ['Café Notes'],
+        both: ['CAFÉ', 'Café Notes'],
+        covering: ['CAFÉ', 'Café Notes']
+      });
+    });
+
+    it('reads the input and the list out of the message, in a tool result and in a JSON-RPC error', () => {
+      expect(parseNotFound(message('say "hi"', 'A, B'))).toEqual({ opening: 'No page "say \\"hi\\"". Closest: ', input: 'say "hi"', list: 'A, B' });
+      expect(parseNotFound(message('x'))).toEqual({ opening: 'No page "x".', input: 'x' });
+      expect(parseNotFound(`MCP error -32002: MCP error -32002: ${message('x', 'A')}`)).toMatchObject({ input: 'x', list: 'A' });
+      expect(parseNotFound('No page name in logseq://page/. Use logseq://page/{name}.')).toBeUndefined();
+    });
+
+    it('splits a list around names that contain ", ", longest first, and says when it can be read two ways', () => {
+      const names = ['Smith, Alice', 'Smith', 'Bob'];
+      expect(splitList('Smith, Alice, Bob', names)).toEqual([['Smith, Alice', 'Bob']]);
+      // "Smith" alone fits too, but "Alice" is not a candidate, so there is one reading
+      expect(splitList('Smith, Alice', names)).toEqual([['Smith, Alice']]);
+      // with "Alice" a candidate too there are two readings, the longest-first one first
+      expect(splitList('Smith, Alice', [...names, 'Alice'])).toEqual([['Smith, Alice'], ['Smith', 'Alice']]);
+      // a choice that leaves the rest unreadable is backed out of: "Smith, Alice" first dead-ends, "Smith" first works
+      expect(splitList('Smith, Alice, Bob', ['Smith', 'Smith, Alice', 'Alice, Bob'])).toEqual([['Smith', 'Alice, Bob']]);
+      expect(splitList('Bob, Bob', ['Bob'])).toEqual([]);
+      expect(splitList('A, B, C, D', ['A', 'B', 'C', 'D'])).toEqual([]);
+    });
+
+    it('does not record a reference whose list can be read two ways', () => {
+      expect(checkReferenceList(message('smi', 'Smith, Alice'), ['Smith', 'Alice', 'Smith, Alice']).join('\n')).toContain('in two ways');
+    });
+  });
+
+  describe('a list that passes', () => {
+    it('is the reference, and also a list that picks other names where the rules leave the choice open', () => {
+      const typo = 'Project Atlas, Project Zed, Project Quill';
+      expect(judge('Projct', typo, typo)).toEqual([]);
+      expect(judge('Projct', typo, 'Project Quill, Project Zed, Project Atlas')).toEqual([]);
+      expect(judge('alice', 'Alice, Alice Notes, Alicia Cole', 'Alice, Alice Notes, Alicia Cole')).toEqual([]);
+    });
+
+    it('is a message with no list where the reference has none', () => {
+      expect(judge('zzz', undefined, undefined)).toEqual([]);
+      expect(judge('2031-12-31', undefined, undefined)).toEqual([]);
+    });
+
+    it('is read decoded: a name with a quote or a backslash, and one that ends with a full stop or holds ". Try"', () => {
+      const names = ['Say "hi" \\ bye', 'Bob', 'Notes v. Try it.', 'Notes v2.'];
+      expect(judge('say "hi"', 'Say "hi" \\ bye', 'Say "hi" \\ bye', names)).toEqual([]);
+      expect(judge('notes v', 'Notes v2., Notes v. Try it.', 'Notes v. Try it., Notes v2.', names)).toEqual([]);
+      // the closing is matched at the end of the message, so the full stop of the last name stays in the list
+      expect(parseNotFound(message('notes v', 'Notes v2., Notes v. Try it.'))?.list).toBe('Notes v2., Notes v. Try it.');
+    });
+
+    it('reads the page resource error the same way', () => {
+      const reference = resourceError(message('Projct', 'Project Atlas, Project Zed, Project Quill'));
+      const swapped = resourceError(message('Projct', 'Project Zed, Project Quill, Project Atlas'));
+      expect(compareResultBySuggestionRules(reference, swapped, PAGES)).toEqual([]);
+      const unrelated = resourceError(message('Projct', 'Bob'));
+      expect(compareResultBySuggestionRules(reference, unrelated, PAGES).join('\n')).toContain('rule 5');
+    });
+  });
+
+  describe('a regression each rule catches', () => {
+    const typo = 'Project Atlas, Project Zed, Project Quill';
+
+    it('rule 5: an unrelated name', () => {
+      const failures = judge('Projct', typo, 'Project Atlas, Bob, Project Quill').join('\n');
+      expect(failures).toContain('rule 5');
+      expect(failures).toContain('"Bob" does not cover');
+    });
+
+    it('rule 6: too few names', () => {
+      expect(judge('Projct', typo, 'Project Atlas, Project Zed').join('\n')).toContain('rule 6: 2 name(s) listed, 3 cover');
+      // with fewer covering names than three, fewer is fine
+      expect(judge('Projct', 'Project Atlas', 'Project Atlas', ['Project Atlas', 'Bob'])).toEqual([]);
+    });
+
+    it('rule 1: a wrong frame', () => {
+      const reference = toolResult(message('Projct', typo));
+      const wrongGuidance = toolResult('No page "Projct". Closest: Project Atlas. Try something else.');
+      expect(compareResultBySuggestionRules(reference, wrongGuidance, PAGES).join('\n')).toContain('rule 1');
+      const otherInput = toolResult(message('Projt', typo));
+      expect(compareResultBySuggestionRules(reference, otherInput, PAGES).join('\n')).toContain('rule 1');
+      // the rest of the result stays byte for byte: the envelope, `isError`
+      expect(compareResultBySuggestionRules(reference, { ...reference, isError: false }, PAGES).join('\n')).toContain('isError');
+    });
+
+    it('rule 2: a missing list, and a list the reference does not have', () => {
+      expect(judge('Projct', typo, undefined).join('\n')).toContain('rule 2: the reference lists closest names, this message lists none');
+      expect(judge('zzz', undefined, 'Bob').join('\n')).toContain('rule 2: the reference lists no closest names, this message does');
+    });
+
+    it('rule 3: a name that is not a candidate, a repeated name, and four names', () => {
+      expect(judge('Projct', typo, 'Project Atlas, Project Zed, Project Quil').join('\n')).toContain('rule 3');
+      expect(judge('Projct', typo, 'project atlas, Project Zed, Project Quill').join('\n')).toContain('rule 3');
+      expect(judge('Projct', typo, 'Project Atlas, Project Atlas, Project Zed').join('\n')).toContain('rule 3');
+      expect(judge('Projct', typo, `${typo}, Alice`).join('\n')).toContain('rule 3');
+    });
+
+    it('rule 4: an exact or prefix hit not placed first', () => {
+      const reference = 'Alice, Alice Notes, Alicia Cole';
+      // a name that only covers the input ahead of the hits
+      expect(judge('alice', reference, 'Alicia Cole, Alice, Alice Notes').join('\n')).toContain('rule 4: the first 2 name(s) must be exact or prefix matches');
+      // the prefix hit ahead of the exact one
+      expect(judge('alice', reference, 'Alice Notes, Alice, Alicia Cole').join('\n')).toContain('rule 4: the prefix match "Alice Notes" is listed before the exact match "Alice"');
+      // a prefix hit left out of a list that has a place for it
+      const pages = ['Project Atlas', 'Project Zed', 'Project Quill', 'Alicia Cole', 'Alice'];
+      expect(judge('proj', 'Project Atlas, Project Zed, Project Quill', 'Project Atlas, Alicia Cole', pages).join('\n')).toContain('rule 4');
+      // an input that folds to nothing has no exact or prefix hit to put first
+      expect(checkList('Bob, Alice, Alice Notes', '   ', PAGES)).toEqual([]);
+    });
+  });
+
+  describe('the rest of a result', () => {
+    it('stays byte for byte when the reference has no page-not-found message', () => {
+      const ok: ToolResult = { content: [{ type: 'text', text: '{"name":"Alice"}' }] };
+      expect(compareResultBySuggestionRules(ok, ok, PAGES)).toEqual([]);
+      expect(compareResultBySuggestionRules(ok, { content: [{ type: 'text', text: '{"name":"alice"}' }] }, PAGES).join('\n')).toContain('content[0].text differs');
+      // a page-not-found message where the reference printed something else is a plain difference
+      expect(compareResultBySuggestionRules(ok, toolResult(message('x', 'Bob')), PAGES).join('\n')).toContain('content[0].text differs');
+    });
+
+    it('fails a result that has no message where the reference has one', () => {
+      const failures = compareResultBySuggestionRules(toolResult(message('Projct', 'Project Atlas')), { content: [{ type: 'text', text: '{"name":"Alice"}' }] }, PAGES);
+      expect(failures.join('\n')).toContain('content[0].text differs');
+    });
+  });
+
+  describe('the recorded set', () => {
+    const recorded = async () => {
+      const results: Record<string, ToolResult> = {};
+      for (const group of CASE_GROUPS) Object.assign(results, JSON.parse(await readFile(expectedFileOf(group), 'utf8')));
+      return results;
+    };
+
+    it('holds every case the ADR requires, and the TypeScript results pass the rules they are the reference for', async () => {
+      const results = await recorded();
+      expect(missingRequiredCases(allCases(), results)).toEqual([]);
+      expect(checkReferenceLists(allCases(), results)).toEqual([]);
+    });
+
+    it('fails when a required case is missing, naming it', async () => {
+      const results = await recorded();
+      const lacking = missingRequiredCases(allCases().filter(c => !c.name.startsWith('suggestions: ')), results).join('\n');
+      for (const kind of ['an exact hit', 'a prefix hit', 'more than three exact or prefix matches', 'no suggestion: an input no candidate covers', 'a listed name that contains ", "']) {
+        expect(lacking).toContain(kind);
+      }
+      // the typo, the ISO date and the page resource's error are recorded in other groups
+      expect(lacking).not.toContain('a typo');
+      expect(lacking).not.toContain('an ISO date');
+      expect(lacking).not.toContain('page resource');
+      expect(missingRequiredCases([], {})).toHaveLength(REQUIRED_CASES.length);
+    });
+
+    it('sorts a case by what it exercises', async () => {
+      const results = await recorded();
+      const kinds = (name: string) => requiredKindsOf(allCases().find(c => c.name === name)!, results[name]);
+      expect(kinds('suggestions: an exact hit comes before the prefix hits')).toEqual(['an exact hit (E and P both non-empty)']);
+      expect(kinds('suggestions: a prefix hit')).toEqual(['a prefix hit (E empty, P non-empty)']);
+      expect(kinds('suggestions: more than three prefix hits')).toEqual(['a prefix hit (E empty, P non-empty)', 'more than three exact or prefix matches']);
+      expect(kinds('suggestions: no page covers the input')).toEqual(['no suggestion: an input no candidate covers']);
+      expect(kinds('suggestions: a name that contains a comma and a space')).toEqual([
+        'a typo with no prefix match and at least one covering name',
+        'a listed name that contains ", "'
+      ]);
+      expect(kinds('page resource: no such page, with the closest names')).toEqual([
+        'a typo with no prefix match and at least one covering name',
+        "the page resource's error"
+      ]);
+      expect(kinds('missing page with suggestions')).toEqual(['a typo with no prefix match and at least one covering name']);
+      expect(kinds('missing journal date')).toEqual(['no suggestion: an ISO date']);
+    });
+
+    it('refuses to record a reference that breaks a rule', () => {
+      const bad = { name: 'x', steps: [[{ method: 'logseq.Editor.getAllPages', args: [], response: PAGES.map(originalName => ({ originalName })) }]] };
+      expect(checkReferenceLists([bad], { x: toolResult(message('Projct', 'Bob')) }).join('\n')).toContain('rule 5');
+      expect(checkReferenceLists([bad], { x: toolResult(message('Projct', 'Project Atlas, Project Zed, Project Quill')) })).toEqual([]);
+      expect(candidatesOf(bad.steps)).toEqual(PAGES);
+    });
+
+    it('is checked by the self-check, which fails when a kind of wrong list applies to no case', async () => {
+      const report = checkWrongLists(allCases(), await recorded());
+      expect(report.ok, report.lines.join('\n')).toBe(true);
+      const barren = checkWrongLists([], {});
+      expect(barren.ok).toBe(false);
+      expect(barren.lines.join('\n')).toContain('no recorded case it applies to');
+    });
+  });
+
+  describe('against the TypeScript server', () => {
+    it('passes its own run under the rules, since the rules accept the reference list', async () => {
+      const group = CASE_GROUPS.find(g => g.name === 'suggestions')!;
+      const report = await runParity({
+        server: typescriptServer(),
+        cases: suggestionsCases,
+        expected: JSON.parse(await readFile(expectedFileOf(group), 'utf8')) as Record<string, ToolResult>,
+        expectedToolList: await loadToolList(),
+        onlyTestedTools: true,
+        bySuggestionRules: true,
+        snapshotFile: SNAPSHOT_FILE
+      });
+      expect(report.failures.filter(f => f.startsWith('[logseq_get_page: suggestions: '))).toEqual([]);
+    }, 60000);
+  });
+});
