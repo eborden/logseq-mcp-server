@@ -414,6 +414,25 @@ describe('null now reads as absent where it used to be a value (#60)', () => {
 });
 
 describe('numbers that pass the parser keep their old meaning', () => {
+  it('get_concept_network: a max_depth of 0 returns the root alone, after its resolver query only', async () => {
+    const { result, queries } = await call('logseq_get_concept_network', { ...NETWORK, max_depth: 0 });
+    expect(result.isError).toBeUndefined();
+    expect(queries).toHaveLength(1);
+    const body = JSON.parse(result.content[0].text);
+    expect(body.nodes.map((n: { name: string }) => n.name)).toEqual(['Alice']);
+    expect(body.edges).toEqual([]);
+  });
+
+  it('search_by_relationship: a max_distance of 0 walks no hops and finds no connection', async () => {
+    const zero = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: 0 });
+    const one = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: 1 });
+    expect(zero.result.isError).toBeUndefined();
+    expect(zero.queries).toHaveLength(one.queries.length - 1); // the resolver queries, no hop query
+    const body = JSON.parse(zero.result.content[0].text);
+    expect(body.results).toEqual([]);
+    expect(body.query.maxDistance).toBe(0);
+  });
+
   it('search_blocks: a limit of 0 returns no blocks and reports the matches', async () => {
     const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: 0 });
     expect(result.isError).toBeUndefined();
@@ -424,10 +443,8 @@ describe('numbers that pass the parser keep their old meaning', () => {
 
   it.each([
     ['logseq_search_blocks', { ...SEARCH, limit: -1 }, 'limit', 0],
-    ['logseq_get_concept_network', { ...NETWORK, max_depth: 0 }, 'max_depth', 1],
-    ['logseq_get_concept_network', { ...NETWORK, max_depth: -1 }, 'max_depth', 1],
-    ['logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: 0 }, 'max_distance', 1],
-    ['logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: -1 }, 'max_distance', 1],
+    ['logseq_get_concept_network', { ...NETWORK, max_depth: -1 }, 'max_depth', 0],
+    ['logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: -1 }, 'max_distance', 0],
     ['logseq_get_context_for_query', { ...CONTEXT, max_topics: 0 }, 'max_topics', 1],
     ['logseq_get_context_for_query', { ...CONTEXT, max_topics: -1 }, 'max_topics', 1],
     ['logseq_query_by_date_range', { last_n: 0 }, 'last_n', 1],
