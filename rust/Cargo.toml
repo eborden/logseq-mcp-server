@@ -25,8 +25,12 @@ serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
 # Tool input schemas, generated from the same type serde parses the arguments into. Already in
 # rmcp's tree (rmcp's `server` feature turns it on).
 schemars = "1"
-# General categories (letter, number) for `query_by_date_range`'s whole-word test (`\p{L}`, `\p{N}`).
-# Already in the tree, under idna_adapter, with the same features and version.
+# Unicode normalization (NFD), for the closest page names' fold (`src/fuzzy.rs`: NFD, drop the marks,
+# lowercase, as the parity harness folds them). Already in the tree, through reqwest > url > idna >
+# idna_adapter, with these same features and locked version, so it adds no build and no download.
+icu_normalizer = { version = "2.2", default-features = false, features = ["compiled_data"] }
+# General categories: letter and number for `query_by_date_range`'s whole-word test (`\p{L}`, `\p{N}`),
+# and mark for the fold above. Already in the tree, under idna_adapter, with the same features and version.
 icu_properties = { version = "2.2", default-features = false, features = ["compiled_data"] }
 # `localeCompare`'s order across scripts, which only the full collation tables give (Latin before Greek
 # before Cyrillic, `ß` as `ss`, ...). Same ICU4X release line as icu_properties (unicode-org/icu4x, Unicode-3.0
@@ -38,9 +42,12 @@ icu_properties = { version = "2.2", default-features = false, features = ["compi
 icu_collator = { version = "2.3", default-features = false, features = ["compiled_data"] }
 # The closest page names for a missing page (`src/fuzzy.rs`, ADR-0032): a maintained fuzzy matcher
 # (helix-editor/nucleo, MPL-2.0, accepted next to this repo's MIT licence by the maintainer on 2026-10-08)
-# in place of a port of fuzzysort. Only its two Unicode tables (accent stripping and case folding) are
-# on, which need no crate: it adds itself and `memchr`, which is already locked. `unicode-segmentation`
-# (grapheme splitting) stays off.
+# in place of a port of fuzzysort. 0.3.1 doesn't compile with these two features off (`CaseMatching` and
+# `Normalization` derive `Default` for a variant they gate), so they are on, and the code never uses
+# them: its `unicode-normalization` table is wrong for Latin Extended Additional (`ạ` becomes `o`), so
+# the fold is done here (NFD, icu_normalizer) and `Normalization::Never` and `CaseMatching::Respect`
+# keep nucleo's own tables out of every match. It adds itself and `memchr`, which is already locked.
+# `unicode-segmentation` stays off.
 nucleo-matcher = { version = "0.3.1", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 
 # The local calendar day (`localtime_r`), which `new Date()`'s local components give the TypeScript
