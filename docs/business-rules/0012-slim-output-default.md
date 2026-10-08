@@ -17,8 +17,9 @@ The default lives in `DEFAULT_SLIM_RESULTS` (`rust/src/slim.rs`): each tool that
 test: `tests/integration/slim-default.test.ts` (omitted means slim, false means full)
 test: `rust/src/slim.rs`
 test: `tests/guards/tool-list.test.ts`
+test: `rust/tests/parity.rs`
 
-`tests/guards/tool-list.test.ts` asserts that every `slim_results` parameter of the recorded `tools/list` advertises `default: true`, and the parity step of CI holds the server's schema to that list.
+`tests/guards/tool-list.test.ts` asserts that every `slim_results` parameter of the recorded `tools/list` advertises `default: true`, and the parity test (`rust/tests/parity.rs`, run by `cargo test`) holds the server's schema to that list.
 
 ## Changelog
 
