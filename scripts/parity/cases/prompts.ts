@@ -5,7 +5,7 @@
 // The harness fixes the clock at Tuesday 2025-03-11 in America/New_York (PARITY_NOW_MS), so "this week" is
 // the week of Monday 2025-03-10, in progress, and "this month" is March 2025, in progress.
 //
-// Not here: an argument that is not a string, or a request with no name. The TypeScript SDK checks those
+// Not here: a week whose Monday is in year 99 (a deliberate difference, see below), an argument that is not a string, or a request with no name. The TypeScript SDK checks those
 // before a prompt sees the request and answers -32603 with the zod issues; the Rust server answers an
 // InvalidParams error with its own words (#316).
 import type { ParityCase } from '../harness.js';
@@ -53,6 +53,8 @@ export const promptsCases: ParityCase[] = [
   get('weekly_summary for a date with short parts', 'weekly_summary', { week: '2025-3-5' }),
   // suspected TS bug: a year below 100 is read as 19xx, so the calendar check never matches
   get('weekly_summary for a year below 100', 'weekly_summary', { week: '0050-03-04' }),
+  // Not here: `week` of 0100-01-01 to 0100-01-03, whose Monday is in year 99. TS reads year 99 as 1999 while it shifts
+  // to Friday and says "through 2000-01-01"; Rust says 0100-01-01 on purpose (#299, a unit test in prompts.rs).
   get('weekly_summary with a quoted word in the error', 'weekly_summary', { week: 'the "next" one' }),
   get('weekly_summary with an argument it does not have', 'weekly_summary', { weak: 'last' }),
   get('weekly_summary with its argument and one it does not have', 'weekly_summary', { week: 'last', topic: 'atlas' }),
@@ -115,6 +117,13 @@ export const promptsCases: ParityCase[] = [
   get('prioritize_tasks with a focus of 200 characters', 'prioritize_tasks', { focus: longText(200) }),
   get('prioritize_tasks with a focus of 201 characters', 'prioritize_tasks', { focus: longText(201) }),
   get('prioritize_tasks with an argument it does not have', 'prioritize_tasks', { topic: 'atlas' }),
+
+  // suspected TS bug: the SDK's zod `record` parse drops a `__proto__` key with a string value (assigning a string
+  // to it is a no-op), so the prompt never sees it. `JSON.parse` makes it an own key, which an object literal
+  // would not, and `JSON.stringify` sends it.
+  get('continue_on ignores a __proto__ argument', 'continue_on', JSON.parse('{"topic":"atlas","__proto__":"x"}') as Record<string, string>),
+  get('continue_on with only a __proto__ argument has no topic', 'continue_on', JSON.parse('{"__proto__":"x"}') as Record<string, string>),
+  get('continue_on rejects a constructor argument beside a __proto__ one', 'continue_on', JSON.parse('{"topic":"atlas","constructor":"z","__proto__":"y"}') as Record<string, string>),
 
   // ---- the name
   get('an unknown prompt', 'nope'),
