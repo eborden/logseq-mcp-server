@@ -79,6 +79,21 @@ pub fn alias_sets(starts: &[PageId]) -> Query {
     }
 }
 
+/// The alias group of a page known only by name (`aliasSetByName`): rows are `[startPage, member]`
+/// with both sides pulled, one per page in the group, the start page included whenever it has an
+/// alias at all. No rows when no page has the name or the page has no aliases, so a name that is not
+/// a page costs nothing and changes nothing. The name is bound, lowercase by construction.
+pub fn alias_set_by_name(name: &PageName) -> Query {
+    Query {
+        text: format!(
+            "[:find (pull ?s [:db/id :block/name :block/original-name]) (pull ?m [:db/id :block/name :block/original-name]) \
+             :in $ ?page-name :where [?s :block/name ?page-name] {}]",
+            alias_closure("?s", "?m")
+        ),
+        inputs: vec![DatalogInput::PageName(name.clone())],
+    }
+}
+
 /// The linked references of a whole alias group (`linkedReferencesOfPages`), the way
 /// `logseq.Editor.getPageLinkedReferences` counts them for one page: blocks whose
 /// `:block/path-refs` hold any of the pages (so children of a block that links the page count),
@@ -111,6 +126,21 @@ mod tests {
             "[:find ?start (pull ?m [:db/id :block/name :block/original-name]) :where [(ground [10 11]) [?start ...]] \
              (or-join [?start ?m] (or-join [?start ?m] [?start :block/alias ?m] [?m :block/alias ?start]) \
              (and (or-join [?start ?alias-mid] [?start :block/alias ?alias-mid] [?alias-mid :block/alias ?start]) \
+             (or-join [?alias-mid ?m] [?alias-mid :block/alias ?m] [?m :block/alias ?alias-mid])))]"
+        );
+    }
+
+    #[test]
+    fn the_alias_group_by_name_binds_the_lowercased_name() {
+        let query = alias_set_by_name(&PageName::new("Project Atlas"));
+        assert_eq!(query.inputs, vec![DatalogInput::PageName(PageName::new("project atlas"))]);
+        assert!(!query.text.contains("atlas"), "no string is embedded in the text");
+        assert_eq!(
+            query.text,
+            "[:find (pull ?s [:db/id :block/name :block/original-name]) (pull ?m [:db/id :block/name :block/original-name]) \
+             :in $ ?page-name :where [?s :block/name ?page-name] \
+             (or-join [?s ?m] (or-join [?s ?m] [?s :block/alias ?m] [?m :block/alias ?s]) \
+             (and (or-join [?s ?alias-mid] [?s :block/alias ?alias-mid] [?alias-mid :block/alias ?s]) \
              (or-join [?alias-mid ?m] [?alias-mid :block/alias ?m] [?m :block/alias ?alias-mid])))]"
         );
     }
