@@ -88,7 +88,7 @@ jobs:
 
       - name: Parity with the TypeScript server
         working-directory: .
-        run: npx tsx scripts/parity.ts --tested-tools-only -- "$PWD/rust/target/debug/logseq-mcp-server"
+        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --tested-tools-only "$PWD/rust/target/debug/logseq-mcp-server"
 
       - name: Build (release)
         run: cargo build --release --locked
