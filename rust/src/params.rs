@@ -37,7 +37,7 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
                     chosen = Some(alias);
                     out.insert((*canonical).to_owned(), args[*alias].clone());
                 }
-                Some(chosen_key) if js::json_stringify(&args[chosen_key]) != js::json_stringify(&args[*alias]) => {
+                Some(chosen_key) if !same_value(&args[chosen_key], &args[*alias]) => {
                     let chosen_value = js::json_stringify(&args[chosen_key]);
                     return Err(ToolError::InvalidParameter(InvalidParameter {
                         param: (*alias).to_owned(),
@@ -53,6 +53,20 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
         }
     }
     Ok(Some(out))
+}
+
+/// Whether two arguments carry the same value. Numbers compare by value, as JavaScript holds
+/// them (`1` and `1.0` are one number; serde_json's own `==` tells them apart), and an object's keys
+/// may come in any order.
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => a.as_f64() == b.as_f64(),
+        (Value::Array(a), Value::Array(b)) => a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_value(a, b)),
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len() && a.iter().all(|(key, a)| b.get(key).is_some_and(|b| same_value(a, b)))
+        }
+        _ => a == b,
+    }
 }
 
 /// What `parseArgs` made of a bad required string parameter: `missing` when it is absent or
@@ -106,6 +120,18 @@ mod tests {
     fn the_canonical_name_stays_and_aliases_with_the_same_value_are_dropped() {
         assert_eq!(resolved(json!({"page_name": "Alice", "name": "Alice", "page": null})), json!({"page_name": "Alice"}));
         assert_eq!(resolved(json!({"name": 5, "page": 5})), json!({"page_name": 5}));
+    }
+
+    #[test]
+    fn numbers_are_the_same_when_their_values_are() {
+        // `1` and `1.0` are one number in JavaScript, which serde_json's `==` calls two
+        let sent: Value = serde_json::from_str(r#"{"name": 1, "page": 1.0}"#).unwrap();
+        assert_eq!(resolved(sent).get("page_name"), Some(&json!(1)));
+        let nested: Value = serde_json::from_str(r#"{"name": [1, {"a": 2}], "page": [1.0, {"a": 2.0}]}"#).unwrap();
+        assert!(resolve_param_aliases(PAGE, args(nested)).is_ok());
+        assert!(resolve_param_aliases(PAGE, args(json!({"name": 1, "page": 1.5}))).is_err());
+        assert!(resolve_param_aliases(PAGE, args(json!({"name": "1", "page": 1}))).is_err());
+        assert!(resolve_param_aliases(PAGE, args(json!({"name": [1, 2], "page": [1]}))).is_err());
     }
 
     #[test]
