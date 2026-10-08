@@ -50,7 +50,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0031-second-implementation-matches-tool-list-by-meaning](0031-second-implementation-matches-tool-list-by-meaning.md) | Hold a second implementation to the tools/list contract by meaning, not by bytes | superseded by 0032-closest-page-suggestions-match-by-meaning |
 | [0032-closest-page-suggestions-match-by-meaning](0032-closest-page-suggestions-match-by-meaning.md) | Hold a Rust implementation to the TypeScript tool contract: by meaning for tools/list and closest-name suggestions, byte for byte for the rest | superseded by 0034-golden-results-are-the-contract |
 | [0033-rust-mutation-testing-ratchet](0033-rust-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the Rust crate with cargo-mutants | accepted |
-| [0034-golden-results-are-the-contract](0034-golden-results-are-the-contract.md) | Make the recorded golden results the contract, compared by meaning, with LogSeq calls held to a bounded count | proposed |
+| [0034-golden-results-are-the-contract](0034-golden-results-are-the-contract.md) | Make the recorded golden results the contract, compared by meaning, with LogSeq calls held to a bounded count | accepted |
 
 ## File naming rule
 
