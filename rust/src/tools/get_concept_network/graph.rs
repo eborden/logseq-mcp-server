@@ -3,8 +3,10 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-/// A page in the network.
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+/// A page in the network: identity, then where it sits in the walk.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Node {
     pub id: i64,
     pub name: String,
@@ -20,6 +22,9 @@ pub struct Node {
 /// - `inbound`: blocks on `to` that reference `from`
 /// - `count`: `outbound + inbound`
 /// - `type`: `reference` if `from` links to `to` at all, else `backlink`
+///
+/// Written as `from`, `to`, `type`, `count`, `outbound`, `inbound`: the pair, what kind it is and how many,
+/// then the counts it is made of. `type` and `count` are derived, so the output is [`EdgeOutput`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edge {
     pub from: i64,
@@ -35,6 +40,24 @@ impl Edge {
 
     pub fn count(&self) -> i64 {
         self.outbound + self.inbound
+    }
+}
+
+/// An [`Edge`] as the result writes it.
+#[derive(Debug, Serialize)]
+pub struct EdgeOutput {
+    from: i64,
+    to: i64,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    count: i64,
+    outbound: i64,
+    inbound: i64,
+}
+
+impl From<&Edge> for EdgeOutput {
+    fn from(edge: &Edge) -> Self {
+        EdgeOutput { from: edge.from, to: edge.to, kind: edge.kind(), count: edge.count(), outbound: edge.outbound, inbound: edge.inbound }
     }
 }
 

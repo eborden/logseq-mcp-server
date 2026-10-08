@@ -30,8 +30,8 @@ use std::collections::{HashMap, HashSet};
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::args::Arguments;
 use crate::client::LogseqClient;
@@ -45,10 +45,10 @@ use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
 use crate::resolve::require_page;
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::resolved_from;
 
-use self::graph::{Edge, Links, Node, Nodes, build_edges, relabel_depths};
+use self::graph::{Edge, EdgeOutput, Links, Node, Nodes, build_edges, relabel_depths};
 use self::queries::{connected_pages, connected_pages_grouped};
 use self::selection::{Candidate, select_candidates};
 use self::warning::{TruncationFacts, network_truncated_warning};
@@ -202,32 +202,36 @@ impl ConceptNetwork {
         self.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())
     }
 
-    /// The network as the TypeScript object is written: `concept`, `resolvedFrom`, `resolvedAliases`,
-    /// `nodes`, `edges`, `truncated`, `hasMore`, `warnings`.
+    /// The network in BR-0013's key order: `concept`, `resolvedFrom`, `resolvedAliases`, then `truncated`,
+    /// `hasMore`, `warnings`, then `nodes` and `edges`.
     pub fn to_value(&self) -> Value {
-        let mut out = Map::new();
-        out.insert("concept".into(), json!(self.concept));
-        if let Some(from) = &self.resolved_from {
-            out.insert("resolvedFrom".into(), from.clone());
-        }
-        if let Some(names) = &self.resolved_aliases {
-            out.insert("resolvedAliases".into(), json!(names));
-        }
-        out.insert("nodes".into(), Value::Array(self.nodes.iter().map(|n| json!({"id": n.id, "name": n.name, "depth": n.depth})).collect()));
-        out.insert(
-            "edges".into(),
-            Value::Array(
-                self.edges
-                    .iter()
-                    .map(|e| json!({"from": e.from, "to": e.to, "type": e.kind(), "count": e.count(), "outbound": e.outbound, "inbound": e.inbound}))
-                    .collect(),
-            ),
-        );
-        out.insert("truncated".into(), json!(self.truncated));
-        out.insert("hasMore".into(), json!(self.has_more()));
-        out.insert("warnings".into(), serde_json::to_value(&self.warnings).expect("warnings serialize"));
-        Value::Object(out)
+        result_value(&NetworkOutput {
+            concept: &self.concept,
+            resolved_from: self.resolved_from.as_ref(),
+            resolved_aliases: self.resolved_aliases.as_deref(),
+            truncated: self.truncated,
+            has_more: self.has_more(),
+            warnings: &self.warnings,
+            nodes: &self.nodes,
+            edges: self.edges.iter().map(EdgeOutput::from).collect(),
+        })
     }
+}
+
+/// A network as written, in BR-0013's order: what was answered, whether it is complete and why not, then the data.
+#[derive(Serialize)]
+struct NetworkOutput<'a> {
+    concept: &'a str,
+    #[serde(rename = "resolvedFrom", skip_serializing_if = "Option::is_none")]
+    resolved_from: Option<&'a Value>,
+    #[serde(rename = "resolvedAliases", skip_serializing_if = "Option::is_none")]
+    resolved_aliases: Option<&'a [String]>,
+    truncated: bool,
+    #[serde(rename = "hasMore")]
+    has_more: bool,
+    warnings: &'a [ResultWarning],
+    nodes: &'a [Node],
+    edges: Vec<EdgeOutput>,
 }
 
 /// `normalizeCap`: a whole number of at least 1 (a JavaScript number is floored, and an argument is
@@ -395,7 +399,8 @@ pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::testing::{meaning, schema_of};
+    use crate::tool::testing::{keys, meaning, schema_of};
+    use serde_json::json;
 
     fn args(value: Value) -> Option<JsonObject> {
         value.as_object().cloned()
@@ -458,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn a_network_is_written_in_the_order_of_the_typescript_object() {
+    fn a_network_says_what_it_answered_and_whether_it_is_complete_before_its_nodes_and_edges() {
         let network = ConceptNetwork {
             concept: "atlas".into(),
             resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
@@ -473,11 +478,28 @@ mod tests {
             concat!(
                 r#"{"concept":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,
+                r#""truncated":true,"hasMore":true,"warnings":[{"code":"w","message":"m","howToFetchAll":"h"}],"#,
                 r#""nodes":[{"id":10,"name":"Project Atlas","depth":0},{"id":20,"name":"Bob","depth":1}],"#,
-                r#""edges":[{"from":10,"to":20,"type":"reference","count":3,"outbound":2,"inbound":1}],"#,
-                r#""truncated":true,"hasMore":true,"warnings":[{"code":"w","message":"m","howToFetchAll":"h"}]}"#
+                r#""edges":[{"from":10,"to":20,"type":"reference","count":3,"outbound":2,"inbound":1}]}"#
             )
         );
+    }
+
+    #[test]
+    fn the_order_of_a_network_does_not_depend_on_which_optional_keys_are_there() {
+        let all = ["concept", "resolvedFrom", "resolvedAliases", "truncated", "hasMore", "warnings", "nodes", "edges"];
+        let network = ConceptNetwork {
+            concept: "atlas".into(),
+            resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
+            resolved_aliases: Some(vec!["Atlas".into()]),
+            nodes: vec![],
+            edges: vec![],
+            truncated: false,
+            warnings: vec![],
+        };
+        assert_eq!(keys(&network.to_value()), all);
+        let bare = ConceptNetwork { resolved_from: None, resolved_aliases: None, ..network };
+        assert_eq!(keys(&bare.to_value()), ["concept", "truncated", "hasMore", "warnings", "nodes", "edges"]);
     }
 
     #[test]
