@@ -463,6 +463,49 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
   });
 });
 
+describe('perturbCases', () => {
+  const call = (response: unknown): CannedCall => ({ method: 'logseq.Editor.getAllPages', args: [], response });
+  const two = (extra: Partial<ParityCase> = {}): ParityCase => ({
+    name: 'two calls',
+    tool: 'logseq_list_pages',
+    arguments: {},
+    steps: [[call([{ name: 'first' }])], [call([{ name: 'second' }])]],
+    ...extra
+  });
+  const lastAnswer = (c: ParityCase) => c.steps.at(-1)!.at(-1)!.response;
+  const firstAnswer = (c: ParityCase) => c.steps[0][0].response;
+
+  it('suffixes the strings of the last call only, and leaves the case it was given alone', () => {
+    const original = two();
+    const [perturbed] = perturbCases([original]);
+    expect(lastAnswer(perturbed)).toEqual([{ name: 'second (perturbed)' }]);
+    expect(firstAnswer(perturbed)).toEqual([{ name: 'first' }]);
+    expect(lastAnswer(original)).toEqual([{ name: 'second' }]);
+  });
+
+  it('turns an answer with no string into a LogSeq error, and leaves a case with no calls as it is', () => {
+    const [noStrings, noCalls] = perturbCases([two({ steps: [[call([])]] }), two({ steps: [] })]);
+    expect(lastAnswer(noStrings)).toEqual({ error: 'parity harness: perturbed answer' });
+    expect(noCalls.steps).toEqual([]);
+  });
+
+  it('gives the last call the answer a case names in perturbed, whatever it is, and no other call', () => {
+    for (const perturbed of [[], null, 0, '', false, { rows: 1 }]) {
+      const [copy] = perturbCases([two({ perturbed })]);
+      expect(lastAnswer(copy)).toEqual(perturbed);
+      expect(firstAnswer(copy)).toEqual([{ name: 'first' }]);
+    }
+  });
+
+  it('does not take a missing perturbed for an answer', () => {
+    const [copy] = perturbCases([two({ perturbed: undefined })]);
+    // the key is there, so it is the answer: undefined reaches JSON as a missing answer, not as a suffix
+    expect(lastAnswer(copy)).toBeUndefined();
+    const [plain] = perturbCases([two()]);
+    expect('perturbed' in plain).toBe(false);
+  });
+});
+
 describe('runParity against the TypeScript server', () => {
   it('with onlyTestedTools, fails on every tool the server lists beyond the ones the cases call', async () => {
     // The TypeScript server lists 16 tools and the case calls one: the other 15 are not in the reference
@@ -479,6 +522,28 @@ describe('runParity against the TypeScript server', () => {
     const notInReference = report.failures.filter(f => f.endsWith(': not in the reference'));
     expect(notInReference).toHaveLength((await loadToolList()).length - 1);
     expect(report.failures).toHaveLength(notInReference.length);
+  }, 60000);
+
+  it('fails a case on its perturbed answer only when that answer changes what the server prints', async () => {
+    const exact = getPageOutlineCases[0];
+    const expected = await loadExpected();
+    const committed = exact.steps.at(-1)!.at(-1)!.response;
+    const run = async (perturbed: unknown) =>
+      runParity({
+        server: typescriptServer(),
+        cases: perturbCases([{ ...exact, perturbed }]),
+        expected: { [exact.name]: expected[exact.name] },
+        expectedToolList: await loadToolList(),
+        onlyTestedTools: true,
+        snapshotFile: SNAPSHOT_FILE
+      });
+    const resultFailures = (report: Awaited<ReturnType<typeof run>>) =>
+      report.failures.filter(f => f.startsWith(`[${exact.tool}: ${exact.name}]`));
+
+    // the committed answer prints the committed result: the self-check would say NOT CAUGHT
+    expect(resultFailures(await run(committed))).toEqual([]);
+    // another answer prints another result: caught
+    expect(resultFailures(await run([])).length).toBeGreaterThan(0);
   }, 60000);
 
   it('passes the TypeScript server against its own recorded results', async () => {
