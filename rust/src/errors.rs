@@ -39,6 +39,8 @@ impl fmt::Display for ToolError {
             ToolError::PageNotFound(error) => error.fmt(f),
             ToolError::AmbiguousPage(error) => error.fmt(f),
             ToolError::InvalidValue(error) => error.fmt(f),
+            // PARITY(#299): `undefined`, the JavaScript word for a missing id, in `groundIds`' message — drop
+            // if Rust becomes the only server.
             ToolError::PageWithoutId => f.write_str("Invalid entity id: undefined (expected an integer)"),
         }
     }

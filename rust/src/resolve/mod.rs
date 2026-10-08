@@ -69,6 +69,8 @@ enum PageKey {
     Name(String),
 }
 
+// PARITY(#299): sorts by `localeCompare`, whose order depends on the host's locale (suspected TS bug; see
+// `js::locale_compare`) — drop if Rust becomes the only server.
 /// Pages from rows, one per entity, ordered by name so output never depends on row order.
 fn distinct_pages(pages: Vec<&PulledPage>) -> Vec<&PulledPage> {
     let mut seen = HashSet::new();
@@ -94,6 +96,8 @@ fn found(page: &PulledPage, matched_by: MatchedBy) -> Resolution {
     Resolution::Found(ResolvedPage { page: page.clone(), matched_by, original_name: page.display_name() })
 }
 
+// PARITY(#299): an ambiguous result names the page as the caller typed it (untrimmed) while its reasons name
+// the trimmed one (suspected TS inconsistency) — drop if Rust becomes the only server.
 fn pick(pages: &[&PulledPage], matched_by: MatchedBy, reason: String, page_name: &str) -> Resolution {
     if let [page] = pages {
         return found(page, matched_by);
