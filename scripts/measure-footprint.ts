@@ -9,20 +9,19 @@
 //   - resident memory: idle after the handshake, and after one logseq_get_page_outline call
 //   - size: the release binary
 //
-// The server talks to the parity harness's stub LogSeq (scripts/parity/stub-logseq.ts) on a random local port with a
-// fresh token, through a temp LOGSEQ_MCP_CONFIG and an empty temp home, answering the harness's made-up Project Atlas
-// page. It never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Memory is read with `ps`,
-// so macOS or Linux only.
+// The server talks to a stub LogSeq (scripts/lib/stub-logseq.ts) on a random local port with a fresh token, through
+// a temp LOGSEQ_MCP_CONFIG and an empty temp home, answering a parity case's made-up Project Atlas page. It never
+// contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Memory is read with `ps`, so macOS or
+// Linux only.
 //
 // The first run is a warm-up and is reported apart, so first-launch costs (on macOS, the OS's check of a binary it
 // has not seen; page-cache effects) stay out of the medians.
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { getPageOutlineCases } from './parity/cases/get-page-outline.js';
-import { sandboxedEnv } from './parity/harness.js';
-import { REPO_ROOT } from './parity/server-command.js';
-import { startStubLogseq, type StubLogseq } from './parity/stub-logseq.js';
+import { loadParityCase, REPO_ROOT } from './lib/parity-cases.js';
+import { sandboxedEnv } from './lib/sandboxed-env.js';
+import { startStubLogseq, type StubLogseq } from './lib/stub-logseq.js';
 import { probeServer, type ProbeResult, type ServerProcess } from './measure-footprint/probe.js';
 import { formatMb, formatMs, formatSummary, summarize } from './measure-footprint/stats.js';
 
@@ -86,7 +85,7 @@ async function main(): Promise<void> {
     const env = sandboxedEnv(configPath, home);
 
     const server: ServerProcess = { command: options.rustBinary, args: [], env, cwd: work };
-    const outline = getPageOutlineCases[0];
+    const outline = loadParityCase('exact name, blocks out of order with children');
     // `stub.load` clears the stub's failure log, so look at it before every load and after every
     // probe: a call the stub could not answer in any run, at start-up or during the tool call, fails the script.
     const checkStub = (what: string) => {

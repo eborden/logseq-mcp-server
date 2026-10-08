@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
-import type { ProjectedTool } from '../../scripts/parity/tool-list-compare.js';
 import {
   approxTokens,
   DESCRIPTION_ALLOWANCES,
@@ -16,8 +15,8 @@ import {
  * Guardrails on the `tools/list` payload (#39, part of #13, kept by #356).
  *
  * Every session pays for this payload in context, so growth should be a deliberate choice. The recorded list,
- * scripts/parity/expected/tool-list.json, is the contract: the parity harness holds the Rust server's `tools/list`
- * to it by meaning (ADR-0031), and these checks hold the recorded list to the rules that outlived the TypeScript
+ * rust/tests/data/parity/tool-list.json, is the contract: the parity test (rust/tests/parity.rs) holds the Rust
+ * server's `tools/list` to it by meaning (ADR-0031), and these checks hold the recorded list to the rules that outlived the TypeScript
  * server it was recorded from (`tests/rust-guards/tool-list-live.test.ts` holds the live list to the budget and the cap):
  *   1. a size budget on the whole serialized tool list (ADR-0016),
  *   2. a per-tool description length cap (ADR-0016),
@@ -27,8 +26,9 @@ import {
  */
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const TOOL_LIST_FILE = new URL('../../scripts/parity/expected/tool-list.json', import.meta.url);
-type RecordedTool = ProjectedTool & {
+const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
+type RecordedTool = {
+  name: string;
   title?: string;
   description?: string;
   annotations?: Record<string, unknown>;
