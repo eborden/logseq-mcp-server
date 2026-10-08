@@ -129,11 +129,19 @@ jobs:
       - name: Build (debug)
         run: cargo build --locked
 
+      # Includes the parity cases (#371): rust/tests/parity.rs holds the binary to the recorded results, calls and
+      # tools/list from rust/tests/data/parity (exported from scripts/parity by scripts/export-parity.ts, and kept
+      # in step by tests/guards/parity-export.test.ts), and parity_self_check.rs proves it can fail. cargo-mutants
+      # runs this same command per mutant (ADR-0033), so a parity case kills a mutant it notices.
       - name: Unit tests
         run: cargo test --locked
 
+      # The Node golden-result harness below checks what the cargo test above checks (#371), with its own comparator
+      # (a second reading of the rules, until the ADR and business-rule enforcement lines that cite it move to the
+      # cargo test, which needs the maintainer's OK), and it is the recorder (--record-from-rust).
+      #
       # The golden-result harness (#124) holds the binary just built to the results recorded from the TypeScript
-      # server before it was retired (scripts/parity/expected): each tool result, prompt and resource byte for byte,
+      # server before it was retired (scripts/parity/expected): each tool result (JSON by deep equality and minified), prompt and resource,
       # the LogSeq calls and `tools/list` by meaning (ADR-0031), the closest names of a missing page by the rules of
       # ADR-0032. It starts its own stub LogSeq on a random local port, so nothing here contacts a LogSeq.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -168,6 +176,13 @@ jobs:
       - name: Build (release)
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: cargo build --release --locked
+
+      # The parity cases through cargo test against the release profile (#371): the same comparator as the debug run,
+      # on the optimised build. A release build ignores LOGSEQ_MCP_NOW, so the cases that read today's date leave this
+      # run (parity_support/cases.rs, clock-cases.json), as --real-clock leaves them out of the Node run below.
+      - name: Parity test (release build)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: cargo test --release --locked --test parity --test parity_self_check
 
       # The library's unit tests with debug_assertions off (#359): the ones that exist only in a release
       # build, such as the one holding that it ignores LOGSEQ_MCP_NOW (`#[cfg(not(debug_assertions))]` in

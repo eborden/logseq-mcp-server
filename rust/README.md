@@ -109,6 +109,26 @@ every name covers every word typed, and that there are as many as there are to l
 TypeScript run still compares its own bytes. The harness fails when the recorded cases lack one the ADR
 requires, and `--self-check` feeds it wrong lists to be sure they fail.
 
+### The same cases from `cargo test` (#371)
+
+`cargo test --locked --test parity` runs every parity case too, so `cargo-mutants` (ADR-0033) counts them:
+it kills a mutant when a case notices it. `rust/tests/parity.rs` starts the binary cargo built, answers its
+LogSeq calls from a stub on a random local port, and holds it to the same things as the Node harness: each
+result (a JSON tool result by deep equality, then minified; markdown, prompts, resources and the frame of a
+page-not-found message byte for byte; the closest names of a page-not-found message by ADR-0032's rules), the LogSeq calls (steps in order, the calls of a step as a set, nothing after the last), and
+`tools/list` by meaning (ADR-0031). `parity_self_check.rs` runs the cases once more with the last answer of each
+changed and requires every case with a LogSeq call to fail.
+
+The cases and golden results come from `rust/tests/data/parity/*.json`, which `npx vite-node
+scripts/export-parity.ts` writes from `scripts/parity/cases/` and `scripts/parity/expected/` (a copy of rust/ is
+all `cargo-mutants` has, so the test can't read `scripts/`). They are generated, never edited:
+`npx vite-node scripts/export-parity.ts --check` and `tests/guards/parity-export.test.ts` fail when they differ
+from their sources. The golden files stay the contract and the only place a result is recorded, so a re-record
+(`scripts/parity.ts --record-from-rust`, Node) is followed by an export, and the export's diff is the same change
+again, in the fixtures. Every comparison rule is in `tests/parity_support/compare.rs`: `compare_results` judges a
+result, and `same_tool_text` and `same_text` are the only places that decide whether two texts match. A release build (`cargo test
+--release`) reads the real date, so the cases that read today (`clock-cases.json`) leave its run.
+
 ## Running it
 
 It reads the same config file as the TypeScript server. To point it at this worktree's fixture
