@@ -2,9 +2,9 @@
 
 ## Statement
 
-Never cut results silently. Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`src/types.ts`): `hasMore`, `warnings: [{ code, message, howToFetchAll? }]`, and `totals` where already known (no extra API call just to count). `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise and a value. Object results get these fields. A tool that returns a bare array keeps it as the first content block and sends `{ "meta": ... }` as a second one (`metaContent`).
+Never cut results silently. Every list-returning tool has a default cap and a maximum, and reports a cap that bites through `ResultMeta` (`rust/src/meta.rs`): `hasMore`, `warnings: [{ code, message, howToFetchAll? }]`, and `totals` where already known (no extra API call just to count). `hasMore` is true only when a warning's `howToFetchAll` names a parameter to raise and a value. Object results get these fields. A tool that returns a bare array keeps it as the first content block and sends `{ "meta": ... }` as a second one (`meta_content` in `rust/src/tools/get_backlinks/mod.rs`).
 
-The `warnings` entry is the truncation signal, not `hasMore`. A result cut at a hard maximum carries a warning with `hasMore: false`, and that warning must say the maximum was reached and that the rest can't be fetched in one call. The exception is a paging parameter, such as `offset`, that can fetch the rest. Then `hasMore` is true, the warning still says the maximum was reached, and `howToFetchAll` names that parameter and its value. Helpers live in `src/utils/result-meta.ts`.
+The `warnings` entry is the truncation signal, not `hasMore`. A result cut at a hard maximum carries a warning with `hasMore: false`, and that warning must say the maximum was reached and that the rest can't be fetched in one call. The exception is a paging parameter, such as `offset`, that can fetch the rest. Then `hasMore` is true, the warning still says the maximum was reached, and `howToFetchAll` names that parameter and its value. The warnings are built in `rust/src/truncation.rs`.
 
 ## Rationale
 
@@ -24,3 +24,4 @@ reviewer: Any new cap, limit or maximum on a tool result reports through `Result
 | 2026-10-05 | Introduced. | #52 |
 | 2026-10-06 | A cut at a hard maximum keeps `hasMore: true` when a paging parameter such as `offset` can fetch the rest, and `howToFetchAll` names it and its value. | #141 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate's unit tests with the TypeScript server's removal. Statement unchanged. | #370 |
+| 2026-10-08 | Statement: the paths and helper names of the TypeScript server (`src/types.ts`, `metaContent`, `src/utils/result-meta.ts`) are the Rust crate's. The rule is unchanged. | #372 |
