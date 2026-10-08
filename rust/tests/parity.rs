@@ -22,13 +22,10 @@
 mod parity_support;
 
 use parity_support::cases::{Case, load_cases, load_clock_cases, load_comparator_table, load_tool_list, perturb_value, without_clock_cases};
-use parity_support::compare::{compare_calls, compare_results, compare_tool_lists, minified_failures, normalize_schema, same_text, values_equal};
+use parity_support::compare::{check_wrong_lists, compare_calls, compare_results, compare_tool_lists, minified_failures, normalize_schema, same_text, values_equal};
 use parity_support::server::{PARITY_NOW_MS, Run, run_parity};
 use parity_support::stub::Call;
-use parity_support::suggestion_rules::{
-    GUIDANCE, candidates_of, check_list, check_reference_list, fold, matches_of, not_found_sites, parse_not_found, read_message, split_list, with_message,
-    wrong_lists, WRONG_LIST_LABELS,
-};
+use parity_support::suggestion_rules::{GUIDANCE, candidates_of, check_list, check_reference_list, fold, matches_of, parse_not_found, split_list};
 use serde_json::{Value, json};
 
 /// The cases this build can hold to the recording.
@@ -388,25 +385,8 @@ fn the_closest_name_rules_judge_a_list() {
 
 #[test]
 fn every_wrong_closest_name_list_is_caught() {
-    let cases = cases_for_this_build();
-    let mut applied = vec![0; WRONG_LIST_LABELS.len()];
-    let mut not_caught = Vec::new();
-    for case in &cases {
-        let candidates = candidates_of(case);
-        for site in not_found_sites(&case.expected) {
-            let reference = read_message(&case.expected, site).unwrap();
-            for wrong in wrong_lists(&reference, &candidates) {
-                applied[WRONG_LIST_LABELS.iter().position(|l| *l == wrong.label).unwrap()] += 1;
-                if compare_results(&case.expected, &with_message(&case.expected, site, &wrong.message), &candidates).is_empty() {
-                    not_caught.push(format!("{} in {:?}", wrong.label, case.name));
-                }
-            }
-        }
-    }
-    assert!(not_caught.is_empty(), "not caught: {not_caught:?}");
-    for (label, count) in WRONG_LIST_LABELS.iter().zip(applied) {
-        assert!(count > 0, "no recorded case a wrong list of the kind {label:?} applies to");
-    }
+    let (lines, ok) = check_wrong_lists(&cases_for_this_build());
+    assert!(ok, "{}", lines.join("\n"));
 }
 
 // ---- the table both comparators are held to
