@@ -1,12 +1,18 @@
 name: CI
 
+# The Rust server is the only server (ADR-0025, #349, #356), so the Rust job is the main check. Node stays for the
+# tooling the Rust server is held to: the parity harness (scripts/parity), the repo's guard tests (tests/guards,
+# tests/rust-guards) and the type-check of both. The integration suites (tests/integration) need a LogSeq desktop
+# app serving the fixture graph, which CI doesn't have; they run locally (tests/integration/setup.md).
+#
+# It builds and tests only; it never publishes (ADR-0017 covers npm, and a binary release needs its own ADR first).
 on:
   pull_request:
-    # labeled and unlabeled: the mutation job reads the mutation-baseline-change label (ADR-0026),
-    # so adding or removing it has to re-run the check.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
   push:
-    branches: [main]
+    branches: [main, feature/rust-spike]
+  # A manual run also builds and checks the release binary (see the steps below)
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,10 +22,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # engines.node in package.json is the floor of the dev toolchain (vite 7): 22.12.
-  # Test the oldest major that satisfies it and the newest.
-  test:
-    name: Type-check and unit tests (Node ${{ matrix.node }})
+  # engines.node in package.json is the floor of the dev toolchain (vite 7): 22.12 (ADR-0022).
+  # Test the oldest major that satisfies it and the newest. These checks need no Rust build.
+  tooling:
+    name: Type-check and guard tests (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -36,158 +42,112 @@ jobs:
 
       - run: npm ci
 
+      # scripts/, the guard tests and the integration suites (which have their own tsconfig). It only type-checks
+      # the integration tests. Running them still needs LogSeq.
       - name: Type-check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
-      # tsconfig.json covers src only (rootDir: src) and skips tests. This one adds
-      # scripts/, the unit tests (src/**/*.test.ts) and the integration tests
-      # (tests/integration/**; see tsconfig.scripts.json). It only type-checks the
-      # integration tests. Running them still needs LogSeq.
-      - name: Type-check scripts and tests
-        run: npx tsc -p tsconfig.scripts.json
+      # The repo's rules as tests: the docs format (ADRs and business rules), the issue and PR templates, the
+      # privacy checks, the fixture graph, the workflows, the tool-list guardrails, the per-worktree instance.
+      # tests/rust-guards needs the Rust binary and runs in the job below.
+      - name: Guard tests
+        run: npx vitest run tests/guards
 
-      # Unit tests only. The integration tests (tests/integration, run locally
-      # with `npm run test:integration`) need a LogSeq desktop app serving the
-      # fixture graph, which CI doesn't have. Don't switch this to `npm test`,
-      # which runs both suites.
-      - name: Unit tests
-        run: npx vitest run src
-
-  # Mutation testing on the unit suite (ADR-0026, #204, #205). It fails when scripts/mutation-ratchet.ts
-  # does: a file below its score in mutation-baseline.json, a bare `Stryker disable`, a file with no
-  # entry, and, on a PR, a lowered score or an edit to the mutated scope without the
-  # mutation-baseline-change label.
-  #
-  # Node 24 only: Node 22 and 24 gave the same scores, and the unit-test job above keeps its
-  # matrix (ADR-0022). The 10-minute timeout is the real bound on a PR.
-  #
-  # A PR job restores Stryker's incremental file and never saves it. Only a push to main saves
-  # (under its own SHA), and so does the weekly job in mutation-weekly.yml, so a PR can't fill
-  # or poison the cache.
-  #
-  # Stryker's incremental mode can't see an edit to the left-out sources, the test helpers,
-  # snapshots, fixtures, the lockfile or the configs. When a PR changes one (or there is no
-  # cache), scripts/mutation-ci.ts takes the cache-miss path: it mutates only the files the PR
-  # itself changed (against its base, not against the commit the restored cache is from: that can
-  # be many commits behind), the files the changed tests import (not for a test the PR adds) and
-  # the files whose baseline entry changed, in that order, and never starts a cold full run. It
-  # takes files first-fit while the estimated mutants fit MUTANT_BUDGET (see
-  # scripts/mutation-ci.ts, ADR-0028, ADR-0029), sizing each file from the restored incremental
-  # file, and leaves the rest to the weekly run, named in the summary. A changed source left out
-  # fails the ratchet until a run of mutation-weekly.yml by hand on the PR's head commit has
-  # succeeded, and a re-run of this job then passes. A test import or baseline entry left out is
-  # only a warning, covered by the scheduled weekly run. The plan step reads the restored file, so
-  # it runs before the step that drops it. After a blind-spot change lands on main the cache stays
-  # old until the weekly run, which resets it (run it by hand on main to do it sooner).
-  mutation:
-    name: Mutation testing
+  build-and-test:
+    name: Cargo build and tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # actions: read, for the ratchet's look-up of a successful mutation-weekly.yml run on the PR's
-    # head commit (ADR-0028). Setting permissions here replaces the workflow's, so contents is repeated.
-    permissions:
-      contents: read
-      actions: read
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: rust
     steps:
-      # Full history: the plan diffs against the commit the restored cache was saved from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
 
+      # Installs the toolchain rust/rust-toolchain.toml names (rust-src-dir points it there), so
+      # CI and local builds use the same compiler, and caches through Swatinem/rust-cache (which
+      # the action pins by SHA itself). Its key covers the rustc version, Cargo.lock and the job,
+      # and it caches only the dependencies' build output, not this crate's, so a cache never
+      # holds a stale build of our code or another toolchain's.
+      # Warnings don't fail the build during the spike: build-warnings is v2's switch for that
+      # (it defaults to deny), and rustflags is left empty.
+      - name: Set up the Rust toolchain and cache
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          rust-src-dir: rust
+          cache-workspaces: rust
+          rustflags: ""
+          build-warnings: warn
+
+      # The action falls back to stable if it misses the toolchain file; fail loudly instead.
+      - name: Check the compiler is the pinned one
+        run: |
+          expected="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustc --version | grep -q "^rustc ${expected} " || { rustc --version; echo "expected rustc ${expected}" >&2; exit 1; }
+
+      - name: Build (debug)
+        run: cargo build --locked
+
+      - name: Unit tests
+        run: cargo test --locked
+
+      # The golden-result harness (#124) holds the binary just built to the results recorded from the TypeScript
+      # server before it was retired (scripts/parity/expected): each tool result, prompt and resource byte for byte,
+      # the LogSeq calls and `tools/list` by meaning (ADR-0031), the closest names of a missing page by the rules of
+      # ADR-0032. It starts its own stub LogSeq on a random local port, so nothing here contacts a LogSeq.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
+          cache-dependency-path: package-lock.json
 
-      - run: npm ci
+      - name: Install the harness's dependencies
+        working-directory: .
+        run: npm ci
 
-      # The one base commit of this job (#223): the plan reads the base's baseline at it and the ratchet
-      # compares the baseline and the mutated scope with it. On a PR it is the first parent of the
-      # merge commit that was checked out, so it is the base tip this HEAD was built on even when
-      # main moved after the PR event (the event's base SHA is stale then, and a labeled or
-      # unlabeled re-run would count main's own baseline edits as the PR's). On a push it is the
-      # commit before it (the ratchet only compares on a PR).
-      - name: Resolve the base commit
+      - name: Parity with the recorded results
+        working-directory: .
+        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts "$PWD/rust/target/debug/logseq-mcp-server"
+
+      # Passes as committed, fails on every perturbed case and on every wrong list of closest names: a harness that
+      # can't fail proves nothing.
+      - name: Parity self-check
+        working-directory: .
+        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --self-check "$PWD/rust/target/debug/logseq-mcp-server"
+
+      # The harness's own end-to-end tests and the server-version check, which start the binary just built.
+      - name: Guard tests that start the server
+        working-directory: .
+        run: npx vitest run tests/rust-guards
+
+      # The slowest step (thin LTO, one codegen unit). Only the parity step below uses its output:
+      # the startup and footprint measurements (#126) build the release binary locally. It runs on
+      # a push to main and by hand. Until then the release profile is checked locally:
+      # `cd rust && cargo build --release --locked`.
+      - name: Build (release)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: cargo build --release --locked
+
+      # The library's unit tests with debug_assertions off (#359): the ones that exist only in a release
+      # build, such as the one holding that it ignores LOGSEQ_MCP_NOW (`#[cfg(not(debug_assertions))]` in
+      # rust/src/env.rs), and the date logic as the shipped profile compiles it. Nothing runs these in a pull
+      # request, so they run with the release build. `--lib` skips the integration tests, which spawn the
+      # binary and are covered by the debug run and the parity step. Turning LTO off and using 16 codegen
+      # units keeps this to a few minutes: the full release profile (thin LTO, one codegen unit) is what makes
+      # the build above slow, and neither setting changes what debug_assertions does. It rebuilds the
+      # dependencies once, since the profile differs from the one the release build used.
+      - name: Unit tests (release)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          if [ "$EVENT_NAME" = pull_request ]; then
-            BASE_SHA="$(git rev-parse HEAD^1)"
-          else
-            BASE_SHA="$BEFORE"
-          fi
-          echo "BASE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+          CARGO_PROFILE_RELEASE_LTO: 'off'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+        run: cargo test --release --locked --lib
 
-      # Restore only. The key names the commit the PR is based on, and restore-keys falls back to
-      # the newest file saved from main.
-      - name: Restore the incremental file
-        id: cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: reports/mutation/stryker-incremental.json
-          key: mutation-incremental-${{ github.event.pull_request.base.sha || github.sha }}
-          restore-keys: |
-            mutation-incremental-
-
-      - name: Plan the run
-        id: plan
-        env:
-          MATCHED_KEY: ${{ steps.cache.outputs.cache-matched-key }}
-        run: |
-          if [ -n "$MATCHED_KEY" ]; then
-            node scripts/mutation-ci.ts plan --cache hit --since "${MATCHED_KEY#mutation-incremental-}" --fallback-since "$BASE_SHA" >> "$GITHUB_OUTPUT"
-          else
-            node scripts/mutation-ci.ts plan --cache miss --fallback-since "$BASE_SHA" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Mutation tests, whole scope (incremental)
-        if: steps.plan.outputs.mode == 'incremental'
-        run: npx stryker run
-
-      # The cache-miss path. The restored file, if any, is dropped so no result from main is reused.
-      - name: Mutation tests, changed files only
-        if: steps.plan.outputs.mode == 'targeted'
-        env:
-          MUTATE: ${{ steps.plan.outputs.mutate }}
-        run: |
-          rm -f reports/mutation/stryker-incremental.json
-          npx stryker run --mutate "$MUTATE"
-
-      # Only a push to main saves, and only a whole-scope incremental run: a cache-miss run holds
-      # a few files' results and would replace the good file. It comes before the ratchet, so a
-      # failing check never stops the cache from being saved: its results are true either way.
-      - name: Save the incremental file
-        if: github.event_name == 'push' && steps.plan.outputs.mode == 'incremental'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: reports/mutation/stryker-incremental.json
-          key: mutation-incremental-${{ github.sha }}
-
-      - name: Job summary
-        if: always()
-        run: node scripts/mutation-ci.ts summary >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: mutation-report
-          path: |
-            reports/mutation/mutation.json
-            reports/mutation/plan.json
-          if-no-files-found: ignore
-          retention-days: 30
-
-      # The gate (ADR-0026). It compares the report with mutation-baseline.json and, on a PR, the
-      # baseline and the mutated scope with the copy at BASE_SHA, the same commit the plan used. A file
-      # below its baseline is re-run once from a fresh sandbox before it fails. Labels and the base go
-      # in through env:. GITHUB_TOKEN (actions: read) is for the look-up of a weekly run on the head
-      # commit, which a changed source left out of this run needs.
-      - name: Ratchet
-        env:
-          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          BASE_REF: ${{ github.base_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/mutation-ratchet.ts check ${BASE_REF:+--base "$BASE_SHA"}
+      # The same harness against the release binary (#359): the debug build above proves the logic,
+      # this proves the optimised build (thin LTO, one codegen unit, stripped) answers the same. It
+      # needs the release build, so it runs under the same condition. A release build ignores
+      # LOGSEQ_MCP_NOW (rust/src/env.rs), so --real-clock leaves out the cases that read today's date
+      # (scripts/parity/clock-cases.ts); the debug run above still holds the server to every one.
+      - name: Parity with the recorded results (release binary)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        working-directory: .
+        run: node node_modules/vite-node/vite-node.mjs scripts/parity.ts --real-clock "$PWD/rust/target/release/logseq-mcp-server"
