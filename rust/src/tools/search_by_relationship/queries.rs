@@ -1,6 +1,6 @@
 //! The Datalog queries only the relationship search makes (`blocksOnPageReferencing`,
 //! `blocksReferencingInPagesLinking`, their alias-group forms and `neighborPages` in
-//! `src/datalog/queries.ts`). A page name is bound with `:in` (ADR-0013), lowercase by
+//! `src/datalog/queries.ts`), and the outbound pair for `referenced-by`, which the TypeScript server never had (#299). A page name is bound with `:in` (ADR-0013), lowercase by
 //! construction; page ids are embedded through `ground_ids`, which takes only a valid [`PageId`].
 //!
 //! The text is the TypeScript text with its whitespace collapsed; LogSeq doesn't care how a query
@@ -27,6 +27,19 @@ pub fn blocks_referencing_in_pages_linking(a: &PageName, b: &PageName) -> Query 
     Query {
         text: "[:find (pull ?block [*]) :in $ ?a-name ?b-name :where [?a :block/name ?a-name] [?b :block/name ?b-name] \
                [?linker :block/refs ?b] [?linker :block/page ?page] [?block :block/page ?page] [?block :block/refs ?a]]"
+            .to_owned(),
+        inputs: vec![DatalogInput::PageName(a.clone()), DatalogInput::PageName(b.clone())],
+    }
+}
+
+/// Blocks that reference topic A, restricted to pages that topic B's page references: the outbound
+/// reading, for `referenced-by` ("blocks about A in pages referenced by B"). It is
+/// [`blocks_referencing_in_pages_linking`] with the link followed the other way: a block on B's page
+/// references `?page`, where the inbound query has a block on `?page` referencing B.
+pub fn blocks_referencing_in_pages_referenced_by(a: &PageName, b: &PageName) -> Query {
+    Query {
+        text: "[:find (pull ?block [*]) :in $ ?a-name ?b-name :where [?a :block/name ?a-name] [?b :block/name ?b-name] \
+               [?source :block/page ?b] [?source :block/refs ?page] [?block :block/page ?page] [?block :block/refs ?a]]"
             .to_owned(),
         inputs: vec![DatalogInput::PageName(a.clone()), DatalogInput::PageName(b.clone())],
     }
@@ -61,6 +74,21 @@ pub fn blocks_referencing_in_pages_linking_ids(a: &[PageId], b: &[PageId]) -> Re
     Ok(Query {
         text: format!(
             "[:find (pull ?block [*]) :where {} {} [?linker :block/refs ?b] [?linker :block/page ?page] \
+             [?block :block/page ?page] [?block :block/refs ?a]]",
+            ground_ids(a, "?a"),
+            ground_ids(b, "?b")
+        ),
+        inputs: Vec::new(),
+    })
+}
+
+/// [`blocks_referencing_in_pages_referenced_by`] across alias groups: blocks that reference any of
+/// `a`, on pages that some block on any of `b` references.
+pub fn blocks_referencing_in_pages_referenced_by_ids(a: &[PageId], b: &[PageId]) -> Result<Query, ToolError> {
+    assert_non_empty("blocksReferencingInPagesReferencedByIds", &[a, b])?;
+    Ok(Query {
+        text: format!(
+            "[:find (pull ?block [*]) :where {} {} [?source :block/page ?b] [?source :block/refs ?page] \
              [?block :block/page ?page] [?block :block/refs ?a]]",
             ground_ids(a, "?a"),
             ground_ids(b, "?b")
@@ -113,6 +141,34 @@ mod tests {
         );
         let linking = blocks_referencing_in_pages_linking_ids(&ids(&[4]), &ids(&[5, 6])).unwrap();
         assert!(linking.text.contains(":where [(ground [4]) [?a ...]] [(ground [5 6]) [?b ...]] [?linker :block/refs ?b]"));
+    }
+
+    #[test]
+    fn the_outbound_query_follows_the_link_from_topic_bs_page_and_binds_names_with_in() {
+        let query = blocks_referencing_in_pages_referenced_by(&PageName::new("Project Atlas"), &PageName::new("Bob"));
+        assert_eq!(query.inputs[0].to_edn(), "\"project atlas\"");
+        assert_eq!(query.inputs[1].to_edn(), "\"bob\"");
+        assert!(!query.text.contains("atlas") && !query.text.contains("bob"));
+        assert_eq!(
+            query.text,
+            "[:find (pull ?block [*]) :in $ ?a-name ?b-name :where [?a :block/name ?a-name] [?b :block/name ?b-name] \
+             [?source :block/page ?b] [?source :block/refs ?page] [?block :block/page ?page] [?block :block/refs ?a]]"
+        );
+        // Not the inbound reading: no block on the linked page references B
+        assert_ne!(query.text, blocks_referencing_in_pages_linking(&PageName::new("Project Atlas"), &PageName::new("Bob")).text);
+    }
+
+    #[test]
+    fn the_outbound_group_form_embeds_only_ids() {
+        let query = blocks_referencing_in_pages_referenced_by_ids(&ids(&[4]), &ids(&[5, 6])).unwrap();
+        assert!(query.inputs.is_empty());
+        assert_eq!(
+            query.text,
+            "[:find (pull ?block [*]) :where [(ground [4]) [?a ...]] [(ground [5 6]) [?b ...]] [?source :block/page ?b] \
+             [?source :block/refs ?page] [?block :block/page ?page] [?block :block/refs ?a]]"
+        );
+        let error = blocks_referencing_in_pages_referenced_by_ids(&[], &ids(&[3])).unwrap_err();
+        assert_eq!(error.to_string(), "blocksReferencingInPagesReferencedByIds needs at least one page id in each list");
     }
 
     #[test]

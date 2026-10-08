@@ -149,6 +149,63 @@ async fn references_with_no_aliases_costs_three_calls_two_resolvers_and_the_quer
 }
 
 #[tokio::test]
+async fn referenced_by_asks_for_the_pages_topic_b_references_and_in_pages_linking_to_for_the_pages_that_link_to_it() {
+    let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
+    let run = |relationship_type: RelationshipType| {
+        let pages = pages.clone();
+        async move {
+            let logseq = mock_logseq(move |request| match resolver_name(request) {
+                Some(name) => resolve(&name, &pages),
+                None => json!([pulled_block(101)]),
+            })
+            .await;
+            let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", relationship_type)).await.unwrap();
+            assert_eq!(result["results"].as_array().unwrap().len(), 1);
+            // the same 3 calls as the inbound reading: 2 resolvers and 1 query
+            assert_eq!(logseq.seen.lock().unwrap().len(), 3);
+            let query = logseq.seen.lock().unwrap().iter().find(|r| resolver_name(r).is_none()).cloned().unwrap();
+            (text_of(&query), inputs_of(&query))
+        }
+    };
+
+    let (outbound, inputs) = run(RelationshipType::ReferencedBy).await;
+    assert!(outbound.contains("[?source :block/page ?b] [?source :block/refs ?page]"), "{outbound}");
+    assert!(!outbound.contains("?linker"), "{outbound}");
+    assert_eq!(inputs, ["\"atlas\"", "\"bob\""]);
+
+    let (inbound, inputs) = run(RelationshipType::InPagesLinkingTo).await;
+    assert!(inbound.contains("[?linker :block/refs ?b] [?linker :block/page ?page]"), "{inbound}");
+    assert_eq!(inputs, ["\"atlas\"", "\"bob\""]);
+}
+
+#[tokio::test]
+async fn referenced_by_with_aliases_adds_the_one_alias_lookup_and_matches_by_the_ids_of_the_groups() {
+    let pages = vec![page(10, "Atlas", &[11]), page(20, "Bob", &[21])];
+    let logseq = mock_logseq(move |request| {
+        let text = text_of(request);
+        if let Some(name) = resolver_name(request) {
+            resolve(&name, &pages)
+        } else if text.starts_with("[:find ?start") {
+            json!([
+                [10, {"id": 10, "name": "atlas", "original-name": "Atlas"}],
+                [10, {"id": 11, "name": "project atlas", "original-name": "Project Atlas"}],
+                [20, {"id": 20, "name": "bob", "original-name": "Bob"}],
+                [20, {"id": 21, "name": "robert", "original-name": "Robert"}]
+            ])
+        } else {
+            json!([pulled_block(101)])
+        }
+    })
+    .await;
+
+    search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::ReferencedBy)).await.unwrap();
+
+    // two resolvers, one alias lookup for both topics, one query over the ids of both groups
+    assert_eq!(logseq.seen.lock().unwrap().len(), 4);
+    assert_eq!(count_matching(&logseq, "[(ground [10 11]) [?a ...]] [(ground [20 21]) [?b ...]] [?source :block/page ?b] [?source :block/refs ?page]"), 1);
+}
+
+#[tokio::test]
 async fn the_same_name_twice_is_resolved_once() {
     let pages = vec![page(10, "Atlas", &[])];
     let logseq = mock_logseq(move |request| match resolver_name(request) {
