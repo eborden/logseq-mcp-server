@@ -190,3 +190,36 @@ async fn with_two_answers_wrong_the_error_is_the_first_in_a_fixed_order() {
     assert!(matches!(&error, ToolError::Response(response) if response.method == GET_CURRENT_PAGE), "{error}");
     assert_eq!(methods(&logseq).len(), 3);
 }
+
+// A deliberate difference from TypeScript, which embeds any integer in the `ground` clause and gets no row: a
+// page id that is not positive can't be a `:db/id`, so `PageId` refuses it before any query is made.
+#[tokio::test]
+async fn a_non_positive_page_id_is_an_error_and_makes_no_lookup() {
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, json!(null)),
+        (GET_CURRENT_BLOCK, json!({"id": 5, "uuid": "00000000-0000-4000-8000-000000000005", "content": "on page -1", "page": {"id": -1}})),
+        (GET_SELECTED_BLOCKS, json!(null)),
+        (DATASCRIPT_QUERY, json!([])),
+    ])
+    .await;
+    let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
+
+    assert!(matches!(&error, ToolError::InvalidValue(_)), "{error}");
+    assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS], "no lookup is made");
+}
+
+#[tokio::test]
+async fn a_page_id_of_zero_with_no_db_id_names_no_page_and_makes_no_lookup() {
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, json!(null)),
+        (GET_CURRENT_BLOCK, json!({"id": 5, "uuid": "00000000-0000-4000-8000-000000000005", "content": "on page 0", "page": {"id": 0}})),
+        (GET_SELECTED_BLOCKS, json!(null)),
+        (DATASCRIPT_QUERY, json!([])),
+    ])
+    .await;
+    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+
+    assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS], "no lookup is made");
+    assert!(context.page.is_none());
+    assert!(context.focused_block.as_ref().unwrap().get("pageName").is_none());
+}
