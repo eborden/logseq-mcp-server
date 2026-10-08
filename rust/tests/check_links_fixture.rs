@@ -11,6 +11,10 @@
 //! - the prose check's first difference agrees with an independent reference, on a table of tricky
 //!   pairs and on seeded random ones.
 //!
+//! The TypeScript pieces and table also held lone surrogates, which a Rust `&str` cannot. The behaviour
+//! they pinned (a position is a whole code point, never the middle of a surrogate pair) is pinned here only by
+//! the astral rows of the table and the emoji pieces, and by the astral parity cases.
+//!
 //! Every page here is the fixture's, made up (BR-0001).
 
 mod common;
@@ -467,13 +471,54 @@ async fn the_prose_check_matches_the_reference_on_the_tricky_pairs() {
 }
 
 const PIECES: &[&str] = &["a", "b", "x", " ", "\n", "[[", "]]", "[", "]", "[[p]]", "😀", "😁", "é", "."];
-const PAIRS: usize = 5000;
+/// The TypeScript test's count. Each pair goes both ways, so 40,000 comparisons.
+const PAIRS: usize = 20_000;
+
+/// A LogSeq that keeps its connections open and answers every request with no rows. The shared mock closes the
+/// connection after each answer, which for ~16,000 queries is too many sockets and too slow; this one is the bulk path
+/// the random pairs use, over one connection. Nothing here is graph data.
+async fn bulk_logseq() -> MockLogseq {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut buf: Vec<u8> = Vec::new();
+                loop {
+                    let mut chunk = [0u8; 8192];
+                    let n = socket.read(&mut chunk).await.unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    // one request at a time: the head, then `content-length` bytes of body
+                    while let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..head_end]).to_ascii_lowercase();
+                        let length = head
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length: ").and_then(|v| v.trim().parse::<usize>().ok()))
+                            .unwrap_or(0);
+                        if buf.len() < head_end + 4 + length {
+                            break;
+                        }
+                        buf.drain(..head_end + 4 + length);
+                        let reply = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n[]";
+                        socket.write_all(reply.as_bytes()).await.unwrap();
+                    }
+                }
+            });
+        }
+    });
+    MockLogseq { api_url, seen: Default::default() }
+}
 
 #[tokio::test]
 async fn the_prose_check_matches_the_reference_on_seeded_random_pairs_including_prefixes_and_extensions() {
     // Each pair goes both ways. A pair whose `after` has a `[[term]]` makes one query, which this answers with no rows
     // (the terms are unresolved, which this test does not read).
-    let logseq = mock_logseq(vec![json!([]); PAIRS * 2]).await;
+    let logseq = bulk_logseq().await;
     let client = client(&logseq);
     let mut rand = Seeded(246);
     let text = |rand: &mut Seeded| -> String {
