@@ -95,7 +95,7 @@ pub struct ResolverRow {
 pub fn resolver_rows(answer: &Value) -> Result<Option<Vec<ResolverRow>>, ResponseError> {
     let mut reader = Reader::default();
     reader
-        .rows(answer, 2, |r, cells| {
+        .rows_with_optional_tail(answer, 2, 1, |r, cells| {
             let page = r.at(Part::Index(0), |r| r.pulled_page(cells.first()))?;
             let via = r.at(Part::Index(1), |r| match cells.get(1) {
                 None => Ok(None),
@@ -123,11 +123,7 @@ pub fn link_target_rows(answer: &Value) -> Result<Option<Vec<LinkTargetRow>>, Re
     let mut reader = Reader::default();
     reader
         .rows(answer, 3, |r, cells| {
-            // PARITY(#299): zod's rule for a tuple whose last cell is `z.unknown()` is that a row may leave that cell
-            // out but not the one before it, and then says `>3` (zod's own wording) — drop if Rust becomes the only server.
-            if cells.len() < 2 {
-                return Err(r.issue("Too small: expected array to have >3 items"));
-            }
+            // `rows` has refused a row of fewer than two cells, so `cells[1]` is there; the name may not be
             let page = r.at(Part::Index(0), |r| match cells.first() {
                 Some(Value::Null) => Ok(None),
                 value => r.pulled_page(value).map(Some),
@@ -272,6 +268,36 @@ mod tests {
         assert_eq!(problem(link_target_rows(&json!([[]]))), "[0]: Too small: expected array to have >3 items");
         assert_eq!(problem(link_target_rows(&json!([[{"id": 1}, "name", "x", "y"]]))), "[0]: Too big: expected array to have <3 items");
         assert_eq!(problem(link_target_rows(&json!([5]))), "[0]: Invalid input: expected tuple, received number");
+    }
+
+    // zod 4 checks a tuple's length before it reads a cell: `z.tuple([...])` fails a row shorter than its width
+    // minus the trailing optional cells minus one with `Too small: expected array to have >{width} items`,
+    // and reads a row one cell shorter than that with the missing cell as `undefined`. Probed with zod 4's
+    // `safeParse(...).error.issues[0]` over the same tuples as `responses.*`.
+    #[test]
+    fn a_row_two_cells_short_is_too_small_before_any_cell_is_read() {
+        assert_eq!(problem(alias_set_rows(&json!([[]]))), "[0]: Too small: expected array to have >2 items");
+        assert_eq!(problem(alias_set_by_name_rows(&json!([[]]))), "[0]: Too small: expected array to have >2 items");
+        assert_eq!(problem(link_target_rows(&json!([[]]))), "[0]: Too small: expected array to have >3 items");
+        // at the row's own path
+        assert_eq!(problem(alias_set_rows(&json!([[1, {"id": 2}], []]))), "[1]: Too small: expected array to have >2 items");
+    }
+
+    #[test]
+    fn a_row_one_cell_short_is_read_with_the_missing_cell_as_undefined() {
+        assert_eq!(problem(alias_set_rows(&json!([[1]]))), "[0][1]: Invalid input: expected object, received undefined");
+        assert_eq!(problem(alias_set_rows(&json!([["x"]]))), "[0][0]: Invalid input: expected number, received string");
+        assert_eq!(problem(alias_set_by_name_rows(&json!([[{"id": 1}]]))), "[0][1]: Invalid input: expected object, received undefined");
+        assert_eq!(problem(link_target_rows(&json!([[{"id": 1}]]))), "[0]: Too small: expected array to have >3 items");
+        assert_eq!(link_target_rows(&json!([[null, "name"]])).unwrap().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_trailing_optional_cell_may_be_left_out_and_a_single_cell_row_is_never_too_short() {
+        // `resolverRows` is `[page, z.string().optional()]`: `[]` is read, and the page is what is missing
+        assert_eq!(problem(resolver_rows(&json!([[]]))), "[0][0]: Invalid input: expected object, received undefined");
+        assert_eq!(resolver_rows(&json!([[{"id": 1}]])).unwrap().unwrap().len(), 1);
+        assert_eq!(problem(page_rows(&json!([[]]))), "[0][0]: Invalid input: expected object, received undefined");
     }
 
     #[test]
