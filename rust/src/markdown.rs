@@ -250,7 +250,9 @@ pub struct PageRenderOptions<'a> {
 /// an alias, date or namespace leaf.
 pub fn resolved_from_line(resolved_from: Option<&Value>) -> Option<String> {
     let map = resolved_from?.as_object()?;
-    // `JSON.stringify(undefined)` and `String(undefined)` are both "undefined"
+    // PARITY(#299): `JSON.stringify(undefined)` and `String(undefined)` are both "undefined", which is how
+    // JavaScript writes a missing value here (the server sets both fields, so this is not reached) — drop if
+    // Rust becomes the only server.
     let name = map.get("name").map_or_else(|| "undefined".to_owned(), js::json_stringify);
     let matched_by = match map.get("matchedBy") {
         Some(Value::String(text)) => text.clone(),
@@ -331,6 +333,8 @@ impl FooterMeta {
                     .iter()
                     .map(|warning| FooterWarning {
                         code: text(warning.get("code")),
+                        // PARITY(#299): JavaScript writes a missing value in a template literal as "undefined" (the
+                        // server gives every warning a message, so this is not reached) — drop if Rust becomes the only server.
                         message: warning.get("message").and_then(Value::as_str).unwrap_or("undefined").to_owned(),
                         how_to_fetch_all: text(warning.get("howToFetchAll")),
                     })
