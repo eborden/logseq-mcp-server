@@ -10,7 +10,10 @@
 //                                                  # for local use, a server with only some tools: tools/list is
 //                                                  # compared for the tools the cases call, and the server must
 //                                                  # list those and no others (CI doesn't use it since #316)
-//   npx tsx scripts/parity.ts --record             # re-record the expected results from the TypeScript server
+//   npx tsx scripts/parity.ts --real-clock -- rust/target/release/logseq-mcp-server
+//                                                  # a server that reads the system clock (the Rust release build
+//                                                  # ignores LOGSEQ_MCP_NOW): the cases that read today are left out
+//   npx tsx scripts/parity.ts --record           # re-record the expected results from the TypeScript server
 //   npx tsx scripts/parity.ts --self-check         # passes as is, and fails on every perturbed case
 //
 // Only the TypeScript server records: the expected files are the reference other servers are judged
@@ -24,6 +27,7 @@ import { CASE_GROUPS, allCases, expectedFileOf, type CaseGroup } from './parity/
 import { compareResult, perturbCases, runParity, type ParityReport, type ToolResult } from './parity/harness.js';
 import { compareToolLists, type ProjectedTool } from './parity/tool-list-compare.js';
 import { parseCommandLine } from './parity/command-line.js';
+import { withoutClockCases } from './parity/clock-cases.js';
 import { REPO_ROOT, SNAPSHOT_FILE } from './parity/ts-server.js';
 
 /** The TypeScript server's tools/list in the snapshot's shape; it must match the snapshot exactly. */
@@ -80,8 +84,8 @@ async function readExpected(groups: readonly CaseGroup[]): Promise<Record<string
 }
 
 async function main(): Promise<number> {
-  const { mode, server, onlyTestedTools } = parseCommandLine(process.argv.slice(2));
-  const cases = allCases();
+  const { mode, server, onlyTestedTools, realClock } = parseCommandLine(process.argv.slice(2));
+  const cases = realClock ? withoutClockCases(allCases()) : allCases();
   const snapshotFile = SNAPSHOT_FILE;
 
   if (mode === 'record') {
@@ -105,7 +109,11 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const expected = await readExpected(CASE_GROUPS);
+  const recorded = await readExpected(CASE_GROUPS);
+  // A result recorded for a case that was left out (--real-clock) is not run, and would be reported as stray.
+  const run = new Set(cases.map(c => c.name));
+  const skipped = new Set(allCases().filter(c => !run.has(c.name)).map(c => c.name));
+  const expected = Object.fromEntries(Object.entries(recorded).filter(([name]) => !skipped.has(name)));
   const expectedToolList = await readJson<ProjectedTool[]>(EXPECTED_TOOL_LIST_FILE);
   if (!expectedToolList) throw new Error(`no expected tool list at ${EXPECTED_TOOL_LIST_FILE}; record it with --record`);
   if (mode === 'check') {

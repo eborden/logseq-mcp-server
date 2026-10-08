@@ -25,6 +25,7 @@ import {
   type ToolResult
 } from '../scripts/parity/harness.js';
 import { parseCommandLine } from '../scripts/parity/command-line.js';
+import { CLOCK_CASES, withoutClockCases } from '../scripts/parity/clock-cases.js';
 import { callKey, DATASCRIPT_QUERY, LOGSEQ_PORT, startStubLogseq, type CannedCall } from '../scripts/parity/stub-logseq.js';
 import { compareToolLists, normalizeSchema, type ProjectedTool } from '../scripts/parity/tool-list-compare.js';
 import { REPO_ROOT, SNAPSHOT_FILE, typescriptServer, viteNodeCommand } from '../scripts/parity/ts-server.js';
@@ -705,7 +706,8 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
     expect(parseCommandLine(['--tested-tools-only', '--', 'x', 'a', '--b'])).toEqual({
       mode: 'check',
       server: { command: 'x', args: ['a', '--b'] },
-      onlyTestedTools: true
+      onlyTestedTools: true,
+      realClock: false
     });
     expect(parseCommandLine(['--self-check', '--tested-tools-only', '--', 'x'])).toMatchObject({ mode: 'self-check', onlyTestedTools: true });
     expect(parseCommandLine(['--perturb', '--', 'x'])).toMatchObject({ mode: 'perturb', onlyTestedTools: false });
@@ -717,7 +719,8 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
     expect(parseCommandLine(['--tested-tools-only', '/bin/server', '--b', 'c'])).toEqual({
       mode: 'check',
       server: { command: '/bin/server', args: ['--b', 'c'] },
-      onlyTestedTools: true
+      onlyTestedTools: true,
+      realClock: false
     });
     expect(parseCommandLine(['--self-check', '/bin/server'])).toMatchObject({ mode: 'self-check', server: { command: '/bin/server' } });
     // only flags: the TypeScript server
@@ -732,6 +735,44 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
     expect(() => parseCommandLine(['--record', '--', 'x'])).toThrow(/a candidate can't record its own reference/);
     expect(() => parseCommandLine(['--tested-tools-only', '--'])).toThrow(/no server command after --/);
     expect(() => parseCommandLine(['--nope'])).toThrow(/unknown flag --nope/);
+  });
+});
+
+describe('the parity command line (--real-clock, #359)', () => {
+  it('reads the flag with the server command intact, in any mode but record', () => {
+    expect(parseCommandLine(['--real-clock', '--', 'x', 'a'])).toEqual({
+      mode: 'check',
+      server: { command: 'x', args: ['a'] },
+      onlyTestedTools: false,
+      realClock: true
+    });
+    expect(parseCommandLine(['--real-clock', '/bin/server'])).toMatchObject({ realClock: true, server: { command: '/bin/server' } });
+    expect(parseCommandLine(['--self-check', '--real-clock', '--', 'x'])).toMatchObject({ mode: 'self-check', realClock: true });
+    expect(parseCommandLine(['--', 'x'])).toMatchObject({ realClock: false });
+    expect(() => parseCommandLine(['--record', '--real-clock'])).toThrow(/--record needs every case, so it can't take --real-clock/);
+  });
+});
+
+describe('withoutClockCases (#359)', () => {
+  const some = (name: string): ParityCase => ({ name, tool: 't', arguments: {}, steps: [] });
+
+  it('leaves out the cases that read today and keeps the order of the rest', () => {
+    const cases = [some('a'), some('b'), some('c')];
+    expect(withoutClockCases(cases, ['b']).map(c => c.name)).toEqual(['a', 'c']);
+    expect(withoutClockCases(cases, []).map(c => c.name)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('refuses a listed name that no case has, so a rename cannot leave a stale one', () => {
+    expect(() => withoutClockCases([some('a')], ['a', 'gone'])).toThrow(/names case\(s\) that don't exist: gone/);
+  });
+
+  it('names only real cases, and none twice', () => {
+    expect(() => withoutClockCases(allCases())).not.toThrow();
+    expect(new Set(CLOCK_CASES).size).toBe(CLOCK_CASES.length);
+  });
+
+  it('keeps every case that does not read the clock', () => {
+    expect(withoutClockCases(allCases())).toHaveLength(allCases().length - CLOCK_CASES.length);
   });
 });
 
