@@ -98,7 +98,7 @@ Date: 2026-10-08
 
 ## Mechanical enforcement
 
-- test: `src/tool-list.test.ts` (the TypeScript server's byte-exact snapshot, size budget and description cap, unchanged from ADR-0016)
+- test: `tests/guards/tool-list.test.ts` (the recorded `tools/list`: size budget and description cap, unchanged from ADR-0016; the TypeScript server's byte-exact snapshot went with that server, #356)
 - none-yet: #335 (the harness check of the suggestion rules and the required cases of Decision 3; it becomes a `test:` line when the harness is on `main`)
 - none-yet: #336 (lands the parity harness on `main`: the byte comparison of results, the comparison of `tools/list` by meaning and the same LogSeq calls, from #124 and #292, which are closed; becomes `test:` lines)
 - none-yet: #299 (the Rust swap and the removal of the fuzzysort port)
