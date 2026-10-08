@@ -2,7 +2,7 @@
 //! its blocks, optionally with their `((uuid))` refs and `{{embed}}`s resolved.
 //!
 //! Calls: 1 for the exact name of a page that has a file (`logseq.Editor.getPage` alone, no
-//! resolver), and 2 more with `include_children` (`getPageBlocksTree`). A name that isn't such a
+//! resolver), and 1 more with `include_children` (`getPageBlocksTree`), 2 in all. A name that isn't such a
 //! page (an alias, an ISO date, a namespace leaf, a stub with no file, or no page at all) goes to
 //! the page resolver too: one Datalog query for an exact name, alias or date, a second for a
 //! namespace leaf, the suggestion lookup for a miss, and another `getPage` call when the resolver
