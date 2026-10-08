@@ -4,7 +4,7 @@
 
 Every tool that takes a page name must resolve it the same way: by exact name in any casing, by alias, by ISO date (`2025-01-01` finds that day's journal) and by namespace leaf. An alias leads to the page that declares it, never to the empty stub page of the same name, and an ISO date prefers the journal over a file-less stub with the same name.
 
-A tool that resolved through an alias, ISO date or namespace leaf must say so: `resolvedFrom: { name, matchedBy, resolvedTo }` in the result, or in `meta` for a bare-array result such as `get_backlinks`. A name that matches more than one page is reported as ambiguous with its candidates (`AmbiguousPageError`). A candidate list cut at its maximum of 10 adds a `candidates_truncated` warning and `totals.candidates`; `hasMore` stays false because no parameter fetches the rest. A page that does not exist is an error with guidance (`PageNotFoundError`), never an empty result, in every page-taking tool, including `get_backlinks`, `get_concept_evolution` and `search_by_relationship` (all relationship types, `connected-within` too).
+A tool that resolved through an alias, ISO date or namespace leaf must say so: `resolvedFrom: { name, matchedBy, resolvedTo }` in the result, or in `meta` for a bare-array result such as `get_backlinks`. A name that matches more than one page is reported as ambiguous with its candidates (`AmbiguousPage`). A candidate list cut at its maximum of 10 adds a `candidates_truncated` warning and `totals.candidates`; `hasMore` stays false because no parameter fetches the rest. A page that does not exist is an error with guidance (`PageNotFound`), never an empty result, in every page-taking tool, including `get_backlinks`, `get_concept_evolution` and `search_by_relationship` (all relationship types, `connected-within` too).
 
 ## Rationale
 
@@ -33,3 +33,4 @@ test: `tests/integration/alias-sets.test.ts`
 |---|---|---|
 | 2026-10-05 | Introduced. | #57 |
 | 2026-10-08 | Mechanical enforcement: the resolver and the per-tool alias tests are the Rust crate's and the integration suite's, with the TypeScript server's removal. Statement unchanged. | #370 |
+| 2026-10-08 | Statement: the TypeScript error names (`AmbiguousPageError`, `PageNotFoundError`) are the Rust crate's (`AmbiguousPage`, `PageNotFound`, `rust/src/errors.rs`). The rule is unchanged. | #372 |
