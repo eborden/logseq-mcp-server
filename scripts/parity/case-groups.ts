@@ -17,8 +17,10 @@ import { listPagesCases } from './cases/list-pages.js';
 import { queryByDateRangeCases } from './cases/query-by-date-range.js';
 import { markdownCases } from './cases/markdown.js';
 import { pageResourceCases } from './cases/page-resource.js';
+import { promptsCases } from './cases/prompts.js';
 import { queryByPropertyCases } from './cases/query-by-property.js';
 import { resolveRefsCases } from './cases/resolve-refs.js';
+import { resourcesCases } from './cases/resources.js';
 import { searchBlocksCases } from './cases/search-blocks.js';
 import { searchByRelationshipCases } from './cases/search-by-relationship.js';
 import type { ParityCase } from './harness.js';
@@ -46,8 +48,10 @@ export const CASE_GROUPS: CaseGroup[] = [
   { name: 'query-by-date-range', cases: queryByDateRangeCases },
   { name: 'markdown', cases: markdownCases },
   { name: 'page-resource', cases: pageResourceCases },
+  { name: 'prompts', cases: promptsCases },
   { name: 'query-by-property', cases: queryByPropertyCases },
   { name: 'resolve-refs', cases: resolveRefsCases },
+  { name: 'resources', cases: resourcesCases },
   { name: 'search-blocks', cases: searchBlocksCases },
   { name: 'search-by-relationship', cases: searchByRelationshipCases }
 ];
