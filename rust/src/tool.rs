@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, ToolAnnotations};
 use schemars::JsonSchema;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
@@ -74,6 +75,13 @@ pub fn parse_args<T: DeserializeOwned>(arguments: Option<JsonObject>) -> Result<
     serde_json::from_value(Value::Object(present))
 }
 
+/// A tool's output struct as the `Value` the renderers and the result writer take. The keys come out
+/// in the order the struct declares its fields, which is the result's key order (BR-0013), so
+/// a struct writes its fields in that order and a unit test of it pins the order.
+pub fn result_value<T: Serialize>(output: &T) -> Value {
+    serde_json::to_value(output).expect("a tool's output serializes: its keys are strings and its numbers finite")
+}
+
 /// A result with no `isError` key, as the recorded results have none: an absent `isError` and
 /// `isError: false` are different results on the wire (rmcp's own `success` writes the latter). Kept
 /// because an absent `isError` is valid MCP, and writing `false` would change every success result in
@@ -103,6 +111,12 @@ pub fn into_result(outcome: Result<CallToolResult, ToolError>) -> CallToolResult
 #[cfg(test)]
 pub(crate) mod testing {
     use super::*;
+
+    /// The keys of a result object in the order it writes them. A unit test of a tool's output pins this
+    /// (BR-0013): `Value` equality ignores order, so it can't.
+    pub(crate) fn keys(value: &Value) -> Vec<&str> {
+        value.as_object().expect("an object").keys().map(String::as_str).collect()
+    }
 
     /// A schema reduced to its meaning, as the parity harness compares `tools/list` (#292):
     /// `$ref`s resolved from `$defs` (the property's own keys win), an optional property's `null`
