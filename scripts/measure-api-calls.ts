@@ -29,6 +29,8 @@ import { getBacklinks } from '../src/tools/get-backlinks.js';
 import { getConceptEvolution } from '../src/tools/get-concept-evolution.js';
 import { searchByRelationship } from '../src/tools/search-by-relationship.js';
 import { checkLinks } from '../src/tools/check-links.js';
+import { listPages } from '../src/tools/list-pages.js';
+import { getGraphInfo } from '../src/tools/get-graph-info.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../src/index.js';
@@ -134,6 +136,8 @@ async function main() {
     ['search_by_relationship references', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'references' }, () => searchByRelationship(client, subject, otherSubject, 'references')],
     ['search_by_relationship references (same topic twice)', 'logseq_search_by_relationship', { topic_a: subject, topic_b: subject, relationship_type: 'references' }, () => searchByRelationship(client, subject, subject, 'references')],
     ['search_by_relationship connected-within', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 }, () => searchByRelationship(client, subject, otherSubject, 'connected-within', 1)],
+    ['list_pages', 'logseq_list_pages', { limit: 50 }, () => listPages(client, { limit: 50 })],
+    ['get_graph_info', 'logseq_get_graph_info', {}, () => getGraphInfo(client)],
     ['get_page (not found)', 'logseq_get_page', { page_name: 'no such page 41 probe', include_children: false }, () => getPage(client, 'no such page 41 probe', false).catch(e => e.name)],
     // Real pages, an alias when the graph has one, and a made-up term, all in one text
     ['check_links (4 terms)', 'logseq_check_links', checkLinksArgs(), () => {
