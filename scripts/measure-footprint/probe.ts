@@ -2,7 +2,7 @@
 // the time from spawn to the `initialize` response, and the process's resident memory before and
 // after one tool call. Raw newline-delimited JSON-RPC rather than the SDK client, so the client's
 // own start-up and bookkeeping stay out of the timing.
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 import { parsePsRssBytes } from './stats.js';
@@ -43,6 +43,26 @@ export async function residentBytes(pid: number): Promise<number> {
   if (process.platform === 'win32') throw new Error('measuring resident memory needs ps; run this on macOS or Linux');
   const { stdout } = await execFileAsync('ps', ['-o', 'rss=', '-p', String(pid)]);
   return parsePsRssBytes(stdout);
+}
+
+/** How long a process gets to exit after each signal before the next, stronger one */
+const STOP_WAIT_MS = 2000;
+
+const hasExited = (child: ChildProcess): boolean => child.exitCode !== null || child.signalCode !== null;
+
+/** SIGTERM, then SIGKILL after a bounded wait, so a server that ignores SIGTERM can't hang the script or outlive it. */
+async function stopProcess(child: ChildProcess): Promise<void> {
+  for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+    if (hasExited(child)) return;
+    child.kill(signal);
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, STOP_WAIT_MS);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
 }
 
 export async function probeServer({ server, call, beforeCall, settleMs = 500, timeoutMs = 15000 }: ProbeOptions): Promise<ProbeResult> {
@@ -129,7 +149,6 @@ export async function probeServer({ server, call, beforeCall, settleMs = 500, ti
     return { coldStartMs, idleRssBytes, afterCallRssBytes };
   } finally {
     child.stdin.end();
-    child.kill();
-    await new Promise<void>(resolve => (child.exitCode !== null || child.signalCode !== null ? resolve() : child.once('exit', () => resolve())));
+    await stopProcess(child);
   }
 }
