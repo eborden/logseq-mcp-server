@@ -4,6 +4,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from './index.js';
 import { LogseqClient } from './client.js';
+import { toolListForSnapshot } from '../scripts/parity/tool-list-projection.js';
 
 /**
  * Guardrails on the `tools/list` payload (#39, part of #13).
@@ -141,15 +142,7 @@ describe('tools/list guardrails', () => {
   it('matches the tool list snapshot', () => {
     // Sorted so that registration order doesn't churn the snapshot.
     // Run `npx vitest run src/tool-list.test.ts -u` to accept an intended change.
-    const snapshot = [...tools]
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(({ name, annotations, description, inputSchema }) => ({
-        name,
-        title: annotations?.title,
-        annotations,
-        description,
-        inputSchema,
-      }));
-    expect(snapshot).toMatchSnapshot();
+    // The parity harness (#124) compares other servers in the same shape.
+    expect(toolListForSnapshot(tools)).toMatchSnapshot();
   });
 });
