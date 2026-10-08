@@ -44,10 +44,14 @@ describe('formatting', () => {
 // A stand-in MCP server: answers `initialize` and `tools/call` with one line each, as the real ones do.
 const FAKE_SERVER = `
 const rl = require('node:readline').createInterface({ input: process.stdin });
+if (process.env.FAKE_IGNORE_SIGTERM) { process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
 rl.on('line', line => {
   const m = JSON.parse(line);
+  if (process.env.FAKE_SILENT) return;
+  if (process.env.FAKE_JUNK) return console.log('this is not json-rpc');
   if (m.method === 'initialize') console.log(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: '2025-06-18' } }));
-  if (m.method === 'tools/call') console.log(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: process.env.FAKE_FAIL ? { isError: true, content: [] } : { content: [{ type: 'text', text: 'ok' }] } }));
+  if (m.method === 'tools/call' && process.env.FAKE_RPC_ERROR) console.log(JSON.stringify({ jsonrpc: '2.0', id: m.id, error: { code: -32602, message: 'bad arguments' } }));
+  else if (m.method === 'tools/call') console.log(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: process.env.FAKE_FAIL ? { isError: true, content: [] } : { content: [{ type: 'text', text: 'ok' }] } }));
 });
 `;
 
@@ -81,4 +85,28 @@ describe('probeServer', () => {
       /no response to initialize.*exited early \(code 3/
     );
   });
+
+  it('fails when the tool call comes back as a JSON-RPC error', async () => {
+    await expect(probeServer({ server: fake({ FAKE_RPC_ERROR: '1' }), call, beforeCall: () => {}, settleMs: 20 })).rejects.toThrow(
+      /the tool call did not return a result.*bad arguments/s
+    );
+  });
+
+  it('times out when the server never answers initialize', async () => {
+    await expect(probeServer({ server: fake({ FAKE_SILENT: '1' }), call, beforeCall: () => {}, settleMs: 20, timeoutMs: 300 })).rejects.toThrow(
+      'no response to initialize in 300 ms'
+    );
+  });
+
+  it('fails at once on a stdout line that is not JSON, without printing the line', async () => {
+    const error = await probeServer({ server: fake({ FAKE_JUNK: '1' }), call, beforeCall: () => {}, settleMs: 20, timeoutMs: 5000 }).catch((e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('not JSON');
+    expect((error as Error).message).not.toContain('this is not json-rpc');
+  });
+
+  it('kills a server that ignores SIGTERM instead of waiting for it', async () => {
+    const result = await probeServer({ server: fake({ FAKE_IGNORE_SIGTERM: '1' }), call, beforeCall: () => {}, settleMs: 20 });
+    expect(result.coldStartMs).toBeGreaterThan(0);
+  }, 15000);
 });
