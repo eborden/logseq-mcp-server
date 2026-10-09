@@ -196,8 +196,10 @@ fn utc_days(year: i64, month: i64, day: i64) -> i64 {
 }
 
 /// `getWeekIdentifier`: the week of a `YYYYMMDD` date as `YYYY-WW`. Not ISO weeks: week 1 is the first 7
-/// days of the year, whatever weekday they start on.
-pub fn week_identifier(date: i64) -> String {
+/// days of the year, whatever weekday they start on. `None` for a date whose month or day digits are
+/// missing (fewer than seven digits): it has no week. A 7- or 9-digit date does get one, from the
+/// characters at the same places (LogSeq's journal days always have eight digits).
+pub fn week_identifier(date: i64) -> Option<String> {
     let text: Vec<char> = date.to_string().chars().collect();
     // `substring(from, to)`
     let part = |from: usize, to: usize| -> String { text.iter().skip(from).take(to - from).collect() };
@@ -209,11 +211,7 @@ pub fn week_identifier(date: i64) -> String {
         }
         _ => None,
     };
-    // PARITY(#299): a date whose month or day digits are missing (fewer than seven digits) has no week, and JavaScript writes the number it computes for it as "NaN". A 7- or 9-digit
-    // date does get a week, from the characters at the same places (LogSeq's journal days always have eight
-    // digits) — drop if Rust becomes the only server.
-    let number = week.map_or_else(|| "NaN".to_owned(), |week| week.to_string());
-    format!("{year}-W{number:0>2}")
+    Some(format!("{year}-W{:0>2}", week?))
 }
 
 /// `getMonthIdentifier`: the month of a date as `YYYYMM`.
@@ -221,12 +219,13 @@ pub fn month_identifier(date: i64) -> String {
     date.to_string().chars().take(6).collect()
 }
 
-/// The key of the period a day falls in, for a grouping.
-pub fn period_key(group_by: GroupBy, date: i64) -> String {
+/// The key of the period a day falls in, for a grouping. `None` for a day with no week, which is
+/// grouped with the undated mentions: in no period.
+pub fn period_key(group_by: GroupBy, date: i64) -> Option<String> {
     match group_by {
-        GroupBy::Day => date.to_string(),
+        GroupBy::Day => Some(date.to_string()),
         GroupBy::Week => week_identifier(date),
-        GroupBy::Month => month_identifier(date),
+        GroupBy::Month => Some(month_identifier(date)),
     }
 }
 
@@ -333,7 +332,7 @@ mod tests {
             for (m, length) in lengths.iter().enumerate() {
                 for day in 1..=*length {
                     let date = year * 10_000 + (m as i64 + 1) * 100 + day;
-                    assert_eq!(week_identifier(date), counted_week(year, m as i64 + 1, day), "{date}");
+                    assert_eq!(week_identifier(date), Some(counted_week(year, m as i64 + 1, day)), "{date}");
                 }
             }
         }
@@ -342,28 +341,31 @@ mod tests {
     #[test]
     fn a_week_is_the_same_on_the_days_around_a_daylight_saving_change() {
         // #249: 2025-03-09 is the day the clocks go forward in New York, 2025-04-06 in Sydney they go back
-        assert_eq!(week_identifier(20250308), "2025-W10");
-        assert_eq!(week_identifier(20250309), "2025-W10");
-        assert_eq!(week_identifier(20250310), "2025-W10");
-        assert_eq!(week_identifier(20250312), "2025-W11");
-        assert_eq!(week_identifier(20250408), "2025-W14");
-        assert_eq!(week_identifier(20250409), "2025-W15");
-        assert_eq!(week_identifier(20250101), "2025-W01");
-        assert_eq!(week_identifier(20251231), "2025-W53");
+        assert_eq!(week_identifier(20250308).as_deref(), Some("2025-W10"));
+        assert_eq!(week_identifier(20250309).as_deref(), Some("2025-W10"));
+        assert_eq!(week_identifier(20250310).as_deref(), Some("2025-W10"));
+        assert_eq!(week_identifier(20250312).as_deref(), Some("2025-W11"));
+        assert_eq!(week_identifier(20250408).as_deref(), Some("2025-W14"));
+        assert_eq!(week_identifier(20250409).as_deref(), Some("2025-W15"));
+        assert_eq!(week_identifier(20250101).as_deref(), Some("2025-W01"));
+        assert_eq!(week_identifier(20251231).as_deref(), Some("2025-W53"));
     }
 
     #[test]
-    fn a_day_or_a_month_is_the_digits_of_the_date_and_a_date_with_no_week_says_nan() {
-        assert_eq!(period_key(GroupBy::Day, 20250102), "20250102");
-        assert_eq!(period_key(GroupBy::Month, 20250102), "202501");
-        assert_eq!(period_key(GroupBy::Week, 20250102), "2025-W01");
-        assert_eq!(week_identifier(2025), "2025-WNaN");
-        assert_eq!(week_identifier(202501), "2025-WNaN");
+    fn a_day_or_a_month_is_the_digits_of_the_date_and_a_date_with_no_week_has_no_key() {
+        assert_eq!(period_key(GroupBy::Day, 20250102).as_deref(), Some("20250102"));
+        assert_eq!(period_key(GroupBy::Month, 20250102).as_deref(), Some("202501"));
+        assert_eq!(period_key(GroupBy::Week, 20250102).as_deref(), Some("2025-W01"));
+        assert_eq!(week_identifier(2025), None);
+        assert_eq!(week_identifier(202501), None);
+        assert_eq!(period_key(GroupBy::Week, 202501), None);
+        // only a week is missing: the day and the month are still the digits
+        assert_eq!(period_key(GroupBy::Day, 202501).as_deref(), Some("202501"));
         // a seventh digit is a day of one digit, and a ninth is never read
-        assert_eq!(week_identifier(2025011), "2025-W01");
-        assert_eq!(week_identifier(202501011), "2025-W01");
+        assert_eq!(week_identifier(2025011).as_deref(), Some("2025-W01"));
+        assert_eq!(week_identifier(202501011).as_deref(), Some("2025-W01"));
         // a month past 12 or a day past the month's end rolls over, as `Date.UTC` has it
-        assert_eq!(week_identifier(20251301), "2025-W53");
+        assert_eq!(week_identifier(20251301).as_deref(), Some("2025-W53"));
         assert_eq!(week_identifier(20250230), week_identifier(20250302));
     }
 }
