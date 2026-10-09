@@ -160,15 +160,8 @@ pub fn key_counts(text: &str) -> Vec<(String, usize)> {
     counts
 }
 
-/// `text.lastIndexOf('\n', index - 1)`. A `fromIndex` below 0 counts as 0, so for `index == 0` it
-/// looks at the first character only.
-// PARITY(#299): at index 0 the lookup finds a newline that is the first character, which puts the line start
-// past the index and leaves the excerpt empty (suspected TS bug: a negative `fromIndex` was meant to find none)
-// — drop if Rust becomes the only server.
+/// The last newline before `index`. There is none before index 0.
 fn last_newline_before(chars: &[char], index: usize) -> Option<usize> {
-    if index == 0 {
-        return (chars.first() == Some(&'\n')).then_some(0);
-    }
     chars[..index].iter().rposition(|c| *c == '\n')
 }
 
@@ -176,7 +169,7 @@ fn last_newline_before(chars: &[char], index: usize) -> Option<usize> {
 fn excerpt(chars: &[char], index: usize) -> String {
     let start = last_newline_before(chars, index).map_or(0, |at| at + 1);
     let end = chars[index..].iter().position(|c| *c == '\n').map_or(chars.len(), |at| index + at);
-    let head = if start <= index { &chars[start..index] } else { &[][..] };
+    let head = &chars[start..index];
     let tail = &chars[index..end];
     let left: String = if head.len() > EXCERPT_BEFORE {
         format!("...{}", head[head.len() - EXCERPT_BEFORE..].iter().collect::<String>())
@@ -326,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_difference_at_a_leading_newline_has_an_empty_excerpt() {
-        // `lastIndexOf('\n', -1)` looks at index 0, finds the newline there and starts the line after it
+        // the line a leading newline sits on is empty, whether or not index 0 looks for a newline before it
         let difference = check_prose("\nx", "y").first_difference.unwrap();
         assert_eq!((difference.line, difference.column), (1, 1));
         assert_eq!(difference.before, "");
