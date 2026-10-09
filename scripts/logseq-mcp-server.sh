@@ -90,7 +90,7 @@ while IFS= read -r line; do
   esac
 done <"$package_json"
 case $version in
-  '' | *[!0-9A-Za-z.+-]*)
+  '' | [!0-9]* | *[!0-9A-Za-z.+-]*)
     die "cannot read a valid version from package.json."
     ;;
 esac
@@ -116,7 +116,9 @@ asset=$NAME-$version-$target
 
 # ---------------------------------------------------------------------------------------------------------------
 # The cache: <cache dir>/logseq-mcp-server/<version>/. A file is moved in only after it was checked, so a binary
-# that is there is a checked one.
+# that is there was a checked one when it arrived. A start from the cache does not hash it again, so the directory
+# must be one only this user can write: it is created 0700, and an existing one that belongs to someone else or is
+# writable by group or others is refused.
 
 if [ -n "${XDG_CACHE_HOME:-}" ]; then
   cache_root=$XDG_CACHE_HOME
@@ -127,9 +129,35 @@ elif [ "$os" = 'Darwin' ]; then
 else
   cache_root=$HOME/.cache
 fi
+case $cache_root in
+  /*) ;;
+  *)
+    die "the cache directory must be an absolute path (XDG_CACHE_HOME or HOME is relative)."
+    ;;
+esac
 cache=$cache_root/$NAME/$version
 
-if [ -f "$cache/$asset" ] && [ -x "$cache/$asset" ]; then
+# check_cache_dirs: whichever of the cache's two directories exist must be ours and not writable by group or others.
+check_cache_dirs() {
+  for dir in "$cache_root/$NAME" "$cache"; do
+    if [ -d "$dir" ] && [ ! -O "$dir" ]; then
+      die "the cache directory $dir is not owned by you, so it is not trusted. Set XDG_CACHE_HOME to a directory of your own."
+    fi
+  done
+  listing=$(ls -ld "$cache_root/$NAME" "$cache" 2>/dev/null) || true
+  while IFS=' ' read -r mode _; do
+    case $mode in
+      ?????w* | ????????w*)
+        die "a cache directory under $cache_root/$NAME is writable by group or others, so it is not trusted. Run 'chmod go-w' on it, or set XDG_CACHE_HOME to a directory of your own."
+        ;;
+    esac
+  done <<EOF
+$listing
+EOF
+}
+check_cache_dirs
+
+if [ -f "$cache/$asset" ] && [ -x "$cache/$asset" ] && [ -O "$cache/$asset" ]; then
   exec "$cache/$asset" "$@"
 fi
 
@@ -145,6 +173,11 @@ if [ -n "${LOGSEQ_MCP_RELEASE_BASE_URL:-}" ]; then
       ;;
   esac
   override=1
+  case $base in
+    http://*)
+      say "warning: LOGSEQ_MCP_RELEASE_BASE_URL is plain http, so the checksums come from the same unprotected place as the binary and prove nothing against an attacker on the network."
+      ;;
+  esac
 else
   base=$DEFAULT_BASE/v$version
   override=0
@@ -180,14 +213,22 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Everything this script creates from here is private to the user (0700 directories, 0600 files), whatever the
+# caller's umask. The umask is put back before the exec, so the server runs with the one it was started with.
+old_umask=$(umask)
+umask 077
 if ! mkdir -p "$cache" 2>/dev/null; then
   die "cannot create the cache directory $cache (is it read-only?). Set XDG_CACHE_HOME to a writable directory."
 fi
+check_cache_dirs
 stage=$cache/.partial.$$
 rm -rf "$stage"
 if ! mkdir "$stage" 2>/dev/null; then
   die "cannot write to the cache directory $cache (is it read-only?). Set XDG_CACHE_HOME to a writable directory."
 fi
+# A start killed hard (SIGKILL, power loss) leaves its staging directory behind. Sweep the ones over a day old,
+# best effort: a failure here never stops the start, and nothing in them is ever run.
+find "$cache" -maxdepth 1 -type d -name '.partial.*' -mtime +0 -exec rm -rf {} + >/dev/null 2>&1 || true
 
 # fetch <file name>: saves <base>/<file name> as $stage/<file name>.
 fetch() {
@@ -197,12 +238,30 @@ fetch() {
     protocols='=https'
   fi
   curl_status=0
-  curl --fail --silent --location --connect-timeout 20 --max-time 300 \
-    --proto "$protocols" --proto-redir "$protocols" \
-    --output "$stage/$1" "$base/$1" </dev/null 2>/dev/null || curl_status=$?
+  # -q first: ignore ~/.curlrc, so nothing there (insecure, proto, ...) changes what is checked. The body of an
+  # error answer is never kept or shown; only its status code is read.
+  http_code=$(curl -q --fail --silent --location --connect-timeout 20 --max-time 300 \
+    --proto "$protocols" --proto-redir "$protocols" --write-out '%{http_code}' \
+    --output "$stage/$1" "$base/$1" </dev/null 2>/dev/null) || curl_status=$?
   case $curl_status in
     0) return 0 ;;
-    22 | 37 | 78)
+    22)
+      case $http_code in
+        404 | 410)
+          die "the release has no file named $1 at $(shown "$base") (version $version). The release may not be published yet, or it has no file for this platform."
+          ;;
+        403 | 429)
+          die "the server refused or rate-limited the download of $1 from $(shown "$base") (HTTP $http_code). Wait and try again."
+          ;;
+        5[0-9][0-9])
+          die "the server answered with an error for $1 from $(shown "$base") (HTTP $http_code). Try again later."
+          ;;
+        *)
+          die "the server answered with an error for $1 from $(shown "$base") (HTTP status $http_code)."
+          ;;
+      esac
+      ;;
+    37 | 78)
       die "the release has no file named $1 at $(shown "$base") (version $version). The release may not be published yet, or it has no file for this platform."
       ;;
     5 | 6 | 7 | 28 | 35 | 52 | 55 | 56 | 60)
@@ -234,7 +293,7 @@ verify "$asset"
 verify LICENSE
 verify THIRD-PARTY-NOTICES.txt
 
-if ! chmod 755 "$stage/$asset"; then
+if ! chmod 700 "$stage/$asset"; then
   die "cannot make the downloaded binary executable."
 fi
 # The binary moves last, so a binary in the cache means the other files are there too. Each mv is an atomic
@@ -247,4 +306,5 @@ mv -f "$stage/$asset" "$cache/$asset"
 cleanup
 stage=
 trap - EXIT HUP INT TERM
+umask "$old_umask"
 exec "$cache/$asset" "$@"
