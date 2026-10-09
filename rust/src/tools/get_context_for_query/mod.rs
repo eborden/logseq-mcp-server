@@ -12,7 +12,7 @@
 //! A `null` answer is not "none" (BR-0011, #338): a keyword search LogSeq did not answer gives a `search_unavailable`
 //! warning beside the empty `searchResults`, and a topic whose context holds an `*_unavailable` warning gets one
 //! `topic_unavailable` warning about it, since a topic's own warnings are not repeated here. Neither has a
-//! `howToFetchAll`. A `null` answer from the page resolver fails the whole call (#301).
+//! `howToFetchAll`. A topic whose alias group was cut has its `alias_set_truncated` warning passed through, about the topic. A `null` answer from the page resolver fails the whole call (#301).
 //!
 //! `format: "markdown"` renders the result through [`crate::markdown_context`], its warnings and
 //! `hasMore` in a footer. `compact` reduces every block to its snippet and uuid ([`crate::compact`]).
@@ -214,9 +214,6 @@ struct QueryContextOutput<'a> {
     has_more: bool,
     warnings: &'a [QueryWarning],
     summary: QuerySummary,
-    // PARITY(#299): a topic's own warnings are dropped here, except as `topic_truncated` (it was cut) and
-    // `topic_unavailable` (LogSeq did not answer part of it, #338), so the `alias_set_truncated` warning of a
-    // topic whose alias group was cut is never shown (suspected TS bug) — drop if Rust becomes the only server.
     contexts: Vec<TopicContextOutput<'a>>,
     #[serde(rename = "searchResults", skip_serializing_if = "Option::is_none")]
     search_results: Option<&'a [Value]>,
@@ -346,6 +343,13 @@ fn topic_warning(context: &TopicContext, topic: &str) -> QueryWarning {
     ))
 }
 
+/// The topic's `alias_set_truncated` warning, as the query's own and about the topic: its alias group was cut, so
+/// references written under the other names are missing. It has no `howToFetchAll` (the maximum cannot be raised),
+/// so it is the one warning of a topic that is neither `topic_truncated` nor `topic_unavailable`'s to carry.
+fn topic_alias_warnings(context: &TopicContext, topic: &str) -> Vec<QueryWarning> {
+    context.warnings.iter().filter(|warning| warning.code == "alias_set_truncated").map(|warning| QueryWarning::from(warning.clone()).about(topic)).collect()
+}
+
 /// The roll-up for a topic whose context holds a warning that LogSeq did not answer part of it (a code ending in
 /// `_unavailable`, BR-0011, #338). A topic's own warnings are not repeated in the query's, so without this the
 /// empty parts of its context would read as a topic with nothing in them. It is about the topic and has no
@@ -419,6 +423,7 @@ pub async fn get_context_for_query(
                 if let Some(warning) = topic_unavailable_warning(&context, topic) {
                     warnings.push(warning);
                 }
+                warnings.extend(topic_alias_warnings(&context, topic));
                 contexts.push(context);
             }
             // A missing topic page is an expected partial result: skip it and say so. Everything else
@@ -655,6 +660,18 @@ mod tests {
             warnings: vec![ResultWarning::new("alias_set_truncated", "m".into())],
             totals: crate::tools::build_context::Totals { blocks: 1, related_pages: 1, references: 0 },
         }
+    }
+
+    #[test]
+    fn a_topic_whose_alias_group_was_cut_passes_that_warning_on_about_the_topic() {
+        let context = topic("a", 1);
+        let warnings = topic_alias_warnings(&context, "a");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].code.as_str(), warnings[0].topic.as_deref(), warnings[0].how_to_fetch_all.as_deref()), ("alias_set_truncated", Some("a"), None));
+        // no other warning of a topic is passed on here: those are rolled up as topic_truncated / topic_unavailable
+        let mut other = topic("b", 2);
+        other.warnings = vec![ResultWarning::new("blocks_truncated", "m".into()), ResultWarning::new("page_blocks_unavailable", "m".into())];
+        assert!(topic_alias_warnings(&other, "b").is_empty());
     }
 
     #[test]
