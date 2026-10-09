@@ -8,12 +8,16 @@ Nothing has been published to npm yet, so there is no released version to compar
 
 ## [Unreleased]
 
+### Changed (server runtime)
+
+- **The server is now the Rust binary** (ADR-0035). There is no npm channel: the name `logseq-mcp-server` on npm is not this project, so `npx logseq-mcp-server` runs someone else's package and must not be used. Build from a clone of `main` (`cd rust && cargo build --release --locked`) until the first GitHub Release ships native binaries. Entries below that mention the npm package, `npx` or the TypeScript server are kept as history.
+
 ### Added
 
 - **`format: "markdown"`** on `get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` (#43). The default stays `"json"`. Markdown is one plain text block: page properties, blocks as indented bullets with `((uuid))` refs kept, related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. About 45-85% fewer bytes than the JSON. Page properties print as the page stores them (the pre-block text, with its `[[refs]]` and hyphenated keys), and keyword search hits end with `((uuid)) (in [[Page]])` so they can be followed up.
 - **`compact`** on `build_context` and `get_context_for_query` (#43): block snippets (first line, 80 characters) and uuids instead of block bodies, in JSON and in Markdown. With `resolve_refs` on `build_context` the refs are not resolved, and a `resolve_refs_ignored_in_compact` warning says so.
 - **`logseq_get_page_outline`** (#43): a page's top-level blocks as `{ uuid, snippet, childCount }`, in two Datalog calls. Read the blocks you pick with `get_block`. Resolves aliases, ISO dates and ambiguous names like the other page tools.
-- **npm package.** `npx -y logseq-mcp-server` works: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 22.12 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
+- **npm package.** (Superseded: there is no npm package, see the Unreleased note above. Do not run `npx logseq-mcp-server`: that name on npm is another project's package, not this one.) As first written: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 22.12 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
 - **MCP prompts**: `weekly_summary`, `monthly_summary`, `continue_on`, `what_do_i_know` and `prioritize_tasks`. Each tells the model which tools to call and what limits to keep, and defers to the `logseq-skills` workflow when the host has it (#46).
 - **MCP resources**: `logseq://guide` (the reading guide) and the `logseq://page/{name}` template (a page as Markdown text). Both are read-only (#46).
 - **Claude Code plugin and marketplace manifests**, with the skills moved to a root `skills/` directory so a plugin can find them. Skills refer to tools by bare name so they work under any host prefix (#45).
