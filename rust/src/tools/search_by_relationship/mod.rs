@@ -29,7 +29,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::block_budget::{Budget, count_blocks, take_blocks};
 use crate::client::LogseqClient;
 use crate::edn::{PageId, PageName};
@@ -70,9 +70,6 @@ const NARROWER: &str = "No other parameter narrows this query.";
 /// order, which is not a ranking. `connected-within` has its own wording.
 const MATCHING_BLOCKS: &str = "matching blocks (the first ones listed, not ranked)";
 
-/// The words `relationship_type` takes, in the order the TypeScript schema lists them.
-pub const RELATIONSHIP_TYPE_VALUES: &[&str] = &["references", "referenced-by", "in-pages-linking-to", "connected-within"];
-
 // `relationship_type`, as the input schema lists it. Inlined into the tool's schema, not referenced
 // from `$defs`: the MCP SDK client drops `$defs`. No doc comment, which would become a `description`
 // of the enum beside the parameter's own.
@@ -96,15 +93,6 @@ impl RelationshipType {
         }
     }
 
-    fn from_word(word: &str) -> Option<RelationshipType> {
-        Some(match word {
-            "references" => RelationshipType::References,
-            "referenced-by" => RelationshipType::ReferencedBy,
-            "in-pages-linking-to" => RelationshipType::InPagesLinkingTo,
-            "connected-within" => RelationshipType::ConnectedWithin,
-            _ => return None,
-        })
-    }
 }
 
 fn default_max_distance() -> u64 {
@@ -115,9 +103,9 @@ fn default_limit() -> u64 {
     DEFAULT_RELATIONSHIP_LIMIT
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// ignores them.
 ///
 /// The two counts are `u64`, not `u32`: the schema is the same (an integer, at least 0), and the
 /// value is echoed back (`query.maxDistance`, "N was asked for"), so a number past `u32` stays
@@ -138,20 +126,6 @@ pub struct Args {
     pub limit: u64,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        topic_a: read.required_string("topic_a")?,
-        topic_b: read.required_string("topic_b")?,
-        relationship_type: RelationshipType::from_word(read.required_enum("relationship_type", RELATIONSHIP_TYPE_VALUES)?)
-            .expect("a word the enum accepted"),
-        max_distance: read.count_or("max_distance", 0, DEFAULT_MAX_DISTANCE)?,
-        limit: read.count_or("limit", 0, DEFAULT_RELATIONSHIP_LIMIT)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -161,7 +135,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, then the search.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let result = search_by_relationship(client, &args).await?;
     Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
@@ -683,7 +657,7 @@ mod tests {
 
     #[test]
     fn the_arguments_default_and_are_read_in_schema_order() {
-        let read = |value: Value| read_args(value.as_object());
+        let read = |value: Value| parse_args::<Args>(value.as_object());
         let args = read(json!({"topic_a": "A", "topic_b": "B", "relationship_type": "references", "max_distance": null})).unwrap();
         assert_eq!((args.max_distance, args.limit, args.relationship_type), (2, 50, RelationshipType::References));
         // topic_a is read before the others, whatever else is wrong
@@ -696,6 +670,23 @@ mod tests {
             read(json!({"topic_a": "A", "topic_b": "B", "relationship_type": "connected-within", "max_distance": -1})).unwrap_err().to_string(),
             "Invalid parameter 'max_distance': -1\n\nExpected: at least 0\nExample: max_distance: 0"
         );
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"topic_a": "A", "topic_b": "B", "relationship_type": "references"});
+        let without = |param: &str| {
+            let mut base = base.clone();
+            base.as_object_mut().unwrap().remove(param);
+            base
+        };
+        sweep::<Args>(without("topic_a"), "topic_a", Takes::Text, true);
+        sweep::<Args>(without("topic_b"), "topic_b", Takes::Text, true);
+        let words = &["references", "referenced-by", "in-pages-linking-to", "connected-within"];
+        sweep::<Args>(without("relationship_type"), "relationship_type", Takes::Words(words), true);
+        sweep::<Args>(base.clone(), "max_distance", Takes::Count(0), false);
+        sweep::<Args>(base, "limit", Takes::Count(0), false);
     }
 
     #[test]

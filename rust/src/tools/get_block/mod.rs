@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::markdown::{FooterMeta, render_block, with_footer};
@@ -51,18 +51,6 @@ pub struct Args {
     pub format: Option<OutputFormat>,
 }
 
-/// The arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        block_uuid: read.required_string("block_uuid")?,
-        include_children: read.boolean("include_children", false)?,
-        resolve_refs: read.boolean("resolve_refs", false)?,
-        format: OutputFormat::read(&read)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -73,7 +61,7 @@ pub fn definition() -> Tool {
 /// A call: aliases folded, arguments read, then the block. This tool has no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let block = get_block(client, &args.block_uuid, args.include_children, args.resolve_refs).await?;
     if args.format == Some(OutputFormat::Markdown) {
         return Ok(success_result(vec![ContentBlock::text(with_footer(render_block(&block), &FooterMeta::of_result(&block, &[])))]));
@@ -153,15 +141,25 @@ mod tests {
     fn the_arguments_are_read_in_schema_order_and_the_uuid_alias_is_folded() {
         let args = |value: Value| value.as_object().cloned();
         let folded = resolve_param_aliases(ALIASES, args(json!({"uuid": "u1", "include_children": true}))).unwrap();
-        let read = read_args(folded.as_ref()).unwrap();
+        let read = parse_args::<Args>(folded.as_ref()).unwrap();
         assert_eq!((read.block_uuid.as_str(), read.include_children, read.resolve_refs), ("u1", true, false));
         // the first bad argument in schema order is the one reported
-        let error = read_args(args(json!({"block_uuid": 5, "resolve_refs": "yes"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"block_uuid": 5, "resolve_refs": "yes"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'block_uuid': 5"), "{error}");
-        let error = read_args(args(json!({"block_uuid": "u", "resolve_refs": "yes", "format": "xml"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"block_uuid": "u", "resolve_refs": "yes", "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'resolve_refs': \"yes\""), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'block_uuid': missing"), "{error}");
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"block_uuid": "u1"});
+        sweep::<Args>(json!({}), "block_uuid", Takes::Text, true);
+        sweep::<Args>(base.clone(), "include_children", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "resolve_refs", Takes::Flag, false);
+        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
     }
 
     #[test]

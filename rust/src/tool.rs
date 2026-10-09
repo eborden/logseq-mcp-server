@@ -1,13 +1,12 @@
 //! What every tool shares: the read-only hints, the input schema generated from its argument
-//! type, argument parsing at the boundary, and turning a tool's outcome into the TypeScript
-//! server's results. A tool's own code is in its directory under `tools/`.
+//! type, and turning a tool's outcome into the TypeScript server's results. A tool's own code is in
+//! its directory under `tools/`; its arguments are parsed by `crate::args::parse_args`.
 
 use std::sync::Arc;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, ToolAnnotations};
 use schemars::JsonSchema;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::errors::ToolError;
@@ -35,9 +34,9 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
 ///   ignores them (the param aliases rely on it), so there's no `additionalProperties: false`;
 /// - a count, limit, offset or depth is an integer (#293: `z.int().min(0)`): schemars gives an
 ///   unsigned type `"type": "integer"` and `"minimum": 0`, plus a `format` the comparison drops. A
-///   parameter whose TypeScript minimum is 1 says so with `#[schemars(range(min = 1))]`. What a tool
-///   does with a bad value (`2.5`, `-1`, `"5"`) is `crate::args::Arguments` (`optional_count`,
-///   `count_or`), which reads a count up to 2^53 - 1 as a `u64`, not serde.
+///   parameter whose minimum is 1 says so with `#[schemars(range(min = 1))]`, and
+///   `crate::args::parse_args`, the one parse of a tool's arguments, enforces the schema's minimum.
+///   It reads a count up to 2^53 - 1 into a `u64`, and refuses a bad value (`2.5`, `-1`, `"5"`).
 pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     let generator = schemars::generate::SchemaSettings::draft2020_12().with(|settings| settings.inline_subschemas = true).into_generator();
     let Value::Object(mut schema) = serde_json::to_value(generator.into_root_schema_for::<T>()).expect("a schema serializes")
@@ -51,19 +50,6 @@ pub fn input_schema<T: JsonSchema>() -> Arc<JsonObject> {
     assert!(!schema.contains_key("$defs"), "a tool's schema must have no $defs, which the MCP SDK's client drops");
     schema.entry("properties").or_insert_with(|| json!({}));
     Arc::new(schema)
-}
-
-/// Parse a tool's arguments at the boundary (ADR-0019). As in `parseArgs`: unknown fields are
-/// ignored and nothing is coerced (`"5"` is not `5`). `null` means absent because this drops
-/// every `null` before serde sees it, so a defaulted non-`Option` field (`#[serde(default)]
-/// bool`) takes its default for `null` too. serde alone would reject that `null`: keep the
-/// filter in every tool.
-///
-/// A failure is serde's own. The words a model reads for it are the tool's (`params.rs`), which
-/// match the TypeScript server's.
-pub fn parse_args<T: DeserializeOwned>(arguments: Option<JsonObject>) -> Result<T, serde_json::Error> {
-    let present: JsonObject = arguments.unwrap_or_default().into_iter().filter(|(_, v)| !v.is_null()).collect();
-    serde_json::from_value(Value::Object(present))
 }
 
 /// A tool's output struct as the `Value` the renderers and the result writer take. The keys come out
@@ -317,11 +303,15 @@ mod tests {
         value.as_object().cloned()
     }
 
+    fn parse(value: Value) -> Result<SampleArgs, crate::errors::InvalidParameter> {
+        crate::args::parse_args::<SampleArgs>(args(value).as_ref())
+    }
+
     #[test]
     fn parsing_ignores_unknown_fields_treats_null_as_absent_and_never_coerces() {
-        let parsed: SampleArgs = parse_args(args(json!({
+        let parsed = parse(json!({
             "page_name": "my page", "limit": null, "include_children": null, "max_nodes": null, "format": "markdown", "extra": 1
-        })))
+        }))
         .unwrap();
         assert_eq!(
             parsed,
@@ -334,14 +324,13 @@ mod tests {
             }
         );
         // zod's z.number() takes a fraction; the tool clamps or floors it.
-        let parsed: SampleArgs = parse_args(args(json!({"page_name": "x", "max_nodes": 2.5}))).unwrap();
-        assert_eq!(parsed.max_nodes, 2.5);
-        assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "limit": "5"}))).is_err());
-        assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "include_children": "true"}))).is_err());
-        assert!(parse_args::<SampleArgs>(args(json!({"page_name": "x", "format": "html"}))).is_err());
-        assert!(parse_args::<SampleArgs>(args(json!({"page_name": null}))).unwrap_err().to_string().contains("page_name"));
-        assert!(parse_args::<SampleArgs>(None).is_err());
-        // Without the null filter serde rejects a null for a defaulted bool: the filter does that work.
+        assert_eq!(parse(json!({"page_name": "x", "max_nodes": 2.5})).unwrap().max_nodes, 2.5);
+        assert!(parse(json!({"page_name": "x", "limit": "5"})).is_err());
+        assert!(parse(json!({"page_name": "x", "include_children": "true"})).is_err());
+        assert!(parse(json!({"page_name": "x", "format": "html"})).is_err());
+        assert!(parse(json!({"page_name": null})).unwrap_err().to_string().contains("page_name"));
+        assert!(crate::args::parse_args::<SampleArgs>(None).is_err());
+        // serde alone rejects a null for a defaulted bool: dropping every null before parsing does that work.
         assert!(serde_json::from_value::<SampleArgs>(json!({"page_name": "x", "include_children": null})).is_err());
     }
 

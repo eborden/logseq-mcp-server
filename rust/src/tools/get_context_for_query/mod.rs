@@ -24,7 +24,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::compact::compact_query_context;
 use crate::errors::{Candidate, ToolError};
@@ -67,57 +67,34 @@ const COMMON_WORDS: &[&str] = &[
     "on", "at", "to", "for", "of", "with", "about", "by",
 ];
 
-fn default_max_topics() -> u32 {
-    DEFAULT_MAX_TOPICS as u32
+fn default_max_topics() -> u64 {
+    DEFAULT_MAX_TOPICS
 }
 
-fn default_max_search_results() -> u32 {
-    DEFAULT_MAX_SEARCH_RESULTS as u32
+fn default_max_search_results() -> u64 {
+    DEFAULT_MAX_SEARCH_RESULTS
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// ignores them.
+#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Natural language query (can include [[page references]] and #tags)
     pub query: String,
     /// Maximum number of topics to extract context for (default: 5)
+    // The tool slices with max_topics, so 0 would keep no topic at all (#293)
     #[serde(default = "default_max_topics")]
     #[schemars(range(min = 1))]
-    pub max_topics: u32,
+    pub max_topics: u64,
     /// Maximum number of search results for queries without explicit topics (default: 20, max: 100)
     #[serde(default = "default_max_search_results")]
-    pub max_search_results: u32,
+    pub max_search_results: u64,
     /// json (default), or markdown text. Markdown has block uuids only on search hits and with compact
     pub format: Option<OutputFormat>,
     /// Block snippets and uuids, no bodies. Read one with logseq_get_block
     #[serde(default)]
     pub compact: bool,
-}
-
-/// What a call asked for, read from the arguments in the order the schema lists them, so the first
-/// one that is wrong is the one reported, as `parseArgs` does.
-#[derive(Debug, PartialEq)]
-struct Request {
-    query: String,
-    max_topics: u64,
-    max_search_results: u64,
-    format: Option<OutputFormat>,
-    compact: bool,
-}
-
-fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Request {
-        query: read.required_string("query")?,
-        // The tool slices with max_topics, so 0 would keep no topic at all (#293)
-        max_topics: read.count_or("max_topics", 1, DEFAULT_MAX_TOPICS)?,
-        max_search_results: read.count_or("max_search_results", 0, DEFAULT_MAX_SEARCH_RESULTS)?,
-        format: OutputFormat::read(&read)?,
-        compact: read.boolean("compact", false)?,
-    })
 }
 
 /// The tool as `tools/list` shows it.
@@ -129,7 +106,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the context, then JSON, compact JSON or Markdown. This tool makes no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let request = read_args(arguments.as_ref())?;
+    let request = parse_args::<Args>(arguments.as_ref())?;
     // Markdown names the page of each keyword hit; JSON hits keep their shape
     let hit_pages = request.format == Some(OutputFormat::Markdown);
     let context = get_context_for_query(client, &request.query, request.max_topics, request.max_search_results, hit_pages).await?;
@@ -507,14 +484,25 @@ mod tests {
 
     #[test]
     fn the_arguments_are_read_in_schema_order_and_a_topic_count_below_one_is_refused() {
-        let request = read_args(args(json!({"query": "q", "max_search_results": 0})).as_ref()).unwrap();
+        let request = parse_args::<Args>(args(json!({"query": "q", "max_search_results": 0})).as_ref()).unwrap();
         assert_eq!((request.max_topics, request.max_search_results, request.compact), (5, 0, false));
-        let error = read_args(args(json!({"query": "q", "max_topics": 0, "max_search_results": -1})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"query": "q", "max_topics": 0, "max_search_results": -1})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_topics': 0"), "{error}");
-        let error = read_args(args(json!({"query": "q", "compact": "yes"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"query": "q", "compact": "yes"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'compact': \"yes\""), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'query': missing"), "{error}");
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"query": "q"});
+        sweep::<Args>(json!({}), "query", Takes::Text, true);
+        sweep::<Args>(base.clone(), "max_topics", Takes::Count(1), false);
+        sweep::<Args>(base.clone(), "max_search_results", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "compact", Takes::Flag, false);
+        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
     }
 
     #[test]

@@ -3,8 +3,7 @@
 //! `last_n`, or `preset`. A preset is resolved against today here, so everything after this sees
 //! plain dates.
 
-use serde_json::Value;
-
+use crate::args::DATE_FORMAT;
 use crate::dates::{CalendarDate, DatePreset, resolve_date_preset};
 use crate::errors::InvalidParameter;
 
@@ -30,14 +29,9 @@ fn invalid(param: &str, value: impl Into<String>, expected: &str, example: &str)
     InvalidParameter { param: param.to_owned(), value: value.into(), expected: expected.to_owned(), example: Some(example.to_owned()) }
 }
 
-/// What a date must be, as the refusal says it.
-const FORMAT: &str = "Date in YYYYMMDD format (8 digits, valid year/month/day)";
-
-/// The refusal of a date argument that is no whole number (a fraction, or beyond the largest safe
-/// integer): it is not in `YYYYMMDD` format, so it is worded as a date of the wrong format is.
-pub fn bad_date(param: &str, value: &Value, example: &str) -> InvalidParameter {
-    invalid(param, value.to_string(), FORMAT, example)
-}
+/// What a date must be, as the refusal says it. A date that is no whole number never gets this far:
+/// the arguments' parse refuses it with the same words.
+const FORMAT: &str = DATE_FORMAT;
 
 /// `isValidDateFormat`: a whole number of 8 digits (year 1900 to 2100) that is a day the calendar has,
 /// so `20250231` is not one.

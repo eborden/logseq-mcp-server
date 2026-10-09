@@ -20,16 +20,17 @@ use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::args::parse_args;
 use crate::block_tree::order_siblings;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
 use crate::meta::{ResultMeta, ResultWarning};
-use crate::params::{ParamAliases, bad_string_param, resolve_param_aliases};
+use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::require_page;
 use crate::snippet::Snippet;
 use crate::tips::tips_content;
-use crate::tool::{input_schema, parse_args, read_only_annotations, success_result};
+use crate::tool::{input_schema, read_only_annotations, success_result};
 
 use self::tips::{TipBlock, outline_tips};
 use self::wire::OutlineBlock;
@@ -58,11 +59,10 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Get Page Outline"))
 }
 
-/// A call: aliases folded, arguments parsed, the tool, then its tip.
+/// A call: aliases folded, arguments parsed (`page_name` is required), the tool, then its tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let args = parse_args::<Args>(arguments.clone())
-        .map_err(|_| ToolError::InvalidParameter(bad_string_param("page_name", arguments.as_ref())))?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let outline = get_page_outline(client, &args.page_name).await?;
     let mut content = vec![ContentBlock::text(serde_json::to_string(&outline).expect("an outline serializes"))];
     if tips_enabled {
@@ -217,7 +217,13 @@ pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::testing::{Takes, sweep};
     use serde_json::{Value, json};
+
+    #[test]
+    fn page_name_is_a_required_string() {
+        sweep::<Args>(json!({}), "page_name", Takes::Text, true);
+    }
 
     fn rows(blocks: Vec<Value>) -> Vec<Option<OutlineBlock>> {
         let answer = Value::Array(blocks.into_iter().map(|b| json!([b])).collect());

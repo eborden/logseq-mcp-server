@@ -22,7 +22,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::{Arguments, Scalar};
+use crate::args::{Scalar, parse_args};
 use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
@@ -74,18 +74,6 @@ pub struct Args {
     pub slim_results: bool,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        property_key: read.required_string("property_key")?,
-        property_value: read.required_scalar("property_value")?,
-        limit: read.count_or("limit", 0, DEFAULT_PROPERTY_LIMIT)?,
-        slim_results: read.boolean("slim_results", DEFAULT_SLIM_RESULTS)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -95,7 +83,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the query, then its meta and tips.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let found = query_by_property_with_meta(client, &args.property_key, &args.property_value, args.slim_results, args.limit).await?;
     // `null` from LogSeq is `null` here, and has no meta or tips (BR-0011)
     let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
@@ -278,9 +266,24 @@ mod tests {
     }
 
     #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"property_key": "status", "property_value": "done"});
+        let without = |param: &str| {
+            let mut base = base.clone();
+            base.as_object_mut().unwrap().remove(param);
+            base
+        };
+        sweep::<Args>(without("property_key"), "property_key", Takes::Text, true);
+        sweep::<Args>(without("property_value"), "property_value", Takes::Scalar, true);
+        sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
+        sweep::<Args>(base, "slim_results", Takes::Flag, false);
+    }
+
+    #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let required = json!({"property_key": "status", "property_value": 3});
-        let defaults = read_args(required.as_object()).unwrap();
+        let defaults = parse_args::<Args>(required.as_object()).unwrap();
         assert_eq!(
             defaults,
             Args { property_key: "status".into(), property_value: Scalar::Number(3.0), limit: 100, slim_results: true }
@@ -289,17 +292,17 @@ mod tests {
         // the first argument in schema order that is wrong is the one reported
         let bad = json!({"slim_results": 0, "limit": "a", "property_value": []});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'property_key': missing\n\nExpected: a string (required)\nExample: property_key: \"...\""
         );
         let bad = json!({"property_key": "a", "slim_results": 0, "limit": "a", "property_value": []});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'property_value': []\n\nExpected: a string, a number or a boolean, not an array\nExample: property_value: \"...\""
         );
         let bad = json!({"property_key": "a", "slim_results": 0, "limit": "a", "property_value": false});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': \"a\"\n\nExpected: a number, not a string\nExample: limit: 5"
         );
     }

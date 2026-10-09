@@ -36,11 +36,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::block_budget::count_blocks;
 use crate::block_tree::{build_block_trees, camelize_keys};
 use crate::client::LogseqClient;
-use crate::dates::{CalendarDate, Clock, DATE_PRESET_VALUES, DatePreset};
+use crate::dates::{CalendarDate, Clock, DatePreset};
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
 use crate::meta::ResultWarning;
@@ -53,7 +53,7 @@ use crate::tool::{input_schema, read_only_annotations, success_result};
 
 use self::cap::{BlockCut, MAX_DATE_RANGE_BLOCKS, TruncationOptions, blocks_truncated, cap_entries};
 use self::search::BlockMatcher;
-use self::selection::{Resolved, Selection, bad_date, resolve_selection};
+use self::selection::{Resolved, Selection, resolve_selection};
 use self::tips::date_range_tips;
 use self::top_concepts::{ConceptRef, DEFAULT_TOP_CONCEPTS_LIMIT, concept_value, extract_concept_refs, roll_up_top_concepts};
 
@@ -78,8 +78,8 @@ fn default_include_content() -> bool {
     true
 }
 
-fn default_top_concepts_limit() -> u32 {
-    DEFAULT_TOP_CONCEPTS_LIMIT
+fn default_top_concepts_limit() -> u64 {
+    u64::from(DEFAULT_TOP_CONCEPTS_LIMIT)
 }
 
 fn default_max_blocks() -> u64 {
@@ -89,7 +89,7 @@ fn default_max_blocks() -> u64 {
 /// The tool's arguments. Unknown fields are ignored, as every TypeScript tool ignores them. Which
 /// selection was given (exactly one of `start_date` with `end_date`, `last_n` or `preset`) and the
 /// `YYYYMMDD` format are checked by [`query_journals`], as in TypeScript; the types and the counts'
-/// minimums are checked when the arguments are read.
+/// minimums are checked when the arguments are parsed.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Start date in YYYYMMDD format (e.g., 20251115). Needs end_date
@@ -100,7 +100,7 @@ pub struct Args {
     pub end_date: Option<i64>,
     /// The N most recent journals that exist (whole number, 1+), newest first
     #[schemars(range(min = 1))]
-    pub last_n: Option<u32>,
+    pub last_n: Option<u64>,
     /// Named period in local time; weeks run Monday to Sunday
     pub preset: Option<DatePreset>,
     /// Optional search term to filter blocks
@@ -113,7 +113,7 @@ pub struct Args {
     pub include_content: bool,
     /// Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it
     #[serde(default = "default_top_concepts_limit")]
-    pub top_concepts_limit: u32,
+    pub top_concepts_limit: u64,
     /// Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)
     #[serde(default)]
     pub resolve_refs: bool,
@@ -122,28 +122,10 @@ pub struct Args {
     pub max_blocks: u64,
 }
 
-/// A count a `u32` field holds: a larger one is as good as the largest, since each of these
-/// (`last_n`, `top_concepts_limit`) only ever cuts a list at that many.
+/// A count a `u32` holds: a larger one is as good as the largest, since `last_n` only ever cuts a
+/// list at that many.
 fn saturate(count: u64) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
-}
-
-/// The arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        start_date: read.optional_whole_or("start_date", |value, _| bad_date("start_date", value, "20251115 for November 15, 2025"))?,
-        end_date: read.optional_whole_or("end_date", |value, _| bad_date("end_date", value, "20251120 for November 20, 2025"))?,
-        last_n: read.optional_count("last_n", 1)?.map(saturate),
-        preset: read.optional_enum("preset", DATE_PRESET_VALUES)?.and_then(DatePreset::from_word),
-        search_term: read.optional_string("search_term")?,
-        slim_results: read.boolean("slim_results", DEFAULT_SLIM_RESULTS)?,
-        include_content: read.boolean("include_content", true)?,
-        top_concepts_limit: saturate(read.count_or("top_concepts_limit", 0, u64::from(DEFAULT_TOP_CONCEPTS_LIMIT))?),
-        resolve_refs: read.boolean("resolve_refs", false)?,
-        max_blocks: read.count_or("max_blocks", 0, DEFAULT_DATE_RANGE_MAX_BLOCKS)?,
-    })
 }
 
 /// The tool as `tools/list` shows it.
@@ -155,7 +137,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the journals, then the tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let result = query_journals(client, &args, clock.today()).await?;
     let mut content = vec![ContentBlock::text(result.json)];
     if tips_enabled {
@@ -307,7 +289,7 @@ fn object_of(parts: Vec<(&str, Value)>) -> Value {
 /// before any LogSeq call is made.
 pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarDate) -> Result<JournalsResult, ToolError> {
     let selection = resolve_selection(
-        Selection { start_date: args.start_date, end_date: args.end_date, last_n: args.last_n, preset: args.preset },
+        Selection { start_date: args.start_date, end_date: args.end_date, last_n: args.last_n.map(saturate), preset: args.preset },
         today,
     )?;
     let search_term = args.search_term.as_deref().filter(|term| !term.is_empty());
@@ -395,7 +377,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         let top = roll_up_top_concepts(
             all_entries.iter().map(|entry| (entry.date, entry.blocks.as_slice())),
             &refs_by_block,
-            u64::from(args.top_concepts_limit),
+            args.top_concepts_limit,
         );
         summary.insert("topConcepts".to_owned(), Value::Array(top.iter().map(concept_value).collect()));
         top
@@ -545,8 +527,32 @@ mod tests {
     }
 
     fn read(value: Value) -> Result<Args, String> {
-        read_args(value.as_object()).map_err(|error| error.to_string())
+        parse_args::<Args>(value.as_object()).map_err(|error| error.to_string())
     }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"last_n": 7});
+        let without = |param: &str| {
+            let mut base = base.clone();
+            base.as_object_mut().unwrap().remove(param);
+            base
+        };
+        sweep::<Args>(base.clone(), "start_date", Takes::Date, false);
+        sweep::<Args>(base.clone(), "end_date", Takes::Date, false);
+        sweep::<Args>(json!({}), "last_n", Takes::Count(1), false);
+        sweep::<Args>(without("preset"), "preset", Takes::Words(&DATE_PRESET_WORDS), false);
+        sweep::<Args>(base.clone(), "search_term", Takes::Text, false);
+        sweep::<Args>(base.clone(), "slim_results", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "include_content", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "top_concepts_limit", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "resolve_refs", Takes::Flag, false);
+        sweep::<Args>(base, "max_blocks", Takes::Count(0), false);
+    }
+
+    /// The words `preset` takes, as the schema lists them.
+    const DATE_PRESET_WORDS: [&str; 8] = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"];
 
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
@@ -604,11 +610,11 @@ mod tests {
         let format = "Expected: Date in YYYYMMDD format (8 digits, valid year/month/day)";
         assert_eq!(
             read(json!({"start_date": 20250101.5, "end_date": 20250102})).unwrap_err(),
-            format!("Invalid parameter 'start_date': 20250101.5\n\n{format}\nExample: 20251115 for November 15, 2025")
+            format!("Invalid parameter 'start_date': 20250101.5\n\n{format}\nExample: start_date: 20251115")
         );
         assert_eq!(
             read(json!({"start_date": 20250101, "end_date": 1e300})).unwrap_err(),
-            format!("Invalid parameter 'end_date': 1e+300\n\n{format}\nExample: 20251120 for November 20, 2025")
+            format!("Invalid parameter 'end_date': 1e+300\n\n{format}\nExample: end_date: 20251115")
         );
     }
 

@@ -4,15 +4,9 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::args::Arguments;
-use crate::errors::InvalidParameter;
-
-/// The words `format` takes, in the order the TypeScript schema lists them.
-pub const FORMAT_VALUES: &[&str] = &["json", "markdown"];
-
-// `format`, as the input schema lists it. Read through `OutputFormat::read`, which words a bad
-// value as the TypeScript server does. No doc comment: it would become a `description` of the enum
-// beside the parameter's own.
+// `format`, as the input schema lists it, and as a tool's arguments take it: `Option<OutputFormat>`,
+// with no default advertised. A word that is neither is refused by `crate::args::parse_args`. No doc
+// comment: it would become a `description` of the enum beside the parameter's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
@@ -20,31 +14,24 @@ pub enum OutputFormat {
     Markdown,
 }
 
-impl OutputFormat {
-    /// `format` as sent, `None` when it is absent or `null` (`formatArg`: no default is advertised).
-    pub fn read(args: &Arguments<'_>) -> Result<Option<OutputFormat>, InvalidParameter> {
-        Ok(args
-            .optional_enum("format", FORMAT_VALUES)?
-            .map(|word| if word == "markdown" { OutputFormat::Markdown } else { OutputFormat::Json }))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::testing::{Takes, parse, sweep};
     use serde_json::json;
 
-    fn read(value: serde_json::Value) -> Result<Option<OutputFormat>, InvalidParameter> {
-        let args = value.as_object().cloned().unwrap();
-        OutputFormat::read(&Arguments::new(Some(&args)))
+    #[derive(Debug, Deserialize, JsonSchema)]
+    struct WithFormat {
+        format: Option<OutputFormat>,
     }
 
     #[test]
     fn format_is_absent_json_or_markdown_by_name() {
-        assert_eq!(read(json!({})).unwrap(), None);
-        assert_eq!(read(json!({"format": null})).unwrap(), None);
-        assert_eq!(read(json!({"format": "json"})).unwrap(), Some(OutputFormat::Json));
-        assert_eq!(read(json!({"format": "markdown"})).unwrap(), Some(OutputFormat::Markdown));
-        assert!(read(json!({"format": "xml"})).is_err());
+        assert_eq!(parse::<WithFormat>(json!({})).unwrap().format, None);
+        assert_eq!(parse::<WithFormat>(json!({"format": null})).unwrap().format, None);
+        assert_eq!(parse::<WithFormat>(json!({"format": "json"})).unwrap().format, Some(OutputFormat::Json));
+        assert_eq!(parse::<WithFormat>(json!({"format": "markdown"})).unwrap().format, Some(OutputFormat::Markdown));
+        assert!(parse::<WithFormat>(json!({"format": "xml"})).is_err());
+        sweep::<WithFormat>(json!({}), "format", Takes::Words(&["json", "markdown"]), false);
     }
 }
