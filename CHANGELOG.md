@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Nothing has been published to npm yet, so there is no released version to compare against. `package.json` says 1.0.0; everything below ships in the first release. When the maintainer cuts it, rename "Unreleased" to that version and date.
+Nothing has been released yet, so there is no released version to compare against. `package.json` says 1.0.0; everything below ships in the first release. When the maintainer cuts it, rename "Unreleased" to that version and date.
 
 ## [Unreleased]
 
