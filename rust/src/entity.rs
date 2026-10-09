@@ -6,9 +6,8 @@
 //! output carries each entity as it came, key order and spelling included (BR-0004), so an entity
 //! is kept as the `serde_json::Value` LogSeq sent and is never rewritten into one shape. This
 //! module does two things with it:
-//! - *checks* it against the schema the TypeScript server checks it with (`check_*`, run by the
-//!   tool's own reader), so a field the code reads that is missing or mistyped is a
-//!   `ResponseError` and never "no data" (BR-0003);
+//! - *checks* it against the shapes in [`shape`] (read by the tool's own wire reader), so a field the
+//!   code reads that is missing or mistyped is a `ResponseError` and never "no data" (BR-0003);
 //! - *reads* a field whichever way it is spelled (the free functions below), which is the one
 //!   place that knows the two spellings, so no tool carries its own `a ?? b ?? c`.
 //!
@@ -17,7 +16,9 @@
 
 use serde_json::Value;
 
-use crate::wire::{Parsed, Part, Reader, entity_id};
+use crate::wire::entity_id;
+
+pub(crate) mod shape;
 
 /// A whole number a JSON value holds, as the id of an entity is.
 fn whole(value: Option<&Value>) -> Option<i64> {
@@ -63,141 +64,10 @@ pub fn journal_day_of(page: Option<&Value>) -> Option<i64> {
     whole(map.get("journalDay")).or_else(|| whole(map.get("journal-day")))
 }
 
-impl Reader {
-    /// A field that must be present and a whole number: a `:db/id` (`z.number()`).
-    pub(crate) fn required_whole(&mut self, map: &serde_json::Map<String, Value>, key: &'static str) -> Parsed<()> {
-        self.at(Part::Key(key), |r| match map.get(key) {
-            None => Err(r.mismatch("number", None)),
-            Some(value) => r.id_value(value).map(|_| ()),
-        })
-    }
-
-    /// The fields a page has in both dialects (`pageShared`).
-    fn check_page_shared(&mut self, map: &serde_json::Map<String, Value>) -> Parsed<()> {
-        self.string(map, "uuid")?;
-        self.boolean(map, "journal?")?;
-        self.boolean(map, "journal")?;
-        self.optional_entity_ref(map, "file")?;
-        self.entity_refs(map, "alias")?;
-        self.optional_entity_ref(map, "namespace")?;
-        self.map_field(map, "properties")?;
-        Ok(())
-    }
-
-    /// `editorPageSchema`: a page from the Editor API (`getAllPages`), camelCase keys.
-    pub(crate) fn check_editor_page(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.required_whole(map, "id")?;
-        self.required_string(map, "name")?;
-        self.check_page_shared(map)?;
-        self.string(map, "originalName")?;
-        self.number(map, "journalDay")?;
-        self.number(map, "createdAt")?;
-        self.number(map, "updatedAt")?;
-        Ok(())
-    }
-
-    /// `pulledPageSchema`: a page from a Datalog pull, LogSeq's own kebab-case keys. Every field is
-    /// optional, the id too.
-    pub(crate) fn check_pulled_page(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.id(map, "id")?;
-        self.string(map, "name")?;
-        self.check_page_shared(map)?;
-        self.id(map, "db/id")?;
-        self.string(map, "original-name")?;
-        self.number(map, "journal-day")?;
-        self.number(map, "created-at")?;
-        self.number(map, "updated-at")?;
-        self.map_field(map, "properties-text-values")?;
-        Ok(())
-    }
-
-    /// `pageLikeSchema`, checked and not kept: a page of either spelling, every field optional.
-    /// The Editor API's fields (`originalName`, `journalDay`, `createdAt`, `updatedAt`) sit
-    /// between the shared fields and the pulled ones in the schema, so a mismatch is reported in
-    /// that order.
-    pub(crate) fn check_page_like(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.id(map, "id")?;
-        self.string(map, "name")?;
-        self.string(map, "uuid")?;
-        self.boolean(map, "journal?")?;
-        self.boolean(map, "journal")?;
-        self.optional_entity_ref(map, "file")?;
-        self.entity_refs(map, "alias")?;
-        self.optional_entity_ref(map, "namespace")?;
-        self.map_field(map, "properties")?;
-        self.string(map, "originalName")?;
-        self.number(map, "journalDay")?;
-        self.number(map, "createdAt")?;
-        self.number(map, "updatedAt")?;
-        self.id(map, "db/id")?;
-        self.string(map, "original-name")?;
-        self.number(map, "journal-day")?;
-        self.number(map, "created-at")?;
-        self.number(map, "updated-at")?;
-        self.map_field(map, "properties-text-values")?;
-        Ok(())
-    }
-
-    /// `nestedPageSchema`: the page nested in a block, or one of its refs. Only what the readers
-    /// take from such a page is checked, since a block carries one page and several refs.
-    pub(crate) fn check_nested_page(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.id(map, "id")?;
-        self.id(map, "db/id")?;
-        self.string(map, "name")?;
-        self.string(map, "originalName")?;
-        self.string(map, "original-name")?;
-        self.boolean(map, "journal?")?;
-        self.boolean(map, "journal")?;
-        self.number(map, "journalDay")?;
-        self.number(map, "journal-day")?;
-        Ok(())
-    }
-
-    /// `blockSchema`: a block, in the fields both dialects spell the same and the code reads.
-    /// `children` is not checked: without `includeChildren` the Editor API gives unfetched tuples
-    /// there, not blocks.
-    pub(crate) fn check_block(&mut self, value: Option<&Value>) -> Parsed<()> {
-        let map = self.object(value)?;
-        self.required_whole(map, "id")?;
-        self.required_string(map, "uuid")?;
-        self.string(map, "content")?;
-        self.at(Part::Key("page"), |r| match map.get("page") {
-            None => Ok(()),
-            some => r.check_nested_page(some),
-        })?;
-        self.optional_entity_ref(map, "parent")?;
-        self.optional_entity_ref(map, "left")?;
-        self.map_field(map, "properties")?;
-        self.string(map, "marker")?;
-        self.at(Part::Key("refs"), |r| match map.get("refs") {
-            None => Ok(()),
-            Some(Value::Array(items)) => {
-                for (i, item) in items.iter().enumerate() {
-                    r.at(Part::Index(i), |r| r.check_nested_page(Some(item)))?;
-                }
-                Ok(())
-            }
-            Some(other) => Err(r.mismatch("array", Some(other))),
-        })?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::to_error;
     use serde_json::json;
-
-    fn problem(check: impl FnOnce(&mut Reader, Option<&Value>) -> Parsed<()>, value: Value) -> String {
-        let issue = check(&mut Reader::default(), Some(&value)).unwrap_err();
-        let error = to_error("m", issue);
-        format!("{}: {}", error.path, error.problem)
-    }
 
     #[test]
     fn an_id_falls_through_to_db_id_only_when_it_is_missing() {
@@ -228,42 +98,106 @@ mod tests {
         assert_eq!(journal_day_of(Some(&json!({"journalDay": 20250102, "journal-day": 1}))), Some(20250102));
     }
 
+    // ---- the shapes: what a page or a block must be for the code that reads it
+
+    use super::shape::{Block, EditorPage, NestedPage, PageLike, PulledPage};
+    use crate::wire::parse;
+    use serde::de::DeserializeOwned;
+
+    /// What a shape says of an answer: `path: problem`, or a panic when it accepts it.
+    fn problem<T: DeserializeOwned>(value: Value) -> String {
+        match parse::<T>("m", &value) {
+            Ok(_) => panic!("accepted {value}"),
+            Err(error) => format!("{}: {}", error.path, error.problem),
+        }
+    }
+
+    fn accepts<T: DeserializeOwned>(value: Value) -> bool {
+        parse::<T>("m", &value).is_ok()
+    }
+
     #[test]
     fn an_editor_page_needs_an_id_and_a_name() {
-        let check = |r: &mut Reader, v: Option<&Value>| r.check_editor_page(v);
-        assert_eq!(problem(check, json!({"name": "a"})), "id: Invalid input: expected number, received undefined");
-        assert_eq!(problem(check, json!({"id": 1})), "name: Invalid input: expected string, received undefined");
-        assert_eq!(problem(check, json!({"id": 1, "name": "a", "alias": [{"id": "x"}]})), "alias[0].id: Invalid input: expected number, received string");
-        assert!(check(&mut Reader::default(), Some(&json!({"id": 1, "name": "a", "originalName": "A", "extra": 1}))).is_ok());
+        assert_eq!(problem::<EditorPage>(json!({"name": "a"})), "answer.id: required, but missing");
+        assert_eq!(problem::<EditorPage>(json!({"id": 1})), "answer.name: required, but missing");
+        assert_eq!(problem::<EditorPage>(json!({"id": 1, "name": "a", "alias": [{"id": "x"}]})), "answer.alias[0].id: expected a whole number, got a string");
+        assert!(accepts::<EditorPage>(json!({"id": 1, "name": "a", "originalName": "A", "extra": 1})));
     }
 
     #[test]
     fn what_the_check_accepts_as_an_id_the_readers_read_and_never_as_absent() {
         // `5.0` and `1e3` are whole numbers to a JavaScript number but floats to serde_json
-        let editor = |r: &mut Reader, v: Option<&Value>| r.check_editor_page(v);
-        let block = |r: &mut Reader, v: Option<&Value>| r.check_block(v);
         for (id, read) in [(json!(5), 5), (json!(5.0), 5), (json!(1e3), 1000)] {
             let page = json!({"id": id, "name": "a", "uuid": "u"});
-            assert!(editor(&mut Reader::default(), Some(&page)).is_ok(), "{id}");
-            assert!(block(&mut Reader::default(), Some(&page)).is_ok(), "{id}");
+            assert!(accepts::<EditorPage>(page.clone()), "{id}");
+            assert!(accepts::<Block>(page.clone()), "{id}");
             assert_eq!(id_of(Some(&page)), Some(read), "{id}");
         }
         // a fraction or a number past 2^53 is no id, and the check says so
         for id in [json!(1.5), json!(1e300), json!(9007199254740993u64)] {
             let page = json!({"id": id, "name": "a", "uuid": "u"});
-            assert!(problem(editor, page.clone()).starts_with("id: Invalid input: expected int"), "{id}");
-            assert!(problem(block, page).starts_with("id: Invalid input: expected int"), "{id}");
+            assert!(problem::<EditorPage>(page.clone()).starts_with("answer.id: expected a whole number"), "{id}");
+            assert!(problem::<Block>(page).starts_with("answer.id: expected a whole number"), "{id}");
         }
     }
 
     #[test]
     fn a_block_needs_an_id_and_a_uuid_and_checks_its_page_and_refs() {
-        let check = |r: &mut Reader, v: Option<&Value>| r.check_block(v);
-        assert_eq!(problem(check, json!({"uuid": "u"})), "id: Invalid input: expected number, received undefined");
-        assert_eq!(problem(check, json!({"id": 1})), "uuid: Invalid input: expected string, received undefined");
-        assert_eq!(problem(check, json!({"id": 1, "uuid": "u", "content": 5})), "content: Invalid input: expected string, received number");
-        assert_eq!(problem(check, json!({"id": 1, "uuid": "u", "page": null})), "page: Invalid input: expected object, received null");
-        assert_eq!(problem(check, json!({"id": 1, "uuid": "u", "refs": [{"name": 3}]})), "refs[0].name: Invalid input: expected string, received number");
-        assert!(check(&mut Reader::default(), Some(&json!({"id": 1, "uuid": "u", "children": ["uuid", "x"], "page": {"id": 2}}))).is_ok());
+        assert_eq!(problem::<Block>(json!({"uuid": "u"})), "answer.id: required, but missing");
+        assert_eq!(problem::<Block>(json!({"id": 1})), "answer.uuid: required, but missing");
+        assert_eq!(problem::<Block>(json!({"id": 1, "uuid": "u", "content": 5})), "answer.content: expected a string, got a number");
+        assert_eq!(problem::<Block>(json!({"id": 1, "uuid": "u", "page": null})), "answer.page: expected an object, got null");
+        assert_eq!(problem::<Block>(json!({"id": 1, "uuid": "u", "refs": [{"name": 3}]})), "answer.refs[0].name: expected a string, got a number");
+        assert!(accepts::<Block>(json!({"id": 1, "uuid": "u", "children": ["uuid", "x"], "page": {"id": 2}})));
+    }
+
+    #[test]
+    fn a_field_that_may_be_left_out_may_not_be_null() {
+        // a null is a mismatch in every field a shape reads (BR-0003), so a field read as absent is absent
+        let block = |key: &str| {
+            let mut block = json!({"id": 1, "uuid": "u"});
+            block[key] = Value::Null;
+            block
+        };
+        for key in ["content", "page", "parent", "left", "properties", "marker", "refs"] {
+            assert!(problem::<Block>(block(key)).starts_with(&format!("answer.{key}: expected ")), "{key}");
+        }
+        let nested = |key: &str| {
+            let mut page = json!({});
+            page[key] = Value::Null;
+            page
+        };
+        for key in ["id", "db/id", "name", "originalName", "original-name", "journal?", "journal", "journalDay", "journal-day"] {
+            assert!(problem::<NestedPage>(nested(key)).starts_with(&format!("answer.{key}: expected ")), "{key}");
+        }
+        let editor = |key: &str| {
+            let mut page = json!({"id": 1, "name": "a"});
+            page[key] = Value::Null;
+            page
+        };
+        for key in ["originalName", "journal?", "journal", "file", "alias", "properties", "journalDay"] {
+            assert!(problem::<EditorPage>(editor(key)).starts_with(&format!("answer.{key}: expected ")), "{key}");
+        }
+        for key in ["id", "db/id", "name", "original-name", "journal?", "journal", "file", "alias", "properties", "journal-day"] {
+            assert!(problem::<PulledPage>(nested(key)).starts_with(&format!("answer.{key}: expected ")), "{key}");
+        }
+        for key in ["id", "db/id", "name", "originalName", "original-name", "journal?", "journal", "properties", "journalDay", "journal-day"] {
+            assert!(problem::<PageLike>(nested(key)).starts_with(&format!("answer.{key}: expected ")), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_field_nothing_reads_may_hold_anything() {
+        let unread = json!({"uuid": 5, "namespace": [1], "createdAt": "x", "updatedAt": null, "created-at": {}, "updated-at": [], "properties-text-values": 7});
+        let with_unread = |mut page: Value| {
+            page.as_object_mut().unwrap().extend(unread.as_object().unwrap().clone());
+            page
+        };
+        assert!(accepts::<EditorPage>(with_unread(json!({"id": 1, "name": "a"}))));
+        assert!(accepts::<PulledPage>(with_unread(json!({}))));
+        assert!(accepts::<PageLike>(with_unread(json!({}))));
+        assert!(accepts::<NestedPage>(with_unread(json!({}))));
+        // and a block's children, which are not read here
+        assert!(accepts::<Block>(json!({"id": 1, "uuid": "u", "children": {"a": 1}, "path-refs": "x", "format": 3})));
     }
 }

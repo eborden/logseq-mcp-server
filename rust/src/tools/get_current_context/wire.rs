@@ -6,7 +6,8 @@
 
 use serde_json::Value;
 
-use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
+use crate::entity::shape::{Block, EditorPage, PulledPage};
+use crate::wire::{DATALOG_METHOD, Object, ResponseError, check, parse, sent_cells, sent_list};
 
 pub const GET_CURRENT_PAGE: &str = "logseq.Editor.getCurrentPage";
 pub const GET_CURRENT_BLOCK: &str = "logseq.Editor.getCurrentBlock";
@@ -16,56 +17,29 @@ pub const GET_SELECTED_BLOCKS: &str = "logseq.Editor.getSelectedBlocks";
 /// block when it hasn't. It is checked as the one it is, so a mismatch reports its own path
 /// (`originalName`, `content`) and not a whole union's.
 pub fn current_page(answer: Value) -> Result<Option<Value>, ResponseError> {
-    if answer.is_null() {
-        return Ok(None);
+    let Some(Object) = parse::<Option<Object>>(GET_CURRENT_PAGE, &answer)? else { return Ok(None) };
+    // `value.name !== undefined`: JSON has no `undefined`, so a `null` name is a name (and not text)
+    match answer.get("name") {
+        Some(_) => check::<EditorPage>(GET_CURRENT_PAGE, &answer)?,
+        None => check::<Block>(GET_CURRENT_PAGE, &answer)?,
     }
-    let mut reader = Reader::default();
-    let checked = match &answer {
-        // `value.name !== undefined`: JSON has no `undefined`, so a `null` name is a name (and not text)
-        Value::Object(map) if map.contains_key("name") => reader.check_editor_page(Some(&answer)),
-        Value::Object(_) => reader.check_block(Some(&answer)),
-        _ => Err(reader.issue("expected an object")),
-    };
-    checked.map(|()| Some(answer)).map_err(|issue| to_error(GET_CURRENT_PAGE, issue))
+    Ok(Some(answer))
 }
 
 /// `responses.block`: `null`, or a block.
 pub fn current_block(answer: Value) -> Result<Option<Value>, ResponseError> {
-    if answer.is_null() {
-        return Ok(None);
-    }
-    Reader::default().check_block(Some(&answer)).map(|()| Some(answer)).map_err(|issue| to_error(GET_CURRENT_BLOCK, issue))
+    Ok(parse::<Option<Block>>(GET_CURRENT_BLOCK, &answer)?.map(|_| answer))
 }
 
 /// `responses.blocks`: `null`, or a list of blocks.
 pub fn selected_blocks(answer: Value) -> Result<Option<Vec<Value>>, ResponseError> {
-    let mut reader = Reader::default();
-    let items = match answer {
-        Value::Null => return Ok(None),
-        Value::Array(items) => items,
-        other => return Err(to_error(GET_SELECTED_BLOCKS, reader.mismatch("array", Some(&other)))),
-    };
-    for (i, item) in items.iter().enumerate() {
-        reader.at(Part::Index(i), |r| r.check_block(Some(item))).map_err(|issue| to_error(GET_SELECTED_BLOCKS, issue))?;
-    }
-    Ok(Some(items))
+    sent_list::<Block>(GET_SELECTED_BLOCKS, &answer)
 }
 
 /// `responses.nullablePageRows`: `null`, or one row per page, each `[page | null]`. A `null` cell is
 /// `None`, which the lookup skips.
 pub fn page_rows(answer: &Value) -> Result<Option<Vec<Option<Value>>>, ResponseError> {
-    let mut reader = Reader::default();
-    reader
-        .rows(answer, 1, |r, cells| {
-            r.at(Part::Index(0), |r| match cells.first() {
-                Some(Value::Null) => Ok(None),
-                cell => {
-                    r.check_pulled_page(cell)?;
-                    Ok(cell.cloned())
-                }
-            })
-        })
-        .map_err(|issue| to_error(DATALOG_METHOD, issue))
+    sent_cells::<PulledPage>(DATALOG_METHOD, answer)
 }
 
 #[cfg(test)]
@@ -96,22 +70,19 @@ mod tests {
         assert_eq!(current_page(block.clone()).unwrap(), Some(block));
         assert_eq!(
             problem(current_page(json!({"id": 1, "name": "a", "originalName": 3}))),
-            "logseq.Editor.getCurrentPage: originalName: Invalid input: expected string, received number"
+            "logseq.Editor.getCurrentPage: answer.originalName: expected a string, got a number"
         );
         assert_eq!(
             problem(current_page(json!({"id": 1, "uuid": "u", "name": null}))),
-            "logseq.Editor.getCurrentPage: name: Invalid input: expected string, received null"
+            "logseq.Editor.getCurrentPage: answer.name: expected a string, got null"
         );
-        assert_eq!(
-            problem(current_page(json!({"id": 2, "page": {"id": 1}}))),
-            "logseq.Editor.getCurrentPage: uuid: Invalid input: expected string, received undefined"
-        );
+        assert_eq!(problem(current_page(json!({"id": 2, "page": {"id": 1}}))), "logseq.Editor.getCurrentPage: answer.uuid: required, but missing");
     }
 
     #[test]
     fn an_open_page_that_is_not_an_object_is_one_error_at_the_top() {
-        for answer in [json!(5), json!([]), json!("Alice"), json!(true)] {
-            assert_eq!(problem(current_page(answer)), "logseq.Editor.getCurrentPage: (response): expected an object");
+        for (answer, found) in [(json!(5), "a number"), (json!([]), "a list"), (json!("Alice"), "a string"), (json!(true), "a boolean")] {
+            assert_eq!(problem(current_page(answer)), format!("logseq.Editor.getCurrentPage: answer: expected an object, got {found}"));
         }
     }
 
@@ -119,15 +90,15 @@ mod tests {
     fn a_block_in_the_wrong_shape_names_its_path_and_no_value() {
         assert_eq!(
             problem(current_block(json!({"id": 1, "uuid": "u", "content": 5}))),
-            "logseq.Editor.getCurrentBlock: content: Invalid input: expected string, received number"
+            "logseq.Editor.getCurrentBlock: answer.content: expected a string, got a number"
         );
         assert_eq!(
             problem(selected_blocks(json!({"id": 1}))),
-            "logseq.Editor.getSelectedBlocks: (response): Invalid input: expected array, received object"
+            "logseq.Editor.getSelectedBlocks: answer: expected a list, got an object"
         );
         assert_eq!(
             problem(selected_blocks(json!([{"id": 1, "uuid": "u"}, {"id": 2, "uuid": "v", "page": {"id": "x"}}]))),
-            "logseq.Editor.getSelectedBlocks: [1].page.id: Invalid input: expected number, received string"
+            "logseq.Editor.getSelectedBlocks: answer[1].page.id: expected a whole number, got a string"
         );
     }
 
@@ -135,12 +106,15 @@ mod tests {
     fn a_lookup_row_skips_a_null_cell_and_checks_a_page() {
         let page = json!({"id": 9, "name": "alice", "original-name": "Alice"});
         assert_eq!(page_rows(&json!([[null], [page.clone()]])).unwrap(), Some(vec![None, Some(page)]));
-        assert_eq!(problem(page_rows(&json!([[]]))), "logseq.DB.datascriptQuery: [0][0]: Invalid input: expected object, received undefined");
-        assert_eq!(
-            problem(page_rows(&json!([[{"name": 7}]]))),
-            "logseq.DB.datascriptQuery: [0][0].name: Invalid input: expected string, received number"
-        );
-        assert_eq!(problem(page_rows(&json!([[{}, 1]]))), "logseq.DB.datascriptQuery: [0]: Too big: expected array to have <1 items");
-        assert_eq!(problem(page_rows(&json!({}))), "logseq.DB.datascriptQuery: (response): Invalid input: expected array, received object");
+        assert_eq!(problem(page_rows(&json!([[]]))), "logseq.DB.datascriptQuery: answer[0]: the row has fewer cells than this server reads");
+        assert_eq!(problem(page_rows(&json!([[{"name": 7}]]))), "logseq.DB.datascriptQuery: answer[0][0].name: expected a string, got a number");
+        assert_eq!(problem(page_rows(&json!([[{}, 1]]))), "logseq.DB.datascriptQuery: answer[0]: the row has more cells than this server reads");
+        assert_eq!(problem(page_rows(&json!({}))), "logseq.DB.datascriptQuery: answer: expected a list, got an object");
+    }
+
+    #[test]
+    fn a_page_field_nothing_reads_may_hold_anything() {
+        let page = json!({"id": 9, "name": "alice", "uuid": 3, "created-at": "x", "updated-at": null, "properties-text-values": [1]});
+        assert_eq!(page_rows(&json!([[page.clone()]])).unwrap(), Some(vec![Some(page)]));
     }
 }

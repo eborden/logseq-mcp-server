@@ -5,18 +5,13 @@
 
 use serde_json::Value;
 
-use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
+use crate::entity::shape::Block;
+use crate::wire::{DATALOG_METHOD, ResponseError, sent_required_cells};
 
 /// `responses.blockRows`: `[block]` per row, or `None` for a `null` answer, which is not an empty
 /// one (BR-0011). Unlike the nullable rows other tools read, a `null` cell is an error here.
 pub fn block_rows(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
-    let mut reader = Reader::default();
-    reader
-        .rows(answer, 1, |r, cells| {
-            r.at(Part::Index(0), |r| r.check_block(cells.first()))?;
-            Ok(cells[0].clone())
-        })
-        .map_err(|issue| to_error(DATALOG_METHOD, issue))
+    sent_required_cells::<Block>(DATALOG_METHOD, answer)
 }
 
 #[cfg(test)]
@@ -39,9 +34,10 @@ mod tests {
 
     #[test]
     fn a_null_cell_or_a_block_without_a_uuid_is_an_error_naming_the_path() {
-        assert_eq!(problem(block_rows(&json!([[null]]))), "[0][0]: Invalid input: expected object, received null");
-        assert_eq!(problem(block_rows(&json!([[{"id": 1}]]))), "[0][0].uuid: Invalid input: expected string, received undefined");
-        assert_eq!(problem(block_rows(&json!([[]]))), "[0][0]: Invalid input: expected object, received undefined");
-        assert_eq!(problem(block_rows(&json!({}))), "(response): Invalid input: expected array, received object");
+        assert_eq!(problem(block_rows(&json!([[null]]))), "answer[0][0]: expected an object, got null");
+        assert_eq!(problem(block_rows(&json!([[{"id": 1}]]))), "answer[0][0].uuid: required, but missing");
+        assert_eq!(problem(block_rows(&json!([[{"id": 1, "uuid": 5}]]))), "answer[0][0].uuid: expected a string, got a number");
+        assert_eq!(problem(block_rows(&json!([[]]))), "answer[0]: the row has fewer cells than this server reads");
+        assert_eq!(problem(block_rows(&json!({}))), "answer: expected a list, got an object");
     }
 }
