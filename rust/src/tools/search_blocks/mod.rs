@@ -29,6 +29,7 @@ use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::pages_by_ids::pages_by_ids;
+use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, blocks_inline_max, capped_truncation_warning};
@@ -82,11 +83,9 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
     let found = search_blocks_with_meta(client, &args.query, args.limit, args.include_context, args.slim_results).await?;
-    // `null` from LogSeq is `null` here, and has no meta or tips: no matches is an empty array
-    let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
-
     let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
-    let tips = if tips_enabled { search_tips(&args.query, &found.results, found.matches()) } else { Vec::new() };
+    // No tip for a search LogSeq did not answer: "No match" would say what the warning says it can't
+    let tips = if tips_enabled && !found.is_unavailable() { search_tips(&args.query, &found.results, found.matches()) } else { Vec::new() };
     let mut meta = serde_json::to_value(&found.meta).expect("a result meta serializes");
     if !tips.is_empty() {
         meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
@@ -98,12 +97,18 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
 /// The hits of a search and what to say about them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchResults {
-    /// Slim blocks, or full ones with `slim_results: false`
+    /// Slim blocks, or full ones with `slim_results: false`. `[]` when LogSeq answered `null`, with a
+    /// `search_unavailable` warning in `meta` (BR-0011, #415)
     pub results: Vec<Value>,
     pub meta: ResultMeta,
 }
 
 impl SearchResults {
+    /// True when LogSeq gave no answer to the search, so `results` is empty because nothing was read.
+    pub fn is_unavailable(&self) -> bool {
+        self.meta.warnings.iter().any(|warning| warning.code == SEARCH_UNAVAILABLE)
+    }
+
     /// `totals.matches`: the number of matching blocks before `limit`.
     pub fn matches(&self) -> Option<usize> {
         self.meta.totals.get("matches").and_then(Value::as_u64).map(|matches| matches as usize)
@@ -138,9 +143,22 @@ fn pulled_page_to_entity(pulled: &Map<String, Value>) -> Map<String, Value> {
     page
 }
 
-/// What to do about a lookup of pages that LogSeq did not answer: no parameter fetches it, so the warnings carry no
-/// `howToFetchAll` and `hasMore` stays false (BR-0011). The retry advice is in the message.
-const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+/// The code of the warning for a search LogSeq did not answer.
+const SEARCH_UNAVAILABLE: &str = "search_unavailable";
+
+/// The search was not answered: `results` is `[]`, but not because nothing matches. No parameter fetches what LogSeq did
+/// not answer, so the warning carries no `howToFetchAll` and `hasMore` stays false (BR-0011). The retry advice is in the
+/// message.
+fn search_unavailable(query: &str) -> ResultWarning {
+    ResultWarning::new(
+        SEARCH_UNAVAILABLE,
+        format!(
+            "LogSeq returned no answer when looking up blocks that contain {} (possibly no graph open or a re-index in progress), \
+             so the empty list may not mean nothing matches. {RETRY_ADVICE}",
+            json!(query)
+        ),
+    )
+}
 
 /// `include_context` could not read the pages of the `count` result blocks: they are returned without `context`.
 fn context_unavailable(count: usize) -> ResultWarning {
@@ -266,7 +284,9 @@ pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>)
 
 /// Search blocks for `query`: the results and their meta (`totals.matches` is the number of
 /// matching blocks before `limit`, and a `results_truncated` warning says what `limit` to use to get
-/// them all), or `None` when LogSeq answers `null` (no matches is an empty `results`).
+/// them all). When LogSeq answers `null` the results are `[]` and the meta carries a `search_unavailable`
+/// warning, with no `totals.matches` since none is known (BR-0011, #415); no matches is an empty `results` and no
+/// warning.
 ///
 /// `limit` (default 100) is clamped to [`MAX_SEARCH_LIMIT`]. The warning never suggests a value above
 /// it, and a cut at the maximum carries no `howToFetchAll`, so `hasMore` is false there (BR-0006).
@@ -276,10 +296,12 @@ pub async fn search_blocks_with_meta(
     limit: Option<u64>,
     include_context: bool,
     slim_results: bool,
-) -> Result<Option<SearchResults>, ToolError> {
+) -> Result<SearchResults, ToolError> {
     let limit = limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
     // Newest first (highest block id first)
-    let Some(mut matches) = find_blocks(client, query).await? else { return Ok(None) };
+    let Some(mut matches) = find_blocks(client, query).await? else {
+        return Ok(SearchResults { results: Vec::new(), meta: ResultMeta::new(vec![search_unavailable(query)], &[]) });
+    };
     let total = matches.len();
     matches.truncate(limit.min(MAX_SEARCH_LIMIT) as usize);
 
@@ -312,7 +334,7 @@ pub async fn search_blocks_with_meta(
         .zip(&contexts)
         .map(|(block, context)| if slim_results { slim_result(block, context.as_ref()) } else { full_result(block, context.as_ref()) })
         .collect();
-    Ok(Some(SearchResults { results, meta }))
+    Ok(SearchResults { results, meta })
 }
 
 #[cfg(test)]
