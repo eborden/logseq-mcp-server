@@ -56,18 +56,66 @@ fn leaf_ref_at(text: &str) -> Option<(&str, &str)> {
 }
 
 /// The ref that starts `text`, if one does: its name and the text after its closing `]]`. One with
-/// nesting counts when [`page_refs`] lists it, so a wrapper with no text of its own is none.
+/// nesting counts when [`page_refs`] lists it, so a wrapper with no text of its own is none. A
+/// caller that asks at many places in one text uses [`Lines`], which reads each line once.
 pub fn ref_at(text: &str) -> Option<(&str, &str)> {
-    if let Some(found) = leaf_ref_at(text) {
-        return Some(found);
+    let (name, end) = Lines::new(text).ref_at(0)?;
+    Some((name, &text[end..]))
+}
+
+/// A text read for the refs that start at given places in it, as [`ref_at`] does for the start of
+/// one. A ref never runs over a newline, so the refs at a start depend on its line alone, and the
+/// line is settled once, the first time a start in it is asked about. Asking at every start of a
+/// line is linear in the line, where a read of the rest of it per start is quadratic.
+pub struct Lines<'t> {
+    text: &'t str,
+    /// The line last asked about: where it starts and what it holds
+    line: Option<(usize, LineRefs<'t>)>,
+}
+
+impl<'t> Lines<'t> {
+    pub fn new(text: &'t str) -> Self {
+        Lines { text, line: None }
     }
-    if !text.starts_with("[[") {
-        return None;
+
+    /// The ref that starts at byte `at` of the text, if one does: its name and where it ends (just
+    /// after its closing `]]`). `at` must be on a character boundary.
+    pub fn ref_at(&mut self, at: usize) -> Option<(&'t str, usize)> {
+        let rest = &self.text[at..];
+        if let Some((name, after)) = leaf_ref_at(rest) {
+            return Some((name, self.text.len() - after.len()));
+        }
+        if !rest.starts_with("[[") {
+            return None;
+        }
+        let covered = self.line.as_ref().is_some_and(|(start, line)| (*start..=*start + line.line.len()).contains(&at));
+        if !covered {
+            let start = self.text[..at].rfind('\n').map_or(0, |newline| newline + 1);
+            let end = at + rest.find('\n').unwrap_or(rest.len());
+            self.line = Some((start, LineRefs::new(&self.text[start..end])));
+        }
+        let (start, line) = self.line.as_ref()?;
+        let (name, end) = line.ref_at(at - start)?;
+        Some((name, start + end))
     }
-    // A ref never runs over a newline, so the scan is of the line only
-    let line = &text[..text.find('\n').unwrap_or(text.len())];
-    let outer = page_refs(line).into_iter().next().filter(|found| found.range.start == 0)?;
-    Some((outer.name, &text[outer.range.end..]))
+}
+
+/// The refs that close at each start of `[[` in one line, found once.
+struct LineRefs<'t> {
+    line: &'t str,
+    closed: HashMap<usize, Closed>,
+}
+
+impl<'t> LineRefs<'t> {
+    fn new(line: &'t str) -> Self {
+        LineRefs { line, closed: settle(line, &opens(line)) }
+    }
+
+    /// The ref listed by [`page_refs`] that starts at `at` of the line: its name and where it ends.
+    fn ref_at(&self, at: usize) -> Option<(&'t str, usize)> {
+        let found = self.closed.get(&at).filter(|found| found.listed)?;
+        Some((&self.line[at + 2..found.end - 2], found.end))
+    }
 }
 
 /// A ref found in a text.
@@ -122,19 +170,29 @@ fn attempt(text: &str, at: usize, closed: &HashMap<usize, Closed>, mut on_child:
     }
 }
 
-/// Every ref in `text`, an outer ref before the refs inside it, in order of where each starts.
-pub fn page_refs(text: &str) -> Vec<PageRef<'_>> {
+/// The byte offset of every `[[` in `text`, which is on a character boundary: `[` is ASCII.
+fn opens(text: &str) -> Vec<usize> {
     let bytes = text.as_bytes();
-    // `[` is ASCII, so each of these is on a character boundary
-    let opens: Vec<usize> = (0..bytes.len().saturating_sub(1)).filter(|&at| bytes[at] == b'[' && bytes[at + 1] == b'[').collect();
-    // Right to left, so each attempt finds the refs inside it settled. An attempt reads its own
-    // characters once and steps over the refs inside it, so the whole is linear in the text.
+    (0..bytes.len().saturating_sub(1)).filter(|&at| bytes[at] == b'[' && bytes[at + 1] == b'[').collect()
+}
+
+/// The refs that close at each start of `[[` in `opens`, found right to left, so each attempt finds
+/// the refs inside it settled. An attempt reads its own characters once and steps over the refs
+/// inside it, so the whole is linear in the text.
+fn settle(text: &str, opens: &[usize]) -> HashMap<usize, Closed> {
     let mut closed: HashMap<usize, Closed> = HashMap::new();
     for &at in opens.iter().rev() {
         if let Some(found) = attempt(text, at, &closed, |_| {}) {
             closed.insert(at, found);
         }
     }
+    closed
+}
+
+/// Every ref in `text`, an outer ref before the refs inside it, in order of where each starts.
+pub fn page_refs(text: &str) -> Vec<PageRef<'_>> {
+    let opens = opens(text);
+    let closed = settle(text, &opens);
     // Left to right: a ref starts where the last one ended or later. What is inside a ref is found
     // by reading it again, on a stack so a deep nest can't overflow the call stack.
     let mut found = Vec::new();
@@ -377,6 +435,20 @@ mod tests {
             }
         }
         assert!(checked > 2_000_000);
+    }
+
+    #[test]
+    fn ref_at_reads_a_long_line_of_unclosed_page_embeds_once() {
+        // each `[[` of 50,000 would cost a read of the rest of the line when ref_at settled every
+        // start of it (minutes); read once, it is a few milliseconds
+        let line = "{{embed [[ ".repeat(50_000);
+        assert_eq!(ref_at(&line[8..]), None);
+        let closed = format!("{line}]]");
+        assert_eq!(ref_at(&closed[8..]), None);
+        // the unclosed starts do not close at the end either, and a deep nest is no deep recursion
+        let depth = 20_000;
+        let deep = format!("{}b{}", "[[a ".repeat(depth), "]]".repeat(depth));
+        assert_eq!(ref_at(&deep), Some((&deep[2..deep.len() - 2], "")));
     }
 
     #[test]
