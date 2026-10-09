@@ -7,8 +7,10 @@
 //! before it fails), the alias lookup (1 query, only with `max_depth` of 1 or more and a page that
 //! has alias links), then one batched query per depth, each covering the whole frontier in both
 //! directions: at most `max_depth` more, 2 + `max_depth` in all for a page with no aliases. The walk
-//! stops early when a depth admits nothing to expand. When the root has aliases, depth 1 expands every
-//! name of the group in one query (`connected_pages_grouped`) and the group is one node.
+//! stops early when a depth admits nothing to expand, or when LogSeq answers `null` for one (a
+//! `links_unavailable` warning, BR-0011: the network is partial, not complete). When the root has
+//! aliases, depth 1 expands every name of the group in one query (`connected_pages_grouped`) and the
+//! group is one node.
 //!
 //! The caps keep a hub usable: `max_fanout` limits the new pages one page may add, `max_nodes` the
 //! pages in all (the root included), and journal pages are leaves unless `expand_journals` is set.
@@ -44,7 +46,7 @@ use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
-use crate::resolve::require_page;
+use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::resolved_from;
 
@@ -192,7 +194,8 @@ pub struct ConceptNetwork {
     pub edges: Vec<Edge>,
     /// `max_nodes` or `max_fanout` dropped at least one page from the network
     pub truncated: bool,
-    /// `network_truncated` when `truncated`, and the alias group's when it was cut
+    /// `network_truncated` when `truncated`, the alias group's when it was cut or not looked up, and
+    /// `links_unavailable` when a depth's query got no answer
     pub warnings: Vec<ResultWarning>,
 }
 
@@ -232,6 +235,20 @@ struct NetworkOutput<'a> {
     warnings: &'a [ResultWarning],
     nodes: &'a [Node],
     edges: Vec<EdgeOutput>,
+}
+
+/// The warning for a `null` answer to the connected-pages query of one depth. No `howToFetchAll`: no
+/// parameter fetches what LogSeq did not answer (like `pages_unavailable`, #64), so it adds nothing to `hasMore`,
+/// and `truncated` stays as the caps left it.
+fn links_unavailable(depth: i64) -> ResultWarning {
+    ResultWarning::new(
+        "links_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the pages linked at depth {depth} of the network (possibly no graph \
+             open or a re-index in progress), so the walk stopped there and the network may be missing pages. \
+             This does not mean those pages link to nothing. {RETRY_ADVICE}"
+        ),
+    )
 }
 
 /// `normalizeCap`: a whole number of at least 1 (a JavaScript number is floored, and an argument is
@@ -276,6 +293,8 @@ pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_
     let mut first_drop_depth: Option<i64> = None;
     // A journal page was admitted and expanded before any page was dropped (#132)
     let mut expanded_journal = false;
+    // The depth whose connected-pages query LogSeq did not answer: the walk stopped there (BR-0011)
+    let mut unavailable_at: Option<i64> = None;
 
     let mut nodes = Nodes::default();
     let mut links = Links::default();
@@ -310,9 +329,11 @@ pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_
             connected_pages(&page_ids(&frontier)?)
         };
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-        // PARITY(#299): a `null` answer is read as "no connected pages", so the network looks empty when LogSeq
-        // didn't answer (suspected TS bug, BR-0011) — fix per #345, in both servers.
-        let rows = connected_rows(&answer)?.unwrap_or_default();
+        // A `null` answer is not "no connected pages" (BR-0011): the walk stops here and says so.
+        let Some(rows) = connected_rows(&answer)? else {
+            unavailable_at = Some(depth);
+            break;
+        };
 
         let mut candidates: HashMap<i64, Candidate> = HashMap::new();
         for row in rows {
@@ -383,6 +404,9 @@ pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_
             expand_journals,
             expanded_journal,
         }));
+    }
+    if let Some(depth) = unavailable_at {
+        warnings.push(links_unavailable(depth));
     }
 
     Ok(ConceptNetwork {
@@ -500,6 +524,28 @@ mod tests {
         assert_eq!(keys(&network.to_value()), all);
         let bare = ConceptNetwork { resolved_from: None, resolved_aliases: None, ..network };
         assert_eq!(keys(&bare.to_value()), ["concept", "truncated", "hasMore", "warnings", "nodes", "edges"]);
+    }
+
+    #[test]
+    fn a_links_unavailable_warning_names_the_depth_and_offers_nothing_to_fetch() {
+        let warning = links_unavailable(2);
+        assert_eq!(warning.code, "links_unavailable");
+        assert!(warning.message.contains("depth 2 of the network"), "{}", warning.message);
+        assert!(warning.message.contains("the walk stopped there"), "{}", warning.message);
+        assert!(warning.message.ends_with(RETRY_ADVICE), "{}", warning.message);
+        assert!(warning.how_to_fetch_all.is_none());
+        // so a network that carries only it has no more to fetch
+        let network = ConceptNetwork {
+            concept: "atlas".into(),
+            resolved_from: None,
+            resolved_aliases: None,
+            nodes: vec![],
+            edges: vec![],
+            truncated: false,
+            warnings: vec![warning],
+        };
+        assert!(!network.has_more());
+        assert_eq!(network.to_value()["truncated"], false);
     }
 
     #[test]
