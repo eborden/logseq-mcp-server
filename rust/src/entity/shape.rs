@@ -113,7 +113,8 @@ pub(crate) struct PulledPage {
 }
 
 /// A page of either spelling, every field optional: the source page of a linked reference, which the
-/// Editor API sends camelized and the aliased Datalog query kebab-case.
+/// Editor API sends camelized and the aliased Datalog query kebab-case. Nothing asks such a page whether it
+/// has a file or aliases, so those are not checked.
 #[derive(Deserialize)]
 pub(crate) struct PageLike {
     #[serde(default)]
@@ -130,10 +131,6 @@ pub(crate) struct PageLike {
     is_journal: Optional<bool>,
     #[serde(default)]
     journal: Optional<bool>,
-    #[serde(default)]
-    file: Optional<EntityRef>,
-    #[serde(default)]
-    alias: Optional<Vec<EntityRef>>,
     #[serde(default)]
     properties: Optional<Object>,
     #[serde(default, rename = "journalDay")]

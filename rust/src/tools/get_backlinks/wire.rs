@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn a_source_page_field_nothing_reads_may_hold_anything() {
-        let answer = json!([[{"id": 1, "uuid": 5, "namespace": [], "createdAt": "x", "created-at": null}, []]]);
+        let answer = json!([[{"id": 1, "uuid": 5, "namespace": [], "createdAt": "x", "created-at": null, "file": 3, "alias": "x"}, []]]);
         assert_eq!(linked_references(answer).unwrap().unwrap().len(), 1);
     }
 

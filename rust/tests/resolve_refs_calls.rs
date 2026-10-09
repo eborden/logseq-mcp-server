@@ -306,7 +306,7 @@ async fn an_answer_that_is_not_a_target_is_a_response_error_and_not_an_empty_res
     let logseq = mock_logseq(vec![json!([[{"uuid": "no id"}]])]).await;
     let error = resolve_block_refs(&client(&logseq), &[root(&format!("(({}))", uuid(2)))]).await.unwrap_err();
     match error {
-        ToolError::Response(response) => assert_eq!((response.method.as_str(), response.path.as_str()), ("logseq.DB.datascriptQuery", "[0][0].id")),
+        ToolError::Response(response) => assert_eq!((response.method.as_str(), response.path.as_str()), ("logseq.DB.datascriptQuery", "answer[0][0].id")),
         other => panic!("expected a response error, got {other}"),
     }
 }
