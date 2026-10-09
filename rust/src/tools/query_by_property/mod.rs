@@ -140,7 +140,7 @@ fn page_id(block: &Map<String, Value>) -> i64 {
     crate::entity::id_of(block.get("page")).unwrap_or(0)
 }
 
-/// `(a.page?.id ?? 0) - (b.page?.id ?? 0) || a.id - b.id`: page id, then block id.
+/// Page id (`page_id`, 0 for none), then block id.
 fn by_page_then_block(a: &Map<String, Value>, b: &Map<String, Value>) -> Ordering {
     page_id(a).cmp(&page_id(b)).then_with(|| block_id(a).cmp(&block_id(b)))
 }
