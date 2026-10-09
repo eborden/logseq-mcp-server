@@ -9,6 +9,11 @@
 //! longest keyword, cut here to the blocks that hold every keyword), and 1 more with
 //! `format: "markdown"` for the pages of the hits kept (none when there are no hits).
 //!
+//! A `null` answer is not "none" (BR-0011, #338): a keyword search LogSeq did not answer gives a `search_unavailable`
+//! warning beside the empty `searchResults`, and a topic whose context holds an `*_unavailable` warning gets one
+//! `topic_unavailable` warning about it, since a topic's own warnings are not repeated here. Neither has a
+//! `howToFetchAll`. A `null` answer from the page resolver fails the whole call (#301).
+//!
 //! `format: "markdown"` renders the result through [`crate::markdown_context`], its warnings and
 //! `hasMore` in a footer. `compact` reduces every block to its snippet and uuid ([`crate::compact`]).
 
@@ -28,6 +33,7 @@ use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::render_query_context;
 use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
+use crate::resolve::RETRY_ADVICE;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::{Caps, TopicContext, TopicContextOutput, build_context_for_topic};
 use crate::tools::search_blocks::{find_blocks, full_blocks_with_context, hit_pages_unavailable};
@@ -208,9 +214,9 @@ struct QueryContextOutput<'a> {
     has_more: bool,
     warnings: &'a [QueryWarning],
     summary: QuerySummary,
-    // PARITY(#299): a topic's own warnings are dropped here, and only `topic_truncated` says it was cut, so the
-    // `alias_set_truncated` warning of a topic whose alias group was cut is never shown (suspected TS bug) —
-    // drop if Rust becomes the only server.
+    // PARITY(#299): a topic's own warnings are dropped here, except as `topic_truncated` (it was cut) and
+    // `topic_unavailable` (LogSeq did not answer part of it, #338), so the `alias_set_truncated` warning of a
+    // topic whose alias group was cut is never shown (suspected TS bug) — drop if Rust becomes the only server.
     contexts: Vec<TopicContextOutput<'a>>,
     #[serde(rename = "searchResults", skip_serializing_if = "Option::is_none")]
     search_results: Option<&'a [Value]>,
@@ -340,6 +346,42 @@ fn topic_warning(context: &TopicContext, topic: &str) -> QueryWarning {
     ))
 }
 
+/// The roll-up for a topic whose context holds a warning that LogSeq did not answer part of it (a code ending in
+/// `_unavailable`, BR-0011, #338). A topic's own warnings are not repeated in the query's, so without this the
+/// empty parts of its context would read as a topic with nothing in them. It is about the topic and has no
+/// `howToFetchAll` (no parameter fetches what was not answered), so `hasMore` is unaffected.
+fn topic_unavailable_warning(context: &TopicContext, topic: &str) -> Option<QueryWarning> {
+    let codes: Vec<&str> = context.warnings.iter().map(|warning| warning.code.as_str()).filter(|code| code.ends_with("_unavailable")).collect();
+    if codes.is_empty() {
+        return None;
+    }
+    Some(
+        QueryWarning::new(
+            "topic_unavailable",
+            format!(
+                "LogSeq returned no answer to part of the context for \"{topic}\" ({}), so part of this topic's context could not be \
+                 read and what is shown may be incomplete. Call logseq_build_context with topic_name {} for the warnings that say which part. {RETRY_ADVICE}",
+                codes.join(", "),
+                js::json_stringify(&json!(topic))
+            ),
+        )
+        .about(topic),
+    )
+}
+
+/// The keyword search was not answered: `searchResults` is `[]`, but not because nothing matches.
+fn search_unavailable(keywords: &[String]) -> QueryWarning {
+    let listed: Vec<String> = keywords.iter().map(|keyword| js::json_stringify(&json!(keyword))).collect();
+    QueryWarning::new(
+        "search_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up blocks for the keywords {} (possibly no graph open or a re-index in progress), \
+             so the empty searchResults may not mean nothing matches. {RETRY_ADVICE}",
+            listed.join(", ")
+        ),
+    )
+}
+
 /// `getContextForQuery`: the context for a natural-language query.
 ///
 /// `max_topics` cuts the topics extracted (at least 1). `max_search_results` is the keyword hits
@@ -373,6 +415,9 @@ pub async fn get_context_for_query(
             Ok(context) => {
                 if context.has_more() {
                     warnings.push(topic_warning(&context, topic));
+                }
+                if let Some(warning) = topic_unavailable_warning(&context, topic) {
+                    warnings.push(warning);
                 }
                 contexts.push(context);
             }
@@ -411,9 +456,13 @@ pub async fn get_context_for_query(
             // order: the search sorts newest first and the filter keeps it. The search is the only data
             // source on this path, so any failure propagates: an empty result must mean "nothing matched".
             let searched = keywords.iter().fold(&keywords[0], |longest, keyword| if js::utf16(keyword).len() > js::utf16(longest).len() { keyword } else { longest });
-            // PARITY(#299): a `null` answer is read as "no matches", so a search LogSeq didn't answer looks like
-            // one that found nothing (suspected TS bug, BR-0011) — fix per #338, in both servers.
-            let blocks = find_blocks(client, searched).await?.unwrap_or_default();
+            // A `null` answer is no answer, not "no matches" (BR-0011, #338): `searchResults` stays `[]`, and a
+            // warning says LogSeq did not answer, so the empty list is not read as a search that found nothing.
+            let found = find_blocks(client, searched).await?;
+            if found.is_none() {
+                warnings.push(search_unavailable(&keywords));
+            }
+            let blocks = found.unwrap_or_default();
             let hits: Vec<Value> = blocks
                 .into_iter()
                 .filter(|block| {

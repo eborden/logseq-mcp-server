@@ -11,6 +11,10 @@
 //! one Datalog query over the group). The caps are applied after the fetch, so they cost no call.
 //! With `resolve_refs`, up to 2 more Datalog queries, none when no returned block holds a ref.
 //!
+//! A `null` answer to the blocks or to the linked references is not "none" (BR-0011, #338): the context is built
+//! without that part and carries a `page_blocks_unavailable` or `backlinks_unavailable` warning, with no
+//! `howToFetchAll` (`hasMore` stays false).
+//!
 //! `format: "markdown"` renders the same context through [`crate::markdown_context`], its warnings
 //! and `hasMore` in a footer. `compact` replaces each block with its snippet and uuid
 //! ([`crate::compact`]) and skips `resolve_refs`, with a warning.
@@ -40,7 +44,7 @@ use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
-use crate::resolve::{ResolvedPage, require_page};
+use crate::resolve::{RETRY_ADVICE, ResolvedPage, require_page};
 use crate::resolve_refs::resolve_block_refs;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::get_backlinks::{block_rows, fetch_backlinks};
@@ -387,6 +391,28 @@ fn temporal_context(page: &Value) -> TemporalContext {
     }
 }
 
+/// LogSeq answered `null` to the query for the blocks of the page (or of its alias group).
+fn page_blocks_unavailable(page: &str) -> ResultWarning {
+    ResultWarning::new(
+        "page_blocks_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the blocks of \"{page}\" (possibly no graph open or a re-index in progress), \
+             so the empty directBlocks may not mean the page has none. {RETRY_ADVICE}"
+        ),
+    )
+}
+
+/// LogSeq answered `null` to the linked references of the page (or of its alias group).
+fn backlinks_unavailable_warning(page: &str) -> ResultWarning {
+    ResultWarning::new(
+        "backlinks_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the pages that link to \"{page}\" (possibly no graph open or a re-index in progress), \
+             so the empty relatedPages and references may not mean nothing links here. {RETRY_ADVICE}"
+        ),
+    )
+}
+
 /// `buildContextForTopic`: build the context of a topic.
 ///
 /// `topic_name` is a page name, an alias or an ISO date (`2025-01-01`) of a journal. The page is
@@ -407,17 +433,20 @@ pub async fn build_context_for_topic(client: &LogseqClient, topic_name: &str, ca
     // Query 2: the blocks of the page, or of every page of its alias group (may be empty)
     let blocks_query = if aliased { get_blocks_on_pages(&alias_set.ids()?) } else { get_page_blocks(&PageName::new(&resolved.lookup_name)) };
     let answer = client.execute_datalog_query(&blocks_query.text, &blocks_query.inputs).await?;
-    // PARITY(#299): a `null` answer is read as "no blocks", so the page looks empty when LogSeq didn't answer
-    // (suspected TS bug, BR-0011) — fix per #338, in both servers.
-    let rows = block_rows(answer)?.unwrap_or_default();
+    // A `null` answer is no answer, not "no blocks" (BR-0011, #338): the page is shown without them, and a warning says why
+    let rows = block_rows(answer)?;
+    let blocks_unavailable = rows.is_none();
+    let rows = rows.unwrap_or_default();
     let fetched: Vec<Value> = rows.into_iter().flatten().map(Value::Object).collect();
     let all_blocks = blocks_of(fetched, aliased, id_of(Some(&main_page)));
     let mut direct_blocks: Vec<Value> = all_blocks.iter().take(caps.max_blocks as usize).cloned().collect();
 
-    // Query 3: the reference blocks, and the related pages derived from them. `null` and `[]` both
-    // mean the page has no backlinks; an error (connection, timeout, auth, unexpected) propagates.
-    // PARITY(#299): a `null` answer is read as "no backlinks" (suspected TS bug, BR-0011) — fix per #338, in both servers.
-    let backlinks = fetch_backlinks(client, &resolved.lookup_name, &alias_set).await?.unwrap_or_default();
+    // Query 3: the reference blocks, and the related pages derived from them. `[]` means the page has no
+    // backlinks and `null` that LogSeq gave no answer (BR-0011, #338: a warning says so); an error
+    // (connection, timeout, auth, unexpected) propagates.
+    let backlinks = fetch_backlinks(client, &resolved.lookup_name, &alias_set).await?;
+    let backlinks_unavailable = backlinks.is_none();
+    let backlinks = backlinks.unwrap_or_default();
     let (all_related_pages, all_references) = references_of(backlinks);
 
     // Everything is already in memory, so the totals cost no extra API call.
@@ -426,6 +455,13 @@ pub async fn build_context_for_topic(client: &LogseqClient, topic_name: &str, ca
     let totals = Totals { blocks: all_blocks.len(), related_pages: all_related_pages.len(), references: all_references.len() };
 
     let mut warnings = alias_set_warnings(&[&alias_set]);
+    // No `howToFetchAll`: no parameter fetches what LogSeq did not answer, so `hasMore` stays false
+    if blocks_unavailable {
+        warnings.push(page_blocks_unavailable(&resolved.original_name));
+    }
+    if backlinks_unavailable {
+        warnings.push(backlinks_unavailable_warning(&resolved.original_name));
+    }
     if totals.blocks > direct_blocks.len() {
         warnings.push(truncation_warning("blocks", direct_blocks.len(), totals.blocks, "max_blocks", "blocks_truncated", Some(INLINE_BLOCKS)));
     }

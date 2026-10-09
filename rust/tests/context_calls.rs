@@ -155,3 +155,158 @@ async fn a_query_with_no_topic_is_one_search_and_one_more_for_the_pages_of_the_h
     let context = get_context_for_query(&client(&nothing), "what is the way of it", 5, 20, true).await.unwrap();
     assert!(methods(&nothing).is_empty() && context.search_results.is_none());
 }
+
+// ---- BR-0011, #338: a `null` answer is no answer, not "nothing there"
+
+fn codes(warnings: &[logseq_mcp_server::meta::ResultWarning]) -> Vec<&str> {
+    warnings.iter().map(|warning| warning.code.as_str()).collect()
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_blocks_is_a_warning_and_a_real_empty_list_is_not() {
+    let referencing = || json!([[source(20, "Bob"), [linking_block(201, 20)]]]);
+    let logseq = mock_logseq(vec![json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]), Value::Null, referencing()]).await;
+    let context = build_context_for_topic(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap();
+    assert_eq!(codes(&context.warnings), ["page_blocks_unavailable"]);
+    let warning = &context.warnings[0];
+    assert!(warning.message.contains("\"Project Atlas\"") && warning.message.contains("may not mean the page has none"), "{}", warning.message);
+    // nothing fetches what LogSeq did not answer: no `howToFetchAll`, so `hasMore` stays false
+    assert!(warning.how_to_fetch_all.is_none() && !context.has_more());
+    // the other parts are still there
+    assert_eq!((context.direct_blocks.len(), context.related_pages.len(), context.references.len()), (0, 1, 1));
+    assert_eq!(methods(&logseq).len(), 3);
+
+    let empty = mock_logseq(vec![json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]), json!([]), referencing()]).await;
+    let context = build_context_for_topic(&client(&empty), "Project Atlas", Caps::default()).await.unwrap();
+    assert!(context.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_linked_references_is_a_warning_and_a_real_empty_list_is_not() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]),
+        json!([flat_block(101, 10, "Only")]),
+        Value::Null,
+    ])
+    .await;
+    let context = build_context_for_topic(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap();
+    assert_eq!(codes(&context.warnings), ["backlinks_unavailable"]);
+    let warning = &context.warnings[0];
+    assert!(warning.message.contains("\"Project Atlas\"") && warning.message.contains("may not mean nothing links here"), "{}", warning.message);
+    assert!(warning.how_to_fetch_all.is_none() && !context.has_more());
+    assert_eq!((context.direct_blocks.len(), context.related_pages.len(), context.references.len()), (1, 0, 0));
+
+    let empty = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]),
+        json!([flat_block(101, 10, "Only")]),
+        json!([]),
+    ])
+    .await;
+    assert!(build_context_for_topic(&client(&empty), "Project Atlas", Caps::default()).await.unwrap().warnings.is_empty());
+}
+
+#[tokio::test]
+async fn a_null_answer_to_each_aliased_query_is_the_same_warning() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        json!([[10, {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}], [10, {"id": 11, "name": "atlas", "original-name": "Atlas"}]]),
+        Value::Null,
+        Value::Null,
+    ])
+    .await;
+    let context = build_context_for_topic(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap();
+    assert_eq!(codes(&context.warnings), ["page_blocks_unavailable", "backlinks_unavailable"]);
+    assert!(!context.has_more());
+    assert_eq!(methods(&logseq).len(), 4);
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_keyword_search_is_a_warning_with_an_empty_list_and_a_real_empty_list_is_not() {
+    let logseq = mock_logseq(vec![Value::Null]).await;
+    let context = get_context_for_query(&client(&logseq), "what does the importer do with retries", 5, 20, true).await.unwrap();
+    // no hit kept, so no page lookup
+    assert_eq!(methods(&logseq).len(), 1);
+    assert_eq!(context.search_results, Some(vec![]));
+    assert_eq!(context.warnings.len(), 1);
+    let warning = &context.warnings[0];
+    assert_eq!(warning.code, "search_unavailable");
+    assert!(warning.message.contains("\"importer\", \"retries\"") && warning.message.contains("may not mean nothing matches"), "{}", warning.message);
+    assert!(warning.how_to_fetch_all.is_none() && warning.topic.is_none() && !context.has_more());
+
+    let empty = mock_logseq(vec![json!([])]).await;
+    let context = get_context_for_query(&client(&empty), "what does the importer do with retries", 5, 20, false).await.unwrap();
+    assert_eq!(context.search_results, Some(vec![]));
+    assert!(context.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn a_topic_with_an_unanswered_part_is_rolled_up_into_one_warning_about_the_topic() {
+    let logseq = mock_logseq(vec![
+        // #bob: the blocks are not answered
+        json!([[page(20, "bob", "Bob", json!({})), "name"]]),
+        Value::Null,
+        json!([]),
+        // #carol: answered
+        json!([[page(30, "carol", "Carol", json!({})), "name"]]),
+        json!([flat_block(311, 30, "Carol owns it")]),
+        json!([]),
+    ])
+    .await;
+    let context = get_context_for_query(&client(&logseq), "about #bob and #carol", 5, 20, false).await.unwrap();
+    assert_eq!(context.contexts.len(), 2);
+    // the topic's own warning is not repeated; the roll-up names the topic and the code, and fetches nothing
+    assert_eq!(context.warnings.len(), 1);
+    let warning = &context.warnings[0];
+    assert_eq!((warning.code.as_str(), warning.topic.as_deref()), ("topic_unavailable", Some("bob")));
+    assert!(warning.message.contains("\"bob\"") && warning.message.contains("page_blocks_unavailable"), "{}", warning.message);
+    assert!(warning.how_to_fetch_all.is_none() && !context.has_more());
+    assert_eq!(codes(&context.contexts[0].warnings), ["page_blocks_unavailable"]);
+}
+
+#[tokio::test]
+async fn a_cut_topic_keeps_its_truncation_warning_beside_the_roll_up() {
+    let rows: Vec<Value> = (0..12).map(|n| flat_block(500 + n, 20, "A block")).collect();
+    let logseq = mock_logseq(vec![json!([[page(20, "bob", "Bob", json!({})), "name"]]), json!(rows), Value::Null]).await;
+    let context = get_context_for_query(&client(&logseq), "about #bob", 5, 20, false).await.unwrap();
+    assert_eq!(context.warnings.iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["topic_truncated", "topic_unavailable"]);
+    // only the cut has a remedy, so `hasMore` is the cut's
+    assert!(context.has_more());
+    // the two differ in remedy: the cut says how to fetch the rest, the roll-up has nothing to fetch
+    assert!(context.warnings[0].how_to_fetch_all.is_some());
+    assert!(context.warnings[1].how_to_fetch_all.is_none());
+}
+
+#[tokio::test]
+async fn a_null_alias_lookup_in_a_topic_is_rolled_up_too_whatever_the_code_is() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        Value::Null,
+        json!([flat_block(101, 10, "Only")]),
+        json!([]),
+    ])
+    .await;
+    let context = get_context_for_query(&client(&logseq), "about [[Project Atlas]]", 5, 20, false).await.unwrap();
+    assert_eq!(codes(&context.contexts[0].warnings), ["alias_lookup_unavailable"]);
+    assert_eq!(context.warnings.len(), 1);
+    let warning = &context.warnings[0];
+    assert_eq!((warning.code.as_str(), warning.topic.as_deref()), ("topic_unavailable", Some("Project Atlas")));
+    assert!(warning.message.contains("(alias_lookup_unavailable)"), "{}", warning.message);
+    assert!(warning.how_to_fetch_all.is_none() && !context.has_more());
+}
+
+#[tokio::test]
+async fn a_null_answer_from_the_resolver_fails_the_query_for_any_topic() {
+    let logseq = mock_logseq(vec![
+        json!([[page(20, "bob", "Bob", json!({})), "name"]]),
+        json!([flat_block(211, 20, "Bob owns it")]),
+        json!([]),
+        // the second topic: the resolver is not answered
+        Value::Null,
+    ])
+    .await;
+    let error = get_context_for_query(&client(&logseq), "about #bob and #carol", 5, 20, false).await.unwrap_err();
+    assert!(matches!(error, ToolError::Failed(_)), "{error}");
+    assert!(error.to_string().starts_with("LogSeq returned no answer when looking up the page \"carol\""), "{error}");
+    // it stops there: no leaf query, no suggestion lookup
+    assert_eq!(methods(&logseq).len(), 4);
+}
