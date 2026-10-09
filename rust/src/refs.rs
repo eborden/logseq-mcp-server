@@ -527,6 +527,17 @@ mod tests {
     }
 
     #[test]
+    fn a_whitespace_only_bracketed_tag_is_the_blank_name_which_is_current_behaviour_not_an_endorsed_one() {
+        // The ref grammar allows a blank name, so `#[[ ]]` is the tag " ". A whitespace-only tag is
+        // never a real one: flagged for the maintainer (#477 review), who may want the run rule
+        // here instead. Pinned so a change to it is deliberate.
+        assert_eq!(tags("#[[ ]]"), [" "]);
+        assert_eq!(tags("#[[  ]] #a"), ["  ", "a"]);
+        assert_eq!(tags("#[[\t]]"), ["\t"]);
+        assert_eq!(names("#[[ ]]"), [" "]);
+    }
+
+    #[test]
     fn a_bracketed_tag_name_holds_any_character_a_ref_name_may() {
         assert_eq!(tags("#[[a#b c]]"), ["a#b c"]);
         assert_eq!(tags("#[[ padded ]]"), [" padded "]);
