@@ -26,7 +26,7 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `tests/guards/package-metadata.test.ts` (engines.node is exactly >=22.12.0; it does not read the toolchain's own floor)
+- test: `tests/guards/package-tooling.test.ts` (engines.node is exactly >=22.12.0; it does not read the toolchain's own floor)
 - test: `tests/guards/adr-workflow-guards.test.ts` (every ci.yml job that runs the tooling's guard tests covers the floor's major and Node 24 and nothing below the floor, the lockfile root carries the same engines.node, and the floor is vite's lowest supported version in that major)
 - ci: `.github/workflows/ci.yml` (type-check and the guard tests of the TypeScript tooling that holds the repo's rules and the parity harness, on Node 22 and 24 for every PR and push)
 - reviewer: The Node floor applies to the dev tooling only (the parity harness, the guard tests, the integration suites and the scripts). The server is the Rust binary in `rust/`, which has no Node floor (ADR-0025, #356; its toolchain is pinned by `rust/rust-toolchain.toml`).
