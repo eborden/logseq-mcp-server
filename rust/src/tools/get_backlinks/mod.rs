@@ -28,8 +28,9 @@ use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, ToolError};
 use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
+use crate::order;
 use crate::params::{ParamAliases, resolve_param_aliases};
-use crate::resolve::alias::{AliasSet, alias_set_warnings, compare_code_units, linked_references_of_pages, resolve_alias_set};
+use crate::resolve::alias::{AliasSet, alias_set_warnings, linked_references_of_pages, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning, large_result_note};
@@ -201,7 +202,7 @@ pub fn rank_backlinks(results: Vec<Backlink>) -> Vec<Backlink> {
         b.2.blocks
             .len()
             .cmp(&a.2.blocks.len())
-            .then_with(|| compare_code_units(&a.0, &b.0))
+            .then_with(|| order::by_name(&a.0, &b.0))
             .then_with(|| a.1.cmp(&b.1))
     });
     keyed.into_iter().map(|(_, _, backlink)| backlink).collect()
@@ -397,13 +398,11 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
         return Ok(None);
     };
     let mut groups = group_by_source_page(rows);
-    // PARITY(#299): orders names with `localeCompare`, as `js::locale_compare` orders them (ICU root collation) — drop if Rust
-    // becomes the only server.
-    // `String(a.page.name).localeCompare(String(b.page.name)) || a.page.id - b.page.id`
+    // By name ([`order::by_name`]), then page id. A page without a name sorts first.
     groups.sort_by(|a, b| {
-        let name = |backlink: &Backlink| backlink.page.get("name").map_or_else(|| "undefined".to_owned(), js_string);
+        let name = |backlink: &Backlink| backlink.page.get("name").map(js_string).unwrap_or_default();
         let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
-        js::locale_compare(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
+        order::by_name(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
     });
     Ok(Some(groups))
 }

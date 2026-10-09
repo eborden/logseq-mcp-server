@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Map, Value};
 
 use crate::entity::id_of;
-use crate::resolve::alias::compare_code_units;
 
 /// Default for `top_concepts_limit`.
 pub const DEFAULT_TOP_CONCEPTS_LIMIT: u32 = 10;
@@ -61,13 +60,12 @@ pub fn extract_concept_refs(block: &Map<String, Value>) -> Vec<ConceptRef> {
     out
 }
 
-/// Order: count desc, then days desc, then name (case-insensitive, then exact).
+/// Order: count desc, then days desc, then name ([`order::by_name`]: lowercase, then exact).
 fn compare_concepts(a: &TopConcept, b: &TopConcept) -> Ordering {
     b.count
         .cmp(&a.count)
         .then(b.days.cmp(&a.days))
-        .then_with(|| compare_code_units(&a.name.to_lowercase(), &b.name.to_lowercase()))
-        .then_with(|| compare_code_units(&a.name, &b.name))
+        .then_with(|| crate::order::by_name(&a.name, &b.name))
 }
 
 struct Tally {
