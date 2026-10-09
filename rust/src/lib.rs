@@ -43,6 +43,7 @@ pub mod slim;
 pub mod snippet;
 pub mod tips;
 pub mod tool;
+pub mod toon;
 pub mod tools;
 pub mod truncation;
 pub mod wire;
