@@ -7,6 +7,7 @@
 use std::ops::Range;
 
 use crate::js;
+use crate::refs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -90,14 +91,12 @@ fn block_embed(rest: &str) -> Option<(&str, &str)> {
     Some((id, rest))
 }
 
-/// `\{\{embed\s+\[\[([^\[\]\n]+)\]\]\s*\}\}`, the text after the opening `{{`.
+/// `\{\{embed\s+<page ref>\s*\}\}`, the text after the opening `{{`. The page ref is the one
+/// grammar of [`refs`].
 fn page_embed(rest: &str) -> Option<(&str, &str)> {
-    let rest = skip_space_1(strip_ci(rest, "embed")?)?.strip_prefix("[[")?;
-    // The name can't hold a bracket, so the first one ends it, and it must be the `]]`
-    let name_len = rest.find(['[', ']', '\n']).unwrap_or(rest.len());
-    let (name, rest) = rest.split_at(name_len);
-    let rest = skip_space(rest.strip_prefix("]]")?).strip_prefix("}}")?;
-    (!name.is_empty()).then_some((name, rest))
+    let (name, rest) = refs::ref_at(skip_space_1(strip_ci(rest, "embed")?)?)?;
+    let rest = skip_space(rest).strip_prefix("}}")?;
+    Some((name, rest))
 }
 
 /// `\(\((UUID)\)\)`, the text after the opening `((`.
