@@ -15,6 +15,8 @@ test: `rust/tests/resolve_refs_calls.rs`
 test: `rust/tests/query_by_date_range_calls.rs`
 test: `rust/tests/get_page_outline_calls.rs`
 test: `rust/tests/get_backlinks_calls.rs`
+test: `rust/tests/get_page_block_calls.rs`
+test: `rust/tests/page_resource_calls.rs`
 
 The first pins the `pages_unavailable` warning for `null` and the absence of a warning for a real `[]`. The second pins the same split for `resolve_refs`: a `null` ref lookup gives a `refs_unavailable` warning and no `missing` refs, and a real `[]` still gives `missing`. The third pins it for `query_by_date_range`: a `null` journal-page answer gives a `journals_unavailable` warning, a `null` block answer gives `blocks_unavailable`, and a real `[]` gives neither. Other tools still read `null` as "none", copied from the TypeScript server and tagged `PARITY(#299)` (suspected TypeScript bugs, #301); their call-count tests in `rust/tests/` pin that current behaviour, to be flipped when it is fixed, and it is not an endorsement of the reading. The reviewer applies the rule to new code.
 reviewer: A tool that maps a `null` API response to an empty result adds a warning that says the data was unavailable.
@@ -29,3 +31,4 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 | 2026-10-07 | Mechanical enforcement: added a `test:` line for `query_by_date_range` (`journals_unavailable` and `blocks_unavailable` on a `null` answer), and added a sentence describing it to the enforcement paragraph. The Statement is unchanged. | #284 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the Rust server's call-count tests with the TypeScript server's removal, and the paragraph that describes them was reworded to match. Statement unchanged. Reworded the last sentence so it doesn't read as endorsing `null` read as none. | #370 |
 | 2026-10-08 | Mechanical enforcement: added `test:` lines for the page resolver (a `null` answer is an error that says LogSeq gave no answer, with no suggestions and no further call; `get_page_outline_calls.rs`) and for `get_backlinks` and the alias groups (`alias_lookup_unavailable`, and `backlinks_unavailable` with a list that is always `[]` on a `null`; `get_backlinks_calls.rs`, with the date-range alias case in the line already there). Additive only; no paragraph reworded. | #404 |
+| 2026-10-08 | Mechanical enforcement: added `test:` lines for `get_page` (a `null` block tree gives a `page_blocks_unavailable` warning, a real `[]` none) and for the page resource (the same warning as a footer). Additive only; the Statement and the paragraphs are unchanged. | #403 |
