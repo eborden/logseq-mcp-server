@@ -40,10 +40,10 @@ pub fn utf16(value: &str) -> Vec<u16> {
     value.encode_utf16().collect()
 }
 
-// PARITY(#299): how JavaScript writes a number in a result (`1e+21`, `0.000001`): a Markdown property value
-// and a backlink sort key — drop if Rust becomes the only server. Not parity: `Scalar::to_js_string` in
-// `args.rs` uses it for `query_by_property`, since LogSeq is ClojureScript and its `(str ?v)` writes a
-// number as JavaScript does, so that use stays.
+// PARITY(#299): the Markdown property value and the backlink sort key are parity uses of this function, to go
+// with the result serialisation. `Scalar::to_js_string` in `args.rs` also calls it, and that use is not
+// parity: LogSeq is ClojureScript and its `(str ?v)` writes a number as JavaScript does (`1e+21`,
+// `0.000001`), so a `query_by_property` value must keep this spelling. Do not delete the function.
 /// A number as `String(n)` or a template literal writes it (ECMAScript `Number::toString`).
 /// JSON has no NaN or infinity, so a value that came from JSON is always finite.
 pub fn number_to_string(n: f64) -> String {
