@@ -1,4 +1,4 @@
-//! The Datalog queries of the page resolver . Every string is bound with `:in`
+//! The Datalog queries of the page resolver. Every string is bound with `:in`
 //! (ADR-0013), so no page name is part of the query text.
 //!
 //! The text has its whitespace collapsed; LogSeq doesn't care how a query is laid out.

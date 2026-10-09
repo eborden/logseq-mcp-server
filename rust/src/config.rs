@@ -16,9 +16,9 @@ pub const DEFAULT_API_URL: &str = "http://127.0.0.1:12315";
 /// What a field must be, the `<field> <problem>` tail of a [`ConfigError::Validation`] message.
 const AUTH_TOKEN_REQUIRED: &str = "is required";
 const NOT_A_STRING: &str = "must be a string";
-/// The largest `timeoutMs` the file may set: `i32::MAX` ms, about 24.8 days, about as long
-/// as a call can sensibly wait. Anything longer is no timeout in practice, so it is refused at
-/// load (ADR-0019) and no call has to check it again.
+/// The largest `timeoutMs` the file may set: `i32::MAX` ms, about 24.8 days: the largest value
+/// accepted, chosen in #426 because it equals Node's `setTimeout` ceiling (above it the retired server fired
+/// after 1 ms). Anything longer is refused at load (ADR-0019), so no call has to check it again.
 pub const MAX_TIMEOUT_MS: u64 = 2_147_483_647;
 /// A `timeoutMs` that is no whole number of milliseconds of at least 1: a string, `null`, a
 /// fraction, zero or a negative number.

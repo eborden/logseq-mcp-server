@@ -159,7 +159,7 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
     let page = match get_page(client, &name, true, false).await {
         Ok(page) => page,
         // rmcp rewrites -32002 to -32602 for a client that negotiated protocol 2026-07-28 or newer (SEP-2164); the
-        // the recorded results come from an SDK that can't negotiate that version, so nothing differs for any version both speak, and the rewrite stays (#299)
+        // SDK the recorded results came from can't negotiate that version, so no result differs for a version both speak, and the rewrite stays (#299)
         Err(error @ ToolError::PageNotFound(_)) => return Err(resource_not_found(&error.to_string(), uri)),
         Err(error @ ToolError::AmbiguousPage(_)) => return Err(mcp_error(ErrorCode::INVALID_PARAMS, &error.to_string())),
         Err(error) => return Err(ErrorData::new(ErrorCode::INTERNAL_ERROR, error.to_string(), None)),
