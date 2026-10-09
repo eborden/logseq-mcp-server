@@ -48,6 +48,20 @@ async fn a_page_with_no_blocks_says_so_and_an_alias_says_where_it_came_from() {
 }
 
 #[tokio::test]
+async fn a_null_block_tree_adds_the_footer_and_a_page_with_no_blocks_does_not() {
+    // BR-0011: `null` is no answer, and the text must not read as a page with nothing on it without saying why
+    let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas"), Value::Null]).await;
+    let text = text_of(&resources::read(&client(&logseq), "logseq://page/Project%20Atlas").await.unwrap());
+    assert!(text.starts_with("# Project Atlas\n\n(this page has no blocks)\n\n---\nWarnings:\n- page_blocks_unavailable: "), "{text}");
+    assert!(text.ends_with("check which graph is open.\n"), "{text}");
+    assert!(!text.contains("hasMore"), "{text}");
+
+    let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas"), json!([])]).await;
+    let text = text_of(&resources::read(&client(&logseq), "logseq://page/Project%20Atlas").await.unwrap());
+    assert_eq!(text, "# Project Atlas\n\n(this page has no blocks)\n");
+}
+
+#[tokio::test]
 async fn a_long_page_is_cut_at_the_cap_and_the_notice_says_how_to_read_on() {
     let blocks: Vec<Value> = (0..40).map(|i| editor_block(100 + i, &format!("{i} {}", "x".repeat(2000)))).collect();
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas"), Value::Array(blocks)]).await;

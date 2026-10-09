@@ -15,7 +15,7 @@ use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::js;
 use crate::instructions::SERVER_INSTRUCTIONS;
-use crate::markdown::{PageRenderOptions, render_page};
+use crate::markdown::{FooterMeta, PageRenderOptions, render_page, with_footer};
 use crate::mcp_error::mcp_error;
 use crate::prompts;
 use crate::tools::{self, get_page::get_page};
@@ -171,6 +171,9 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
         &page,
         PageRenderOptions { blocks_fetched: true, max_chars: Some(MAX_PAGE_CHARS), cut_notice: Some(&cut_notice), fallback_title: Some(&name) },
     );
+    // A page carries `warnings` only when LogSeq gave no answer for its blocks (`page_blocks_unavailable`, BR-0011). The
+    // footer is then the same one `logseq_get_page` renders; with no warning the text is the page alone.
+    let text = with_footer(text, &FooterMeta::of_result(&page, &[]));
     Ok(ReadResourceResult::new(vec![ResourceContents::text(text, uri).with_mime_type(MARKDOWN)]))
 }
 
