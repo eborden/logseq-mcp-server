@@ -13,8 +13,8 @@
   "skills": ["./skills/"],
   "mcpServers": {
     "logseq": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"]
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/logseq-mcp-server.sh"]
     }
   }
 }
