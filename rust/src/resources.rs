@@ -16,7 +16,7 @@ use crate::errors::ToolError;
 use crate::js;
 use crate::instructions::SERVER_INSTRUCTIONS;
 use crate::markdown::{FooterMeta, PageRenderOptions, render_page, with_footer};
-use crate::mcp_error::mcp_error;
+use crate::mcp_error::{mcp_error, resource_not_found};
 use crate::prompts;
 use crate::tools::{self, get_page::get_page};
 
@@ -160,7 +160,7 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
         Ok(page) => page,
         // rmcp rewrites -32002 to -32602 for a client that negotiated protocol 2026-07-28 or newer (SEP-2164); the
         // TypeScript SDK can't negotiate that, so it's not a regression, and the rewrite stays (#299)
-        Err(error @ ToolError::PageNotFound(_)) => return Err(mcp_error(ErrorCode::RESOURCE_NOT_FOUND, &error.to_string())),
+        Err(error @ ToolError::PageNotFound(_)) => return Err(resource_not_found(&error.to_string(), uri)),
         Err(error @ ToolError::AmbiguousPage(_)) => return Err(mcp_error(ErrorCode::INVALID_PARAMS, &error.to_string())),
         Err(error) => return Err(ErrorData::new(ErrorCode::INTERNAL_ERROR, error.to_string(), None)),
     };
@@ -185,10 +185,7 @@ pub async fn read(client: &LogseqClient, uri: &str) -> Result<ReadResourceResult
     if uri.starts_with(PAGE_URI_PREFIX) {
         return read_page(client, uri).await;
     }
-    Err(mcp_error(
-        ErrorCode::RESOURCE_NOT_FOUND,
-        &format!("Unknown resource {}. Available: {AVAILABLE}.", js::json_stringify(&Value::from(uri))),
-    ))
+    Err(resource_not_found(&format!("Unknown resource {}. Available: {AVAILABLE}.", Value::from(uri)), uri))
 }
 
 #[cfg(test)]
@@ -215,7 +212,7 @@ mod tests {
         for bad in ["logseq://page/50%", "logseq://page/a%2", "logseq://page/%zz", "logseq://page/%C3", "logseq://page/%FF", "logseq://page/%ED%A0%80"] {
             assert_eq!(
                 name_of(bad).unwrap_err(),
-                format!("MCP error -32602: Invalid page name encoding in {bad}. URL-encode the page name."),
+                format!("Invalid page name encoding in {bad}. URL-encode the page name."),
                 "{bad}"
             );
         }
@@ -223,12 +220,12 @@ mod tests {
 
     #[test]
     fn a_blank_name_and_a_long_one_are_invalid_params() {
-        assert_eq!(name_of("logseq://page/").unwrap_err(), "MCP error -32602: No page name in logseq://page/. Use logseq://page/{name}.");
-        assert!(name_of("logseq://page/%20%09").unwrap_err().starts_with("MCP error -32602: No page name in"));
+        assert_eq!(name_of("logseq://page/").unwrap_err(), "No page name in logseq://page/. Use logseq://page/{name}.");
+        assert!(name_of("logseq://page/%20%09").unwrap_err().starts_with("No page name in"));
         assert!(name_of(&format!("logseq://page/{}", "a".repeat(200))).is_ok());
         assert_eq!(
             name_of(&format!("logseq://page/{}", "a".repeat(201))).unwrap_err(),
-            "MCP error -32602: Page name is 201 characters; the limit is 200."
+            "Page name is 201 characters; the limit is 200."
         );
         // the limit counts UTF-16 code units, as `.length` does: 100 rockets are 200, 101 are 202
         assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(100))).is_ok());
@@ -236,9 +233,15 @@ mod tests {
     }
 
     #[test]
-    fn errors_carry_the_code_and_the_sdk_prefix_and_no_data() {
-        let error = mcp_error(ErrorCode::RESOURCE_NOT_FOUND, "No page \"x\".");
-        assert_eq!((error.code.0, error.message.as_ref(), error.data), (-32002, "MCP error -32002: No page \"x\".", None));
+    fn errors_carry_the_code_and_the_message_as_written() {
+        let error = mcp_error(ErrorCode::INVALID_PARAMS, "No page \"x\".");
+        assert_eq!((error.code.0, error.message.as_ref(), error.data), (-32602, "No page \"x\".", None));
+    }
+
+    #[test]
+    fn resource_not_found_names_the_uri_in_its_data() {
+        let error = resource_not_found("No page \"x\".", "logseq://page/x");
+        assert_eq!((error.code.0, error.message.as_ref(), error.data), (-32002, "No page \"x\".", Some(json!({ "uri": "logseq://page/x" }))));
     }
 
     #[test]
