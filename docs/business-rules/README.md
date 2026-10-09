@@ -28,7 +28,7 @@ One row per rule, sorted by number. See [Format rules](#format-rules) for what e
 | [0011-null-is-not-empty](0011-null-is-not-empty.md) | `null` from an API call is not `[]`; report it as unavailable with a warning. |
 | [0012-slim-output-default](0012-slim-output-default.md) | Slim output is the default; only an explicit `slim_results: false` returns full entities. |
 | [0013-response-key-order](0013-response-key-order.md) | A result lists its keys in one fixed order: what was answered, what must not be missed, the data, then optional guidance. |
-| [0014-toon-output](0014-toon-output.md) | A TOON result carries exactly the JSON result's data, is offered only where measured smaller, and no default changes without a recorded maintainer decision. |
+| [0014-toon-output](0014-toon-output.md) | `format: "toon"` is opt-in and carries the same data as JSON in the same key order; the default stays JSON. |
 
 ## Numbering and naming
 
