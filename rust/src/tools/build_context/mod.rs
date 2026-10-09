@@ -11,6 +11,10 @@
 //! one Datalog query over the group). The caps are applied after the fetch, so they cost no call.
 //! With `resolve_refs`, up to 2 more Datalog queries, none when no returned block holds a ref.
 //!
+//! A `null` answer to the blocks or to the linked references is not "none" (BR-0011, #338): the context is built
+//! without that part and carries a `page_blocks_unavailable` or `backlinks_unavailable` warning, with no
+//! `howToFetchAll` (`hasMore` stays false).
+//!
 //! `format: "markdown"` renders the same context through [`crate::markdown_context`], its warnings
 //! and `hasMore` in a footer. `compact` replaces each block with its snippet and uuid
 //! ([`crate::compact`]) and skips `resolve_refs`, with a warning.

@@ -9,6 +9,11 @@
 //! longest keyword, cut here to the blocks that hold every keyword), and 1 more with
 //! `format: "markdown"` for the pages of the hits kept (none when there are no hits).
 //!
+//! A `null` answer is not "none" (BR-0011, #338): a keyword search LogSeq did not answer gives a `search_unavailable`
+//! warning beside the empty `searchResults`, and a topic whose context holds an `*_unavailable` warning gets one
+//! `topic_unavailable` warning about it, since a topic's own warnings are not repeated here. Neither has a
+//! `howToFetchAll`. A `null` answer from the page resolver fails the whole call (#301).
+//!
 //! `format: "markdown"` renders the result through [`crate::markdown_context`], its warnings and
 //! `hasMore` in a footer. `compact` reduces every block to its snippet and uuid ([`crate::compact`]).
 
