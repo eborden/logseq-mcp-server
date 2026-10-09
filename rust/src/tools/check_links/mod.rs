@@ -24,7 +24,6 @@ use crate::client::LogseqClient;
 use crate::errors::{InvalidParameter, MatchedBy, ToolError};
 use crate::js;
 use crate::meta::ResultWarning;
-use crate::resolve::alias::compare_code_units;
 use crate::resolve::{Resolution, link_key, resolve_link_targets};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 
@@ -99,8 +98,7 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
     let refs_preserved = check_refs_preserved(before, after);
 
     let mut terms: Vec<String> = link_counts(after).into_iter().map(|(term, _)| term).collect();
-    // PARITY(#299): orders by UTF-16 code unit, as JavaScript's `<` does — drop if Rust becomes the only server.
-    terms.sort_by(|x, y| compare_code_units(x, y));
+    terms.sort();
     let distinct_keys: std::collections::HashSet<String> = terms.iter().map(|term| key_of(term)).collect();
     if distinct_keys.len() > MAX_LINK_TERMS {
         return Err(ToolError::InvalidParameter(InvalidParameter {

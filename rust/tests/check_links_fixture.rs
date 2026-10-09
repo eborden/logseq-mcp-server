@@ -580,17 +580,17 @@ async fn terms_are_checked_and_listed_sorted_whatever_order_after_has_them_in() 
 }
 
 #[tokio::test]
-async fn terms_sort_by_utf16_code_unit_so_a_capital_comes_before_a_lowercase_letter() {
+async fn terms_sort_by_code_point_so_a_capital_comes_before_a_lowercase_letter() {
     let (result, bound) = gate_over(&pages_named(&["Bob", "alice"]), "alice Bob", "[[alice]] [[Bob]]").await;
 
     assert_eq!(terms_of(&result["refs"], "resolved"), [json!("Bob"), json!("alice")]);
     assert_eq!(bound, json!("[\"bob\",\"alice\"]"));
 
-    // An astral character (UTF-16 units D83D DE00) sorts before a fullwidth letter (FF41) by code unit, after it by code point
+    // An astral character (UTF-16 units D83D DE00) sorts after a fullwidth letter (FF41) by code point, before it by code unit
     let (result, bound) = gate_over(&[], "z \u{1F600} \u{FF41}", "[[\u{FF41}]] [[\u{1F600}]] [[Z]]").await;
 
-    assert_eq!(terms_of(&result["refs"], "unresolved"), [json!("Z"), json!("\u{1F600}"), json!("\u{FF41}")]);
-    assert_eq!(bound, json!("[\"z\",\"\u{1F600}\",\"\u{FF41}\"]"));
+    assert_eq!(terms_of(&result["refs"], "unresolved"), [json!("Z"), json!("\u{FF41}"), json!("\u{1F600}")]);
+    assert_eq!(bound, json!("[\"z\",\"\u{FF41}\",\"\u{1F600}\"]"));
 }
 
 #[tokio::test]
