@@ -36,24 +36,13 @@ export interface ToolInputSchema {
  * `false` would make validating clients reject the unadvertised aliases (`name`,
  * `page`, `uuid`) that `resolveParamAliases` folds. `$schema` is dropped too;
  * tools/list never carried it.
- *
- * An integer (`z.int()`, #293) is advertised as `"type": "integer"` alone: zod adds
- * the safe-integer range as `minimum` and `maximum`, which tells a caller nothing
- * and costs about 50 characters a parameter. The parser still enforces it.
  */
 export function toInputSchema(schema: z.ZodObject): ToolInputSchema {
-  const { $schema: _dropped, ...rest } = z.toJSONSchema(schema, { io: 'input', override: dropSafeIntegerRange });
+  const { $schema: _dropped, ...rest } = z.toJSONSchema(schema, { io: 'input' });
   if (rest.type !== 'object' || rest.properties === undefined || 'additionalProperties' in rest) {
     throw new Error('toInputSchema needs a zod object schema that ignores unknown fields');
   }
   return { ...rest, type: 'object', properties: rest.properties };
-}
-
-/** Remove the bounds zod gives every integer; any other `minimum` or `maximum` stays. */
-function dropSafeIntegerRange({ jsonSchema }: { jsonSchema: Record<string, unknown> }): void {
-  if (jsonSchema.type !== 'integer') return;
-  if (jsonSchema.minimum === Number.MIN_SAFE_INTEGER) delete jsonSchema.minimum;
-  if (jsonSchema.maximum === Number.MAX_SAFE_INTEGER) delete jsonSchema.maximum;
 }
 
 /**
@@ -115,18 +104,10 @@ const expectedMessage: z.core.$ZodErrorMap = issue => {
     case 'invalid_type': {
       const expected = EXPECTED_TYPE[issue.expected] ?? issue.expected;
       if (issue.input === undefined) return `${expected} (required)`;
-      // 2.5 is a number, so "an integer, not a number" would say nothing (#293). zod reports
-      // `int` only for a finite non-whole number: NaN, ±Infinity and other kinds come back as
-      // `number`, so this is always a fraction (pinned in parse-args.test.ts)
-      if (issue.expected === 'int') return `${expected}, not a fraction`;
       return `${expected}, not ${kindOf(issue.input)}`;
     }
     case 'invalid_value':
       return `one of ${issue.values.map(v => JSON.stringify(v)).join(', ')}`;
-    case 'too_small':
-      // A count below its `.min()` (#293). Other origins (string length, arrays) keep zod's message
-      if (issue.origin !== 'number' || !issue.inclusive) return undefined;
-      return `at least ${issue.minimum}`;
     case 'invalid_union': {
       const kinds = unionKinds(issue);
       if (kinds === undefined) return undefined;
@@ -174,9 +155,6 @@ function exampleFor(param: string, issue: z.core.$ZodIssue): string | undefined 
   if (issue.code === 'invalid_type') {
     const sample = EXAMPLE_VALUE[issue.expected];
     return sample === undefined ? undefined : `${param}: ${sample}`;
-  }
-  if (issue.code === 'too_small' && issue.origin === 'number' && issue.inclusive) {
-    return `${param}: ${issue.minimum}`;
   }
   if (issue.code === 'invalid_union') {
     // The first alternative's sample: `property_value: "..."`

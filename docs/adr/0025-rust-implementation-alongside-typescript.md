@@ -34,7 +34,7 @@ Tracked in #122.
 
 ## Status
 
-superseded by 0031-second-implementation-matches-tool-list-by-meaning
+accepted
 
 Date: 2026-10-05
 

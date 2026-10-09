@@ -8,8 +8,7 @@ import { DEFAULT_LIST_PAGES_LIMIT, DEFAULT_LIST_PAGES_OFFSET } from './tools/lis
 /**
  * What each handler hands its tool function (#60): the
  * defaults, every clamp at and above its limit, and the values that pass through
- * unclamped. Fractions and values below a parameter's minimum are rejected first (#293),
- * and the tool is never called (the last describe). The tool functions are mocked, so
+ * unclamped (negative and fractional numbers). The tool functions are mocked, so
  * these pin the handler alone. The clamps are safeguards: `max_depth` <= 3,
  * `max_nodes` <= 500, `max_fanout` <= 100.
  */
@@ -135,8 +134,9 @@ describe('logseq_get_concept_network hand-off', () => {
     [3, 3],
     [4, 3],
     [100, 3],
-    [1, 1],
     [0, 0],
+    [-1, -1],
+    [1.5, 1.5],
   ])('max_depth %j reaches the tool as %j (clamped to 3, not raised)', async (value, expected) => {
     const [, depth] = await network({ max_depth: value });
     expect(depth).toBe(expected);
@@ -147,6 +147,9 @@ describe('logseq_get_concept_network hand-off', () => {
     [501, 500],
     [10_000, 500],
     [1, 1],
+    [0, 0],
+    [-5, -5],
+    [2.5, 2.5],
   ])('max_nodes %j reaches the tool as %j (clamped to 500; the tool floors it at 1)', async (value, expected) => {
     const [, , options] = await network({ max_nodes: value });
     expect((options as { maxNodes: unknown }).maxNodes).toBe(expected);
@@ -156,6 +159,8 @@ describe('logseq_get_concept_network hand-off', () => {
     [100, 100],
     [101, 100],
     [1, 1],
+    [-1, -1],
+    [2.5, 2.5],
   ])('max_fanout %j reaches the tool as %j (clamped to 100; the tool floors it at 1)', async (value, expected) => {
     const [, , options] = await network({ max_fanout: value });
     expect((options as { maxFanout: unknown }).maxFanout).toBe(expected);
@@ -179,12 +184,12 @@ describe('logseq_search_by_relationship hand-off', () => {
     expect(await relationship({})).toEqual(['Alice', 'Bob', 'connected-within', 2, { limit: 50 }]);
   });
 
-  it.each([5, 0, 100_000])('limit %j passes through (the tool clamps it)', async value => {
+  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (the tool clamps it)', async value => {
     const [, , , , options] = await relationship({ limit: value });
     expect(options).toEqual({ limit: value });
   });
 
-  it.each([0, 1, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {
+  it.each([0, -1, 1.5, 3, 10])('max_distance %j passes through (it has no clamp)', async value => {
     const [, , , distance] = await relationship({ max_distance: value });
     expect(distance).toBe(value);
   });
@@ -206,7 +211,7 @@ describe('logseq_search_blocks hand-off', () => {
     expect(await search({})).toEqual(['alice', undefined, false, true]);
   });
 
-  it.each([5, 0, 100_000])('limit %j passes through (it has no clamp)', async value => {
+  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (it has no clamp)', async value => {
     const [, limit] = await search({ limit: value });
     expect(limit).toBe(value);
   });
@@ -233,7 +238,7 @@ describe('logseq_query_by_property hand-off', () => {
     ).toEqual(['status', 'active', false, 100]);
   });
 
-  it.each([5, 0, 100_000])('limit %j passes through (the tool clamps it)', async value => {
+  it.each([5, 0, -1, 2.5, 100_000])('limit %j passes through (the tool clamps it)', async value => {
     const [, , , limit] = await handedOff(
       'logseq_query_by_property',
       { property_key: 'status', property_value: 'active', limit: value },
@@ -249,9 +254,10 @@ describe('logseq_get_context_for_query hand-off', () => {
 
   it.each([
     [{ max_topics: 3 }, { maxTopics: 3 }],
-    [{ max_topics: 1 }, { maxTopics: 1 }],
+    [{ max_topics: -1 }, { maxTopics: -1 }],
+    [{ max_topics: 2.5 }, { maxTopics: 2.5 }],
     [{ max_search_results: 50 }, { maxSearchResults: 50 }],
-    [{ max_search_results: 0 }, { maxSearchResults: 0 }],
+    [{ max_search_results: -1 }, { maxSearchResults: -1 }],
   ])('%j passes through as %j (no clamp)', async (args, expected) => {
     const [, options] = await context(args);
     expect(options).toMatchObject(expected);
@@ -327,6 +333,15 @@ describe('logseq_query_by_date_range hand-off', () => {
     const [options] = await range({ preset: 'last_week' });
     expect(options).toMatchObject({ preset: 'last_week' });
   });
+
+  it.each([
+    [{ last_n: -1 }, { lastN: -1 }],
+    [{ last_n: 2.5 }, { lastN: 2.5 }],
+    [{ top_concepts_limit: -1, last_n: 1 }, { topConceptsLimit: -1 }],
+  ])('%j reaches the tool as %j, which owns the range checks', async (args, expected) => {
+    const [options] = await range(args);
+    expect(options).toMatchObject(expected);
+  });
 });
 
 describe('logseq_build_context hand-off', () => {
@@ -360,10 +375,14 @@ describe('logseq_build_context hand-off', () => {
   it.each([
     [{ max_blocks: 5 }, { maxBlocks: 5 }],
     [{ max_blocks: 0 }, { maxBlocks: 0 }],
+    [{ max_blocks: -1 }, { maxBlocks: -1 }],
+    [{ max_blocks: 2.5 }, { maxBlocks: 2.5 }],
     [{ max_blocks: 100_000 }, { maxBlocks: 100_000 }],
     [{ max_related_pages: 0 }, { maxRelatedPages: 0 }],
+    [{ max_related_pages: -1 }, { maxRelatedPages: -1 }],
     [{ max_related_pages: 1_000 }, { maxRelatedPages: 1_000 }],
     [{ max_references: 0 }, { maxReferences: 0 }],
+    [{ max_references: -1 }, { maxReferences: -1 }],
     [{ max_references: 1_000 }, { maxReferences: 1_000 }],
     [{ include_temporal_context: false }, { includeTemporalContext: false }],
     [{ include_temporal_context: true }, { includeTemporalContext: true }],
@@ -443,8 +462,8 @@ describe('logseq_get_page_outline and logseq_list_pages hand-off', () => {
   it('list_pages: limit and offset default to 200 and 0, and pass through unclamped (#61)', async () => {
     expect(page).toEqual({ limit: 200, offset: 0 });
     vi.clearAllMocks();
-    expect(await handedOff('logseq_list_pages', { limit: 5000, offset: 3 }, mocks.listPages)).toEqual([
-      { nameContains: undefined, limit: 5000, offset: 3 },
+    expect(await handedOff('logseq_list_pages', { limit: 5000, offset: -3 }, mocks.listPages)).toEqual([
+      { nameContains: undefined, limit: 5000, offset: -3 },
     ]);
   });
 });
@@ -466,69 +485,5 @@ describe('logseq_get_backlinks hand-off', () => {
     [{ max_blocks_per_page: 5000 }, { maxPages: 20, maxBlocksPerPage: 5000 }],
   ])('%j passes through as %j, for the tool to clamp', async (args, expected) => {
     expect(await backlinks(args)).toEqual(['Alice', expected]);
-  });
-});
-
-/** The error text of a call the handler rejects, and that the tool function was never called. */
-async function rejectedBefore(name: string, args: Record<string, unknown>, mock: { mock: { calls: unknown[][] } }) {
-  const server = createServer(new LogseqClient({ apiUrl: 'http://localhost:12315', authToken: 'test-token-123' }), { tips: false });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const mcp = new Client({ name: 'test', version: '1.0.0' }, { capabilities: {} });
-  await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
-  try {
-    const result = (await mcp.callTool({ name, arguments: args })) as { isError?: boolean; content: Array<{ text: string }> };
-    expect(result.isError).toBe(true);
-    expect(mock.mock.calls).toEqual([]);
-    return JSON.parse(result.content[0].text).error as string;
-  } finally {
-    await mcp.close();
-  }
-}
-
-describe('a value below its minimum never reaches the tool (#293)', () => {
-  it.each([
-    ['logseq_get_concept_network', { concept_name: 'Alice', max_depth: -1 }, 'max_depth', 0, mocks.getConceptNetwork],
-    ['logseq_get_concept_network', { concept_name: 'Alice', max_nodes: 0 }, 'max_nodes', 1, mocks.getConceptNetwork],
-    ['logseq_get_concept_network', { concept_name: 'Alice', max_fanout: -1 }, 'max_fanout', 1, mocks.getConceptNetwork],
-    [
-      'logseq_search_by_relationship',
-      { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within', max_distance: -1 },
-      'max_distance',
-      0,
-      mocks.searchByRelationship,
-    ],
-    [
-      'logseq_search_by_relationship',
-      { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references', limit: -1 },
-      'limit',
-      0,
-      mocks.searchByRelationship,
-    ],
-    ['logseq_search_blocks', { query: 'alice', limit: -1 }, 'limit', 0, mocks.searchBlocksWithMeta],
-    [
-      'logseq_query_by_property',
-      { property_key: 'status', property_value: 'active', limit: -1 },
-      'limit',
-      0,
-      mocks.queryByPropertyWithMeta,
-    ],
-    ['logseq_get_context_for_query', { query: 'q', max_topics: 0 }, 'max_topics', 1, mocks.getContextForQuery],
-    ['logseq_get_context_for_query', { query: 'q', max_search_results: -1 }, 'max_search_results', 0, mocks.getContextForQuery],
-    ['logseq_query_by_date_range', { last_n: 0 }, 'last_n', 1, mocks.queryJournals],
-    ['logseq_query_by_date_range', { last_n: 1, top_concepts_limit: -1 }, 'top_concepts_limit', 0, mocks.queryJournals],
-    ['logseq_query_by_date_range', { last_n: 1, max_blocks: -1 }, 'max_blocks', 0, mocks.queryJournals],
-    ['logseq_build_context', { topic_name: 'Alice', max_blocks: -1 }, 'max_blocks', 0, mocks.buildContextForTopic],
-    ['logseq_build_context', { topic_name: 'Alice', max_related_pages: -1 }, 'max_related_pages', 0, mocks.buildContextForTopic],
-    ['logseq_build_context', { topic_name: 'Alice', max_references: -1 }, 'max_references', 0, mocks.buildContextForTopic],
-    ['logseq_get_concept_evolution', { concept_name: 'Alice', max_entries: -1 }, 'max_entries', 0, mocks.getConceptEvolution],
-    ['logseq_get_backlinks', { page_name: 'Alice', max_pages: -1 }, 'max_pages', 0, mocks.getBacklinksWithMeta],
-    ['logseq_get_backlinks', { page_name: 'Alice', max_blocks_per_page: -1 }, 'max_blocks_per_page', 0, mocks.getBacklinksWithMeta],
-    ['logseq_list_pages', { limit: -1 }, 'limit', 0, mocks.listPages],
-    ['logseq_list_pages', { offset: -3 }, 'offset', 0, mocks.listPages],
-  ] as const)('%s %j is rejected', async (name, args, param, minimum, mock) => {
-    const value = (args as Record<string, unknown>)[param];
-    expect(await rejectedBefore(name, args, mock)).toBe(
-      `Invalid parameter '${param}': ${value}\n\nExpected: at least ${minimum}\nExample: ${param}: ${minimum}`
-    );
   });
 });

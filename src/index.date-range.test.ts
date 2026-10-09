@@ -44,7 +44,7 @@ describe('logseq_query_by_date_range through MCP', () => {
     );
 
     const schema: any = tool!.inputSchema;
-    expect(schema.properties.top_concepts_limit).toMatchObject({ type: 'integer', default: 10 });
+    expect(schema.properties.top_concepts_limit).toMatchObject({ type: 'number', default: 10 });
   });
 
   it('returns isError for a bad top_concepts_limit without calling LogSeq', async () => {

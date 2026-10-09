@@ -38,20 +38,17 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "max_blocks": {
           "default": 50,
           "description": "Maximum number of blocks to include (default: 50)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "max_references": {
           "default": 20,
           "description": "Maximum number of reference blocks to include (default: 20)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "max_related_pages": {
           "default": 10,
           "description": "Maximum number of related pages to include (default: 10)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "resolve_refs": {
           "default": false,
@@ -122,14 +119,12 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "max_blocks_per_page": {
           "default": 10,
           "description": "Max linking blocks per source page (default: 10, max: 50)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "max_pages": {
           "default": 20,
           "description": "Max source pages (default: 20, max: 100)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "page_name": {
           "description": "Page to get backlinks for (name, alias or ISO date)",
@@ -223,8 +218,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "max_entries": {
           "default": 100,
           "description": "Max mentions, oldest first (default: 100, max: 500)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "start_date": {
           "description": "Optional start date in YYYYMMDD format",
@@ -273,20 +267,17 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "max_depth": {
           "default": 2,
           "description": "Maximum depth to traverse (default: 2, max: 3)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "max_fanout": {
           "default": 15,
           "description": "Maximum new pages any one page may add (default: 15, max: 100)",
-          "minimum": 1,
-          "type": "integer",
+          "type": "number",
         },
         "max_nodes": {
           "default": 50,
           "description": "Maximum pages in the network, root included (default: 50, max: 500)",
-          "minimum": 1,
-          "type": "integer",
+          "type": "number",
         },
       },
       "required": [
@@ -327,14 +318,12 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "max_search_results": {
           "default": 20,
           "description": "Maximum number of search results for queries without explicit topics (default: 20, max: 100)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "max_topics": {
           "default": 5,
           "description": "Maximum number of topics to extract context for (default: 5)",
-          "minimum": 1,
-          "type": "integer",
+          "type": "number",
         },
         "query": {
           "description": "Natural language query (can include [[page references]] and #tags)",
@@ -481,8 +470,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "limit": {
           "default": 200,
           "description": "Max pages (default: 200, max: 1000)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "name_contains": {
           "description": "Filter pages whose name or alias contains this text (case-insensitive)",
@@ -491,8 +479,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "offset": {
           "default": 0,
           "description": "Pages to skip, in name order; shifts if the graph changes",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
       },
       "required": [],
@@ -527,14 +514,12 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         },
         "last_n": {
           "description": "The N most recent journals that exist (whole number, 1+), newest first",
-          "minimum": 1,
-          "type": "integer",
+          "type": "number",
         },
         "max_blocks": {
           "default": 200,
           "description": "Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "preset": {
           "description": "Named period in local time; weeks run Monday to Sunday",
@@ -571,8 +556,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "top_concepts_limit": {
           "default": 10,
           "description": "Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
       },
       "type": "object",
@@ -597,8 +581,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "limit": {
           "default": 100,
           "description": "Max blocks to return (default: 100, max: 500)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "property_key": {
           "description": "Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)",
@@ -654,8 +637,7 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         },
         "limit": {
           "description": "Maximum number of results to return (default: 100, max: 500)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "query": {
           "description": "Text to search for in block content",
@@ -692,14 +674,12 @@ exports[`tools/list guardrails > matches the tool list snapshot 1`] = `
         "limit": {
           "default": 50,
           "description": "Max results (default: 50, max: 500). connected-within counts every block of both pages, nested ones too, topic A's first; a block that lost children has childrenTruncated",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "max_distance": {
           "default": 2,
           "description": "Maximum graph distance for connected-within (default: 2)",
-          "minimum": 0,
-          "type": "integer",
+          "type": "number",
         },
         "relationship_type": {
           "description": "Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)",

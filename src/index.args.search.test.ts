@@ -414,68 +414,51 @@ describe('null now reads as absent where it used to be a value (#60)', () => {
 });
 
 describe('numbers that pass the parser keep their old meaning', () => {
-  it('get_concept_network: a max_depth of 0 returns the root alone, after its resolver query only', async () => {
-    const { result, queries } = await call('logseq_get_concept_network', { ...NETWORK, max_depth: 0 });
-    expect(result.isError).toBeUndefined();
-    expect(queries).toHaveLength(1);
-    const body = JSON.parse(result.content[0].text);
-    expect(body.nodes.map((n: { name: string }) => n.name)).toEqual(['Alice']);
-    expect(body.edges).toEqual([]);
-  });
-
-  it('search_by_relationship: a max_distance of 0 walks no hops and finds no connection', async () => {
-    const zero = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: 0 });
-    const one = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: 1 });
-    expect(zero.result.isError).toBeUndefined();
-    expect(zero.queries).toHaveLength(one.queries.length - 1); // the resolver queries, no hop query
-    const body = JSON.parse(zero.result.content[0].text);
-    expect(body.results).toEqual([]);
-    expect(body.query.maxDistance).toBe(0);
-  });
-
-  it('search_blocks: a limit of 0 returns no blocks and reports the matches', async () => {
-    const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: 0 });
+  it('search_blocks: a negative limit returns no blocks and reports the matches', async () => {
+    const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: -1 });
     expect(result.isError).toBeUndefined();
     expect(JSON.parse(result.content[0].text)).toEqual([]);
     expect(JSON.parse(result.content[1].text).meta).toMatchObject({ hasMore: true, totals: { matches: 3 } });
   });
 
+  it('get_concept_network: a negative max_depth walks no further than 0', async () => {
+    await expectSame('logseq_get_concept_network', { ...NETWORK, max_depth: -1 }, { ...NETWORK, max_depth: 0 });
+    const { queries } = await call('logseq_get_concept_network', { ...NETWORK, max_depth: -1 });
+    expect(queries).toHaveLength(1); // the root's resolver query only
+  });
 
-  it.each([
-    ['logseq_search_blocks', { ...SEARCH, limit: -1 }, 'limit', 0],
-    ['logseq_get_concept_network', { ...NETWORK, max_depth: -1 }, 'max_depth', 0],
-    ['logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: -1 }, 'max_distance', 0],
-    ['logseq_get_context_for_query', { ...CONTEXT, max_topics: 0 }, 'max_topics', 1],
-    ['logseq_get_context_for_query', { ...CONTEXT, max_topics: -1 }, 'max_topics', 1],
-    ['logseq_query_by_date_range', { last_n: 0 }, 'last_n', 1],
-    ['logseq_query_by_date_range', { last_n: -1 }, 'last_n', 1],
-    ['logseq_query_by_date_range', { ...RANGE, top_concepts_limit: -1 }, 'top_concepts_limit', 0],
-  ] as const)('%s %j is rejected by the parser as below its minimum, before any call (#293)', async (tool, args, param, minimum) => {
-    expect(await rejection(tool, args)).toContain(
-      `Invalid parameter '${param}': ${(args as Record<string, unknown>)[param]}\n\nExpected: at least ${minimum}\nExample: ${param}: ${minimum}`
-    );
+  it('search_by_relationship: a negative max_distance walks no hops, and is echoed as given', async () => {
+    const negative = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: -1 });
+    const zero = await call('logseq_search_by_relationship', { ...RELATIONSHIP, max_distance: 0 });
+    expect(negative.queries).toEqual(zero.queries);
+    expect(negative.apiCalls).toEqual(zero.apiCalls);
+    const body = JSON.parse(negative.result.content[0].text);
+    expect(body.results).toEqual([]);
+    expect(body.query.maxDistance).toBe(-1);
+  });
+
+  it('get_context_for_query: a negative max_topics still slices from the end (current, not endorsed)', async () => {
+    const { result } = await call('logseq_get_context_for_query', { ...CONTEXT, max_topics: -1 });
+    const body = JSON.parse(result.content[0].text);
+    expect(body.contexts).toHaveLength(1);
+    expect(body.warnings[0]).toMatchObject({ code: 'topics_truncated' });
   });
 
   it.each([
+    [{ last_n: -1 }, 'last_n'],
+    [{ last_n: 2.5 }, 'last_n'],
+    [{ last_n: 0 }, 'last_n'],
     [{ start_date: 2025, end_date: 20250107 }, 'start_date'],
+    [{ ...RANGE, top_concepts_limit: -1 }, 'top_concepts_limit'],
+    [{ ...RANGE, top_concepts_limit: 2.5 }, 'top_concepts_limit'],
     [{ last_n: 1, preset: 'today' }, 'date selection'],
   ])('query_by_date_range: %j is still rejected by the tool, before any call', async (args, param) => {
     expect(await rejection('logseq_query_by_date_range', args)).toContain(`Invalid parameter '${param}'`);
   });
 
-  it.each([
-    [{ last_n: 2.5 }, 'last_n'],
-    [{ ...RANGE, top_concepts_limit: 2.5 }, 'top_concepts_limit'],
-  ])('query_by_date_range: %j is rejected by the parser as a fraction, before any call (#293)', async (args, param) => {
-    expect(await rejection('logseq_query_by_date_range', args)).toContain(
-      `Invalid parameter '${param}': 2.5\n\nExpected: an integer, not a fraction`
-    );
-  });
-
-  it('search_blocks: a fractional limit is rejected before any call, not cut down (#293)', async () => {
-    expect(await rejection('logseq_search_blocks', { ...SEARCH, limit: 2.5 })).toContain(
-      "Invalid parameter 'limit': 2.5\n\nExpected: an integer, not a fraction"
-    );
+  it('search_blocks: a fractional limit is cut down to a whole number of blocks', async () => {
+    const { result } = await call('logseq_search_blocks', { ...SEARCH, limit: 2.5 });
+    expect(JSON.parse(result.content[0].text)).toHaveLength(2);
   });
 });
 

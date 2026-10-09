@@ -354,22 +354,14 @@ describe('tools without parameters ignore whatever they are sent', () => {
 });
 
 describe('values that pass the parser keep their old meaning', () => {
-  it('build_context: a max_blocks of 0 keeps no blocks and says more exist', async () => {
-    const capped = await body('logseq_build_context', { ...CONTEXT, max_blocks: 0 });
-    expect(capped.directBlocks).toEqual([]);
+  it('build_context: a negative max_blocks still slices from the end (current, not endorsed)', async () => {
+    const capped = await body('logseq_build_context', { ...CONTEXT, max_blocks: -1 });
+    expect(capped.directBlocks).toHaveLength(1);
     expect(capped.hasMore).toBe(true);
   });
 
-  it('build_context: a negative max_blocks is rejected before any call; it used to slice from the end (#293)', async () => {
-    expect(await rejection('logseq_build_context', { ...CONTEXT, max_blocks: -1 })).toContain(
-      "Invalid parameter 'max_blocks': -1\n\nExpected: at least 0\nExample: max_blocks: 0"
-    );
-  });
-
-  it('build_context: a fractional max_blocks is rejected before any call, not cut down (#293)', async () => {
-    expect(await rejection('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).toContain(
-      "Invalid parameter 'max_blocks': 1.5\n\nExpected: an integer, not a fraction"
-    );
+  it('build_context: a fractional max_blocks is cut down to a whole number of blocks', async () => {
+    expect((await body('logseq_build_context', { ...CONTEXT, max_blocks: 1.5 })).directBlocks).toHaveLength(1);
   });
 
   it('list_pages: an empty name_contains is still no filter', async () => {

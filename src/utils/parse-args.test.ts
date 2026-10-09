@@ -147,19 +147,10 @@ describe('parseArgs', () => {
       );
     });
 
-    it('says an integer is expected, not a fraction, with an integer for the example', () => {
+    it('says an integer is expected, with an integer for the example', () => {
       expect(messageFor(z.object({ v: z.int() }), { v: 1.5 })).toBe(
-        "Invalid parameter 'v': 1.5\n\nExpected: an integer, not a fraction\nExample: v: 5"
+        "Invalid parameter 'v': 1.5\n\nExpected: an integer, not a number\nExample: v: 5"
       );
-      expect(messageFor(z.object({ v: z.int() }), { v: -0.1 })).toContain('Expected: an integer, not a fraction\n');
-    });
-
-    it('calls only a finite non-whole number a fraction', () => {
-      for (const v of ['5', '2.5', NaN, Infinity, -Infinity, true]) {
-        expect(messageFor(z.object({ v: z.int() }), { v }), String(v)).not.toContain('fraction');
-      }
-      // Only where an integer was expected: elsewhere 2.5 is just a number
-      expect(messageFor(z.object({ v: z.string() }), { v: 2.5 })).toContain('Expected: a string, not a number\n');
     });
 
     it('gives no Example: line for a type with no sample value', () => {
@@ -183,28 +174,6 @@ describe('parseArgs', () => {
 
       expect(message).toMatch(/^Invalid parameter 'v': 5\n\nExpected: /);
       expect(message).not.toContain('Example:');
-    });
-
-    it('says a number below its minimum must be at least it, with the minimum as the example (#293)', () => {
-      expect(messageFor(z.object({ v: z.int().min(1) }), { v: 0 })).toBe(
-        "Invalid parameter 'v': 0\n\nExpected: at least 1\nExample: v: 1"
-      );
-      expect(messageFor(z.object({ v: z.number().min(0) }), { v: -0.5 })).toBe(
-        "Invalid parameter 'v': -0.5\n\nExpected: at least 0\nExample: v: 0"
-      );
-    });
-
-    it('keeps the zod message, with no Example:, for a number above its maximum', () => {
-      // An inclusive numeric bound like a minimum, but too_big: neither "at least" nor an example applies
-      const capped = z.object({ v: z.number().max(5) });
-
-      expect(messageFor(capped, { v: 6 })).toBe(`Invalid parameter 'v': 6\n\nExpected: ${zodMessage(capped, { v: 6 })}`);
-    });
-
-    it('keeps the zod message, with no Example:, for an exclusive minimum', () => {
-      const positive = z.object({ v: z.number().gt(0) });
-
-      expect(messageFor(positive, { v: 0 })).toBe(`Invalid parameter 'v': 0\n\nExpected: ${zodMessage(positive, { v: 0 })}`);
     });
 
     it('keeps the zod message for an issue of another kind, and gives it no Example:', () => {
@@ -306,24 +275,5 @@ describe('toInputSchema', () => {
 
   it('accepts a schema with no fields', () => {
     expect(toInputSchema(z.object({}))).toEqual({ type: 'object', properties: {} });
-  });
-
-  it("advertises an integer without zod's safe-integer range, but keeps bounds the schema sets (#293)", () => {
-    const counts = z.object({
-      plain: z.int(),
-      bounded: z.int().min(1).max(10),
-      floored: z.int().min(0),
-      fraction: z.number().min(-1),
-      // A plain number bounded by the same values keeps them: only integers lose the range
-      wide: z.number().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
-    });
-
-    expect(toInputSchema(counts).properties).toEqual({
-      plain: { type: 'integer' },
-      bounded: { type: 'integer', minimum: 1, maximum: 10 },
-      floored: { type: 'integer', minimum: 0 },
-      fraction: { type: 'number', minimum: -1 },
-      wide: { type: 'number', minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
-    });
   });
 });
