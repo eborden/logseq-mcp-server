@@ -232,10 +232,20 @@ impl QueryContext {
     }
 }
 
-/// The `[[page references]]`, then the `#tags`, each once, first seen first.
+/// The `[[page references]]`, then the `#tags`, each once, first seen first. A ref that holds
+/// another ref is one topic, the largest name: `[[a [[b]] d]]` is `a [[b]] d`, not also `b`. Each
+/// name is a lookup, and a nested link typed by mistake would cost the not-found path for nothing.
 fn extract_topics(query: &str) -> Vec<String> {
     let mut seen = HashSet::new();
-    refs::page_refs(query).into_iter().map(|found| found.name).chain(refs::tags(query)).filter(|topic| seen.insert(*topic)).map(str::to_owned).collect()
+    // `page_refs` lists an outer ref before the refs inside it, so a ref that starts before the end
+    // of the last outermost one is inside it
+    let mut outermost_end = 0;
+    let outermost = refs::page_refs(query).into_iter().filter(|found| {
+        let nested = found.range.start < outermost_end;
+        outermost_end = outermost_end.max(found.range.end);
+        !nested
+    });
+    outermost.map(|found| found.name).chain(refs::tags(query)).filter(|topic| seen.insert(*topic)).map(str::to_owned).collect()
 }
 
 /// The words a keyword search looks for: the first three words of the query, lowercased, longer
@@ -510,11 +520,27 @@ mod tests {
         // the comma after a tag is part of it: a tag runs to white space or `#` (`refs::tags`)
         assert_eq!(extract_topics("what about [[Atlas]] and #beta, [[Bob Smith]] #beta [[Atlas]] #gamma#delta"), ["Atlas", "Bob Smith", "beta,", "beta", "gamma", "delta"]);
         // the grammar of `refs::page_refs`: a name holds no bracket or newline, so `[[[c]]` is the topic `c`,
-        // a ref over two lines is none, and a ref that holds a ref is a topic beside the one inside it
-        assert_eq!(extract_topics("[[[c]] [[x\ny]] [[a [[b]] d]]"), ["c", "a [[b]] d", "b"]);
+        // a ref over two lines is none, and a ref that holds a ref is one topic, the largest name
+        assert_eq!(extract_topics("[[[c]] [[x\ny]] [[a [[b]] d]]"), ["c", "a [[b]] d"]);
         // a wrapper with no text of its own is only the ref inside it
         assert_eq!(extract_topics("[[[[b]]]] [[ [[b]] ]]"), ["b"]);
         assert_eq!(extract_topics("nothing here"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_ref_inside_another_is_not_a_topic_of_its_own() {
+        assert_eq!(extract_topics("[[a [[b]] d]]"), ["a [[b]] d"]);
+        // two levels, and siblings inside one outer ref
+        assert_eq!(extract_topics("[[a [[b [[c]] ]] ]]"), ["a [[b [[c]] ]] "]);
+        assert_eq!(extract_topics("[[x [[a]] y [[b]] z]]"), ["x [[a]] y [[b]] z"]);
+        // refs after it, and the same name as a plain ref elsewhere, are topics as before
+        assert_eq!(extract_topics("[[a [[b]] d]] then [[b]] and [[e]]"), ["a [[b]] d", "b", "e"]);
+        // a wrapper is no topic, so the refs inside it are the outermost ones
+        assert_eq!(extract_topics("[[ [[a]] [[b]] ]]"), ["a", "b"]);
+        // a tag is a topic whatever surrounds it
+        assert_eq!(extract_topics("[[a [[b]] d]] #t"), ["a [[b]] d", "t"]);
+        // an outer ref that is no ref leaves the refs inside it as topics
+        assert_eq!(extract_topics("[[a [[b]] c"), ["b"]);
     }
 
     #[test]
