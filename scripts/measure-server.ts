@@ -1,11 +1,9 @@
 /**
- * Server selection for the measure scripts (#353): the TypeScript server, in process, or the
- * Rust binary over MCP stdio.
+ * Server selection for the measure scripts (#353, #356): the Rust binary over MCP stdio, the only server since the
+ * TypeScript one was retired.
  *
- *   --server ts        the default: scripts/measure-api-calls.ts calls each tool function directly
- *   --server ts-mcp    the TypeScript server through an in-memory MCP client (the MCP layer in the timing)
- *   --server rust      the Rust binary through MCP stdio, as Claude Code runs it
- *   --rust-binary <p>  the binary for `--server rust` (default rust/target/release/logseq-mcp-server)
+ *   --server rust      the default, and the only value
+ *   --rust-binary <p>  the binary (default rust/target/release/logseq-mcp-server)
  *
  * The Rust binary talks to LogSeq itself, so its calls are counted by a small forwarding proxy
  * on the loopback interface: the binary gets a temporary config that holds the same token and
@@ -22,9 +20,9 @@ import { tmpdir } from 'os';
 import { isAbsolute, join, resolve } from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { LogseqMCPConfig } from '../src/types.js';
+import type { LogseqMCPConfig } from './lib/logseq-api.js';
 
-export type ServerKind = 'ts' | 'ts-mcp' | 'rust';
+export type ServerKind = 'rust';
 
 export interface ServerChoice {
   kind: ServerKind;
@@ -38,15 +36,14 @@ const DEFAULT_BINARY = 'rust/target/release/logseq-mcp-server';
 
 /** Parses `--server` and `--rust-binary`; everything else (a page name) is left in `rest`. */
 export function parseServerFlags(argv: string[]): ServerChoice {
-  let kind: ServerKind = 'ts';
+  const kind: ServerKind = 'rust';
   let binary = DEFAULT_BINARY;
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--server') {
       const value = argv[++i];
-      if (value !== 'ts' && value !== 'ts-mcp' && value !== 'rust') throw new Error('--server takes ts, ts-mcp or rust');
-      kind = value;
+      if (value !== 'rust') throw new Error('--server takes rust: the TypeScript server was retired (#356)');
     } else if (arg === '--rust-binary') {
       const value = argv[++i];
       if (!value) throw new Error('--rust-binary takes a path');
@@ -122,7 +119,7 @@ export interface RustServer {
 }
 
 /**
- * Starts the Rust binary over MCP stdio with `config` (the same one the TypeScript client uses).
+ * Starts the Rust binary over MCP stdio with `config`.
  * With `count`, LogSeq calls go through a counting proxy. The binary gets a home of its own, so
  * it has no config file to fall back on.
  */
@@ -152,7 +149,7 @@ export async function startRustServer(binary: string, config: LogseqMCPConfig, c
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   delete env.LOGSEQ_MCP_NOW;
-  // The TypeScript paths run with tips on; the config's `tips` or a caller's LOGSEQ_MCP_TIPS must not change that
+  // Tips on, as a client sees them by default; the config's `tips` or a caller's LOGSEQ_MCP_TIPS must not change that
   env.LOGSEQ_MCP_TIPS = '1';
   env.LOGSEQ_MCP_CONFIG = configPath;
   env.HOME = home;

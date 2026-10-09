@@ -10,16 +10,14 @@
  * never the message text, so the output is safe to read. Quote it as approximate
  * percentages and not verbatim.
  *
- * Usage: npx tsx scripts/measure-output-size.ts [--server ts|rust] [--rust-binary <path>] [pageName]
- * `--server rust` runs the Rust binary over MCP stdio instead of the TypeScript server (#353); the
- * setup queries that pick the subject go straight to LogSeq either way, so both measure the same pages.
+ * Usage: npx tsx scripts/measure-output-size.ts [--server rust] [--rust-binary <path>] [pageName]
+ * `--server rust` (the default and only value since the TypeScript server was retired, #356) runs the Rust
+ * binary over MCP stdio (default rust/target/release/logseq-mcp-server); the setup queries that pick the
+ * subject go straight to LogSeq. With no LOGSEQ_MCP_CONFIG it reads the real graph on purpose.
  * Requires LogSeq running with the HTTP API enabled. Read-only.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { loadConfig, resolveConfigPath } from '../src/config.js';
-import { LogseqClient } from '../src/client.js';
-import { createServer } from '../src/index.js';
+import { loadConfig, LogseqClient, resolveConfigPath } from './lib/logseq-api.js';
 import { parseServerFlags, startRustServer } from './measure-server.js';
 
 type Args = Record<string, unknown>;
@@ -43,7 +41,6 @@ const pct = (slim: number, full: number) => (full === 0 ? '  n/a' : `${(((full -
 
 async function main() {
   const choice = parseServerFlags(process.argv.slice(2));
-  if (choice.kind === 'ts-mcp') throw new Error('--server takes ts or rust here: this script always goes through MCP');
   // LOGSEQ_MCP_CONFIG if set (e.g. the fixture instance), else ~/.logseq-mcp/config.json
   const config = await loadConfig(resolveConfigPath());
   const logseq = new LogseqClient(config);
@@ -72,18 +69,8 @@ async function main() {
   const topPair = [...pairCounts.entries()].sort((a, b) => b[1] - a[1])[0];
   const [propKey, propValue] = topPair ? (JSON.parse(topPair[0]) as [string, string]) : [undefined, undefined];
 
-  let mcp: Client;
-  let closeRust: (() => Promise<void>) | undefined;
-  if (choice.kind === 'rust') {
-    const rust = await startRustServer(choice.rustBinary, config, false);
-    mcp = rust.mcp;
-    closeRust = rust.close;
-  } else {
-    const server = createServer(logseq, { tips: true });
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    mcp = new Client({ name: 'measure-output-size', version: '1.0.0' }, { capabilities: {} });
-    await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
-  }
+  const rust = await startRustServer(choice.rustBinary, config, false);
+  const mcp: Client = rust.mcp;
 
   try {
     const slimCases: Array<[string, string, Args]> = [
@@ -148,8 +135,7 @@ async function main() {
       console.log(`${'build_context: compact json'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextCompact).padStart(9)}  ${pct(contextCompact, contextJson)}`);
     }
   } finally {
-    if (closeRust) await closeRust();
-    else await mcp.close();
+    await rust.close();
   }
 }
 

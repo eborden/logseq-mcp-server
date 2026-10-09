@@ -234,7 +234,7 @@ Re-run the script after changing any of these tools, and update this table.
 
 Times were also about equal, but the machine was under heavy load for all three runs (1-minute load average ~11-13, and it never fell below 3 in the 20 minutes waited), so treat them as order of magnitude: a single-page tool takes a few ms to ~0.1s, and a depth-2 network or `build_context` ~0.2-0.7s, on either server, inside the run-to-run noise. Re-measure on a quiet machine before quoting a difference between the servers.
 
-Select the server with `--server ts` (default: each tool function in process), `--server ts-mcp` (the TypeScript server through an in-memory MCP client) or `--server rust` (the binary at `--rust-binary`, default `rust/target/release/logseq-mcp-server`, over MCP stdio). Build it with `cd rust && cargo build --release --locked`. For `rust` the script counts calls with a forwarding proxy between the binary and LogSeq (`scripts/measure-server.ts`); the binary gets a temporary config with the same token, deleted afterwards. The proxy and the MCP layer add a little to each time.
+The measure scripts drive the Rust server since the TypeScript one was retired (#356): `--server rust` is the default and the only value (the `ts` and `ts-mcp` paths are gone), and the binary is the one at `--rust-binary`, default `rust/target/release/logseq-mcp-server`, over MCP stdio. Build it with `cd rust && cargo build --release --locked`. The script counts calls with a forwarding proxy between the binary and LogSeq (`scripts/measure-server.ts`); the binary gets a temporary config with the same token, deleted afterwards. The proxy and the MCP layer add a little to each time.
 
 ## Critical LogSeq Datalog Constraints
 
@@ -617,7 +617,7 @@ Measured numbers are in "Current Implementation Status" under "Why Datalog?". Re
 ```bash
 npx tsx scripts/measure-api-calls.ts            # picks the most-referenced page
 npx tsx scripts/measure-api-calls.ts "my page"  # or a specific page
-npx tsx scripts/measure-api-calls.ts --server rust  # the Rust binary (build it first); also --server ts-mcp. measure-output-size.ts takes --server ts|rust
+npx tsx scripts/measure-api-calls.ts --rust-binary rust/target/debug/logseq-mcp-server  # another binary than the release build (both measure scripts take it)
 npx tsx scripts/measure-output-size.ts          # output size, slim vs full (#42), markdown and compact vs json (#43); bytes only, no names
 ```
 
