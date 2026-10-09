@@ -322,6 +322,47 @@ describe('the cache is private to the user', () => {
     expect(cacheContents()).toEqual([]);
   });
 
+  it('follows a symlinked cache directory and judges its target: accepted when private, refused when world-writable', async () => {
+    const release = makeRelease('release');
+    const target = join(scratch, 'elsewhere');
+    mkdirSync(join(cacheRoot), { recursive: true });
+    mkdirSync(target, { mode: 0o700 });
+    symlinkSync(target, join(cacheRoot, NAME));
+
+    const accepted = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    expect(accepted.stderr).toBe('');
+    expect(accepted.status).toBe(0);
+    expect(existsSync(join(target, VERSION, `${NAME}-${VERSION}-${TARGET}`))).toBe(true);
+
+    chmodSync(target, 0o777);
+    try {
+      const refused = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+      expect(refused.status).toBe(1);
+      expect(refused.stdout).toBe('');
+      expect(refused.stderr).toContain('is writable by group or others, so it is not trusted');
+    } finally {
+      chmodSync(target, 0o700);
+    }
+  });
+
+  it('follows a symlinked version directory too, and refuses one whose target is group-writable', async () => {
+    const release = makeRelease('release');
+    const target = join(scratch, 'elsewhere-version');
+    mkdirSync(join(cacheRoot, NAME), { recursive: true });
+    mkdirSync(target, { mode: 0o700 });
+    symlinkSync(target, cacheDir());
+    expect((await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) })).status).toBe(0);
+
+    chmodSync(target, 0o770);
+    try {
+      const refused = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain('is writable by group or others, so it is not trusted');
+    } finally {
+      chmodSync(target, 0o700);
+    }
+  });
+
   it('accepts a 0755 directory it owns (readable by others, not writable)', async () => {
     const release = makeRelease('release');
     mkdirSync(cacheDir(), { recursive: true, mode: 0o755 });
