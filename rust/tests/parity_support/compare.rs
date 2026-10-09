@@ -7,7 +7,7 @@
 //! - [`same_text`] and [`same_tool_text`] are the places that decide whether two result texts match. A tool
 //!   result's JSON text (`content`) is compared by deep equality (the maintainer's decision on #371): object
 //!   key order is ignored, array order is kept, numbers compare by value. Every other text is compared byte for
-//!   byte: a markdown result (`format: "markdown"`), a prompt's messages, a resource read, and the frame of a
+//!   byte: a markdown result (`format: "markdown"`), a TOON result (`format: "toon"`, BR-0014), a prompt's messages, a resource read, and the frame of a
 //!   page-not-found message outside the closest names. Nothing else compares text.
 //! - [`minified_failures`] holds every JSON tool result to ADR-0009 separately, so deep equality can't let
 //!   layout whitespace through: the text is parsed, written again by `serde_json` (`Value`'s `Display`, which writes no
@@ -61,14 +61,14 @@ pub fn same_text(expected: &str, actual: &str) -> bool {
 }
 
 /// A text that is a JSON object or array, parsed. A tool's JSON result is always one of those, and a
-/// markdown result isn't JSON at all.
+/// markdown or TOON result is not JSON at all.
 fn json_container(text: &str) -> Option<Value> {
     let value: Value = serde_json::from_str(text).ok()?;
     (value.is_object() || value.is_array()).then_some(value)
 }
 
 /// Whether two texts of a tool result's `content` are the same: by deep equality when both are JSON (key
-/// order ignored, array order kept, numbers by value), byte for byte otherwise (markdown).
+/// order ignored, array order kept, numbers by value), byte for byte otherwise (markdown, TOON).
 pub fn same_tool_text(expected: &str, actual: &str) -> bool {
     match (json_container(expected), json_container(actual)) {
         (Some(want), Some(got)) => values_equal(&want, &got),
@@ -222,7 +222,7 @@ fn compare_result(expected: &Value, actual: &Value) -> Vec<String> {
                 let Some(g_value) = g.get(key) else { continue };
                 match (key.as_str(), w_value.as_str(), g_value.as_str()) {
                     ("text", Some(w_text), Some(g_text)) => {
-                        // A tool result's text is JSON or markdown; a resource's is whatever it renders, byte for byte
+                        // A tool result's text is JSON, markdown or TOON; a resource's is whatever it renders, byte for byte
                         let same = if list == "content" { same_tool_text(w_text, g_text) } else { same_text(w_text, g_text) };
                         if !same {
                             failures.push(text_difference(&format!("{list}[{i}].text"), w_text, g_text));
