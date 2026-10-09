@@ -485,9 +485,9 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn the_schema_means_what_the_typescript_one_means() {
+    fn the_schema_means_what_the_pinned_one_means() {
         // `inputSchema` of logseq_query_by_date_range in the ADR-0016 snapshot
-        let typescript = json!({
+        let pinned = json!({
             "type": "object",
             "properties": {
                 "start_date": {"type": "number", "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date"},
@@ -512,11 +512,11 @@ mod tests {
                 },
             },
         });
-        assert_eq!(meaning(&schema_of::<Args>()), meaning(&typescript));
+        assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
 
     #[test]
-    fn the_tool_is_read_only_and_titled_as_in_typescript() {
+    fn the_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
         assert_eq!(tool.title.as_deref(), Some("Query by Date Range"));

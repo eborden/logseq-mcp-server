@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_template_is_the_one_typescript_lists() {
+    fn the_page_template_is_the_pinned_one() {
         assert_eq!(
             serde_json::to_value(templates()).unwrap(),
             json!([{

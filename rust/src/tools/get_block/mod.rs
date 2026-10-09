@@ -111,9 +111,9 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn the_block_schema_means_what_the_typescript_one_means() {
+    fn the_block_schema_means_what_the_pinned_one_means() {
         // `inputSchema` of logseq_get_block in the ADR-0016 snapshot
-        let typescript = json!({
+        let pinned = json!({
             "type": "object",
             "properties": {
                 "block_uuid": {"type": "string", "description": "UUID of the block to retrieve"},
@@ -123,11 +123,11 @@ mod tests {
             },
             "required": ["block_uuid"],
         });
-        assert_eq!(meaning(&schema_of::<Args>()), meaning(&typescript));
+        assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
 
     #[test]
-    fn the_block_tool_is_read_only_and_titled_as_in_typescript() {
+    fn the_block_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
         assert_eq!(tool.title.as_deref(), Some("Get Block"));

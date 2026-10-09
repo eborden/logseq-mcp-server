@@ -210,7 +210,7 @@ mod tests {
         let got = &responses[2]["result"];
         assert_eq!(got["messages"][0]["role"], "user");
         assert!(got["messages"][0]["content"]["text"].as_str().unwrap().starts_with("Help me continue where I left off on \"project atlas\""));
-        assert!(got.get("resultType").is_none(), "the TypeScript server sends no resultType: {got}");
+        assert!(got.get("resultType").is_none(), "the result carries no resultType field: {got}");
         assert_eq!(responses[3]["error"]["code"], -32602);
         assert_eq!(responses[3]["error"]["message"], r#"Prompt "continue_on" needs a non-empty "topic" argument."#);
         assert_eq!(responses[4]["error"]["code"], -32602);

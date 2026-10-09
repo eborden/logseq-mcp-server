@@ -231,13 +231,13 @@ mod tests {
     }
 
     #[test]
-    fn the_schema_is_an_empty_object_as_in_typescript() {
-        let typescript = json!({"type": "object", "properties": {}, "required": []});
-        assert_eq!(meaning(&schema_of::<Args>()), meaning(&typescript));
+    fn the_schema_is_an_empty_object_as_pinned() {
+        let pinned = json!({"type": "object", "properties": {}, "required": []});
+        assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
 
     #[test]
-    fn the_tool_is_read_only_titled_and_not_idempotent_as_in_typescript() {
+    fn the_tool_is_read_only_titled_and_not_idempotent_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
         assert_eq!(tool.title.as_deref(), Some("Get Current Context"));

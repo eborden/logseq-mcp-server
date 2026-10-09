@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn tips_accepts_the_typescript_values() {
+    fn tips_accepts_the_pinned_values() {
         for (value, expected) in [
             ("on", TipsOverride::On),
             (" TRUE ", TipsOverride::On),

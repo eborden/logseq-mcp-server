@@ -690,10 +690,10 @@ mod tests {
     }
 
     #[test]
-    fn the_search_schema_means_what_the_typescript_one_means() {
+    fn the_search_schema_means_what_the_pinned_one_means() {
         use crate::tool::testing::{meaning, schema_of};
         // `inputSchema` of logseq_search_by_relationship in the ADR-0016 snapshot
-        let typescript = json!({
+        let pinned = json!({
             "type": "object",
             "properties": {
                 "topic_a": {"type": "string", "description": "Primary topic to search for (page name, alias or ISO date)"},
@@ -713,11 +713,11 @@ mod tests {
             },
             "required": ["topic_a", "topic_b", "relationship_type"],
         });
-        assert_eq!(meaning(&schema_of::<Args>()), meaning(&typescript));
+        assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
 
     #[test]
-    fn the_search_tool_is_read_only_and_titled_as_in_typescript() {
+    fn the_search_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
         assert_eq!(tool.title.as_deref(), Some("Search by Relationship"));
