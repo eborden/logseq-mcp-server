@@ -474,7 +474,7 @@ mod tests {
         let error = read(json!({"concept_name": "a", "end_date": 2.5})).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Invalid parameter 'end_date': 2.5\n\nExpected: Date in YYYYMMDD format (8 digits, valid year/month/day)\nExample: end_date: 20251115"
+            "Invalid parameter 'end_date': 2.5\n\nExpected: an integer, not a fraction\nExample: end_date: 20251115"
         );
         let error = read(json!({"concept_name": "a", "group_by": "year", "max_entries": -1})).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'group_by': \"year\""), "{error}");
@@ -489,8 +489,8 @@ mod tests {
         use crate::args::testing::{Takes, sweep};
         let base = json!({"concept_name": "Atlas"});
         sweep::<Args>(json!({}), "concept_name", Takes::Text, true);
-        sweep::<Args>(base.clone(), "start_date", Takes::Date, false);
-        sweep::<Args>(base.clone(), "end_date", Takes::Date, false);
+        sweep::<Args>(base.clone(), "start_date", Takes::Whole, false);
+        sweep::<Args>(base.clone(), "end_date", Takes::Whole, false);
         sweep::<Args>(base.clone(), "group_by", Takes::Words(&["day", "week", "month"]), false);
         sweep::<Args>(base, "max_entries", Takes::Count(0), false);
     }

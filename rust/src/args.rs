@@ -34,6 +34,12 @@ pub const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 /// What a date must be, as the refusal of one that is no whole number says it.
 pub const DATE_FORMAT: &str = "Date in YYYYMMDD format (8 digits, valid year/month/day)";
 
+/// A `YYYYMMDD` day an argument names, for a tool that requires one: a number that is no whole number is
+/// refused as a date of the wrong format (`Date in YYYYMMDD format ...`), where a plain `i64` argument says
+/// `an integer, not a fraction`. The tool checks that the day is a real one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct YyyyMmDd(pub i64);
+
 /// A string, number or boolean, as a tool that takes any of the three receives it. The tool's schema
 /// is generated from this type, so it advertises the three (`anyOf`).
 ///
@@ -305,12 +311,14 @@ struct Limits {
     min: u64,
     /// A string is at most this many characters (`maxLength`)
     max_chars: Option<usize>,
+    /// A date that must be a `YYYYMMDD` day, as a [`YyyyMmDd`] says
+    day_format: bool,
 }
 
 impl Limits {
     fn of(property: Option<&Value>) -> Limits {
         let number = |key: &str| property.and_then(|property| property.get(key)).and_then(|limit| limit.as_u64().or_else(|| limit.as_f64().map(|limit| limit as u64)));
-        Limits { min: number("minimum").unwrap_or(0), max_chars: number("maxLength").map(|limit| limit as usize) }
+        Limits { min: number("minimum").unwrap_or(0), max_chars: number("maxLength").map(|limit| limit as usize), day_format: false }
     }
 }
 
@@ -409,13 +417,24 @@ impl<'de> Argument<'de> {
         visitor.visit_u64(n as u64)
     }
 
-    /// A date: a whole number within 2^53 - 1 either way. Whether it is a real day is the tool's to say.
+    /// A day number: a whole number within 2^53 - 1 either way. Whether it is a real day is the tool's to
+    /// say. One that is no whole number is worded as the date format when the argument is a [`YyyyMmDd`],
+    /// and as the number it is otherwise.
     fn date<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, ArgError> {
         let Value::Number(number) = self.value else { return Err(ArgError::new(Why::Mismatch)) };
-        match Self::whole(number) {
-            Some(n) => visitor.visit_i64(n),
-            None => Err(ArgError::refused(DATE_FORMAT, Some("20251115"))),
+        if let Some(n) = Self::whole(number) {
+            return visitor.visit_i64(n);
         }
+        let n = number.as_f64().expect("a JSON number is finite");
+        Err(if self.limits.day_format {
+            ArgError::refused(DATE_FORMAT, Some("20251115"))
+        } else if n.fract() != 0.0 {
+            ArgError::refused("an integer, not a fraction", Some("20251115"))
+        } else if n > 0.0 {
+            ArgError::refused(format!("at most {MAX_SAFE_INTEGER}"), None)
+        } else {
+            ArgError::refused(format!("at least -{MAX_SAFE_INTEGER}"), None)
+        })
     }
 
     /// A string, if it is not longer than the schema's `maxLength`, counted in characters (code points, which
@@ -471,6 +490,11 @@ impl<'de> Deserializer<'de> for Argument<'de> {
     dates! { deserialize_i8 deserialize_i16 deserialize_i32 deserialize_i64 }
     texts! { deserialize_str deserialize_string }
 
+    fn deserialize_newtype_struct<V: Visitor<'de>>(self, name: &'static str, visitor: V) -> Result<V::Value, ArgError> {
+        let limits = Limits { day_format: name == "YyyyMmDd", ..self.limits };
+        visitor.visit_newtype_struct(Argument { value: self.value, limits })
+    }
+
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, ArgError> {
         if self.value.is_null() { visitor.visit_none() } else { visitor.visit_some(self) }
     }
@@ -488,7 +512,7 @@ impl<'de> Deserializer<'de> for Argument<'de> {
     }
 
     forward_to_deserialize_any! {
-        bool i128 u128 f32 f64 char bytes byte_buf unit unit_struct newtype_struct seq tuple tuple_struct map
+        bool i128 u128 f32 f64 char bytes byte_buf unit unit_struct seq tuple tuple_struct map
         struct identifier ignored_any
     }
 }
@@ -521,7 +545,9 @@ pub(crate) mod testing {
         Flag,
         /// One of these words
         Words(&'static [&'static str]),
-        /// A `YYYYMMDD` number
+        /// A day number the tool does not require to be a date: a whole number
+        Whole,
+        /// A `YYYYMMDD` day ([`YyyyMmDd`])
         Date,
         Scalar,
     }
@@ -597,6 +623,14 @@ pub(crate) mod testing {
                 taken.extend([json!(min), json!(min + 1), json!(9_007_199_254_740_991u64), json!(min as f64)]);
                 message(param, "missing", "a number (required)", Some("5"))
             }
+            Takes::Whole => {
+                refuse_kinds(Value::is_number, &|kind| format!("a number, not {kind}"), "5");
+                refused.push((json!(20251115.5), message(param, "20251115.5", "an integer, not a fraction", Some("20251115"))));
+                refused.push((json!(9_007_199_254_740_992u64), message(param, "9007199254740992", "at most 9007199254740991", None)));
+                refused.push((json!(-9_007_199_254_740_992i64), message(param, "-9007199254740992", "at least -9007199254740991", None)));
+                taken.extend([json!(20251115), json!(20251115.0), json!(0), json!(2), json!(-3)]);
+                message(param, "missing", "a number (required)", Some("5"))
+            }
             Takes::Date => {
                 refuse_kinds(Value::is_number, &|kind| format!("a number, not {kind}"), "5");
                 let format = "Date in YYYYMMDD format (8 digits, valid year/month/day)";
@@ -650,6 +684,8 @@ mod tests {
         last: Option<u64>,
         #[schemars(with = "Option<f64>")]
         day: Option<i64>,
+        #[schemars(with = "Option<f64>")]
+        dated: Option<YyyyMmDd>,
         #[serde(default)]
         flag: bool,
         format: Option<Kind2>,
@@ -705,6 +741,7 @@ mod tests {
                 nodes: 1,
                 last: None,
                 day: None,
+                dated: None,
                 flag: false,
                 format: None,
                 note: None,
@@ -840,15 +877,28 @@ mod tests {
     }
 
     #[test]
-    fn a_date_is_a_whole_number_within_the_safe_range_and_may_be_negative() {
+    fn a_day_number_is_a_whole_number_within_the_safe_range_and_may_be_negative() {
         let bad = |extra: Value| sample(extra).unwrap_err();
-        let format = "Date in YYYYMMDD format (8 digits, valid year/month/day)";
-        assert_eq!(bad(json!({"day": 1.5})), message("day", "1.5", format, Some("20251115")));
-        assert_eq!(bad(json!({"day": 1e300})), message("day", "1e+300", format, Some("20251115")));
-        assert_eq!(bad(json!({"day": -1e300})), message("day", "-1e+300", format, Some("20251115")));
-        assert_eq!(bad(json!({"day": 9007199254740992u64})), message("day", "9007199254740992", format, Some("20251115")));
+        assert_eq!(bad(json!({"day": 1.5})), message("day", "1.5", "an integer, not a fraction", Some("20251115")));
+        assert_eq!(bad(json!({"day": 1e300})), message("day", "1e+300", "at most 9007199254740991", None));
+        assert_eq!(bad(json!({"day": -1e300})), message("day", "-1e+300", "at least -9007199254740991", None));
+        assert_eq!(bad(json!({"day": 9007199254740992u64})), message("day", "9007199254740992", "at most 9007199254740991", None));
+        assert_eq!(sample(json!({"day": 2})).unwrap().day, Some(2));
         assert_eq!(sample(json!({"day": 9007199254740991u64})).unwrap().day, Some(9_007_199_254_740_991));
         assert_eq!(sample(json!({"day": -9007199254740991i64})).unwrap().day, Some(-9_007_199_254_740_991));
+    }
+
+    #[test]
+    fn a_yyyymmdd_day_is_refused_as_a_date_of_the_wrong_format_when_it_is_no_whole_number() {
+        let bad = |extra: Value| sample(extra).unwrap_err();
+        let format = "Date in YYYYMMDD format (8 digits, valid year/month/day)";
+        for (sent, shown) in [(json!(1.5), "1.5"), (json!(1e300), "1e+300"), (json!(-1e300), "-1e+300"), (json!(9007199254740992u64), "9007199254740992")] {
+            assert_eq!(bad(json!({"dated": sent})), message("dated", shown, format, Some("20251115")));
+        }
+        // whether it is a real day is the tool's to say
+        assert_eq!(sample(json!({"dated": 2})).unwrap().dated, Some(YyyyMmDd(2)));
+        assert_eq!(sample(json!({"dated": 20250101.0})).unwrap().dated, Some(YyyyMmDd(20_250_101)));
+        assert_eq!(bad(json!({"dated": "x"})), message("dated", "\"x\"", "a number, not a string", Some("5")));
     }
 
     #[test]
