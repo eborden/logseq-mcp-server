@@ -21,7 +21,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # as JSON.stringify does: without it serde_json sorts them, and the byte-for-byte parity of
 # ADR-0025 Decision 2 would fail on key order alone.
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
+serde_json = { version = "1", features = ["preserve_order"] }
 # Tool input schemas, generated from the same type serde parses the arguments into. Already in
 # rmcp's tree (rmcp's `server` feature turns it on).
 schemars = "1"
