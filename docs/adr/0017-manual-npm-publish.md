@@ -22,9 +22,9 @@ The working rule that follows (never publish, tag or release from a session) liv
 
 ## Status
 
-accepted
+superseded by 0035-native-binary-release-on-github-releases
 
-Date: 2026-10-05
+Date: 2026-10-08
 
 ## Mechanical enforcement
 

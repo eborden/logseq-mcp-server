@@ -33,7 +33,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0014-resolve-page-names-via-shared-resolver](0014-resolve-page-names-via-shared-resolver.md) | Resolve page names in every page-taking tool through one shared resolver | accepted |
 | [0015-tool-descriptions-state-limits](0015-tool-descriptions-state-limits.md) | Make every tool description say what the tool can't find | accepted |
 | [0016-tool-list-size-guardrails](0016-tool-list-size-guardrails.md) | Budget and snapshot the tool list that every session loads | accepted |
-| [0017-manual-npm-publish](0017-manual-npm-publish.md) | Publish to npm only from a manual workflow run by the maintainer | accepted |
+| [0017-manual-npm-publish](0017-manual-npm-publish.md) | Publish to npm only from a manual workflow run by the maintainer | superseded by 0035-native-binary-release-on-github-releases |
 | [0018-ship-as-claude-code-plugin](0018-ship-as-claude-code-plugin.md) | Ship the server and skills as a Claude Code plugin with skills at the repo root | accepted |
 | [0019-parse-input-at-boundary](0019-parse-input-at-boundary.md) | Parse external input at the boundary | accepted |
 | [0020-additive-tool-contracts](0020-additive-tool-contracts.md) | Change tool contracts additively | accepted |
