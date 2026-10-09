@@ -262,7 +262,7 @@ async fn a_page_embed_with_no_entity_is_missing_and_keeps_the_name_as_written() 
 }
 
 #[tokio::test]
-async fn refs_in_children_are_resolved_in_the_same_batch_and_unfetched_children_become_objects() {
+async fn refs_in_children_are_resolved_in_the_same_batch() {
     let logseq = mock_logseq(vec![json!([target(2, "one", 100, 100), target(3, "two", 100, 100)])]).await;
     let mut parent = root(&format!("top (({}))", uuid(2)));
     parent["children"] = json!([editor_block(5, &format!("child (({}))", uuid(3))), editor_block(6, "no ref")]);
@@ -273,8 +273,22 @@ async fn refs_in_children_are_resolved_in_the_same_batch_and_unfetched_children_
     assert_eq!(resolved.blocks[0]["resolvedContent"], "top one");
     assert_eq!(resolved.blocks[0]["children"][0]["resolvedContent"], "child two");
     assert!(resolved.blocks[0]["children"][1].get("resolvedContent").is_none());
-    // suspected TS bug, kept: `{ ...child }` turns an unfetched `["uuid", "abc"]` into an object
-    assert_eq!(text(&resolved.blocks[1]["children"]), r#"[{"0":"uuid","1":"abc"}]"#);
+}
+
+#[tokio::test]
+async fn an_unfetched_child_tuple_is_left_as_sent_beside_real_children_that_are_still_annotated() {
+    let logseq = mock_logseq(vec![json!([target(2, "one", 100, 100)])]).await;
+    let mut parent = root("top");
+    parent["children"] = json!([["uuid", "abc"], editor_block(5, &format!("child (({}))", uuid(2))), "bare"]);
+    let unfetched = json!({"id": 7, "uuid": uuid(7), "content": "x", "children": [["uuid", "abc"]]});
+    let resolved = resolve_block_refs(&client(&logseq), &[parent, unfetched]).await.unwrap();
+
+    let children = &resolved.blocks[0]["children"];
+    assert_eq!(children[0], json!(["uuid", "abc"]));
+    assert_eq!(children[1]["resolvedContent"], "child one");
+    // anything else that is not a block comes back untouched too
+    assert_eq!(children[2], "bare");
+    assert_eq!(text(&resolved.blocks[1]["children"]), r#"[["uuid","abc"]]"#);
 }
 
 #[tokio::test]
