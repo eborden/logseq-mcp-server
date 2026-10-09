@@ -66,15 +66,13 @@ pub fn camelize_block(block: &Map<String, Value>) -> Map<String, Value> {
     out
 }
 
-// PARITY(#299): drops a sibling that shares an id with one already placed, though the doc says nothing is
-// dropped (suspected TS bug) — drop if Rust becomes the only server.
 /// `orderSiblings`: siblings in page order, by following the `:block/left` chain.
 ///
 /// The first sibling's `left` is the parent (or the page), which is not itself a sibling, so it
 /// is the head of the chain; each following sibling's `left` is the previous one. Blocks the
 /// chain can't reach (a corrupt graph, or a cycle) are appended in id order so nothing is
-/// dropped. Two siblings with one `left`: the first listed follows it. Two with one id: the
-/// first one the order reaches is kept.
+/// dropped. Two siblings with one `left`: the first listed follows it. Two with one id are both
+/// kept, each in the place the chain (or, failing that, the order of ids) gives it.
 ///
 /// `id` is a sibling's own id and `left` the id its `:block/left` points at, if it has one.
 pub fn order_siblings<T>(siblings: Vec<T>, id: impl Fn(&T) -> i64, left: impl Fn(&T) -> Option<i64>) -> Vec<T> {
@@ -95,18 +93,18 @@ pub fn order_siblings<T>(siblings: Vec<T>, id: impl Fn(&T) -> i64, left: impl Fn
     heads.sort_by_key(|&i| id(&siblings[i])); // a stable sort, as `Array.prototype.sort` is
 
     let mut order: Vec<usize> = Vec::with_capacity(siblings.len());
-    let mut seen: HashSet<i64> = HashSet::new();
+    let mut placed = vec![false; siblings.len()];
     for head in heads {
         let mut current = Some(head);
-        while let Some(i) = current.filter(|&i| !seen.contains(&id(&siblings[i]))) {
-            seen.insert(id(&siblings[i]));
+        while let Some(i) = current.filter(|&i| !placed[i]) {
+            placed[i] = true;
             order.push(i);
             current = by_left.get(&id(&siblings[i])).copied();
         }
     }
     let mut rest: Vec<usize> = (0..siblings.len()).collect();
     rest.sort_by_key(|&i| id(&siblings[i]));
-    order.extend(rest.into_iter().filter(|&i| !seen.contains(&id(&siblings[i]))));
+    order.extend(rest.into_iter().filter(|&i| !placed[i]));
 
     let mut slots: Vec<Option<T>> = siblings.into_iter().map(Some).collect();
     order.into_iter().map(|i| slots[i].take().expect("each sibling is placed once")).collect()
@@ -310,9 +308,11 @@ mod tests {
     }
 
     #[test]
-    fn a_sibling_that_shares_an_id_with_a_placed_one_is_dropped() {
-        // suspected TS bug, kept: nothing is dropped, the doc says, yet the second 7 is
-        assert_eq!(ordered(vec![(7, Some(1)), (7, Some(1))]), [7]);
+    fn a_sibling_that_shares_an_id_with_a_placed_one_is_kept() {
+        // nothing is dropped: both 7s come back, the second after the first
+        assert_eq!(ordered(vec![(7, Some(1)), (7, Some(1))]), [7, 7]);
+        // a duplicate met again along a chain is kept, and the chain stops at the first block it has placed
+        assert_eq!(ordered(vec![(7, Some(1)), (8, Some(7)), (7, Some(8))]), [7, 8, 7]);
     }
 
     fn flat(blocks: Vec<Value>) -> Vec<Map<String, Value>> {
