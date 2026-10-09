@@ -365,11 +365,12 @@ fn a_page_not_found_message_is_read_by_its_frame() {
     assert_eq!(parsed.opening, "No page \"Atlas\". Closest: ");
     let bare = parse_not_found(&message("2025-01-01", None)).unwrap();
     assert_eq!((bare.opening.as_str(), bare.list), ("No page \"2025-01-01\".", None));
-    // A JSON-RPC error carries its code in front, more than once; an escaped quote stays in the input
-    let wrapped = format!("MCP error -32602: MCP error -32602: {}", message("a \"b\"", Some("A B")));
-    let parsed = parse_not_found(&wrapped).unwrap();
+    // A JSON-RPC error's message is recorded as the server sent it, with nothing in front; an escaped quote
+    // stays in the input, and a message with something in front is not read as a not-found message
+    let parsed = parse_not_found(&message("a \"b\"", Some("A B"))).unwrap();
     assert_eq!(parsed.input, "a \"b\"");
-    assert!(parsed.opening.starts_with("MCP error -32602: MCP error -32602: No page "));
+    assert!(parsed.opening.starts_with("No page "));
+    assert!(parse_not_found(&format!("MCP error -32602: {}", message("a \"b\"", Some("A B")))).is_none());
     assert!(parse_not_found("No page \"a\". Closest: . Try something.").is_none());
     assert!(parse_not_found("Page not found").is_none());
 }

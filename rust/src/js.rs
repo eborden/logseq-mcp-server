@@ -40,8 +40,10 @@ pub fn utf16(value: &str) -> Vec<u16> {
     value.encode_utf16().collect()
 }
 
-// PARITY(#299): how JavaScript writes a number in an error message (`1e+21`, `0.000001`) — drop if Rust
-// becomes the only server.
+// PARITY(#299): the Markdown property value and the backlink sort key are parity uses of this function, to go
+// with the result serialisation. `Scalar::to_js_string` in `args.rs` also calls it, and that use is not
+// parity: LogSeq is ClojureScript and its `(str ?v)` writes a number as JavaScript does (`1e+21`,
+// `0.000001`), so a `query_by_property` value must keep this spelling. Do not delete the function.
 /// A number as `String(n)` or a template literal writes it (ECMAScript `Number::toString`).
 /// JSON has no NaN or infinity, so a value that came from JSON is always finite.
 pub fn number_to_string(n: f64) -> String {
@@ -76,8 +78,8 @@ pub fn number_to_string(n: f64) -> String {
 
 // PARITY(#299): `JSON.stringify` writes integer-like object keys first and numbers its own way — drop if
 // Rust becomes the only server.
-/// `JSON.stringify(value)`, for the places the TypeScript server writes a value it was handed
-/// into a message (a bad argument, a conflicting alias). Numbers are written as JavaScript writes
+/// `JSON.stringify(value)`, for the results (ADR-0031, ADR-0009). A message that quotes a value
+/// writes it with serde instead (`Value::to_string`). Numbers are written as JavaScript writes
 /// them, and an object's integer-like keys come first, in ascending order, then the others in
 /// the order they came: a JavaScript object keeps its keys that way.
 pub fn json_stringify(value: &Value) -> String {

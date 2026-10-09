@@ -11,7 +11,6 @@ use serde::Serialize;
 
 use crate::client::LogseqError;
 use crate::edn::InvalidValue;
-use crate::js;
 use crate::wire::ResponseError;
 
 #[derive(Debug)]
@@ -28,7 +27,7 @@ pub enum ToolError {
     AmbiguousPage(AmbiguousPage),
     /// A value that a query can't carry (a `:db/id` that isn't one).
     InvalidValue(InvalidValue),
-    /// A page the resolver found has no `:db/id` (`groundIds` throws on `undefined`).
+    /// A page the resolver found has no `:db/id`, so there is no id to bind into a query.
     PageWithoutId,
     /// A plain `Error` a tool throws with a fixed message, e.g. `Failed to retrieve graph information`.
     Failed(String),
@@ -44,9 +43,7 @@ impl fmt::Display for ToolError {
             ToolError::AmbiguousPage(error) => error.fmt(f),
             ToolError::InvalidValue(error) => error.fmt(f),
             ToolError::Failed(message) => f.write_str(message),
-            // PARITY(#299): `undefined`, the JavaScript word for a missing id, in `groundIds`' message — drop
-            // if Rust becomes the only server.
-            ToolError::PageWithoutId => f.write_str("Invalid entity id: undefined (expected an integer)"),
+            ToolError::PageWithoutId => f.write_str("Invalid entity id: missing (expected a positive integer)"),
         }
     }
 }
@@ -205,9 +202,9 @@ impl fmt::Display for AmbiguousPage {
     }
 }
 
-/// `JSON.stringify(text)`.
+/// `text` as a JSON string literal.
 fn json_string(text: &str) -> String {
-    js::json_stringify(&serde_json::Value::String(text.to_owned()))
+    serde_json::Value::String(text.to_owned()).to_string()
 }
 
 #[cfg(test)]
@@ -278,6 +275,6 @@ mod tests {
 
     #[test]
     fn a_page_without_an_id_is_the_error_group_ids_throws() {
-        assert_eq!(ToolError::PageWithoutId.to_string(), "Invalid entity id: undefined (expected an integer)");
+        assert_eq!(ToolError::PageWithoutId.to_string(), "Invalid entity id: missing (expected a positive integer)");
     }
 }

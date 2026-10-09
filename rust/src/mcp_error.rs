@@ -1,12 +1,14 @@
-//! A JSON-RPC error as the TypeScript server sends an `McpError`, shared by the resources and the prompts.
+//! A JSON-RPC error answering a prompt or resource request, shared by the resources and the prompts.
 
 use rmcp::ErrorData;
 use rmcp::model::ErrorCode;
 
-// PARITY(#299): the TypeScript SDK's `McpError` writes "MCP error <code>: " before its message, so that is
-// what goes on the wire, and the SDK sends no `data` (the `{ uri }` the resource code builds never leaves
-// the server; suspected TS bug) — drop if Rust becomes the only server.
-/// A JSON-RPC error as the TypeScript server sends an `McpError`.
+/// A JSON-RPC error with the code and the message as written, and no `data`.
 pub fn mcp_error(code: ErrorCode, message: &str) -> ErrorData {
-    ErrorData::new(code, format!("MCP error {}: {message}", code.0), None)
+    ErrorData::new(code, message.to_owned(), None)
+}
+
+/// A resource-not-found error. Its `data` is `{ "uri": uri }`, naming the resource that was asked for.
+pub fn resource_not_found(message: &str, uri: &str) -> ErrorData {
+    ErrorData::new(ErrorCode::RESOURCE_NOT_FOUND, message.to_owned(), Some(serde_json::json!({ "uri": uri })))
 }

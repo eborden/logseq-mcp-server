@@ -99,19 +99,22 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     let raw: Value = serde_json::from_str(text)
         .map_err(|error| ConfigError::InvalidJson { detail: json_error_detail(&error.to_string()) })?;
 
-    // 1. An object with a truthy authToken. Anything else is "authToken is required".
+    // 1. An object with an authToken that is present, not `null` and not empty. Anything else is
+    // "authToken is required" (an empty token would fail every call later with a 401). A token of
+    // the wrong type is reported in step 2, after the fields before it.
     let object = match &raw {
-        Value::Object(map) if map.get("authToken").is_some_and(is_truthy) => map,
+        Value::Object(map) if !matches!(map.get("authToken"), None | Some(Value::Null)) && map.get("authToken").and_then(Value::as_str) != Some("") => map,
         _ => return Err(invalid("authToken", AUTH_TOKEN_REQUIRED)),
     };
 
     // 2. Each field in turn. Nothing is coerced: "5000" is not a timeout, "false" not a boolean.
     // JSON has no `undefined`, so a present `null` in an optional field is a wrong value, as
-    // zod's `.optional()` treats it.
+    // zod's `.optional()` treats it. An `apiUrl` that is absent, `null` or empty is the default.
     let api_url = match object.get("apiUrl") {
-        Some(Value::String(url)) if !url.is_empty() => url.clone(),
-        Some(value) if is_truthy(value) => return Err(invalid("apiUrl", NOT_A_STRING)),
-        _ => DEFAULT_API_URL.to_owned(),
+        None | Some(Value::Null) => DEFAULT_API_URL.to_owned(),
+        Some(Value::String(url)) if url.is_empty() => DEFAULT_API_URL.to_owned(),
+        Some(Value::String(url)) => url.clone(),
+        Some(_) => return Err(invalid("apiUrl", NOT_A_STRING)),
     };
     let auth_token = match object.get("authToken") {
         Some(Value::String(token)) => token.clone(),
@@ -132,22 +135,6 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     };
 
     Ok(Config { api_url, auth_token, timeout_ms, tips })
-}
-
-/// JavaScript truthiness, which the TypeScript checks use for `authToken` and `apiUrl`. Keep
-/// rejecting a missing or empty `authToken` (a safeguard: an empty token fails every call later
-/// with a 401), and an empty `apiUrl` falling back to the default.
-// PARITY(#299): only which message a non-string token or URL gets follows JavaScript truthiness: `0`,
-// `false` and `null` say "authToken is required", while `1`, `true`, `[]` and `{}` get past it and say
-// "not a string" — drop that distinction if Rust becomes the only server.
-fn is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(flag) => *flag,
-        Value::Number(n) => n.as_f64().is_some_and(|x| x != 0.0),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(_) | Value::Object(_) => true,
-    }
 }
 
 /// The parser's reason, unless it quotes the file. serde_json's syntax messages name a line and
@@ -188,8 +175,8 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_or_falsy_api_url_is_the_default() {
-        for api_url in [None, Some(r#""""#), Some("null"), Some("0"), Some("false")] {
+    fn a_missing_null_or_empty_api_url_is_the_default() {
+        for api_url in [None, Some(r#""""#), Some("null")] {
             let field = api_url.map(|v| format!(r#","apiUrl":{v}"#)).unwrap_or_default();
             let config = parse_config(&format!(r#"{{"authToken":"x"{field}}}"#)).unwrap();
             assert_eq!(config.api_url, DEFAULT_API_URL, "apiUrl {api_url:?}");
@@ -203,8 +190,6 @@ mod tests {
             r#"{}"#,
             r#"{"authToken":""}"#,
             r#"{"authToken":null}"#,
-            r#"{"authToken":0}"#,
-            r#"{"authToken":false}"#,
             r#"[]"#,
             r#"42"#,
             r#"{"apiUrl":7,"timeoutMs":-1}"#,
@@ -216,7 +201,11 @@ mod tests {
     #[test]
     fn reports_the_first_wrong_field_in_order() {
         assert_eq!(validation(r#"{"authToken":"x","apiUrl":7,"tips":"no"}"#), ("apiUrl".into(), NOT_A_STRING.into()));
-        assert_eq!(validation(r#"{"authToken":true}"#), ("authToken".into(), NOT_A_STRING.into()));
+        // a token or URL of the wrong type is "not a string", whatever its value (`0` and `false` too)
+        for wrong in ["true", "false", "0", "1", "[]", "{}"] {
+            assert_eq!(validation(&format!(r#"{{"authToken":{wrong}}}"#)), ("authToken".into(), NOT_A_STRING.into()), "{wrong}");
+            assert_eq!(validation(&format!(r#"{{"authToken":"x","apiUrl":{wrong}}}"#)), ("apiUrl".into(), NOT_A_STRING.into()), "{wrong}");
+        }
         assert_eq!(validation(r#"{"authToken":"x","tips":"false"}"#), ("tips".into(), TIPS.into()));
         assert_eq!(validation(r#"{"authToken":"x","tips":null}"#), ("tips".into(), TIPS.into()));
         for timeout in ["0", "-5", r#""5000""#, "null", "true"] {

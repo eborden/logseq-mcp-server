@@ -14,7 +14,7 @@ pub const MAX_TIPS: usize = 2;
 /// A suggested call: the tool name followed by its arguments as JSON, so a name with quotes,
 /// backslashes or newlines stays a valid call.
 pub fn suggest_call(tool: &str, args: &Value) -> String {
-    format!("{tool} {}", js::json_stringify(args))
+    format!("{tool} {}", args)
 }
 
 /// A text that isn't blank (`nonEmptyString`).

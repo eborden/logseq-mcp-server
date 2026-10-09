@@ -212,7 +212,7 @@ mod tests {
         assert!(got["messages"][0]["content"]["text"].as_str().unwrap().starts_with("Help me continue where I left off on \"project atlas\""));
         assert!(got.get("resultType").is_none(), "the TypeScript server sends no resultType: {got}");
         assert_eq!(responses[3]["error"]["code"], -32602);
-        assert_eq!(responses[3]["error"]["message"], r#"MCP error -32602: Prompt "continue_on" needs a non-empty "topic" argument."#);
+        assert_eq!(responses[3]["error"]["message"], r#"Prompt "continue_on" needs a non-empty "topic" argument."#);
         assert_eq!(responses[4]["error"]["code"], -32602);
     }
 
@@ -232,8 +232,9 @@ mod tests {
         assert!(guide["text"].as_str().unwrap().starts_with("# LogSeq MCP guide\n\nRead-only access to a LogSeq graph."));
         assert_eq!(
             responses[3]["error"]["message"],
-            r#"MCP error -32002: Unknown resource "logseq://nope". Available: logseq://guide, logseq://page/{name}."#
+            r#"Unknown resource "logseq://nope". Available: logseq://guide, logseq://page/{name}."#
         );
+        assert_eq!(responses[3]["error"]["data"], serde_json::json!({ "uri": "logseq://nope" }));
     }
 
     #[tokio::test]
