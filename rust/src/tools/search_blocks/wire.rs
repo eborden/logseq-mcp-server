@@ -1,5 +1,5 @@
 //! What the block search reads from LogSeq: the hits of its query and the pages of its context
-//! lookup Each is checked against its wire type, and returned as the
+//! lookup. Each is checked against its wire type, and returned as the
 //! JSON LogSeq sent, since a full result carries each entity as it came.
 
 use serde::Deserialize;

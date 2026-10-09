@@ -7,7 +7,7 @@ edition = "2024"
 # rmcp 3.x needs 1.88. rust-toolchain.toml pins the same version for local builds and CI.
 rust-version = "1.88"
 publish = false
-description = "Spike: the LogSeq MCP server in Rust, beside the TypeScript one (ADR-0025, #122)"
+description = "The Rust MCP server for LogSeq (ADR-0025, #122)"
 
 [dependencies]
 # The official MCP SDK. No macros (the tools are listed by hand, see src/server.rs) and only
@@ -32,7 +32,7 @@ icu_normalizer = { version = "2.2", default-features = false, features = ["compi
 # General categories: letter and number for `query_by_date_range`'s whole-word test (`\p{L}`, `\p{N}`),
 # and mark for the fold above. Already in the tree, under idna_adapter, with the same features and version.
 icu_properties = { version = "2.2", default-features = false, features = ["compiled_data"] }
-# The closest page names for a missing page (`src/fuzzy.rs`, ADR-0032): a maintained fuzzy matcher
+# The closest page names for a missing page (`src/fuzzy.rs`, ADR-0034 Decision 4): a maintained fuzzy matcher
 # (helix-editor/nucleo, MPL-2.0, accepted next to this repo's MIT licence by the maintainer on 2026-10-08)
 # in place of a port of fuzzysort. 0.3.1 doesn't compile with these two features off (`CaseMatching` and
 # `Normalization` derive `Default` for a variant they gate), so they are on, and the code never uses
