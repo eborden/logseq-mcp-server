@@ -5,7 +5,8 @@ const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.ur
 
 // package.json is repository tooling, not a package (ADR-0035, #419): the server is the Rust binary, released on GitHub
 // Releases and started by scripts/logseq-mcp-server.sh. The npm name `logseq-mcp-server` belongs to another
-// maintainer, so nothing here may publish under it.
+// maintainer, so nothing here may publish under it. The file keeps its name because ADR-0022 (engines.node) and
+// ADR-0023 (licence) cite it in their enforcement lines.
 describe('package.json is repository tooling (ADR-0035)', () => {
   it('is private, so an npm publish by accident fails', () => {
     expect(pkg.private).toBe(true);
