@@ -192,7 +192,7 @@ State the delta explicitly in the signal text. "Vendor estimate tripled since sc
 
 11 items, ~85 words, 3 theme headers.
 
-**AFTER** — compressed with salience. The day links show LogSeq's default title format (`MMM do, yyyy`) only; write them in the graph's own format ("Journal Day Links"):
+**AFTER**, compressed with salience. The day links show LogSeq's default title format (`MMM do, yyyy`) only; write them in the graph's own format ("Journal Day Links"):
 
 ```markdown
 tags:: [[Weekly Summary]], [[Dec 1st, 2026]], [[Dec 2nd, 2026]], [[Dec 3rd, 2026]]
