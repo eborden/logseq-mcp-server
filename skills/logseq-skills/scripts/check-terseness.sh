@@ -186,7 +186,9 @@ elif [[ "$source_line" =~ $source_re ]]; then
     if (( start_n >= 0 && end_n >= 0 )) && (( start_n < want_n || start_n > want_n + 6 || end_n > want_n + 6 )); then
       echo "FAIL: source range $src_start-$src_end is not inside the week of $want (that Monday through Sunday)"; fail=1
     fi
-    day_links=$(grep -m1 -E '^tags::' "$FILE" | grep -Eo '\[\[[A-Z][a-z]{2} [0-9]{1,2}(st|nd|rd|th), [0-9]{4}\]\]' | wc -l | tr -d ' ')
+    # Day links are written in the graph's own journal title format (any format, see the reference), so count every
+    # link on the tags line except the [[Weekly Summary]] tag instead of matching one date shape.
+    day_links=$(grep -m1 -E '^tags::' "$FILE" | grep -Eo '\[\[[^]]+\]\]' | grep -vixFc '[[Weekly Summary]]' || true)
     if [[ "$day_links" != "$src_days" ]]; then
       echo "WARN: the tags line links $day_links journal days but the source line says $src_days"
       warn=1
