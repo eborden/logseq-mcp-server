@@ -32,9 +32,7 @@ The server is a Rust binary. It ships as native binaries on GitHub Releases (ADR
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
-cd logseq-mcp-server
-git checkout feature/rust-spike       # `main` still has the TypeScript server until the Rust branch merges
-cd rust
+cd logseq-mcp-server/rust             # a clone checks out `main`, which holds the Rust server
 cargo build --release --locked        # rust/target/release/logseq-mcp-server
 ```
 
