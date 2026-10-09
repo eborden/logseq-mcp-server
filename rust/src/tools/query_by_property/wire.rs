@@ -4,24 +4,14 @@
 
 use serde_json::{Map, Value};
 
-use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
+use crate::entity::shape::Block;
+use crate::wire::{DATALOG_METHOD, ResponseError, sent_cells};
 
 /// `responses.nullableBlockRows`: `null`, or one row per match, `[block | null]`. A `null` cell is
 /// skipped (`filter(pulled => pulled != null)`), and every block is checked whole.
 pub fn blocks(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
-    let mut reader = Reader::default();
-    let rows = reader
-        .rows(answer, 1, |r, cells| {
-            r.at(Part::Index(0), |r| match cells.first() {
-                Some(Value::Null) => Ok(None),
-                cell => {
-                    r.check_block(cell)?;
-                    Ok(cell.and_then(Value::as_object).cloned())
-                }
-            })
-        })
-        .map_err(|issue| to_error(DATALOG_METHOD, issue))?;
-    Ok(rows.map(|rows| rows.into_iter().flatten().collect()))
+    let cells = sent_cells::<Block>(DATALOG_METHOD, answer)?;
+    Ok(cells.map(|cells| cells.into_iter().flatten().filter_map(|cell| if let Value::Object(map) = cell { Some(map) } else { None }).collect()))
 }
 
 #[cfg(test)]
@@ -45,12 +35,13 @@ mod tests {
 
     #[test]
     fn a_row_that_is_not_a_block_is_an_error_naming_the_path_and_no_value() {
-        assert_eq!(problem(blocks(&json!({}))), "(response): Invalid input: expected array, received object");
-        assert_eq!(problem(blocks(&json!([7]))), "[0]: Invalid input: expected tuple, received number");
-        assert_eq!(problem(blocks(&json!([[1]]))), "[0][0]: Invalid input: expected object, received number");
-        assert_eq!(problem(blocks(&json!([[{"uuid": "u"}]]))), "[0][0].id: Invalid input: expected number, received undefined");
-        assert_eq!(problem(blocks(&json!([[{"id": 1}]]))), "[0][0].uuid: Invalid input: expected string, received undefined");
-        assert_eq!(problem(blocks(&json!([[{"id": 1, "uuid": "u", "page": {"id": "x"}}]]))), "[0][0].page.id: Invalid input: expected number, received string");
-        assert_eq!(problem(blocks(&json!([[{"id": 1, "uuid": "u"}, {"id": 2, "uuid": "v"}]]))), "[0]: Too big: expected array to have <1 items");
+        assert_eq!(problem(blocks(&json!({}))), "answer: expected a list, got an object");
+        assert_eq!(problem(blocks(&json!([7]))), "answer[0]: expected a row, got a number");
+        assert_eq!(problem(blocks(&json!([[1]]))), "answer[0][0]: expected an object, got a number");
+        assert_eq!(problem(blocks(&json!([[{"uuid": "u"}]]))), "answer[0][0].id: required, but missing");
+        assert_eq!(problem(blocks(&json!([[{"id": 1}]]))), "answer[0][0].uuid: required, but missing");
+        assert_eq!(problem(blocks(&json!([[{"id": 1, "uuid": "u", "page": {"id": "x"}}]]))), "answer[0][0].page.id: expected a whole number, got a string");
+        assert_eq!(problem(blocks(&json!([[{"id": 1, "uuid": "u", "properties": []}]]))), "answer[0][0].properties: expected an object, got a list");
+        assert_eq!(problem(blocks(&json!([[{"id": 1, "uuid": "u"}, {"id": 2, "uuid": "v"}]]))), "answer[0]: the row has more cells than this server reads");
     }
 }

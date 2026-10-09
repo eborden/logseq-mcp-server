@@ -192,7 +192,7 @@ async fn a_null_answer_is_an_empty_list_and_a_warning_and_an_unreadable_one_is_a
     let logseq = mock_logseq(vec![json!([[page(10, "atlas", "Atlas", &[]), "name"]]), json!([[null, [{"uuid": "u"}]]])]).await;
     let error = run(&logseq, "atlas").await.unwrap_err();
     assert!(matches!(error, ToolError::Response(_)), "{error}");
-    assert!(error.to_string().contains("logseq.Editor.getPageLinkedReferences in a shape this server can't read: [0][1][0].id"));
+    assert!(error.to_string().contains("logseq.Editor.getPageLinkedReferences in a shape this server can't read: answer[0][1][0].id"));
 }
 
 #[tokio::test]
