@@ -147,4 +147,25 @@ mod tests {
         assert_eq!(problem(target_rows(&json!([[{"id": 1, "page": {"name": 4}}]]))), "answer[0][0].page.name: expected a string, got a number");
         assert_eq!(problem(target_rows(&json!([[{"id": 1, "parent": {"id": "x"}}]]))), "answer[0][0].parent.id: expected a whole number, got a string");
     }
+
+    /// The fields a ref target may leave out: left out is fine, `null` is a mismatch at that field (BR-0003).
+    #[test]
+    fn a_null_in_any_field_that_may_be_left_out_is_a_mismatch_and_leaving_it_out_is_not() {
+        for key in ["uuid", "content", "name", "original-name", "left", "parent", "page"] {
+            let mut target = json!({"id": 1});
+            assert!(target_rows(&json!([[target.clone()]])).is_ok(), "{key} left out");
+            target[key] = Value::Null;
+            let said = problem(target_rows(&json!([[target]])));
+            assert!(said.starts_with(&format!("answer[0][0].{key}: expected ")), "{said}");
+        }
+        for key in ["id", "name", "original-name"] {
+            let mut page = json!({});
+            assert!(target_rows(&json!([[{"id": 1, "page": page.clone()}]])).is_ok(), "page.{key} left out");
+            page[key] = Value::Null;
+            let said = problem(target_rows(&json!([[{"id": 1, "page": page}]])));
+            assert!(said.starts_with(&format!("answer[0][0].page.{key}: expected ")), "{said}");
+        }
+        // the one a row must have
+        assert_eq!(problem(target_rows(&json!([[{"id": null}]]))), "answer[0][0].id: expected a whole number, got null");
+    }
 }

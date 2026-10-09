@@ -387,4 +387,10 @@ mod tests {
         ));
         assert!(!message.contains("secret page"));
     }
+
+    #[test]
+    fn a_listed_name_may_be_left_out_and_may_not_be_null() {
+        assert_eq!(page_names(&json!([{}]), "m").unwrap().unwrap(), vec![None]);
+        assert_eq!(problem(page_names(&json!([{"originalName": null}]), "m")), "answer[0].originalName: expected a string, got null");
+    }
 }
