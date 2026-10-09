@@ -51,7 +51,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0032-closest-page-suggestions-match-by-meaning](0032-closest-page-suggestions-match-by-meaning.md) | Hold a Rust implementation to the TypeScript tool contract: by meaning for tools/list and closest-name suggestions, byte for byte for the rest | superseded by 0034-golden-results-are-the-contract |
 | [0033-rust-mutation-testing-ratchet](0033-rust-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the Rust crate with cargo-mutants | accepted |
 | [0034-golden-results-are-the-contract](0034-golden-results-are-the-contract.md) | Make the recorded golden results the contract, compared by meaning, with LogSeq calls held to a bounded count | accepted |
-| [0035-native-binary-release-on-github-releases](0035-native-binary-release-on-github-releases.md) | Release the Rust server as native binaries on GitHub Releases, started by one thin launcher | proposed |
+| [0035-native-binary-release-on-github-releases](0035-native-binary-release-on-github-releases.md) | Release the Rust server as native binaries on GitHub Releases, started by one thin launcher | accepted |
 
 ## File naming rule
 

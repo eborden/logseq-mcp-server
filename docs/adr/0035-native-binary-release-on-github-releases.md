@@ -8,7 +8,7 @@ The Rust server is the only server (#349, #356). Nothing ships it yet. The piece
 - `package.json` has `bin` and `main` pointing at `dist/index.js`, a `build` script that exits 1, and `files` that list `dist`.
 - `.github/workflows/publish.yml` builds the TypeScript server and runs `npm publish`.
 
-[ADR-0017 (manual-npm-publish)](0017-manual-npm-publish.md) and [ADR-0018 (ship-as-claude-code-plugin)](0018-ship-as-claude-code-plugin.md) both say in their enforcement sections that how the Rust binary is shipped is open (#350, #355). This ADR closes that. The cutover to `main` is #354. The work that follows is #418 (the release workflow) and #419 (the launcher and the manifests), and neither starts until this ADR is accepted.
+[ADR-0017 (manual-npm-publish)](0017-manual-npm-publish.md) and [ADR-0018 (ship-as-claude-code-plugin)](0018-ship-as-claude-code-plugin.md) both say in their enforcement sections that how the Rust binary is shipped is open (#350, #355). This ADR closes that. The cutover to `main` is #354. The work that follows is #418 (the release workflow) and #419 (the launcher and the manifests, which folds in #355), and neither starts before this ADR is accepted.
 
 What the decision has to fit:
 
@@ -104,9 +104,9 @@ We recommend and choose option 1: **native binaries on GitHub Releases, started 
 
 ## Status
 
-proposed
+accepted
 
-Date: 2026-10-08
+Date: 2026-10-09
 
 ## Mechanical enforcement
 
