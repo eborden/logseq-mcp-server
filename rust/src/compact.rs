@@ -21,10 +21,7 @@ pub fn compact_block(block: &Value) -> Value {
     if let Some(uuid) = block.get("uuid") {
         out.insert("uuid".into(), uuid.clone());
     }
-    // PARITY(#299): a snippet cut inside an emoji ends in a lone surrogate in TypeScript, which a Rust string
-    // can't hold: it ends in U+FFFD here (suspected TS bug: `slice` should cut by code point) — drop if Rust
-    // becomes the only server.
-    out.insert("snippet".into(), Value::String(Snippet::of(block.get("content").and_then(Value::as_str)).to_string_lossy()));
+    out.insert("snippet".into(), Value::String(Snippet::of(block.get("content").and_then(Value::as_str)).as_str().to_owned()));
     Value::Object(out)
 }
 

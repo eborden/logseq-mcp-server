@@ -182,11 +182,11 @@ mod tests {
     #[test]
     fn tags_run_to_white_space_or_the_next_hash() {
         assert_eq!(extract_tags("a #one, #two#three # four #"), ["one,", "two", "three"]);
-        assert_eq!(extract_tags("#a\u{a0}#b\u{feff}c"), ["a", "b"]);
+        assert_eq!(extract_tags("#a\u{a0}#b\u{85}c"), ["a", "b"]);
         assert_eq!(extract_tags("no tags"), Vec::<String>::new());
         assert_eq!(extract_tags("#é #\u{1F680}x"), ["é", "\u{1F680}x"]);
-        // U+0085 is not JavaScript white space
-        assert_eq!(extract_tags("#a\u{85}b"), ["a\u{85}b"]);
+        // U+0085 is white space, and U+FEFF is not (Rust's set, not JavaScript's)
+        assert_eq!(extract_tags("#a\u{feff}b"), ["a\u{feff}b"]);
     }
 
     #[test]

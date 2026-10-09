@@ -238,10 +238,10 @@ mod tests {
         // no space after "embed" is no embed, and the ref inside is found on its own
         let tight = format!("{{{{embed(({A}))}}}}");
         assert_eq!(kinds(&tight).iter().map(|k| k.0).collect::<Vec<_>>(), [Kind::Ref]);
-        // U+0085 is not white space in JavaScript
-        assert_eq!(kinds(&format!("{{{{embed\u{85}(({A}))}}}}")).iter().map(|k| k.0).collect::<Vec<_>>(), [Kind::Ref]);
-        // U+FEFF is
-        assert_eq!(kinds(&format!("{{{{embed\u{feff}(({A}))}}}}"))[0].0, Kind::BlockEmbed);
+        // U+FEFF is not white space (Rust's set, not JavaScript's)
+        assert_eq!(kinds(&format!("{{{{embed\u{feff}(({A}))}}}}")).iter().map(|k| k.0).collect::<Vec<_>>(), [Kind::Ref]);
+        // U+0085 is
+        assert_eq!(kinds(&format!("{{{{embed\u{85}(({A}))}}}}"))[0].0, Kind::BlockEmbed);
     }
 
     #[test]

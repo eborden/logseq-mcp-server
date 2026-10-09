@@ -19,12 +19,12 @@
 //! `((uuid))`), `show_uuid` (the `((uuid))` after a block's text) and `show_page` (`(in [[Page]])`
 //! after it). Only the context tools use them (`crate::markdown_context`).
 //!
-//! Lengths and cuts are in UTF-16 code units, as JavaScript counts them (see `js`).
+//! Lengths and cuts count characters (code points), never UTF-16 code units, so a cut never lands inside one.
 
 use serde_json::{Map, Value};
 
 use crate::js;
-use crate::snippet::Snippet;
+use crate::snippet::{Snippet, first_chars};
 
 /// Shown after the start of a first block that alone exceeds the limit.
 pub const TRUNCATED_BLOCK_MARKER: &str = "\n[This block is longer than the limit and was truncated here.]";
@@ -55,7 +55,7 @@ fn is_pre_block(block: &Map<String, Value>) -> bool {
 pub struct OutlineOptions {
     /// Titles and ids only: each block is its first-line snippet followed by its `((uuid))`
     pub compact: bool,
-    /// Stop after this many characters (UTF-16 code units) and report `cut`. Unlimited when `None`.
+    /// Stop after this many characters (code points) and report `cut`. Unlimited when `None`.
     pub max_chars: Option<usize>,
     /// Leave out pre-blocks, whose text is the page properties already rendered above
     pub skip_pre_blocks: bool,
@@ -74,9 +74,9 @@ pub struct Outline {
     pub cut: bool,
 }
 
-/// JavaScript's `string.length`.
+/// The length of a text in characters (code points), which is what the caps count.
 fn length(text: &str) -> usize {
-    text.encode_utf16().count()
+    text.chars().count()
 }
 
 /// `blockPageLink`: the page a block sits on, as a link, when its name is known: a search hit's
@@ -102,10 +102,7 @@ fn bullet_text(block: &Map<String, Value>, depth: usize, options: &OutlineOption
     let uuid = non_empty(block.get("uuid"));
     let page = if options.show_page { block_page_link(block) } else { None };
     if options.compact {
-        // PARITY(#299): a snippet cut inside an emoji ends in a lone surrogate in TypeScript, which a Rust string
-        // can't hold: it ends in U+FFFD here (suspected TS bug: `slice` should cut by code point) — drop if Rust
-        // becomes the only server.
-        let snippet = Snippet::of(block.get("content").and_then(Value::as_str)).to_string_lossy();
+        let snippet = Snippet::of(block.get("content").and_then(Value::as_str)).as_str().to_owned();
         let parts = [Some(snippet), uuid.map(|uuid| format!("(({uuid}))")), page.map(|page| format!("(in {page})"))];
         let text: Vec<String> = parts.into_iter().flatten().filter(|part| !part.is_empty()).collect();
         return js::trim_end(&format!("{indent}- {}", text.join(" "))).to_owned();
@@ -134,20 +131,6 @@ fn bullet_text(block: &Map<String, Value>, depth: usize, options: &OutlineOption
     lines.join("\n")
 }
 
-/// `text.slice(0, end)` in UTF-16 code units, for a `text` too long for what is left of the budget.
-// PARITY(#299): the cut is by UTF-16 code unit, as `slice` cuts. A cut between the halves of a surrogate
-// pair would leave a lone surrogate, which a Rust string can't hold (TypeScript writes it as a `\ud83d`
-// escape, ill-formed text that many clients show as U+FFFD): the cut stops one unit earlier instead
-// (suspected TS bug: `slice` should cut by code point) — drop if Rust becomes the only server.
-fn slice_start(text: &str, end: usize) -> String {
-    let units = js::utf16(text);
-    let mut end = end.min(units.len());
-    if end > 0 && (0xD800..0xDC00).contains(&units[end - 1]) {
-        end -= 1;
-    }
-    String::from_utf16(&units[..end]).expect("a cut that keeps both halves of every pair is well-formed")
-}
-
 struct Walk {
     out: Vec<String>,
     left: usize,
@@ -173,8 +156,8 @@ impl Walk {
                 // A first block over the cap would otherwise render as an empty page.
                 // Keep its start, with a marker, so the reader sees real content.
                 if self.out.is_empty() {
-                    let keep = self.left.saturating_sub(TRUNCATED_BLOCK_MARKER.len() + 1);
-                    self.out.push(format!("{}{TRUNCATED_BLOCK_MARKER}", slice_start(&text, keep)));
+                    let keep = self.left.saturating_sub(length(TRUNCATED_BLOCK_MARKER) + 1);
+                    self.out.push(format!("{}{TRUNCATED_BLOCK_MARKER}", first_chars(&text, keep)));
                 }
                 return;
             }
@@ -503,16 +486,28 @@ mod tests {
     }
 
     #[test]
-    fn the_cut_counts_utf16_units_and_never_splits_a_surrogate_pair() {
-        // `- ` and the rocket (2 units) fill 4 of the 7 units left for text after the marker
-        assert_eq!(slice_start("- \u{1F680}\u{1F680}", 4), "- \u{1F680}");
-        assert_eq!(slice_start("- \u{1F680}\u{1F680}", 3), "- ", "a cut between the two halves of a rocket stops before it");
-        assert_eq!(slice_start("abc", 0), "");
-        assert_eq!(slice_start("abc", 10), "abc");
-        // a bullet of 3 rockets is 2 + 6 = 8 units; with 5 left it is over the cap
-        let cut = render_outline(&[json!({"content": "\u{1F680}\u{1F680}\u{1F680}"})], OutlineOptions { max_chars: Some(5), ..Default::default() });
+    fn the_cut_counts_characters_and_never_splits_one() {
+        let rockets = [json!({"content": "\u{1F680}\u{1F680}\u{1F680}"})];
+        let long_rockets = [json!({"content": "\u{1F680}".repeat(100)})];
+        // a bullet of 3 rockets is 2 + 3 = 5 characters and a newline: 6; with 5 left it is over the cap
+        let cut = render_outline(&rockets, OutlineOptions { max_chars: Some(5), ..Default::default() });
         assert!(cut.cut);
         assert_eq!(cut.lines, [TRUNCATED_BLOCK_MARKER]);
+        assert!(!render_outline(&rockets, OutlineOptions { max_chars: Some(6), ..Default::default() }).cut);
+        // `- ` and a rocket fill 3 of the characters left for text after the marker: a rocket is one character
+        let marker = length(TRUNCATED_BLOCK_MARKER);
+        let cut = render_outline(&long_rockets, OutlineOptions { max_chars: Some(marker + 1 + 3), ..Default::default() });
+        assert_eq!(cut.lines, [format!("- \u{1F680}{TRUNCATED_BLOCK_MARKER}")]);
+        // a ZWJ emoji is several code points, and the cut can fall between them, never inside one
+        let family = [json!({"content": format!("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}{}", "y".repeat(100))})];
+        let cut = render_outline(&family, OutlineOptions { max_chars: Some(marker + 1 + 4), ..Default::default() });
+        assert_eq!(cut.lines, [format!("- \u{1F468}\u{200D}{TRUNCATED_BLOCK_MARKER}")]);
+        // a combining mark stays with its letter when the cut falls after both
+        let accent = [json!({"content": format!("e\u{301}e\u{301}{}", "y".repeat(100))})];
+        let cut = render_outline(&accent, OutlineOptions { max_chars: Some(marker + 1 + 4), ..Default::default() });
+        assert_eq!(cut.lines, [format!("- e\u{301}{TRUNCATED_BLOCK_MARKER}")]);
+        assert!(cut.lines.iter().all(|line| !line.contains('\u{FFFD}')));
+        assert_eq!(first_chars("abc", 0), "");
     }
 
     #[test]
