@@ -39,7 +39,7 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 | `src/resolve_refs/`, `src/output_format.rs` | `((uuid))` refs and `{{embed}}`s resolved in returned blocks, one batched query per nesting level (BR-0007; `resolve-refs.ts`), with the ref and embed patterns written out since the crate has no regex engine; and the `format` parameter, `json` or `markdown` |
 | `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (messages word for word as `src/errors.ts`), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
 | `src/fuzzy.rs` | The closest names for a missing page, picked with `nucleo-matcher` (`Pattern::new`, `AtomKind::Fuzzy`): names equal to the input first, then names that start with it, then names that contain each of its words in order, best score first. The parity test holds the list to ADR-0032's rules, not to the TypeScript server's bytes |
-| `src/js.rs` | The JavaScript rules the output depends on: number formatting and `JSON.stringify` key order. `trim` and the white-space set are Rust's, and text lengths and cuts count code points (#299) |
+| `src/js.rs` | `number_to_string`, how LogSeq (ClojureScript) spells a number in `(str ?v)`, for a `query_by_property` value. Results are written by `serde_json`, keys in insertion order. `trim` and the white-space set are Rust's, and text lengths and cuts count code points (#299) |
 | `src/order.rs` | The one fixed order for names: lowercase by code point, then the name itself (#299) |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
 
