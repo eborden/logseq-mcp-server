@@ -21,8 +21,12 @@ impl fmt::Display for LimitsError {
 
 impl std::error::Error for LimitsError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
+    /// The `cargo-mutants` version the workflows install and the ratchet expects (ADR-0033 "Tool and scope"), exact. Not named
+    /// `CARGO_*` on purpose: Swatinem/rust-cache hashes every such variable into its key, and the mutation workflows must
+    /// compute the same key as the build job to restore its cache.
+    pub tool_version: String,
     /// The PR job's `timeout-minutes`, which the workflow repeats as a literal (a test holds the two equal).
     pub job_timeout_minutes: u64,
     /// Seconds before the first mutant: the tool's install, the dependency restore, the baseline build and test, for each of
@@ -61,7 +65,16 @@ pub fn parse(text: &str) -> Result<Limits, LimitsError> {
             .parse::<u64>()
             .map_err(|_| LimitsError(format!("{key} is not a whole number")))
     };
+    let tool_version = values
+        .get("MUTANTS_TOOL_VERSION")
+        .ok_or_else(|| LimitsError("MUTANTS_TOOL_VERSION is missing".into()))?
+        .to_string();
+    let parts: Vec<&str> = tool_version.split('.').collect();
+    if parts.len() != 3 || !parts.iter().all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit())) {
+        return Err(LimitsError("MUTANTS_TOOL_VERSION is not an exact version like 27.1.0".into()));
+    }
     let limits = Limits {
+        tool_version,
         job_timeout_minutes: number("JOB_TIMEOUT_MINUTES")?,
         overhead_seconds: number("OVERHEAD_SECONDS")?,
         spare_seconds: number("SPARE_SECONDS")?,
@@ -70,7 +83,7 @@ pub fn parse(text: &str) -> Result<Limits, LimitsError> {
         mutant_budget: number("MUTANT_BUDGET")? as usize,
         full_run_slices: number("FULL_RUN_SLICES")?,
     };
-    let known = ["JOB_TIMEOUT_MINUTES", "OVERHEAD_SECONDS", "SPARE_SECONDS", "SECONDS_PER_MUTANT", "MUTANT_JOBS", "MUTANT_BUDGET", "FULL_RUN_SLICES"];
+    let known = ["MUTANTS_TOOL_VERSION", "JOB_TIMEOUT_MINUTES", "OVERHEAD_SECONDS", "SPARE_SECONDS", "SECONDS_PER_MUTANT", "MUTANT_JOBS", "MUTANT_BUDGET", "FULL_RUN_SLICES"];
     if let Some(extra) = values.keys().find(|key| !known.contains(key)) {
         return Err(LimitsError(format!("{extra} is not a limit")));
     }
@@ -105,7 +118,7 @@ impl Limits {
 mod tests {
     use super::*;
 
-    const GOOD: &str = "# a comment\nJOB_TIMEOUT_MINUTES=20\nOVERHEAD_SECONDS=300\nSPARE_SECONDS=120\nSECONDS_PER_MUTANT=20\nMUTANT_JOBS=2\nMUTANT_BUDGET=78\nFULL_RUN_SLICES=1\n";
+    const GOOD: &str = "# a comment\nMUTANTS_TOOL_VERSION=27.1.0\nJOB_TIMEOUT_MINUTES=20\nOVERHEAD_SECONDS=300\nSPARE_SECONDS=120\nSECONDS_PER_MUTANT=20\nMUTANT_JOBS=2\nMUTANT_BUDGET=78\nFULL_RUN_SLICES=1\n";
 
     #[test]
     fn reads_the_limits_and_skips_comments_and_blank_lines() {
@@ -113,6 +126,7 @@ mod tests {
         assert_eq!(limits.job_timeout_minutes, 20);
         assert_eq!(limits.mutant_budget, 78);
         assert_eq!(limits.full_run_slices, 1);
+        assert_eq!(limits.tool_version, "27.1.0");
     }
 
     #[test]
@@ -139,5 +153,13 @@ mod tests {
         assert!(parse(&format!("{GOOD}EXTRA=1\n")).is_err());
         assert!(parse(&GOOD.replace("SPARE_SECONDS=120", "SPARE_SECONDS=two")).is_err());
         assert!(parse(&format!("{GOOD}not a line\n")).is_err());
+    }
+
+    #[test]
+    fn the_tool_version_is_exact() {
+        for bad in ["", "27", "^27.1.0", "=27.1.0", "27.1.x", "27..1", "latest"] {
+            let text = GOOD.replace("MUTANTS_TOOL_VERSION=27.1.0", &format!("MUTANTS_TOOL_VERSION={bad}"));
+            assert!(parse(&text).is_err(), "{bad:?}");
+        }
     }
 }

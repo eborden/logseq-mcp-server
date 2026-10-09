@@ -5,7 +5,11 @@
 //! mutation-ratchet plan      --repo DIR --out DIR [--limits FILE] [--base SHA] [--proof]
 //! mutation-ratchet full-plan --repo DIR --out DIR --index K [--limits FILE] [--slices N]
 //! mutation-ratchet report    --plan FILE --results DIR --out DIR [--head SHA] [--tool-version V]
+//! mutation-ratchet measure   --label NAME --outcomes FILE [--wall SECONDS]
+//! mutation-ratchet test-times --log FILE
 //! ```
+//!
+//! The last two are for the measurement runs of #364 PR 1: they print counts and seconds, never a name from a graph.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,10 +20,12 @@ use serde_json::json;
 use crate::exit::{self, Exit};
 use crate::gather::{CargoMutants, Git, Lister, plan_from};
 use crate::limits::{self, Limits};
+use crate::measure;
 use crate::outcomes;
 use crate::plan::{Group, Item, Kind, Mode, Plan, proof_plan};
 use crate::report::{RunResult, count_mismatches, render_plan, render_results};
 use crate::slices::slice_files;
+use crate::testtimes;
 
 /// `--key value` pairs and bare `--flag`s.
 pub struct Args {
@@ -74,6 +80,17 @@ fn read_limits(args: &Args, repo: &Path) -> Result<Limits, String> {
     Ok(limits)
 }
 
+/// `--repo` and `--out` as absolute paths: the tool runs in another directory, so a relative path to the diff it reads would
+/// point somewhere else.
+fn repo_and_out(args: &Args) -> Result<(PathBuf, PathBuf), String> {
+    let repo = PathBuf::from(args.required("repo")?);
+    let out = PathBuf::from(args.required("out")?);
+    fs::create_dir_all(&out).map_err(|e| format!("couldn't create {}: {e}", out.display()))?;
+    let repo = fs::canonicalize(&repo).map_err(|e| format!("couldn't resolve {}: {e}", repo.display()))?;
+    let out = fs::canonicalize(&out).map_err(|e| format!("couldn't resolve {}: {e}", out.display()))?;
+    Ok((repo, out))
+}
+
 fn write(out: &Path, name: &str, text: &str) -> Result<(), String> {
     fs::write(out.join(name), text).map_err(|e| format!("couldn't write {name}: {e}"))
 }
@@ -85,9 +102,7 @@ fn lines(files: &[&str]) -> String {
 /// `plan`: what this pull request's run measures. Writes `plan.json`, `summary.md`, `base-sha.txt`, `in-diff.diff` (when some
 /// file is measured by its changed lines), `in-diff-files.txt`, `whole-files.txt` and `plan.env` into `--out`.
 pub fn plan_command(args: &Args, lister: &dyn Lister) -> Result<String, String> {
-    let repo = PathBuf::from(args.required("repo")?);
-    let out = PathBuf::from(args.required("out")?);
-    fs::create_dir_all(&out).map_err(|e| format!("couldn't create {}: {e}", out.display()))?;
+    let (repo, out) = repo_and_out(args)?;
     let limits = read_limits(args, &repo)?;
     let git = Git { root: repo };
     let base = match args.optional("base") {
@@ -110,9 +125,7 @@ pub fn plan_command(args: &Args, lister: &dyn Lister) -> Result<String, String> 
 
 /// `full-plan`: one slice of a full run (ADR-0033 "Slices").
 pub fn full_plan_command(args: &Args, lister: &dyn Lister) -> Result<String, String> {
-    let repo = PathBuf::from(args.required("repo")?);
-    let out = PathBuf::from(args.required("out")?);
-    fs::create_dir_all(&out).map_err(|e| format!("couldn't create {}: {e}", out.display()))?;
+    let (repo, out) = repo_and_out(args)?;
     let limits = read_limits(args, &repo)?;
     let slices_wanted = match args.optional("slices") {
         Some(n) => n.parse::<usize>().map_err(|_| "--slices is not a whole number".to_string())?,
@@ -292,11 +305,52 @@ pub fn main_with(args: &[String]) -> Result<String, String> {
                 Err(format!("{}\n{}", reported.summary, reported.failures.join("\n")))
             }
         }
+        "measure" => measure_command(&parsed),
+        "test-times" => test_times_command(&parsed),
         "help" | "--help" => Ok(usage()),
         other => Err(format!("unknown command {other:?}\n{}", usage())),
     }
 }
 
+/// `measure`: one table row, and the mutants per file group, for a run's outcomes.json.
+fn measure_command(args: &Args) -> Result<String, String> {
+    let path = args.required("outcomes")?;
+    let text = fs::read_to_string(path).map_err(|e| format!("couldn't read {path}: {e}"))?;
+    let outcomes = outcomes::parse(&text).map_err(|e| e.to_string())?;
+    let wall = match args.optional("wall") {
+        Some(seconds) => Some(seconds.parse::<f64>().map_err(|_| "--wall is not a number of seconds".to_string())?),
+        None => None,
+    };
+    Ok(format!(
+        "{}\n{}\n\n{}",
+        measure::HEADER,
+        measure::row(args.required("label")?, &outcomes, wall),
+        measure::size_summary(&outcomes)
+    ))
+}
+
+/// `test-times`: seconds per test binary in the tool's baseline log, slowest first.
+fn test_times_command(args: &Args) -> Result<String, String> {
+    let path = args.required("log")?;
+    let text = fs::read_to_string(path).map_err(|e| format!("couldn't read {path}: {e}"))?;
+    let mut times = testtimes::per_binary(&text);
+    times.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let total: f64 = times.iter().map(|(_, seconds)| seconds).sum();
+    let mut out = format!("{} test binaries, {total:.1} s in all.\n", times.len());
+    for (name, seconds) in &times {
+        out.push_str(&format!("{seconds:.2} s  {name}\n"));
+    }
+    Ok(out)
+}
+
 fn usage() -> String {
-    "usage:\n  mutation-ratchet plan      --repo DIR --out DIR [--limits FILE] [--base SHA] [--proof]\n  mutation-ratchet full-plan --repo DIR --out DIR --index K [--limits FILE] [--slices N]\n  mutation-ratchet report    --plan FILE --results DIR --out DIR [--head SHA] [--tool-version V]".to_string()
+    [
+        "usage:",
+        "  mutation-ratchet plan       --repo DIR --out DIR [--limits FILE] [--base SHA] [--proof]",
+        "  mutation-ratchet full-plan  --repo DIR --out DIR --index K [--limits FILE] [--slices N]",
+        "  mutation-ratchet report     --plan FILE --results DIR --out DIR [--head SHA] [--tool-version V]",
+        "  mutation-ratchet measure    --label NAME --outcomes FILE [--wall SECONDS]",
+        "  mutation-ratchet test-times --log FILE",
+    ]
+    .join("\n")
 }

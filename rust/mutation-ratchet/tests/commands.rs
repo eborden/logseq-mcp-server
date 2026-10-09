@@ -22,7 +22,7 @@ fn args(pairs: &[&str]) -> Args {
     Args::parse(&pairs.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap()
 }
 
-const LIMITS: &str = "JOB_TIMEOUT_MINUTES=20\nOVERHEAD_SECONDS=300\nSPARE_SECONDS=120\nSECONDS_PER_MUTANT=20\nMUTANT_JOBS=2\nMUTANT_BUDGET=78\nFULL_RUN_SLICES=1\n";
+const LIMITS: &str = "MUTANTS_TOOL_VERSION=27.1.0\nJOB_TIMEOUT_MINUTES=20\nOVERHEAD_SECONDS=300\nSPARE_SECONDS=120\nSECONDS_PER_MUTANT=20\nMUTANT_JOBS=2\nMUTANT_BUDGET=78\nFULL_RUN_SLICES=1\n";
 
 fn limits_file() -> PathBuf {
     let path = scratch_dir().join("limits.env");
@@ -308,4 +308,46 @@ fn arguments_are_checked() {
     assert!(Args::parse(&["plan".to_string()]).is_err());
     assert!(Args::parse(&["--repo".to_string()]).is_err());
     assert!(Args::parse(&["--repo".to_string(), "a".to_string(), "--repo".to_string(), "b".to_string()]).is_err());
+}
+
+// -- measure and test-times --
+
+#[test]
+fn measure_prints_a_row_and_the_size_summary_with_no_file_name() {
+    let dir = scratch_dir();
+    let path = dir.join("outcomes.json");
+    fs::write(&path, outcomes_json(3, 1, "Success")).unwrap();
+    let out = mutation_ratchet::run::main_with(&["measure", "--label", "j2", "--outcomes", path.to_str().unwrap(), "--wall", "90"].map(String::from)).unwrap();
+    assert!(out.starts_with("| Run | Mutants |"), "{out}");
+    assert!(out.contains("\n| j2 | 4 | 3 caught, 1 missed, 0 timeout, 0 unviable (0.0%) |"), "{out}");
+    assert!(out.contains("| 90 s |"), "{out}");
+    assert!(out.contains("4 mutants in 1 files."), "{out}");
+    assert!(!out.contains("a.rs"), "{out}");
+}
+
+#[test]
+fn measure_of_a_malformed_file_is_an_error() {
+    let dir = scratch_dir();
+    let path = dir.join("outcomes.json");
+    fs::write(&path, "{").unwrap();
+    assert!(mutation_ratchet::run::main_with(&["measure", "--label", "x", "--outcomes", path.to_str().unwrap()].map(String::from)).is_err());
+}
+
+#[test]
+fn test_times_lists_the_slowest_binary_first() {
+    let dir = scratch_dir();
+    let path = dir.join("baseline.log");
+    fs::write(
+        &path,
+        "Running unittests src/lib.rs (x)\ntest result: ok. 1 passed; finished in 0.50s\nRunning tests/slow.rs (y)\ntest result: ok. 1 passed; finished in 9.00s\n",
+    )
+    .unwrap();
+    let out = mutation_ratchet::run::main_with(&["test-times", "--log", path.to_str().unwrap()].map(String::from)).unwrap();
+    assert_eq!(out, "2 test binaries, 9.5 s in all.\n9.00 s  tests/slow.rs\n0.50 s  unittests src/lib.rs\n");
+}
+
+#[test]
+fn an_unknown_command_or_none_is_an_error_with_the_usage() {
+    assert!(mutation_ratchet::run::main_with(&[]).unwrap_err().contains("usage"));
+    assert!(mutation_ratchet::run::main_with(&["nope".to_string()]).unwrap_err().contains("unknown command"));
 }
