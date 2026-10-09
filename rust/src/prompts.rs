@@ -61,11 +61,10 @@ fn length(text: &str) -> usize {
 }
 
 /// Reject arguments the prompt does not declare, so a typo is not silently ignored. They are named in the
-/// order `Object.keys` lists them.
+/// order they were sent in.
 fn reject_unknown_arguments(definition: &PromptDefinition, raw: &JsonObject) -> Result<(), ErrorData> {
-    let unknown: Vec<String> = js::entries_in_js_order(raw)
-        .into_iter()
-        .map(|(key, _)| key)
+    let unknown: Vec<String> = raw
+        .keys()
         .filter(|key| !definition.arguments.iter().any(|known| known.name == key.as_str()))
         .map(|key| quoted(key))
         .collect();
@@ -614,11 +613,11 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_argument_is_named_in_the_order_object_keys_lists_it() {
-        // integer-like keys come first, then the rest in the order sent
+    fn an_unknown_argument_is_named_in_the_order_it_was_sent() {
+        // a numeric-looking name is not moved ahead of the rest
         assert_eq!(
             text_of("prioritize_tasks", json!({"b": "x", "10": "y", "2": "z"}), TUESDAY).unwrap_err(),
-            r#"Prompt "prioritize_tasks" has no argument "2", "10", "b". Arguments: focus."#
+            r#"Prompt "prioritize_tasks" has no argument "b", "10", "2". Arguments: focus."#
         );
     }
 
