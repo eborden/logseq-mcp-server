@@ -315,6 +315,7 @@
   "date range: the outline counts top-level blocks against max_blocks, and blockCount counts the nested ones": 2,
   "date range: the outline ignores slim_results and resolve_refs": 2,
   "date range: the outline snippets: blank first line, a long line, an emoji cut by the 80 character limit, no content": 2,
+  "date range: the search term's alias lookup answers null": 3,
   "date range: top_concepts_limit 0": 2,
   "date range: top_concepts_limit 1 keeps the best, 0 leaves topConcepts out and the tip with it": 2,
   "date range: two selections": 0,

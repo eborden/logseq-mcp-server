@@ -30,7 +30,7 @@ use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, compare_code_units, linked_references_of_pages, resolve_alias_set};
-use crate::resolve::require_page;
+use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning, large_result_note};
 
@@ -106,13 +106,8 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     let max_blocks_per_page = read.count_or("max_blocks_per_page", 0, DEFAULT_MAX_BLOCKS_PER_PAGE)?;
 
     let outcome = get_backlinks_with_meta(client, &page_name, max_pages, max_blocks_per_page).await?;
-    let has_results = outcome.results.as_ref().is_some_and(|results| !results.is_empty());
-    let text = js::json_stringify(&match outcome.results {
-        Some(results) => Value::Array(results.into_iter().map(Backlink::into_value).collect()),
-        // PARITY(#299): LogSeq's null is passed through as the text `null` with no warning; BR-0011 only requires one
-        // when null becomes empty, so whether this needs one is open in #318 — drop if Rust becomes the only server.
-        None => Value::Null,
-    });
+    let has_results = !outcome.results.is_empty();
+    let text = js::json_stringify(&Value::Array(outcome.results.into_iter().map(Backlink::into_value).collect()));
     let mut content = vec![ContentBlock::text(text)];
     let tips = if tips_enabled { backlink_tips(&page_name, has_results) } else { Vec::new() };
     if let Some(meta) = meta_content(outcome.meta, &tips) {
@@ -335,10 +330,11 @@ fn page_blocks_truncated(affected: &[&Backlink], cap: usize, requested: u64, kep
 /// What a backlinks call found, ready to write out.
 #[derive(Debug)]
 pub struct Outcome {
-    /// `None` is LogSeq's `null` (BR-0011), which stays `null` in the output
-    pub results: Option<Vec<Backlink>>,
+    /// Always a list. LogSeq's `null` is `[]` here, with a `backlinks_unavailable` warning in
+    /// `meta` (BR-0011, #318), on the Editor path and the aliased one alike.
+    pub results: Vec<Backlink>,
     /// The second content block's `meta`: absent for an exact match on a page with no aliases
-    /// that fits both caps, so default output is unchanged.
+    /// that fits both caps and was answered, so default output is unchanged.
     pub meta: Option<Map<String, Value>>,
 }
 
@@ -389,6 +385,9 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
 /// over the ids of the whole group, shaped like that call's result (camelCase entities, one
 /// `[page, blocks]` tuple per source page), the pages in order of name, then id. A caller that ranks
 /// them (`get_backlinks`) loses that order, one that doesn't (`build_context`) keeps it.
+///
+/// `None` is LogSeq's `null` on either path (BR-0011, #318): no answer, which is not "nothing links
+/// here". The caller says so.
 pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_set: &AliasSet) -> Result<Option<Vec<Backlink>>, ToolError> {
     if !alias_set.has_aliases() {
         let answer = client.call_api(LINKED_REFERENCES_METHOD, &[Value::from(resolved_name)]).await?;
@@ -396,9 +395,9 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
     }
     let query = linked_references_of_pages(&alias_set.ids()?);
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    // PARITY(#299): a `null` answer is read as "no rows", so the page looks like it has no backlinks when
-    // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
-    let rows = wire::block_rows(answer)?.unwrap_or_default();
+    let Some(rows) = wire::block_rows(answer)? else {
+        return Ok(None);
+    };
     let mut groups = group_by_source_page(rows);
     // PARITY(#299): orders names with `localeCompare`, as `js::locale_compare` orders them (ICU root collation) — drop if Rust
     // becomes the only server.
@@ -428,13 +427,16 @@ pub async fn get_backlinks_with_meta(
     let resolved = require_page(client, page_name).await?;
     let alias_set = resolve_alias_set(client, &resolved.page).await?;
     let fetched = fetch_backlinks(client, &resolved.lookup_name, &alias_set).await?;
-    // The same cut for both paths, after the fetch: a null answer stays null (BR-0011)
+    // The same cut for both paths, after the fetch. A null answer is no list to cut: it is `[]` and a warning (BR-0011)
     let capped = fetched.map(|fetched| cap_backlinks(fetched, &resolved.lookup_name, max_pages, max_blocks_per_page));
     let resolved_from = (resolved.matched_by != MatchedBy::Name).then(|| {
         json!({"name": page_name, "matchedBy": resolved.matched_by.as_str(), "resolvedTo": resolved.original_name})
     });
     let mut warnings = alias_set_warnings(&[&alias_set]);
-    warnings.extend(capped.as_ref().map(|capped| capped.warnings.clone()).unwrap_or_default());
+    match &capped {
+        Some(capped) => warnings.extend(capped.warnings.clone()),
+        None => warnings.push(backlinks_unavailable(&resolved.original_name)),
+    }
 
     let meta = if resolved_from.is_none() && !alias_set.has_aliases() && warnings.is_empty() {
         None
@@ -455,7 +457,19 @@ pub async fn get_backlinks_with_meta(
         }
         Some(meta)
     };
-    Ok(Outcome { results: capped.map(|capped| capped.results), meta })
+    Ok(Outcome { results: capped.map(|capped| capped.results).unwrap_or_default(), meta })
+}
+
+/// No `howToFetchAll`: no parameter fetches what LogSeq did not answer (like `pages_unavailable`),
+/// so `hasMore` stays false. The retry advice is in the message.
+fn backlinks_unavailable(page: &str) -> ResultWarning {
+    ResultWarning::new(
+        "backlinks_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the pages that link to \"{page}\" (possibly no graph open or a \
+             re-index in progress), so the empty list may not mean nothing links here. {RETRY_ADVICE}"
+        ),
+    )
 }
 
 #[cfg(test)]
