@@ -12,9 +12,15 @@ import { at, jobCondition, listOf, parseWorkflowYaml, triggers, type YamlNode } 
 const WORKFLOWS_DIR = new URL('../../.github/workflows/', import.meta.url);
 const readWorkflow = (name: string) => readFileSync(new URL(name, WORKFLOWS_DIR), 'utf-8');
 
-const MAIN_GATE = /^github\.ref == 'refs\/heads\/main'(?:\s*&&(?!.*\|\|).*)?$/;
+// Exactly this, on every job: no `&&` tail. A status function (`always()`, `!cancelled()`, `failure()`) after it would
+// let the last job run past a failed leg, and an `||` would open the gate.
+const MAIN_GATE = /^github\.ref == 'refs\/heads\/main'$/;
+const STATUS_FUNCTION = /\b(?:always|cancelled|failure|success)\s*\(/;
+// A release or tag command in any flag order: `gh release create`, `gh -R x release create`, `gh --repo x release edit`
+const GH_RELEASE = (verbs: string) => new RegExp(`\\bgh\\b[^\\n]*\\brelease\\s+(?:${verbs})\\b`);
 const PINNED_ACTION = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@[0-9a-f]{40}$/;
 const WRITE_PERMISSIONS = ['contents', 'id-token', 'attestations'];
+const SIGNATURE_STEP = 'Show the macOS signature';
 
 /** Workflow text without comment-only lines, with `\` line continuations joined: what a shell would read. */
 function commandText(source: string): string {
@@ -39,7 +45,8 @@ function releaseOrTagHits(name: string, source: string, options: { allowReleaseC
   const hits: string[] = [];
   const text = commandText(source);
   const rules: [RegExp, string][] = [
-    [/\bgh\s+release\s+(?:edit|upload|delete)\b/, 'gh release edit, upload or delete'],
+    [GH_RELEASE('edit|upload|delete'), 'gh release edit, upload or delete'],
+    [/\b(?:curl|wget)\b[^\n]*api\.github\.com[^\n]*(?:releases|git\/refs|git\/tags?\b)/, 'curl or wget to the releases or refs API'],
     [/\bgit\s+(?:tag|push)\b/, 'git tag or git push'],
     [
       /\buses:\s*['"]?(?:softprops\/action-gh-release|actions\/create-release|actions\/upload-release-asset|ncipollo\/release-action|marvinpinto\/action-automatic-releases|svenstaro\/upload-release-action|mathieudutour\/github-tag-action|anothrNick\/github-tag-action|ad-m\/github-push-action)\b/,
@@ -47,7 +54,7 @@ function releaseOrTagHits(name: string, source: string, options: { allowReleaseC
     ],
     [/\bcontents:\s*write\b/, 'contents: write'],
   ];
-  if (!options.allowReleaseCreate) rules.unshift([/\bgh\s+release\s+create\b/, 'gh release create']);
+  if (!options.allowReleaseCreate) rules.unshift([GH_RELEASE('create'), 'gh release create']);
   text.split('\n').forEach((line, i) => {
     for (const [pattern, what] of rules) if (pattern.test(line)) hits.push(`${name}: ${what} (${line.trim()}) [${i + 1}]`);
     // A write through `gh api` to the releases, tags or refs endpoints
@@ -74,7 +81,7 @@ function releaseWorkflowProblems(source: string): string[] {
   // Main only: every job, with no `||` to open the gate
   if (jobs.length === 0) problems.push('no jobs');
   for (const [name, job] of jobs) {
-    if (!MAIN_GATE.test(jobCondition(job) ?? '')) problems.push(`job "${name}" is not gated to refs/heads/main`);
+    if (!MAIN_GATE.test(jobCondition(job) ?? '')) problems.push(`job "${name}" is not gated to exactly refs/heads/main`);
   }
 
   // Least privilege: read at the top, and exactly one job, the last, with write and the attestation permissions
@@ -116,9 +123,29 @@ function releaseWorkflowProblems(source: string): string[] {
     if (run !== undefined && run.includes('${{')) problems.push(`a run script holds an expression: ${run.split('\n').find(l => l.includes('${{'))!.trim()}`);
   }
 
+  // A red leg must stop the run: nothing may turn a failure into a pass or run a step past one
+  for (const line of commandText(source).split('\n')) {
+    if (/\bcontinue-on-error\b/.test(line)) problems.push(`continue-on-error: ${line.trim()}`);
+  }
+  for (const [name, job] of jobs) {
+    if (job.map.has('uses')) {
+      const uses = job.map.get('uses')!.value;
+      if (!PINNED_ACTION.test(uses)) problems.push(`job "${name}" calls "${uses}", which is not pinned by a 40-character commit SHA`);
+    }
+    for (const step of stepsOf(job)) {
+      const label = `step "${step.map.get('name')?.value ?? step.map.get('uses')?.value ?? step.line}" of job "${name}"`;
+      if (STATUS_FUNCTION.test(step.map.get('if')?.value ?? '')) problems.push(`${label} has a status function in its if:`);
+      if (step.map.has('shell')) problems.push(`${label} sets shell:, which can drop the fail-fast flags`);
+      const run = commandText(step.map.get('run')?.value ?? '');
+      if (/\bset\s+\+(?:e|o\s+errexit)\b/.test(run)) problems.push(`${label} turns off errexit`);
+      // The one exception: the codesign display, which only prints and exits non-zero for an unsigned x86_64 binary
+      if (/\|\|\s*(?:true|:|exit\s+0)(?:\s|;|$)/.test(run) && step.map.get('name')?.value !== SIGNATURE_STEP) problems.push(`${label} swallows a failure with || true`);
+    }
+  }
+
   // Only a draft, only on a real run
   const text = commandText(source);
-  const creates = text.split('\n').filter(line => /\bgh\s+release\s+create\b/.test(line));
+  const creates = text.split('\n').filter(line => GH_RELEASE('create').test(line));
   if (creates.length !== 1) problems.push(`expected one gh release create, found ${creates.length}`);
   for (const line of creates) {
     if (!/(?:^|\s)--draft(?:\s|$)/.test(line)) problems.push('gh release create has no --draft');
@@ -127,7 +154,7 @@ function releaseWorkflowProblems(source: string): string[] {
   for (const step of steps) {
     const run = step.map.get('run')?.value ?? '';
     const uses = step.map.get('uses')?.value ?? '';
-    if (/\bgh\s+release\s+create\b/.test(commandText(run)) || uses.startsWith('actions/attest@')) {
+    if (GH_RELEASE('create').test(commandText(run)) || uses.startsWith('actions/attest@')) {
       if (!/^\$\{\{\s*!inputs\.dry_run\s*\}\}$/.test(step.map.get('if')?.value ?? '')) problems.push(`the step "${step.map.get('name')?.value ?? uses}" does not run only when dry_run is off`);
     }
   }
@@ -197,7 +224,7 @@ describe('ADR-0035: release.yml is manual, main-only, dry-run by default and dra
 
     it('loses its main gate on a job', () => {
       const broken = changed("    name: Licence notices\n    needs: preflight\n    if: github.ref == 'refs/heads/main'\n", '    name: Licence notices\n    needs: preflight\n');
-      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/job "notices" is not gated to refs\/heads\/main/);
+      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/job "notices" is not gated to exactly refs\/heads\/main/);
     });
 
     it('opens its main gate with an ||', () => {
@@ -208,6 +235,66 @@ describe('ADR-0035: release.yml is manual, main-only, dry-run by default and dra
     it('gates to another branch', () => {
       const broken = changed("    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices]\n    if: github.ref == 'refs/heads/main'\n", "    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices]\n    if: github.ref == 'refs/heads/feature/rust-spike'\n");
       expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/job "release" is not gated/);
+    });
+
+    const releaseGate = "    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices]\n    if: github.ref == 'refs/heads/main'\n";
+
+    it('adds a status function to a job gate, so the last job could run past a failed leg', () => {
+      for (const tail of ['always()', '!cancelled()', 'failure()', 'success() || always()']) {
+        const broken = changed(releaseGate, releaseGate.replace("'refs/heads/main'", `'refs/heads/main' && ${tail}`));
+        expect(releaseWorkflowProblems(broken).join('\n'), tail).toMatch(/job "release" is not gated to exactly/);
+      }
+    });
+
+    it('puts a status function in a step if', () => {
+      const broken = changed('      - name: Write SHA256SUMS\n', "      - name: Write SHA256SUMS\n        if: ${{ always() }}\n");
+      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/status function in its if:/);
+    });
+
+    it('sets continue-on-error on a step or a job', () => {
+      const onStep = changed('      - name: Parity test and its self-check\n', '      - name: Parity test and its self-check\n        continue-on-error: true\n');
+      expect(releaseWorkflowProblems(onStep).join('\n')).toMatch(/continue-on-error/);
+      const onJob = changed('    name: Build and gate (${{ matrix.target }})\n', '    name: Build and gate (${{ matrix.target }})\n    continue-on-error: true\n');
+      expect(releaseWorkflowProblems(onJob).join('\n')).toMatch(/continue-on-error/);
+    });
+
+    it('swallows a failed gate with || true, || : or set +e', () => {
+      const gate = '        run: cargo test --release --locked --target "$TARGET" --lib\n';
+      for (const [variant, expected] of [
+        [' || true', /swallows a failure with \|\| true/],
+        [' || :', /swallows a failure with \|\| true/],
+        [' || exit 0', /swallows a failure with \|\| true/],
+      ] as const) {
+        expect(releaseWorkflowProblems(changed(gate, gate.replace('\n', `${variant}\n`))).join('\n'), variant).toMatch(expected);
+      }
+      const off = changed(gate, '        run: |\n          set +e\n          cargo test --release --locked --target "$TARGET" --lib\n');
+      expect(releaseWorkflowProblems(off).join('\n')).toMatch(/turns off errexit/);
+    });
+
+    it('sets shell: on a step, which can drop the fail-fast flags', () => {
+      const broken = changed('      - name: Write SHA256SUMS\n', '      - name: Write SHA256SUMS\n        shell: bash {0}\n');
+      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/sets shell:/);
+    });
+
+    it('creates a second release with the flags before the subcommand', () => {
+      const extra = '          gh -R "$GITHUB_REPOSITORY" release create "v${VERSION}" dist/LICENSE\n';
+      const broken = changed('          mkdir dist\n', `          mkdir dist\n${extra}`);
+      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/expected one gh release create, found 2/);
+      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/gh release create has no --draft/);
+    });
+
+    it('creates a release or a tag through the API', () => {
+      const curl = changed('          mkdir dist\n', '          mkdir dist\n          curl -X POST https://api.github.com/repos/x/y/releases -d {}\n');
+      expect(releaseWorkflowProblems(curl).join('\n')).toMatch(/curl or wget to the releases or refs API/);
+      const api = changed('          mkdir dist\n', '          mkdir dist\n          gh api repos/x/y/git/refs -f ref=refs/tags/v1 -f sha=abc\n');
+      expect(releaseWorkflowProblems(api).join('\n')).toMatch(/gh api write to releases or refs/);
+      const post = changed('          mkdir dist\n', '          mkdir dist\n          gh api --method POST repos/x/y/releases\n');
+      expect(releaseWorkflowProblems(post).join('\n')).toMatch(/gh api write to releases or refs/);
+    });
+
+    it('calls a reusable workflow that is not pinned by a SHA', () => {
+      const broken = changed('    name: Licence notices\n', '    name: Licence notices\n    uses: some-org/some-repo/.github/workflows/build.yml@main\n');
+      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/job "notices" calls .*not pinned/);
     });
 
     it('creates a release that is not a draft', () => {
@@ -274,12 +361,15 @@ describe('ADR-0035: no other workflow creates a release or a tag', () => {
       '  gh api repos/x/y/git/refs -f ref=refs/tags/v1',
       '- uses: softprops/action-gh-release@abc',
       '  contents: write',
+      '  gh -R x/y release create v2',
+      '  gh --repo x/y release edit v1',
+      '  curl -X POST https://api.github.com/repos/x/y/releases',
       '  gh release list',
       '  gh api repos/x/y/releases --paginate --jq .',
       '# git tag v1 in a comment',
     ].join('\n');
-    expect(releaseOrTagHits('x.yml', text, { allowReleaseCreate: false })).toHaveLength(9);
-    expect(releaseOrTagHits('x.yml', text, { allowReleaseCreate: true })).toHaveLength(8);
+    expect(releaseOrTagHits('x.yml', text, { allowReleaseCreate: false })).toHaveLength(12);
+    expect(releaseOrTagHits('x.yml', text, { allowReleaseCreate: true })).toHaveLength(10);
   });
 
   it('joins a command continued over lines', () => {
