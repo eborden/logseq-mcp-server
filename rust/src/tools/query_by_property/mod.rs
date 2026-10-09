@@ -135,12 +135,9 @@ fn block_id(block: &Map<String, Value>) -> i64 {
     block.get("id").and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
-// PARITY(#299): the sort reads only `page.id`, so a page spelled `db/id`, which LogSeq never sends for a
-// nested pull, sorts as page 0 (suspected TS bug: read it as `entityId` does) - drop if Rust becomes the only
-// server.
-/// `a.page?.id ?? 0`: the id of the page a block sits on, 0 when it carries none.
+/// The id of the page a block sits on (`id`, else `db/id`), 0 when it carries none.
 fn page_id(block: &Map<String, Value>) -> i64 {
-    block.get("page").and_then(|page| page.get("id")).and_then(crate::wire::whole_number).unwrap_or(0)
+    crate::entity::id_of(block.get("page")).unwrap_or(0)
 }
 
 /// `(a.page?.id ?? 0) - (b.page?.id ?? 0) || a.id - b.id`: page id, then block id.
@@ -239,6 +236,16 @@ mod tests {
         blocks.sort_by(by_page_then_block);
         let ids: Vec<i64> = blocks.iter().map(block_id).collect();
         assert_eq!(ids, [6, 8, 7, 5, 9]);
+    }
+
+    #[test]
+    fn a_page_spelled_db_id_sorts_by_that_id_not_as_page_zero() {
+        let mut spelled = block(5, None);
+        spelled.insert("page".into(), json!({"db/id": 30}));
+        let mut blocks = vec![spelled, block(7, Some(10)), block(6, Some(40))];
+        blocks.sort_by(by_page_then_block);
+        let ids: Vec<i64> = blocks.iter().map(block_id).collect();
+        assert_eq!(ids, [7, 5, 6]);
     }
 
     #[test]
