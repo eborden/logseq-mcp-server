@@ -90,11 +90,13 @@ fn block_embed(rest: &str) -> Option<(&str, &str)> {
     Some((id, rest))
 }
 
-/// `\{\{embed\s+<page ref>\s*\}\}`, the text after the opening `{{`. The page ref is the one
-/// grammar of [`refs`].
-fn page_embed(rest: &str) -> Option<(&str, &str)> {
-    let (name, rest) = refs::ref_at(skip_space_1(strip_ci(rest, "embed")?)?)?;
-    let rest = skip_space(rest).strip_prefix("}}")?;
+/// `\{\{embed\s+<page ref>\s*\}\}`, the text after the opening `{{`, which sits at `text.len() -
+/// rest.len()` of `lines`' text. The page ref is the one grammar of [`refs`], read through `lines`
+/// so a line of many `{{embed [[` is read once.
+fn page_embed<'t>(lines: &mut refs::Lines<'t>, text: &'t str, rest: &'t str) -> Option<(&'t str, &'t str)> {
+    let after_embed = skip_space_1(strip_ci(rest, "embed")?)?;
+    let (name, end) = lines.ref_at(text.len() - after_embed.len())?;
+    let rest = skip_space(&text[end..]).strip_prefix("}}")?;
     Some((name, rest))
 }
 
@@ -110,11 +112,12 @@ fn plain_ref(rest: &str) -> Option<(&str, &str)> {
 pub fn scan(text: &str) -> Vec<Found> {
     let bytes = text.as_bytes();
     let mut found = Vec::new();
+    let mut lines = refs::Lines::new(text);
     let mut i = 0;
     while i < bytes.len() {
         // Every pattern opens with an ASCII bracket, so `i` is at a character boundary when it matches
         let opened = match bytes[i] {
-            b'{' if bytes.get(i + 1) == Some(&b'{') => try_embed(&text[i + 2..]),
+            b'{' if bytes.get(i + 1) == Some(&b'{') => try_embed(&mut lines, text, &text[i + 2..]),
             b'(' if bytes.get(i + 1) == Some(&b'(') => plain_ref(&text[i + 2..]).map(|(id, rest)| (Kind::Ref, id, rest)),
             _ => None,
         };
@@ -137,10 +140,10 @@ pub fn scan(text: &str) -> Vec<Found> {
 }
 
 /// A block embed, else a page embed, after the `{{`.
-fn try_embed(rest: &str) -> Option<(Kind, &str, &str)> {
+fn try_embed<'t>(lines: &mut refs::Lines<'t>, text: &'t str, rest: &'t str) -> Option<(Kind, &'t str, &'t str)> {
     block_embed(rest)
         .map(|(id, rest)| (Kind::BlockEmbed, id, rest))
-        .or_else(|| page_embed(rest).map(|(name, rest)| (Kind::PageEmbed, name, rest)))
+        .or_else(|| page_embed(lines, text, rest).map(|(name, rest)| (Kind::PageEmbed, name, rest)))
 }
 
 fn is_line_terminator(c: char) -> bool {
@@ -246,6 +249,19 @@ mod tests {
     fn an_embed_that_is_not_closed_leaves_its_ref_to_be_found() {
         let text = format!("{{{{embed (({A}))}} (({B}))");
         assert_eq!(kinds(&text).iter().map(|k| k.0).collect::<Vec<_>>(), [Kind::Ref, Kind::Ref]);
+    }
+
+    #[test]
+    fn thousands_of_unclosed_page_embeds_on_one_line_are_none_and_are_read_once() {
+        // a read of the rest of the line at each `{{embed [[` would be quadratic: minutes for this
+        let line = "{{embed [[ ".repeat(50_000);
+        assert!(scan(&line).is_empty());
+        // closed at the end, the last one is a page embed and the rest are still none
+        let closed = format!("{line}x]] }}}}");
+        let found = scan(&closed);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].token.kind, Kind::PageEmbed);
+        assert_eq!(found[0].token.key, "x");
     }
 
     #[test]
