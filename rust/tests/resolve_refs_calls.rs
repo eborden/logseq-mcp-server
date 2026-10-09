@@ -276,6 +276,16 @@ async fn refs_in_children_are_resolved_in_the_same_batch() {
 }
 
 #[tokio::test]
+async fn a_root_that_is_not_a_block_comes_back_as_sent_beside_a_root_that_is_annotated() {
+    let logseq = mock_logseq(vec![json!([target(2, "one", 100, 100)])]).await;
+    let roots = [json!(["uuid", "abc"]), root(&format!("top (({}))", uuid(2)))];
+    let resolved = resolve_block_refs(&client(&logseq), &roots).await.unwrap();
+
+    assert_eq!(resolved.blocks[0], json!(["uuid", "abc"]));
+    assert_eq!(resolved.blocks[1]["resolvedContent"], "top one");
+}
+
+#[tokio::test]
 async fn an_unfetched_child_tuple_is_left_as_sent_beside_real_children_that_are_still_annotated() {
     let logseq = mock_logseq(vec![json!([target(2, "one", 100, 100)])]).await;
     let mut parent = root("top");
