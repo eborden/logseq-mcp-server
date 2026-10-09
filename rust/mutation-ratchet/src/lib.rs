@@ -10,10 +10,13 @@
 pub mod baseline;
 pub mod diff;
 pub mod exit;
+pub mod gather;
+pub mod limits;
 pub mod listing;
 pub mod outcomes;
 pub mod plan;
 pub mod regions;
 pub mod report;
+pub mod run;
 pub mod score;
 pub mod slices;
