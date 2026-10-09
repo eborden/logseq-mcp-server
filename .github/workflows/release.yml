@@ -53,7 +53,8 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          # [[ =~ ]] matches the whole value, so a multi-line input can't pass on one good line
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::The version input must be plain x.y.z, with no v prefix and no pre-release part."
             exit 1
           fi
@@ -122,6 +123,14 @@ jobs:
         run: |
           expected="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
           rustc --version | grep -q "^rustc ${expected} " || { rustc --version; echo "expected rustc ${expected}" >&2; exit 1; }
+
+      # The runners float (the -latest labels, as ADR-0035 names them), so the report records which image and compiler
+      # each leg's gate passed on.
+      - name: Record the runner and the compiler
+        run: |
+          uname -srm
+          if [ -r /etc/os-release ]; then cat /etc/os-release; else sw_vers; fi
+          rustc -vV
 
       - name: Build (release)
         id: build
@@ -289,7 +298,9 @@ jobs:
             exit 1
           fi
 
-      # Exactly the release set and nothing else, so an unexpected file can't ride along.
+      # Exactly the release set and nothing else, so an unexpected file can't ride along. The artifact transport between
+      # the legs and this job is GitHub's own and is trusted: the checksums are taken here, over what was downloaded,
+      # and the leg's own hash check (Stage the binary the gate tested) covers only the build job.
       - name: Write SHA256SUMS
         env:
           VERSION: ${{ inputs.version }}
