@@ -27,7 +27,6 @@ use crate::args::Arguments;
 use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, ToolError};
-use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::order;
 use crate::params::{ParamAliases, resolve_param_aliases};
@@ -109,7 +108,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
 
     let outcome = get_backlinks_with_meta(client, &page_name, max_pages, max_blocks_per_page).await?;
     let has_results = !outcome.results.is_empty();
-    let text = js::json_stringify(&Value::Array(outcome.results.into_iter().map(Backlink::into_value).collect()));
+    let text = Value::Array(outcome.results.into_iter().map(Backlink::into_value).collect()).to_string();
     let mut content = vec![ContentBlock::text(text)];
     let tips = if tips_enabled { backlink_tips(&page_name, has_results) } else { Vec::new() };
     if let Some(meta) = meta_content(outcome.meta, &tips) {
@@ -130,7 +129,7 @@ fn meta_content(meta: Option<Map<String, Value>>, tips: &[String]) -> Option<Str
             merged
         }
     };
-    Some(js::json_stringify(&json!({ "meta": Value::Object(merged) })))
+    Some(json!({ "meta": Value::Object(merged) }).to_string())
 }
 
 /// `[sourcePage, linking blocks]` ranked and cut: the result and what the cut says about it.
@@ -151,7 +150,7 @@ fn block_count(backlink: &Backlink) -> String {
 fn js_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
-        Value::Number(n) => js::number_to_string(n.as_f64().expect("a JSON number is finite")),
+        Value::Number(n) => n.to_string(),
         other => other.to_string(),
     }
 }

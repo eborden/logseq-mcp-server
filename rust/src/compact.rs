@@ -96,22 +96,21 @@ pub fn compact_query_context(context: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::js::json_stringify;
     use serde_json::json;
 
     #[test]
     fn a_block_is_its_uuid_and_the_first_line_of_its_content() {
         assert_eq!(compact_block(&json!({"id": 1, "uuid": "u1", "content": "\n  Hello  \nmore", "page": {"id": 2}})), json!({"uuid": "u1", "snippet": "Hello"}));
         // a block with no content has an empty snippet, one with no uuid has none
-        assert_eq!(json_stringify(&compact_block(&json!({"uuid": "u2"}))), r#"{"uuid":"u2","snippet":""}"#);
-        assert_eq!(json_stringify(&compact_block(&json!({"content": "x"}))), r#"{"snippet":"x"}"#);
+        assert_eq!(compact_block(&json!({"uuid": "u2"})).to_string(), r#"{"uuid":"u2","snippet":""}"#);
+        assert_eq!(compact_block(&json!({"content": "x"})).to_string(), r#"{"snippet":"x"}"#);
     }
 
     #[test]
     fn a_page_is_its_id_name_and_original_name_in_either_spelling() {
-        assert_eq!(json_stringify(&compact_page(&json!({"id": 1, "name": "atlas", "original-name": "Atlas", "uuid": "x"}))), r#"{"id":1,"name":"atlas","originalName":"Atlas"}"#);
-        assert_eq!(json_stringify(&compact_page(&json!({"db/id": 7, "originalName": "Atlas"}))), r#"{"id":7,"originalName":"Atlas"}"#);
-        assert_eq!(json_stringify(&compact_page(&json!({"id": 3}))), r#"{"id":3}"#);
+        assert_eq!(compact_page(&json!({"id": 1, "name": "atlas", "original-name": "Atlas", "uuid": "x"})).to_string(), r#"{"id":1,"name":"atlas","originalName":"Atlas"}"#);
+        assert_eq!(compact_page(&json!({"db/id": 7, "originalName": "Atlas"})).to_string(), r#"{"id":7,"originalName":"Atlas"}"#);
+        assert_eq!(compact_page(&json!({"id": 3})).to_string(), r#"{"id":3}"#);
         assert_eq!(compact_page(&json!({})), json!({}));
     }
 
@@ -132,7 +131,7 @@ mod tests {
     #[test]
     fn a_topic_context_keeps_its_keys_and_loses_its_bodies() {
         assert_eq!(
-            json_stringify(&compact_topic_context(&context())),
+            compact_topic_context(&context()).to_string(),
             concat!(
                 r#"{"topic":"atlas","mainPage":{"id":1,"name":"atlas","originalName":"Atlas"},"#,
                 r#""directBlocks":[{"uuid":"u5","snippet":"first"}],"#,

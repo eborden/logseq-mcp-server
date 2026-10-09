@@ -27,7 +27,6 @@ use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
@@ -98,13 +97,13 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     // `null` from LogSeq is `null` here, and has no meta or tips: no matches is an empty array
     let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
 
-    let mut content = vec![ContentBlock::text(js::json_stringify(&Value::Array(found.results.clone())))];
+    let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
     let tips = if tips_enabled { search_tips(&args.query, &found.results, found.matches()) } else { Vec::new() };
     let mut meta = serde_json::to_value(&found.meta).expect("a result meta serializes");
     if !tips.is_empty() {
         meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
     }
-    content.push(ContentBlock::text(js::json_stringify(&json!({ "meta": meta }))));
+    content.push(ContentBlock::text(json!({ "meta": meta }).to_string()));
     Ok(success_result(content))
 }
 
@@ -341,12 +340,12 @@ mod tests {
         });
         let entity = pulled_page_to_entity(pulled.as_object().unwrap());
         assert_eq!(
-            js::json_stringify(&Value::Object(entity)),
+            Value::Object(entity).to_string(),
             r#"{"id":5,"name":"alice","uuid":"u","originalName":"Alice","original-name":"Alice","journalDay":20250101,"createdAt":7,"updatedAt":8,"propertiesTextValues":{"a":"b"}}"#
         );
         // a pull without the renamed keys adds none
         let bare = json!({"id": 6, "name": "bob"});
-        assert_eq!(js::json_stringify(&Value::Object(pulled_page_to_entity(bare.as_object().unwrap()))), r#"{"id":6,"name":"bob"}"#);
+        assert_eq!(Value::Object(pulled_page_to_entity(bare.as_object().unwrap())).to_string(), r#"{"id":6,"name":"bob"}"#);
     }
 
     fn block(id: i64, content: &str) -> Value {
@@ -361,11 +360,11 @@ mod tests {
     #[test]
     fn a_full_result_is_the_block_as_it_came_with_its_context_after_it() {
         assert_eq!(
-            js::json_stringify(&full_result(&block(1, "hi [[Bob]]"), None)),
+            full_result(&block(1, "hi [[Bob]]"), None).to_string(),
             r#"{"id":1,"uuid":"u1","content":"hi [[Bob]]","page":{"id":5,"name":"alice","original-name":"Alice"}}"#
         );
         assert_eq!(
-            js::json_stringify(&full_result(&block(1, "hi [[Bob]]"), Some(&context()))),
+            full_result(&block(1, "hi [[Bob]]"), Some(&context())).to_string(),
             r#"{"id":1,"uuid":"u1","content":"hi [[Bob]]","page":{"id":5,"name":"alice","original-name":"Alice"},"context":{"page":{"id":5,"name":"alice","originalName":"Alice","original-name":"Alice","journal?":false},"references":["Bob"],"tags":[]}}"#
         );
     }
@@ -373,11 +372,11 @@ mod tests {
     #[test]
     fn a_slim_result_names_the_page_and_leaves_out_what_is_empty() {
         assert_eq!(
-            js::json_stringify(&slim_result(&block(1, "hi [[Bob]] #t"), None)),
+            slim_result(&block(1, "hi [[Bob]] #t"), None).to_string(),
             r##"{"uuid":"u1","content":"hi [[Bob]] #t","pageName":"Alice","tags":["t"],"pageRefs":["Bob"]}"##
         );
         assert_eq!(
-            js::json_stringify(&slim_result(&block(1, "hi [[Bob]]"), Some(&context()))),
+            slim_result(&block(1, "hi [[Bob]]"), Some(&context())).to_string(),
             r#"{"uuid":"u1","content":"hi [[Bob]]","pageName":"Alice","pageRefs":["Bob"],"context":{"page":{"name":"alice","originalName":"Alice"},"references":["Bob"]}}"#
         );
     }

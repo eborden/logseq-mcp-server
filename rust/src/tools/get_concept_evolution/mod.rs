@@ -29,7 +29,6 @@ use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::edn::{PageId, PageName};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{alias_set_warnings, resolve_alias_set};
@@ -118,7 +117,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let request = read_args(arguments.as_ref())?;
     let evolution = get_concept_evolution(client, &request.concept_name, request.options).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&evolution.to_value()))]))
+    Ok(success_result(vec![ContentBlock::text(evolution.to_value().to_string())]))
 }
 
 /// What `getConceptEvolution` takes beyond the concept (`ConceptEvolutionOptions`).
@@ -509,7 +508,7 @@ mod tests {
 
     #[test]
     fn a_result_says_what_it_answered_what_may_be_missing_and_the_summary_before_the_timeline() {
-        let text = js::json_stringify(&evolution().to_value());
+        let text = evolution().to_value().to_string();
         assert_eq!(
             text,
             concat!(
@@ -568,23 +567,23 @@ mod tests {
             ..evolution()
         };
         assert_eq!(
-            js::json_stringify(&plain.to_value()),
+            plain.to_value().to_string(),
             r#"{"concept":"atlas","summary":{"totalMentions":0,"dateRange":{"earliest":null,"latest":null},"journalMentions":0,"nonJournalMentions":0},"timeline":[]}"#
         );
         // an alias group's warning alone adds the meta, with no totals
         let aliased = ConceptEvolution { total_mentions_before_cut: None, ..evolution() };
-        assert!(!js::json_stringify(&aliased.to_value()).contains("totals"));
+        assert!(!aliased.to_value().to_string().contains("totals"));
         // grouping asked for and nothing to group is an empty object, not an absent key
         let empty = ConceptEvolution { grouped_timeline: Some(vec![]), ..plain };
-        assert!(js::json_stringify(&empty.to_value()).contains(r#""groupedTimeline":{}"#));
+        assert!(empty.to_value().to_string().contains(r#""groupedTimeline":{}"#));
     }
 
     #[test]
-    fn grouped_keys_that_are_whole_numbers_come_first_as_javascript_writes_an_object() {
+    fn grouped_keys_stay_in_the_order_the_periods_were_first_met_whole_numbers_included() {
         let grouped = ConceptEvolution {
             grouped_timeline: Some(vec![("2025-W02".into(), vec![]), ("20250301".into(), vec![]), ("20250201".into(), vec![])]),
             ..evolution()
         };
-        assert!(js::json_stringify(&grouped.to_value()).contains(r#""groupedTimeline":{"20250201":[],"20250301":[],"2025-W02":[]}"#));
+        assert!(grouped.to_value().to_string().contains(r#""groupedTimeline":{"2025-W02":[],"20250301":[],"20250201":[]}"#));
     }
 }

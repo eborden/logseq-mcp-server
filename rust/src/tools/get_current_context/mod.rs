@@ -26,7 +26,6 @@ use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
@@ -57,7 +56,7 @@ pub fn definition() -> Tool {
 /// A call: the context LogSeq is showing, as JSON.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let context = get_current_context(client).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&context.into_value()))]))
+    Ok(success_result(vec![ContentBlock::text(context.into_value().to_string())]))
 }
 
 /// What the user is looking at, as written in BR-0013's order: what must not be missed (`hasMore` and `warnings`,
@@ -264,7 +263,7 @@ mod tests {
             "id": 1, "uuid": "a", "children": [["uuid", "x"], {"id": 3, "uuid": "c", "content": "kid", "children": [["uuid", "y"]]}, {"id": 4}, "text"], "content": "p"
         }));
         assert_eq!(
-            js::json_stringify(&Value::Object(with_fetched_children(&block))),
+            Value::Object(with_fetched_children(&block)).to_string(),
             r#"{"id":1,"uuid":"a","content":"p","children":[{"id":3,"uuid":"c","content":"kid","children":[]}]}"#
         );
         // children that are not a list are left as they came
@@ -276,7 +275,7 @@ mod tests {
     fn the_message_comes_before_a_null_page_and_the_blocks() {
         let context = CurrentContext { has_more: None, warnings: None, message: Some(NO_PAGE_OPEN_MESSAGE), page: None, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![]) };
         assert_eq!(
-            js::json_stringify(&context.clone().into_value()),
+            context.clone().into_value().to_string(),
             r#"{"message":"No page is open in LogSeq (for example the All Pages view is showing).","page":null,"focusedBlock":{"uuid":"u"},"selectedBlocks":[]}"#
         );
         assert_eq!(keys(&context.into_value()), ["message", "page", "focusedBlock", "selectedBlocks"]);

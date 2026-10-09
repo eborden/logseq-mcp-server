@@ -232,17 +232,17 @@ mod tests {
     #[test]
     fn two_keys_that_camelize_alike_keep_the_first_place_and_the_last_value() {
         let out = camelize_keys(&object(json!({"a-b": 1, "z": 0, "aB": 2})));
-        assert_eq!(crate::js::json_stringify(&Value::Object(out)), r#"{"aB":2,"z":0}"#);
+        assert_eq!(Value::Object(out).to_string(), r#"{"aB":2,"z":0}"#);
         // a block spelled both ways: the camelCase twin's list wins, at the kebab-case key's place
         let block = object(json!({"properties-order": ["a-b"], "x": 1, "propertiesOrder": ["c-d"]}));
-        assert_eq!(crate::js::json_stringify(&Value::Object(camelize_block(&block))), r#"{"propertiesOrder":["cD"],"x":1}"#);
+        assert_eq!(Value::Object(camelize_block(&block)).to_string(), r#"{"propertiesOrder":["cD"],"x":1}"#);
     }
 
     #[test]
     fn properties_that_are_not_a_map_are_left_alone() {
         let block = object(json!({"properties": null, "properties-text-values": [1], "properties-order": "x-y"}));
         assert_eq!(
-            crate::js::json_stringify(&Value::Object(camelize_block(&block))),
+            Value::Object(camelize_block(&block)).to_string(),
             r#"{"properties":null,"propertiesTextValues":[1],"propertiesOrder":"x-y"}"#
         );
     }

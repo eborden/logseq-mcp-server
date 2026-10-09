@@ -133,7 +133,6 @@ pub fn concept_value(concept: &TopConcept) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::js;
     use serde_json::json;
 
     fn block(value: Value) -> Map<String, Value> {
@@ -213,6 +212,6 @@ mod tests {
     #[test]
     fn a_concept_is_written_as_name_count_days() {
         let concept = TopConcept { name: "Atlas".into(), count: 3, days: 2 };
-        assert_eq!(js::json_stringify(&concept_value(&concept)), r#"{"name":"Atlas","count":3,"days":2}"#);
+        assert_eq!(concept_value(&concept).to_string(), r#"{"name":"Atlas","count":3,"days":2}"#);
     }
 }

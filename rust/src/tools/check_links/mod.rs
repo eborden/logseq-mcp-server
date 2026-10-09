@@ -22,7 +22,6 @@ use serde_json::Value;
 use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::errors::{InvalidParameter, MatchedBy, ToolError};
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::resolve::{Resolution, link_key, resolve_link_targets};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
@@ -76,7 +75,7 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = read_args(arguments.as_ref())?;
     let result = check_links(client, &args.before, &args.after).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&result))]))
+    Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
 /// `countOf(text, token)`: how many non-overlapping copies of `token` the text holds.
@@ -263,7 +262,7 @@ mod tests {
         assert_eq!(keys(&value["refs"]), ["ok", "resolved", "unresolved", "ambiguous"]);
         assert_eq!(keys(&value["refs"]["resolved"][0]), ["term", "page", "matchedBy"]);
         assert_eq!(keys(&value["refs"]["ambiguous"][0]), ["term", "candidates", "totalCandidates", "preexisting"]);
-        assert_eq!(js::json_stringify(&value["refs"]["unresolved"]), r#"["gone"]"#);
+        assert_eq!(value["refs"]["unresolved"].to_string(), r#"["gone"]"#);
     }
 
     fn read(value: Value) -> Result<Args, ToolError> {

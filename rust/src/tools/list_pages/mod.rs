@@ -22,7 +22,6 @@ use serde_json::Value;
 use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::order;
 use crate::tips::tips_content;
@@ -87,7 +86,7 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = read_args(arguments.as_ref())?;
     let result = list_pages(client, &args).await?;
-    let mut content = vec![ContentBlock::text(js::json_stringify(&result.to_value()))];
+    let mut content = vec![ContentBlock::text(result.to_value().to_string())];
     if tips_enabled {
         let first = result.pages.first().map(|page| page.name.as_str());
         if let Some(tips) = tips_content(&list_pages_tips(args.name_contains.as_deref(), first)) {
@@ -374,7 +373,7 @@ mod tests {
             total: 2,
             warning: None,
         };
-        assert_eq!(js::json_stringify(&plain.to_value()), r#"{"total":2,"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}]}"#);
+        assert_eq!(plain.to_value().to_string(), r#"{"total":2,"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}]}"#);
         assert_eq!(keys(&plain.to_value()), ["total", "pages"]);
         let cut = ListPagesResult {
             pages: vec![],
@@ -382,7 +381,7 @@ mod tests {
             warning: Some(ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }),
         };
         assert_eq!(
-            js::json_stringify(&cut.to_value()),
+            cut.to_value().to_string(),
             r#"{"total":3,"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"pages":[]}"#
         );
         assert_eq!(keys(&cut.to_value()), ["total", "hasMore", "warnings", "pages"]);

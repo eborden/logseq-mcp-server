@@ -95,7 +95,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
         let body = render_page(&page, PageRenderOptions { blocks_fetched: args.include_children, ..Default::default() });
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&page, &tips)))]));
     }
-    let mut content = vec![ContentBlock::text(js::json_stringify(&page))];
+    let mut content = vec![ContentBlock::text(page.to_string())];
     if let Some(tips) = tips_content(&tips) {
         content.push(ContentBlock::text(tips));
     }

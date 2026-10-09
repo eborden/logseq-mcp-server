@@ -218,9 +218,9 @@ fn property_value(value: &Value) -> Option<String> {
                 .collect();
             (!parts.is_empty()).then(|| parts.join(", "))
         }
-        Value::Object(_) => Some(js::json_stringify(value)),
+        Value::Object(_) => Some(value.to_string()),
         Value::Bool(flag) => Some(flag.to_string()),
-        Value::Number(n) => Some(js::number_to_string(n.as_f64().expect("a JSON number is finite"))),
+        Value::Number(n) => Some(n.to_string()),
         Value::String(text) => (!js::trim(text).is_empty()).then(|| text.clone()),
     }
 }
@@ -281,10 +281,10 @@ pub struct PageRenderOptions<'a> {
 pub fn resolved_from_line(resolved_from: Option<&Value>) -> Option<String> {
     let map = resolved_from?.as_object()?;
     // The server sets both fields, so a map without them has no note to write.
-    let name = js::json_stringify(map.get("name")?);
+    let name = map.get("name")?.to_string();
     let matched_by = match map.get("matchedBy")? {
         Value::String(text) => text.clone(),
-        other => js::json_stringify(other),
+        other => other.to_string(),
     };
     Some(format!("(resolved from {name}, matched by {matched_by})"))
 }
@@ -531,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn page_refs_keep_their_brackets_and_other_values_are_written_as_javascript_writes_them() {
+    fn page_refs_keep_their_brackets_and_other_values_are_written_by_serde() {
         let props = json!({
             "see-also": ["[[Project Atlas]]", "Carol", " ", 4, null, ["x"]],
             "owner": "[[Alice]]",
@@ -541,14 +541,16 @@ mod tests {
             "blank": "  ",
             "none": [null, ""],
         });
+        // a number is written as serde writes it, whatever the exponent's spelling
+        let big = format!("big:: {}", json!(1e21));
         assert_eq!(
             render_properties(Some(&props)),
             [
                 "see-also:: [[Project Atlas]], [[Carol]], 4, [[x]]",
                 "owner:: [[Alice]]",
                 "ratings:: 1, 2.5",
-                r#"nested:: {"2":[true],"b":1}"#,
-                "big:: 1e+21",
+                r#"nested:: {"b":1,"2":[true]}"#,
+                big.as_str(),
             ]
         );
     }

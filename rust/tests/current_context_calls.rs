@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::js;
 use logseq_mcp_server::tools::get_current_context;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -99,7 +98,7 @@ async fn nothing_open_costs_the_three_editor_calls_with_no_arguments() {
     assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS]);
     assert!(logseq.seen.lock().unwrap().iter().all(|call| call["args"] == json!([])));
     assert_eq!(
-        js::json_stringify(&context.into_value()),
+        context.into_value().to_string(),
         r#"{"message":"No page is open in LogSeq (for example the All Pages view is showing).","page":null}"#
     );
 }
@@ -229,7 +228,7 @@ async fn a_zoomed_block_names_its_page_through_one_lookup() {
     .await;
     let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
     assert_eq!(methods(&logseq).len(), 4);
-    assert_eq!(js::json_stringify(&context.into_value()), r#"{"page":{"name":"project atlas","originalName":"Project Atlas"},"focusedBlock":{"uuid":"00000000-0000-4000-8000-000000000512","content":"zoomed","pageName":"Project Atlas"}}"#);
+    assert_eq!(context.into_value().to_string(), r#"{"page":{"name":"project atlas","originalName":"Project Atlas"},"focusedBlock":{"uuid":"00000000-0000-4000-8000-000000000512","content":"zoomed","pageName":"Project Atlas"}}"#);
 }
 
 #[tokio::test]

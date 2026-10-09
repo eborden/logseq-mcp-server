@@ -39,7 +39,6 @@ use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::ToolError;
-use crate::js;
 use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::render_network;
 use crate::meta::ResultWarning;
@@ -162,7 +161,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         let body = render_network(&result);
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
     }
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&result))]))
+    Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
 /// What `getConceptNetwork` takes beyond the root and the depth (`ConceptNetworkOptions`).
@@ -498,7 +497,7 @@ mod tests {
             warnings: vec![ResultWarning { code: "w".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }],
         };
         assert_eq!(
-            js::json_stringify(&network.to_value()),
+            network.to_value().to_string(),
             concat!(
                 r#"{"concept":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,
