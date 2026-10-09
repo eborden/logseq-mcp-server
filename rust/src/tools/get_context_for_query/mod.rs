@@ -30,7 +30,7 @@ use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::{Caps, TopicContext, TopicContextOutput, build_context_for_topic};
-use crate::tools::search_blocks::{find_blocks, full_blocks_with_context};
+use crate::tools::search_blocks::{find_blocks, full_blocks_with_context, hit_pages_unavailable};
 use crate::truncation::{CappedTruncation, capped_truncation_warning};
 
 pub const NAME: &str = "logseq_get_context_for_query";
@@ -443,7 +443,15 @@ pub async fn get_context_for_query(
             let kept: Vec<Value> = hits.into_iter().take(kept_count).collect();
 
             // Pages only for the hits kept: one batched lookup
-            search_results = Some(if hit_pages { full_blocks_with_context(client, kept).await? } else { kept });
+            search_results = Some(if hit_pages {
+                let (with_pages, pages_unavailable) = full_blocks_with_context(client, kept).await?;
+                if pages_unavailable {
+                    warnings.push(hit_pages_unavailable(with_pages.len()).into());
+                }
+                with_pages
+            } else {
+                kept
+            });
         }
     }
 

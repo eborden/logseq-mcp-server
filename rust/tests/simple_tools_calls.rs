@@ -152,6 +152,25 @@ async fn context_costs_one_more_call_for_the_pages_of_the_hits_kept_only() {
     assert_eq!(found.meta.warnings[0].code, "results_truncated");
 }
 
+// BR-0011 (#326): a `null` answer to the context lookup is not blocks with no context
+#[tokio::test]
+async fn a_null_context_lookup_is_a_warning_and_an_empty_one_is_not() {
+    let logseq = mock_logseq(vec![json!([block(1, "text", 5), block(2, "more", 5)]), json!(null)]).await;
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, true, true).await.unwrap().unwrap();
+    assert_eq!(found.results.len(), 2);
+    assert!(found.results.iter().all(|result| result.get("context").is_none()));
+    assert_eq!(found.meta.warnings.len(), 1);
+    assert_eq!(found.meta.warnings[0].code, "context_unavailable");
+    assert!(found.meta.warnings[0].message.contains("the 2 result block(s)"));
+    assert!(!found.meta.has_more && found.meta.warnings[0].how_to_fetch_all.is_none());
+
+    // a real `[]` is pages not found, with no warning
+    let logseq = mock_logseq(vec![json!([block(1, "text", 5)]), json!([])]).await;
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, true, true).await.unwrap().unwrap();
+    assert!(found.meta.warnings.is_empty());
+    assert!(found.results[0].get("context").is_none());
+}
+
 #[tokio::test]
 async fn context_costs_no_call_when_no_hit_has_a_page_id() {
     let logseq = mock_logseq(vec![json!([[{"id": 1, "uuid": "u1", "content": "text"}]])]).await;
