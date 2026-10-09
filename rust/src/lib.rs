@@ -29,6 +29,7 @@ pub mod markdown;
 pub mod markdown_context;
 pub mod mcp_error;
 pub mod meta;
+pub mod order;
 pub mod output_format;
 pub mod pages_by_ids;
 pub mod params;
