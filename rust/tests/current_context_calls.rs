@@ -149,6 +149,19 @@ async fn a_block_with_no_page_costs_no_lookup() {
     assert!(context.page.is_none() && context.message.is_some());
 }
 
+#[tokio::test]
+async fn an_answer_with_neither_a_name_nor_a_page_is_no_page_and_says_none_is_open() {
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, json!({"id": 5, "uuid": "00000000-0000-4000-8000-000000000005", "content": "orphan"})),
+        (GET_CURRENT_BLOCK, json!(null)),
+        (GET_SELECTED_BLOCKS, json!(null)),
+    ])
+    .await;
+    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 3);
+    assert!(context.page.is_none() && context.message.is_some());
+}
+
 // BR-0011 (#326): a `null` answer to the lookup of the blocks' pages is not "no pages"
 #[tokio::test]
 async fn a_null_page_lookup_is_a_warning_and_not_no_page_open() {
@@ -275,6 +288,6 @@ async fn a_page_id_of_zero_is_an_id_and_so_an_error_like_a_negative_one_and_make
     .await;
     let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
 
+    assert!(matches!(&error, ToolError::InvalidValue(_)), "{error}");
     assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS], "no lookup is made");
 }
-    assert!(matches!(&error, ToolError::InvalidValue(_)), "{error}");

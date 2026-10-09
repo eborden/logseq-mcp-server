@@ -143,10 +143,8 @@ pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext
 
     // `getCurrentPage` answers the block itself when the user has zoomed into one.
     let zoomed_block = current_page.as_ref().and_then(Value::as_object).filter(|entity| is_block_entity(entity));
-    // PARITY(#299): an answer with no `name` and no `page` is neither a page nor a zoomed block, and is read as a
-    // page anyway, so a block that lacks its `page` shows up as a page with an empty name (suspected TS bug) —
-    // drop if Rust becomes the only server.
-    let page_entity = current_page.as_ref().filter(|_| zoomed_block.is_none());
+    // A page has a `name`. An answer with neither a `name` nor a `page` is no page and no zoomed block, so no page is open.
+    let page_entity = current_page.as_ref().filter(|entity| zoomed_block.is_none() && entity.get("name").is_some());
 
     let focused = current_block.as_ref().and_then(Value::as_object).or(zoomed_block);
     let selected_blocks: Vec<&Map<String, Value>> = selected.iter().flatten().filter_map(Value::as_object).collect();
