@@ -58,7 +58,7 @@ pub async fn resolve_link_targets(client: &LogseqClient, names: &[&str]) -> Resu
     }
     for key in keys {
         // `resolveFromRows(key, ...)`: the name is the key, trimmed and lowercase already
-        let resolution = by_name.get(&key).and_then(|rows| resolve_from_rows(&key, &key, rows)).unwrap_or(Resolution::NotFound);
+        let resolution = by_name.get(&key).and_then(|rows| resolve_from_rows(&key, rows)).unwrap_or(Resolution::NotFound);
         resolutions.insert(key, resolution);
     }
     Ok(LinkTargetResolutions { resolutions, unavailable })
@@ -77,7 +77,7 @@ mod tests {
             let (Some(page), Some(name)) = (row.page, row.name) else { continue };
             by_name.entry(name).or_default().push(wire::ResolverRow { page, via: Some(row.via) });
         }
-        by_name.into_iter().filter_map(|(name, rows)| resolve_from_rows(&name, &name, &rows).map(|found| (name, found))).collect()
+        by_name.into_iter().filter_map(|(name, rows)| resolve_from_rows(&name, &rows).map(|found| (name, found))).collect()
     }
 
     #[test]
