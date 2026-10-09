@@ -243,7 +243,7 @@ async fn an_ambiguous_name_stops_after_the_resolver() {
 }
 
 #[tokio::test]
-async fn a_year_before_1000_is_a_name_not_a_date_and_costs_three_calls_where_typescript_makes_one() {
+async fn a_year_before_1000_is_a_name_not_a_date_and_costs_three_calls() {
     // On purpose (see `resolve`): a journal day is eight digits, so "0999-12-31" is a plain name, not a
     // date. The leaf query and the suggestion lookup follow, and the error lists the closest names.
     let logseq = mock_logseq(vec![

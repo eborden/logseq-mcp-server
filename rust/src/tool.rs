@@ -226,7 +226,7 @@ mod tests {
 
     /// The recorded schema for fields of each kind in [`SampleArgs`]
     /// (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
-    fn typescript_sample_schema() -> Value {
+    fn pinned_sample_schema() -> Value {
         json!({
             "type": "object",
             "properties": {
@@ -241,8 +241,8 @@ mod tests {
     }
 
     #[test]
-    fn the_schema_comes_from_the_type_that_parses_the_arguments_and_means_the_typescript_contract() {
-        assert_eq!(meaning(&schema_of::<SampleArgs>()), meaning(&typescript_sample_schema()));
+    fn the_schema_comes_from_the_type_that_parses_the_arguments_and_means_the_pinned_contract() {
+        assert_eq!(meaning(&schema_of::<SampleArgs>()), meaning(&pinned_sample_schema()));
     }
 
     #[test]
@@ -258,13 +258,13 @@ mod tests {
         // `format` is a parameter here, not the JSON Schema keyword: it must survive normalizing.
         let ours = meaning(&schema_of::<SampleArgs>());
         assert_eq!(ours["properties"]["format"]["enum"], json!(["json", "markdown"]));
-        let mut other_enum = typescript_sample_schema();
+        let mut other_enum = pinned_sample_schema();
         other_enum["properties"]["format"]["enum"] = json!(["json", "html"]);
         assert_ne!(ours, meaning(&other_enum));
-        let mut other_description = typescript_sample_schema();
+        let mut other_description = pinned_sample_schema();
         other_description["properties"]["format"]["description"] = json!("something else");
         assert_ne!(ours, meaning(&other_description));
-        let mut no_format = typescript_sample_schema();
+        let mut no_format = pinned_sample_schema();
         no_format["properties"].as_object_mut().unwrap().remove("format");
         assert_ne!(ours, meaning(&no_format));
     }

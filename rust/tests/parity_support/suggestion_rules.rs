@@ -416,7 +416,7 @@ pub fn missing_required_cases(cases: &[Case]) -> Vec<String> {
     REQUIRED_CASES
         .iter()
         .filter(|kind| !seen.contains(kind))
-        .map(|kind| format!("the recorded cases lack a required closest-names case (ADR-0032): {kind}"))
+        .map(|kind| format!("the recorded cases lack a required closest-names case (ADR-0034 Decision 4): {kind}"))
         .collect()
 }
 

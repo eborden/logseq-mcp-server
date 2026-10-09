@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn ground_clauses_match_the_typescript_builders() {
+    fn ground_clauses_have_the_pinned_text() {
         let ids = [PageId::new(12).unwrap(), PageId::new(345).unwrap()];
         assert_eq!(ground_ids(&ids, "?p"), "[(ground [12 345]) [?p ...]]");
         assert_eq!(ground_ids(&[], "?id"), "[(ground []) [?id ...]]");

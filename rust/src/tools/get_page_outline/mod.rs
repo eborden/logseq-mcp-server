@@ -350,19 +350,19 @@ mod tests {
     }
 
     #[test]
-    fn the_outline_schema_means_what_the_typescript_one_means() {
+    fn the_outline_schema_means_what_the_pinned_one_means() {
         use crate::tool::testing::{meaning, schema_of};
         // `inputSchema` of logseq_get_page_outline in the ADR-0016 snapshot
-        let typescript = json!({
+        let pinned = json!({
             "type": "object",
             "properties": {"page_name": {"type": "string", "description": "Page name, alias, or ISO date (2025-01-01) for a journal"}},
             "required": ["page_name"],
         });
-        assert_eq!(meaning(&schema_of::<Args>()), meaning(&typescript));
+        assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
 
     #[test]
-    fn the_outline_tool_is_read_only_and_titled_as_in_typescript() {
+    fn the_outline_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
         assert_eq!(tool.title.as_deref(), Some("Get Page Outline"));
@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn the_outline_serializes_in_the_order_the_typescript_server_writes_it() {
+    fn the_outline_serializes_in_the_pinned_key_order() {
         let outline = PageOutline {
             page: "Project Atlas".into(),
             resolved_from: Some(ResolvedFrom { name: "atlas".into(), matched_by: "alias", resolved_to: "Project Atlas".into() }),

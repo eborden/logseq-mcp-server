@@ -227,7 +227,7 @@ pub fn record_goldens(dir: &Path, require_suggestion_cases: bool) -> Result<Reco
         broken.extend(missing_required_cases(&recording));
     }
     if !broken.is_empty() {
-        return Err(format!("nothing was recorded: the results break the closest-name rules of ADR-0032\n- {}", broken.join("\n- ")));
+        return Err(format!("nothing was recorded: the results break the closest-name rules of ADR-0034 Decision 4\n- {}", broken.join("\n- ")));
     }
 
     let mut out = RecordReport::default();

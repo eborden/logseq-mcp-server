@@ -298,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn a_year_before_1000_is_a_name_here_and_a_date_in_typescript() {
+    fn a_year_before_1000_is_a_plain_name_not_a_date() {
         // On purpose: a journal day is eight digits, so such a date is a plain name, which costs the leaf query and the suggestions
         // (`get_page_outline_calls.rs` counts them). The harness can't express an accepted
         // difference without weakening its comparison, so there is no parity case.
