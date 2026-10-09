@@ -9,12 +9,35 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// A source file that may make a `custom` error, and why its text is fixed.
-const ALLOWED: [(&str, &str); 1] = [
+const ALLOWED: [(&str, &str); 5] = [
+    ("src/args.rs", "reads the arguments a client sent, never a LogSeq answer (ADR-0004 is about the answer); its one visitor builds no error text"),
+    ("src/resolve/wire.rs", "hand-written row visitors whose only error is `invalid_length`, which the deserializer turns into fixed text"),
     ("src/tools/get_page_outline/wire.rs", "`TryFrom` with `type Error = &'static str`, and a `custom(\"...\")` with a literal"),
+    ("src/wire.rs", "hand-written visitors (`Id`, `Number`, `Object`, `Optional`) whose errors are `invalid_value` with a literal, which the deserializer turns into fixed text"),
+    ("src/wire/deserializer.rs", "defines `custom`, the one place a message is kept as given (`Problem::Other`), and says that only fixed text may be passed"),
 ];
 
 /// What makes a type able to put its own text in an error.
-const TOKENS: [&str; 5] = ["serde(try_from", "try_from = \"", "deserialize_with", "serde(with", "Error::custom("];
+///
+/// `::custom` and `.custom(` stand for every spelling of the call: `Error::custom(`, `E::custom(` through an alias
+/// or a generic parameter, `de::Error::custom` passed as a function value (`.map_err(de::Error::custom)`), and a
+/// method call. The `impl` and `Visitor` tokens catch a hand-written deserializer, which can build an error from
+/// a received value without ever writing `custom`. `fn custom` catches a type that defines its own `custom`.
+const TOKENS: [&str; 13] = [
+    "serde(try_from",
+    "try_from = \"",
+    "deserialize_with",
+    "serde(with",
+    "::custom",
+    ".custom(",
+    "fn custom",
+    "impl<'de> Deserialize",
+    "impl Deserialize",
+    "Deserialize<'de> for",
+    "Visitor<'de> for",
+    "Visitor<'_> for",
+    ".deserialize_any(",
+];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).unwrap() {
@@ -31,11 +54,21 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// The code of a file, without its tests and without comments.
-fn code(path: &Path) -> String {
-    let text = fs::read_to_string(path).unwrap();
+/// The code of a source text, without its tests and without comments.
+fn code_of(text: &str) -> String {
     let end = text.find("#[cfg(test)]\nmod tests").unwrap_or(text.len());
     text[..end].lines().filter(|line| !line.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n")
+}
+
+/// The code of a file, without its tests and without comments.
+fn code(path: &Path) -> String {
+    code_of(&fs::read_to_string(path).unwrap())
+}
+
+/// The tokens a source text holds, in `TOKENS` order.
+fn tokens_in(source: &str) -> Vec<&'static str> {
+    let code = code_of(source);
+    TOKENS.iter().copied().filter(|token| code.contains(token)).collect()
 }
 
 #[test]
@@ -48,8 +81,7 @@ fn only_the_listed_files_can_put_their_own_text_in_an_error() {
         if relative.ends_with("/reading.rs") {
             continue;
         }
-        let code = code(&file);
-        if TOKENS.iter().any(|token| code.contains(token)) {
+        if !tokens_in(&fs::read_to_string(&file).unwrap()).is_empty() {
             found.push(relative);
         }
     }
@@ -78,4 +110,71 @@ fn the_text_a_listed_type_gives_is_a_literal() {
     for (at, _) in outline.match_indices("return Err(") {
         assert!(outline[at + "return Err(".len()..].starts_with('"'), "an error from try_from must be a string literal");
     }
+}
+
+// The scan reads text, so each bypass below is a made-up source held in a string: no violating file is in the tree.
+
+#[test]
+fn the_scan_catches_a_custom_call_through_an_alias_or_a_generic_parameter() {
+    let source = "fn read<E: de::Error>(text: &str) -> E {\n    E::custom(format!(\"bad {text}\"))\n}\n";
+    assert!(tokens_in(source).contains(&"::custom"), "`E::custom(` has no `Error::custom(` in it, and must still be caught");
+}
+
+#[test]
+fn the_scan_catches_custom_passed_as_a_function() {
+    let source = "let id = parse(text).map_err(de::Error::custom)?;\n";
+    assert!(tokens_in(source).contains(&"::custom"), "`.map_err(de::Error::custom)` has no opening paren, and must still be caught");
+}
+
+#[test]
+fn the_scan_catches_custom_called_as_a_method() {
+    let source = "let error = issue.custom(received);\n";
+    assert!(tokens_in(source).contains(&".custom("), "a `.custom(` method call must be caught");
+}
+
+#[test]
+fn the_scan_catches_a_type_that_defines_its_own_custom() {
+    let source = "impl de::Error for Mine {\n    fn custom<T: fmt::Display>(message: T) -> Self {\n        Mine(message.to_string())\n    }\n}\n";
+    assert!(tokens_in(source).contains(&"fn custom"), "a second `custom` must be caught");
+}
+
+#[test]
+fn the_scan_catches_a_hand_written_deserialize_impl() {
+    for source in [
+        "impl<'de> Deserialize<'de> for Mine {\n    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> { todo!() }\n}\n",
+        "impl Deserialize for Mine {}\n",
+        "impl<'de, T: Deserialize<'de>> Deserialize<'de> for Wrapper<T> {}\n",
+    ] {
+        assert!(!tokens_in(source).is_empty(), "a manual `Deserialize` impl must be caught: {source}");
+    }
+}
+
+#[test]
+fn the_scan_catches_a_hand_written_visitor() {
+    for source in [
+        "impl<'de> Visitor<'de> for MineVisitor {\n    type Value = Mine;\n}\n",
+        "impl Visitor<'_> for MineVisitor {\n    type Value = Mine;\n}\n",
+        "let value = deserializer.deserialize_any(MineVisitor)?;\n",
+    ] {
+        assert!(!tokens_in(source).is_empty(), "a manual `Visitor` must be caught: {source}");
+    }
+}
+
+#[test]
+fn the_scan_still_catches_each_attribute_that_names_its_own_error() {
+    for source in ["#[serde(try_from = \"Raw\")]\n", "#[serde(deserialize_with = \"f\")]\n", "#[serde(with = \"m\")]\n"] {
+        assert!(!tokens_in(source).is_empty(), "an attribute that picks its own error must be caught: {source}");
+    }
+}
+
+#[test]
+fn the_scan_passes_ordinary_code() {
+    let source = "#[derive(Deserialize)]\nstruct Page {\n    name: String,\n}\n\nfn read(answer: &Value) -> Result<Page, ResponseError> {\n    wire::read(\"Editor.getPage\", answer)\n}\n";
+    assert_eq!(tokens_in(source), Vec::<&str>::new());
+}
+
+#[test]
+fn the_scan_ignores_comments_and_the_tests_module() {
+    let source = "// E::custom( is how a bad one looks\nfn fine() {}\n#[cfg(test)]\nmod tests {\n    fn t() { E::custom(\"x\") }\n}\n";
+    assert_eq!(tokens_in(source), Vec::<&str>::new());
 }
