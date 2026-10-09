@@ -7,7 +7,6 @@ use serde_json::Value;
 
 use crate::dates::{CalendarDate, DatePreset, resolve_date_preset};
 use crate::errors::InvalidParameter;
-use crate::js;
 
 /// The three groups of arguments that choose a range, as sent.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -37,7 +36,7 @@ const FORMAT: &str = "Date in YYYYMMDD format (8 digits, valid year/month/day)";
 /// The refusal of a date argument that is no whole number (a fraction, or beyond the largest safe
 /// integer): it is not in `YYYYMMDD` format, so it is worded as a date of the wrong format is.
 pub fn bad_date(param: &str, value: &Value, example: &str) -> InvalidParameter {
-    invalid(param, js::json_stringify(value), FORMAT, example)
+    invalid(param, value.to_string(), FORMAT, example)
 }
 
 // PARITY(#299): checks the day against 31 whatever the month, so `20250231` passes and the query asks for

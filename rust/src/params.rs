@@ -9,7 +9,6 @@
 use serde_json::{Map, Value};
 
 use crate::errors::{InvalidParameter, ToolError};
-use crate::js;
 
 /// Alternative names a tool accepts for a canonical parameter: `(canonical, aliases)`. They are
 /// not in the input schema, so they cost no tokens in `tools/list`. Best-effort, not a contract:
@@ -38,10 +37,10 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
                     out.insert((*canonical).to_owned(), args[*alias].clone());
                 }
                 Some(chosen_key) if !same_value(&args[chosen_key], &args[*alias]) => {
-                    let chosen_value = js::json_stringify(&args[chosen_key]);
+                    let chosen_value = args[chosen_key].to_string();
                     return Err(ToolError::InvalidParameter(InvalidParameter {
                         param: (*alias).to_owned(),
-                        value: js::json_stringify(&args[*alias]),
+                        value: args[*alias].to_string(),
                         expected: format!(
                             "the same value as '{chosen_key}' ({chosen_value}), or only one of them. '{alias}' is an alias of '{canonical}'"
                         ),
@@ -77,7 +76,7 @@ pub fn bad_string_param(param: &str, args: Option<&Map<String, Value>>) -> Inval
     let sent = args.and_then(|args| args.get(param)).filter(|value| !value.is_null());
     let (value, expected) = match sent {
         None => ("missing".to_owned(), "a string (required)".to_owned()),
-        Some(value) => (js::json_stringify(value), format!("a string, not {}", kind_of(value))),
+        Some(value) => (value.to_string(), format!("a string, not {}", kind_of(value))),
     };
     InvalidParameter { param: param.to_owned(), value, expected, example: Some(format!("{param}: \"...\"")) }
 }
@@ -164,7 +163,9 @@ mod tests {
             (json!(42), "42", "a number"),
             (json!(true), "true", "a boolean"),
             (json!(["a"]), "[\"a\"]", "an array"),
-            (json!({"b": 1, "1": 2}), "{\"1\":2,\"b\":1}", "an object"),
+            (json!({"b": 1, "1": 2}), "{\"b\":1,\"1\":2}", "an object"),
+            // a number is written as serde writes it, not as JavaScript does (`100000000000000000000`)
+            (json!(1e20), "1e+20", "a number"),
             (json!(1e21), "1e+21", "a number"),
         ] {
             let error = bad_string_param("page_name", args(json!({ "page_name": sent })).as_ref());

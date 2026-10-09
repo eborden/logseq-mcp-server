@@ -339,7 +339,7 @@ fn topic_warning(context: &TopicContext, topic: &str) -> QueryWarning {
     .about(topic)
     .how_to_fetch_all(format!(
         "Call logseq_build_context with topic_name {} and raise max_blocks ({}), max_references ({}) and max_related_pages ({}).",
-        js::json_stringify(&json!(topic)),
+        json!(topic).to_string(),
         totals.blocks,
         totals.references,
         totals.related_pages
@@ -362,7 +362,7 @@ fn topic_unavailable_warning(context: &TopicContext, topic: &str) -> Option<Quer
                 "LogSeq returned no answer to part of the context for \"{topic}\" ({}), so part of this topic's context could not be \
                  read and what is shown may be incomplete. Call logseq_build_context with topic_name {} for the warnings that say which part. {RETRY_ADVICE}",
                 codes.join(", "),
-                js::json_stringify(&json!(topic))
+                json!(topic).to_string()
             ),
         )
         .about(topic),
@@ -371,7 +371,7 @@ fn topic_unavailable_warning(context: &TopicContext, topic: &str) -> Option<Quer
 
 /// The keyword search was not answered: `searchResults` is `[]`, but not because nothing matches.
 fn search_unavailable(keywords: &[String]) -> QueryWarning {
-    let listed: Vec<String> = keywords.iter().map(|keyword| js::json_stringify(&json!(keyword))).collect();
+    let listed: Vec<String> = keywords.iter().map(|keyword| json!(keyword).to_string()).collect();
     QueryWarning::new(
         "search_unavailable",
         format!(

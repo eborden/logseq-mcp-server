@@ -30,7 +30,9 @@ pub enum Scalar {
 }
 
 impl Scalar {
-    /// `String(value)`, as JavaScript writes it: a number as `Number#toString` does (`3`, not `3.0`).
+    /// `String(value)`, as JavaScript writes it: a number as `Number#toString` does (`3`, not `3.0`). This is not
+    /// parity code: the value is matched against a property LogSeq stored, and LogSeq is ClojureScript, so its
+    /// `(str ?v)` spells a number the JavaScript way.
     pub fn to_js_string(&self) -> String {
         match self {
             Scalar::Text(text) => text.clone(),
@@ -106,7 +108,7 @@ impl<'a> Arguments<'a> {
         if text.encode_utf16().count() > max {
             return Err(InvalidParameter {
                 param: param.to_owned(),
-                value: js::json_stringify(&Value::String(text)),
+                value: Value::String(text).to_string(),
                 expected: format!("Too big: expected string to have <={max} characters"),
                 example: None,
             });
@@ -120,8 +122,8 @@ impl<'a> Arguments<'a> {
         match self.optional_enum(param, values)? {
             Some(value) => Ok(value),
             None => {
-                let shown: Vec<String> = values.iter().map(|value| js::json_stringify(&Value::from(*value))).collect();
-                let example = values.last().map(|last| format!("{param}: {}", js::json_stringify(&Value::from(*last))));
+                let shown: Vec<String> = values.iter().map(|value| Value::from(*value).to_string()).collect();
+                let example = values.last().map(|last| format!("{param}: {}", Value::from(*last).to_string()));
                 Err(InvalidParameter { param: param.to_owned(), value: "missing".to_owned(), expected: format!("one of {}", shown.join(", ")), example })
             }
         }
@@ -135,8 +137,8 @@ impl<'a> Arguments<'a> {
         if let Some(value) = sent.as_str().and_then(|text| values.iter().find(|value| **value == text)) {
             return Ok(Some(value));
         }
-        let shown: Vec<String> = values.iter().map(|value| js::json_stringify(&Value::from(*value))).collect();
-        let example = values.last().map(|last| format!("{param}: {}", js::json_stringify(&Value::from(*last))));
+        let shown: Vec<String> = values.iter().map(|value| Value::from(*value).to_string()).collect();
+        let example = values.last().map(|last| format!("{param}: {}", Value::from(*last).to_string()));
         Err(wrong(param, sent, format!("one of {}", shown.join(", ")), example))
     }
 
@@ -227,7 +229,7 @@ fn not_whole(param: &str, value: &Value, why: NotWhole, example: &str) -> Invali
 }
 
 fn wrong(param: &str, value: &Value, expected: String, example: Option<String>) -> InvalidParameter {
-    InvalidParameter { param: param.to_owned(), value: js::json_stringify(value), expected, example }
+    InvalidParameter { param: param.to_owned(), value: value.to_string(), expected, example }
 }
 
 /// What a value is, in the words of the `Expected:` line (`kindOf`).
@@ -294,7 +296,7 @@ mod tests {
         // a tool can word the refusal itself, and still gets the value and why
         let own = read.optional_whole_or("b", |value, why| InvalidParameter {
             param: "b".to_owned(),
-            value: js::json_stringify(value),
+            value: value.to_string(),
             expected: format!("{why:?}"),
             example: None,
         });
