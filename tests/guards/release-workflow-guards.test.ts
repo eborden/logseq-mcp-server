@@ -20,7 +20,10 @@ const STATUS_FUNCTION = /\b(?:always|cancelled|failure|success)\s*\(/;
 const GH_RELEASE = (verbs: string) => new RegExp(`\\bgh\\b[^\\n]*\\brelease\\s+(?:${verbs})\\b`);
 const PINNED_ACTION = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./-]+@[0-9a-f]{40}$/;
 const WRITE_PERMISSIONS = ['contents', 'id-token', 'attestations'];
+// The one step that may end in `|| true`: it only prints, and the exemption holds for exactly this script, so a later
+// edit can't put other commands under the name.
 const SIGNATURE_STEP = 'Show the macOS signature';
+const SIGNATURE_RUN = 'codesign --display --verbose=2 "dist/logseq-mcp-server-${VERSION}-${TARGET}" 2>&1 || true';
 
 /** Workflow text without comment-only lines, with `\` line continuations joined: what a shell would read. */
 function commandText(source: string): string {
@@ -139,7 +142,7 @@ function releaseWorkflowProblems(source: string): string[] {
       const run = commandText(step.map.get('run')?.value ?? '');
       if (/\bset\s+\+(?:e|o\s+errexit)\b/.test(run)) problems.push(`${label} turns off errexit`);
       // The one exception: the codesign display, which only prints and exits non-zero for an unsigned x86_64 binary
-      if (/\|\|\s*(?:true|:|exit\s+0)(?:\s|;|$)/.test(run) && step.map.get('name')?.value !== SIGNATURE_STEP) problems.push(`${label} swallows a failure with || true`);
+      if (/\|\|\s*(?:true|:|exit\s+0)(?:\s|;|$)/.test(run) && !(step.map.get('name')?.value === SIGNATURE_STEP && (step.map.get('run')?.value ?? '').trim() === SIGNATURE_RUN)) problems.push(`${label} swallows a failure with || true`);
     }
   }
 
@@ -269,6 +272,17 @@ describe('ADR-0035: release.yml is manual, main-only, dry-run by default and dra
       }
       const off = changed(gate, '        run: |\n          set +e\n          cargo test --release --locked --target "$TARGET" --lib\n');
       expect(releaseWorkflowProblems(off).join('\n')).toMatch(/turns off errexit/);
+    });
+
+    it('changes the script of the codesign step that is allowed to end in || true', () => {
+      const run = '        run: codesign --display --verbose=2 "dist/logseq-mcp-server-${VERSION}-${TARGET}" 2>&1 || true\n';
+      expect(releaseWorkflowProblems(source)).toEqual([]);
+      const added = changed(run, '        run: |\n          codesign --display --verbose=2 "dist/logseq-mcp-server-${VERSION}-${TARGET}" 2>&1 || true\n          cargo test --release --lib || true\n');
+      expect(releaseWorkflowProblems(added).join('\n')).toMatch(/swallows a failure with \|\| true/);
+      const swapped = changed(run, '        run: cargo test --release --locked --lib || true\n');
+      expect(releaseWorkflowProblems(swapped).join('\n')).toMatch(/swallows a failure with \|\| true/);
+      const renamed = changed('      - name: Show the macOS signature\n', '      - name: Show something else\n');
+      expect(releaseWorkflowProblems(renamed).join('\n')).toMatch(/swallows a failure with \|\| true/);
     });
 
     it('sets shell: on a step, which can drop the fail-fast flags', () => {
