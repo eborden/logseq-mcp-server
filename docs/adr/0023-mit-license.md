@@ -23,4 +23,5 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `tests/guards/package-metadata.test.ts` (package.json license is MIT and the LICENSE file starts with the MIT header, and ships in files)
+- test: `tests/guards/package-metadata.test.ts` (package.json license is MIT and the LICENSE file starts with the MIT header)
+- test: `tests/guards/release-assets.test.ts` (the LICENSE ships as a release asset: release.yml copies it into the release set, lists it in SHA256SUMS and uploads it with the draft release, and the repository's LICENSE is the MIT text)
