@@ -1,0 +1,281 @@
+name: Rust mutation testing (full runs and proofs)
+
+# The long runs of cargo-mutants on the Rust server (ADR-0033, #364): a proof run, a full run, and a calibration run. PR 1 of
+# #364: they measure and report, and nothing gates yet.
+#
+# `schedule` and `workflow_dispatch` only run for a workflow file on the default branch, and `main` is frozen until the cutover
+# merge. So until this file is on `main` it is started by a label on a pull request, which GitHub runs from the PR's merge
+# commit. Labels are applied only by someone with write access, one at a time (the jobs below share one concurrency group, so a
+# second label waits for the first and a third replaces the second; the CPU rule is one run of the tool at a time):
+#
+#   mutation-proof      the PR's own plan, for the changed sources and edited tests the PR job left out, with no budget and
+#                       the same BASE_SHA (the merge commit's first parent). Uploads rust-mutation-proof-<head sha>, which
+#                       lists the files it measured.
+#   mutation-full       every mutant of the crate, whole files, in FULL_RUN_SLICES chained slices (a matrix of one at a time).
+#                       Uploads rust-mutation-full-<head sha>-slice-<n>, which lists the files it covered. The backstop for what
+#                       the PR job can't see: a weakened test under rust/tests/, an edit that weakens another region, load.
+#   mutation-calibrate  one small sample of mutants run at --jobs 1 and 2, with and without the tool copying the restored
+#                       target/ into its scratch trees. Measurement only (#364 PR 1): it sets MUTANT_JOBS and copy_target.
+#
+# Once this file is on `main`, a cron here gives the schedule (one slice a night, so every file is measured at least once a
+# week) and `workflow_dispatch` starts a full run by hand. Adding the cron is a later step.
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '17 3 * * *'   # a later step, once this file reaches main (ADR-0033 "Full runs")
+
+permissions:
+  contents: read
+
+# The three labelled kinds and a manual run share one group, so two runs of the tool never overlap. Any other label on any PR
+# starts a run whose jobs are all skipped; it gets a group of its own so it can't replace a queued run of the three.
+concurrency:
+  group: ${{ (github.event_name == 'workflow_dispatch' || contains(fromJSON('["mutation-proof","mutation-full","mutation-calibrate"]'), github.event.label.name)) && 'rust-mutation-cpu' || format('rust-mutation-other-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+jobs:
+  slices:
+    name: Slices of a full run
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'mutation-full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      slices: ${{ steps.count.outputs.slices }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Count the slices from limits.env
+        id: count
+        run: |
+          count="$(sed -n 's/^FULL_RUN_SLICES=//p' rust/mutation-ratchet/limits.env)"
+          echo "slices=[$(seq -s, 0 $((count - 1)))]" >> "$GITHUB_OUTPUT"
+
+  full:
+    name: Full run, slice ${{ matrix.slice }}
+    needs: slices
+    runs-on: ubuntu-latest
+    # A job is limited to 6 hours. The slice count (FULL_RUN_SLICES) is raised if a cold slice doesn't fit.
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      # One slice at a time, so slices never overlap.
+      max-parallel: 1
+      matrix:
+        slice: ${{ fromJSON(needs.slices.outputs.slices) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The long jobs build into a scratch copy for hours. The hosted runner's disk is small, and a runner that fills it is lost
+      # without a log. The preinstalled toolchains nobody here uses are the easy gigabytes.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: ./.github/actions/rust-mutation-setup
+
+      - name: Plan the slice
+        run: |
+          mkdir -p "${RUNNER_TEMP}/plan"
+          "${RATCHET}" full-plan --repo . --out "${RUNNER_TEMP}/plan" --index "${SLICE}"
+          cat "${RUNNER_TEMP}/plan/summary.md" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SLICE: ${{ matrix.slice }}
+
+      - name: Mutate the slice
+        run: rust/mutation-ratchet/run-plan.sh "${RUNNER_TEMP}/plan" "${RUNNER_TEMP}/results"
+
+      - name: Report
+        run: |
+          mkdir -p "${RUNNER_TEMP}/report"
+          status=0
+          "${RATCHET}" report \
+            --plan "${RUNNER_TEMP}/plan/plan.json" --results "${RUNNER_TEMP}/results" --out "${RUNNER_TEMP}/report" \
+            --head "${HEAD_SHA}" --tool-version "${MUTANTS_TOOL_VERSION}" > /dev/null || status=$?
+          cat "${RUNNER_TEMP}/report/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          dir="${RUNNER_TEMP}/results/whole/"
+          if [ -f "${dir}mutants.out/outcomes.json" ]; then
+            {
+              printf '\n### Measurements\n\n'
+              "${RATCHET}" measure \
+                --label "slice-${SLICE}" --outcomes "${dir}mutants.out/outcomes.json" --wall "$(cat "${dir}wall")"
+              printf '\n### Seconds per test binary in the unmutated baseline\n\n```\n'
+              "${RATCHET}" test-times --log "${dir}mutants.out/log/baseline.log"
+              printf '```\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "${status}"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SLICE: ${{ matrix.slice }}
+
+      # Counts and the tool's own lists of what it caught, missed and timed out: no log, no diff (BR-0001). Never pasted anywhere.
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-mutation-full-${{ github.event.pull_request.head.sha || github.sha }}-slice-${{ matrix.slice }}
+          path: |
+            ${{ runner.temp }}/plan/plan.json
+            ${{ runner.temp }}/plan/summary.md
+            ${{ runner.temp }}/report/report.json
+            ${{ runner.temp }}/report/measured-files.json
+            ${{ runner.temp }}/results/*/exit
+            ${{ runner.temp }}/results/*/wall
+            ${{ runner.temp }}/results/*/mutants.out/outcomes.json
+            ${{ runner.temp }}/results/*/mutants.out/missed.txt
+            ${{ runner.temp }}/results/*/mutants.out/timeout.txt
+            ${{ runner.temp }}/results/*/mutants.out/unviable.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  proof:
+    name: Proof of the left-out changed sources
+    if: github.event.label.name == 'mutation-proof'
+    runs-on: ubuntu-latest
+    # A proof run has no budget; this is the job limit minus a margin.
+    timeout-minutes: 350
+    steps:
+      # The merge commit and both parents: BASE_SHA is the first parent, the same one the PR job used.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      # The long jobs build into a scratch copy for hours. The hosted runner's disk is small, and a runner that fills it is lost
+      # without a log. The preinstalled toolchains nobody here uses are the easy gigabytes.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: ./.github/actions/rust-mutation-setup
+
+      # The PR job's plan, with the same limits.env (so the same budget), is what decides which files it left out. The proof
+      # plan is those files, measured with no budget.
+      - name: Plan the proof
+        run: |
+          mkdir -p "${RUNNER_TEMP}/plan"
+          "${RATCHET}" plan --repo . --out "${RUNNER_TEMP}/plan" --proof
+          cat "${RUNNER_TEMP}/plan/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "${RUNNER_TEMP}/plan/plan.env" >> "$GITHUB_ENV"
+
+      - name: Mutate what the PR job left out
+        if: env.NOTHING_SELECTED != 'true'
+        run: rust/mutation-ratchet/run-plan.sh "${RUNNER_TEMP}/plan" "${RUNNER_TEMP}/results"
+
+      - name: Report
+        run: |
+          mkdir -p "${RUNNER_TEMP}/report"
+          status=0
+          "${RATCHET}" report \
+            --plan "${RUNNER_TEMP}/plan/plan.json" --results "${RUNNER_TEMP}/results" --out "${RUNNER_TEMP}/report" \
+            --head "${HEAD_SHA}" --tool-version "${MUTANTS_TOOL_VERSION}" > /dev/null || status=$?
+          cat "${RUNNER_TEMP}/report/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          for dir in "${RUNNER_TEMP}"/results/*/; do
+            if [ -f "${dir}mutants.out/outcomes.json" ]; then
+              {
+                printf '\n### Measurements: %s\n\n' "$(basename "${dir}")"
+                "${RATCHET}" measure \
+                  --label "$(basename "${dir}")" --outcomes "${dir}mutants.out/outcomes.json" --wall "$(cat "${dir}wall")"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          exit "${status}"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+      # The ratchet accepts a proof (PR 2) only if the run succeeded, it is a run of this workflow, the artifact hasn't expired,
+      # its name is built from the PR's head commit, it is the newest for that commit, and measured-files.json lists every
+      # left-out changed source. An empty proof (nothing was left out) uploads an empty list, so the label can always be applied.
+      - name: Keep the proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-mutation-proof-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/plan/plan.json
+            ${{ runner.temp }}/plan/summary.md
+            ${{ runner.temp }}/report/report.json
+            ${{ runner.temp }}/report/measured-files.json
+            ${{ runner.temp }}/results/*/exit
+            ${{ runner.temp }}/results/*/wall
+            ${{ runner.temp }}/results/*/mutants.out/outcomes.json
+            ${{ runner.temp }}/results/*/mutants.out/missed.txt
+            ${{ runner.temp }}/results/*/mutants.out/timeout.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  calibrate:
+    name: Calibration of the job count, the target copy and incremental builds
+    if: github.event.label.name == 'mutation-calibrate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      # One in SHARDS of the crate's mutants, taken round-robin (`--sharding round-robin --shard 0/SHARDS`) so the sample has the
+      # real mix of fast, slow and unviable mutants and not the first 1% of the source. Small enough to run a few times.
+      SHARDS: '100'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust-mutation-setup
+
+      # Three runs of the same sample, one after another, all with incremental builds on (the first calibration, with the cache
+      # not restored, measured them at about half the seconds per mutant of builds without, and --jobs 2 no faster than --jobs 1).
+      # What these change: whether the tool copies the restored target/ into its scratch trees (the baseline's build time, which
+      # the first calibration couldn't show because its dependency cache wasn't restored), and --jobs. A run that breaks fails
+      # the job.
+      - name: Run the sample three ways
+        run: |
+          mkdir -p "${RUNNER_TEMP}/calibrate"
+          printf '## Calibration of one in %s of the mutants\n' "${SHARDS}" >> "$GITHUB_STEP_SUMMARY"
+          calibrate() {
+            local label="$1" jobs="$2" copy="$3" incremental="$4"
+            local dir="${RUNNER_TEMP}/calibrate/${label}" code=0 start
+            start="$(date +%s)"
+            (cd rust && CARGO_INCREMENTAL="${incremental}" cargo mutants --sharding round-robin --shard "0/${SHARDS}" \
+              --jobs "${jobs}" --copy-target="${copy}" --no-shuffle --colors never --output "${dir}") || code=$?
+            local wall=$(($(date +%s) - start))
+            echo "cargo mutants (${label}) exited ${code} after ${wall} s"
+            case "${code}" in
+              0 | 2 | 3) ;;
+              *)
+                echo "::error::the ${label} calibration run broke (exit ${code})"
+                return 1
+                ;;
+            esac
+            {
+              printf '\n### %s (jobs %s, copy target %s, CARGO_INCREMENTAL=%s)\n\n' "${label}" "${jobs}" "${copy}" "${incremental}"
+              "${RATCHET}" measure \
+                --label "${label}" --outcomes "${dir}/mutants.out/outcomes.json" --wall "${wall}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+          calibrate j1-nocopy-inc1 1 false 1
+          calibrate j1-copy-inc1 1 true 1
+          calibrate j2-copy-inc1 2 true 1
+          {
+            printf '\n### Seconds per test binary in the unmutated baseline (from the first run)\n\n```\n'
+            "${RATCHET}" test-times \
+              --log "${RUNNER_TEMP}/calibrate/j1-nocopy-inc1/mutants.out/log/baseline.log"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the calibration
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-mutation-calibrate-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/calibrate/*/mutants.out/outcomes.json
+          if-no-files-found: ignore
+          retention-days: 14

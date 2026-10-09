@@ -1,0 +1,103 @@
+name: Rust mutation testing
+
+# Mutation testing of the Rust server with cargo-mutants, on a pull request's own changes (ADR-0033, #364). PR 1 of #364:
+# the job measures and reports, and nothing gates yet (the baseline and the ratchet are PR 2).
+#
+# Nobody runs cargo-mutants on a developer machine, agents included (ADR-0033 "Quiet by construction"). It runs here, in one
+# job per run, with at most MUTANT_JOBS (2) mutants in flight, and a superseded run is cancelled. There is no push trigger and
+# no results cache: a pull request run already tests the merge with its base, and an incremental results cache can't back a
+# gate (`--iterate` is a heuristic). The dependency-build cache the Cargo job saves is restored, never saved, by the shared
+# setup action.
+#
+# What a run measures comes from the PR's own diff (rust/mutation-ratchet, `plan`): the mutants on the changed code outside any
+# `#[cfg(test)]` item (`--in-diff`), the whole file of a source whose own test items lost or edited a line (`--file`), and the
+# whole file of a changed baseline entry. What doesn't fit the budget is named in the summary as left out. An empty plan
+# says in words that nothing was mutated. The constants are in rust/mutation-ratchet/limits.env, which this job and the proof
+# run (rust-mutation-full.yml) both read, with the arithmetic that gives MUTANT_BUDGET.
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - '.github/actions/rust-mutation-setup/**'
+      - '.github/workflows/rust-mutation.yml'
+      - '.github/workflows/rust-mutation-full.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-mutation-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: Mutants in the changed code
+    runs-on: ubuntu-latest
+    # Repeated as a literal because a job can't read the environment for this key; limits.env holds the number and a test in
+    # rust/mutation-ratchet holds the two equal. The mutation budget below is computed from it.
+    timeout-minutes: 20
+    steps:
+      # Two commits of history: the merge commit that was checked out and both of its parents. BASE_SHA below is the first
+      # parent (HEAD^1), never github.event.pull_request.base.sha, which is older once the base branch has moved and then
+      # gives a diff that doesn't match the tree (exit 5) or puts mutants on the wrong lines (ADR-0033 "The diff base is exact").
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: ./.github/actions/rust-mutation-setup
+        with:
+          run-package-tests: 'true'
+
+      - name: Plan what this pull request's run measures
+        run: |
+          mkdir -p "${RUNNER_TEMP}/plan"
+          "${RATCHET}" plan --repo . --out "${RUNNER_TEMP}/plan"
+          cat "${RUNNER_TEMP}/plan/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "${RUNNER_TEMP}/plan/plan.env" >> "$GITHUB_ENV"
+
+      # Up to two calls of the tool: one by changed lines, one by whole file. Each is run with --jobs MUTANT_JOBS, one after the
+      # other, and its exit code is recorded for the report step (rust/mutation-ratchet/run-plan.sh).
+      - name: Mutate what the plan selected
+        if: env.NOTHING_SELECTED != 'true'
+        run: rust/mutation-ratchet/run-plan.sh "${RUNNER_TEMP}/plan" "${RUNNER_TEMP}/results"
+
+      # Exit 0, 2 and 3 are results (clean, missed mutants, timeouts), not failures. 1, 4, 5, 6, 70, a signal and a missing or
+      # malformed outcomes.json fail the job: the run didn't measure what it was asked to (rust/mutation-ratchet, `exit`).
+      - name: Report
+        run: |
+          mkdir -p "${RUNNER_TEMP}/report"
+          status=0
+          "${RATCHET}" report \
+            --plan "${RUNNER_TEMP}/plan/plan.json" --results "${RUNNER_TEMP}/results" --out "${RUNNER_TEMP}/report" \
+            --head "${HEAD_SHA}" --tool-version "${MUTANTS_TOOL_VERSION}" > /dev/null || status=$?
+          cat "${RUNNER_TEMP}/report/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          for dir in "${RUNNER_TEMP}"/results/*/; do
+            if [ -f "${dir}mutants.out/outcomes.json" ]; then
+              {
+                printf '\n### Measurements: %s\n\n' "$(basename "${dir}")"
+                "${RATCHET}" measure \
+                  --label "$(basename "${dir}")" --outcomes "${dir}mutants.out/outcomes.json" --wall "$(cat "${dir}wall")"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          exit "${status}"
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+      # Only counts and the tool's own listing of what it caught and missed: no log, no diff (BR-0001). Never pasted anywhere.
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-mutation-pr-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/plan/plan.json
+            ${{ runner.temp }}/plan/summary.md
+            ${{ runner.temp }}/report/report.json
+            ${{ runner.temp }}/results/*/exit
+            ${{ runner.temp }}/results/*/mutants.out/outcomes.json
+            ${{ runner.temp }}/results/*/mutants.out/missed.txt
+            ${{ runner.temp }}/results/*/mutants.out/timeout.txt
+          if-no-files-found: ignore
+          retention-days: 14

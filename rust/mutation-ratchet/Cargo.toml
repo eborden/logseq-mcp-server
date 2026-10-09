@@ -1,0 +1,24 @@
+[package]
+name = "mutation-ratchet"
+version = "0.1.0"
+edition = "2024"
+# The server's toolchain: rust/rust-toolchain.toml, which rustup finds from this directory too.
+rust-version = "1.88"
+publish = false
+description = "The plan and the ratchet for cargo-mutants runs on the server crate (ADR-0033, #364). Not part of the server's dependency tree."
+
+# Its own workspace root. The server's Cargo.toml has no [workspace], so without this table cargo would look one level up
+# and the two packages would be separate only by accident. This keeps the lockfile, the target directory and every
+# dependency of this package apart from the server's, and the server's jobs never build it.
+[workspace]
+
+[dependencies]
+# JSON in and out: cargo-mutants' `outcomes.json` and `--list --json`, the baseline and the plan. Both are already in the
+# server's tree, at the versions this lockfile pins.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Reads a source file to find its `#[cfg(test)]` items and the lines they span, the way cargo-mutants does (it uses syn),
+# so the plan's regions agree with the tool's. Already in the server's tree (2.0.119, under serde_derive and others).
+# proc-macro2's `span-locations` is what gives a parsed item its line numbers outside a proc macro.
+syn = { version = "2", default-features = false, features = ["full", "parsing", "printing", "visit", "clone-impls"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
