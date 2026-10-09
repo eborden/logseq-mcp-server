@@ -123,6 +123,8 @@ A format with a slash, as in `EEE, MM/dd/yyyy` above, also has a cost: LogSeq re
 
 Build every summary from `logseq_query_by_date_range`, after loading the tools and calling `logseq_get_graph_info` (Step 0 of the sub-skill). A journal file is a fallback for a tool call that has actually failed: you made the call and it returned an error, or the server wouldn't connect. These are not failures: the tool is deferred and needs a search to load, a search took a call, or files looked easier. Load the tool.
 
+One read is allowed besides the query: the single `:journal/page-title-format` key in `<graph>/logseq/config.edn`, for the day-link format (see "Journal Day Links"). It is a config file, not a journal, and it can come after the period query. It is not a licence to open `journals/` or `pages/`.
+
 If a call did fail:
 
 - **Say so.** Put the error in the gist, write `summary-source:: files; <the error>` where the roll-up line goes, and pass `--allow-files` to the gate.
