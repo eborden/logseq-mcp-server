@@ -110,8 +110,8 @@ fn unavailable_warning(set: &AliasSet) -> Option<ResultWarning> {
         "alias_lookup_unavailable",
         format!(
             "LogSeq returned no answer when looking up the aliases of \"{name}\" (possibly no graph open or a \
-             re-index in progress), so only the page itself was used and references written under its other \
-             names may be missing. This does not mean the page has no aliases. {RETRY_ADVICE}"
+             re-index in progress), so references written under its other names may be missing. \
+             This does not mean it has no aliases. {RETRY_ADVICE}"
         ),
     ))
 }
@@ -308,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unavailable_lookup_says_so_and_a_cut_one_still_says_that() {
+    fn an_unavailable_lookup_says_so_and_is_never_also_reported_as_cut() {
         let unavailable = AliasSet { unavailable: Some("Atlas".to_owned()), ..AliasSet::single(&page(json!({"id": 1, "name": "atlas", "original-name": "Atlas"}))) };
         let warnings = alias_set_warnings(&[&unavailable]);
         let [warning] = &warnings[..] else { panic!("one warning") };
@@ -316,12 +316,17 @@ mod tests {
         assert_eq!(
             warning.message,
             "LogSeq returned no answer when looking up the aliases of \"Atlas\" (possibly no graph open or a re-index in \
-             progress), so only the page itself was used and references written under its other names may be missing. \
-             This does not mean the page has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+             progress), so references written under its other names may be missing. \
+             This does not mean it has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."
         );
         assert_eq!(warning.how_to_fetch_all, None);
         // the set is the page alone, so no names are reported as covered
         assert_eq!(unavailable.resolved_aliases(), None);
+        // a set that is somehow both is reported once, as unavailable, and a cut set alone is still `alias_set_truncated`
+        let both = AliasSet { truncated: true, ..unavailable.clone() };
+        assert_eq!(alias_set_warnings(&[&both]).iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["alias_lookup_unavailable"]);
+        let cut = AliasSet { truncated: true, ..AliasSet::single(&page(json!({"id": 1, "name": "atlas", "original-name": "Atlas"}))) };
+        assert_eq!(alias_set_warnings(&[&cut]).iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["alias_set_truncated"]);
     }
 
     #[test]

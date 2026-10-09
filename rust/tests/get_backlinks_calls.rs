@@ -218,8 +218,8 @@ async fn a_null_answer_to_the_alias_lookup_warns_and_the_editor_call_reads_the_p
         meta,
         concat!(
             r#"{"hasMore":false,"warnings":[{"code":"alias_lookup_unavailable","message":"LogSeq returned no answer when looking up the aliases of \"Atlas\" "#,
-            r#"(possibly no graph open or a re-index in progress), so only the page itself was used and references written under its other names may be missing. "#,
-            r#"This does not mean the page has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}]}"#
+            r#"(possibly no graph open or a re-index in progress), so references written under its other names may be missing. "#,
+            r#"This does not mean it has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}]}"#
         )
     );
 }
