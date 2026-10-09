@@ -392,10 +392,9 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
     let mut summary = Map::new();
     summary.insert("totalDays".to_owned(), Value::from(all_entries.len()));
     summary.insert("totalBlocks".to_owned(), Value::from(total_blocks));
-    // PARITY(#299): an empty `search_term` is no search, yet it is echoed here, since only an absent one is
-    // `undefined` (suspected TS bug) — drop if Rust becomes the only server.
-    if let Some(term) = &args.search_term {
-        summary.insert("searchTerm".to_owned(), Value::from(term.as_str()));
+    // An empty `search_term` is no search, so it is not echoed
+    if let Some(term) = search_term {
+        summary.insert("searchTerm".to_owned(), Value::from(term));
     }
     let top = if args.top_concepts_limit > 0 {
         let top = roll_up_top_concepts(
