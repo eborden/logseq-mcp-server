@@ -118,7 +118,7 @@ async fn a_null_page_list_is_not_an_empty_one() {
 #[tokio::test]
 async fn a_search_costs_one_call_and_binds_its_text_with_in() {
     let logseq = mock_logseq(vec![json!([block(2, "an a.b match", 5), block(9, "a newer a.b match", 5)])]).await;
-    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "a.b (x)", None, false, true).await.unwrap().unwrap();
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "a.b (x)", None, false, true).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
     let seen = logseq.seen.lock().unwrap();
@@ -140,7 +140,7 @@ async fn context_costs_one_more_call_for_the_pages_of_the_hits_kept_only() {
         json!([page(5)]),
     ])
     .await;
-    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", Some(2), true, true).await.unwrap().unwrap();
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", Some(2), true, true).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery"]);
     let seen = logseq.seen.lock().unwrap();
@@ -155,7 +155,7 @@ async fn context_costs_one_more_call_for_the_pages_of_the_hits_kept_only() {
 #[tokio::test]
 async fn a_null_context_lookup_is_a_warning_and_an_empty_one_is_not() {
     let logseq = mock_logseq(vec![json!([block(1, "text", 5), block(2, "more", 5)]), json!(null)]).await;
-    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, true, true).await.unwrap().unwrap();
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, true, true).await.unwrap();
     assert_eq!(found.results.len(), 2);
     assert!(found.results.iter().all(|result| result.get("context").is_none()));
     assert_eq!(found.meta.warnings.len(), 1);
@@ -165,7 +165,7 @@ async fn a_null_context_lookup_is_a_warning_and_an_empty_one_is_not() {
 
     // a real `[]` is pages not found, with no warning
     let logseq = mock_logseq(vec![json!([block(1, "text", 5)]), json!([])]).await;
-    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, true, true).await.unwrap().unwrap();
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, true, true).await.unwrap();
     assert!(found.meta.warnings.is_empty());
     assert!(found.results[0].get("context").is_none());
 }
@@ -173,19 +173,57 @@ async fn a_null_context_lookup_is_a_warning_and_an_empty_one_is_not() {
 #[tokio::test]
 async fn context_costs_no_call_when_no_hit_has_a_page_id() {
     let logseq = mock_logseq(vec![json!([[{"id": 1, "uuid": "u1", "content": "text"}]])]).await;
-    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "text", None, true, false).await.unwrap().unwrap();
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "text", None, true, false).await.unwrap();
     assert_eq!(methods(&logseq).len(), 1);
     assert!(found.results[0].get("context").is_none());
 }
 
+// BR-0011 (#415): a `null` answer to the search is `[]` and a warning, and no match is `[]` and none
 #[tokio::test]
-async fn a_null_answer_is_none_and_no_match_is_an_empty_result() {
+async fn a_null_answer_is_an_unavailable_warning_and_no_match_is_an_empty_result_without_one() {
     let logseq = mock_logseq(vec![json!(null)]).await;
-    assert!(search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, false, true).await.unwrap().is_none());
-    let logseq = mock_logseq(vec![json!([])]).await;
-    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, false, true).await.unwrap().unwrap();
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, false, true).await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
     assert!(found.results.is_empty());
+    assert!(found.is_unavailable());
+    assert_eq!(found.matches(), None, "no total is known, so none is claimed");
+    assert_eq!(found.meta.warnings.len(), 1);
+    assert_eq!(found.meta.warnings[0].code, "search_unavailable");
+    assert!(found.meta.warnings[0].message.contains(r#"blocks that contain "x""#));
+    assert!(!found.meta.has_more && found.meta.warnings[0].how_to_fetch_all.is_none());
+
+    let logseq = mock_logseq(vec![json!([])]).await;
+    let found = search_blocks::search_blocks_with_meta(&client(&logseq), "x", None, false, true).await.unwrap();
+    assert!(found.results.is_empty());
+    assert!(!found.is_unavailable());
+    assert!(found.meta.warnings.is_empty());
     assert_eq!(found.matches(), Some(0));
+}
+
+// BR-0011, BR-0013 (#415): the text of both content blocks, in key order, and no tip for a search that was not answered
+#[tokio::test]
+async fn a_null_answer_to_the_search_is_written_as_an_empty_list_and_a_warning_with_no_tip() {
+    let logseq = mock_logseq(vec![json!(null)]).await;
+    let result = search_blocks::call(&client(&logseq), true, json!({"query": "x\"y"}).as_object().cloned()).await.unwrap();
+    let content = serde_json::to_value(&result).unwrap()["content"].clone();
+
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"], "one call, as for any search");
+    assert_eq!(content.as_array().unwrap().len(), 2);
+    assert_eq!(content[0]["text"], "[]");
+    assert_eq!(
+        content[1]["text"],
+        r#"{"meta":{"hasMore":false,"warnings":[{"code":"search_unavailable","message":"LogSeq returned no answer when looking up blocks that contain \"x\\\"y\" (possibly no graph open or a re-index in progress), so the empty list may not mean nothing matches. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}],"totals":{}}}"#
+    );
+
+    // a real `[]` has no warning, and gets its usual "No match" tip
+    let logseq = mock_logseq(vec![json!([])]).await;
+    let result = search_blocks::call(&client(&logseq), true, json!({"query": "x"}).as_object().cloned()).await.unwrap();
+    let content = serde_json::to_value(&result).unwrap()["content"].clone();
+    assert_eq!(content[0]["text"], "[]");
+    assert_eq!(
+        content[1]["text"],
+        r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":0},"tips":["No match. Search is literal (no synonyms): try a shorter or different word, or logseq_list_pages {\"name_contains\":\"x\"}."]}}"#
+    );
 }
 
 #[tokio::test]
@@ -200,7 +238,6 @@ async fn a_property_search_costs_one_query_and_binds_its_key_and_value() {
     let logseq = mock_logseq(vec![json!([block(2, "a block\nstatus:: testing", 5), block(9, "another\nstatus:: testing", 5)])]).await;
     let found = query_by_property::query_by_property_with_meta(&client(&logseq), "status", &Scalar::Text("test\"ing".into()), true, 100)
         .await
-        .unwrap()
         .unwrap();
 
     // one call, whatever the number of matches, and never a crawl of the pages
@@ -212,13 +249,51 @@ async fn a_property_search_costs_one_query_and_binds_its_key_and_value() {
     assert!(found.meta.is_none(), "nothing was cut, so there is no meta");
 }
 
+// BR-0011 (#415): a `null` answer to the query is `[]` and a warning, and no match is `[]` and none
 #[tokio::test]
-async fn a_bad_property_key_is_refused_before_any_call_and_a_null_answer_is_none() {
+async fn a_bad_property_key_is_refused_before_any_call_and_a_null_answer_is_an_unavailable_warning() {
     let logseq = mock_logseq(vec![json!(null)]).await;
     let error = query_by_property::query_by_property_with_meta(&client(&logseq), "bad name", &Scalar::Text("x".into()), true, 100).await.unwrap_err();
     assert!(error.to_string().contains("property_key"), "{error}");
     assert!(methods(&logseq).is_empty());
     // BR-0011: `null` is not an empty list
-    assert!(query_by_property::query_by_property_with_meta(&client(&logseq), "status", &Scalar::Text("x".into()), true, 100).await.unwrap().is_none());
+    let found = query_by_property::query_by_property_with_meta(&client(&logseq), "status", &Scalar::Text("x".into()), true, 100).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
+    assert!(found.results.is_empty());
+    let meta = found.meta.expect("a `null` answer carries a meta");
+    assert_eq!(meta.warnings.len(), 1);
+    assert_eq!(meta.warnings[0].code, "property_query_unavailable");
+    assert!(meta.warnings[0].message.contains(r#"blocks with the property "status""#));
+    assert!(!meta.has_more && meta.warnings[0].how_to_fetch_all.is_none());
+    assert!(meta.totals.is_empty(), "no total is known, so none is claimed");
+
+    // a real `[]` is no match, with no meta at all
+    let logseq = mock_logseq(vec![json!([])]).await;
+    let found = query_by_property::query_by_property_with_meta(&client(&logseq), "status", &Scalar::Text("x".into()), true, 100).await.unwrap();
+    assert!(found.results.is_empty());
+    assert!(found.meta.is_none());
+}
+
+// BR-0011, BR-0013 (#415): the text of both content blocks, in key order, and no tip
+#[tokio::test]
+async fn a_null_answer_to_the_property_query_is_written_as_an_empty_list_and_a_warning() {
+    let logseq = mock_logseq(vec![json!(null)]).await;
+    let arguments = json!({"property_key": "status", "property_value": "doing"}).as_object().cloned();
+    let result = query_by_property::call(&client(&logseq), true, arguments.clone()).await.unwrap();
+    let content = serde_json::to_value(&result).unwrap()["content"].clone();
+
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"], "one call, as for any property query");
+    assert_eq!(content.as_array().unwrap().len(), 2);
+    assert_eq!(content[0]["text"], "[]");
+    assert_eq!(
+        content[1]["text"],
+        r#"{"meta":{"hasMore":false,"warnings":[{"code":"property_query_unavailable","message":"LogSeq returned no answer when looking up blocks with the property \"status\" (possibly no graph open or a re-index in progress), so the empty list may not mean nothing matches. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}],"totals":{}}}"#
+    );
+
+    // a real `[]` is the empty list alone
+    let logseq = mock_logseq(vec![json!([])]).await;
+    let result = query_by_property::call(&client(&logseq), true, arguments).await.unwrap();
+    let content = serde_json::to_value(&result).unwrap()["content"].clone();
+    assert_eq!(content.as_array().unwrap().len(), 1);
+    assert_eq!(content[0]["text"], "[]");
 }
