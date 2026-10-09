@@ -103,8 +103,7 @@ fn found(page: &PulledPage, matched_by: MatchedBy, lookup_name: String) -> Resol
     Resolution::Found(ResolvedPage { page: page.clone(), matched_by, original_name: page.display_name(), lookup_name })
 }
 
-// PARITY(#299): an ambiguous result names the page as the caller typed it (untrimmed) while its reasons name
-// the trimmed one (suspected TS inconsistency) — drop if Rust becomes the only server.
+/// One page resolves to itself; several are ambiguous, named by the trimmed `page_name` that its reasons name too.
 fn pick(pages: &[&PulledPage], matched_by: MatchedBy, reason: String, page_name: &str) -> Resolution {
     if let [page] = pages {
         return found(page, matched_by, page.lower_name());
@@ -130,10 +129,7 @@ fn json_string(text: &str) -> String {
 /// Routes 1-3 of [`resolve_page`] over the rows of its first query, for one trimmed name. Each
 /// row's `via` is `"name"` (or absent), `"alias"` or `"journal-date"`. `None` when no route
 /// matched, which is when `resolve_page` goes on to the namespace leaf.
-///
-/// The `page_name` of an ambiguous result is the name as the caller typed it, which is why
-/// `input` is passed apart from the trimmed `name`.
-fn resolve_from_rows(input: &str, name: &str, rows: &[ResolverRow]) -> Option<Resolution> {
+fn resolve_from_rows(name: &str, rows: &[ResolverRow]) -> Option<Resolution> {
     // A row without a `via` is a plain page row, i.e. an exact match
     let by_route = |via: &str| -> Vec<&PulledPage> {
         rows.iter().filter(|row| row.via.as_deref().unwrap_or("name") == via).map(|row| &row.page).collect()
@@ -152,7 +148,7 @@ fn resolve_from_rows(input: &str, name: &str, rows: &[ResolverRow]) -> Option<Re
         // A stub is a page nobody wrote: no file. Real pages keep the name.
         let is_stub = !exact.has_file;
         if is_stub && !alias_sources.is_empty() {
-            return Some(pick(&alias_sources, MatchedBy::Alias, alias_reason(), input));
+            return Some(pick(&alias_sources, MatchedBy::Alias, alias_reason(), name));
         }
         // `[[2025-01-01]]` links and `date:: 2025-01-01` values create a stub named like the date
         // when the graph's journal titles use another format. The journal for that day is the
@@ -160,15 +156,15 @@ fn resolve_from_rows(input: &str, name: &str, rows: &[ResolverRow]) -> Option<Re
         let other_journals: Vec<&PulledPage> =
             journals.iter().copied().filter(|page| page.entity_id() != exact.entity_id()).collect();
         if is_stub && !other_journals.is_empty() {
-            return Some(pick(&other_journals, MatchedBy::JournalDate, format!("journal page for {name}"), input));
+            return Some(pick(&other_journals, MatchedBy::JournalDate, format!("journal page for {name}"), name));
         }
         return Some(found(exact, MatchedBy::Name, name.to_owned()));
     }
     if !alias_sources.is_empty() {
-        return Some(pick(&alias_sources, MatchedBy::Alias, alias_reason(), input));
+        return Some(pick(&alias_sources, MatchedBy::Alias, alias_reason(), name));
     }
     if !journals.is_empty() {
-        return Some(pick(&journals, MatchedBy::JournalDate, format!("journal page for {name}"), input));
+        return Some(pick(&journals, MatchedBy::JournalDate, format!("journal page for {name}"), name));
     }
     None
 }
@@ -218,7 +214,7 @@ pub async fn resolve_page(client: &LogseqClient, input: &str) -> Result<Resoluti
     let answer = run(client, &queries::resolve_page(&page_name, journal_day)).await?;
     // A `null` is no answer, not "no rows" (BR-0011): stop here, with no leaf query and no suggestions
     let rows = wire::resolver_rows(&answer)?.ok_or_else(|| lookup_unavailable(input))?;
-    if let Some(resolution) = resolve_from_rows(input, name, &rows) {
+    if let Some(resolution) = resolve_from_rows(name, &rows) {
         return Ok(resolution);
     }
 
@@ -229,7 +225,7 @@ pub async fn resolve_page(client: &LogseqClient, input: &str) -> Result<Resoluti
         let leaves = distinct_pages(rows.iter().collect());
         if !leaves.is_empty() {
             let reason = format!("namespace page ending in {}", json_string(&format!("/{name}")));
-            return Ok(pick(&leaves, MatchedBy::NamespaceLeaf, reason, input));
+            return Ok(pick(&leaves, MatchedBy::NamespaceLeaf, reason, name));
         }
     }
     Ok(Resolution::NotFound)
@@ -285,7 +281,7 @@ mod tests {
 
     fn resolve(name: &str, rows: Vec<Value>) -> Option<Resolution> {
         let rows = wire::resolver_rows(&Value::Array(rows)).unwrap().unwrap();
-        resolve_from_rows(name, js::trim(name), &rows)
+        resolve_from_rows(js::trim(name), &rows)
     }
 
     fn found_name(resolution: Option<Resolution>) -> (String, MatchedBy) {
@@ -378,11 +374,11 @@ mod tests {
     }
 
     #[test]
-    fn the_ambiguous_page_name_is_the_name_as_typed() {
+    fn the_ambiguous_page_name_is_the_trimmed_name() {
         let rows = vec![row(41, "alice notes", "Alice Notes", true, Some("alias")), row(40, "alice", "Alice", true, Some("alias"))];
         let rows = wire::resolver_rows(&Value::Array(rows)).unwrap().unwrap();
-        let Some(Resolution::Ambiguous(ambiguous)) = resolve_from_rows("  AL ", "AL", &rows) else { panic!("expected ambiguous") };
-        assert_eq!(ambiguous.page_name, "  AL ");
+        let Some(Resolution::Ambiguous(ambiguous)) = resolve_from_rows("AL", &rows) else { panic!("expected ambiguous") };
+        assert_eq!(ambiguous.page_name, "AL");
         assert_eq!(ambiguous.candidates[0].reason, "declares alias \"AL\"");
     }
 }
