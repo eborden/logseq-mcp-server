@@ -48,19 +48,20 @@ pub fn linked_references(answer: Value) -> Result<Option<Vec<Backlink>>, Respons
     if parse::<Option<Vec<(Option<PageLike>, Vec<Block>)>>>(LINKED_REFERENCES_METHOD, &answer)?.is_none() {
         return Ok(None);
     }
-    let Value::Array(rows) = answer else { unreachable!("a list of rows was read, so the answer is a list") };
-    Ok(Some(
-        rows.into_iter()
-            .map(|row| {
-                let Value::Array(mut cells) = row else { unreachable!("each row was read as a row, so it is a list") };
-                let blocks = match cells.pop() {
-                    Some(Value::Array(blocks)) => blocks,
-                    _ => unreachable!("the blocks cell was read as a list"),
-                };
-                Backlink { page: cells.pop().unwrap_or(Value::Null), blocks }
-            })
-            .collect(),
-    ))
+    // The rows were read as `[page | null, blocks]`, so each is a list of those two cells. Said again here, as an
+    // error and not a panic, so that a change to the cells above can't go unmatched by this.
+    let backlinks: Result<Vec<Backlink>, ResponseError> = crate::wire::items(&answer)
+        .iter()
+        .map(|row| match row.as_array().map(Vec::as_slice) {
+            Some([page, Value::Array(blocks)]) => Ok(Backlink { page: page.clone(), blocks: blocks.clone() }),
+            _ => Err(ResponseError {
+                method: LINKED_REFERENCES_METHOD.to_owned(),
+                path: "answer".to_owned(),
+                problem: "a row is not the page and the blocks that were read".to_owned(),
+            }),
+        })
+        .collect();
+    backlinks.map(Some)
 }
 
 /// `responses.nullableBlockRows`: `[block | null]` per row, or `null`. A `null` cell is `None`,
