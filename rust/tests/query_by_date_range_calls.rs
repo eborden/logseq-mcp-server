@@ -7,6 +7,7 @@
 mod common;
 
 use common::{args_of, client, methods, mock_logseq};
+use logseq_mcp_server::args::YyyyMmDd;
 use logseq_mcp_server::dates::{CalendarDate, DatePreset};
 use logseq_mcp_server::errors::ToolError;
 use logseq_mcp_server::tools::query_by_date_range::{Args, query_journals};
@@ -31,7 +32,7 @@ fn args() -> Args {
 }
 
 fn range(start: i64, end: i64) -> Args {
-    Args { start_date: Some(start), end_date: Some(end), ..args() }
+    Args { start_date: Some(YyyyMmDd(start)), end_date: Some(YyyyMmDd(end)), ..args() }
 }
 
 fn page(id: i64, day: i64) -> Value {

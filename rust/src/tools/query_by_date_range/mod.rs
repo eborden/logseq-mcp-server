@@ -36,7 +36,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::args::parse_args;
+use crate::args::{YyyyMmDd, parse_args};
 use crate::block_budget::count_blocks;
 use crate::block_tree::{build_block_trees, camelize_keys};
 use crate::client::LogseqClient;
@@ -94,10 +94,10 @@ fn default_max_blocks() -> u64 {
 pub struct Args {
     /// Start date in YYYYMMDD format (e.g., 20251115). Needs end_date
     #[schemars(with = "Option<f64>")]
-    pub start_date: Option<i64>,
+    pub start_date: Option<YyyyMmDd>,
     /// End date in YYYYMMDD format (e.g., 20251120). Needs start_date
     #[schemars(with = "Option<f64>")]
-    pub end_date: Option<i64>,
+    pub end_date: Option<YyyyMmDd>,
     /// The N most recent journals that exist (whole number, 1+), newest first
     #[schemars(range(min = 1))]
     pub last_n: Option<u64>,
@@ -289,7 +289,7 @@ fn object_of(parts: Vec<(&str, Value)>) -> Value {
 /// before any LogSeq call is made.
 pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarDate) -> Result<JournalsResult, ToolError> {
     let selection = resolve_selection(
-        Selection { start_date: args.start_date, end_date: args.end_date, last_n: args.last_n.map(saturate), preset: args.preset },
+        Selection { start_date: args.start_date.map(|day| day.0), end_date: args.end_date.map(|day| day.0), last_n: args.last_n.map(saturate), preset: args.preset },
         today,
     )?;
     let search_term = args.search_term.as_deref().filter(|term| !term.is_empty());
@@ -606,7 +606,7 @@ mod tests {
     #[test]
     fn a_date_is_a_whole_number_and_anything_else_is_refused_as_a_date_of_the_wrong_format() {
         let args = read(json!({"start_date": 20250101, "end_date": 20250102.0})).unwrap();
-        assert_eq!((args.start_date, args.end_date), (Some(20_250_101), Some(20_250_102)));
+        assert_eq!((args.start_date, args.end_date), (Some(YyyyMmDd(20_250_101)), Some(YyyyMmDd(20_250_102))));
         let format = "Expected: Date in YYYYMMDD format (8 digits, valid year/month/day)";
         assert_eq!(
             read(json!({"start_date": 20250101.5, "end_date": 20250102})).unwrap_err(),
