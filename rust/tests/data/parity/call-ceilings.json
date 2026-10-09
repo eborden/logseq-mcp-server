@@ -478,6 +478,7 @@
   "get_page: a block tree that is not a list of blocks": 2,
   "get_page: a name that two pages declare is ambiguous": 2,
   "get_page: a null block tree gets no children key": 2,
+  "get_page: a null block tree with resolve_refs": 2,
   "get_page: a page with no blocks gets no children key": 2,
   "get_page: a stub that is an alias target resolves to the page that declares it": 4,
   "get_page: a stub that is not an alias target": 2,
