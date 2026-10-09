@@ -117,7 +117,7 @@ How a link looks for a few formats, with made-up days (Tuesday 2026-09-01 and We
 
 Letters follow LogSeq's formatter: `yyyy` year, `MM` two-digit month, `MMM` short month name, `MMMM` full month name, `dd` two-digit day, `do` day with an English ordinal (1st, 2nd, 3rd, 4th, 11th, 22nd), `E` or `EEE` short weekday name, `EEEE` full weekday name. Anything else in the string (commas, spaces, hyphens, slashes) is copied as written.
 
-A format with a slash, as in `EEE, MM/dd/yyyy` above, also has a cost: LogSeq reads `/` in a page title as a namespace separator, so each link makes namespace parent pages (here `Tue, 09`) appear. That is the graph's own format, and the links stay correct. Mention it to the user if they ask why such pages exist. A link written in the wrong format makes a stub page, which the user has to delete by hand, because these tools cannot delete pages.
+A format with a slash, as in `EEE, MM/dd/yyyy` above, also has a cost: LogSeq reads `/` in a page title as a namespace separator, so each link makes namespace parent pages appear, such as `Tue, 09` and `Tue, 09/01`. That is the graph's own format, and the links stay correct. Mention it to the user if they ask why such pages exist. A link written in the wrong format makes a stub page, which the user has to delete by hand, because these tools cannot delete pages.
 
 ## Reading the Period: Query First, Files Only After a Failure
 
