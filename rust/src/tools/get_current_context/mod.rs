@@ -101,18 +101,18 @@ fn page_names_unavailable(no_page_known: bool) -> ResultWarning {
     )
 }
 
-/// The id of the page a block sits on (`blockPageId`): `None` when the block carries no page.
+/// The id of the page a block sits on: `None` when the block carries no page.
 fn block_page_id(block: &Map<String, Value>) -> Option<i64> {
     id_of(block.get("page"))
 }
 
-/// `isBlockEntity`: `getCurrentPage` answers a block, not a page, when the user has zoomed into
+/// Whether the entity is a block. `getCurrentPage` answers a block, not a page, when the user has zoomed into
 /// one. It has no `name`, and it has a `page`.
 fn is_block_entity(entity: &Map<String, Value>) -> bool {
     !entity.contains_key("name") && entity.get("uuid").is_some_and(Value::is_string) && entity.contains_key("page")
 }
 
-/// `withFetchedChildren`: without `includeChildren`, the Editor API gives a block's `children` as
+/// Without `includeChildren`, the Editor API gives a block's `children` as
 /// unfetched `["uuid", "<id>"]` tuples rather than blocks. Keep only the children that are blocks
 /// with text, so slimming has nothing to choke on; `logseq_get_block` fetches the rest.
 fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
@@ -252,7 +252,7 @@ mod tests {
         assert!(is_block_entity(&object(json!({"id": 1, "uuid": "u", "page": {"id": 2}}))));
         assert!(!is_block_entity(&object(json!({"id": 1, "uuid": "u", "name": "a", "page": {"id": 2}}))));
         assert!(!is_block_entity(&object(json!({"id": 1, "uuid": "u"}))));
-        // a `null` name is a name, as `name !== undefined` has it
+        // a `null` name is a name: only a missing `name` key makes a block
         assert!(!is_block_entity(&object(json!({"id": 1, "uuid": "u", "name": null, "page": {"id": 2}}))));
     }
 

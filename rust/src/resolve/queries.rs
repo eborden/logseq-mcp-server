@@ -44,7 +44,7 @@ pub fn namespace_leaf_pages(leaf: &PageName) -> Query {
     }
 }
 
-/// The name and alias routes of [`resolve_page`] for many names at once (`linkTargets`, #146), as
+/// The name and alias routes of [`resolve_page`] for many names at once (#146), as
 /// `[page, via, name]` rows: `via` is `"name"` for the page with that `:block/name`, `"alias"` for a page
 /// whose `:block/alias` points at it. The name rides along so each row can be matched to the term it
 /// answers. The names go in as one string collection (`:in $ [?n ...]`), never as query text, and are
@@ -61,13 +61,13 @@ pub fn link_targets(names: &[PageName]) -> Query {
     }
 }
 
-/// One alias link between two pages, followed in either direction (`aliasHop`).
+/// One alias link between two pages, followed in either direction.
 fn alias_hop(from: &str, to: &str) -> String {
     format!("(or-join [{from} {to}] [{from} :block/alias {to}] [{to} :block/alias {from}])")
 }
 
-/// Every page within two alias links (`ALIAS_MAX_HOPS`) of `start`, in either direction
-/// (`aliasClosure`). `start` itself comes back too (a link and its mirror form a cycle), so the
+/// Every page within two alias links (`ALIAS_MAX_HOPS`) of `start`, in either direction.
+/// `start` itself comes back too (a link and its mirror form a cycle), so the
 /// caller de-duplicates. The two hops are unrolled because rules can't be passed, and a third
 /// hop turns a 7-page group into a ~0.4s query.
 fn alias_closure(start: &str, member: &str) -> String {
@@ -79,7 +79,7 @@ fn alias_closure(start: &str, member: &str) -> String {
     )
 }
 
-/// The alias groups of several pages in one query (`aliasSets`): rows are `[startId, member]`,
+/// The alias groups of several pages in one query: rows are `[startId, member]`,
 /// one per page in the start page's group, the start page itself included whenever it has an
 /// alias at all. A page with no aliases has no rows. The ids are embedded through [`ground_ids`].
 pub fn alias_sets(starts: &[PageId]) -> Query {
@@ -94,7 +94,7 @@ pub fn alias_sets(starts: &[PageId]) -> Query {
     }
 }
 
-/// The alias group of a page known only by name (`aliasSetByName`): rows are `[startPage, member]`
+/// The alias group of a page known only by name: rows are `[startPage, member]`
 /// with both sides pulled, one per page in the group, the start page included whenever it has an
 /// alias at all. No rows when no page has the name or the page has no aliases, so a name that is not
 /// a page costs nothing and changes nothing. The name is bound, lowercase by construction.
@@ -109,7 +109,7 @@ pub fn alias_set_by_name(name: &PageName) -> Query {
     }
 }
 
-/// The linked references of a whole alias group (`linkedReferencesOfPages`), the way
+/// The linked references of a whole alias group, the way
 /// `logseq.Editor.getPageLinkedReferences` counts them for one page: blocks whose
 /// `:block/path-refs` hold any of the pages (so children of a block that links the page count),
 /// except blocks that sit on one of the pages themselves. Rows are `[block]`, with the block's

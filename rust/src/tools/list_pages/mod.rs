@@ -147,7 +147,7 @@ fn by_name(a: &ListedEntity, b: &ListedEntity) -> Ordering {
 /// Fold alias links into the page list (#171), from the `alias` ids that `getAllPages` already
 /// carries on every entity, so it costs no call.
 ///
-/// Which page is canonical follows the resolver (`declaringPages`): a page with a file wrote the
+/// Which page is canonical follows the resolver: a page with a file wrote the
 /// `alias::` line, so it is canonical, and the file-less stubs LogSeq made for its alias names nest
 /// under it. LogSeq links an alias group of three or more as a clique, but the declaring page links
 /// all of them, so a stub's canonical pages are the file-backed pages it links to directly.

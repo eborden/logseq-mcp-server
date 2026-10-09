@@ -29,12 +29,12 @@ use crate::snippet::{Snippet, first_chars};
 /// Shown after the start of a first block that alone exceeds the limit.
 pub const TRUNCATED_BLOCK_MARKER: &str = "\n[This block is longer than the limit and was truncated here.]";
 
-/// `nonEmpty`: a string that isn't blank, as it is.
+/// A string that isn't blank, as it is.
 fn non_empty(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str).filter(|text| !js::trim(text).is_empty())
 }
 
-/// `pageTitle`: the original-case title of a page entity in any of the shapes the tools return,
+/// The original-case title of a page entity in any of the shapes the tools return,
 /// else its name, else `fallback`, else `""`.
 pub fn page_title(page: &Value, fallback: Option<&str>) -> String {
     non_empty(page.get("originalName"))
@@ -45,7 +45,7 @@ pub fn page_title(page: &Value, fallback: Option<&str>) -> String {
         .to_owned()
 }
 
-/// `isPreBlock`: either spelling of the flag, set to `true`.
+/// Either spelling of the flag, set to `true`.
 fn is_pre_block(block: &Map<String, Value>) -> bool {
     block.get("pre-block?") == Some(&Value::Bool(true)) || block.get("preBlock?") == Some(&Value::Bool(true))
 }
@@ -79,7 +79,7 @@ fn length(text: &str) -> usize {
     text.chars().count()
 }
 
-/// `blockPageLink`: the page a block sits on, as a link, when its name is known: a search hit's
+/// The page a block sits on, as a link, when its name is known: a search hit's
 /// `context.page`, or a `page` entity with a name.
 fn block_page_link(block: &Map<String, Value>) -> Option<String> {
     let from_context = block.get("context").and_then(|context| context.get("page"));
@@ -90,7 +90,7 @@ fn block_page_link(block: &Map<String, Value>) -> Option<String> {
         .map(page_link)
 }
 
-/// `pageLink`: `[[Title]]`, the way a page is linked in LogSeq.
+/// A link to a page, `[[Title]]`, the way a page is linked in LogSeq.
 pub fn page_link(page: &Value) -> String {
     format!("[[{}]]", page_title(page, None))
 }
@@ -170,7 +170,7 @@ impl Walk {
     }
 }
 
-/// `renderOutline`: a block tree as an outline. Stops at `max_chars` when given, and says so
+/// A block tree as an outline. Stops at `max_chars` when given, and says so
 /// through `cut`; the caller owns the notice. Children that are not block objects (unfetched
 /// `["uuid", "<id>"]` tuples) are skipped.
 pub fn render_outline(blocks: &[Value], options: OutlineOptions) -> Outline {
@@ -179,7 +179,7 @@ pub fn render_outline(blocks: &[Value], options: OutlineOptions) -> Outline {
     Outline { lines: walk.out, cut: walk.cut }
 }
 
-/// `kebabKey`: `fooBar` back to `foo-bar`. The Editor API camelCases property keys, LogSeq files
+/// A property key in kebab-case: `fooBar` back to `foo-bar`. The Editor API camelCases property keys, LogSeq files
 /// write them kebab-case. `/([a-z0-9])([A-Z])/g`: matches don't overlap, so in `aBC` only `aB` matches.
 fn kebab_key(key: &str) -> String {
     let chars: Vec<char> = key.chars().collect();
@@ -203,7 +203,7 @@ fn as_link(value: &str) -> String {
     if value.contains("[[") { value.to_owned() } else { format!("[[{value}]]") }
 }
 
-/// `propertyValue`: a property's value as text, or `None` when it has nothing to show.
+/// A property's value as text, or `None` when it has nothing to show.
 fn property_value(value: &Value) -> Option<String> {
     match value {
         Value::Null => None,
@@ -225,7 +225,7 @@ fn property_value(value: &Value) -> Option<String> {
     }
 }
 
-/// `renderProperties`: properties as LogSeq writes them, `key:: value`, rebuilt from a `properties`
+/// Properties as LogSeq writes them, `key:: value`, rebuilt from a `properties`
 /// map. Keys are shown kebab-case, multi-value properties as `[[a]], [[b]]`. Empty values are left
 /// out. This is the fallback for a page whose pre-block was not fetched: the pre-block's own text
 /// ([`pre_block_lines`]) is the faithful form, and is preferred.
@@ -236,7 +236,7 @@ pub fn render_properties(properties: Option<&Value>) -> Vec<String> {
         .collect()
 }
 
-/// `preBlockLines`: the text of a page's pre-block (its property block) as lines, exactly as
+/// The text of a page's pre-block (its property block) as lines, exactly as
 /// LogSeq stores it, or `None` when the tree has none or it is empty. No key or value mapping
 /// happens, so nothing is lost.
 pub fn pre_block_lines(blocks: &[Value]) -> Option<Vec<String>> {
@@ -253,7 +253,7 @@ pub struct PropertyLines {
     pub from_pre_block: bool,
 }
 
-/// `propertyLines`: the pre-block's own text when the tree has one, else [`render_properties`] on
+/// The pre-block's own text when the tree has one, else [`render_properties`] on
 /// the `properties` map.
 pub fn property_lines(properties: Option<&Value>, blocks: Option<&[Value]>) -> PropertyLines {
     match blocks.and_then(pre_block_lines) {
@@ -276,7 +276,7 @@ pub struct PageRenderOptions<'a> {
     pub fallback_title: Option<&'a str>,
 }
 
-/// `resolvedFromLine`: the `(resolved from "x", matched by alias)` note for a page reached through
+/// The `(resolved from "x", matched by alias)` note for a page reached through
 /// an alias, date or namespace leaf.
 pub fn resolved_from_line(resolved_from: Option<&Value>) -> Option<String> {
     let map = resolved_from?.as_object()?;
@@ -289,7 +289,7 @@ pub fn resolved_from_line(resolved_from: Option<&Value>) -> Option<String> {
     Some(format!("(resolved from {name}, matched by {matched_by})"))
 }
 
-/// `renderPage`: one page as Markdown: title, resolved-from note, page properties, then the block
+/// One page as Markdown: title, resolved-from note, page properties, then the block
 /// outline (children of the page entity). No footer; add one with [`with_footer`].
 pub fn render_page(page: &Value, options: PageRenderOptions<'_>) -> String {
     let mut lines = vec![format!("# {}", page_title(page, options.fallback_title)), String::new()];
@@ -319,7 +319,7 @@ pub fn render_page(page: &Value, options: PageRenderOptions<'_>) -> String {
     format!("{}\n{body}{notice}\n", lines.join("\n"))
 }
 
-/// `renderBlock`: one block with its children (as many as were fetched), under a `Block ((uuid))`
+/// One block with its children (as many as were fetched), under a `Block ((uuid))`
 /// heading. A block's own text is what it holds; its page is not rendered, because the Editor API
 /// returns only a page id for it.
 pub fn render_block(block: &Value) -> String {
@@ -371,7 +371,7 @@ impl FooterMeta {
     }
 }
 
-/// `renderFooter`: warnings, `hasMore` and tips as a short footer after a `---` rule, or `""` when
+/// Warnings, `hasMore` and tips as a short footer after a `---` rule, or `""` when
 /// there is nothing to say. The same information the JSON `meta` carries:
 ///
 /// ```text
@@ -402,7 +402,7 @@ pub fn render_footer(meta: &FooterMeta) -> String {
     if lines.is_empty() { String::new() } else { format!("---\n{}", lines.join("\n")) }
 }
 
-/// `withFooter`: `body` followed by the footer for `meta`, one paragraph apart. Just `body` when
+/// The body followed by the footer for `meta`, one paragraph apart. Just the body when
 /// the footer is empty.
 pub fn with_footer(body: String, meta: &FooterMeta) -> String {
     let footer = render_footer(meta);
@@ -704,7 +704,7 @@ mod tests {
             {"content": "", "resolvedContent": "not shown"},
         ]);
         let compact = OutlineOptions { compact: true, ..Default::default() };
-        // the bullet of a block with nothing to show is a bare dash, as `trimEnd` leaves it
+        // the bullet of a block with nothing to show is a bare dash, as trimming the end of a line leaves it
         assert_eq!(
             outline_with(blocks, compact),
             [format!("- First line (({UUID_A}))"), "\t- child ((u2))".to_owned(), format!("- (({UUID_A}))"), "- no uuid".to_owned(), "-".to_owned()]

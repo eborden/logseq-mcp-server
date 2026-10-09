@@ -165,7 +165,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     Ok(success_result(vec![ContentBlock::text(shown.to_string())]))
 }
 
-/// What `buildContextForTopic` takes beyond the topic (`ContextOptions`).
+/// What building a context takes beyond the topic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Caps {
     pub max_blocks: u64,
@@ -322,7 +322,7 @@ impl TopicContext {
     }
 }
 
-/// `mainPage.properties || {}`: the page's properties, or an empty object when it has none.
+/// The page's properties, or an empty object when it has none.
 fn page_properties(page: &Value) -> Value {
     match page.get("properties") {
         Some(properties) if !matches!(properties, Value::Null | Value::Bool(false)) => properties.clone(),
@@ -330,7 +330,7 @@ fn page_properties(page: &Value) -> Value {
     }
 }
 
-/// `resolvedFromInfo`: says the page isn't the exact name the caller gave. Absent for an exact match.
+/// Says the page isn't the exact name the caller gave (`resolvedFrom`). Absent for an exact match.
 pub fn resolved_from(input: &str, resolved: &ResolvedPage) -> Option<Value> {
     (resolved.matched_by != MatchedBy::Name)
         .then(|| json!({"name": input, "matchedBy": resolved.matched_by.as_str(), "resolvedTo": resolved.original_name}))
@@ -404,7 +404,7 @@ fn backlinks_unavailable_warning(page: &str) -> ResultWarning {
     )
 }
 
-/// `buildContextForTopic`: build the context of a topic.
+/// Builds the context of a topic.
 ///
 /// `topic_name` is a page name, an alias or an ISO date (`2025-01-01`) of a journal. The page is
 /// resolved first (BR-0010); with aliases, its blocks and references cover every name of the group

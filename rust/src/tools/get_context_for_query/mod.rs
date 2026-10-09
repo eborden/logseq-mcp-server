@@ -232,7 +232,7 @@ impl QueryContext {
     }
 }
 
-/// `extractTopicsFromQuery`: the `[[page references]]`, then the `#tags`, each once, first seen first.
+/// The `[[page references]]`, then the `#tags`, each once, first seen first.
 fn extract_topics(query: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     refs::page_refs(query).into_iter().map(|found| found.name).chain(refs::tags(query)).filter(|topic| seen.insert(*topic)).map(str::to_owned).collect()
@@ -319,7 +319,7 @@ fn search_unavailable(keywords: &[String]) -> QueryWarning {
     )
 }
 
-/// `getContextForQuery`: the context for a natural-language query.
+/// The context for a natural-language query.
 ///
 /// `max_topics` cuts the topics extracted (at least 1). `max_search_results` is the keyword hits
 /// kept (clamped to [`MAX_SEARCH_RESULTS`]; a cut adds a `search_results_truncated` warning, and

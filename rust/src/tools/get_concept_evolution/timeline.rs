@@ -111,8 +111,7 @@ pub fn cap_timeline(full: &[Entry], max_entries: u64) -> Vec<Entry> {
     kept
 }
 
-/// The places of the blocks the timeline kept, in the order of the mentions (`filteredBlocks.filter(block =>
-/// kept.has(block))`).
+/// The places of the blocks the timeline kept, in the order of the mentions.
 pub fn shown_places(total: usize, timeline: &[Entry]) -> Vec<usize> {
     let kept: HashSet<usize> = timeline.iter().flat_map(|entry| entry.blocks.iter().copied()).collect();
     (0..total).filter(|place| kept.contains(place)).collect()
@@ -180,7 +179,7 @@ fn utc_days(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468 + (day - 1)
 }
 
-/// `getWeekIdentifier`: the week of a `YYYYMMDD` date as `YYYY-WW`. Not ISO weeks: week 1 is the first 7
+/// The week of a `YYYYMMDD` date as `YYYY-WW`. Not ISO weeks: week 1 is the first 7
 /// days of the year, whatever weekday they start on. `None` for a date whose month or day digits are
 /// missing (fewer than seven digits): it has no week. A 7- or 9-digit date does get one, from the
 /// characters at the same places (LogSeq's journal days always have eight digits).
@@ -199,7 +198,7 @@ pub fn week_identifier(date: i64) -> Option<String> {
     Some(format!("{year}-W{:0>2}", week?))
 }
 
-/// `getMonthIdentifier`: the month of a date as `YYYYMM`.
+/// The month of a date as `YYYYMM`.
 pub fn month_identifier(date: i64) -> String {
     date.to_string().chars().take(6).collect()
 }

@@ -43,7 +43,7 @@ pub fn blocks_referencing_in_pages_referenced_by(a: &PageName, b: &PageName) -> 
     }
 }
 
-/// `assertNonEmptyIds`: a list with no page id can't be queried.
+/// A list with no page id can't be queried.
 fn assert_non_empty(method: &str, lists: &[&[PageId]]) -> Result<(), ToolError> {
     if lists.iter().any(|list| list.is_empty()) {
         return Err(ToolError::Failed(format!("{method} needs at least one page id in each list")));

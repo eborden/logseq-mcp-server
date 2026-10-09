@@ -32,7 +32,7 @@ pub fn first_chars(text: &str, count: usize) -> &str {
 pub struct Snippet(String);
 
 impl Snippet {
-    /// `firstLineSnippet`: the first non-blank line, trimmed, cut to 80 characters with a
+    /// The first non-blank line, trimmed, cut to 80 characters with a
     /// trailing `...`. Empty for a block with no content.
     pub fn of(content: Option<&str>) -> Snippet {
         let line = first_non_blank_line(content);

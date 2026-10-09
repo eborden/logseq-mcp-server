@@ -10,7 +10,7 @@ use crate::errors::{InvalidParameter, ToolError};
 /// a client that validates against the schema rejects an alias-only call before it gets here.
 pub type ParamAliases = &'static [(&'static str, &'static [&'static str])];
 
-/// `resolveParamAliases`: the arguments with every alias folded into its canonical parameter and
+/// The arguments with every alias folded into its canonical parameter and
 /// the alias keys removed. Other arguments pass through untouched. An alias and the canonical
 /// name (or two aliases) may both be given if they carry the same value. Different values are
 /// ambiguous, and nothing is picked silently: that is an [`InvalidParameter`].

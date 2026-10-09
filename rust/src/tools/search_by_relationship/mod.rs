@@ -140,12 +140,12 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
-/// `isInfrastructureError`: the connection to LogSeq failed (not running, timeout, rejected token).
+/// The connection to LogSeq failed (not running, timeout, rejected token).
 fn is_infrastructure(error: &ToolError) -> bool {
     matches!(error, ToolError::Logseq(error) if error.is_infrastructure())
 }
 
-/// `resolveTopics`: both topics resolved at once. The same name (ignoring case and surrounding
+/// Both topics resolved at once. The same name (ignoring case and surrounding
 /// whitespace) is resolved once. When both fail, the error is deterministic: a connection, timeout or
 /// auth error first, then topic A's, then topic B's, whichever request happened to finish first.
 async fn resolve_topics(client: &LogseqClient, topic_a: &str, topic_b: &str) -> Result<(ResolvedPage, ResolvedPage), ToolError> {
@@ -177,7 +177,7 @@ struct TopicCounts {
     partial_block: bool,
 }
 
-/// `connectedWithinEntries`: `what` for a cut `connected-within`: the unit (every block of the two
+/// The `what` of a cut `connected-within`: the unit (every block of the two
 /// pages' trees, nested ones too, in document order, topic A's page first), how many kept blocks came
 /// from each topic and how many each page has, so a reader can see when topic B's blocks were dropped
 /// entirely, and whether a kept block lost children. All of it is known from the two tree calls, so
@@ -259,7 +259,7 @@ fn cut_warning(what: &str, shown: usize, total: usize, requested: u64) -> Result
     })
 }
 
-/// `resolvedFromInfo`: which page a topic stood for, when it was an alias, date or namespace leaf
+/// Which page a topic stood for, when it was an alias, date or namespace leaf
 /// rather than an exact name.
 fn resolved_from(input: &str, resolved: &ResolvedPage) -> Option<Value> {
     (resolved.matched_by != MatchedBy::Name)
@@ -385,7 +385,7 @@ fn page_blocks_unavailable(which: &str, topic: &str) -> ResultWarning {
     )
 }
 
-/// `searchByRelationship`: blocks tied to topic A by a link to topic B. Returns the result as the
+/// Blocks tied to topic A by a link to topic B. Returns the result as the
 /// JSON the tool prints.
 ///
 /// A topic with aliases matches references written under any of its names (`resolvedAliases` says
@@ -547,7 +547,7 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
         result.insert("resolvedAliases".into(), Value::Object(aliases));
     }
     result.insert("results".into(), Value::Array(capped.results));
-    // `buildResultMeta`: `hasMore` follows the warnings, and `totals` is there only when a cut was made
+    // `hasMore` follows the warnings, and `totals` is there only when a cut was made
     result.insert("hasMore".into(), json!(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())));
     result.insert("warnings".into(), serde_json::to_value(&warnings).expect("warnings serialize"));
     if let Some(total) = capped.total_blocks {
@@ -556,7 +556,7 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
     Ok(Value::Object(result))
 }
 
-/// A query for blocks, run and unwrapped (`extractBlocks`), or `None` when LogSeq gave no answer
+/// A query for blocks, run and unwrapped, or `None` when LogSeq gave no answer
 /// (`null`, BR-0011), which is not "nothing matches".
 async fn fetch_blocks(client: &LogseqClient, query: crate::edn::Query) -> Result<Option<Vec<Value>>, ToolError> {
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;

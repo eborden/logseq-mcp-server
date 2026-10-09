@@ -294,7 +294,7 @@ impl From<RawRef> for EntityRef {
     }
 }
 
-/// `entityId`: `id`, else `db/id` when `id` is absent. An `id` of 0 is an id.
+/// The `id`, else `db/id` when `id` is absent. An `id` of 0 is an id.
 pub(crate) fn entity_id(id: Option<i64>, db_id: Option<i64>) -> Option<i64> {
     id.or(db_id)
 }

@@ -8,7 +8,7 @@
 //! - *checks* it against the shapes in [`shape`] (read by the tool's own wire reader), so a field the
 //!   code reads that is missing or mistyped is a `ResponseError` and never "no data" (BR-0003);
 //! - *reads* a field whichever way it is spelled (the free functions below), which is the one
-//!   place that knows the two spellings, so no tool carries its own `a ?? b ?? c`.
+//!   place that knows the two spellings, so no tool carries its own chain of fallbacks.
 //!
 //! Only the spelling is decided here. What an empty or absent value means stays with the caller,
 //! except [`page_display_name`], which is the one display-name policy.
@@ -24,7 +24,7 @@ fn whole(value: Option<&Value>) -> Option<i64> {
     value.and_then(crate::wire::whole_number)
 }
 
-/// `entityId`: the id of an entity or of a reference to one, in either spelling. A missing `id`
+/// The id of an entity or of a reference to one, in either spelling. A missing `id`
 /// falls through to `db/id`; an `id` of 0 is an id.
 pub fn id_of(entity: Option<&Value>) -> Option<i64> {
     let map = entity?.as_object()?;
@@ -36,28 +36,28 @@ fn text<'v>(map: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v st
     map.get(key).and_then(Value::as_str)
 }
 
-/// `originalNameOf`: the original-case name, in either spelling. An empty one counts as missing.
+/// The original-case name, in either spelling. An empty one counts as missing.
 pub fn original_name_of(page: Option<&Value>) -> Option<&str> {
     let map = page?.as_object()?;
-    // `a || b`: the first that is not empty, else the second
+    // the first that is not empty, else the second
     text(map, "originalName").filter(|name| !name.is_empty()).or_else(|| text(map, "original-name"))
 }
 
-/// `pageDisplayName`: the original-case name, else `:block/name`, else `""`. An empty original name
+/// The original-case name, else `:block/name`, else `""`. An empty original name
 /// counts as missing, so a page never shows as blank while it has a name.
 pub fn page_display_name(page: Option<&Value>) -> String {
     let name = page.and_then(Value::as_object).and_then(|map| text(map, "name"));
     original_name_of(page).filter(|name| !name.is_empty()).or(name.filter(|name| !name.is_empty())).unwrap_or("").to_owned()
 }
 
-/// `journalFlag`: the page's journal flag as LogSeq set it, in either spelling. `None` when it says
+/// The page's journal flag as LogSeq set it, in either spelling. `None` when it says
 /// nothing.
 pub fn journal_flag(page: Option<&Value>) -> Option<bool> {
     let map = page?.as_object()?;
     map.get("journal?").and_then(Value::as_bool).or_else(|| map.get("journal").and_then(Value::as_bool))
 }
 
-/// `journalDayOf`: the `YYYYMMDD` journal day of a page, in either spelling.
+/// The `YYYYMMDD` journal day of a page, in either spelling.
 pub fn journal_day_of(page: Option<&Value>) -> Option<i64> {
     let map = page?.as_object()?;
     whole(map.get("journalDay")).or_else(|| whole(map.get("journal-day")))

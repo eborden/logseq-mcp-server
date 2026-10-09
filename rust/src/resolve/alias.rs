@@ -38,7 +38,7 @@ pub struct AliasMember {
 }
 
 impl AliasMember {
-    /// `memberOf`: a page with an id. One without can't be queried and is not a member.
+    /// A page with an id. One without can't be queried and is not a member.
     fn of(page: &PulledPage) -> Option<AliasMember> {
         page.entity_id().map(|id| AliasMember { id, name: page.lower_name(), original_name: page.display_name() })
     }
@@ -58,17 +58,17 @@ pub struct AliasSet {
 }
 
 impl AliasSet {
-    /// `singleAliasSet`: a set holding only `page`. No query, nothing to union.
+    /// A set holding only `page`. No query, nothing to union.
     pub fn single(page: &PulledPage) -> AliasSet {
         AliasSet { members: AliasMember::of(page).into_iter().collect(), truncated: false, unavailable: None }
     }
 
-    /// `hasAliases`: the set holds more than the page asked about.
+    /// The set holds more than the page asked about.
     pub fn has_aliases(&self) -> bool {
         self.members.len() > 1
     }
 
-    /// `aliasIds`: page ids of the set, as ids a query can embed.
+    /// Page ids of the set, as ids a query can embed.
     pub fn ids(&self) -> Result<Vec<PageId>, ToolError> {
         self.members.iter().map(|member| PageId::new(member.id).map_err(ToolError::from)).collect()
     }
@@ -86,7 +86,7 @@ impl AliasSet {
     }
 }
 
-/// `aliasSetWarnings`: the `alias_set_truncated` warning for each set that was cut, and the
+/// The `alias_set_truncated` warning for each set that was cut, and the
 /// `alias_lookup_unavailable` warning for each whose lookup LogSeq did not answer (#318). No
 /// `howToFetchAll` on the second: no parameter fetches what LogSeq did not answer.
 pub fn alias_set_warnings(sets: &[&AliasSet]) -> Vec<ResultWarning> {
@@ -120,7 +120,7 @@ fn truncated_warning(set: &AliasSet) -> Option<ResultWarning> {
     })
 }
 
-/// `buildSet`: fold query members into a set, start page first, the rest by name, capped.
+/// Folds query members into a set, start page first, the rest by name, capped.
 fn build_set(start: AliasMember, found: Vec<AliasMember>) -> AliasSet {
     let mut seen = HashSet::new();
     let mut others: Vec<AliasMember> = Vec::new();
@@ -204,7 +204,7 @@ pub async fn resolve_alias_set(client: &LogseqClient, page: &PulledPage) -> Resu
     Ok(resolve_alias_sets(client, &[page]).await?.remove(0))
 }
 
-/// `resolveAliasSetByName`: the alias set of a page known only by name, or `None` when no page has
+/// The alias set of a page known only by name, or `None` when no page has
 /// that name or it has no aliases. For free text that may or may not be a page name (a
 /// `search_term`), where "not a page" is an ordinary answer, not an error. One Datalog query.
 /// A `null` answer is not that answer (BR-0011, #318): it is a set with no members, marked
@@ -218,7 +218,7 @@ pub async fn resolve_alias_set_by_name(client: &LogseqClient, name: &str) -> Res
     Ok(alias_set_of_rows(&rows))
 }
 
-/// What `resolveAliasSetByName` makes of the rows: the first start page that has an id, the
+/// What the by-name alias lookup makes of the rows: the first start page that has an id, the
 /// members of every row, and the set they make, or `None` when it holds no more than the start page.
 fn alias_set_of_rows(rows: &[(PulledPage, PulledPage)]) -> Option<AliasSet> {
     let first = rows.iter().find_map(|(start, _)| AliasMember::of(start))?;

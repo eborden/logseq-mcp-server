@@ -130,7 +130,7 @@ fn is_placeholder(row: &RefTarget) -> bool {
     row.page.as_ref().and_then(|page| page.id).is_none() && row.name.is_none()
 }
 
-/// `pageNameOf`: the name of the page a block sits on.
+/// The name of the page a block sits on.
 fn page_name_of(row: Option<&RefTarget>) -> Option<String> {
     let page = row?.page.as_ref()?;
     page.original_name.clone().or_else(|| page.name.clone())
@@ -299,7 +299,7 @@ struct ResolvedRef {
     status: &'static str,
 }
 
-/// `dedupeRefs`: one entry per embed kind, target and status.
+/// One entry per embed kind, target and status.
 fn dedupe_refs(refs: Vec<ResolvedRef>) -> Vec<ResolvedRef> {
     let mut seen = HashSet::new();
     refs.into_iter()
@@ -560,7 +560,7 @@ pub async fn resolve_block_refs_with(client: &LogseqClient, roots: &[Value], opt
     Ok(Resolved { blocks, warnings: renderer.all_warnings() })
 }
 
-/// `buildResultMeta(warnings)` without totals, as a block or page result carries it: `hasMore`,
+/// The result meta without totals, as a block or page result carries it: `hasMore`,
 /// then `warnings`. Adds both to `result`, after the keys it has.
 pub fn with_meta(mut result: Map<String, Value>, warnings: &[ResultWarning]) -> Map<String, Value> {
     result.insert("hasMore".into(), Value::Bool(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())));

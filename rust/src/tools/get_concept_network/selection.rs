@@ -28,7 +28,7 @@ pub struct Selection {
     pub dropped_by_budget: usize,
 }
 
-/// `Number(a.isJournal) - Number(b.isJournal) || score(b) - score(a) || a.id - b.id`: non-journal
+/// The order of candidates: non-journal
 /// pages first, then the higher score, then the lower id.
 fn rank(score: impl Fn(&Candidate) -> i64) -> impl Fn(&Candidate, &Candidate) -> Ordering {
     move |a, b| {

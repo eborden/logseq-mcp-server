@@ -157,7 +157,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
-/// What `getConceptNetwork` takes beyond the root and the depth (`ConceptNetworkOptions`).
+/// What the network walk takes beyond the root and the depth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
     /// Hard cap on nodes in the result, root included
@@ -253,7 +253,7 @@ fn page_ids(ids: &[i64]) -> Result<Vec<PageId>, ToolError> {
     ids.iter().map(|&id| PageId::new(id).map_err(ToolError::from)).collect()
 }
 
-/// `getConceptNetwork`: the network of pages linked to a concept, by batched Datalog queries.
+/// The network of pages linked to a concept, by batched Datalog queries.
 ///
 /// One query for the root plus one per depth level (at most `max_depth` + 1 calls), each covering
 /// the whole BFS frontier in both link directions.

@@ -3,7 +3,7 @@
 //! sent, since a full result carries it as it came.
 //!
 //! Both answers are `null` or a list of rows, one cell each, and a `null` cell is skipped
-//! (`filter(row => row != null)`). A `null` answer is not an empty one (BR-0011): the tool says
+//! (the row is dropped). A `null` answer is not an empty one (BR-0011): the tool says
 //! LogSeq gave no answer.
 
 use serde::de::DeserializeOwned;
@@ -18,12 +18,12 @@ fn rows<T: DeserializeOwned>(answer: &Value) -> Result<Option<Vec<Map<String, Va
     Ok(cells.map(|cells| cells.into_iter().flatten().filter_map(|cell| if let Value::Object(map) = cell { Some(map) } else { None }).collect()))
 }
 
-/// `responses.nullablePageRows`: the pulled journal pages, or `None` for a `null` answer.
+/// The pulled journal pages, or `None` for a `null` answer.
 pub fn pages(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
     rows::<PulledPage>(answer)
 }
 
-/// `responses.nullableBlockRows`: the pulled blocks, or `None` for a `null` answer.
+/// The pulled blocks, or `None` for a `null` answer.
 pub fn blocks(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
     rows::<Block>(answer)
 }

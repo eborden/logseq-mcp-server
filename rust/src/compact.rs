@@ -15,7 +15,7 @@ use serde_json::{Map, Value};
 use crate::entity::{id_of, original_name_of};
 use crate::snippet::Snippet;
 
-/// `compactBlock`: `{ uuid, snippet }`. A block with no `uuid` has none here either.
+/// A compact block: `{ uuid, snippet }`. A block with no `uuid` has none here either.
 pub fn compact_block(block: &Value) -> Value {
     let mut out = Map::new();
     if let Some(uuid) = block.get("uuid") {
@@ -25,7 +25,7 @@ pub fn compact_block(block: &Value) -> Value {
     Value::Object(out)
 }
 
-/// `compactPage`: `{ id, name, originalName }`, each only when the page has it.
+/// A compact page: `{ id, name, originalName }`, each only when the page has it.
 pub fn compact_page(page: &Value) -> Value {
     let mut out = Map::new();
     if let Some(id) = id_of(Some(page)) {
@@ -54,7 +54,7 @@ fn each(value: Option<&Value>, f: impl Fn(&Value) -> Value) -> Value {
     Value::Array(value.and_then(Value::as_array).map(|items| items.iter().map(f).collect()).unwrap_or_default())
 }
 
-/// `compactTopicContext`: a topic's context with block bodies replaced by snippets and pages by
+/// A topic's context with block bodies replaced by snippets and pages by
 /// their names.
 pub fn compact_topic_context(context: &Value) -> Value {
     let mut out = map_of(context);
@@ -81,12 +81,12 @@ pub fn compact_topic_context(context: &Value) -> Value {
     Value::Object(out)
 }
 
-/// `compactQueryContext`: a query's context with every topic compacted and the search hits reduced
+/// A query's context with every topic compacted and the search hits reduced
 /// to snippets.
 pub fn compact_query_context(context: &Value) -> Value {
     let mut out = map_of(context);
     out = with(out, "contexts", each(context.get("contexts"), compact_topic_context));
-    // `searchResults: undefined` is no key once written
+    // a missing `searchResults` stays a missing key
     if let Some(results) = context.get("searchResults") {
         out = with(out, "searchResults", each(Some(results), compact_block));
     }

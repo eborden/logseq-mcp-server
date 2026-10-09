@@ -104,7 +104,7 @@ fn plain_ref(rest: &str) -> Option<(&str, &str)> {
     Some((id, rest.strip_prefix("))")?))
 }
 
-/// The refs and embeds in `text`, in order, as `matchAll` finds them: `{{embed ((uuid))}}`,
+/// The refs and embeds in `text`, in order, left to right and not overlapping: `{{embed ((uuid))}}`,
 /// `{{embed [[page]]}}` and `((uuid))`, in that order of precedence at a position. Only strict
 /// uuids match, so `((not a uuid))` is left alone.
 pub fn scan(text: &str) -> Vec<Found> {
@@ -173,7 +173,7 @@ fn id_line(s: &str) -> Option<usize> {
     Some(s.len() - rest.len() + ending)
 }
 
-/// `cleanContent`: a block's text without the `id::` property line LogSeq stores in it, wherever
+/// A block's text without the `id::` property line LogSeq stores in it, wherever
 /// it sits, with any spacing and line ending and only at the start of a line, then without
 /// trailing white space.
 pub fn clean_content(content: &str) -> String {

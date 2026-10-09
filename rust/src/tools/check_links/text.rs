@@ -76,7 +76,7 @@ pub struct RefsPreservedCheck {
     pub removed: Vec<RemovedRef>,
 }
 
-/// `stripBrackets`: `[[term]]` to `term`, one pass. The refs are those of [`refs`].
+/// `[[term]]` to `term`, one pass. The refs are those of [`refs`].
 pub fn strip_brackets(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
@@ -105,7 +105,7 @@ pub fn link_counts(text: &str) -> Vec<(String, usize)> {
     counts
 }
 
-/// The page name a term links to (`keyOf`): trimmed and lowercased, as LogSeq trims ref names and
+/// The page name a term links to: trimmed and lowercased, as LogSeq trims ref names and
 /// stores `:block/name` lowercase. This is one place where the tool departs from the script, which
 /// lowercases without trimming: `[[ Alice ]]` resolves to `Alice` here.
 pub fn key_of(term: &str) -> String {

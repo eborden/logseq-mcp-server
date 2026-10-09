@@ -113,7 +113,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     Ok(success_result(content))
 }
 
-/// `metaContent(meta, tips)`: the trailing `{"meta": ...}` block, which carries the tips too, or
+/// The trailing `{"meta": ...}` block, which carries the tips too, or
 /// nothing when there is neither.
 fn meta_content(meta: Option<Map<String, Value>>, tips: &[String]) -> Option<String> {
     let merged = match (meta, tips.is_empty()) {
@@ -156,13 +156,13 @@ fn field<'a>(map: Option<&'a Map<String, Value>>, key: &str) -> Option<&'a Value
     map.and_then(|map| map.get(key))
 }
 
-/// The first of `candidates` that is present (`a ?? b ?? c`; a `null` can't occur, the schema
+/// The first of `candidates` that is present (a `null` can't occur, the schema
 /// refuses it).
 fn first_present<'a>(candidates: impl IntoIterator<Item = Option<&'a Value>>) -> Option<&'a Value> {
     candidates.into_iter().flatten().find(|value| !value.is_null())
 }
 
-/// `sourceName`: the name a warning shows for a source page: the page's, else its first block's
+/// The name a warning shows for a source page: the page's, else its first block's
 /// page (a tuple can have no page), else a neutral label.
 fn source_name(backlink: &Backlink) -> String {
     let page = backlink.page.as_object();
@@ -187,7 +187,7 @@ fn rank_id(backlink: &Backlink) -> i64 {
     first_present([field(backlink.page.as_object(), "id"), field(backlink.block_page(), "id")]).and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
-/// `rankBacklinks`: source pages ranked by how many blocks link the target, most first (#178).
+/// Source pages ranked by how many blocks link the target, most first (#178).
 /// Ties break by page name (lowercase, plain code-unit order), then by page id, so the order is
 /// the same on every run and on both paths: the Editor call's order is LogSeq's own and the alias
 /// group's is by name, and neither says which pages link most. The blocks of each page keep the
@@ -204,7 +204,7 @@ pub fn rank_backlinks(results: Vec<Backlink>) -> Vec<Backlink> {
     keyed.into_iter().map(|(_, _, backlink)| backlink).collect()
 }
 
-/// `pagesThatFit` (#196): the most source pages, from the top of the ranking, whose blocks still
+/// The most source pages (#196), from the top of the ranking, whose blocks still
 /// plausibly come back inline: the longest prefix of `results` that holds at most
 /// [`INLINE_BLOCKS`] blocks once each page is cut to `block_cap`.
 fn pages_that_fit(results: &[Backlink], block_cap: usize) -> usize {
@@ -220,7 +220,7 @@ fn pages_that_fit(results: &[Backlink], block_cap: usize) -> usize {
     pages
 }
 
-/// `capBacklinks`: rank `fetched`, then cut to `max_pages` source pages and `max_blocks_per_page`
+/// Ranks `fetched`, then cuts to `max_pages` source pages and `max_blocks_per_page`
 /// blocks each (#61), keeping the first of each in that order. The ranking applies whether or
 /// not a cap bites, so the order is the same at every cap value and a smaller cap is always a
 /// prefix of a larger one. A result that fits both caps comes back ranked, with no warning and no
@@ -375,7 +375,7 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
         .collect()
 }
 
-/// `fetchBacklinks`: the linked references of a resolved page. Without aliases this is the Editor
+/// The linked references of a resolved page. Without aliases this is the Editor
 /// API's own call for `resolved_name`, unchanged. For a page with aliases it is one Datalog query
 /// over the ids of the whole group, shaped like that call's result (camelCase entities, one
 /// `[page, blocks]` tuple per source page), the pages in order of name, then id. A caller that ranks
@@ -406,7 +406,7 @@ fn by_page_name_then_id(a: &Backlink, b: &Backlink) -> Ordering {
     order::by_name(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
 }
 
-/// `getBacklinksWithMeta`: every page and block that links to `page_name` under any of its names.
+/// Every page and block that links to `page_name` under any of its names.
 ///
 /// `page_name` is a page name, an alias, or an ISO date (`2025-01-01`) of a journal. The meta
 /// carries `resolvedFrom` when the name was an alias, date or namespace leaf rather than an exact

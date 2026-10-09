@@ -1,4 +1,4 @@
-//! What the page outline reads from LogSeq: the blocks its query pulls (`outlineBlockSchema`).
+//! What the page outline reads from LogSeq: the blocks its query pulls.
 
 use std::fmt;
 
@@ -68,7 +68,7 @@ impl<'de> Visitor<'de> for ParentVisitor {
     }
 }
 
-/// A block as the outline's query pulls it (`outlineBlockSchema`).
+/// A block as the outline's query pulls it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "Pulled")]
 pub struct OutlineBlock {
@@ -123,7 +123,7 @@ impl TryFrom<Pulled> for OutlineBlock {
     }
 }
 
-/// `responses.outlineRows`: `[block | null]` per row. A `null` cell is `None`, which the outline
+/// The answer: `[block | null]` per row. A `null` cell is `None`, which the outline
 /// skips.
 pub fn outline_rows(answer: &Value) -> Result<Option<Vec<Option<OutlineBlock>>>, ResponseError> {
     Ok(parse::<Option<Vec<(Option<OutlineBlock>,)>>>(DATALOG_METHOD, answer)?.map(|rows| rows.into_iter().map(|(block,)| block).collect()))
