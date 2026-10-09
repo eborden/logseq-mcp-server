@@ -92,7 +92,7 @@ async fn run(logseq: &MockLogseq, name: &str) -> Result<Outcome, ToolError> {
 }
 
 fn results_text(outcome: &Outcome) -> String {
-    let results = outcome.results.clone().expect("a list");
+    let results = outcome.results.clone();
     serde_json::to_string(&Value::Array(results.into_iter().map(|b| b.into_value()).collect())).unwrap()
 }
 
@@ -108,7 +108,7 @@ async fn a_page_with_no_aliases_costs_two_calls_the_resolver_then_the_editor_cal
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.Editor.getPageLinkedReferences"]);
     // an exact match hands the caller's own text on
     assert_eq!(logseq.seen.lock().unwrap()[1]["args"], json!(["Atlas"]));
-    assert_eq!(outcome.results.as_ref().unwrap().len(), 1);
+    assert_eq!(outcome.results.len(), 1);
     assert_eq!(outcome.meta, None, "an exact match on a page with no aliases that fits both caps has no meta");
 }
 
@@ -167,23 +167,61 @@ async fn the_cut_costs_no_call_and_counts_everything_that_was_there() {
     let logseq = mock_logseq(vec![json!([[page(10, "atlas", "Atlas", &[]), "name"]]), Value::Array(sources)]).await;
     let outcome = run(&logseq, "atlas").await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
-    assert_eq!(outcome.results.as_ref().unwrap().len(), 20);
+    assert_eq!(outcome.results.len(), 20);
     let meta = outcome.meta.unwrap();
     assert_eq!(meta["totals"], json!({"pages": 25, "blocks": 25}));
     assert_eq!(meta["warnings"][0]["code"], "pages_truncated");
 }
 
+/// What every `null` answer to the references becomes (BR-0011, #318): an empty list and a warning, never the bare text `null`.
+fn assert_backlinks_unavailable(outcome: &Outcome, extra_meta: &str) {
+    assert!(outcome.results.is_empty());
+    let meta = serde_json::to_string(outcome.meta.as_ref().expect("a warning needs a meta")).unwrap();
+    assert!(meta.starts_with(r#"{"hasMore":false,"warnings":[{"code":"backlinks_unavailable","message":"LogSeq returned no answer when looking up the pages that link to \"Atlas\" "#), "{meta}");
+    assert!(meta.ends_with(&format!(r#"Retry in a moment, or call logseq_get_graph_info to check which graph is open."}}]{extra_meta}}}"#)), "{meta}");
+    assert!(!meta.contains("howToFetchAll") && !meta.contains("totals"), "{meta}");
+}
+
 #[tokio::test]
-async fn a_null_answer_stays_null_and_an_unreadable_one_is_an_error() {
+async fn a_null_answer_is_an_empty_list_and_a_warning_and_an_unreadable_one_is_an_error() {
     let logseq = mock_logseq(vec![json!([[page(10, "atlas", "Atlas", &[]), "name"]]), Value::Null]).await;
     let outcome = run(&logseq, "atlas").await.unwrap();
-    assert!(outcome.results.is_none());
-    assert_eq!(outcome.meta, None);
+    assert_backlinks_unavailable(&outcome, "");
+    assert_eq!(methods(&logseq).len(), 2);
 
     let logseq = mock_logseq(vec![json!([[page(10, "atlas", "Atlas", &[]), "name"]]), json!([[null, [{"uuid": "u"}]]])]).await;
     let error = run(&logseq, "atlas").await.unwrap_err();
     assert!(matches!(error, ToolError::Response(_)), "{error}");
     assert!(error.to_string().contains("logseq.Editor.getPageLinkedReferences in a shape this server can't read: [0][1][0].id"));
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_aliased_query_is_the_same_empty_list_and_warning_with_the_names_the_group_has() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "atlas", "Atlas", &[11]), "name"]]),
+        json!([[10, {"id": 10, "name": "atlas", "original-name": "Atlas"}], [10, {"id": 11, "name": "project atlas", "original-name": "Project Atlas"}]]),
+        Value::Null,
+    ])
+    .await;
+    let outcome = run(&logseq, "atlas").await.unwrap();
+    assert_backlinks_unavailable(&outcome, r#","resolvedAliases":["Atlas","Project Atlas"]"#);
+    assert_eq!(methods(&logseq).len(), 3);
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_alias_lookup_warns_and_the_editor_call_reads_the_page_alone() {
+    let logseq = mock_logseq(vec![json!([[page(10, "atlas", "Atlas", &[11]), "name"]]), Value::Null, json!([])]).await;
+    let outcome = run(&logseq, "atlas").await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery", "logseq.Editor.getPageLinkedReferences"]);
+    let meta = serde_json::to_string(outcome.meta.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        meta,
+        concat!(
+            r#"{"hasMore":false,"warnings":[{"code":"alias_lookup_unavailable","message":"LogSeq returned no answer when looking up the aliases of \"Atlas\" "#,
+            r#"(possibly no graph open or a re-index in progress), so only the page itself was used and references written under its other names may be missing. "#,
+            r#"This does not mean the page has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}]}"#
+        )
+    );
 }
 
 #[tokio::test]

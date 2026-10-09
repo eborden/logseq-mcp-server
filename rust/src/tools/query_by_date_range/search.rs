@@ -117,6 +117,7 @@ mod tests {
         AliasSet {
             members: members.iter().map(|(id, name)| AliasMember { id: *id, name: (*name).to_owned(), original_name: (*name).to_owned() }).collect(),
             truncated: false,
+            unavailable: None,
         }
     }
 
