@@ -66,16 +66,11 @@ impl Reader {
         self.number(map, "created-at")?;
         self.number(map, "updated-at")?;
         self.map_field(map, "properties-text-values")?;
-        // PARITY(#299): reads the Editor API's `originalName` spelling from a Datalog pull, as `entity-fields`
-        // does — drop if Rust becomes the only server.
-        // `entity-fields` reads `originalName` first, in case a pull carried the Editor API's
-        // spelling. The schema doesn't name it, so it is read only when it is text.
-        let camel = map.get("originalName").and_then(Value::as_str).map(str::to_owned);
         Ok(PulledPage {
             id,
             db_id,
             name,
-            original_name: camel.filter(|name| !name.is_empty()).or(original_name),
+            original_name,
             has_file: file.is_some(),
             has_alias_links: alias_links > 0,
             raw: value.cloned().unwrap_or(Value::Null),
@@ -310,6 +305,14 @@ mod tests {
         assert_eq!(page(json!({"id": 0, "db/id": 7})).entity_id(), Some(0));
         assert_eq!(page(json!({"id": 3, "db/id": 7})).entity_id(), Some(3));
         assert_eq!(page(json!({})).entity_id(), None);
+    }
+
+    #[test]
+    fn a_pulled_page_is_named_by_its_kebab_case_original_name_only() {
+        let page = |value: Value| resolver_rows(&json!([[value]])).unwrap().unwrap().remove(0).page;
+        assert_eq!(page(json!({"id": 1, "name": "alice", "original-name": "Alice"})).display_name(), "Alice");
+        // the Editor API's spelling is not read from a pull: the lowercase name stands in
+        assert_eq!(page(json!({"id": 1, "name": "alice", "originalName": "Alice"})).display_name(), "alice");
     }
 
     #[test]
