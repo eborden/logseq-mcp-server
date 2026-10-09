@@ -121,9 +121,9 @@ fn pick(pages: &[&PulledPage], matched_by: MatchedBy, reason: String, page_name:
     Resolution::Ambiguous(AmbiguousPage { page_name: page_name.to_owned(), candidates, total_candidates: pages.len() })
 }
 
-/// `JSON.stringify(text)`.
+/// `text` as a JSON string literal.
 fn json_string(text: &str) -> String {
-    js::json_stringify(&serde_json::Value::String(text.to_owned()))
+    serde_json::Value::String(text.to_owned()).to_string()
 }
 
 /// Routes 1-3 of [`resolve_page`] over the rows of its first query, for one trimmed name. Each
