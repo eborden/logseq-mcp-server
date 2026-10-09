@@ -67,8 +67,10 @@ describe('logseq_list_pages nests aliases (#171), against the fixture graph', ()
   it('sorts by page name, with no duplicate pages', () => {
     const listed = names(all);
     expect(new Set(listed).size).toBe(listed.length);
-    const sorted = [...listed].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-    expect(listed.map(name => name.toLowerCase())).toEqual(sorted.map(name => name.toLowerCase()));
+    // the fixed order (#299): lowercase names by code point (the fixture holds no character above U+FFFF, where
+    // JavaScript's code unit order would differ), and the name itself between names that differ only in case
+    const lower = listed.map(name => name.toLowerCase());
+    expect(lower).toEqual([...lower].sort());
   });
 
   it('name_contains on an alias returns the page that declares it, with its alias list', async () => {

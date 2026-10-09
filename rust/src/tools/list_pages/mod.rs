@@ -24,6 +24,7 @@ use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::js;
 use crate::meta::ResultWarning;
+use crate::order;
 use crate::tips::tips_content;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, capped_truncation_warning};
@@ -151,13 +152,10 @@ struct Entry<'a> {
     aliases: Vec<&'a ListedEntity>,
 }
 
-/// A total order on page names. `localeCompare` is 0 for some distinct names (NFC and NFD, a
-/// zero-width space), and `getAllPages` order is not guaranteed, so a tie could put one name on two
-/// pages and drop the other.
+/// A total order on page names ([`order::by_name`]): `getAllPages` order is not guaranteed, so a
+/// tie between two names would put one name on two pages and drop the other.
 fn by_name(a: &ListedEntity, b: &ListedEntity) -> Ordering {
-    // PARITY(#299): `localeCompare`'s order, which follows the host's ICU (suspected TS bug) — replace with a fixed
-    // order if Rust becomes the only server, and keep the tie-break after it, which is what makes the order total.
-    js::locale_compare(&a.name, &b.name).then_with(|| a.name.encode_utf16().cmp(b.name.encode_utf16()))
+    order::by_name(&a.name, &b.name)
 }
 
 /// Fold alias links into the page list (#171), from the `alias` ids that `getAllPages` already
