@@ -40,16 +40,14 @@ pub fn bad_date(param: &str, value: &Value, example: &str) -> InvalidParameter {
     invalid(param, js::json_stringify(value), FORMAT, example)
 }
 
-// PARITY(#299): checks the day against 31 whatever the month, so `20250231` passes and the query asks for
-// it as a bound (suspected TS bug: it is no date) — drop if Rust becomes the only server.
-/// `isValidDateFormat`: a whole number of 8 digits (year 1900 to 2100, month 1 to 12, day 1 to 31).
-/// A day is checked against 31 whatever the month, so `20250231` passes.
+/// `isValidDateFormat`: a whole number of 8 digits (year 1900 to 2100) that is a day the calendar has,
+/// so `20250231` is not one.
 fn is_valid_date_format(date: i64) -> bool {
     if !(10_000_000..=99_999_999).contains(&date) {
         return false;
     }
     let (year, month, day) = (date / 10_000, date / 100 % 100, date % 100);
-    (1900..=2100).contains(&year) && (1..=12).contains(&month) && (1..=31).contains(&day)
+    (1900..=2100).contains(&year) && CalendarDate::real(year as i32, month as u32, day as u32).is_some()
 }
 
 /// The one validation path for choosing a range.
@@ -177,10 +175,10 @@ mod tests {
 
     #[test]
     fn a_date_is_eight_digits_with_a_year_a_month_and_a_day_in_range() {
-        for good in [19000101, 21001231, 20250231, 20251115] {
+        for good in [19000101, 21001231, 20240229, 20250228, 20251115] {
             assert!(is_valid_date_format(good), "{good}");
         }
-        for bad in [2025011, 202501011, 18991231, 21010101, 20250001, 20251301, 20250100, 20250132, -2025011, 0] {
+        for bad in [2025011, 202501011, 18991231, 21010101, 20250001, 20251301, 20250100, 20250132, 20250231, 20250229, 20250431, 19000229, -2025011, 0] {
             assert!(!is_valid_date_format(bad), "{bad}");
         }
     }
