@@ -1,7 +1,7 @@
 //! `tests/fixtures/graph-linking/` through `logseq_check_links` (#369), against a stub LogSeq built
 //! from the fixture's `pages.txt`. The fixture is the worked example and the regression suite for
 //! the concept-linking skill and its gate. This is the port of the test that ran it in TypeScript,
-//! `src/tools/check-links.test.ts` (last version: commit 10103c8), which went with the TypeScript
+//! `src/tools/check-links.test.ts` (last version: commit 35fa2dd3), which went with the TypeScript
 //! server (#356):
 //!
 //! - `expected/` passes, each file in `negative/` fails on the check the fixture README names,

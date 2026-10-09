@@ -10,7 +10,7 @@
  * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 19,383. So the real payload
  * has about 317 characters of headroom under this budget, not the 937 the recorded list leaves.
  *
- * The history of the number is in the version of `src/tool-list.test.ts` at commit `10103c8`: it was set when the list
+ * The history of the number is in the version of `src/tool-list.test.ts` at commit `35fa2dd3`: it was set when the list
  * was about 16,000 characters and raised once to 19,700 for the #61 caps.
  *
  * To raise it deliberately: change this constant in the PR that grows the tool list, and say in the PR

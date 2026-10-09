@@ -4,7 +4,7 @@ The LogSeq MCP server in Rust. It began as a bounded spike
 ([ADR-0025](../docs/adr/0025-rust-implementation-alongside-typescript.md), #122) beside a TypeScript server, and
 since the Go on #349 (2026-10-08) it is the only server on this branch: the TypeScript server was removed in #356.
 The tool contract it keeps is that server's: `tests/data/parity/` holds the results recorded from it (its last version
-is readable at commit `10103c8`, as `10103c8:src/client.ts`), which the parity test holds this crate to (`cargo test`,
+is readable at commit `35fa2dd3`, as `35fa2dd3:src/client.ts`), which the parity test holds this crate to (`cargo test`,
 below). Comments in this crate say why the Rust code does what it does, not what that server did.
 `// PARITY(#299)` tags the code that exists only to match it.
 
