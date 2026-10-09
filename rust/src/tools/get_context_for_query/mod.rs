@@ -516,6 +516,14 @@ mod tests {
     }
 
     #[test]
+    fn a_bracketed_tag_is_one_topic_of_its_name() {
+        // the one grammar of `refs`: `#[[a b]]` is the tag `a b`, and the same text is the ref `a b`
+        assert_eq!(extract_topics("see #[[tag with spaces]] and #plain"), ["tag with spaces", "plain"]);
+        // no closing brackets: the run to white space, as before
+        assert_eq!(extract_topics("see #[[tag with spaces"), ["[[tag"]);
+    }
+
+    #[test]
     fn keywords_are_the_first_three_long_words_that_are_not_stop_words() {
         assert_eq!(keywords("What does the Importer do about Retries and Timeouts today"), ["importer", "retries", "timeouts"]);
         assert_eq!(keywords("how is it"), Vec::<String>::new());

@@ -157,6 +157,16 @@ mod tests {
     }
 
     #[test]
+    fn a_bracketed_tag_is_one_tag_of_its_name_and_the_same_text_is_still_a_page_ref() {
+        assert_eq!(extract_tags("x #[[tag with spaces]]"), ["tag with spaces"]);
+        assert_eq!(extract_page_refs("x #[[tag with spaces]]"), ["tag with spaces"]);
+        assert_eq!(extract_tags("#[[one two]] and #plain and #[[three four]]"), ["one two", "plain", "three four"]);
+        // no closing brackets on the line: the run to white space, as before
+        assert_eq!(extract_tags("x #[[tag with spaces"), ["[[tag"]);
+        assert_eq!(slim(json!({"uuid": "u", "content": "x #[[tag with spaces]]"}), ""), r##"{"uuid":"u","content":"x #[[tag with spaces]]","tags":["tag with spaces"],"pageRefs":["tag with spaces"]}"##);
+    }
+
+    #[test]
     fn empty_values_say_nothing_but_false_and_zero_do() {
         for empty in [json!(null), json!(""), json!("  "), json!([]), json!({})] {
             assert!(is_empty_value(&empty), "{empty}");
