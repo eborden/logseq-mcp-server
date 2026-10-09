@@ -142,7 +142,7 @@ mod tests {
         let client = LogseqClient::new(&Config {
             api_url: api_url.into(),
             auth_token: "unused".into(),
-            timeout_ms: Some(2000.0),
+            timeout_ms: Some(2000),
             tips: None,
         });
         let (server_io, client_io) = tokio::io::duplex(1 << 16);

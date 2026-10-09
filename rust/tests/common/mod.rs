@@ -57,7 +57,7 @@ pub async fn mock_logseq(answers: Vec<Value>) -> MockLogseq {
 }
 
 pub fn client(logseq: &MockLogseq) -> LogseqClient {
-    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None })
+    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
 
 /// The method of each request so far, in order.

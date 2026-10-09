@@ -37,7 +37,7 @@ async fn proxy_environment_variables_are_ignored() {
         String::from_utf8_lossy(&buf[..n]).lines().next().unwrap_or_default().to_owned()
     });
 
-    let client = LogseqClient::new(&Config { api_url, auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None });
+    let client = LogseqClient::new(&Config { api_url, auth_token: "t".into(), timeout_ms: Some(5000), tips: None });
     let data = client.call_api("logseq.App.getCurrentGraph", &[]).await.unwrap();
     assert_eq!(data, serde_json::json!({"ok": true}));
     // A direct request names the path; a proxied one would name the absolute URL.
