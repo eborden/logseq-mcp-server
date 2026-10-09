@@ -13,7 +13,7 @@ Generate a weekly summary from journal entries, compressed to salient signals an
 | Source | Journal entries (raw) |
 | Period | Monday through Friday |
 | Output | `<graph>/pages/Weekly YYYY-MM-DD.md` (the Monday date) |
-| Tags | `[[Weekly Summary]]` plus one link per journal day with content |
+| Tags | `[[Weekly Summary]]` plus one link per journal day with content, each in the graph's journal title format (reference, "Journal Day Links"; never a hardcoded one) |
 | Source line | `summary-source::` under the tags line: the period query's roll-up (Step 6) |
 | Gist label | `- **Week**: ...` |
 | Lookback | Previous 2-3 `Weekly *` pages |
@@ -95,6 +95,8 @@ grep -nE "^\s*-\s+(TODO|DOING|NOW|LATER) " <graph>/journals/YYYY_MM_*.md
 This `grep` reads marker state only. It doesn't replace Step 4: it can't tell you what the week held, and it shows nothing of a day that has no open item.
 
 ### Step 6: Write and Verify the Page
+
+First find the graph's journal title format (`:journal/page-title-format` in `<graph>/logseq/config.edn`; the reference's "Journal Day Links" says what to do when the key or the file is missing) and write every day link on the tags line in it. This is a one-key read of one file, not a read of the journals, so it may come after Step 4's query.
 
 Apply the compression rules and output structure from the reference. Under the tags line, add the roll-up from Step 4. If the page already has a `summary-source::` line (an update in place, or a `source::` line from an earlier version of this skill), replace it with this run's roll-up rather than adding a second one. Keeping the old line says the page was built from a query this run never made.
 

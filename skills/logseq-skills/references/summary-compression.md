@@ -70,7 +70,7 @@ When over the cap, prefer merging to dropping — two thin signals about the sam
 Every summary page carries these sections in this order. `## Unresolved` and `## Personal` are **mandatory even when empty** — an omitted section reads as "never checked", while an empty one reads as "checked, nothing found".
 
 ```markdown
-tags:: [[<Granularity> Summary]], <constituent page links>
+tags:: [[<Granularity> Summary]], <constituent page links; weekly day links in the graph's journal title format>
 summary-source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top <name> <count>/<days> | <name> <count>/<days>
 
 - **<Period>**: [1-2 sentence gist]
@@ -90,8 +90,34 @@ The `summary-source::` line records the roll-up (`summary.totalDays`, `summary.t
 1. **Indent with tabs.** LogSeq's outliner requires tabs; spaces break nesting silently.
 2. **Page refs**: `[[Double Brackets]]`, for significant people and topics only.
 3. **Block refs**: `((uuid))` for open items. These render live content and stay linked to source. Never paste TODO text into a summary — a copy goes stale without any visible sign.
-4. **Tags line**: link only the constituent periods that actually had content. Weekly day links use an English ordinal with a three-letter month: `[[Sep 1st, 2026]]`, `[[Sep 2nd, 2026]]`, `[[Sep 3rd, 2026]]`, `[[Sep 8th, 2026]]`, `[[Sep 22nd, 2026]]`. Monthly links constituent weeks as `[[Weekly YYYY-MM-DD]]`. Omit periods with no content rather than linking an empty page.
+4. **Tags line**: link only the constituent periods that actually had content. Weekly day links are the journal pages' own titles, written in the graph's journal title format (see "Journal Day Links" below), never in a format you picked. Monthly links constituent weeks as `[[Weekly YYYY-MM-DD]]`, which are page names and not journal titles, so they do not follow that format. Omit periods with no content rather than linking an empty page.
 5. **Partial periods**: state the boundary in the gist when the period is incomplete — for example "(through Thu Aug 27)". Remove the caveat when completing it later.
+
+## Journal Day Links
+
+A journal page's title comes from the graph's `:journal/page-title-format`, so every link to a journal day must be spelled that way. A link in any other format is a plain page with a date-like name. LogSeq does not map the text to the journal day, so it creates an empty stub page next to the real journal and the link points at the stub.
+
+**Find the format once per run, before writing the Tags line:**
+
+1. Read `<graph>/logseq/config.edn` (`<graph>` from `logseq_get_graph_info`, Step 0) and find the `:journal/page-title-format` key, for example `:journal/page-title-format "yyyy-MM-dd"`. Read only that file and that key.
+2. If the file has no such key, use LogSeq's default, `MMM do, yyyy`.
+3. If the file cannot be read (missing, no permission, no file access in this host), ask the user for the format, or for one journal page's title to copy. Don't guess.
+
+Then format **every** day link you write with that format, from the day's real date. Don't mix formats within a page, and don't copy the shape of a link from an older summary (it may predate the format or the graph's change of it). `:journal/file-name-format` is a different key (the file name under `journals/`); don't use it for links.
+
+How a link looks for a few formats, with made-up days (Tuesday 2026-09-01 and Wednesday 2026-09-02):
+
+| `:journal/page-title-format` | Link for 2026-09-01 | Link for 2026-09-02 |
+|---|---|---|
+| `MMM do, yyyy` (LogSeq's default) | `[[Sep 1st, 2026]]` | `[[Sep 2nd, 2026]]` |
+| `yyyy-MM-dd` | `[[2026-09-01]]` | `[[2026-09-02]]` |
+| `EEE, MM/dd/yyyy` | `[[Tue, 09/01/2026]]` | `[[Wed, 09/02/2026]]` |
+| `dd-MM-yyyy` (numeric, day first) | `[[01-09-2026]]` | `[[02-09-2026]]` |
+| `EEEE, MMMM do, yyyy` | `[[Tuesday, September 1st, 2026]]` | `[[Wednesday, September 2nd, 2026]]` |
+
+Letters follow LogSeq's formatter: `yyyy` year, `MM` two-digit month, `MMM` short month name, `MMMM` full month name, `dd` two-digit day, `do` day with an English ordinal (1st, 2nd, 3rd, 4th, 11th, 22nd), `E` or `EEE` short weekday name, `EEEE` full weekday name. Anything else in the string (commas, spaces, hyphens, slashes) is copied as written.
+
+A format with a slash, as in `EEE, MM/dd/yyyy` above, also has a cost: LogSeq reads `/` in a page title as a namespace separator, so each link makes namespace parent pages (here `Tue, 09`) appear. That is the graph's own format, and the links stay correct. Mention it to the user if they ask why such pages exist. A link written in the wrong format makes a stub page, which the user has to delete by hand, because these tools cannot delete pages.
 
 ## Reading the Period: Query First, Files Only After a Failure
 
@@ -166,7 +192,7 @@ State the delta explicitly in the signal text. "Vendor estimate tripled since sc
 
 11 items, ~85 words, 3 theme headers.
 
-**AFTER** — compressed with salience:
+**AFTER** — compressed with salience. The day links show LogSeq's default title format (`MMM do, yyyy`) only; write them in the graph's own format ("Journal Day Links"):
 
 ```markdown
 tags:: [[Weekly Summary]], [[Dec 1st, 2026]], [[Dec 2nd, 2026]], [[Dec 3rd, 2026]]
