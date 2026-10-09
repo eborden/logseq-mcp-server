@@ -267,7 +267,7 @@ fn extract_topics(query: &str) -> Vec<String> {
 fn keywords(query: &str) -> Vec<String> {
     query
         .to_lowercase()
-        .split(js::is_js_space)
+        .split(char::is_whitespace)
         .filter(|word| word.chars().count() > 3 && !COMMON_WORDS.contains(word))
         .take(3)
         .map(str::to_owned)

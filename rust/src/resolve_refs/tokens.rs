@@ -1,8 +1,8 @@
 //! Finding refs and embeds in a block's text, and cleaning a target's text (the scanner and
 //! `cleanContent` of `src/utils/resolve-refs.ts`). The TypeScript server does both with regular
 //! expressions; the crate has no regex engine, and each pattern is small, so they are written out
-//! here, with the same matches: the same leftmost-first alternation, the same `\s`
-//! ([`js::is_js_space`]) and the same ASCII-only case folding as the `i` flag.
+//! here, with the same matches: the same leftmost-first alternation, white space as Rust takes it
+//! (`char::is_whitespace`, not JavaScript's `\s`) and the same ASCII-only case folding as the `i` flag.
 
 use std::ops::Range;
 
@@ -61,9 +61,9 @@ fn strip_ci<'a>(s: &'a str, lit: &str) -> Option<&'a str> {
     head.eq_ignore_ascii_case(lit).then(|| &s[lit.len()..])
 }
 
-/// `\s*`
+/// `\s*`, with Rust's white space
 fn skip_space(s: &str) -> &str {
-    s.trim_start_matches(js::is_js_space)
+    s.trim_start_matches(char::is_whitespace)
 }
 
 /// `\s+`

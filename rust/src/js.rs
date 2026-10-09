@@ -8,21 +8,16 @@
 
 use serde_json::Value;
 
-/// A character that counts as white space: Rust's `char::is_whitespace` (Unicode `White_Space`).
+/// The text without white space at either end: Rust's `char::is_whitespace` (Unicode `White_Space`).
 /// The TypeScript server used JavaScript's set, which adds U+FEFF and leaves out U+0085; the
-/// Rust server takes Rust's (#299).
-pub fn is_js_space(c: char) -> bool {
-    c.is_whitespace()
-}
-
-/// The text without white space at either end ([`is_js_space`]).
+/// Rust server takes Rust's (#299). Kept as a name for the many callers; it is `str::trim`.
 pub fn trim(value: &str) -> &str {
-    value.trim_matches(is_js_space)
+    value.trim()
 }
 
-/// The text without white space at its end ([`is_js_space`]).
+/// The text without white space at its end (`str::trim_end`).
 pub fn trim_end(value: &str) -> &str {
-    value.trim_end_matches(is_js_space)
+    value.trim_end()
 }
 
 // PARITY(#299): the Markdown property value and the backlink sort key are parity uses of this function, to go
