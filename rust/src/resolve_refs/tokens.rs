@@ -1,8 +1,7 @@
-//! Finding refs and embeds in a block's text, and cleaning a target's text (the scanner and
-//! `cleanContent` of `src/utils/resolve-refs.ts`). The TypeScript server does both with regular
-//! expressions; the crate has no regex engine, and each pattern is small, so they are written out
-//! here, with the same matches: the same leftmost-first alternation, white space as Rust takes it
-//! (`char::is_whitespace`, not JavaScript's `\s`) and the same ASCII-only case folding as the `i` flag.
+//! Finding refs and embeds in a block's text, and cleaning a target's text .
+//! Both are small regex-shaped patterns and the crate has no regex engine, so they are written out
+//! here: leftmost-first alternation, white space as Rust takes it (`char::is_whitespace`, not the
+//! wider `\s` of a JavaScript regex) and ASCII-only case folding, as the `i` flag does.
 
 use std::ops::Range;
 

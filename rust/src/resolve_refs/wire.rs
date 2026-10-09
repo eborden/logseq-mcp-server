@@ -1,5 +1,4 @@
-//! What the ref lookup reads from LogSeq: the blocks and pages a `((uuid))` or an embed points at
-//! (`refTargetSchema` and `responses.refTargetRows` in `src/response-schemas.ts`).
+//! What the ref lookup reads from LogSeq: the blocks and pages a `((uuid))` or an embed points at.
 
 use serde::Deserialize;
 use serde_json::Value;

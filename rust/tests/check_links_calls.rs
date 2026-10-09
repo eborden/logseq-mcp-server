@@ -1,7 +1,7 @@
 //! The link checker's LogSeq traffic against a mock LogSeq on a local port: how many calls it makes
-//! and with which inputs. The Rust side of the call counts in `CLAUDE.md` ("Current Implementation
+//! and with which inputs. The call counts in `CLAUDE.md` ("Current Implementation
 //! Status": `check_links` is 0-1 calls); the parity harness (`parity.rs`) checks the same
-//! calls and the result bytes against the TypeScript server. Every page here is made up (BR-0001).
+//! calls and the result bytes against the recorded results. Every page here is made up (BR-0001).
 
 mod common;
 

@@ -1,5 +1,4 @@
-//! What the concept network reads from LogSeq: the rows of its connected-pages query
-//! (`responses.connectedRows` in `src/response-schemas.ts`).
+//! What the concept network reads from LogSeq: the rows of its connected-pages query.
 
 use serde::Deserialize;
 use serde_json::Value;

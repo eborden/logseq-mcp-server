@@ -1,4 +1,4 @@
-//! What a property search suggests next (`logseq_query_by_property` in `src/utils/tips.ts`). Tips
+//! What a property search suggests next. Tips
 //! are built from the finished result, as JSON, never by the search itself. The topic worth a
 //! `build_context` call is picked as it is for a block search: the same hits, the same rules.
 

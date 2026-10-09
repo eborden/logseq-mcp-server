@@ -1,5 +1,4 @@
-//! `summary.topConcepts`: the pages the returned blocks reference most (the Rust side of
-//! `src/utils/top-concepts.ts`). Tags, `[[links]]` and aliases all end up as `:block/refs` of the
+//! `summary.topConcepts`: the pages the returned blocks reference most . Tags, `[[links]]` and aliases all end up as `:block/refs` of the
 //! same page, so they merge on page id with no parsing of content.
 
 use std::cmp::Ordering;

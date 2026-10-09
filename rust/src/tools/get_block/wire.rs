@@ -1,4 +1,4 @@
-//! What `logseq.Editor.getBlock` answers (`responses.block` in `src/response-schemas.ts`): a
+//! What `logseq.Editor.getBlock` answers: a
 //! block, or `null` when there is none. The block is returned as LogSeq sent it, since the
 //! result carries it whole (BR-0004).
 

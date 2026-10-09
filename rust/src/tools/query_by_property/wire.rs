@@ -1,5 +1,4 @@
-//! What the property search reads from LogSeq: its query's rows (`responses.nullableBlockRows` in
-//! `src/response-schemas.ts`). Each block is checked against the TypeScript schema and returned as
+//! What the property search reads from LogSeq: its query's rows. Each block is checked against its wire type and returned as
 //! the JSON LogSeq sent, since a full result carries it as it came.
 
 use serde_json::{Map, Value};

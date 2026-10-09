@@ -2,7 +2,7 @@
 //! (`responses.linkedReferences`) and the blocks of the aliased Datalog query
 //! (`responses.nullableBlockRows`).
 //!
-//! Both are checked against the TypeScript schemas and then kept as the values LogSeq sent: the
+//! Both are checked against their wire types and then kept as the values LogSeq sent: the
 //! tool's output carries each entity as it came (BR-0004), so a typed copy would only be thrown
 //! away. The schema checks are `entity.rs`'s.
 

@@ -1,7 +1,7 @@
-//! What a block search suggests next (`logseq_search_blocks` in `src/utils/tips.ts`). Tips are
+//! What a block search suggests next. Tips are
 //! built from the finished result, as JSON, never by the search itself, so the result keeps its
-//! shape: they read the same fields the TypeScript tips read (`pageName`, `context.page`, `page`,
-//! `tags`, `pageRefs`), in the same order.
+//! shape: they read these fields (`pageName`, `context.page`, `page`,
+//! `tags`, `pageRefs`), in this order.
 
 use serde_json::{Value, json};
 

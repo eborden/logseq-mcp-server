@@ -1,5 +1,4 @@
-//! What `logseq.Editor.getAllPages` answers, for the fields the page list reads
-//! (`responses.editorPages` in `src/response-schemas.ts`).
+//! What `logseq.Editor.getAllPages` answers, for the fields the page list reads.
 
 use serde_json::Value;
 

@@ -1,4 +1,4 @@
-//! The one Markdown renderer (#43; the Rust side of `src/utils/markdown.ts`). Every tool that takes
+//! The one Markdown renderer (#43). Every tool that takes
 //! `format: "markdown"` and the `logseq://page/{name}` resource render through here, so a page
 //! looks the same wherever it is read. Never add a second renderer.
 //!
@@ -11,7 +11,7 @@
 //! - a short footer for warnings, `hasMore` and tips ([`render_footer`]).
 //!
 //! The functions are pure: they take the tools' result objects (`serde_json::Value`, as LogSeq
-//! sent them) and return text. They read tolerantly, as the TypeScript ones do, because the shapes
+//! sent them) and return text. They read tolerantly, because the shapes
 //! differ by source (Editor API camelCase, Datalog kebab-case, `children` that are unfetched
 //! `["uuid", "<id>"]` tuples rather than blocks).
 //!
@@ -348,8 +348,8 @@ pub struct FooterMeta {
 }
 
 impl FooterMeta {
-    /// The meta a tool's result carries in its own fields (`warnings`, `hasMore`), as the TypeScript
-    /// tools pass the result itself to `withFooter`, with the tips the tool made.
+    /// The meta a tool's result carries in its own fields (`warnings`, `hasMore`): a tool passes the
+    /// result itself, with the tips it made.
     pub fn of_result(result: &Value, tips: &[String]) -> Self {
         let text = |value: Option<&Value>| value.and_then(Value::as_str).filter(|text| !text.is_empty()).map(str::to_owned);
         let warnings = result

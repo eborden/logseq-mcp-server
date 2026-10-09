@@ -1,4 +1,4 @@
-//! The timeline of a concept's mentions (the pure part of `src/tools/get-concept-evolution.ts`):
+//! The timeline of a concept's mentions (the pure part of the tool):
 //! which blocks pass the date bounds, how they are grouped by day, cut at `max_entries` and grouped
 //! by period, and the words of the cut. Blocks are the `Value`s LogSeq sent, and an entry names
 //! them by their place in the list of mentions, so the same block is never copied twice.
@@ -7,8 +7,7 @@
 //! journal) is undated, passes every date filter, and comes last.
 //!
 //! The period keys are plain calendar arithmetic on the `YYYYMMDD` number, with no time zone in it:
-//! the TypeScript code computes them from UTC midnights so a daylight-saving change can't move a
-//! day into another week (#249), and this has no local time to be moved by.
+//! there is no local time for a daylight-saving change to move a day into another week by (#249).
 
 use std::collections::{HashMap, HashSet};
 
@@ -45,7 +44,7 @@ pub struct Entry {
     pub blocks: Vec<usize>,
 }
 
-/// `journalDayOf(block.page) || undefined`: the block's day, `None` when it has none or it is 0.
+/// The block's day, `None` when it has none or it is 0.
 pub fn day_of(block: &Value) -> Option<i64> {
     journal_day_of(block.get("page")).filter(|day| *day != 0)
 }
@@ -253,7 +252,7 @@ mod tests {
         assert_eq!(ids(filter_by_dates(blocks.clone(), None, Some(20250115))), [1, 3, 4]);
         assert_eq!(ids(filter_by_dates(blocks.clone(), Some(20250101), Some(20250101))), [1, 3, 4]);
         assert_eq!(ids(filter_by_dates(blocks.clone(), Some(0), Some(0))), [1, 2, 3, 4]);
-        // a day of 0 is no day: block 4 is undated, as `journalDayOf(page) || undefined` has it
+        // a day of 0 is no day: block 4 is undated
         assert_eq!(day_of(&blocks[3]), None);
     }
 
@@ -301,7 +300,7 @@ mod tests {
         assert!(warning.message.starts_with("Showing 500 of 600 mentions (oldest first, undated last; the timeline ends at 20240601): max_entries is capped at its maximum of 500 (700 was asked for), so the rest can't be fetched in one call. Set start_date to 20240601 for later dated mentions"), "{}", warning.message);
     }
 
-    /// A week as the TypeScript test computes it, with no date arithmetic in it: counting the days of the
+    /// A week computed independently of the code under test, with no date arithmetic in it: counting the days of the
     /// year, from 0, in sevens.
     fn counted_week(year: i64, month: i64, day: i64) -> String {
         let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
@@ -350,7 +349,7 @@ mod tests {
         // a seventh digit is a day of one digit, and a ninth is never read
         assert_eq!(week_identifier(2025011).as_deref(), Some("2025-W01"));
         assert_eq!(week_identifier(202501011).as_deref(), Some("2025-W01"));
-        // a month past 12 or a day past the month's end rolls over, as `Date.UTC` has it
+        // a month past 12 or a day past the month's end rolls over
         assert_eq!(week_identifier(20251301).as_deref(), Some("2025-W53"));
         assert_eq!(week_identifier(20250230), week_identifier(20250302));
     }

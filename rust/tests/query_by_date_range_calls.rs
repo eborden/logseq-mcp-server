@@ -1,7 +1,7 @@
 //! The LogSeq traffic of `logseq_query_by_date_range` against a mock LogSeq on a local port: how
-//! many calls it makes, in which order and with which inputs. The Rust side of the call counts in
+//! many calls it makes, in which order and with which inputs. The call counts are those in
 //! `CLAUDE.md` ("Current Implementation Status"); the parity harness (`parity.rs`) checks
-//! the same calls and the result bytes against the TypeScript server. Every page and block here
+//! the same calls and the result bytes against the recorded results. Every page and block here
 //! is made up (BR-0001).
 
 mod common;

@@ -1,4 +1,4 @@
-//! `logseq_query_by_date_range` (the Rust side of `src/tools/query-by-date-range.ts`): journal
+//! `logseq_query_by_date_range`: journal
 //! entries for a range chosen one of three ways (explicit dates, the `last_n` most recent journals,
 //! or a named `preset`), with the blocks of each day as trees, an optional search, a roll-up of the
 //! pages the period was about (`summary.topConcepts`) and a cap on the blocks returned.
@@ -61,7 +61,7 @@ pub use self::cap::DEFAULT_DATE_RANGE_MAX_BLOCKS;
 
 pub const NAME: &str = "logseq_query_by_date_range";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.\n\n\
 **Use when:** \"what did I do last week?\" or catching up. summary.topConcepts shows what a period was about.\n\
 **Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n\
@@ -86,9 +86,9 @@ fn default_max_blocks() -> u64 {
     DEFAULT_DATE_RANGE_MAX_BLOCKS
 }
 
-/// The tool's arguments. Unknown fields are ignored, as every TypeScript tool ignores them. Which
+/// The tool's arguments. Unknown fields are ignored, as in every tool (see `input_schema`). Which
 /// selection was given (exactly one of `start_date` with `end_date`, `last_n` or `preset`) and the
-/// `YYYYMMDD` format are checked by [`query_journals`], as in TypeScript; the types and the counts'
+/// `YYYYMMDD` format are checked by [`query_journals`]; the types and the counts'
 /// minimums are checked when the arguments are parsed.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {

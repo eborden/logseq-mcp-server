@@ -1,5 +1,4 @@
-//! Cutting block trees to a count of blocks, nested ones included (the Rust side of
-//! `src/utils/block-budget.ts`; #162, #183). A cap in these units bounds a result however deep the
+//! Cutting block trees to a count of blocks, nested ones included (#162, #183). A cap in these units bounds a result however deep the
 //! trees run. Shared by `query_by_date_range` (`max_blocks`) and `search_by_relationship` (`limit`,
 //! for `connected-within`).
 //!

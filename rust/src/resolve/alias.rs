@@ -1,4 +1,4 @@
-//! Alias groups (#69; the Rust side of `src/utils/alias-set.ts`). `alias::` makes two names one
+//! Alias groups (#69). `alias::` makes two names one
 //! concept, but a reference written under either name points at its own page entity, so a tool
 //! that follows links to one page id misses the rest. A tool that follows links to a page asks
 //! for the page's [`AliasSet`] first and uses every id in it.

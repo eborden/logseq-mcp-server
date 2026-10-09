@@ -1,4 +1,4 @@
-//! `logseq_get_page` (the Rust side of `src/tools/get-page.ts`): a page by name, optionally with
+//! `logseq_get_page`: a page by name, optionally with
 //! its blocks, optionally with their `((uuid))` refs and `{{embed}}`s resolved.
 //!
 //! Calls: 1 for the exact name of a page that has a file (`logseq.Editor.getPage` alone, no
@@ -42,7 +42,7 @@ use self::tips::page_tips;
 
 pub const NAME: &str = "logseq_get_page";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get a page by name (case-insensitive). With include_children, also its blocks.\n\n\
 **Use when:** you know the page name.\n\
 **Can't find:** pages by keyword (logseq_search_blocks, logseq_list_pages) or what links here (logseq_get_backlinks).\n\
@@ -51,7 +51,7 @@ const DESCRIPTION: &str = "Get a page by name (case-insensitive). With include_c
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
 
-/// The page tool's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The page tool's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     /// Page name, alias, or ISO date (2025-01-01) for a journal

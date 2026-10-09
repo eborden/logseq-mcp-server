@@ -1,6 +1,6 @@
 //! What the relationship search reads from LogSeq: the blocks of its queries
 //! (`responses.nullableBlockRows`), the page ids of a hop (`responses.idRows`) and a page's block
-//! tree (`responses.blocks`). Blocks are checked against the TypeScript schema and kept as the JSON
+//! tree (`responses.blocks`). Blocks are checked against their wire types and kept as the JSON
 //! LogSeq sent, since a result carries them as they came (BR-0004).
 //!
 //! `null` is a case of its own (BR-0011): each parser returns `None` for it and the tool decides

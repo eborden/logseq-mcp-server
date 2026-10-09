@@ -1,8 +1,7 @@
-//! The closest page names for a missing page (`suggestPages`, `src/utils/resolve-page.ts`), picked
-//! with the `nucleo-matcher` crate.
+//! The closest page names for a missing page, picked with the `nucleo-matcher` crate.
 //!
-//! The list is part of a "no such page" message that the parity harness holds to rules, not to the
-//! TypeScript server's bytes ([ADR-0032 (closest-page-suggestions-match-by-meaning)], Decision 3), so
+//! The list is part of a "no such page" message that the parity harness holds to rules, not to a
+//! recorded list of names ([ADR-0034 (golden-results-are-the-contract)], Decision 4), so
 //! this doesn't follow fuzzysort. What it has to give is, in order:
 //! 1. the names that equal the input, ignoring case and accents (rule 4);
 //! 2. then the names that start with it (rule 4);

@@ -1,4 +1,4 @@
-//! The first-line snippet (`firstLineSnippet` in `src/utils/snippet.ts`): what a block looks like
+//! The first-line snippet: what a block looks like
 //! when the model should see what it is about without paying for its body. The page outline, the
 //! `compact` output of the context tools and compact Markdown all use it, so it is here and not in
 //! any one tool's directory.

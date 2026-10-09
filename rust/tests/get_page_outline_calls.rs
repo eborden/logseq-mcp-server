@@ -1,7 +1,7 @@
 //! The page outline's LogSeq traffic against a mock LogSeq on a local port: how many calls it
-//! makes, in which order, with which inputs, and what it answers. The Rust side of
-//! `src/index.outline.test.ts`'s call counts; the parity harness (`parity.rs`) checks the
-//! same calls and the result bytes against the TypeScript server. Every page and block here is
+//! makes, in which order, with which inputs, and what it answers. The call counts
+//! are those in `CLAUDE.md` ("Current Implementation Status"); the parity harness (`parity.rs`) checks the
+//! same calls and the result bytes against the recorded results. Every page and block here is
 //! made up (BR-0001).
 
 use std::sync::{Arc, Mutex};
@@ -244,9 +244,8 @@ async fn an_ambiguous_name_stops_after_the_resolver() {
 
 #[tokio::test]
 async fn a_year_before_1000_is_a_name_not_a_date_and_costs_three_calls_where_typescript_makes_one() {
-    // Different from the TypeScript server on purpose (see `resolve`): it takes "0999-12-31" for a
-    // date, makes one call and gives no suggestions. Here it is a plain name, so the leaf query and
-    // the suggestion lookup follow, and the error lists the closest names.
+    // On purpose (see `resolve`): a journal day is eight digits, so "0999-12-31" is a plain name, not a
+    // date. The leaf query and the suggestion lookup follow, and the error lists the closest names.
     let logseq = mock_logseq(vec![
         json!([]),
         json!([]),

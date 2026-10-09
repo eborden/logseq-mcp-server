@@ -1,4 +1,4 @@
-//! `logseq_get_page_outline` (the Rust side of `src/tools/get-page-outline.ts`): a page's
+//! `logseq_get_page_outline`: a page's
 //! top-level blocks with a first-line snippet and a child count each, so a model can choose what
 //! to read with `logseq_get_block` instead of loading a long page whole.
 //!
@@ -37,7 +37,7 @@ use self::wire::OutlineBlock;
 
 pub const NAME: &str = "logseq_get_page_outline";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "List a page's top-level blocks: uuid, the first line (80 characters) and the number of children. Cheaper than logseq_get_page for a long page.\n\n\
 **Use when:** you need a page's shape before reading parts of it. Read the blocks you pick with logseq_get_block.\n\
 **Can't find:** nested blocks below the first level, or block text past the first line (logseq_get_block, logseq_get_page).";
@@ -45,7 +45,7 @@ const DESCRIPTION: &str = "List a page's top-level blocks: uuid, the first line 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
 
-/// The outline's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The outline's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     /// Page name, alias, or ISO date (2025-01-01) for a journal

@@ -1,5 +1,4 @@
-//! Which of a depth's new pages join the network (`selectCandidates` in
-//! `src/tools/get-concept-network.ts`). The caps keep a hub page usable: `max_fanout` limits what
+//! Which of a depth's new pages join the network. The caps keep a hub page usable: `max_fanout` limits what
 //! one page may add, `max_nodes` what the whole network may hold, and the choice never depends on
 //! the order the query's rows came in.
 

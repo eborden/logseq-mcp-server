@@ -1,13 +1,12 @@
-//! The two JavaScript behaviors the server still needs. Results are not one of them: every tool
+//! Two small helpers: white-space trimming and LogSeq's number spelling. Results are not one of them: every tool
 //! result is written by `serde_json` (ADR-0009, ADR-0034), with an object's keys in insertion order
 //! and a number in serde's spelling, and the recorded results are compared by meaning.
 //!
 //! - White space (`trim`, `trim_end`) is Rust's `char::is_whitespace` (#299, wave C2).
-//! - [`number_to_string`] is how LogSeq spells a number. It is not here to match the TypeScript server.
+//! - [`number_to_string`] is how LogSeq spells a number. LogSeq is ClojureScript, so it is JavaScript's spelling.
 
 /// The text without white space at either end: Rust's `char::is_whitespace` (Unicode `White_Space`).
-/// The TypeScript server used JavaScript's set, which adds U+FEFF and leaves out U+0085; the
-/// Rust server takes Rust's (#299). Kept as a name for the many callers; it is `str::trim`.
+/// JavaScript's set adds U+FEFF and leaves out U+0085; this takes Rust's (#299). Kept as a name for the many callers; it is `str::trim`.
 pub fn trim(value: &str) -> &str {
     value.trim()
 }

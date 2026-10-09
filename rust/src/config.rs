@@ -1,8 +1,8 @@
-//! The config file, parsed once into a typed [`Config`] (the Rust side of `src/config.ts`).
+//! The config file, parsed once into a typed [`Config`].
 //!
 //! Every failure is a [`ConfigError`] variant, so callers and tests tell them apart by variant,
 //! never by message text. No message shows a value from the file or the file's text, since any
-//! of them could be the token (ADR-0003). The messages match the TypeScript server's word for word.
+//! of them could be the token (ADR-0003). The messages are fixed text, pinned by the tests below.
 
 use std::fmt;
 use std::io;
@@ -10,14 +10,14 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-/// The API URL when the file sets none (or a falsy one), as in `src/config.ts`.
+/// The API URL when the file sets none (or an empty one).
 pub const DEFAULT_API_URL: &str = "http://127.0.0.1:12315";
 
 /// What a field must be, the `<field> <problem>` tail of a [`ConfigError::Validation`] message.
 const AUTH_TOKEN_REQUIRED: &str = "is required";
 const NOT_A_STRING: &str = "must be a string";
-/// The largest `timeoutMs` the file may set: `i32::MAX` ms, about 24.8 days, the longest timer
-/// the JavaScript runtimes take. Anything longer is no timeout in practice, so it is refused at
+/// The largest `timeoutMs` the file may set: `i32::MAX` ms, about 24.8 days, about as long
+/// as a call can sensibly wait. Anything longer is no timeout in practice, so it is refused at
 /// load (ADR-0019) and no call has to check it again.
 pub const MAX_TIMEOUT_MS: u64 = 2_147_483_647;
 /// A `timeoutMs` that is no whole number of milliseconds of at least 1: a string, `null`, a
@@ -29,7 +29,7 @@ const TIMEOUT_MS_TOO_LARGE: &str = "must be at most 2147483647 milliseconds (abo
 // ("number out of range"), so the file is `ConfigError::InvalidJson`, which shows no file value.
 const TIPS: &str = "must be a boolean";
 
-/// Replaces a JSON parser message that quotes the file, as `REDACTED_JSON_DETAIL` does in TypeScript.
+/// Replaces a JSON parser message that quotes the file, so it can't leak the token.
 pub const REDACTED_JSON_DETAIL: &str = "the file is not valid JSON (an unquoted value, a trailing comma or a byte-order mark?); the parser's message is not shown, as it may quote the authToken";
 
 /// The parsed config. Unknown keys in the file are dropped; the optional fields are `None`
@@ -99,8 +99,8 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     parse_config(&text)
 }
 
-/// Parse the config file's text. The checks run in the order `src/config.ts` reports them,
-/// so the first problem found is the same error the TypeScript server gives.
+/// Parse the config file's text. The checks run in a fixed order (the token first, then
+/// each field in turn), so the first problem found is always the same error.
 pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     let raw: Value = serde_json::from_str(text)
         .map_err(|error| ConfigError::InvalidJson { detail: json_error_detail(&error.to_string()) })?;
@@ -114,8 +114,8 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     };
 
     // 2. Each field in turn. Nothing is coerced: "5000" is not a timeout, "false" not a boolean.
-    // JSON has no `undefined`, so a present `null` in an optional field is a wrong value, as
-    // zod's `.optional()` treats it. An `apiUrl` that is absent, `null` or empty is the default.
+    // JSON has no `undefined`, so a present `null` in an optional field is a wrong value, not
+    // an absent one. An `apiUrl` that is absent, `null` or empty is the default.
     let api_url = match object.get("apiUrl") {
         None | Some(Value::Null) => DEFAULT_API_URL.to_owned(),
         Some(Value::String(url)) if url.is_empty() => DEFAULT_API_URL.to_owned(),
@@ -157,8 +157,7 @@ fn timeout_ms(n: &serde_json::Number) -> Result<u64, &'static str> {
 }
 
 /// The parser's reason, unless it quotes the file. serde_json's syntax messages name a line and
-/// column, not text, but a message with a double quote in it is replaced all the same, as in
-/// TypeScript, so a future parser message can't leak the token.
+/// column, not text, but a message with a double quote in it is replaced all the same, so a future parser message can't leak the token.
 fn json_error_detail(message: &str) -> String {
     if message.contains('"') { REDACTED_JSON_DETAIL.to_owned() } else { message.to_owned() }
 }

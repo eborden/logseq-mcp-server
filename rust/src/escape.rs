@@ -1,7 +1,7 @@
-//! Escaping text for a regular expression (the Rust side of `src/utils/escape-regex.ts`).
+//! Escaping text for a regular expression.
 
 /// Escape every regex metacharacter in `text` so it matches literally: `. * + ? ^ $ { } ( ) | [ ] \`,
-/// the set JavaScript's `RegExp` treats as special. LogSeq evaluates `re-pattern` with a JavaScript
+/// the set a JavaScript `RegExp` treats as special. LogSeq evaluates `re-pattern` with a JavaScript
 /// `RegExp`, so the result is safe to embed in `"(?i)" + escape_regex(text)`.
 ///
 /// This is only the regex layer. When the pattern is sent as a Datalog `:in` input, the client

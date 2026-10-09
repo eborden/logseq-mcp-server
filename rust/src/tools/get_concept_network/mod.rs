@@ -1,4 +1,4 @@
-//! `logseq_get_concept_network` (the Rust side of `src/tools/get-concept-network.ts`): the pages
+//! `logseq_get_concept_network`: the pages
 //! linked to a concept as nodes and edges, in both link directions, up to `max_depth` hops, with one
 //! edge per page pair and its reference count.
 //!
@@ -59,7 +59,7 @@ pub use self::warning::{MAX_FANOUT_LIMIT, MAX_NODES_LIMIT};
 
 pub const NAME: &str = "logseq_get_concept_network";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n\
 **Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n\
 **Can't find:** unlinked pages, or what pages say (logseq_build_context).";
@@ -89,7 +89,7 @@ fn default_max_fanout() -> u64 {
 }
 
 /// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
-/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
 /// ignores them. `max_nodes` and `max_fanout` start at 1, a `max_depth` of 0 returns the root alone.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
@@ -243,8 +243,7 @@ fn links_unavailable(depth: i64) -> ResultWarning {
     )
 }
 
-/// `normalizeCap`: a whole number of at least 1 (a JavaScript number is floored, and an argument is
-/// whole already).
+/// A cap: a whole number of at least 1 (an argument is whole already).
 fn cap(value: u64) -> usize {
     usize::try_from(value.max(1)).unwrap_or(usize::MAX)
 }

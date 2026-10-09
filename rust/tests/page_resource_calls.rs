@@ -1,7 +1,7 @@
 //! The LogSeq traffic of the `logseq://page/{name}` resource against a mock LogSeq on a local port,
 //! and what it answers. It reads a page the way `logseq_get_page` does with `include_children`, so
 //! it makes the same calls: the page, then its blocks. The parity harness
-//! (`parity.rs`) checks the same against the TypeScript server. Every page and block here
+//! (`parity.rs`) checks the same against the recorded results. Every page and block here
 //! is made up (BR-0001).
 
 mod common;

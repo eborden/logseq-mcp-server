@@ -1,4 +1,4 @@
-//! The Datalog query only the block search makes (`searchBlocks` in `src/datalog/queries.ts`). The
+//! The Datalog query only the block search makes. The
 //! search text is bound with `:in` as a regex (ADR-0013). The page lookup it also makes is shared:
 //! `crate::pages_by_ids`.
 

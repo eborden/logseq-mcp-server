@@ -1,5 +1,4 @@
-//! The Datalog queries only `build_context` makes (`getPageBlocks` and `getBlocksOnPages` in
-//! `src/datalog/queries.ts`). The page name is bound with `:in` (ADR-0013); the ids of an alias
+//! The Datalog queries only `build_context` makes. The page name is bound with `:in` (ADR-0013); the ids of an alias
 //! group are embedded through [`ground_ids`], which takes [`PageId`]s and not numbers.
 
 use crate::edn::{DatalogInput, PageId, PageName, Query, ground_ids};

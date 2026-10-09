@@ -1,4 +1,4 @@
-//! `logseq_get_context_for_query` (the Rust side of `src/tools/get-context-for-query.ts`): context
+//! `logseq_get_context_for_query`: context
 //! for a natural-language question. Its `[[page]]` and `#tag` topics each get a
 //! `logseq_build_context` (with the caps 10 blocks, 5 related pages and 10 references), and a query
 //! that names none is searched for its first three words over three letters instead.
@@ -41,7 +41,7 @@ use crate::truncation::{CappedTruncation, capped_truncation_warning};
 
 pub const NAME: &str = "logseq_get_context_for_query";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Context for a natural-language question. Takes [[page]] and #tag topics from the query, else searches its first 3 words over 3 letters (max 100 hits), and builds context for each.\n\n\
 **Can't find:** meaning, or over 100 keyword hits (put specific words first). Topics come from links, tags or literal words, so put page names in [[brackets]].\n\
 **Alternatives:** logseq_build_context for one known topic.";
@@ -76,7 +76,7 @@ fn default_max_search_results() -> u64 {
 }
 
 /// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
-/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
 /// ignores them.
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {

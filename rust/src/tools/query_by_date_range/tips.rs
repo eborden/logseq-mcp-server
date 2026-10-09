@@ -1,4 +1,4 @@
-//! What a date-range result suggests next (`logseq_query_by_date_range` in `src/utils/tips.ts`):
+//! What a date-range result suggests next:
 //! follow the top concept of the period. Nothing when the result has none (no blocks, or
 //! `top_concepts_limit` 0).
 

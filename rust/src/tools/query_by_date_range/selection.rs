@@ -1,4 +1,4 @@
-//! How the caller chose the range (`resolveSelection` in `src/tools/query-by-date-range.ts`).
+//! How the caller chose the range.
 //! Exactly one of three groups must be given: explicit dates (`start_date` with `end_date`),
 //! `last_n`, or `preset`. A preset is resolved against today here, so everything after this sees
 //! plain dates.

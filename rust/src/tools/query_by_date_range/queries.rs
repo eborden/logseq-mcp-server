@@ -1,5 +1,4 @@
-//! The Datalog queries only the date-range tool makes (`getJournalPagesInRange`,
-//! `getJournalBlocksInRange` and `getJournalPagesUpTo` in `src/datalog/queries.ts`). The day
+//! The Datalog queries only the date-range tool makes. The day
 //! bounds are bound with `:in`, as typed [`DayBound`]s, so no value is part of the query text.
 //!
 //! `[?page :block/name]` is required in every one: blocks LogSeq creates in the app on a journal

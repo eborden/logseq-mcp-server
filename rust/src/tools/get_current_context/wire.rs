@@ -1,6 +1,5 @@
 //! What the current context reads from LogSeq: the three Editor answers and the page lookup
-//! (`responses.pageOrBlock`, `responses.block`, `responses.blocks` and `responses.nullablePageRows`
-//! in `src/response-schemas.ts`). Each is checked against the TypeScript schema and returned as the
+//! Each is checked against its wire type and returned as the
 //! JSON LogSeq sent, since the slim output reads fields of an entity whichever way they are spelled.
 //! `null` is a case of its own (BR-0011): each parser answers `None` for it and the tool decides.
 

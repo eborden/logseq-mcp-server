@@ -1,4 +1,4 @@
-//! What the backlinks tool suggests next (`logseq_get_backlinks` in `src/utils/tips.ts`).
+//! What the backlinks tool suggests next.
 
 use serde_json::json;
 

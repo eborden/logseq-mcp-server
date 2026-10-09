@@ -1,4 +1,4 @@
-//! MCP resources (the Rust side of `src/resources.ts`). Read-only, like everything here (BR-0002).
+//! MCP resources. Read-only, like everything here (BR-0002).
 //! Two: `logseq://page/{name}`, one page as Markdown text, through the same lookup as
 //! `logseq_get_page` (aliases, ISO dates, case-insensitive names) and the same renderer
 //! (`crate::markdown`, never a second one).
@@ -47,7 +47,7 @@ pub fn list() -> Vec<Resource> {
     ]
 }
 
-/// The tools in the order `TOOL_DESCRIPTIONS` (`src/tool-descriptions.ts`) lists them, which the guide follows
+/// The tools in the order the guide lists them
 /// (`tools/list` has its own order). A test checks it names every tool once.
 const GUIDE_TOOL_ORDER: [&str; 16] = [
     "logseq_list_pages",
@@ -159,7 +159,7 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
     let page = match get_page(client, &name, true, false).await {
         Ok(page) => page,
         // rmcp rewrites -32002 to -32602 for a client that negotiated protocol 2026-07-28 or newer (SEP-2164); the
-        // TypeScript SDK can't negotiate that, so it's not a regression, and the rewrite stays (#299)
+        // the recorded results come from an SDK that can't negotiate that version, so nothing differs for any version both speak, and the rewrite stays (#299)
         Err(error @ ToolError::PageNotFound(_)) => return Err(resource_not_found(&error.to_string(), uri)),
         Err(error @ ToolError::AmbiguousPage(_)) => return Err(mcp_error(ErrorCode::INVALID_PARAMS, &error.to_string())),
         Err(error) => return Err(ErrorData::new(ErrorCode::INTERNAL_ERROR, error.to_string(), None)),

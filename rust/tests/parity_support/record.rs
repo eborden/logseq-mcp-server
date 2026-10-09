@@ -4,7 +4,7 @@
 //!
 //! `PARITY_RECORD=1 cargo test --test parity_record -- --nocapture` runs every case against the stub with the
 //! debug build (which reads the fixed clock, `src/env.rs`) and rewrites the `expected` of a case only when its
-//! result changed in meaning (`compare_results`: JSON by deep equality, closest names by the rules of ADR-0032,
+//! result changed in meaning (`compare_results`: JSON by deep equality, closest names by the rules of ADR-0034 Decision 4,
 //! everything else byte for byte). A case whose result is the same by that comparison keeps the bytes recorded for
 //! it, so the diff of a re-record is the change and not the spelling of the Rust server's output. A case with no
 //! `expected` yet is new, and gets its result. The recorded `tools/list` is rewritten the same way, entry by entry
@@ -20,7 +20,7 @@
 //!   when that is fewer, gives a case with no ceiling the number it made, and never raises one: a case that made
 //!   more calls than its ceiling is a failure, and nothing is recorded;
 //! - writes nothing when a case's LogSeq calls are wrong, when the server fails a case, or when a recorded
-//!   closest-names list would break rules 3 to 6 of ADR-0032 or the recorded set would lack a case they require.
+//!   closest-names list would break rules 3 to 6 of ADR-0034 Decision 4 or the recorded set would lack a case they require.
 //!
 //! The planning is plain functions over JSON values (`plan_group`, `plan_tool_list`, `render_group`), so
 //! `tests/parity_record.rs` tests each rule without a server, and the whole recorder end to end against a copy of
@@ -104,7 +104,7 @@ pub fn plan_group(name: &str, cases: &[Value], results: &HashMap<String, Value>)
                 object.insert("expected".to_owned(), result.clone());
             }
             Some(recorded) => {
-                // The closest names of a missing page are held to the rules of ADR-0032, not to bytes: a list the rules accept is no change
+                // The closest names of a missing page are held to the rules of ADR-0034 Decision 4, not to bytes: a list the rules accept is no change
                 let lines = compare_results(recorded, result, &candidates_of(&case));
                 if !lines.is_empty() {
                     changes.push(CaseChange { name: case.name.clone(), lines });
@@ -132,7 +132,7 @@ pub struct ToolListPlan {
 }
 
 /// What recording the server's `tools/list` does: nothing (`None`) when it is the recorded list by meaning
-/// (ADR-0031: the schemars spellings of a schema don't count), otherwise the server's list, with every tool that
+/// (ADR-0034 Decision 3: the schemars spellings of a schema don't count), otherwise the server's list, with every tool that
 /// is the same by meaning keeping the bytes it had.
 pub fn plan_tool_list(recorded: &[Value], server: &[Value]) -> Option<ToolListPlan> {
     let changes = compare_tool_lists(recorded, server);
@@ -152,7 +152,7 @@ pub fn plan_tool_list(recorded: &[Value], server: &[Value]) -> Option<ToolListPl
     Some(ToolListPlan { tools, changes })
 }
 
-/// The recorded tool list's text: indented by two spaces, as `JSON.stringify(list, null, 2)` writes it.
+/// The recorded tool list's text: indented by two spaces.
 pub fn render_tool_list(tools: &[Value]) -> String {
     format!("{}\n", serde_json::to_string_pretty(&Value::Array(tools.to_vec())).expect("a tool list serializes"))
 }
@@ -207,7 +207,7 @@ fn with_results(cases: &[Case], results: &HashMap<String, Value>) -> Vec<Case> {
 
 /// Record the folder `dir`: run every case of its group files against the stub, and rewrite what changed in
 /// meaning. `require_suggestion_cases` is for the real case set: the recorded results have to hold every kind of
-/// closest-names case ADR-0032 requires, which a copy of some of the files can't.
+/// closest-names case ADR-0034 Decision 4 requires, which a copy of some of the files can't.
 pub fn record_goldens(dir: &Path, require_suggestion_cases: bool) -> Result<RecordReport, String> {
     let cases = load_cases_for_recording(dir);
     let recorded_tools = load_tool_list_in(dir);

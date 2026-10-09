@@ -1,4 +1,4 @@
-//! `logseq_get_graph_info` (the Rust side of `src/tools/get-graph-info.ts`): which graph LogSeq has
+//! `logseq_get_graph_info`: which graph LogSeq has
 //! open, as it says so itself.
 //!
 //! Calls: 1 (`logseq.App.getCurrentGraph`). The answer is the result as it came, so a key LogSeq
@@ -16,7 +16,7 @@ use crate::tool::{input_schema, read_only_annotations, success_result};
 
 pub const NAME: &str = "logseq_get_graph_info";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get the connected graph's name and filesystem path.\n\n\
 **Use when:** confirming which graph is attached or debugging paths.\n\
 **Can't find:** anything about content. See logseq_list_pages and logseq_build_context.";

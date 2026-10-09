@@ -1,6 +1,5 @@
 //! `ResultMeta`: how a result says it was cut or partial (BR-0006), and the structured result an
-//! ambiguous page name returns (the Rust side of `src/utils/result-meta.ts` and
-//! `ambiguousPageResult` in `src/utils/resolve-page.ts`).
+//! ambiguous page name returns.
 //!
 //! Key order is part of the output (ADR-0009): `hasMore`, `warnings`, then `totals`.
 

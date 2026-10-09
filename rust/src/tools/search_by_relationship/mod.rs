@@ -1,4 +1,4 @@
-//! `logseq_search_by_relationship` (the Rust side of `src/tools/search-by-relationship.ts`): blocks
+//! `logseq_search_by_relationship`: blocks
 //! tied to topic A by a link to topic B, as `references`, `referenced-by` / `in-pages-linking-to`
 //! (one query each, see below) or `connected-within` N hops (#7), cut to `limit` (#61, #183).
 //!
@@ -43,7 +43,7 @@ use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warni
 
 pub const NAME: &str = "logseq_search_by_relationship";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n\
 **Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.\n\
 **Alternatives:** logseq_search_blocks (keywords), logseq_get_concept_network (overview).";
@@ -104,7 +104,7 @@ fn default_limit() -> u64 {
 }
 
 /// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
-/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
 /// ignores them.
 ///
 /// The two counts are `u64`, not `u32`: the schema is the same (an integer, at least 0), and the
@@ -446,8 +446,8 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
             });
         }
         // Blocks that reference topic A, on pages that a block on topic B's page references (outbound: the
-        // pages B links to). The TypeScript server ran the inbound query here too, against its own
-        // description (#299, D5); the maintainer approved making it do what the description says.
+        // pages B links to). `referenced-by` once ran the inbound query here, against the
+        // tool's description (#299, D5); the maintainer approved making it do what the description says.
         RelationshipType::ReferencedBy => {
             let query = if any_aliases {
                 queries::blocks_referencing_in_pages_referenced_by_ids(&set_a.ids()?, &set_b.ids()?)?

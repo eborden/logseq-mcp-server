@@ -2,7 +2,7 @@
 //! nowhere else in the parity test (#371, #379).
 //!
 //! - [`compare_results`] is the entry for a tool, prompt or resource result: structure equal, the closest
-//!   names of a page-not-found message by the rules of ADR-0032 (`suggestion_rules.rs`), every text as below,
+//!   names of a page-not-found message by the rules of ADR-0034 Decision 4 (`suggestion_rules.rs`), every text as below,
 //!   every other value equal, and every JSON tool result minified.
 //! - [`same_text`] and [`same_tool_text`] are the places that decide whether two result texts match. A tool
 //!   result's JSON text (`content`) is compared by deep equality (the maintainer's decision on #371): object
@@ -15,7 +15,7 @@
 //! - [`compare_calls`] holds the LogSeq calls to a case's recorded calls and its ceiling (ADR-0034 Decision 5): each
 //!   call made matches a recorded call, in any order, and there are at most as many as the ceiling. [`stale_ceiling`]
 //!   is the other side: a run of the cases as committed that makes fewer than the ceiling fails until it is lowered.
-//! - [`compare_tool_lists`] holds `tools/list` to the recorded list by meaning (ADR-0031, #292).
+//! - [`compare_tool_lists`] holds `tools/list` to the recorded list by meaning (ADR-0034 Decision 3, #292).
 
 use std::collections::BTreeSet;
 
@@ -241,7 +241,7 @@ fn compare_result(expected: &Value, actual: &Value) -> Vec<String> {
 }
 
 /// Compare a result with the recorded one. The recorded result holds a page-not-found message that lists
-/// closest names (ADR-0032, #335): that list is held to the rules, and the rest of the result, the message's
+/// closest names (ADR-0034 Decision 4, #335): that list is held to the rules, and the rest of the result, the message's
 /// frame included, to [`compare_result`]. A result with no such message is compared as [`compare_result`] does.
 /// `candidates` are the names the stub's `getAllPages` answer holds.
 ///
@@ -320,7 +320,7 @@ pub fn stale_ceiling(ceiling: usize, made: usize) -> Option<String> {
     })
 }
 
-// ---- tools/list, by meaning (ADR-0031 Decision 2, #292; the rules are those of tool-list-compare.ts)
+// ---- tools/list, by meaning (ADR-0034 Decision 3, #292)
 //
 // Both sides go through `normalize_schema`, which removes only what no client can see in validation:
 //   1. `$ref` is replaced by the schema it points at, and `$defs` / `definitions` are dropped. A `$ref` with

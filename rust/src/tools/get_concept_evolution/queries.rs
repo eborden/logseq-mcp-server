@@ -1,5 +1,4 @@
-//! The Datalog queries only `get_concept_evolution` makes (`getBlocksReferencingPage` and
-//! `getBlocksReferencingPages` in `src/datalog/queries.ts`). A page name is bound with `:in`
+//! The Datalog queries only `get_concept_evolution` makes. A page name is bound with `:in`
 //! (ADR-0013); the ids of an alias group are embedded through [`ground_ids`], which takes
 //! [`PageId`]s and not numbers.
 

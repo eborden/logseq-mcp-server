@@ -1,4 +1,4 @@
-//! Markdown for the context tools (#43; the Rust side of `src/utils/markdown-context.ts`), built on
+//! Markdown for the context tools (#43), built on
 //! the shared pieces in `crate::markdown`: `build_context` and `get_context_for_query` here, and
 //! the concept network (`render_network`, #313). Same conventions: `[[Page]]` links, `- ` bullets,
 //! `((uuid))` refs untouched. Warnings, `hasMore` and tips are not rendered here; the tool adds
@@ -85,7 +85,7 @@ fn group_by_source(references: &[Value]) -> Vec<(Value, Vec<Value>)> {
     let mut index: HashMap<String, usize> = HashMap::new();
     for reference in references {
         let page = reference.get("sourcePage").filter(|page| page.is_object()).cloned().unwrap_or_else(|| json!({}));
-        // `String(entityId(page) ?? pageTitle(page))`
+        // the page's id as text, else its title
         let key = id_of(Some(&page)).map_or_else(|| page_title(&page, None), |id| id.to_string());
         let at = *index.entry(key).or_insert_with(|| {
             groups.push((page.clone(), Vec::new()));

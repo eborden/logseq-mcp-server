@@ -1,5 +1,4 @@
-//! The network's nodes and links, and what is derived from them once the walk is over
-//! (`relabelDepths` and `buildEdges` in `src/tools/get-concept-network.ts`).
+//! The network's nodes and links, and what is derived from them once the walk is over.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -62,7 +61,7 @@ impl From<&Edge> for EdgeOutput {
 }
 
 /// Directed link counts, `(from, to)` to the blocks on `from` that reference `to`, in the order
-/// they were first set (a JavaScript `Map` keeps that order, and the walk to the nodes follows it).
+/// they were first set (an insertion-ordered map keeps that order, and the walk to the nodes follows it).
 #[derive(Debug, Default)]
 pub struct Links {
     order: Vec<(i64, i64)>,

@@ -1,4 +1,4 @@
-//! `logseq_get_current_context` (the Rust side of `src/tools/get-current-context.ts`): what the user
+//! `logseq_get_current_context`: what the user
 //! is looking at in LogSeq right now: the open page, the block being edited and any selected blocks.
 //!
 //! Calls: 3 Editor calls made at once (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`),
@@ -33,7 +33,7 @@ use crate::tool::{input_schema, read_only_annotations, result_value, success_res
 
 pub const NAME: &str = "logseq_get_current_context";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n\
 **Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_build_context or logseq_get_page.\n\n\
 **Can't find:** anything not open right now. Returns page: null with a message when no page is open.";
@@ -132,10 +132,9 @@ fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
 ///
 /// API calls: 3 Editor calls, plus 1 Datalog query only when a block's page is not already known.
 pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext, ToolError> {
-    // `Promise.all` rejects on the first error, but the other two fetches still run to completion, so the
-    // TypeScript server always makes all three calls. `join!` lets all three finish too, and the errors are
-    // then raised in a fixed order (page, block, selection). With two answers wrong at once TypeScript reports
-    // whichever arrives first, so the parity cases never have two.
+    // All three calls are always made, and `join!` lets all three finish, so the errors are raised in a
+    // fixed order (page, block, selection). With two answers wrong at once the first in that order is
+    // reported, and the parity cases never have two.
     let (page_answer, block_answer, selected_answer) =
         tokio::join!(fetch_current_page(client), fetch_current_block(client), fetch_selected_blocks(client));
     let (current_page, current_block, selected) = (page_answer?, block_answer?, selected_answer?);
