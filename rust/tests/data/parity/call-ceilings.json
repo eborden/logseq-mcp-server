@@ -915,6 +915,8 @@
   "relationship: the same name twice is resolved once": 2,
   "relationship: topics that are an alias and a date": 3,
   "resolver row in a shape the server cannot read": 1,
+  "resolver: the first query answers null": 1,
+  "resolver: the leaf query answers null": 2,
   "resources: a URI with a quote and a newline in it": 0,
   "resources: an empty URI": 0,
   "resources: an unknown name": 0,
