@@ -60,6 +60,7 @@ Use this skill when:
 - Salience filtering, emotional markers, the hard word budget, merge-vs-drop
 - Output structure, LogSeq formatting (tabs, `[[refs]]`, `((uuids))`), open-item verification
 - Reading the period: the query first, journal files only after a tool call has failed
+- Journal day links: written in the graph's `:journal/page-title-format` (read from `<graph>/logseq/config.edn`), never a hardcoded format
 - Trend contextualization and a before/after compression example
 - **ALWAYS read this alongside any `skills/*-summary.md` sub-skill**
 - **Non-negotiable constraint, whether creating or updating:** signals are one line each (weekly 10-15 words / 150 total; monthly 12-18 words / 200 total), zero em-dashes. A bullet whose second sentence explains its first is the defect. A signal with no number is usually the one most worth keeping. Validate with `scripts/check-terseness.sh <file>` before reporting done.
