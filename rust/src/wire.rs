@@ -22,7 +22,19 @@
 
 use std::fmt;
 
+use serde::Deserialize;
+use serde::de::{self, DeserializeOwned, Deserializer, IgnoredAny, MapAccess, Unexpected, Visitor};
 use serde_json::{Map, Value};
+
+mod deserializer;
+#[cfg(test)]
+mod reading;
+
+use self::deserializer::Wire;
+
+/// The most a whole number can be, as a JavaScript number holds it: 2^53, where an f64 stops holding every
+/// whole number.
+const MAX_WHOLE: i64 = 9_007_199_254_740_992;
 
 /// A whole number a JSON value holds, as an id or a `YYYYMMDD` day is: `5` and `5.0` alike (JSON text has
 /// no difference between them for a JavaScript runtime), up to 2^53, where an f64 stops holding every whole
@@ -30,11 +42,18 @@ use serde_json::{Map, Value};
 /// so what the check accepts is never read as absent.
 pub(crate) fn whole_number(value: &Value) -> Option<i64> {
     let Value::Number(number) = value else { return None };
-    const MAX: i64 = 9_007_199_254_740_992;
     match number.as_i64() {
-        Some(whole) => (-MAX..=MAX).contains(&whole).then_some(whole),
-        None => number.as_f64().filter(|n| n.fract() == 0.0 && n.abs() <= MAX as f64).map(|n| n as i64),
+        Some(whole) => whole_i64(whole),
+        None => number.as_f64().and_then(whole_f64),
     }
+}
+
+fn whole_i64(number: i64) -> Option<i64> {
+    (-MAX_WHOLE..=MAX_WHOLE).contains(&number).then_some(number)
+}
+
+fn whole_f64(number: f64) -> Option<i64> {
+    (number.fract() == 0.0 && number.abs() <= MAX_WHOLE as f64).then_some(number as i64)
 }
 
 /// The method a Datalog answer reports in a [`ResponseError`].
@@ -64,6 +83,154 @@ impl fmt::Display for ResponseError {
 }
 
 impl std::error::Error for ResponseError {}
+
+impl ResponseError {
+    fn from_issue(method: &str, issue: &deserializer::Issue) -> Self {
+        ResponseError { method: method.to_owned(), path: issue.path_text(), problem: issue.problem_text() }
+    }
+}
+
+/// An answer read into `T`, or the response error that says where it stopped being one.
+///
+/// A `null` answer is an error unless `T` is an `Option`: `parse::<Option<T>>` reads `null` as `None`, and
+/// the tool decides what that means (BR-0011).
+pub(crate) fn parse<T: DeserializeOwned>(method: &str, answer: &Value) -> Result<T, ResponseError> {
+    T::deserialize(Wire(answer)).map_err(|issue| ResponseError::from_issue(method, &issue))
+}
+
+/// `answer` must be a `T`; the `T` itself is not wanted. For an entity a tool carries as LogSeq sent it
+/// (BR-0004) and reads through [`crate::entity`].
+pub(crate) fn check<T: DeserializeOwned>(method: &str, answer: &Value) -> Result<(), ResponseError> {
+    parse::<T>(method, answer).map(|_| ())
+}
+
+/// A whole number: a `:db/id`, or a count. `5` and `5.0` alike, up to 2^53 (see [`whole_number`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Id(pub i64);
+
+impl<'de> Deserialize<'de> for Id {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Id, D::Error> {
+        deserializer.deserialize_any(IdVisitor)
+    }
+}
+
+struct IdVisitor;
+
+impl IdVisitor {
+    fn too_large<E: de::Error>(unexpected: Unexpected<'_>) -> E {
+        E::invalid_value(unexpected, &"a whole number no larger than 2^53")
+    }
+}
+
+impl Visitor<'_> for IdVisitor {
+    type Value = Id;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a whole number")
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Id, E> {
+        i64::try_from(value).ok().and_then(whole_i64).map(Id).ok_or_else(|| Self::too_large(Unexpected::Unsigned(value)))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Id, E> {
+        whole_i64(value).map(Id).ok_or_else(|| Self::too_large(Unexpected::Signed(value)))
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Id, E> {
+        match whole_f64(value) {
+            Some(whole) => Ok(Id(whole)),
+            None if value.fract() != 0.0 => Err(E::invalid_value(Unexpected::Float(value), &"a whole number")),
+            None => Err(Self::too_large(Unexpected::Float(value))),
+        }
+    }
+}
+
+/// Any JSON number: a creation time, a journal day LogSeq may or may not give.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Number(pub f64);
+
+impl<'de> Deserialize<'de> for Number {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Number, D::Error> {
+        deserializer.deserialize_any(NumberVisitor)
+    }
+}
+
+struct NumberVisitor;
+
+impl Visitor<'_> for NumberVisitor {
+    type Value = Number;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a number")
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Number, E> {
+        Ok(Number(value as f64))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Number, E> {
+        Ok(Number(value as f64))
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Number, E> {
+        Ok(Number(value))
+    }
+}
+
+/// A JSON object whose keys and values are the user's own (`properties`): only that it is an object is
+/// read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Object;
+
+impl<'de> Deserialize<'de> for Object {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Object, D::Error> {
+        deserializer.deserialize_map(ObjectVisitor)
+    }
+}
+
+struct ObjectVisitor;
+
+impl<'de> Visitor<'de> for ObjectVisitor {
+    type Value = Object;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("an object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Object, A::Error> {
+        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(Object)
+    }
+}
+
+/// A field LogSeq may leave out. Present, it must be a `T`: `null` is a mismatch, not "absent" (a plain
+/// `Option` field would read it as absent, and a field the code reads would then fail silently, BR-0003).
+/// Write it with `#[serde(default)]`, so that leaving the field out is `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Optional<T>(Option<T>);
+
+impl<T> Default for Optional<T> {
+    fn default() -> Self {
+        Optional(None)
+    }
+}
+
+impl<T> Optional<T> {
+    pub(crate) fn into_option(self) -> Option<T> {
+        self.0
+    }
+
+    pub(crate) fn as_ref(&self) -> Option<&T> {
+        self.0.as_ref()
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Optional<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        T::deserialize(deserializer).map(|value| Optional(Some(value)))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum Part {
@@ -296,11 +463,27 @@ pub(crate) fn to_error(method: &str, issue: Issue) -> ResponseError {
     ResponseError { method: method.to_owned(), path, problem: issue.problem }
 }
 
-/// A bare reference to an entity: the ids it carries, in either spelling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// A bare reference to an entity: the ids it carries, in either spelling. Each is a whole number when
+/// present (`5.0` too), and neither need be there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(from = "RawRef")]
 pub struct EntityRef {
     pub id: Option<i64>,
     pub db_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct RawRef {
+    #[serde(default)]
+    id: Optional<Id>,
+    #[serde(default, rename = "db/id")]
+    db_id: Optional<Id>,
+}
+
+impl From<RawRef> for EntityRef {
+    fn from(raw: RawRef) -> Self {
+        EntityRef { id: raw.id.into_option().map(|id| id.0), db_id: raw.db_id.into_option().map(|id| id.0) }
+    }
 }
 
 /// `entityId`: `id`, else `db/id` when `id` is absent. An `id` of 0 is an id.
