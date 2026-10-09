@@ -15,6 +15,7 @@ test: `rust/tests/resolve_refs_calls.rs`
 test: `rust/tests/query_by_date_range_calls.rs`
 test: `rust/tests/get_page_outline_calls.rs`
 test: `rust/tests/get_backlinks_calls.rs`
+test: `rust/tests/current_context_calls.rs`
 test: `rust/tests/get_page_block_calls.rs`
 test: `rust/tests/page_resource_calls.rs`
 
@@ -31,4 +32,5 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 | 2026-10-07 | Mechanical enforcement: added a `test:` line for `query_by_date_range` (`journals_unavailable` and `blocks_unavailable` on a `null` answer), and added a sentence describing it to the enforcement paragraph. The Statement is unchanged. | #284 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the Rust server's call-count tests with the TypeScript server's removal, and the paragraph that describes them was reworded to match. Statement unchanged. Reworded the last sentence so it doesn't read as endorsing `null` read as none. | #370 |
 | 2026-10-08 | Mechanical enforcement: added `test:` lines for the page resolver (a `null` answer is an error that says LogSeq gave no answer, with no suggestions and no further call; `get_page_outline_calls.rs`) and for `get_backlinks` and the alias groups (`alias_lookup_unavailable`, and `backlinks_unavailable` with a list that is always `[]` on a `null`; `get_backlinks_calls.rs`, with the date-range alias case in the line already there). Additive only; no paragraph reworded. | #404 |
+| 2026-10-08 | Mechanical enforcement: added a `test:` line for `get_current_context` (`page_names_unavailable` on a `null` page lookup, none on a real `[]`). Statement and paragraphs unchanged. | #405 |
 | 2026-10-08 | Mechanical enforcement: added `test:` lines for `get_page` (a `null` block tree gives a `page_blocks_unavailable` warning, a real `[]` none) and for the page resource (the same warning as a footer). Additive only; the Statement and the paragraphs are unchanged. | #403 |
