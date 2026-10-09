@@ -40,8 +40,11 @@ run() {
   # Incremental builds on: the build job turns them off (setup-rust-toolchain), but every mutant is a small edit of one file, and
   # the calibration of #364 PR 1 measured about half the seconds per mutant with them (12 s against 23 s). --caught and
   # --unviable print every mutant as it finishes, not only the missed ones, so the log says where a run stopped.
-  (cd "${crate_dir}" && CARGO_INCREMENTAL=1 cargo mutants --jobs "${MUTANT_JOBS}" --no-shuffle --colors never --caught --unviable \
-    --output "${dir}" "$@") || code=$?
+  # Niced, so the runner's own agent keeps its CPU: builds and tests use all 4 cores for hours, and three slices of the first
+  # full runs of #364 PR 1 ended with "The runner has received a shutdown signal" or "lost communication" while the disk
+  # (100 GB free) and the memory (13 GB free) were fine, which is what a starved agent looks like.
+  (cd "${crate_dir}" && CARGO_INCREMENTAL=1 nice -n 15 cargo mutants --jobs "${MUTANT_JOBS}" --no-shuffle --colors never --caught \
+    --unviable --output "${dir}" "$@") || code=$?
   echo "${code}" > "${dir}/exit"
   echo "$(($(date +%s) - start))" > "${dir}/wall"
   echo "cargo mutants (${name}) exited ${code} after $(cat "${dir}/wall") s"
