@@ -120,12 +120,58 @@ async fn a_missing_page_adds_the_suggestion_lookup_and_fails_with_the_closest_na
     assert!(matches!(&error, ToolError::PageNotFound(missing) if missing.suggestions == ["Project Atlas"]), "{error}");
 }
 
+fn codes(warnings: &[logseq_mcp_server::meta::ResultWarning]) -> Vec<&str> {
+    warnings.iter().map(|warning| warning.code.as_str()).collect()
+}
+
 #[tokio::test]
-async fn a_null_answer_is_read_as_no_connected_pages_and_an_infrastructure_error_propagates() {
+async fn a_null_answer_for_the_first_depth_is_a_links_unavailable_warning_not_an_empty_network() {
     let null = mock_logseq(vec![root(), json!(null)]).await;
     let network = get_concept_network(&client(&null), "Project Atlas", 2, Options::default()).await.unwrap();
+    // the root alone, and the walk stopped at once: no depth 2 query
     assert_eq!(network.nodes.len(), 1);
+    assert_eq!(methods(&null).len(), 2);
+    assert_eq!(codes(&network.warnings), ["links_unavailable"]);
+    let warning = &network.warnings[0];
+    assert!(warning.message.contains("depth 1"), "{}", warning.message);
+    assert!(warning.message.contains("This does not mean those pages link to nothing."), "{}", warning.message);
+    // nothing to fetch with a parameter, so no hasMore, and nothing was cut
+    assert!(warning.how_to_fetch_all.is_none());
+    assert!(!network.has_more() && !network.truncated);
+    assert_eq!(network.to_value()["hasMore"], false);
 
+    // a real [] is a network with no links, and says nothing
+    let empty = mock_logseq(vec![root(), json!([])]).await;
+    let network = get_concept_network(&client(&empty), "Project Atlas", 2, Options::default()).await.unwrap();
+    assert!(network.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn a_null_answer_at_a_later_depth_keeps_what_was_found_and_leaves_truncated_as_the_caps_set_it() {
+    let logseq = mock_logseq(vec![
+        root(),
+        json!([row(10, 20, "Bob", false, "outbound", 2), row(10, 21, "Carol", false, "inbound", 1)]),
+        json!(null),
+    ])
+    .await;
+    // the fanout cap drops Carol at depth 1, then depth 2 gets no answer
+    let network = get_concept_network(&client(&logseq), "Project Atlas", 3, Options { max_fanout: 1, ..Options::default() }).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 3);
+    assert_eq!(network.nodes.iter().map(|node| node.name.as_str()).collect::<Vec<_>>(), ["Project Atlas", "Bob"]);
+    assert!(network.truncated);
+    assert_eq!(codes(&network.warnings), ["network_truncated", "links_unavailable"]);
+    assert!(network.warnings[1].message.contains("depth 2"), "{}", network.warnings[1].message);
+    assert!(network.warnings[1].how_to_fetch_all.is_none());
+
+    // without a cap that bit, `truncated` stays false
+    let quiet = mock_logseq(vec![root(), json!([row(10, 20, "Bob", false, "outbound", 2)]), json!(null)]).await;
+    let network = get_concept_network(&client(&quiet), "Project Atlas", 3, Options::default()).await.unwrap();
+    assert!(!network.truncated && !network.has_more());
+    assert_eq!(codes(&network.warnings), ["links_unavailable"]);
+}
+
+#[tokio::test]
+async fn an_infrastructure_error_for_the_connected_pages_propagates() {
     let failing = mock_logseq(vec![root(), json!({"error": "Query timed out"})]).await;
     let error = get_concept_network(&client(&failing), "Project Atlas", 2, Options::default()).await.unwrap_err();
     assert!(matches!(error, ToolError::Logseq(_)), "{error}");
@@ -184,12 +230,88 @@ async fn a_page_with_aliases_adds_the_alias_query_and_reads_the_group_with_one_m
     assert_eq!(evolution.resolved_aliases.unwrap(), ["Atlas", "Project Atlas"]);
 }
 
-#[tokio::test]
-async fn a_null_answer_is_read_as_nothing_found_and_a_missing_page_or_an_error_is_not() {
-    let nulls = mock_logseq(vec![root(), json!(null), json!(null), json!(null)]).await;
-    let evolution = get_concept_evolution(&client(&nulls), "Project Atlas", EvolutionOptions::default()).await.unwrap();
-    assert!(evolution.timeline.is_empty());
+const TREE_BLOCK_IDS: [i64; 2] = [101, 103];
 
+fn evolution_tree() -> Value {
+    json!([tree_block(101), tree_block(103)])
+}
+
+async fn evolution_with(answers: Vec<Value>) -> logseq_mcp_server::tools::get_concept_evolution::ConceptEvolution {
+    let logseq = mock_logseq(answers).await;
+    get_concept_evolution(&client(&logseq), "Project Atlas", EvolutionOptions::default()).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_null_block_tree_is_a_page_blocks_unavailable_warning_and_the_mentions_still_count() {
+    let evolution = evolution_with(vec![root(), json!(null), editor_page(), json!([mention(201, 31, 20250310)])]).await;
+    assert_eq!(codes(&evolution.warnings), ["page_blocks_unavailable"]);
+    assert!(evolution.warnings[0].message.contains("This does not mean the page has no blocks."), "{}", evolution.warnings[0].message);
+    assert!(evolution.warnings[0].how_to_fetch_all.is_none());
+    assert_eq!(evolution.summary.total_mentions, 1);
+    // `hasMore`, `warnings` and no `totals`, as there was no cut
+    let value = evolution.to_value();
+    assert_eq!(value["hasMore"], false);
+    assert_eq!(value["warnings"][0]["code"], "page_blocks_unavailable");
+    assert!(value.get("totals").is_none());
+}
+
+#[tokio::test]
+async fn a_null_page_with_blocks_to_enrich_is_a_page_unavailable_warning_and_the_blocks_are_undated() {
+    let evolution = evolution_with(vec![root(), evolution_tree(), json!(null), json!([mention(201, 31, 20250310)])]).await;
+    assert_eq!(codes(&evolution.warnings), ["page_unavailable"]);
+    assert!(evolution.warnings[0].message.contains("listed as undated mentions"), "{}", evolution.warnings[0].message);
+    assert!(evolution.warnings[0].how_to_fetch_all.is_none());
+    // the tree's blocks keep their bare page and have no day
+    let undated = evolution.timeline.iter().find(|(date, _)| date.is_none()).unwrap();
+    let ids: Vec<i64> = undated.1.iter().map(|block| block["id"].as_i64().unwrap()).collect();
+    assert_eq!(ids, TREE_BLOCK_IDS);
+    assert_eq!(undated.1[0]["page"], json!({"id": 10}));
+    assert_eq!(evolution.to_value()["hasMore"], false);
+
+    // an empty tree has nothing to enrich, so a null page says nothing
+    let empty = evolution_with(vec![root(), json!([]), json!(null), json!([mention(201, 31, 20250310)])]).await;
+    assert!(empty.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn a_null_mentions_answer_is_a_mentions_unavailable_warning_and_the_page_still_shows() {
+    let evolution = evolution_with(vec![root(), evolution_tree(), editor_page(), json!(null)]).await;
+    assert_eq!(codes(&evolution.warnings), ["mentions_unavailable"]);
+    assert!(evolution.warnings[0].message.contains("This does not mean nothing mentions it."), "{}", evolution.warnings[0].message);
+    assert!(evolution.warnings[0].how_to_fetch_all.is_none());
+    assert_eq!(evolution.summary.total_mentions, 2);
+    assert_eq!(evolution.to_value()["hasMore"], false);
+
+    // a real [] is a concept nothing mentions, and says nothing
+    let empty = evolution_with(vec![root(), evolution_tree(), editor_page(), json!([])]).await;
+    assert!(empty.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn when_everything_answers_null_the_page_lookup_adds_no_third_warning() {
+    // no tree, so no blocks to enrich: two warnings, not three
+    let evolution = evolution_with(vec![root(), json!(null), json!(null), json!(null)]).await;
+    assert_eq!(codes(&evolution.warnings), ["page_blocks_unavailable", "mentions_unavailable"]);
+    assert!(evolution.timeline.is_empty());
+    assert_eq!(evolution.summary.total_mentions, 0);
+}
+
+#[tokio::test]
+async fn a_null_answer_for_the_aliased_mentions_is_a_mentions_unavailable_warning_beside_the_alias_group() {
+    let evolution = evolution_with(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        json!([[10, {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}], [10, {"id": 11, "name": "atlas", "original-name": "Atlas"}]]),
+        evolution_tree(),
+        editor_page(),
+        json!(null),
+    ])
+    .await;
+    assert_eq!(codes(&evolution.warnings), ["mentions_unavailable"]);
+    assert_eq!(evolution.resolved_aliases.as_deref(), Some(&["Atlas".to_owned(), "Project Atlas".to_owned()][..]));
+}
+
+#[tokio::test]
+async fn a_missing_page_or_an_infrastructure_error_is_not_a_warning() {
     let missing = mock_logseq(vec![json!([]), json!([]), json!([])]).await;
     let error = get_concept_evolution(&client(&missing), "Projct Atlas", EvolutionOptions::default()).await.unwrap_err();
     assert!(matches!(error, ToolError::PageNotFound(_)), "{error}");
