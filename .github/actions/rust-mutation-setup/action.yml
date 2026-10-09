@@ -66,6 +66,19 @@ runs:
         cargo mutants --version
         test "$(cargo mutants --version)" = "cargo-mutants ${MUTANTS_TOOL_VERSION}"
 
+    # cargo-mutants copies `rust/` into a scratch directory under TMPDIR and runs the tests there, so a test that reads outside
+    # the crate finds nothing. tests/check_links_fixture.rs reads ../tests/fixtures/graph-linking (from CARGO_MANIFEST_DIR), which
+    # in a scratch copy is $TMPDIR/tests/fixtures/graph-linking. Putting a copy of the fixtures there keeps the baseline green
+    # without a change to the crate or its tests; the first calibration run found it (every check_links_fixture test failed the
+    # baseline, exit 4). A crate that read only its own directory would need none of this.
+    - name: Put the repository's test fixtures where the tool's scratch copies can reach them
+      shell: bash
+      run: |
+        scratch="${RUNNER_TEMP}/mutants-scratch"
+        mkdir -p "${scratch}/tests"
+        cp -R tests/fixtures "${scratch}/tests/fixtures"
+        echo "TMPDIR=${scratch}" >> "$GITHUB_ENV"
+
     # Built into a target directory outside the repository, on purpose: cargo-mutants copies the tree it runs in into a scratch
     # directory for the baseline and for each job, and it skips only a `target/` at the tree's top level (rust/target). A
     # target/ inside rust/mutation-ratchet would be copied every time. CARGO_TARGET_DIR is set on these steps only, never for the
