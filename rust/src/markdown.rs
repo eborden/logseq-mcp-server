@@ -541,8 +541,8 @@ mod tests {
             "blank": "  ",
             "none": [null, ""],
         });
-        // a number is written as serde writes it, whatever the exponent's spelling
-        let big = format!("big:: {}", json!(1e21));
+        // a number is written as serde_json 1.0.151 writes it (`1e+21` for 1e21). The literal is pinned on purpose:
+        // a change to serde's spelling should fail here, not pass because the test uses the same writer.
         assert_eq!(
             render_properties(Some(&props)),
             [
@@ -550,7 +550,7 @@ mod tests {
                 "owner:: [[Alice]]",
                 "ratings:: 1, 2.5",
                 r#"nested:: {"b":1,"2":[true]}"#,
-                big.as_str(),
+                "big:: 1e+21",
             ]
         );
     }
