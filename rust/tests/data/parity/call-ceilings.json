@@ -273,7 +273,7 @@
   "date range: an empty search_term is no search and costs no alias query": 2,
   "date range: an end date with a month 13": 0,
   "date range: an end date with no start": 0,
-  "date range: day 31 of a short month is a valid bound": 1,
+  "date range: day 31 of a short month is a valid bound": 0,
   "date range: full entities: the page as the Editor API spells it, each block with its level and children": 2,
   "date range: include_content false: counts and the first line of each top-level block": 2,
   "date range: include_content that is not a boolean": 0,
