@@ -1,0 +1,19 @@
+THIRD-PARTY NOTICES
+
+logseq-mcp-server is MIT licensed (see LICENSE). The release binary is built from the Rust crates below, which
+carry their own licences. This file lists each licence once, with the crates that use it, and is generated from
+Cargo.lock by cargo-about for the targets the release builds.
+
+{{#each licenses}}
+================================================================================
+{{name}} ({{id}})
+================================================================================
+
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
