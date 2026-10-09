@@ -1,0 +1,84 @@
+name: Set up cargo-mutants
+description: >-
+  The pinned Rust toolchain with the build job's dependency cache restored (never saved), cargo-mutants at the exact version in
+  rust/mutation-ratchet/limits.env, and the plan and ratchet package built. Shared by rust-mutation.yml and
+  rust-mutation-full.yml (ADR-0033, #364). Run actions/checkout first; this action reads the repository.
+
+inputs:
+  run-package-tests:
+    description: Run the plan and ratchet package's own tests before building it ('true' or 'false').
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # The toolchain rust/rust-toolchain.toml names, and the dependency cache the Cargo build job (ci.yml, build-and-test) saves
+    # under the same shared key. This step only restores it: cache-save-if is false, so a pull request run can never poison the
+    # cache the build job and every later run read, and no run builds dependencies cold once a push has saved one.
+    #
+    # Swatinem/rust-cache hashes the rustc version, the lockfile and every environment variable that starts with CARGO, CC,
+    # CFLAGS, CXX, CMAKE or RUST into the key. rustflags and build-warnings are therefore the build job's exact values, and no
+    # variable of that kind is set before this step: the limits are loaded after it, and are not named like that.
+    - name: Set up the Rust toolchain and restore the dependency cache
+      uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      with:
+        rust-src-dir: rust
+        cache-workspaces: rust
+        cache-shared-key: rust-deps
+        cache-save-if: 'false'
+        cache-bin: 'false'
+        rustflags: ""
+        build-warnings: warn
+
+    # The action falls back to stable if it misses the toolchain file; fail loudly instead (as ci.yml does).
+    - name: Check the compiler is the pinned one
+      shell: bash
+      working-directory: rust
+      run: |
+        expected="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+        rustc --version | grep -q "^rustc ${expected} " || { rustc --version; echo "expected rustc ${expected}" >&2; exit 1; }
+
+    - name: Load the limits
+      shell: bash
+      run: grep -E '^[A-Z_]+=' rust/mutation-ratchet/limits.env >> "$GITHUB_ENV"
+
+    # A cached binary is a tool, not a result: it holds no mutant outcome, so it can't weaken a gate. Without it, installing
+    # compiles the tool's tree from source (203 locked crates, none with a build script that uses the network: see the
+    # vetting in #364) on every run.
+    - name: Restore cargo-mutants if it is cached
+      id: tool
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: ~/.cargo/bin/cargo-mutants
+        key: cargo-mutants-${{ env.MUTANTS_TOOL_VERSION }}-${{ runner.os }}-${{ hashFiles('rust/rust-toolchain.toml') }}
+
+    - name: Install cargo-mutants at the exact version, from the tool's own lockfile
+      if: steps.tool.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: rust
+      run: cargo install cargo-mutants --version "=${MUTANTS_TOOL_VERSION}" --locked
+
+    - name: Check the tool is the version the baseline will be set with
+      shell: bash
+      working-directory: rust
+      run: |
+        cargo mutants --version
+        test "$(cargo mutants --version)" = "cargo-mutants ${MUTANTS_TOOL_VERSION}"
+
+    # Built into a target directory outside the repository, on purpose: cargo-mutants copies the tree it runs in into a scratch
+    # directory for the baseline and for each job, and it skips only a `target/` at the tree's top level (rust/target). A
+    # target/ inside rust/mutation-ratchet would be copied every time. CARGO_TARGET_DIR is set on these steps only, never for the
+    # job, so it can't reach the dependency cache key or the server's own build.
+    - name: Test and build the plan and ratchet package
+      shell: bash
+      working-directory: rust/mutation-ratchet
+      env:
+        RUN_PACKAGE_TESTS: ${{ inputs.run-package-tests }}
+        CARGO_TARGET_DIR: ${{ runner.temp }}/ratchet-target
+      run: |
+        if [ "${RUN_PACKAGE_TESTS}" = 'true' ]; then
+          cargo test --locked
+        fi
+        cargo build --locked
+        echo "RATCHET=${CARGO_TARGET_DIR}/debug/mutation-ratchet" >> "$GITHUB_ENV"
