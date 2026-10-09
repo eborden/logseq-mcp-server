@@ -483,7 +483,7 @@ async fn a_null_hop_stops_the_walk_with_no_more_calls_and_says_not_connected_may
         json!([{
             "code": "hop_unavailable",
             "message": format!(
-                "LogSeq returned no answer when looking up the pages linked from hop 2 (possibly no graph open or a \
+                "LogSeq returned no answer when looking up the pages reached at hop 2 (possibly no graph open or a \
                  re-index in progress), so the walk stopped there and \"not connected\" may be wrong. \
                  This does not mean the topics are not connected. {RETRY}"
             ),
@@ -580,4 +580,34 @@ async fn a_null_hop_after_a_cut_hop_keeps_the_frontier_warning_and_adds_its_own(
     let codes: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|warning| warning["code"].as_str().unwrap()).collect();
     assert_eq!(codes, ["frontier_truncated", "hop_unavailable"]);
     assert_eq!(result["hasMore"], json!(false));
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_aliased_relationship_query_is_still_a_warning_not_no_matches() {
+    for relationship_type in [RelationshipType::References, RelationshipType::InPagesLinkingTo, RelationshipType::ReferencedBy] {
+        let pages = vec![page(10, "Atlas", &[11]), page(20, "Bob", &[])];
+        let logseq = mock_logseq(move |request| {
+            let text = text_of(request);
+            if let Some(name) = resolver_name(request) {
+                resolve(&name, &pages)
+            } else if text.starts_with("[:find ?start") {
+                json!([[10, {"id": 10, "name": "atlas", "original-name": "Atlas"}], [10, {"id": 11, "name": "project atlas", "original-name": "Project Atlas"}]])
+            } else {
+                // the query over the ids of the groups
+                Value::Null
+            }
+        })
+        .await;
+
+        let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", relationship_type)).await.unwrap();
+
+        // two resolvers, one alias lookup, the grouped query: the aliased path was taken
+        assert_eq!(asked(&logseq).len(), 4, "{relationship_type:?}");
+        assert_eq!(result["resolvedAliases"]["topicA"], json!(["Atlas", "Project Atlas"]), "{relationship_type:?}");
+        assert_eq!(result["results"], json!([]), "{relationship_type:?}");
+        assert_eq!(result["hasMore"], json!(false));
+        let warnings = result["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 1, "{relationship_type:?}");
+        assert_eq!(warnings[0]["code"], "relationship_unavailable", "{relationship_type:?}");
+    }
 }
