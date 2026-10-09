@@ -393,7 +393,7 @@ fn hop_unavailable(hop: u64) -> ResultWarning {
     ResultWarning::new(
         "hop_unavailable",
         format!(
-            "LogSeq returned no answer when looking up the pages linked from hop {hop} (possibly no graph open or a \
+            "LogSeq returned no answer when looking up the pages reached at hop {hop} (possibly no graph open or a \
              re-index in progress), so the walk stopped there and \"not connected\" may be wrong. \
              This does not mean the topics are not connected. {RETRY_ADVICE}"
         ),
