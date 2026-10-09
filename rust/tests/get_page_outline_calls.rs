@@ -170,12 +170,37 @@ async fn an_error_from_logseq_is_an_error_and_not_an_empty_outline() {
     assert_eq!(error.to_string(), "LogSeq API error: Query timed out");
 }
 
+// BR-0011, #300: a `null` answer to the blocks query is the empty list plus `outline_unavailable`, not an outline
+// that says the page has no blocks. `hasMore` stays false and there is no `howToFetchAll`. A real `[]` has no warning.
 #[tokio::test]
-async fn a_null_answer_is_an_empty_outline_and_an_unreadable_one_is_an_error() {
+async fn a_null_answer_is_an_empty_outline_with_an_outline_unavailable_warning() {
     let logseq = mock_logseq(vec![json!([[page(10, "bob", "Bob", true), "name"]]), Value::Null]).await;
     let outline = get_page_outline(&client(&logseq), "bob").await.unwrap();
-    assert!(outline.blocks.is_empty());
+    assert_eq!(methods(&logseq).len(), 2);
+    let value = serde_json::to_value(&outline).unwrap();
+    assert_eq!(value["blocks"], json!([]));
+    assert_eq!(value["hasMore"], json!(false));
+    assert_eq!(value["totals"], json!({"blocks": 0}));
+    let warnings = value["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{value}");
+    assert_eq!(warnings[0]["code"], "outline_unavailable");
+    let message = warnings[0]["message"].as_str().unwrap();
+    assert!(message.contains("when looking up the blocks of this page"), "{message}");
+    assert!(message.contains("so the empty outline may not mean the page has no blocks"), "{message}");
+    assert!(warnings[0].get("howToFetchAll").is_none(), "{value}");
+}
 
+#[tokio::test]
+async fn a_real_empty_answer_is_an_empty_outline_with_no_warning() {
+    let logseq = mock_logseq(vec![json!([[page(10, "bob", "Bob", true), "name"]]), json!([])]).await;
+    let value = serde_json::to_value(get_page_outline(&client(&logseq), "bob").await.unwrap()).unwrap();
+    assert_eq!(value["blocks"], json!([]));
+    assert_eq!(value["warnings"], json!([]));
+    assert_eq!(value["hasMore"], json!(false));
+}
+
+#[tokio::test]
+async fn an_unreadable_answer_is_an_error() {
     let logseq = mock_logseq(vec![json!([[page(10, "bob", "Bob", true), "name"]]), json!([[{"uuid": "u"}]])]).await;
     let error = get_page_outline(&client(&logseq), "bob").await.unwrap_err();
     assert!(matches!(error, ToolError::Response(_)), "{error}");
