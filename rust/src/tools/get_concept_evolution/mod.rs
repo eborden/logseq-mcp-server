@@ -33,7 +33,7 @@ use crate::js;
 use crate::meta::ResultWarning;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{alias_set_warnings, resolve_alias_set};
-use crate::resolve::require_page;
+use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::resolved_from;
 use crate::tools::get_page::wire as page_wire;
@@ -157,7 +157,8 @@ pub struct ConceptEvolution {
     pub concept: String,
     pub resolved_from: Option<Value>,
     pub resolved_aliases: Option<Vec<String>>,
-    /// An alias group cut at its maximum, or mentions cut at `max_entries`; empty otherwise
+    /// An alias group cut at its maximum or not looked up, a lookup LogSeq did not answer, or mentions cut
+    /// at `max_entries`; empty otherwise
     pub warnings: Vec<ResultWarning>,
     /// How many mentions there were, when the timeline cut some
     pub total_mentions_before_cut: Option<usize>,
@@ -263,6 +264,41 @@ impl ConceptEvolution {
     }
 }
 
+/// The warnings for a `null` answer to one of the three lookups (BR-0011). No `howToFetchAll` on any: no
+/// parameter fetches what LogSeq did not answer (like `pages_unavailable`, #64), so none adds to `hasMore`.
+fn page_blocks_unavailable() -> ResultWarning {
+    ResultWarning::new(
+        "page_blocks_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the blocks of this page (possibly no graph open or a re-index in \
+             progress), so the page's own blocks are missing from the timeline. This does not mean the page has no \
+             blocks. {RETRY_ADVICE}"
+        ),
+    )
+}
+
+fn page_unavailable_warning() -> ResultWarning {
+    ResultWarning::new(
+        "page_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up this page (possibly no graph open or a re-index in progress), so \
+             the page's blocks lost their day and are listed as undated mentions. This does not mean the page has no \
+             day. {RETRY_ADVICE}"
+        ),
+    )
+}
+
+fn mentions_unavailable_warning() -> ResultWarning {
+    ResultWarning::new(
+        "mentions_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the blocks that mention this concept (possibly no graph open or a \
+             re-index in progress), so the mentions are missing from the timeline. This does not mean nothing \
+             mentions it. {RETRY_ADVICE}"
+        ),
+    )
+}
+
 /// `getConceptEvolution`: track how a concept evolves over time.
 ///
 /// `concept_name` is a page name, an alias or an ISO date (`2025-01-01`). When the name was an alias,
@@ -290,13 +326,19 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
     let answer = client.call_api(page_wire::PAGE_METHOD, &[Value::from(lookup_name.as_str())]).await?;
     let concept_page = page_wire::page(&answer)?;
     let mut tree = tree;
-    // PARITY(#299): a `null` page leaves the tree's blocks with their bare `{ id }` page, so they lose their day and
-    // become undated mentions with no warning (suspected TS bug, BR-0011) — fix per #345, in both servers.
-    if let (Some(blocks), Some(page)) = (tree.as_mut(), concept_page.as_ref()) {
-        for block in blocks {
-            if let Value::Object(map) = block {
-                map.insert("page".to_owned(), page.clone());
+    // A `null` page leaves the tree's blocks with their bare `{ id }` page, so they would lose their day and become
+    // undated mentions: that is `page_unavailable` (BR-0011), said only when there are blocks to enrich.
+    let mut page_unavailable = false;
+    if let Some(blocks) = tree.as_mut() {
+        match concept_page.as_ref() {
+            Some(page) => {
+                for block in blocks {
+                    if let Value::Object(map) = block {
+                        map.insert("page".to_owned(), page.clone());
+                    }
+                }
             }
+            None => page_unavailable = !blocks.is_empty(),
         }
     }
 
@@ -311,14 +353,13 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
         blocks_referencing_page(&PageName::new(&lookup_name))
     };
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    // PARITY(#299): a `null` answer is read as "no mentions", so the concept looks unmentioned when LogSeq didn't
-    // answer (suspected TS bug, BR-0011) — fix per #345, in both servers.
-    let mentions = block_rows(&answer)?.unwrap_or_default();
+    // A `null` answer is not "no mentions" (BR-0011): the concept is listed without any, and the result says so.
+    let mentions = block_rows(&answer)?;
 
-    // Combine and deduplicate
-    // PARITY(#299): a `null` block tree is read as "no blocks on the page", as a missing mention list is
-    // (suspected TS bug, BR-0011) — fix per #345, in both servers.
-    let all_blocks: Vec<Value> = tree.unwrap_or_default().into_iter().chain(mentions).collect();
+    // Combine and deduplicate. A `null` block tree is not "no blocks on the page" either (BR-0011).
+    let blocks_unavailable = tree.is_none();
+    let mentions_unavailable = mentions.is_none();
+    let all_blocks: Vec<Value> = tree.unwrap_or_default().into_iter().chain(mentions.unwrap_or_default()).collect();
     let unique = unique_by_id(all_blocks);
 
     // Filter by date range
@@ -359,6 +400,15 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
     };
 
     let mut warnings = alias_set_warnings(&[&alias_set]);
+    if blocks_unavailable {
+        warnings.push(page_blocks_unavailable());
+    }
+    if page_unavailable {
+        warnings.push(page_unavailable_warning());
+    }
+    if mentions_unavailable {
+        warnings.push(mentions_unavailable_warning());
+    }
     let cut = total > shown.len();
     if cut {
         warnings.push(entries_truncated(&full, &kept, total, shown.len(), max_entries));
@@ -473,6 +523,23 @@ mod tests {
                 r#""groupedTimeline":{"20250101":[{"id":1,"uuid":"u1","page":{"id":101,"journalDay":20250101}}]}}"#
             )
         );
+    }
+
+    #[test]
+    fn an_unavailable_lookup_says_which_data_is_missing_and_offers_nothing_to_fetch() {
+        let warnings = vec![page_blocks_unavailable(), page_unavailable_warning(), mentions_unavailable_warning()];
+        assert_eq!(warnings.iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["page_blocks_unavailable", "page_unavailable", "mentions_unavailable"]);
+        for warning in &warnings {
+            assert!(warning.message.starts_with("LogSeq returned no answer when looking up"), "{}", warning.message);
+            assert!(warning.message.ends_with(RETRY_ADVICE), "{}", warning.message);
+            assert!(warning.how_to_fetch_all.is_none());
+        }
+        assert!(warnings[1].message.contains("listed as undated mentions"));
+        // the completeness block is there for them alone, with no `totals` and `hasMore` false
+        let only = ConceptEvolution { warnings, total_mentions_before_cut: None, ..evolution() };
+        let value = only.to_value();
+        assert_eq!(value["hasMore"], false);
+        assert!(value.get("totals").is_none());
     }
 
     #[test]
