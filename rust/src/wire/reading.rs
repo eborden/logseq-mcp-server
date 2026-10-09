@@ -116,6 +116,44 @@ fn an_option_in_a_list_keeps_the_rule_of_a_list_even_inside_a_field() {
 }
 
 #[test]
+fn the_values_of_a_map_are_not_fields_and_read_null_as_none() {
+    use std::collections::BTreeMap;
+    let answer = json!({"a": "x", "b": null});
+    let map: BTreeMap<String, Option<String>> = parse(METHOD, &answer).unwrap();
+    assert_eq!(map.get("a"), Some(&Some("x".to_owned())));
+    assert_eq!(map.get("b"), Some(&None));
+    // a field holding that map is a field that may not be `null`, but its values are the map's
+    #[derive(Debug, Deserialize)]
+    struct Holder {
+        values: Option<BTreeMap<String, Option<String>>>,
+    }
+    let holder: Holder = parse(METHOD, &json!({"values": {"b": null}})).unwrap();
+    assert_eq!(holder.values.unwrap().get("b"), Some(&None));
+    assert_eq!(problem::<Holder>(json!({"values": null})), "answer.values: expected an object, got null");
+}
+
+#[test]
+fn a_newtype_is_read_where_it_sits_not_as_a_field_of_what_it_wraps() {
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct Maybe(Option<String>);
+    #[derive(Debug, Deserialize)]
+    struct Holder {
+        maybe: Maybe,
+        wrapped: Option<Maybe>,
+    }
+    // at the top of an answer and as a cell, the newtype around an `Option` reads `null` as `None`
+    assert_eq!(parse::<Maybe>(METHOD, &json!(null)).unwrap(), Maybe(None));
+    assert_eq!(parse::<(Maybe,)>(METHOD, &json!([null])).unwrap(), (Maybe(None),));
+    // as the type of a field it does the same, as it did before a field was read by position
+    let holder: Holder = parse(METHOD, &json!({"maybe": null})).unwrap();
+    assert_eq!((holder.maybe, holder.wrapped), (Maybe(None), None));
+    assert_eq!(parse::<Holder>(METHOD, &json!({"maybe": "a", "wrapped": "b"})).unwrap().wrapped, Some(Maybe(Some("b".to_owned()))));
+    // an `Option` around the newtype is a field that may not be `null`: the newtype is read, and it reads `None`
+    let holder: Holder = parse(METHOD, &json!({"maybe": null, "wrapped": null})).unwrap();
+    assert_eq!(holder.wrapped, Some(Maybe(None)));
+}
+
+#[test]
 fn an_extra_key_passes_beside_an_option_field() {
     let answer = json!({"extra": {"deep": [null]}, "name": "a", "more": null});
     assert_eq!(parse::<Named>(METHOD, &answer).unwrap().name.as_deref(), Some("a"));
