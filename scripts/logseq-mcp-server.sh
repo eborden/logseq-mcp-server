@@ -138,13 +138,14 @@ esac
 cache=$cache_root/$NAME/$version
 
 # check_cache_dirs: whichever of the cache's two directories exist must be ours and not writable by group or others.
+# A symlink is followed (`-O`, `ls -L`), so what is judged is the directory it points at.
 check_cache_dirs() {
   for dir in "$cache_root/$NAME" "$cache"; do
     if [ -d "$dir" ] && [ ! -O "$dir" ]; then
       die "the cache directory $dir is not owned by you, so it is not trusted. Set XDG_CACHE_HOME to a directory of your own."
     fi
   done
-  listing=$(ls -ld "$cache_root/$NAME" "$cache" 2>/dev/null) || true
+  listing=$(ls -ldL "$cache_root/$NAME" "$cache" 2>/dev/null) || true
   while IFS=' ' read -r mode _; do
     case $mode in
       ?????w* | ????????w*)
