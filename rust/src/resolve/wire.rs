@@ -9,7 +9,7 @@ use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde_json::Value;
 
 use crate::entity::shape;
-use crate::wire::{DATALOG_METHOD, Id, Optional, ResponseError, entity_id, items, parse};
+use crate::wire::{DATALOG_METHOD, Id, ResponseError, entity_id, items, parse};
 
 /// A page as a Datalog pull answers it, with the fields the tools read.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -33,12 +33,12 @@ impl PulledPage {
     /// A page read as [`shape::PulledPage`], with the entity as LogSeq sent it.
     fn read(shape: shape::PulledPage, raw: Option<&Value>) -> Self {
         PulledPage {
-            id: shape.id.into_option().map(|id| id.0),
-            db_id: shape.db_id.into_option().map(|id| id.0),
-            name: shape.name.into_option(),
-            original_name: shape.original_name.into_option(),
-            has_file: shape.file.into_option().is_some(),
-            has_alias_links: shape.alias.into_option().is_some_and(|links| !links.is_empty()),
+            id: shape.id.map(|id| id.0),
+            db_id: shape.db_id.map(|id| id.0),
+            name: shape.name,
+            original_name: shape.original_name,
+            has_file: shape.file.is_some(),
+            has_alias_links: shape.alias.is_some_and(|links| !links.is_empty()),
             raw: raw.cloned().unwrap_or(Value::Null),
         }
     }
@@ -195,14 +195,14 @@ pub fn page_rows(answer: &Value) -> Result<Option<Vec<PulledPage>>, ResponseErro
 /// A page as `getAllPages` lists it, for the one field the closest-name search reads.
 #[derive(Deserialize)]
 struct ListedName {
-    #[serde(default, rename = "originalName")]
-    original_name: Optional<String>,
+    #[serde(rename = "originalName")]
+    original_name: Option<String>,
 }
 
 /// The answer of `getAllPages`, read for the original name of each page. A page whose
 /// `originalName` is absent is `None`.
 pub fn page_names(answer: &Value, method: &str) -> Result<Option<Vec<Option<String>>>, ResponseError> {
-    Ok(parse::<Option<Vec<ListedName>>>(method, answer)?.map(|pages| pages.into_iter().map(|page| page.original_name.into_option()).collect()))
+    Ok(parse::<Option<Vec<ListedName>>>(method, answer)?.map(|pages| pages.into_iter().map(|page| page.original_name).collect()))
 }
 
 #[cfg(test)]
