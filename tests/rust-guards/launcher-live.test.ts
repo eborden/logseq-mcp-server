@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createHash } from 'crypto';
+import { execFileSync } from 'child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -32,6 +33,7 @@ describe('the launcher starting the server (ADR-0035)', () => {
   let dir: string;
   let client: Client;
   let cached: string;
+  let serverPid: number | null;
 
   beforeAll(async () => {
     requireRustBinary();
@@ -68,6 +70,7 @@ describe('the launcher starting the server (ADR-0035)', () => {
     });
     client = new Client({ name: 'launcher-live-guard', version: '1.0.0' }, { capabilities: {} });
     await client.connect(transport);
+    serverPid = transport.pid;
   }, 60000);
 
   afterAll(async () => {
@@ -81,6 +84,21 @@ describe('the launcher starting the server (ADR-0035)', () => {
 
   it('answers tools/list with the 16 tools', async () => {
     expect((await client.listTools()).tools).toHaveLength(16);
+  });
+
+  // The launcher must be replaced by the server (`exec`), not wait beside it: ADR-0035's footprint (about 2 MB resident)
+  // depends on it, and a launcher that ran the server as a child would pass every other test here.
+  it('is the server itself: the process the client started runs the cached binary and has no child', () => {
+    expect(serverPid).not.toBeNull();
+    const command = execFileSync('ps', ['-o', 'command=', '-p', String(serverPid)], { encoding: 'utf-8' }).trim();
+    // the whole command line is the cached path: not `sh .../logseq-mcp-server.sh`, and no arguments
+    expect(command).toBe(cached);
+    const table = execFileSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid='], { encoding: 'utf-8' });
+    const children = table
+      .split('\n')
+      .map(line => line.trim().split(/\s+/))
+      .filter(([, ppid]) => ppid === String(serverPid));
+    expect(children).toEqual([]);
   });
 
   it('left the checked binary in the cache, executable', () => {
