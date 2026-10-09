@@ -1,13 +1,15 @@
 //! What the concept network reads from LogSeq: the rows of its connected-pages query
 //! (`responses.connectedRows` in `src/response-schemas.ts`).
 
+use serde::Deserialize;
 use serde_json::Value;
 
-use crate::wire::{DATALOG_METHOD, Part, Parsed, Reader, ResponseError, to_error};
+use crate::wire::{DATALOG_METHOD, Id, ResponseError, parse};
 
 /// One row of the connected-pages query:
 /// `[sourceId, connectedId, name, originalName, isJournal, relType, count]`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "Cells")]
 pub struct ConnectedRow {
     /// The page whose links these are: a frontier page, or the group's id for a grouped query
     pub source: i64,
@@ -24,52 +26,36 @@ pub struct ConnectedRow {
     pub count: i64,
 }
 
-impl Reader {
-    /// A cell that is a whole number: an id or a count (`z.number()`). One difference from
-    /// TypeScript, which takes a fraction and fails later at `groundIds`: LogSeq never sends one,
-    /// so it is refused where it is read (see `crate::wire`).
-    fn whole_cell(&mut self, cell: Option<&Value>) -> Parsed<i64> {
-        match cell {
-            Some(value) => {
-                let n = self.number_value(value)?;
-                if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 { Ok(n as i64) } else { Err(self.mismatch("int", Some(value))) }
-            }
-            None => Err(self.mismatch("number", None)),
-        }
-    }
+/// The cells of a row, in the order the query returns them. Every one is read.
+#[derive(Deserialize)]
+struct Cells(Id, Id, String, String, bool, Direction, Id);
 
-    fn string_cell(&mut self, cell: Option<&Value>) -> Parsed<String> {
-        match cell {
-            Some(value) => self.string_value(value),
-            None => Err(self.mismatch("string", None)),
-        }
-    }
+#[derive(Deserialize)]
+enum Direction {
+    #[serde(rename = "outbound")]
+    Outbound,
+    #[serde(rename = "inbound")]
+    Inbound,
+}
 
-    fn connected_row(&mut self, cells: &[Value]) -> Parsed<ConnectedRow> {
-        let source = self.at(Part::Index(0), |r| r.whole_cell(cells.first()))?;
-        let connected = self.at(Part::Index(1), |r| r.whole_cell(cells.get(1)))?;
-        let name = self.at(Part::Index(2), |r| r.string_cell(cells.get(2)))?;
-        let original_name = self.at(Part::Index(3), |r| r.string_cell(cells.get(3)))?;
-        let is_journal = self.at(Part::Index(4), |r| match cells.get(4) {
-            Some(Value::Bool(flag)) => Ok(*flag),
-            other => Err(r.mismatch("boolean", other)),
-        })?;
-        let outbound = self.at(Part::Index(5), |r| match cells.get(5).and_then(Value::as_str) {
-            Some("outbound") => Ok(true),
-            Some("inbound") => Ok(false),
-            // PARITY(#299): zod's wording for a value outside an enum — drop if Rust becomes the only server.
-            _ => Err(r.issue("Invalid option: expected one of \"outbound\"|\"inbound\"")),
-        })?;
-        let count = self.at(Part::Index(6), |r| r.whole_cell(cells.get(6)))?;
-        Ok(ConnectedRow { source, connected, name, original_name, is_journal, outbound, count })
+impl From<Cells> for ConnectedRow {
+    fn from(Cells(source, connected, name, original_name, is_journal, direction, count): Cells) -> Self {
+        ConnectedRow {
+            source: source.0,
+            connected: connected.0,
+            name,
+            original_name,
+            is_journal,
+            outbound: matches!(direction, Direction::Outbound),
+            count: count.0,
+        }
     }
 }
 
 /// `responses.connectedRows`: the rows, or `None` for a `null` answer, which is not an empty one
 /// (BR-0011).
 pub fn connected_rows(answer: &Value) -> Result<Option<Vec<ConnectedRow>>, ResponseError> {
-    let mut reader = Reader::default();
-    reader.rows(answer, 7, |r, cells| r.connected_row(cells)).map_err(|issue| to_error(DATALOG_METHOD, issue))
+    parse(DATALOG_METHOD, answer)
 }
 
 #[cfg(test)]
@@ -94,20 +80,32 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_cell_names_its_path_in_zod_s_words() {
+    fn an_id_or_a_count_may_be_written_with_a_point() {
+        let rows = connected_rows(&json!([[10.0, 20.0, "b", "B", false, "inbound", 2.0]])).unwrap().unwrap();
+        assert_eq!((rows[0].source, rows[0].connected, rows[0].count), (10, 20, 2));
+    }
+
+    #[test]
+    fn a_wrong_cell_is_named_by_its_place_in_the_answer() {
         let method = DATALOG_METHOD;
-        assert_eq!(problem(connected_rows(&json!({}))), "(response): Invalid input: expected array, received object");
-        assert_eq!(problem(connected_rows(&json!([1]))), "[0]: Invalid input: expected tuple, received number");
-        // zod's tuple length rule (`Reader::rows`, #344): two cells short is `Too small` before any cell is read, one short is read
-        assert_eq!(problem(connected_rows(&json!([[10, 20]]))), "[0]: Too small: expected array to have >7 items");
-        assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", false, "outbound"]]))), "[0][6]: Invalid input: expected number, received undefined");
-        assert_eq!(problem(connected_rows(&json!([["a", 20, "b", "B", false, "outbound", 1]]))), "[0][0]: Invalid input: expected number, received string");
-        assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", "no", "outbound", 1]]))), "[0][4]: Invalid input: expected boolean, received string");
+        assert_eq!(problem(connected_rows(&json!({}))), "answer: expected a list, got an object");
+        assert_eq!(problem(connected_rows(&json!([1]))), "answer[0]: expected a row, got a number");
+        assert_eq!(problem(connected_rows(&json!([[10, 20]]))), "answer[0]: the row has fewer cells than this server reads");
+        assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", false, "outbound"]]))), "answer[0]: the row has fewer cells than this server reads");
+        assert_eq!(problem(connected_rows(&json!([["a", 20, "b", "B", false, "outbound", 1]]))), "answer[0][0]: expected a whole number, got a string");
+        assert_eq!(problem(connected_rows(&json!([[1.5, 20, "b", "B", false, "outbound", 1]]))), "answer[0][0]: expected a whole number, got a number with a fraction");
+        assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", "no", "outbound", 1]]))), "answer[0][4]: expected a boolean, got a string");
         assert_eq!(
             problem(connected_rows(&json!([[10, 20, "b", "B", false, "sideways", 1]]))),
-            "[0][5]: Invalid option: expected one of \"outbound\"|\"inbound\""
+            "answer[0][5]: expected \"outbound\" or \"inbound\", got a different string"
         );
-        assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", false, "inbound", 1, 9]]))), "[0]: Too big: expected array to have <7 items");
+        assert_eq!(problem(connected_rows(&json!([[10, 20, "b", "B", false, "inbound", 1, 9]]))), "answer[0]: the row has more cells than this server reads");
         assert_eq!(connected_rows(&json!([[1.5, 20, "b", "B", false, "inbound", 1]])).unwrap_err().method, method);
+    }
+
+    #[test]
+    fn what_is_said_never_includes_what_was_sent() {
+        let error = connected_rows(&json!([[10, 20, "b", "B", false, "secret direction", 1]])).unwrap_err().to_string();
+        assert!(!error.contains("secret"));
     }
 }
