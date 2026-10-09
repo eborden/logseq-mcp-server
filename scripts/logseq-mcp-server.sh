@@ -183,20 +183,20 @@ fetch() {
   else
     protocols='=https'
   fi
-  status=0
+  curl_status=0
   curl --fail --silent --location --connect-timeout 20 --max-time 300 \
     --proto "$protocols" --proto-redir "$protocols" \
-    --output "$stage/$1" "$base/$1" </dev/null 2>/dev/null || status=$?
-  case $status in
+    --output "$stage/$1" "$base/$1" </dev/null 2>/dev/null || curl_status=$?
+  case $curl_status in
     0) return 0 ;;
     22 | 37 | 78)
       die "the release has no file named $1 at $(shown "$base") (version $version). The release may not be published yet, or it has no file for this platform."
       ;;
     5 | 6 | 7 | 28 | 35 | 52 | 55 | 56 | 60)
-      die "could not download $1 from $(shown "$base") (curl exit $status). Check the network connection; a proxy is read from HTTPS_PROXY, ALL_PROXY and NO_PROXY."
+      die "could not download $1 from $(shown "$base") (curl exit $curl_status). Check the network connection; a proxy is read from HTTPS_PROXY, ALL_PROXY and NO_PROXY."
       ;;
     *)
-      die "could not download $1 from $(shown "$base") (curl exit $status)."
+      die "could not download $1 from $(shown "$base") (curl exit $curl_status)."
       ;;
   esac
 }
