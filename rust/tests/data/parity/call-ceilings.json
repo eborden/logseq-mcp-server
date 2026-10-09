@@ -574,6 +574,7 @@
   "links: two empty texts": 0,
   "list: bad limit: a fraction": 0,
   "list: bad limit: a string": 0,
+  "list: format toon": 1,
   "list: limit past the safe range of a count": 1,
   "list: limit zero": 1,
   "list: null arguments are absent": 1,

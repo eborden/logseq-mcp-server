@@ -22,9 +22,14 @@ pub fn non_empty(text: &str) -> Option<&str> {
     (!js::trim(text).is_empty()).then_some(text)
 }
 
-/// The trailing block that carries the tips, or `None` when there are none.
+/// The value of the trailing block that carries the tips, or `None` when there are none.
+pub fn tips_value(tips: &[String]) -> Option<Value> {
+    (!tips.is_empty()).then(|| json!({"meta": {"tips": tips}}))
+}
+
+/// The trailing block that carries the tips, as JSON text, or `None` when there are none.
 pub fn tips_content(tips: &[String]) -> Option<String> {
-    (!tips.is_empty()).then(|| json!({"meta": {"tips": tips}}).to_string())
+    tips_value(tips).map(|value| value.to_string())
 }
 
 fn as_object(value: Option<&Value>) -> Option<&Map<String, Value>> {

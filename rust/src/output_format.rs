@@ -1,8 +1,13 @@
 //! The `format` parameter of the tools that can answer in Markdown (#43): `json` (the default) or
-//! `markdown`. A tool that takes it renders through `crate::markdown`.
+//! `markdown`. A tool that takes it renders through `crate::markdown`. The flat-list tools take
+//! [`ListFormat`] instead: `json` (the default) or `toon`, written through `crate::toon` (BR-0014).
 
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::Value;
+
+use crate::errors::ToolError;
+use crate::toon;
 
 // `format`, as the input schema lists it, and as a tool's arguments take it: `Option<OutputFormat>`,
 // with no default advertised. A word that is neither is refused by `crate::args::parse_args`. No doc
@@ -12,6 +17,28 @@ use serde::Deserialize;
 pub enum OutputFormat {
     Json,
     Markdown,
+}
+
+// `format` of a flat-list tool, as the input schema lists it: `Option<ListFormat>`, with no default
+// advertised. Its own type, not a third value of `OutputFormat`, so a tool that renders Markdown does not
+// advertise a word it can't write. No doc comment, as above.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ListFormat {
+    Json,
+    Toon,
+}
+
+impl ListFormat {
+    /// The text of one content block of a result: the value as JSON (the bytes every tool wrote before
+    /// this parameter existed) unless TOON was asked for. Every block of a result goes through here, so
+    /// the meta and tips blocks are in the same format as the data.
+    pub fn text(format: Option<ListFormat>, value: &Value) -> Result<String, ToolError> {
+        match format {
+            Some(ListFormat::Toon) => toon::encode(value),
+            Some(ListFormat::Json) | None => Ok(value.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]

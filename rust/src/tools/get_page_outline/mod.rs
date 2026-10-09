@@ -29,8 +29,9 @@ use crate::meta::{ResultMeta, ResultWarning};
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::require_page;
 use crate::snippet::Snippet;
-use crate::tips::tips_content;
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::output_format::ListFormat;
+use crate::tips::tips_value;
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 
 use self::tips::{TipBlock, outline_tips};
 use self::wire::OutlineBlock;
@@ -50,6 +51,8 @@ const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
 pub struct Args {
     /// Page name, alias, or ISO date (2025-01-01) for a journal
     pub page_name: String,
+    /// json (default), or toon text: a list's keys once, not on every row
+    pub format: Option<ListFormat>,
 }
 
 /// The tool as `tools/list` shows it.
@@ -64,12 +67,12 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let args = parse_args::<Args>(arguments.as_ref())?;
     let outline = get_page_outline(client, &args.page_name).await?;
-    let mut content = vec![ContentBlock::text(serde_json::to_string(&outline).expect("an outline serializes"))];
+    let mut content = vec![ContentBlock::text(ListFormat::text(args.format, &result_value(&outline))?)];
     if tips_enabled {
         let blocks: Vec<TipBlock<'_>> =
             outline.blocks.iter().map(|block| TipBlock { uuid: &block.uuid, child_count: block.child_count }).collect();
-        if let Some(tips) = tips_content(&outline_tips(&blocks)) {
-            content.push(ContentBlock::text(tips));
+        if let Some(tips) = tips_value(&outline_tips(&blocks)) {
+            content.push(ContentBlock::text(ListFormat::text(args.format, &tips)?));
         }
     }
     Ok(success_result(content))
@@ -355,7 +358,10 @@ mod tests {
         // `inputSchema` of logseq_get_page_outline in the ADR-0016 snapshot
         let pinned = json!({
             "type": "object",
-            "properties": {"page_name": {"type": "string", "description": "Page name, alias, or ISO date (2025-01-01) for a journal"}},
+            "properties": {
+                "page_name": {"type": "string", "description": "Page name, alias, or ISO date (2025-01-01) for a journal"},
+                "format": {"type": "string", "enum": ["json", "toon"], "description": "json (default), or toon text: a list's keys once, not on every row"},
+            },
             "required": ["page_name"],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
