@@ -42,6 +42,14 @@ icu_properties = { version = "2.2", default-features = false, features = ["compi
 # `unicode-segmentation` stays off.
 nucleo-matcher = { version = "0.3.1", default-features = false, features = ["unicode-normalization", "unicode-casefold"] }
 
+# Opt-in `format: "toon"` on the flat-list tools (BR-0014, `src/toon.rs`): TOON writes a list's keys once
+# instead of on every row. toon-format 0.6.1 is the TOON project's own Rust crate (toon-format/toon-rust, MIT,
+# the licence this repo uses, ADR-0023). `default-features = false` drops its `cli` feature (clap, ratatui,
+# tiktoken-rs, syntect, arboard and the rest), leaving the encoder. It reads serde_json's `Value`, so object
+# keys come out in the order `preserve_order` keeps them (BR-0004, BR-0013); `src/toon.rs` has the test that
+# pins that order and this crate's output.
+toon-format = { version = "0.6.1", default-features = false }
+
 # The local calendar day (`localtime_r`), which no standard library function gives. Already in the tree (tokio, mio and socket2 use it),
 # at the locked version, so it adds no build and no download. Unix only: elsewhere the date is UTC.
 [target.'cfg(unix)'.dependencies]

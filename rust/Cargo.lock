@@ -507,6 +507,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "toon-format",
 ]
 
 [[package]]
@@ -923,6 +924,18 @@ dependencies = [
  "libc",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "toon-format"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b55b4cdcf739ae27860deed060785c8f5f59e8663013223c183fb9fda75282d"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
