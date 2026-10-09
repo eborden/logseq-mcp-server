@@ -11,7 +11,8 @@
 //!
 //! The page and its blocks are the entities the Editor API sent, key order and spelling included
 //! (BR-0004). The result adds `resolvedFrom` when the name wasn't an exact one, then `children`,
-//! then (with `resolve_refs`) `hasMore` and `warnings`.
+//! then `hasMore` and `warnings` (with `resolve_refs`, or when LogSeq answered `null` for the blocks: a
+//! `page_blocks_unavailable` warning, BR-0011).
 //!
 //! With `format: "markdown"` the same page is rendered by `crate::markdown` into one text block,
 //! its warnings, `hasMore` and tips in a footer, and no separate tips block. The calls are the same.
@@ -30,6 +31,7 @@ use crate::errors::{MatchedBy, PageNotFound, ToolError};
 use crate::js;
 use crate::markdown::{FooterMeta, PageRenderOptions, render_page, with_footer};
 use crate::output_format::OutputFormat;
+use crate::meta::ResultWarning;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::{ResolvedPage, require_page};
 use crate::resolve_refs::{resolve_block_refs, with_meta};
@@ -150,17 +152,23 @@ pub async fn get_page(client: &LogseqClient, page_name: &str, include_children: 
     }
 
     // If include_children is requested, fetch the page blocks tree
+    let mut warnings: Vec<ResultWarning> = Vec::new();
     if include_children {
         let answer = client.call_api(wire::BLOCKS_METHOD, &[Value::from(lookup_name.as_str())]).await?;
-        // PARITY(#299): a `null` answer leaves the page without `children` and says nothing, where BR-0011 asks
-        // for a warning that the blocks were unavailable (suspected TS bug) — fix per #323, in both servers.
-        if let Some(blocks) = wire::blocks(&answer)?.filter(|blocks| !blocks.is_empty()) {
-            result.insert("children".into(), Value::Array(blocks));
+        // `null` is not `[]` (BR-0011). An empty tree is a page with no blocks and says nothing. `null` may mean no
+        // graph is open or LogSeq is re-indexing, so the page is returned without `children` and a warning says why.
+        // No `howToFetchAll`: no parameter fetches blocks LogSeq did not answer, so `hasMore` stays false (BR-0006).
+        match wire::blocks(&answer)? {
+            None => warnings.push(blocks_unavailable()),
+            Some(blocks) if blocks.is_empty() => {}
+            Some(blocks) => {
+                result.insert("children".into(), Value::Array(blocks));
+            }
         }
     }
 
     if !resolve_refs {
-        return Ok(Value::Object(result));
+        return Ok(Value::Object(if warnings.is_empty() { result } else { with_meta(result, &warnings) }));
     }
     let roots: Vec<Value> = result.get("children").and_then(Value::as_array).cloned().unwrap_or_default();
     let resolved = resolve_block_refs(client, &roots).await?;
@@ -169,7 +177,19 @@ pub async fn get_page(client: &LogseqClient, page_name: &str, include_children: 
     if annotated.contains_key("children") {
         annotated.insert("children".into(), Value::Array(resolved.blocks));
     }
-    Ok(Value::Object(with_meta(annotated, &resolved.warnings)))
+    warnings.extend(resolved.warnings);
+    Ok(Value::Object(with_meta(annotated, &warnings)))
+}
+
+/// The warning for a `null` answer to the page's block tree.
+fn blocks_unavailable() -> ResultWarning {
+    ResultWarning::new(
+        "page_blocks_unavailable",
+        "LogSeq returned no answer when looking up the blocks of this page (possibly no graph open or a re-index in progress), \
+         so the page is returned without its children. This does not mean the page has no blocks. \
+         Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+            .to_owned(),
+    )
 }
 
 #[cfg(test)]

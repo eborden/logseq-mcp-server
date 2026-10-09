@@ -168,11 +168,39 @@ async fn the_blocks_cost_one_more_call_and_a_page_with_none_gets_no_children_key
     // `children` is the last key
     assert_eq!(js::json_stringify(&page).rsplit_once(r#","children":"#).map(|(_, rest)| rest.starts_with('[')), Some(true));
 
-    for none in [json!([]), Value::Null] {
-        let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), none]).await;
-        let page = get_page::get_page(&client(&logseq), "Project Atlas", true, false).await.unwrap();
-        assert!(page.get("children").is_none());
-    }
+    // A real `[]` is a page with no blocks and says nothing
+    let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), json!([])]).await;
+    let page = get_page::get_page(&client(&logseq), "Project Atlas", true, false).await.unwrap();
+    assert!(page.get("children").is_none() && page.get("warnings").is_none() && page.get("hasMore").is_none());
+}
+
+#[tokio::test]
+async fn a_null_block_tree_is_a_warning_and_not_a_page_with_no_blocks() {
+    // BR-0011: `null` is no answer. `hasMore` stays false and there is no `howToFetchAll` (BR-0006)
+    let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), Value::Null]).await;
+    let page = get_page::get_page(&client(&logseq), "Project Atlas", true, false).await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.Editor.getPage", "logseq.Editor.getPageBlocksTree"]);
+    assert!(page.get("children").is_none());
+    assert_eq!(page["hasMore"], false);
+    let warnings = page["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["code"], "page_blocks_unavailable");
+    assert!(warnings[0].get("howToFetchAll").is_none());
+    assert!(warnings[0]["message"].as_str().unwrap().contains("does not mean the page has no blocks"));
+    // the meta follows the page's own keys
+    assert!(js::json_stringify(&page).contains(r#","hasMore":false,"warnings":[{"code":"page_blocks_unavailable","message":"#));
+
+    // With `resolve_refs` the warning is merged with the ones that path makes, and no ref lookup is made for no blocks
+    let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), Value::Null]).await;
+    let page = get_page::get_page(&client(&logseq), "Project Atlas", true, true).await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.Editor.getPage", "logseq.Editor.getPageBlocksTree"]);
+    assert_eq!(page["hasMore"], false);
+    assert_eq!(page["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["page_blocks_unavailable"]);
+
+    // Without `include_children` no tree is asked for, so there is nothing to warn about
+    let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
+    let page = get_page::get_page(&client(&logseq), "Project Atlas", false, false).await.unwrap();
+    assert!(page.get("warnings").is_none());
 }
 
 #[tokio::test]
