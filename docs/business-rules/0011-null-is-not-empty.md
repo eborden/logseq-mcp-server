@@ -21,8 +21,23 @@ test: `rust/tests/page_resource_calls.rs`
 test: `rust/tests/search_by_relationship_calls.rs`
 test: `rust/tests/concept_calls.rs`
 test: `rust/tests/context_calls.rs`
+test: `rust/tests/check_links_calls.rs`
 
-The first pins the `pages_unavailable` warning for `null` and the absence of a warning for a real `[]`. The second pins the same split for `resolve_refs`: a `null` ref lookup gives a `refs_unavailable` warning and no `missing` refs, and a real `[]` still gives `missing`. The third pins it for `query_by_date_range`: a `null` journal-page answer gives a `journals_unavailable` warning, a `null` block answer gives `blocks_unavailable`, and a real `[]` gives neither. Other tools still read `null` as "none", copied from the TypeScript server and tagged `PARITY(#299)` (suspected TypeScript bugs, #301); their call-count tests in `rust/tests/` pin that current behaviour, to be flipped when it is fixed, and it is not an endorsement of the reading. The reviewer applies the rule to new code.
+What each test file pins on a `null` answer, and that a real `[]` carries no warning where one is tested beside it:
+
+- `simple_tools_calls.rs`: `list_pages` gives `pages_unavailable`; `search_blocks` with `include_context` gives `context_unavailable` on a `null` page lookup.
+- `resolve_refs_calls.rs`: a `null` ref lookup gives `refs_unavailable` and no `missing` refs; a real `[]` still gives `missing`.
+- `query_by_date_range_calls.rs`: a `null` journal-page answer gives `journals_unavailable`, a `null` block answer `blocks_unavailable`.
+- `get_page_outline_calls.rs`: `outline_unavailable` on a `null` outline answer; a `null` answer from the page resolver is an error that says LogSeq gave no answer, with no suggestions and no further call.
+- `get_backlinks_calls.rs`: `backlinks_unavailable` (the list is always `[]` on a `null`) and `alias_lookup_unavailable`.
+- `current_context_calls.rs`: `page_names_unavailable` on a `null` page lookup.
+- `get_page_block_calls.rs` and `page_resource_calls.rs`: `page_blocks_unavailable` on a `null` block tree, as a warning on the page and a footer on the resource.
+- `search_by_relationship_calls.rs`: `relationship_unavailable`, `hop_unavailable` and `page_blocks_unavailable`.
+- `concept_calls.rs`: `links_unavailable` for `get_concept_network`; `page_blocks_unavailable`, `page_unavailable` and `mentions_unavailable` for `get_concept_evolution`.
+- `context_calls.rs`: `page_blocks_unavailable`, `backlinks_unavailable`, `search_unavailable` and the `topic_unavailable` roll-up for `build_context` and `get_context_for_query`; a `null` resolver answer fails the whole call.
+- `check_links_calls.rs`: `check_links` gives `refs_unchecked` on a `null` answer, never missing pages.
+
+No tool but `search_blocks` and `query_by_property` maps a `null` answer to an empty result without a warning: each gives one of these warnings or fails with an error (`get_block`, `get_graph_info`, the page resolver). Those two still return the bare text `null` (#415). Their call-count tests in `simple_tools_calls.rs` pin that behaviour, copied from the TypeScript server, to be flipped when #415 is fixed, and it is not an endorsement of the reading. The reviewer applies the rule to new code.
 reviewer: A tool that maps a `null` API response to an empty result adds a warning that says the data was unavailable.
 
 ## Changelog
@@ -40,3 +55,4 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 | 2026-10-08 | Mechanical enforcement: added a `test:` line for `search_by_relationship` (`relationship_unavailable`, `hop_unavailable` and `page_blocks_unavailable` on a `null` answer, and none on a real `[]`). Additive; no paragraph reworded. | #406 |
 | 2026-10-08 | Mechanical enforcement: added a `test:` line for `get_concept_network` and `get_concept_evolution` (`links_unavailable` on a `null` connected-pages answer; `page_blocks_unavailable`, `page_unavailable` and `mentions_unavailable` on a `null` block tree, page or mentions answer, none on a real `[]`; `concept_calls.rs`). Additive only; the Statement and the paragraphs are unchanged. | #408 |
 | 2026-10-08 | Mechanical enforcement: added a `test:` line for `build_context` and `get_context_for_query` (`page_blocks_unavailable`, `backlinks_unavailable`, `search_unavailable` and the `topic_unavailable` roll-up on a `null` answer, none on a real `[]`; a `null` resolver answer fails the whole call). Additive only; no paragraph reworded. | #410 |
+| 2026-10-08 | Mechanical enforcement: reworded the paragraph that describes the test lines. It now names what each `test:` line pins (the lines added by #403 to #411), says no tool but two maps a `null` to an empty result without a warning, and names `search_blocks` and `query_by_property` as the two that still return the bare text `null` (#415) instead of "other tools still read `null` as none". Also added a `test:` line for `check_links` (`refs_unchecked` on a `null` answer; `check_links_calls.rs`), which is additive enforcement, and turned the paragraph into one bullet per test file. The Statement is unchanged. | #416 |
