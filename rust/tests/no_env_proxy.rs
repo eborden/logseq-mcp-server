@@ -9,10 +9,9 @@ use tokio::net::TcpListener;
 
 #[tokio::test]
 async fn proxy_environment_variables_are_ignored() {
-    // A proxy on a closed port: a call routed through it would fail to connect.
-    let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let proxy = format!("http://{}", closed.local_addr().unwrap());
-    drop(closed);
+    // A proxy on a closed port: a call routed through it would fail to connect. Port 1 is privileged and never
+    // bound; a port freed by dropping a listener could be handed to the stub below (#450).
+    let proxy = "http://127.0.0.1:1".to_owned();
     // SAFETY: this binary has one test, so no other thread reads the environment meanwhile.
     unsafe {
         for key in ["HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"] {

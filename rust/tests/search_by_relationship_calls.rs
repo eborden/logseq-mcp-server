@@ -394,11 +394,10 @@ async fn a_topic_that_is_no_page_fails_with_the_closest_names_and_the_other_topi
 
 #[tokio::test]
 async fn a_failed_connection_is_the_error_even_when_the_other_topic_is_not_found_first() {
-    // Nothing listens: both resolvers fail to connect. The error is the connection's, not a missing page
-    let dead = {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        format!("http://{}", listener.local_addr().unwrap())
-    };
+    // Nothing listens: both resolvers fail to connect. The error is the connection's, not a missing page.
+    // Port 1 is privileged and never bound, so the connection is refused; a port freed by dropping a listener
+    // could be handed to another test's mock in this binary (#450).
+    let dead = "http://127.0.0.1:1".to_owned();
     let client = LogseqClient::new(&Config { api_url: dead, auth_token: "t".into(), timeout_ms: Some(2000), tips: None });
 
     let error = search_by_relationship(&client, &args("Atlas", "Bob", RelationshipType::References)).await.unwrap_err();

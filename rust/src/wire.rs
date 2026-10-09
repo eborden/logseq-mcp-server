@@ -9,7 +9,9 @@
 //! (BR-0003). So:
 //! - extra keys pass, since LogSeq adds them;
 //! - `null` is a case of its own (BR-0011): `parse::<Option<T>>` returns `None` for a `null` answer
-//!   and the tool decides what that means. In a field, `null` is not "absent": see [`Optional`];
+//!   and the tool decides what that means. In a struct's field, `null` is not "absent": a field LogSeq
+//!   may leave out is an `Option<T>`, which is `None` when it is left out and an error when it is `null`,
+//!   because position decides (see `Wire` in `wire/deserializer.rs`);
 //! - the error names the method and where the first mismatch is, in this server's words, and never a
 //!   value from the answer, because an answer is the user's graph (ADR-0004).
 //!
@@ -100,7 +102,7 @@ impl ResponseError {
 /// A `null` answer is an error unless `T` is an `Option`: `parse::<Option<T>>` reads `null` as `None`, and
 /// the tool decides what that means (BR-0011).
 pub(crate) fn parse<T: DeserializeOwned>(method: &str, answer: &Value) -> Result<T, ResponseError> {
-    T::deserialize(Wire(answer)).map_err(|issue| ResponseError::from_issue(method, &issue))
+    T::deserialize(Wire::new(answer)).map_err(|issue| ResponseError::from_issue(method, &issue))
 }
 
 /// `answer` must be a `T`; the `T` itself is not wanted. For an entity a tool carries as LogSeq sent it
@@ -140,7 +142,7 @@ pub(crate) fn sent_required_cells<T: DeserializeOwned>(method: &str, answer: &Va
 /// `value` must be a `T`; it sits at `answer[at[0]][at[1]]...`, which is where an error says it is. For a
 /// cell that is checked after the row it is in has been read.
 pub(crate) fn check_at<T: DeserializeOwned>(method: &str, value: &Value, at: &[usize]) -> Result<(), ResponseError> {
-    T::deserialize(Wire(value)).map(|_| ()).map_err(|issue| {
+    T::deserialize(Wire::new(value)).map(|_| ()).map_err(|issue| {
         let issue = at.iter().rev().fold(issue, |issue, index| issue.at(ReadPart::Index(*index)));
         ResponseError::from_issue(method, &issue)
     })
@@ -247,30 +249,6 @@ impl<'de> Visitor<'de> for ObjectVisitor {
     }
 }
 
-/// A field LogSeq may leave out. Present, it must be a `T`: `null` is a mismatch, not "absent" (a plain
-/// `Option` field would read it as absent, and a field the code reads would then fail silently, BR-0003).
-/// Write it with `#[serde(default)]`, so that leaving the field out is `None`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Optional<T>(Option<T>);
-
-impl<T> Default for Optional<T> {
-    fn default() -> Self {
-        Optional(None)
-    }
-}
-
-impl<T> Optional<T> {
-    pub(crate) fn into_option(self) -> Option<T> {
-        self.0
-    }
-}
-
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for Optional<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        T::deserialize(deserializer).map(|value| Optional(Some(value)))
-    }
-}
-
 /// A bare reference to an entity: the ids it carries, in either spelling. Each is a whole number when
 /// present (`5.0` too), and neither need be there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -282,15 +260,14 @@ pub struct EntityRef {
 
 #[derive(Deserialize)]
 struct RawRef {
-    #[serde(default)]
-    id: Optional<Id>,
-    #[serde(default, rename = "db/id")]
-    db_id: Optional<Id>,
+    id: Option<Id>,
+    #[serde(rename = "db/id")]
+    db_id: Option<Id>,
 }
 
 impl From<RawRef> for EntityRef {
     fn from(raw: RawRef) -> Self {
-        EntityRef { id: raw.id.into_option().map(|id| id.0), db_id: raw.db_id.into_option().map(|id| id.0) }
+        EntityRef { id: raw.id.map(|id| id.0), db_id: raw.db_id.map(|id| id.0) }
     }
 }
 
