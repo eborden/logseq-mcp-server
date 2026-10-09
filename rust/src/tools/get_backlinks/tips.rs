@@ -5,8 +5,8 @@ use serde_json::json;
 use crate::tips::{MAX_TIPS, non_empty, suggest_call};
 
 /// Tips for a finished call: read the page itself, with its related pages. `page_name` is the
-/// name as the caller sent it. Nothing for an empty result, or for a result that is not a list
-/// (a `null` answer from LogSeq).
+/// name as the caller sent it. Nothing for an empty result, which includes one LogSeq did not
+/// answer (`[]` plus a `backlinks_unavailable` warning).
 pub fn backlink_tips(page_name: &str, has_results: bool) -> Vec<String> {
     let mut tips = Vec::new();
     if let (Some(page), true) = (non_empty(page_name), has_results) {
