@@ -100,7 +100,7 @@ These need the `project` scope: `gh auth refresh -s project`.
 ### Ready items go to subagents
 - **Anything in *Ready* is implemented by a subagent**, not inline in the main session. The main session picks Ready items, sequences them, briefs one subagent per issue, spawns a separate reviewer subagent for each PR it opens (see Code review) and updates the board.
 - Pick unblocked items from *Ready* (no open blocked-by issue, see "Plans live in issues"). Run in parallel only items with no blocked-by edge between them and no file overlap.
-- Each subagent works in its own git worktree branched from the PR's base (`origin/feature/rust-spike` while the Rust-only work lives there, `origin/main` after it merges).
+- Each subagent works in its own git worktree branched from the PR's base (`origin/main`: the Rust server is on `main` after the cutover; use `origin/feature/rust-spike` only while that branch is still in use).
 - Run subagents in parallel only when their files don't overlap. Give each its own tool directory (`rust/src/tools/<tool>/`, with its queries in its own `queries.rs`) and its own new test file.
 - Subagents open PRs and don't merge. They stage files by explicit path and never commit `node_modules`, `dist`, local settings or draft docs.
 
@@ -170,7 +170,7 @@ Done by whoever merges:
 - `npm run typecheck` and `npx vitest run tests/guards tests/rust-guards`
 - `npm run test:integration` against this worktree's fixture instance (`npx tsx scripts/logseq-instance.ts start`, the run, then `stop`; read-only). The instance opens a copy (#151), so afterwards the repo's status must still show no change under `tests/fixtures/graph/`
 - `npx tsx scripts/measure-api-calls.ts` still runs (it needs the Rust binary: `cd rust && cargo build --release --locked`, or `--rust-binary` for another)
-- A clean merge against the PR's current base branch (`feature/rust-spike` while the Rust-only work lives there, `main` after it merges). If the base has moved, test the PR merged onto it.
+- A clean merge against the PR's current base branch (`main`: the Rust server is on `main` after the cutover; `feature/rust-spike` only while that branch is still in use). If the base has moved, test the PR merged onto it.
 
 ### Merge policy
 - **Three actions need the maintainer's explicit OK:** merging a PR, moving a board item from *Backlog* to *Ready*, and merging any PR that adds, changes, supersedes or retires an ADR or business rule, even with self-merge. The exception is a PR that adds or strengthens Mechanical enforcement lines on ADRs and business rules, and changes no other ADR or business-rule content (see "ADRs and business rules"). Everything else (issues, PRs, reviews, resolving threads, pushing to feature branches, other status moves) is allowed by default.
