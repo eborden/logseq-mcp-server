@@ -7,6 +7,8 @@
 
 use std::fmt;
 
+use serde::Serialize;
+
 use crate::client::LogseqError;
 use crate::edn::InvalidValue;
 use crate::js;
@@ -119,7 +121,8 @@ impl fmt::Display for PageNotFound {
 }
 
 /// How a name matched a page, for `matchedBy`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum MatchedBy {
     Name,
     Alias,
@@ -139,11 +142,13 @@ impl MatchedBy {
 }
 
 /// One page a name could refer to (`PageCandidate`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Candidate {
     /// Lowercased `:block/name`, safe to pass back to any page-taking tool
     pub name: String,
+    #[serde(rename = "originalName")]
     pub original_name: String,
+    #[serde(rename = "matchedBy")]
     pub matched_by: MatchedBy,
     /// Why this page matched, in words
     pub reason: String,

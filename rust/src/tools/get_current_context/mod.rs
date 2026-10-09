@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::client::LogseqClient;
@@ -26,7 +26,7 @@ use crate::errors::ToolError;
 use crate::js;
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 
 pub const NAME: &str = "logseq_get_current_context";
 
@@ -56,32 +56,25 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option
     Ok(success_result(vec![ContentBlock::text(js::json_stringify(&context.into_value()))]))
 }
 
-/// What the user is looking at: `page` is `null` when nothing is open, and then `message` says so.
-#[derive(Debug, Clone, PartialEq)]
+/// What the user is looking at, as written in BR-0013's order: `message` (the verdict, only when no page is open),
+/// then the data: `page` (`null` when nothing is open), `focusedBlock` and `selectedBlocks`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CurrentContext {
-    pub page: Option<Map<String, Value>>,
+    /// Says so when no page is open
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<&'static str>,
+    /// `null` when nothing is open
+    pub page: Option<Map<String, Value>>,
+    #[serde(rename = "focusedBlock", skip_serializing_if = "Option::is_none")]
     pub focused_block: Option<Map<String, Value>>,
     /// Absent when nothing is selected
+    #[serde(rename = "selectedBlocks", skip_serializing_if = "Option::is_none")]
     pub selected_blocks: Option<Vec<Map<String, Value>>>,
 }
 
 impl CurrentContext {
-    /// The result in the key order the TypeScript server writes it: `page` (even when `null`),
-    /// `message`, `focusedBlock`, `selectedBlocks`.
     pub fn into_value(self) -> Value {
-        let mut result = Map::new();
-        result.insert("page".into(), self.page.map_or(Value::Null, Value::Object));
-        if let Some(message) = self.message {
-            result.insert("message".into(), Value::from(message));
-        }
-        if let Some(block) = self.focused_block {
-            result.insert("focusedBlock".into(), Value::Object(block));
-        }
-        if let Some(blocks) = self.selected_blocks {
-            result.insert("selectedBlocks".into(), Value::Array(blocks.into_iter().map(Value::Object).collect()));
-        }
-        Value::Object(result)
+        result_value(&self)
     }
 }
 
@@ -204,7 +197,7 @@ async fn fetch_selected_blocks(client: &LogseqClient) -> Result<Option<Vec<Value
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::testing::{meaning, schema_of};
+    use crate::tool::testing::{keys, meaning, schema_of};
     use serde_json::json;
 
     fn object(value: Value) -> Map<String, Value> {
@@ -252,11 +245,23 @@ mod tests {
     }
 
     #[test]
-    fn the_result_is_written_in_key_order_with_a_null_page() {
-        let context = CurrentContext { page: None, message: Some(NO_PAGE_OPEN_MESSAGE), focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![]) };
+    fn the_message_comes_before_a_null_page_and_the_blocks() {
+        let context = CurrentContext { message: Some(NO_PAGE_OPEN_MESSAGE), page: None, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![]) };
         assert_eq!(
-            js::json_stringify(&context.into_value()),
-            r#"{"page":null,"message":"No page is open in LogSeq (for example the All Pages view is showing).","focusedBlock":{"uuid":"u"},"selectedBlocks":[]}"#
+            js::json_stringify(&context.clone().into_value()),
+            r#"{"message":"No page is open in LogSeq (for example the All Pages view is showing).","page":null,"focusedBlock":{"uuid":"u"},"selectedBlocks":[]}"#
         );
+        assert_eq!(keys(&context.into_value()), ["message", "page", "focusedBlock", "selectedBlocks"]);
+    }
+
+    #[test]
+    fn the_order_does_not_depend_on_which_optional_keys_are_there() {
+        let page = Some(object(json!({"name": "atlas"})));
+        // a page is open and nothing is focused or selected: `page` alone, with no message
+        let open = CurrentContext { message: None, page: page.clone(), focused_block: None, selected_blocks: None };
+        assert_eq!(keys(&open.into_value()), ["page"]);
+        // a block is focused and others are selected
+        let busy = CurrentContext { message: None, page, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![object(json!({"uuid": "v"}))]) };
+        assert_eq!(keys(&busy.into_value()), ["page", "focusedBlock", "selectedBlocks"]);
     }
 }
