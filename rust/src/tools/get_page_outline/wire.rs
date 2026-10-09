@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::wire::{DATALOG_METHOD, EntityRef, Part, Parsed, Reader, ResponseError, entity_id, to_error};
 
-/// A block's parent as the outline reads it: a bare number, or `{ id }`.
+/// A block's parent as the outline reads it: a bare number, or `{ id }` (or `{ "db/id" }`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Parent {
     Id(i64),
@@ -12,11 +12,11 @@ pub enum Parent {
 }
 
 impl Parent {
-    /// `parentIdOf`: the number itself, or the reference's `id` (not its `db/id`).
+    /// The parent's id: the number itself, or the reference's `id`, else its `db/id`, as a block's own id reads.
     pub fn id(self) -> Option<i64> {
         match self {
             Parent::Id(id) => Some(id),
-            Parent::Ref(reference) => reference.id,
+            Parent::Ref(reference) => reference.entity_id(),
         }
     }
 }
@@ -117,8 +117,12 @@ mod tests {
         for bad in [json!("a"), json!({"id": "a"}), json!(null), json!(true), json!({"id": 1, "db/id": "x"})] {
             assert_eq!(problem(parent(bad)), "[0][0].parent: Invalid input");
         }
-        // Only `id` counts for a parent reference, as `parentIdOf` has it.
+        // A parent reference reads `id`, then `db/id`, as a block's own id does.
         let rows = outline_rows(&json!([[{"id": 1, "uuid": "u", "parent": {"db/id": 9}}]])).unwrap().unwrap();
+        assert_eq!(rows[0].as_ref().unwrap().parent.and_then(Parent::id), Some(9));
+        let rows = outline_rows(&json!([[{"id": 1, "uuid": "u", "parent": {"id": 4, "db/id": 9}}]])).unwrap().unwrap();
+        assert_eq!(rows[0].as_ref().unwrap().parent.and_then(Parent::id), Some(4));
+        let rows = outline_rows(&json!([[{"id": 1, "uuid": "u", "parent": {}}]])).unwrap().unwrap();
         assert_eq!(rows[0].as_ref().unwrap().parent.and_then(Parent::id), None);
     }
 

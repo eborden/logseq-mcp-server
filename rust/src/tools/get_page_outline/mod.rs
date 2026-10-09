@@ -130,8 +130,6 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
     let mut top: Vec<Top<'_>> = Vec::new();
     let mut child_count: HashMap<i64, usize> = HashMap::new();
     for block in rows.iter().flatten() {
-        // PARITY(#299): a parent counts by its `id` only, while a block's own id reads `id` then `db/id`
-        // (suspected TS inconsistency) — drop if Rust becomes the only server.
         let Some(parent_id) = block.parent.and_then(self::wire::Parent::id) else { continue };
         if parent_id == page_id {
             top.push(Top { id: block.entity_id().unwrap_or(0), left: block.left_id, block });
@@ -300,6 +298,16 @@ mod tests {
         let rows = rows(vec![block(103, Some(10), 10, "top"), child]);
         let (blocks, _, _) = outline_of(10, &rows);
         assert_eq!(blocks[0].child_count, 1);
+    }
+
+    #[test]
+    fn a_parent_spelled_db_id_counts_as_the_page_or_the_parent_block() {
+        let mut top = block(103, None, 10, "top");
+        top["parent"] = json!({"db/id": 10});
+        let mut child = block(203, None, 103, "child");
+        child["parent"] = json!({"db/id": 103});
+        let (blocks, _, total) = outline_of(10, &rows(vec![top, child]));
+        assert_eq!((uuids(&blocks), blocks[0].child_count, total), (vec!["u103"], 1, 1));
     }
 
     #[test]
