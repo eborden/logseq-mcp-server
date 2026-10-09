@@ -78,6 +78,35 @@ describe('ADR-0018: plugin manifest', () => {
   });
 });
 
+// ADR-0035 (#419): the plugin runs the one POSIX sh launcher, which downloads and checks the release binary and
+// `exec`s it. The binary is not in the repository and there is no TypeScript build output, so no manifest may name a
+// `dist` path.
+describe('ADR-0035: the plugin starts the launcher', () => {
+  const LAUNCHER = 'scripts/logseq-mcp-server.sh';
+
+  it('plugin.json runs the launcher through ${CLAUDE_PLUGIN_ROOT}, with sh, and nothing else', () => {
+    const plugin = readJson('.claude-plugin/plugin.json');
+    expect(plugin.mcpServers).toEqual({ logseq: { command: 'sh', args: [`\${CLAUDE_PLUGIN_ROOT}/${LAUNCHER}`] } });
+    expect(lstatSync(join(ROOT, LAUNCHER)).isFile()).toBe(true);
+  });
+
+  it('the launcher is tracked, so the ShellCheck job in ci.yml lints it', () => {
+    const tracked = execFileSync('git', ['ls-files', '--', LAUNCHER], { cwd: ROOT, encoding: 'utf-8' });
+    expect(tracked.trim()).toBe(LAUNCHER);
+  });
+
+  it('no manifest names a dist path', () => {
+    for (const manifest of ['.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', 'package.json']) {
+      expect(readFileSync(join(ROOT, manifest), 'utf-8'), `${manifest} names dist`).not.toMatch(/\bdist\b/);
+    }
+  });
+
+  it('plugin.json starts no node process (a Node launcher stays resident beside the server, ADR-0035)', () => {
+    const servers = Object.values(readJson('.claude-plugin/plugin.json').mcpServers) as { command: string }[];
+    for (const server of servers) expect(server.command).not.toBe('node');
+  });
+});
+
 describe('ADR-0018: skills name tools by bare name', () => {
   it('flags a prefixed tool name outside the explanatory line', () => {
     const skillPath = join('skills', 'logseq-skills', 'SKILL.md');
