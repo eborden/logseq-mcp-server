@@ -129,7 +129,7 @@ What the MCP server, and a LogSeq used without the instance, need:
      "authToken": "your-token-here"
    }
    ```
-   Optional: add `"timeoutMs"` (positive number, default `30000`) to change the per-call timeout.
+   Optional: add `"timeoutMs"` (a whole number of milliseconds from 1 to 2147483647, default `30000`) to change the per-call timeout.
    Optional: add `"tips": false` (or set `LOGSEQ_MCP_TIPS=off`, which wins over the file) to drop the next-step hints from results. The variable accepts `on`/`true`/`1`/`yes` and `off`/`false`/`0`/`no`; any other value is a configuration error.
 
 ## Test Behavior
