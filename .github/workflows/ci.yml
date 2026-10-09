@@ -224,11 +224,17 @@ jobs:
       # holds a stale build of our code or another toolchain's.
       # Warnings don't fail the build during the spike: build-warnings is v2's switch for that
       # (it defaults to deny), and rustflags is left empty.
+      #
+      # cache-shared-key replaces the job-based part of the cache key, so the Rust mutation workflows (rust-mutation.yml and
+      # rust-mutation-full.yml, ADR-0033) restore this job's dependency cache under the same key. They never save it: this job
+      # is the only writer. Changing the key, or the rustflags and build-warnings inputs (they reach the key through the
+      # environment), changes theirs in step; the shared setup action (.github/actions/rust-mutation-setup) holds the other half.
       - name: Set up the Rust toolchain and cache
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           rust-src-dir: rust
           cache-workspaces: rust
+          cache-shared-key: rust-deps
           rustflags: ""
           build-warnings: warn
 
