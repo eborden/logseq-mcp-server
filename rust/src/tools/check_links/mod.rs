@@ -35,8 +35,8 @@ pub const NAME: &str = "logseq_check_links";
 const DESCRIPTION: &str = "Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.\n\n\
 **Can't find:** a link to the wrong page, or a name split across a ref.";
 
-/// Most UTF-16 code units (`string.length`) `before` or `after` may hold, about 12k tokens each. A
-/// journal day or page file is well under. An emoji counts as two.
+/// Most characters (code points) `before` or `after` may hold, about 12k tokens each. A
+/// journal day or page file is well under. An emoji counts as one.
 pub const MAX_TEXT_CHARS: usize = 50_000;
 
 /// Most distinct `[[terms]]` one call resolves. More is rejected before any LogSeq call.
@@ -46,10 +46,8 @@ pub const MAX_LINK_TERMS: usize = 500;
 /// [`MAX_TEXT_CHARS`], so the input stays bounded (ADR-0011). An empty string is a text, not a
 /// missing one. The cap on distinct terms is checked by [`check_links`], before any LogSeq call.
 ///
-/// Units: the cap counts UTF-16 code units (`string.length`), while the advertised JSON Schema
-/// `maxLength` counts code points. Text outside the Basic Multilingual Plane takes two units per
-/// character, so about 25,000 emoji pass a validating client and are then rejected here, with a clear
-/// error and no LogSeq call. Deliberate, as in TypeScript: the cap bounds memory.
+/// Units: the cap counts code points, which is what the advertised JSON Schema `maxLength` counts
+/// too, so a client that validates against the schema and the server agree on every text.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Text before linking
@@ -286,20 +284,20 @@ mod tests {
     }
 
     #[test]
-    fn a_text_over_the_cap_is_zods_too_big_and_the_cap_counts_utf16_units() {
+    fn a_text_over_the_cap_is_zods_too_big_and_the_cap_counts_characters() {
         let long = "x".repeat(MAX_TEXT_CHARS + 1);
         assert_eq!(
             read(json!({"before": long, "after": ""})).unwrap_err().to_string(),
             format!("Invalid parameter 'before': \"{long}\"\n\nExpected: Too big: expected string to have <=50000 characters")
         );
         assert!(read(json!({"before": "x".repeat(MAX_TEXT_CHARS), "after": ""})).is_ok());
-        // 25,001 emoji are 50,002 units
-        let emoji = "\u{1F600}".repeat(25_001);
+        // an emoji is one character: 50,001 of them are over the cap, 50,000 are not
+        let emoji = "\u{1F600}".repeat(50_001);
         assert_eq!(
             read(json!({"before": "", "after": emoji})).unwrap_err().to_string(),
             format!("Invalid parameter 'after': \"{emoji}\"\n\nExpected: Too big: expected string to have <=50000 characters")
         );
-        assert!(read(json!({"before": "", "after": "\u{1F600}".repeat(25_000)})).is_ok());
+        assert!(read(json!({"before": "", "after": "\u{1F600}".repeat(50_000)})).is_ok());
     }
 
     #[test]

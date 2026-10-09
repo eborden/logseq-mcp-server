@@ -21,7 +21,7 @@ use crate::dates::CalendarDate;
 use crate::js;
 use crate::mcp_error::mcp_error;
 
-/// Longest topic accepted, in UTF-16 code units (`.length`). A topic is a page name or a short
+/// Longest topic accepted, in characters. A topic is a page name or a short
 /// phrase, not a paragraph.
 pub const MAX_TOPIC_LENGTH: usize = 200;
 
@@ -55,9 +55,9 @@ fn quoted(text: &str) -> String {
     Value::from(text).to_string()
 }
 
-/// The length `.length` gives: UTF-16 code units.
+/// The length of a text in characters (code points).
 fn length(text: &str) -> usize {
-    text.encode_utf16().count()
+    text.chars().count()
 }
 
 /// Reject arguments the prompt does not declare, so a typo is not silently ignored. They are named in the
@@ -639,7 +639,7 @@ mod tests {
     }
 
     #[test]
-    fn a_topic_is_trimmed_quoted_and_capped_in_utf16_units() {
+    fn a_topic_is_trimmed_quoted_and_capped_in_characters() {
         let text = text_of("continue_on", json!({"topic": "  say \"hi\"\n "}), TUESDAY).unwrap();
         assert!(text.starts_with(r#"Help me continue where I left off on "say \"hi\"" in my LogSeq graph."#), "{text}");
         assert!(text_of("continue_on", json!({"topic": "a".repeat(200)}), TUESDAY).is_ok());
@@ -647,8 +647,9 @@ mod tests {
             text_of("continue_on", json!({"topic": "a".repeat(201)}), TUESDAY).unwrap_err(),
             "\"topic\" is 201 characters; the limit is 200. Use a page name or a short phrase."
         );
-        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(100)}), TUESDAY).is_ok());
-        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(101)}), TUESDAY).unwrap_err().contains("is 202 characters"));
+        // a rocket is one character, not two UTF-16 units
+        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(200)}), TUESDAY).is_ok());
+        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(201)}), TUESDAY).unwrap_err().contains("is 201 characters"));
         assert_eq!(
             text_of("prioritize_tasks", json!({"focus": "a".repeat(201)}), TUESDAY).unwrap_err(),
             "\"focus\" is 201 characters; the limit is 200."

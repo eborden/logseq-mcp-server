@@ -232,10 +232,10 @@ mod tests {
     }
 
     #[test]
-    fn values_are_trimmed_as_javascript_trims() {
-        assert_eq!(env(&[(TIPS_ENV, "\u{feff}off")], home()).unwrap().tips, TipsOverride::Off);
-        assert_eq!(env(&[(TIPS_ENV, "\u{feff}")], home()).unwrap().tips, TipsOverride::Unset);
-        let env = env(&[(CONFIG_PATH_ENV, "\u{feff}/tmp/instance/config.json")], None).unwrap();
+    fn values_are_trimmed_as_rust_trims() {
+        assert_eq!(env(&[(TIPS_ENV, "\u{85}off")], home()).unwrap().tips, TipsOverride::Off);
+        assert_eq!(env(&[(TIPS_ENV, "\u{85}")], home()).unwrap().tips, TipsOverride::Unset);
+        let env = env(&[(CONFIG_PATH_ENV, "\u{85}/tmp/instance/config.json")], None).unwrap();
         assert_eq!(env.config_path.as_path(), Path::new("/tmp/instance/config.json"));
     }
 

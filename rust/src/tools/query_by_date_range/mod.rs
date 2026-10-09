@@ -48,6 +48,7 @@ use crate::meta::ResultWarning;
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set_by_name};
 use crate::resolve_refs::resolve_block_refs;
 use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
+use crate::snippet::{first_chars, first_non_blank_line};
 use crate::tips::tips_content;
 use crate::tool::{input_schema, read_only_annotations, success_result};
 
@@ -67,7 +68,7 @@ const DESCRIPTION: &str = "Query journal entries by start_date + end_date, last_
 **Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n\
 **Alternatives:** logseq_get_concept_evolution, logseq_search_blocks.";
 
-/// Longest first-line snippet of the outline, in UTF-16 code units, ellipsis included.
+/// Longest first-line snippet of the outline, in characters (code points), ellipsis included.
 const SNIPPET_LENGTH: usize = 80;
 
 fn default_slim_results() -> bool {
@@ -237,20 +238,17 @@ fn blocks_unavailable(page_count: usize) -> ResultWarning {
     )
 }
 
-// PARITY(#299): cuts at 80 UTF-16 code units with `slice`, which can split an emoji and leave a lone
-// surrogate, and takes the first line even when it is blank, where the page outline takes the first
-// non-blank one (suspected TS bugs) — drop if Rust becomes the only server.
-/// The first line of a block, trimmed and shortened (`snippetOf`), as UTF-16 code units: a cut
-/// between the halves of an emoji leaves a lone surrogate, as `slice` does.
-fn snippet_of(block: &Value) -> Vec<u16> {
-    let content = block.get("content").and_then(Value::as_str).unwrap_or("");
-    let first_line = js::trim(content.split('\n').next().unwrap_or(""));
-    let mut units = js::utf16(first_line);
-    if units.len() > SNIPPET_LENGTH {
-        units.truncate(SNIPPET_LENGTH - 3);
-        units.extend("...".encode_utf16());
+/// The first non-blank line of a block, trimmed and shortened (`snippetOf`), as the page outline
+/// takes it. Over 80 characters (code points) it is cut to 77 and ends in `...`, so a cut never
+/// lands inside a character. Unlike the outline's snippet, white space the cut leaves at the end
+/// stays.
+fn snippet_of(block: &Value) -> String {
+    let line = first_non_blank_line(block.get("content").and_then(Value::as_str));
+    if line.chars().count() > SNIPPET_LENGTH {
+        format!("{}...", first_chars(line, SNIPPET_LENGTH - 3))
+    } else {
+        line.to_owned()
     }
-    units
 }
 
 /// The block trees of the blocks one query pulled, and each block's concepts for the roll-up.
@@ -287,22 +285,20 @@ fn trees_of(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> (HashMap<i64, 
 /// `{"hasMore":..,"warnings":[..],"totals":{..}}` as keys of the result: `hasMore` is true when any
 /// warning offers a way to fetch the rest, and `totals` (what there was before a cut) comes only
 /// with a cut.
-fn meta_parts(warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> Vec<(&'static str, String)> {
+fn meta_parts(warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> Vec<(&'static str, Value)> {
     let mut parts = vec![
-        ("hasMore", warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()).to_string()),
-        ("warnings", js::json_stringify(&serde_json::to_value(warnings).expect("warnings serialize"))),
+        ("hasMore", Value::Bool(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()))),
+        ("warnings", serde_json::to_value(warnings).expect("warnings serialize")),
     ];
     if let Some((blocks, days)) = totals {
-        let totals = Value::Object(Map::from_iter([("blocks".to_owned(), Value::from(blocks)), ("days".to_owned(), Value::from(days))]));
-        parts.push(("totals", js::json_stringify(&totals)));
+        parts.push(("totals", Value::Object(Map::from_iter([("blocks".to_owned(), Value::from(blocks)), ("days".to_owned(), Value::from(days))]))));
     }
     parts
 }
 
-/// A JSON object from keys and the JSON text of each value, in order.
-fn object_text(parts: &[(&str, String)]) -> String {
-    let fields: Vec<String> = parts.iter().map(|(key, text)| format!("{}:{text}", js::json_stringify(&Value::from(*key)))).collect();
-    format!("{{{}}}", fields.join(","))
+/// A JSON object from keys and values, in order.
+fn object_of(parts: Vec<(&str, Value)>) -> Value {
+    Value::Object(parts.into_iter().map(|(key, value)| (key.to_owned(), value)).collect())
 }
 
 /// Query journal entries for a range chosen one of three ways: explicit dates, the `last_n` most
@@ -387,7 +383,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         }
     }
 
-    let date_range = object_text(&[("start", range_start.to_string()), ("end", range_end.to_string())]);
+    let date_range = object_of(vec![("start", Value::from(range_start)), ("end", Value::from(range_end))]);
     // The summary describes every block found, cut or not (#61), so a cut result still shows what the period was about
     let mut summary = Map::new();
     summary.insert("totalDays".to_owned(), Value::from(all_entries.len()));
@@ -408,7 +404,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         Vec::new()
     };
     let top_concept = top.first().map(|concept| concept.name.clone());
-    let summary = js::json_stringify(&Value::Object(summary));
+    let summary = Value::Object(summary);
 
     // Cap the blocks (#61) on data already fetched, so it adds no API call. At or below the cap
     // nothing changes. What comes after (resolving refs, slimming) sees only the kept blocks.
@@ -429,34 +425,34 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
             &TruncationOptions { nested: args.include_content, newest_first, start: range_start, end: range_end, requested: args.max_blocks },
         ));
     }
-    let mut alias_parts: Vec<(&str, String)> = Vec::new();
+    let mut alias_parts: Vec<(&str, Value)> = Vec::new();
     if let Some(names) = alias_set.as_ref().and_then(AliasSet::resolved_aliases) {
-        alias_parts.push(("resolvedAliases", js::json_stringify(&Value::from(names))));
+        alias_parts.push(("resolvedAliases", Value::from(names)));
     }
     // The meta comes only with something to say, so output below the cap is unchanged
     let cut_meta = if warnings.is_empty() { Vec::new() } else { meta_parts(&warnings, totals) };
 
     let page_name = |entry: &Entry| page_display_name(Some(&entry.page));
-    let mut parts: Vec<(&str, String)> = vec![("dateRange", date_range)];
+    let mut parts: Vec<(&str, Value)> = vec![("dateRange", date_range)];
 
     if !args.include_content {
-        let entries_text: Vec<String> = entries
+        let entries_value: Vec<Value> = entries
             .iter()
             .map(|entry| {
-                let snippets: Vec<String> = entry.blocks.iter().map(|block| js::json_string_utf16(&snippet_of(block))).collect();
-                object_text(&[
-                    ("date", entry.date.to_string()),
-                    ("pageName", js::json_stringify(&Value::from(page_name(entry)))),
-                    ("blockCount", count_blocks(&entry.blocks).to_string()),
-                    ("snippets", format!("[{}]", snippets.join(","))),
+                let snippets: Vec<Value> = entry.blocks.iter().map(|block| Value::String(snippet_of(block))).collect();
+                object_of(vec![
+                    ("date", Value::from(entry.date)),
+                    ("pageName", Value::from(page_name(entry))),
+                    ("blockCount", Value::from(count_blocks(&entry.blocks))),
+                    ("snippets", Value::Array(snippets)),
                 ])
             })
             .collect();
-        parts.push(("entries", format!("[{}]", entries_text.join(","))));
+        parts.push(("entries", Value::Array(entries_value)));
         parts.push(("summary", summary));
         parts.extend(alias_parts);
         parts.extend(cut_meta);
-        return Ok(JournalsResult { json: object_text(&parts), top_concept });
+        return Ok(JournalsResult { json: js::json_stringify(&object_of(parts)), top_concept });
     }
 
     // Opt-in (#18): resolve once over every returned block, whatever the number of days. Only the
@@ -477,7 +473,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         meta = meta_parts(&warnings, totals);
     }
 
-    let entries_text: Vec<Value> = entries
+    let entries_value: Vec<Value> = entries
         .iter()
         .map(|entry| {
             let mut map = Map::new();
@@ -494,11 +490,11 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
             Value::Object(map)
         })
         .collect();
-    parts.push(("entries", js::json_stringify(&Value::Array(entries_text))));
+    parts.push(("entries", Value::Array(entries_value)));
     parts.push(("summary", summary));
     parts.extend(alias_parts);
     parts.extend(meta);
-    Ok(JournalsResult { json: object_text(&parts), top_concept })
+    Ok(JournalsResult { json: js::json_stringify(&object_of(parts)), top_concept })
 }
 
 #[cfg(test)]
@@ -622,25 +618,37 @@ mod tests {
     }
 
     fn snippet(content: &str) -> String {
-        String::from_utf16_lossy(&snippet_of(&block(content)))
+        snippet_of(&block(content))
     }
 
     #[test]
-    fn a_snippet_is_the_first_line_trimmed_even_when_blank_and_cut_at_eighty_units() {
+    fn a_snippet_is_the_first_non_blank_line_trimmed_and_cut_at_eighty_characters() {
         assert_eq!(snippet("  Hello  \nsecond"), "Hello");
-        // unlike the page outline, the first line is the first line: a blank one gives an empty snippet
-        assert_eq!(snippet("\n\nHello"), "");
+        // as the page outline takes it: blank lines before the first one with text are skipped
+        assert_eq!(snippet("\n\nHello"), "Hello");
+        assert_eq!(snippet("  \n \t \n  Hello  \nsecond"), "Hello");
+        assert_eq!(snippet("\n  \n"), "");
         assert_eq!(snippet(&"x".repeat(80)), "x".repeat(80));
         assert_eq!(snippet(&"x".repeat(81)), format!("{}...", "x".repeat(77)));
         // no trimEnd after the cut: a space stays
         assert_eq!(snippet(&format!("{} {}", "x".repeat(76), "y".repeat(10))), format!("{} ...", "x".repeat(76)));
-        assert_eq!(js::json_string_utf16(&snippet_of(&json!({"id": 1}))), "\"\"");
+        assert_eq!(snippet_of(&json!({"id": 1})), "");
     }
 
     #[test]
-    fn a_snippet_cut_inside_an_emoji_keeps_the_lone_half_as_an_escape() {
+    fn a_snippet_cuts_by_code_point_so_no_lone_surrogate_or_replacement_character_appears() {
+        // 80 rockets are 160 UTF-16 units and 80 characters: no cut
+        assert_eq!(snippet(&"\u{1F680}".repeat(80)), "\u{1F680}".repeat(80));
+        assert_eq!(snippet(&"\u{1F680}".repeat(81)), format!("{}...", "\u{1F680}".repeat(77)));
+        // a rocket at the boundary (the 77th character) stays whole, and its JSON has no escape for half of it
         let text = format!("{}\u{1F680}{}", "x".repeat(76), "y".repeat(10));
-        assert_eq!(js::json_string_utf16(&snippet_of(&block(&text))), format!("\"{}\\ud83d...\"", "x".repeat(76)));
+        assert_eq!(snippet(&text), format!("{}\u{1F680}...", "x".repeat(76)));
+        let json = serde_json::to_string(&snippet(&text)).unwrap();
+        assert!(!json.contains("\\ud") && !json.contains('\u{FFFD}'), "{json}");
+        // a ZWJ emoji is cut between its code points; a letter and its combining mark likewise
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        assert_eq!(snippet(&format!("{}{family}{}", "x".repeat(76), "y".repeat(10))), format!("{}\u{1F468}...", "x".repeat(76)));
+        assert_eq!(snippet(&format!("{}e\u{301}{}", "x".repeat(76), "y".repeat(10))), format!("{}e...", "x".repeat(76)));
     }
 
     #[test]
@@ -648,7 +656,10 @@ mod tests {
         assert_eq!(Value::from(20250101_i64).to_string(), "20250101");
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) };
         let parts = meta_parts(&[warning], Some((9, 2)));
-        assert_eq!(object_text(&parts), r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#);
-        assert_eq!(object_text(&meta_parts(&[], None)), r#"{"hasMore":false,"warnings":[]}"#);
+        assert_eq!(
+            js::json_stringify(&object_of(parts)),
+            r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#
+        );
+        assert_eq!(js::json_stringify(&object_of(meta_parts(&[], None))), r#"{"hasMore":false,"warnings":[]}"#);
     }
 }

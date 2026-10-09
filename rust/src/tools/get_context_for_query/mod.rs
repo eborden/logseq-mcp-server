@@ -306,12 +306,12 @@ fn extract_topics(query: &str) -> Vec<String> {
 }
 
 /// The words a keyword search looks for: the first three words of the query, lowercased, longer
-/// than three letters (UTF-16 code units, as `length` counts them) and not stop words.
+/// than three letters (characters) and not stop words.
 fn keywords(query: &str) -> Vec<String> {
     query
         .to_lowercase()
         .split(js::is_js_space)
-        .filter(|word| js::utf16(word).len() > 3 && !COMMON_WORDS.contains(word))
+        .filter(|word| word.chars().count() > 3 && !COMMON_WORDS.contains(word))
         .take(3)
         .map(str::to_owned)
         .collect()
@@ -460,7 +460,7 @@ pub async fn get_context_for_query(
             // the same whichever keyword is searched, since the filter needs all of them, and so is their
             // order: the search sorts newest first and the filter keeps it. The search is the only data
             // source on this path, so any failure propagates: an empty result must mean "nothing matched".
-            let searched = keywords.iter().fold(&keywords[0], |longest, keyword| if js::utf16(keyword).len() > js::utf16(longest).len() { keyword } else { longest });
+            let searched = keywords.iter().fold(&keywords[0], |longest, keyword| if keyword.chars().count() > longest.chars().count() { keyword } else { longest });
             // A `null` answer is no answer, not "no matches" (BR-0011, #338): `searchResults` stays `[]`, and a
             // warning says LogSeq did not answer, so the empty list is not read as a search that found nothing.
             let found = find_blocks(client, searched).await?;
@@ -593,14 +593,15 @@ mod tests {
         assert_eq!(keywords("how is it"), Vec::<String>::new());
         // a word of three letters is out, however it is spaced
         assert_eq!(keywords("abc\u{a0}abcd  efgh"), ["abcd", "efgh"]);
-        // length counts UTF-16 code units: two emoji are four of them
-        assert_eq!(keywords("\u{1F680}\u{1F680} xyz"), ["\u{1F680}\u{1F680}"]);
+        // length counts characters, not UTF-16 units: two emoji are two (out), four are four (in)
+        assert_eq!(keywords("\u{1F680}\u{1F680} xyz"), Vec::<String>::new());
+        assert_eq!(keywords("\u{1F680}\u{1F680}\u{1F680}\u{1F680} xyz"), ["\u{1F680}\u{1F680}\u{1F680}\u{1F680}"]);
     }
 
     #[test]
     fn the_longest_keyword_is_searched_and_the_first_of_equal_length() {
         let words = ["long".to_owned(), "longer".to_owned(), "second".to_owned()];
-        let searched = words.iter().fold(&words[0], |longest, keyword| if js::utf16(keyword).len() > js::utf16(longest).len() { keyword } else { longest });
+        let searched = words.iter().fold(&words[0], |longest, keyword| if keyword.chars().count() > longest.chars().count() { keyword } else { longest });
         assert_eq!(searched, "longer");
     }
 

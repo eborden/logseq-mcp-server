@@ -23,10 +23,10 @@ use crate::tools::{self, get_page::get_page};
 const PAGE_URI_PREFIX: &str = "logseq://page/";
 pub const PAGE_URI_TEMPLATE: &str = "logseq://page/{name}";
 
-/// Longest page name accepted in a resource URI, in UTF-16 code units, matching the prompt topic limit.
+/// Longest page name accepted in a resource URI, in characters, matching the prompt topic limit.
 const MAX_PAGE_NAME_LENGTH: usize = 200;
 
-/// Most characters (UTF-16 code units) of a page returned in one read. A page can be far larger
+/// Most characters of a page returned in one read. A page can be far larger
 /// than a context window; the cut is announced at the end of the text, never silent (BR-0006).
 pub const MAX_PAGE_CHARS: usize = 50_000;
 
@@ -145,7 +145,7 @@ fn page_name_from_uri(uri: &str) -> Result<String, ErrorData> {
     if name.is_empty() {
         return Err(mcp_error(ErrorCode::INVALID_PARAMS, &format!("No page name in {uri}. Use {PAGE_URI_TEMPLATE}.")));
     }
-    let length = name.encode_utf16().count();
+    let length = name.chars().count();
     if length > MAX_PAGE_NAME_LENGTH {
         return Err(mcp_error(ErrorCode::INVALID_PARAMS, &format!("Page name is {length} characters; the limit is {MAX_PAGE_NAME_LENGTH}.")));
     }
@@ -227,9 +227,9 @@ mod tests {
             name_of(&format!("logseq://page/{}", "a".repeat(201))).unwrap_err(),
             "Page name is 201 characters; the limit is 200."
         );
-        // the limit counts UTF-16 code units, as `.length` does: 100 rockets are 200, 101 are 202
-        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(100))).is_ok());
-        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(101))).unwrap_err().contains("is 202 characters"));
+        // the limit counts characters (code points): a rocket is one, so 200 rockets fit and 201 do not
+        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(200))).is_ok());
+        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(201))).unwrap_err().contains("is 201 characters"));
     }
 
     #[test]

@@ -124,8 +124,9 @@ mod tests {
     }
 
     #[test]
-    fn the_first_word_stops_at_javascript_white_space() {
+    fn the_first_word_stops_at_white_space() {
         assert_eq!(first_word("\u{a0}one\u{3000}two"), Some("one"));
-        assert_eq!(first_word("one\u{85}two"), Some("one\u{85}two"));
+        assert_eq!(first_word("one\u{85}two"), Some("one"));
+        assert_eq!(first_word("one\u{feff}two"), Some("one\u{feff}two"));
     }
 }

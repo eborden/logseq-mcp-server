@@ -101,11 +101,11 @@ impl<'a> Arguments<'a> {
         }
     }
 
-    /// A required string of at most `max` UTF-16 code units (`z.string().max(max)`), which is what
-    /// `.length` counts. A longer one is zod's own `Too big`, with the whole text as the value and no example.
+    /// A required string of at most `max` characters (code points). A longer one is `Too big`, with the
+    /// whole text as the value and no example.
     pub fn required_string_max(&self, param: &str, max: usize) -> Result<String, InvalidParameter> {
         let text = self.required_string(param)?;
-        if text.encode_utf16().count() > max {
+        if text.chars().count() > max {
             return Err(InvalidParameter {
                 param: param.to_owned(),
                 value: Value::String(text).to_string(),
@@ -360,16 +360,17 @@ mod tests {
     }
 
     #[test]
-    fn a_string_with_a_maximum_counts_utf16_units_and_says_too_big_with_the_whole_text() {
+    fn a_string_with_a_maximum_counts_characters_and_says_too_big_with_the_whole_text() {
         let read = |text: &str| {
             let args = arguments(json!({"after": text}));
             Arguments::new(Some(&args)).required_string_max("after", 3)
         };
         assert_eq!(read("abc").unwrap(), "abc");
-        // an emoji is two units: `.length` of "ab😀" is 4
+        // an emoji is one character, not two UTF-16 units
+        assert_eq!(read("ab\u{1F600}").unwrap(), "ab\u{1F600}");
         assert_eq!(
-            message(read("ab\u{1F600}").unwrap_err()),
-            "Invalid parameter 'after': \"ab\u{1F600}\"\n\nExpected: Too big: expected string to have <=3 characters"
+            message(read("abc\u{1F600}").unwrap_err()),
+            "Invalid parameter 'after': \"abc\u{1F600}\"\n\nExpected: Too big: expected string to have <=3 characters"
         );
         assert_eq!(read("a\u{1F600}").unwrap(), "a\u{1F600}");
         assert_eq!(

@@ -1,38 +1,28 @@
-//! What the TypeScript server inherits from JavaScript and puts in its output: which characters
-//! `trim()` removes, how a number is written and how `JSON.stringify` orders object keys. Each is
-//! here once, named for the JavaScript behavior it copies, so a tool can say "as `JSON.stringify`
-//! writes it" instead of redoing the rule.
+//! What the TypeScript server inherits from JavaScript and puts in its output: how a number is
+//! written and how `JSON.stringify` orders object keys. Each is here once, named for the
+//! JavaScript behavior it copies, so a tool can say "as `JSON.stringify` writes it" instead of
+//! redoing the rule.
 //!
-//! JavaScript strings are UTF-16. Where a length or an index is part of the output (a snippet
-//! cut at 80 characters) the callers work in UTF-16 code units, with
-//! [`utf16`], and not in Rust's bytes or `char`s.
+//! Text is not here any more. A length or a cut in the output counts code points (`chars()`),
+//! and white space is Rust's `char::is_whitespace` (#299, wave C2).
 
 use serde_json::Value;
 
-// PARITY(#299): the set of characters JavaScript's `trim()` and `\s` take as white space (U+FEFF in, U+0085 out)
-// where Rust's differs — drop if Rust becomes the only server.
-/// A character `String.prototype.trim()` removes: JavaScript's WhiteSpace and LineTerminator.
-/// That is Rust's `White_Space` plus U+FEFF (a byte-order mark), less U+0085, which JavaScript
-/// keeps. It is also what `\s` matches.
+/// A character that counts as white space: Rust's `char::is_whitespace` (Unicode `White_Space`).
+/// The TypeScript server used JavaScript's set, which adds U+FEFF and leaves out U+0085; the
+/// Rust server takes Rust's (#299).
 pub fn is_js_space(c: char) -> bool {
-    c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}')
+    c.is_whitespace()
 }
 
-/// `String.prototype.trim()`.
+/// The text without white space at either end ([`is_js_space`]).
 pub fn trim(value: &str) -> &str {
     value.trim_matches(is_js_space)
 }
 
-/// `String.prototype.trimEnd()`.
+/// The text without white space at its end ([`is_js_space`]).
 pub fn trim_end(value: &str) -> &str {
     value.trim_end_matches(is_js_space)
-}
-
-// PARITY(#299): JavaScript counts, cuts and indexes strings by UTF-16 code unit, which shows in the
-// snippet cut — drop if Rust becomes the only server.
-/// The UTF-16 code units of a string, which is what `.length`, `charCodeAt` and `slice` count.
-pub fn utf16(value: &str) -> Vec<u16> {
-    value.encode_utf16().collect()
 }
 
 // PARITY(#299): the Markdown property value and the backlink sort key are parity uses of this function, to go
@@ -106,34 +96,6 @@ pub fn entries_in_js_order(map: &serde_json::Map<String, Value>) -> Vec<(&String
     indices.into_iter().map(|(_, entry)| entry).chain(others).collect()
 }
 
-// PARITY(#299): writes a snippet cut inside an emoji as a lone-surrogate escape, which is ill-formed
-// UTF-16 that many clients replace with U+FFFD (suspected TS bug: `slice` should cut by code point) — drop
-// if Rust becomes the only server.
-/// `JSON.stringify(text)` for a JavaScript string that may be ill-formed: a code unit that is half
-/// of a surrogate pair, which happens when a string is cut between the two. JSON.stringify writes
-/// such a unit as the escape `\ud83d` (well-formed JSON.stringify, ES2019), and Rust's `String`
-/// can't hold one, so a string cut by UTF-16 index is kept as code units until it is written.
-pub fn json_string_utf16(units: &[u16]) -> String {
-    let mut out = String::with_capacity(units.len() + 2);
-    out.push('"');
-    for decoded in char::decode_utf16(units.iter().copied()) {
-        match decoded {
-            Ok('"') => out.push_str("\\\""),
-            Ok('\\') => out.push_str("\\\\"),
-            Ok('\u{8}') => out.push_str("\\b"),
-            Ok('\u{c}') => out.push_str("\\f"),
-            Ok('\n') => out.push_str("\\n"),
-            Ok('\r') => out.push_str("\\r"),
-            Ok('\t') => out.push_str("\\t"),
-            Ok(c) if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            Ok(c) => out.push(c),
-            Err(lone) => out.push_str(&format!("\\u{:04x}", lone.unpaired_surrogate())),
-        }
-    }
-    out.push('"');
-    out
-}
-
 /// A key JavaScript treats as an array index: a canonical decimal below 2^32 - 1.
 fn array_index(key: &str) -> Option<u32> {
     let canonical = key == "0" || (!key.starts_with('0') && !key.is_empty() && key.bytes().all(|b| b.is_ascii_digit()));
@@ -146,10 +108,11 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn trim_removes_what_javascript_removes() {
-        assert_eq!(trim("\u{feff} on \u{a0}\u{2028}\t"), "on");
-        // U+0085 is white space to Rust and not to JavaScript.
-        assert_eq!(trim("\u{85}on\u{85}"), "\u{85}on\u{85}");
+    fn trim_removes_what_rust_calls_white_space() {
+        assert_eq!(trim(" on \u{a0}\u{2028}\t"), "on");
+        // White space is Rust's set: U+0085 is in it, and a byte-order mark (U+FEFF) is not.
+        assert_eq!(trim("\u{85}on\u{85}"), "on");
+        assert_eq!(trim("\u{feff}on\u{feff}"), "\u{feff}on\u{feff}");
         assert_eq!(trim_end("  a b \n"), "  a b");
     }
 
@@ -184,15 +147,5 @@ mod tests {
         assert_eq!(json_stringify(&value), r#"{"1":{"z":1e+21},"2":true,"b":100,"a":[null,1.5,"x\"y"],"01":0}"#);
         assert_eq!(json_stringify(&json!({})), "{}");
         assert_eq!(json_stringify(&json!("é\n")), "\"é\\n\"");
-    }
-
-    #[test]
-    fn a_cut_surrogate_pair_is_written_as_an_escape_as_json_stringify_does() {
-        // JSON.stringify("a\ud83d") and JSON.stringify("\ude00b\n\u0001\"")
-        assert_eq!(json_string_utf16(&[0x61, 0xd83d]), r#""a\ud83d""#);
-        assert_eq!(json_string_utf16(&[0xde00, 0x62, 0x0a, 1, 0x22]), r#""\ude00b\n\u0001\"""#);
-        // a whole pair is the character
-        assert_eq!(json_string_utf16(&utf16("é😀\u{2028}\u{7f}")), "\"é😀\u{2028}\u{7f}\"");
-        assert_eq!(json_string_utf16(&utf16("\u{8}\u{c}\r\t\\")), r#""\b\f\r\t\\""#);
     }
 }
