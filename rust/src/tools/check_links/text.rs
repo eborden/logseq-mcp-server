@@ -239,6 +239,18 @@ mod tests {
     }
 
     #[test]
+    fn a_bracketed_tag_is_the_ref_beside_its_hash_and_the_checks_read_no_tags() {
+        // `#[[weekly review]]` is one tag (`refs::tags`) and, in these texts, one ref to that page
+        assert_eq!(counts("a #[[weekly review]] b"), [("weekly review", 1)]);
+        assert_eq!(strip_brackets("a #[[weekly review]] b"), "a #weekly review b");
+        assert!(check_refs_preserved("a #[[weekly review]]", "a #[[weekly review]] and [[Weekly Review]]").ok);
+        let dropped = check_refs_preserved("a #[[weekly review]]", "a #weekly review");
+        assert_eq!(dropped.removed, [RemovedRef { term: "weekly review".into(), before: 1, after: 0 }]);
+        assert!(check_prose("a #weekly review", "a #[[weekly review]]").ok);
+        assert_eq!(check_brackets("a #[[weekly review]]"), BracketCheck { ok: true, opens: 1, closes: 1, nested: None });
+    }
+
+    #[test]
     fn stripping_brackets_keeps_everything_else() {
         assert_eq!(strip_brackets("x [[Alice]] y [[ ]] [[a[[b]]"), "x Alice y   [[ab");
         assert_eq!(strip_brackets("no links ]] [["), "no links ]] [[");

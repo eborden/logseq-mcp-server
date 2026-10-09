@@ -13,7 +13,14 @@
 //!
 //! A tag is a `#` followed by one or more characters that are neither white space
 //! ([`char::is_whitespace`]) nor `#`. The run ends at the next `#`, which starts a tag of its own,
-//! and takes in everything else, so `#a,` is the tag `a,` and `#[[weekly` is the tag `[[weekly`.
+//! and takes in everything else, so `#a,` is the tag `a,`.
+//!
+//! A bracketed tag, `#[[tag with spaces]]`, is another spelling of `#abc` for a name with spaces.
+//! It is one tag whose text is the name between the brackets (no `#`, no brackets), under the name
+//! grammar of a ref: one or more characters that are not `[`, `]` or a newline, closed by `]]` on
+//! the same line. The ref scanner is unchanged: the same text still holds the ref `tag with spaces`.
+//! A `#[[` with no closing `]]` on its line falls back to the run rule, so `#[[weekly` is the tag
+//! `[[weekly`, as it always was.
 
 use std::ops::Range;
 
@@ -67,12 +74,20 @@ pub fn page_refs(text: &str) -> Vec<PageRef<'_>> {
     found
 }
 
-/// Every tag in `text`, without its `#`, in order.
+/// Every tag in `text`, without its `#`, in order. A bracketed tag, `#[[tag with spaces]]`, is one
+/// tag whose text is the name between the brackets.
 pub fn tags(text: &str) -> Vec<&str> {
     let mut found = Vec::new();
     let mut at = 0;
     while let Some(offset) = text[at..].find('#') {
         let start = at + offset + 1;
+        // A name that follows the ref grammar, closed on its line. Without a closing `]]` the run
+        // rule below reads `#[[weekly` as it always did.
+        if let Some((name, rest)) = ref_at(&text[start..]) {
+            found.push(name);
+            at = text.len() - rest.len();
+            continue;
+        }
         let len = text[start..].find(|c: char| c == '#' || c.is_whitespace()).unwrap_or(text.len() - start);
         if len > 0 {
             found.push(&text[start..start + len]);
@@ -197,8 +212,56 @@ mod tests {
     }
 
     #[test]
-    fn a_hash_before_a_bracketed_name_takes_the_brackets_up_to_white_space() {
-        assert_eq!(tags("#[[weekly review]]"), ["[[weekly"]);
-        assert_eq!(tags("#[[x]] y"), ["[[x]]"]);
+    fn a_hash_before_a_bracketed_name_is_one_tag_of_that_name() {
+        assert_eq!(tags("#[[tag with spaces]]"), ["tag with spaces"]);
+        assert_eq!(tags("#[[weekly review]]"), ["weekly review"]);
+        assert_eq!(tags("#[[x]] y"), ["x"]);
+        assert_eq!(tags("#abc"), ["abc"]);
+        // the ref scanner is unchanged: the same text holds the ref of that name
+        assert_eq!(names("#[[tag with spaces]]"), ["tag with spaces"]);
+    }
+
+    #[test]
+    fn a_bracketed_tag_without_its_closing_brackets_is_a_run_to_white_space() {
+        assert_eq!(tags("#[[weekly"), ["[[weekly"]);
+        assert_eq!(tags("#[[weekly review"), ["[[weekly"]);
+        assert_eq!(tags("#[[a]b]]"), ["[[a]b]]"]);
+        // a name does not run over a newline, so the line has no closing brackets
+        assert_eq!(tags("#[[a\nb]]"), ["[[a"]);
+        assert_eq!(tags("#[[a b\n]] c"), ["[[a"]);
+        // a closed one on a later line is read there
+        assert_eq!(tags("#[[a\n#[[b c]]"), ["[[a", "b c"]);
+    }
+
+    #[test]
+    fn a_hash_before_brackets_at_the_end_of_the_text_is_the_run() {
+        assert_eq!(tags("#[["), ["[["]);
+        assert_eq!(tags("x #["), ["["]);
+        assert_eq!(tags("#[[]]"), ["[[]]"]);
+        assert_eq!(tags("#[[a]"), ["[[a]"]);
+        assert_eq!(tags("#[[a]]"), ["a"]);
+    }
+
+    #[test]
+    fn several_bracketed_tags_and_plain_ones_on_one_line_are_each_read() {
+        assert_eq!(tags("#[[a b]] #[[c d]]"), ["a b", "c d"]);
+        assert_eq!(tags("#[[a b]]#[[c d]]"), ["a b", "c d"]);
+        assert_eq!(tags("#[[a b]] #c #[[d e]] #f"), ["a b", "c", "d e", "f"]);
+        assert_eq!(tags("#plain #[[a b]]"), ["plain", "a b"]);
+        assert_eq!(tags("#[[a b]]#c"), ["a b", "c"]);
+        // what follows the closing brackets is not part of the tag
+        assert_eq!(tags("#[[a b]]c"), ["a b"]);
+        assert_eq!(tags("#[[a b]],"), ["a b"]);
+    }
+
+    #[test]
+    fn a_bracketed_tag_name_holds_any_character_a_ref_name_may() {
+        assert_eq!(tags("#[[a#b c]]"), ["a#b c"]);
+        assert_eq!(tags("#[[ padded ]]"), [" padded "]);
+        assert_eq!(tags("#[[日本語 é🙂]]"), ["日本語 é🙂"]);
+        // a bracket inside is no name: the run rule reads it
+        assert_eq!(tags("#[[a [[b]] c]]"), ["[[a"]);
+        // a `[[` after a `#` further along is not a bracketed tag of the first
+        assert_eq!(tags("# [[a b]]"), Vec::<&str>::new());
     }
 }
