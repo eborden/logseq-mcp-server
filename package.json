@@ -2,25 +2,12 @@
   "name": "logseq-mcp-server",
   "version": "1.0.0",
   "description": "MCP server that gives Claude read-only access to a LogSeq knowledge graph: context building, search, graph traversal and journal date ranges.",
+  "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "logseq-mcp-server": "dist/index.js",
-    "logseq-mcp": "dist/index.js"
-  },
-  "files": [
-    "dist",
-    "skills",
-    "CHANGELOG.md",
-    "LICENSE",
-    "README.md"
-  ],
   "engines": {
     "node": ">=22.12.0"
   },
   "scripts": {
-    "build": "echo 'The TypeScript server is retired (#356): the server is Rust, built with: cd rust && cargo build --release --locked. Shipping it is #355 and #350.' >&2 && exit 1",
-    "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tests/integration/tsconfig.json",
     "test": "vitest run tests/guards && vitest run tests/rust-guards && npm run test:integration",
     "test:guards": "vitest run tests/guards",
