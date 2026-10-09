@@ -359,8 +359,8 @@ fn topic_unavailable_warning(context: &TopicContext, topic: &str) -> Option<Quer
         QueryWarning::new(
             "topic_unavailable",
             format!(
-                "LogSeq returned no answer to part of the context for \"{topic}\" ({}), so what is shown may be missing blocks, related \
-                 pages or references that exist. Call logseq_build_context with topic_name {} for the warnings that say which part. {RETRY_ADVICE}",
+                "LogSeq returned no answer to part of the context for \"{topic}\" ({}), so part of this topic's context could not be \
+                 read and what is shown may be incomplete. Call logseq_build_context with topic_name {} for the warnings that say which part. {RETRY_ADVICE}",
                 codes.join(", "),
                 js::json_stringify(&json!(topic))
             ),
