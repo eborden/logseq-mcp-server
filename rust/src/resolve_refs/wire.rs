@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::wire::{DATALOG_METHOD, EntityRef, Id, Optional, ResponseError, parse};
+use crate::wire::{DATALOG_METHOD, EntityRef, Id, ResponseError, parse};
 
 /// The page a target block sits on: the parts the lookup pulls.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,46 +35,38 @@ pub struct RefTarget {
 #[derive(Deserialize)]
 struct Pulled {
     id: Id,
-    #[serde(default)]
-    uuid: Optional<String>,
-    #[serde(default)]
-    content: Optional<String>,
-    #[serde(default)]
-    name: Optional<String>,
-    #[serde(default, rename = "original-name")]
-    original_name: Optional<String>,
-    #[serde(default)]
-    left: Optional<EntityRef>,
-    #[serde(default)]
-    parent: Optional<EntityRef>,
-    #[serde(default)]
-    page: Optional<PulledPage>,
+    uuid: Option<String>,
+    content: Option<String>,
+    name: Option<String>,
+    #[serde(rename = "original-name")]
+    original_name: Option<String>,
+    left: Option<EntityRef>,
+    parent: Option<EntityRef>,
+    page: Option<PulledPage>,
 }
 
 #[derive(Deserialize)]
 struct PulledPage {
-    #[serde(default)]
-    id: Optional<Id>,
-    #[serde(default)]
-    name: Optional<String>,
-    #[serde(default, rename = "original-name")]
-    original_name: Optional<String>,
+    id: Option<Id>,
+    name: Option<String>,
+    #[serde(rename = "original-name")]
+    original_name: Option<String>,
 }
 
 impl From<Pulled> for RefTarget {
     fn from(pulled: Pulled) -> Self {
         RefTarget {
             id: pulled.id.0,
-            uuid: pulled.uuid.into_option(),
-            content: pulled.content.into_option(),
-            name: pulled.name.into_option(),
-            original_name: pulled.original_name.into_option(),
-            left_id: pulled.left.into_option().and_then(|left| left.id),
-            parent_id: pulled.parent.into_option().and_then(|parent| parent.id),
-            page: pulled.page.into_option().map(|page| TargetPage {
-                id: page.id.into_option().map(|id| id.0),
-                name: page.name.into_option(),
-                original_name: page.original_name.into_option(),
+            uuid: pulled.uuid,
+            content: pulled.content,
+            name: pulled.name,
+            original_name: pulled.original_name,
+            left_id: pulled.left.and_then(|left| left.id),
+            parent_id: pulled.parent.and_then(|parent| parent.id),
+            page: pulled.page.map(|page| TargetPage {
+                id: page.id.map(|id| id.0),
+                name: page.name,
+                original_name: page.original_name,
             }),
         }
     }

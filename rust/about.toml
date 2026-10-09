@@ -1,0 +1,18 @@
+# The settings cargo-about reads to write THIRD-PARTY-NOTICES.txt, a release asset (ADR-0035 Decision 3, #418).
+# .github/workflows/release.yml runs it; about.hbs is its template.
+
+# The licences the release may carry. A dependency under any other one fails the run until the maintainer has
+# looked at it and added it here, so a new dependency can't ship without a decision. Dual-licensed crates (MIT OR
+# Apache-2.0, Apache-2.0 OR BSL-1.0, Unlicense OR MIT) pass on whichever of these they offer.
+accepted = ["MIT", "Apache-2.0", "Unicode-3.0", "MPL-2.0"]
+
+# The crates the three release targets build (the same triples as the matrix in release.yml). A crate only a
+# Windows or Haiku build needs is left out.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl"]
+
+# What isn't in the binary: test-only and build-script-only crates, and this crate (LICENSE covers it).
+ignore-dev-dependencies = true
+ignore-build-dependencies = true
+
+[private]
+ignore = true

@@ -7,7 +7,7 @@ use serde::de::value::MapAccessDeserializer;
 use serde::de::{self, Deserializer, MapAccess, Visitor};
 use serde_json::Value;
 
-use crate::wire::{DATALOG_METHOD, EntityRef, IdVisitor, Optional, ResponseError, entity_id, parse};
+use crate::wire::{DATALOG_METHOD, EntityRef, IdVisitor, ResponseError, entity_id, parse};
 
 /// A block's parent as the outline reads it: a bare number, or `{ id }` (or `{ "db/id" }`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,25 +90,21 @@ impl OutlineBlock {
 /// What a row is read as.
 #[derive(Deserialize)]
 struct Pulled {
-    #[serde(default)]
-    id: Optional<crate::wire::Id>,
-    #[serde(default, rename = "db/id")]
-    db_id: Optional<crate::wire::Id>,
+    id: Option<crate::wire::Id>,
+    #[serde(rename = "db/id")]
+    db_id: Option<crate::wire::Id>,
     uuid: String,
-    #[serde(default)]
-    content: Optional<String>,
-    #[serde(default)]
-    left: Optional<EntityRef>,
-    #[serde(default)]
-    parent: Optional<Parent>,
+    content: Option<String>,
+    left: Option<EntityRef>,
+    parent: Option<Parent>,
 }
 
 impl TryFrom<Pulled> for OutlineBlock {
     type Error = &'static str;
 
     fn try_from(pulled: Pulled) -> Result<Self, Self::Error> {
-        let id = pulled.id.into_option().map(|id| id.0);
-        let db_id = pulled.db_id.into_option().map(|id| id.0);
+        let id = pulled.id.map(|id| id.0);
+        let db_id = pulled.db_id.map(|id| id.0);
         if id.is_none() && db_id.is_none() {
             return Err("a block needs an id or a db/id, and has neither");
         }
@@ -116,9 +112,9 @@ impl TryFrom<Pulled> for OutlineBlock {
             id,
             db_id,
             uuid: pulled.uuid,
-            content: pulled.content.into_option(),
-            left_id: pulled.left.into_option().and_then(|left| left.id),
-            parent: pulled.parent.into_option(),
+            content: pulled.content,
+            left_id: pulled.left.and_then(|left| left.id),
+            parent: pulled.parent,
         })
     }
 }

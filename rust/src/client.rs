@@ -324,10 +324,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_refused_connection_is_not_running() {
-        // Bind to get a free port, then close it so nothing listens there.
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        drop(listener);
+        // Port 1 is privileged and never bound, so the connection is refused. A port freed by dropping a listener
+        // could be handed to a parallel test that binds `127.0.0.1:0`, and this call would land on it (#450).
+        let url = "http://127.0.0.1:1".to_owned();
         let error = client(&url, None).call_api("logseq.App.getCurrentGraph", &[]).await.unwrap_err();
         assert!(matches!(error, LogseqError::NotRunning { .. }), "{error:?}");
         assert!(error.is_infrastructure());

@@ -4,7 +4,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{Id, Number, Object, Optional, ResponseError, check, parse};
+use super::{Id, Number, Object, ResponseError, check, parse};
 
 const METHOD: &str = "logseq.Test.method";
 
@@ -20,19 +20,16 @@ fn problem<T: serde::de::DeserializeOwned + std::fmt::Debug>(answer: Value) -> S
 #[allow(dead_code)]
 struct Page {
     id: Id,
-    #[serde(default)]
-    name: Optional<String>,
-    #[serde(default)]
-    links: Optional<Vec<Link>>,
-    #[serde(default, rename = "original-name")]
-    original_name: Optional<String>,
+    name: Option<String>,
+    links: Option<Vec<Link>>,
+    #[serde(rename = "original-name")]
+    original_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct Link {
-    #[serde(default)]
-    id: Optional<Id>,
+    id: Option<Id>,
 }
 
 #[test]
@@ -63,7 +60,7 @@ fn a_field_that_is_not_there_is_missing_at_its_own_path() {
 #[test]
 fn a_field_that_may_be_left_out_may_not_be_null() {
     let page: Page = parse(METHOD, &json!({"id": 1})).unwrap();
-    assert!(page.name.into_option().is_none() && page.links.into_option().is_none());
+    assert!(page.name.is_none() && page.links.is_none());
     assert_eq!(problem::<Page>(json!({"id": 1, "name": null})), "answer.name: expected a string, got null");
     assert_eq!(problem::<Page>(json!({"id": 1, "links": null})), "answer.links: expected a list, got null");
     assert_eq!(problem::<Page>(json!({"id": 1, "links": [null]})), "answer.links[0]: expected an object, got null");
@@ -73,11 +70,101 @@ fn a_field_that_may_be_left_out_may_not_be_null() {
     assert_eq!(problem::<Vec<Page>>(json!(null)), "answer: expected a list, got null");
 }
 
+/// A struct with one field LogSeq may leave out.
+#[derive(Debug, Deserialize)]
+struct Named {
+    name: Option<String>,
+}
+
+#[test]
+fn an_option_field_is_none_when_absent_an_error_when_null_and_a_value_when_there() {
+    assert_eq!(parse::<Named>(METHOD, &json!({})).unwrap().name, None);
+    assert_eq!(parse::<Named>(METHOD, &json!({"name": "a"})).unwrap().name.as_deref(), Some("a"));
+    // `null` in a field is read as a `String`, and is not one: the same words as any other wrong type
+    assert_eq!(problem::<Named>(json!({"name": null})), "answer.name: expected a string, got null");
+    assert_eq!(problem::<Named>(json!({"name": 5})), "answer.name: expected a string, got a number");
+    assert_eq!(problem::<String>(json!(null)), "answer: expected a string, got null");
+}
+
+#[test]
+fn a_null_answer_and_a_null_cell_are_none() {
+    // the top of an answer (BR-0011)
+    assert_eq!(parse::<Option<String>>(METHOD, &json!(null)).unwrap(), None);
+    assert_eq!(parse::<Option<String>>(METHOD, &json!("a")).unwrap().as_deref(), Some("a"));
+    assert_eq!(parse::<Option<Named>>(METHOD, &json!(null)).unwrap().map(|named| named.name), None);
+    // a cell of a row
+    assert_eq!(parse::<(Option<String>,)>(METHOD, &json!([null])).unwrap(), (None,));
+    assert_eq!(parse::<(Option<String>,)>(METHOD, &json!(["a"])).unwrap(), (Some("a".to_owned()),));
+    assert_eq!(parse::<(Id, Option<String>)>(METHOD, &json!([1, null])).unwrap(), (Id(1), None));
+    assert_eq!(parse::<(Option<Named>,)>(METHOD, &json!([null])).unwrap().0.map(|named| named.name), None);
+    // a cell that is an object whose own field is `null` still fails at the field
+    assert_eq!(problem::<(Option<Named>,)>(json!([{"name": null}])), "answer[0].name: expected a string, got null");
+}
+
+#[test]
+fn an_option_in_a_list_keeps_the_rule_of_a_list_even_inside_a_field() {
+    #[derive(Debug, Deserialize)]
+    struct Holder {
+        items: Option<Vec<Option<String>>>,
+    }
+    assert_eq!(parse::<Vec<Option<String>>>(METHOD, &json!([null, "a"])).unwrap(), vec![None, Some("a".to_owned())]);
+    let holder: Holder = parse(METHOD, &json!({"items": [null, "a"]})).unwrap();
+    assert_eq!(holder.items, Some(vec![None, Some("a".to_owned())]));
+    // the field itself is still not allowed to be `null`
+    assert_eq!(problem::<Holder>(json!({"items": null})), "answer.items: expected a list, got null");
+    assert!(parse::<Holder>(METHOD, &json!({})).unwrap().items.is_none());
+}
+
+#[test]
+fn the_values_of_a_map_are_not_fields_and_read_null_as_none() {
+    use std::collections::BTreeMap;
+    let answer = json!({"a": "x", "b": null});
+    let map: BTreeMap<String, Option<String>> = parse(METHOD, &answer).unwrap();
+    assert_eq!(map.get("a"), Some(&Some("x".to_owned())));
+    assert_eq!(map.get("b"), Some(&None));
+    // a field holding that map is a field that may not be `null`, but its values are the map's
+    #[derive(Debug, Deserialize)]
+    struct Holder {
+        values: Option<BTreeMap<String, Option<String>>>,
+    }
+    let holder: Holder = parse(METHOD, &json!({"values": {"b": null}})).unwrap();
+    assert_eq!(holder.values.unwrap().get("b"), Some(&None));
+    assert_eq!(problem::<Holder>(json!({"values": null})), "answer.values: expected an object, got null");
+}
+
+#[test]
+fn a_newtype_is_read_where_it_sits_not_as_a_field_of_what_it_wraps() {
+    #[derive(Debug, PartialEq, Deserialize)]
+    struct Maybe(Option<String>);
+    #[derive(Debug, Deserialize)]
+    struct Holder {
+        maybe: Maybe,
+        wrapped: Option<Maybe>,
+    }
+    // at the top of an answer and as a cell, the newtype around an `Option` reads `null` as `None`
+    assert_eq!(parse::<Maybe>(METHOD, &json!(null)).unwrap(), Maybe(None));
+    assert_eq!(parse::<(Maybe,)>(METHOD, &json!([null])).unwrap(), (Maybe(None),));
+    // as the type of a field it does the same, as it did before a field was read by position
+    let holder: Holder = parse(METHOD, &json!({"maybe": null})).unwrap();
+    assert_eq!((holder.maybe, holder.wrapped), (Maybe(None), None));
+    assert_eq!(parse::<Holder>(METHOD, &json!({"maybe": "a", "wrapped": "b"})).unwrap().wrapped, Some(Maybe(Some("b".to_owned()))));
+    // an `Option` around the newtype is a field that may not be `null`: the newtype is read, and it reads `None`
+    let holder: Holder = parse(METHOD, &json!({"maybe": null, "wrapped": null})).unwrap();
+    assert_eq!(holder.wrapped, Some(Maybe(None)));
+}
+
+#[test]
+fn an_extra_key_passes_beside_an_option_field() {
+    let answer = json!({"extra": {"deep": [null]}, "name": "a", "more": null});
+    assert_eq!(parse::<Named>(METHOD, &answer).unwrap().name.as_deref(), Some("a"));
+    assert_eq!(parse::<Named>(METHOD, &json!({"extra": null})).unwrap().name, None);
+}
+
 #[test]
 fn keys_the_type_does_not_name_are_not_read() {
     let answer = json!({"id": 1, "extra": {"deep": [1, {"a": null}]}, "uuid": 5, "children": "x", "name": "a"});
     let page: Page = parse(METHOD, &answer).unwrap();
-    assert_eq!(page.name.into_option().as_deref(), Some("a"));
+    assert_eq!(page.name.as_deref(), Some("a"));
     assert!(check::<Page>(METHOD, &answer).is_ok());
 }
 

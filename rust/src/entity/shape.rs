@@ -8,38 +8,36 @@
 //! needed, fails the answer here, with a [`crate::wire::ResponseError`] (BR-0003). That is why a field
 //! belongs in a shape if any code reads it off such an entity, and why one that no code reads does not.
 //!
-//! Every field LogSeq may leave out is an [`Optional`] with `#[serde(default)]`: absent is fine, `null`
-//! is not. A shape that is only checked is never read back, hence the allowed dead code.
+//! Every field LogSeq may leave out is an `Option`: absent is `None`, and `null` is not (as the value of a
+//! struct's field, `Option` does not read `null` as absent; see `Wire` in `wire/deserializer.rs`). A shape that is only
+//! checked is never read back, hence the allowed dead code.
 
 #![allow(dead_code)]
 
 use serde::Deserialize;
 
-use crate::wire::{EntityRef, Id, Number, Object, Optional};
+use crate::wire::{EntityRef, Id, Number, Object};
 
 /// A page nested in a block (`:block/page`) or listed among its `refs`, in either spelling. Only what
 /// [`super::page_display_name`], [`super::journal_flag`], [`super::journal_day_of`] and the id readers take
 /// from it.
 #[derive(Deserialize)]
 pub(crate) struct NestedPage {
-    #[serde(default)]
-    id: Optional<Id>,
-    #[serde(default, rename = "db/id")]
-    db_id: Optional<Id>,
-    #[serde(default)]
-    name: Optional<String>,
-    #[serde(default, rename = "originalName")]
-    original_name: Optional<String>,
-    #[serde(default, rename = "original-name")]
-    original_name_pulled: Optional<String>,
-    #[serde(default, rename = "journal?")]
-    is_journal: Optional<bool>,
-    #[serde(default)]
-    journal: Optional<bool>,
-    #[serde(default, rename = "journalDay")]
-    journal_day: Optional<Number>,
-    #[serde(default, rename = "journal-day")]
-    journal_day_pulled: Optional<Number>,
+    id: Option<Id>,
+    #[serde(rename = "db/id")]
+    db_id: Option<Id>,
+    name: Option<String>,
+    #[serde(rename = "originalName")]
+    original_name: Option<String>,
+    #[serde(rename = "original-name")]
+    original_name_pulled: Option<String>,
+    #[serde(rename = "journal?")]
+    is_journal: Option<bool>,
+    journal: Option<bool>,
+    #[serde(rename = "journalDay")]
+    journal_day: Option<Number>,
+    #[serde(rename = "journal-day")]
+    journal_day_pulled: Option<Number>,
 }
 
 /// A block, in the fields both spellings share and the code reads. `children` is not read here: without
@@ -48,20 +46,13 @@ pub(crate) struct NestedPage {
 pub(crate) struct Block {
     id: Id,
     uuid: String,
-    #[serde(default)]
-    content: Optional<String>,
-    #[serde(default)]
-    page: Optional<NestedPage>,
-    #[serde(default)]
-    parent: Optional<EntityRef>,
-    #[serde(default)]
-    left: Optional<EntityRef>,
-    #[serde(default)]
-    properties: Optional<Object>,
-    #[serde(default)]
-    marker: Optional<String>,
-    #[serde(default)]
-    refs: Optional<Vec<NestedPage>>,
+    content: Option<String>,
+    page: Option<NestedPage>,
+    parent: Option<EntityRef>,
+    left: Option<EntityRef>,
+    properties: Option<Object>,
+    marker: Option<String>,
+    refs: Option<Vec<NestedPage>>,
 }
 
 /// A page from the Editor API (`getPage`, `getAllPages`, the open page): camelCase keys, and an `id` and
@@ -70,46 +61,36 @@ pub(crate) struct Block {
 pub(crate) struct EditorPage {
     pub(crate) id: Id,
     pub(crate) name: String,
-    #[serde(default, rename = "originalName")]
-    pub(crate) original_name: Optional<String>,
-    #[serde(default, rename = "journal?")]
-    pub(crate) is_journal: Optional<bool>,
-    #[serde(default)]
-    pub(crate) journal: Optional<bool>,
+    #[serde(rename = "originalName")]
+    pub(crate) original_name: Option<String>,
+    #[serde(rename = "journal?")]
+    pub(crate) is_journal: Option<bool>,
+    pub(crate) journal: Option<bool>,
     /// The page is backed by a file: it wrote its own `alias::` line, rather than being a stub
-    #[serde(default)]
-    pub(crate) file: Optional<EntityRef>,
-    #[serde(default)]
-    pub(crate) alias: Optional<Vec<EntityRef>>,
-    #[serde(default)]
-    properties: Optional<Object>,
-    #[serde(default, rename = "journalDay")]
-    journal_day: Optional<Number>,
+    pub(crate) file: Option<EntityRef>,
+    pub(crate) alias: Option<Vec<EntityRef>>,
+    properties: Option<Object>,
+    #[serde(rename = "journalDay")]
+    journal_day: Option<Number>,
 }
 
 /// A page from a Datalog pull: LogSeq's own kebab-case keys, every field optional, the id too.
 #[derive(Deserialize)]
 pub(crate) struct PulledPage {
-    #[serde(default)]
-    pub(crate) id: Optional<Id>,
-    #[serde(default, rename = "db/id")]
-    pub(crate) db_id: Optional<Id>,
-    #[serde(default)]
-    pub(crate) name: Optional<String>,
-    #[serde(default, rename = "original-name")]
-    pub(crate) original_name: Optional<String>,
-    #[serde(default, rename = "journal?")]
-    is_journal: Optional<bool>,
-    #[serde(default)]
-    journal: Optional<bool>,
-    #[serde(default)]
-    pub(crate) file: Optional<EntityRef>,
-    #[serde(default)]
-    pub(crate) alias: Optional<Vec<EntityRef>>,
-    #[serde(default)]
-    properties: Optional<Object>,
-    #[serde(default, rename = "journal-day")]
-    journal_day: Optional<Number>,
+    pub(crate) id: Option<Id>,
+    #[serde(rename = "db/id")]
+    pub(crate) db_id: Option<Id>,
+    pub(crate) name: Option<String>,
+    #[serde(rename = "original-name")]
+    pub(crate) original_name: Option<String>,
+    #[serde(rename = "journal?")]
+    is_journal: Option<bool>,
+    journal: Option<bool>,
+    pub(crate) file: Option<EntityRef>,
+    pub(crate) alias: Option<Vec<EntityRef>>,
+    properties: Option<Object>,
+    #[serde(rename = "journal-day")]
+    journal_day: Option<Number>,
 }
 
 /// A page of either spelling, every field optional: the source page of a linked reference, which the
@@ -117,24 +98,20 @@ pub(crate) struct PulledPage {
 /// has a file or aliases, so those are not checked.
 #[derive(Deserialize)]
 pub(crate) struct PageLike {
-    #[serde(default)]
-    id: Optional<Id>,
-    #[serde(default, rename = "db/id")]
-    db_id: Optional<Id>,
-    #[serde(default)]
-    name: Optional<String>,
-    #[serde(default, rename = "originalName")]
-    original_name: Optional<String>,
-    #[serde(default, rename = "original-name")]
-    original_name_pulled: Optional<String>,
-    #[serde(default, rename = "journal?")]
-    is_journal: Optional<bool>,
-    #[serde(default)]
-    journal: Optional<bool>,
-    #[serde(default)]
-    properties: Optional<Object>,
-    #[serde(default, rename = "journalDay")]
-    journal_day: Optional<Number>,
-    #[serde(default, rename = "journal-day")]
-    journal_day_pulled: Optional<Number>,
+    id: Option<Id>,
+    #[serde(rename = "db/id")]
+    db_id: Option<Id>,
+    name: Option<String>,
+    #[serde(rename = "originalName")]
+    original_name: Option<String>,
+    #[serde(rename = "original-name")]
+    original_name_pulled: Option<String>,
+    #[serde(rename = "journal?")]
+    is_journal: Option<bool>,
+    journal: Option<bool>,
+    properties: Option<Object>,
+    #[serde(rename = "journalDay")]
+    journal_day: Option<Number>,
+    #[serde(rename = "journal-day")]
+    journal_day_pulled: Option<Number>,
 }

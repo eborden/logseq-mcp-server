@@ -27,15 +27,15 @@ pub struct ListedEntity {
 impl From<EditorPage> for ListedEntity {
     fn from(page: EditorPage) -> Self {
         // the original name, else the name: the Editor API's spelling only, and an empty one counts as missing
-        let display_name = page.original_name.into_option().filter(|name| !name.is_empty()).unwrap_or_else(|| page.name.clone());
+        let display_name = page.original_name.filter(|name| !name.is_empty()).unwrap_or_else(|| page.name.clone());
         ListedEntity {
             id: page.id.0,
             name: page.name,
             display_name,
             // `journal?`, else `journal`
-            journal: page.is_journal.into_option().or(page.journal.into_option()).unwrap_or(false),
-            written: page.file.into_option().is_some(),
-            alias_ids: page.alias.into_option().unwrap_or_default().into_iter().filter_map(|link| link.id).collect(),
+            journal: page.is_journal.or(page.journal).unwrap_or(false),
+            written: page.file.is_some(),
+            alias_ids: page.alias.unwrap_or_default().into_iter().filter_map(|link| link.id).collect(),
         }
     }
 }

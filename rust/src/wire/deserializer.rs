@@ -13,8 +13,11 @@
 //! Three rules a type can rely on:
 //! - an object's keys the type does not name are never read, not even to be type-checked, so a
 //!   field the code doesn't use can't fail the answer (and LogSeq may add keys);
-//! - a `null` is `None` only where the type asks for an `Option`; anywhere else it is a mismatch
-//!   (see [`super::Optional`] for a field that may be left out but not be `null`);
+//! - a `null` is `None` only where the type asks for an `Option` at the top of an answer or as a cell of a
+//!   list or row (a `null` answer, a `null` cell are cases of their own, BR-0011); anywhere else it is a
+//!   mismatch. A struct field typed `Option<T>` may be left out (serde's derive gives it `None`), but is
+//!   not `None` when it is `null`: the value is read as a `T`, and `null` is not one (BR-0003). Position
+//!   decides, see [`Wire`];
 //! - a row (a tuple) has exactly the cells its type reads, or the longest of them when the type
 //!   says some are optional: more cells than that is an error, as fewer is.
 
@@ -201,14 +204,35 @@ impl de::Error for Issue {
 }
 
 /// The deserializer: a borrowed value, read as whatever the type asks for.
+///
+/// Where the value sits decides what `Option` means to it. A `null` is `None` at the top of an answer and as an
+/// item of a list or a cell of a row, where a `null` is a case of its own (BR-0011). As the value of a struct's
+/// field it is not: a field LogSeq may leave out is `Option<T>`, left out is `None`, and one that is there must
+/// be a `T`, so `null` there is a mismatch and never read as absent (BR-0003).
 #[derive(Clone, Copy)]
-pub(crate) struct Wire<'v>(pub(crate) &'v Value);
+pub(crate) struct Wire<'v> {
+    value: &'v Value,
+    /// The value of a struct's field
+    field: bool,
+}
+
+impl<'v> Wire<'v> {
+    /// A top-level answer, or an item of a list or a row.
+    pub(crate) fn new(value: &'v Value) -> Self {
+        Wire { value, field: false }
+    }
+
+    /// The value of a struct's field.
+    fn field(value: &'v Value) -> Self {
+        Wire { value, field: true }
+    }
+}
 
 impl<'de> Deserializer<'de> for Wire<'de> {
     type Error = Issue;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Issue> {
-        match self.0 {
+        match self.value {
             Value::Null => visitor.visit_unit(),
             Value::Bool(flag) => visitor.visit_bool(*flag),
             Value::Number(number) => {
@@ -224,26 +248,27 @@ impl<'de> Deserializer<'de> for Wire<'de> {
             }
             Value::String(text) => visitor.visit_borrowed_str(text),
             Value::Array(items) => visitor.visit_seq(Items { items: items.iter(), next: 0 }),
-            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: &[] }),
+            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: &[], fields: false }),
         }
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Issue> {
-        match self.0 {
-            Value::Null => visitor.visit_none(),
+        match self.value {
+            Value::Null if !self.field => visitor.visit_none(),
+            // a field that is there is a `T`, `null` included: `T` says what it found
             _ => visitor.visit_some(self),
         }
     }
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Issue> {
-        match self.0 {
+        match self.value {
             Value::Array(items) => visitor.visit_seq(Items { items: items.iter(), next: 0 }),
             other => Err(Issue::wrong_type("a list", other)),
         }
     }
 
     fn deserialize_tuple<V: Visitor<'de>>(self, _length: usize, visitor: V) -> Result<V::Value, Issue> {
-        match self.0 {
+        match self.value {
             Value::Array(items) => {
                 let mut cells = Items { items: items.iter(), next: 0 };
                 let row = visitor.visit_seq(&mut cells)?;
@@ -259,8 +284,8 @@ impl<'de> Deserializer<'de> for Wire<'de> {
     }
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Issue> {
-        match self.0 {
-            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: &[] }),
+        match self.value {
+            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: &[], fields: false }),
             other => Err(Issue::wrong_type("an object", other)),
         }
     }
@@ -268,19 +293,21 @@ impl<'de> Deserializer<'de> for Wire<'de> {
     /// An object read as a struct: the key of a field that fails is put in the path when the type names it, and
     /// only then.
     fn deserialize_struct<V: Visitor<'de>>(self, _name: &'static str, fields: &'static [&'static str], visitor: V) -> Result<V::Value, Issue> {
-        match self.0 {
-            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: fields }),
+        match self.value {
+            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: fields, fields: true }),
             other => Err(Issue::wrong_type("an object", other)),
         }
     }
 
+    /// A newtype is read as what it wraps, in the place the newtype itself sits: the wrapped type is not a field
+    /// of a struct, so a `null` is read as an `Option` inside it reads one anywhere else, and not as a field's.
     fn deserialize_newtype_struct<V: Visitor<'de>>(self, _name: &'static str, visitor: V) -> Result<V::Value, Issue> {
-        visitor.visit_newtype_struct(self)
+        visitor.visit_newtype_struct(Wire::new(self.value))
     }
 
     /// An enum of unit variants, named by a string (`"outbound"`).
     fn deserialize_enum<V: Visitor<'de>>(self, _name: &'static str, _variants: &'static [&'static str], visitor: V) -> Result<V::Value, Issue> {
-        match self.0 {
+        match self.value {
             Value::String(name) => visitor.visit_enum(name.as_str().into_deserializer()),
             other => Err(Issue::wrong_type("a string", other)),
         }
@@ -309,7 +336,7 @@ impl<'de> SeqAccess<'de> for Items<'de> {
         let Some(item) = self.items.next() else { return Ok(None) };
         let at = self.next;
         self.next += 1;
-        seed.deserialize(Wire(item)).map(Some).map_err(|issue| issue.at(Part::Index(at)))
+        seed.deserialize(Wire::new(item)).map(Some).map_err(|issue| issue.at(Part::Index(at)))
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -324,6 +351,8 @@ struct Fields<'v> {
     entries: serde_json::map::Iter<'v>,
     pending: Option<(&'v String, &'v Value)>,
     named: &'static [&'static str],
+    /// The object is read as a struct, so its values are the values of fields (see [`Wire`])
+    fields: bool,
 }
 
 impl<'de> MapAccess<'de> for Fields<'de> {
@@ -338,7 +367,8 @@ impl<'de> MapAccess<'de> for Fields<'de> {
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, Issue> {
         let Some((key, value)) = self.pending.take() else { return Err(Issue::other("a value with no key")) };
         let named = self.named.iter().find(|name| **name == key.as_str());
-        seed.deserialize(Wire(value)).map_err(|issue| match named {
+        let value = if self.fields { Wire::field(value) } else { Wire::new(value) };
+        seed.deserialize(value).map_err(|issue| match named {
             Some(name) => issue.at(Part::Key(name)),
             None => issue,
         })
