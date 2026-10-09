@@ -167,6 +167,18 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
     (blocks, warnings, total)
 }
 
+/// The warning for a `null` answer to the page's blocks. `hasMore` stays false and there is no `howToFetchAll`:
+/// no parameter fetches blocks LogSeq did not answer (BR-0006, BR-0011).
+fn blocks_unavailable() -> ResultWarning {
+    ResultWarning::new(
+        "outline_unavailable",
+        "LogSeq returned no answer when looking up the blocks of this page (possibly no graph open or a re-index in progress), \
+         so the empty outline may not mean the page has no blocks. \
+         Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+            .to_owned(),
+    )
+}
+
 /// A page's outline.
 ///
 /// `page_name` is a page name, an alias, or an ISO date (`2025-01-01`) of a journal. When it was
@@ -182,11 +194,15 @@ pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<
 
     let query = self::queries::page_outline_blocks(page_id);
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    // PARITY(#299): a `null` answer becomes an empty outline with no warning, where BR-0011 asks for
-    // one that says the data was unavailable (suspected TS bug) — fix per #300, in both servers.
-    let rows = wire::outline_rows(&answer)?.unwrap_or_default();
+    // BR-0011: a `null` answer is not an empty outline. It gives the same empty list plus a warning that says
+    // the data was unavailable. A real `[]` is a page with no blocks and carries no warning.
+    let rows = wire::outline_rows(&answer)?;
+    let unavailable = rows.is_none();
 
-    let (blocks, warnings, total) = outline_of(raw_id, &rows);
+    let (blocks, mut warnings, total) = outline_of(raw_id, &rows.unwrap_or_default());
+    if unavailable {
+        warnings.push(blocks_unavailable());
+    }
     let resolved_from = (resolved.matched_by != MatchedBy::Name).then(|| ResolvedFrom {
         name: page_name.to_owned(),
         matched_by: resolved.matched_by.as_str(),
@@ -306,6 +322,17 @@ mod tests {
         let (blocks, warnings, total) = outline_of(10, &[]);
         assert!(blocks.is_empty() && warnings.is_empty());
         assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn the_unavailable_warning_says_the_empty_outline_may_not_mean_no_blocks_and_offers_no_way_to_fetch_more() {
+        let warning = blocks_unavailable();
+        assert_eq!(warning.code, "outline_unavailable");
+        assert!(warning.message.contains("when looking up the blocks of this page"), "{}", warning.message);
+        assert!(warning.message.contains("so the empty outline may not mean the page has no blocks"), "{}", warning.message);
+        assert_eq!(warning.how_to_fetch_all, None);
+        // No way to fetch more, so `hasMore` is false (BR-0006)
+        assert!(!ResultMeta::new(vec![warning], &[("blocks", 0)]).has_more);
     }
 
     #[test]
