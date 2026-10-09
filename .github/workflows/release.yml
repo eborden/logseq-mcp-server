@@ -5,11 +5,13 @@ name: Release
 # Manual only, from main: this workflow never runs on push, tag or pull request. The maintainer starts it from the
 # Actions tab ("Run workflow", branch main). No session runs it, tags or releases anything (ADR-0017, CLAUDE.md).
 #
-# - dry_run (the default): builds every target, runs every gate leg and assembles the release set (binaries,
-#   SHA256SUMS, LICENSE, THIRD-PARTY-NOTICES.txt) as workflow artifacts. It makes no attestation, no release and no tag.
-# - dry_run off: the same, then attests build provenance for each binary and creates a DRAFT release v<version> at
-#   this run's commit. A draft is not public and has no tag. The maintainer publishes it from the Releases page, and
-#   that click creates the tag (ADR-0035 Decision 2 and 12).
+# - dry_run (the default): builds every target, runs every gate leg and assembles the release set (binaries, the three
+#   PyPI wheels built from them, SHA256SUMS, LICENSE, THIRD-PARTY-NOTICES.txt) as workflow artifacts. It makes no
+#   attestation, no release and no tag.
+# - dry_run off: the same, then attests build provenance for each binary and each wheel and creates a DRAFT release
+#   v<version> at this run's commit. A draft is not public and has no tag. The maintainer publishes it from the
+#   Releases page, and that click creates the tag (ADR-0035 Decision 2 and 12). The wheels ride on the release and
+#   pypi.yml later uploads those exact files to PyPI (ADR-0036).
 #
 # The version input must equal the version in rust/Cargo.toml, package.json and both plugin manifests, or the run fails
 # before it builds. A run fails if a release or a tag v<version> already exists, draft or not, so a stale draft is
@@ -265,10 +267,84 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # The three PyPI wheels (ADR-0036). A wheel carries one gated binary unmodified, so the wheels are built here, from the
+  # files the legs produced, and ride on the release: the last job checksums, attests and attaches them with the
+  # binaries, and pypi.yml later uploads exactly these files to PyPI. Standard-library Python only, no install step, and
+  # the read-only token. The builder checks its own inputs (a checksum, the CPU and OS of each binary, the minimum macOS).
+  wheels:
+    name: PyPI wheels
+    needs: [preflight, build, notices]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Test the wheel builder
+        run: python3 -I -m unittest discover -s scripts/pypi
+
+      - name: Download the binaries and the notices
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: assets
+          merge-multiple: true
+
+      # The builder refuses an input SHA256SUMS does not list, so it needs the file. These sums are taken here, over what
+      # was downloaded, as the last job's are; each leg's own hash check covered the build job.
+      - name: Write the checksums the builder checks
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd assets
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-musl; do
+            test -f "logseq-mcp-server-${VERSION}-${target}"
+          done
+          test -f LICENSE
+          test -f THIRD-PARTY-NOTICES.txt
+          test "$(find . -type f | wc -l)" -eq 5
+          LC_ALL=C sha256sum "logseq-mcp-server-${VERSION}-aarch64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl" LICENSE THIRD-PARTY-NOTICES.txt > SHA256SUMS
+
+      - name: Build the wheels
+        env:
+          VERSION: ${{ inputs.version }}
+        run: python3 -I scripts/pypi/build_wheels.py --version "$VERSION" --assets assets --readme pypi/README.md --out wheels
+
+      # What an install does, on the one wheel this runner can run: the executable lands on PATH with the gated binary's
+      # bytes. Each binary was gated on its own target by the build job.
+      - name: Install the Linux wheel into a clean environment
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/check"
+          "${RUNNER_TEMP}/check/bin/python" -m pip install --no-index --no-deps wheels/*musllinux_1_2_x86_64.whl
+          cmp "${RUNNER_TEMP}/check/bin/logseq-mcp-server" "assets/logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl"
+          test -x "${RUNNER_TEMP}/check/bin/logseq-mcp-server"
+
+      # Exactly the three wheels and nothing else, so an unexpected file can't ride along into the release.
+      - name: Check the wheel set
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd wheels
+          test "$(find . -type f | wc -l)" -eq 3
+          test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_11_0_arm64.whl"
+          test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_10_12_x86_64.whl"
+          test -f "logseq_mcp_server-${VERSION}-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl"
+
+      - name: Upload the wheels
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheels
+          path: wheels/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
   # The only job with a write token. It joins the legs, writes SHA256SUMS, and on a real run attests and drafts.
   release:
     name: Checksums, attestation and draft release
-    needs: [preflight, build, notices]
+    needs: [preflight, build, notices, wheels]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -311,8 +387,11 @@ jobs:
           done
           test -f LICENSE
           test -f THIRD-PARTY-NOTICES.txt
-          test "$(find . -type f | wc -l)" -eq 5
-          LC_ALL=C sha256sum "logseq-mcp-server-${VERSION}-aarch64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl" LICENSE THIRD-PARTY-NOTICES.txt > SHA256SUMS
+          test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_11_0_arm64.whl"
+          test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_10_12_x86_64.whl"
+          test -f "logseq_mcp_server-${VERSION}-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl"
+          test "$(find . -type f | wc -l)" -eq 8
+          LC_ALL=C sha256sum "logseq-mcp-server-${VERSION}-aarch64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl" LICENSE THIRD-PARTY-NOTICES.txt "logseq_mcp_server-${VERSION}-py3-none-macosx_11_0_arm64.whl" "logseq_mcp_server-${VERSION}-py3-none-macosx_10_12_x86_64.whl" "logseq_mcp_server-${VERSION}-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl" > SHA256SUMS
           sha256sum --check SHA256SUMS
           cat SHA256SUMS
 
@@ -325,11 +404,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Attest build provenance for the binaries
+      # The binaries and the wheels (ADR-0036): pypi.yml checks a wheel's attestation before it uploads it.
+      - name: Attest build provenance for the binaries and the wheels
         if: ${{ !inputs.dry_run }}
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: dist/logseq-mcp-server-*
+          subject-path: |
+            dist/logseq-mcp-server-*
+            dist/*.whl
 
       # A draft: not public, and no tag until the maintainer publishes it from the Releases page.
       - name: Create the draft release
@@ -344,4 +426,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "v${VERSION}" \
             --notes "Built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} at ${GITHUB_SHA}. Check a download against SHA256SUMS, or with gh attestation verify." \
-            dist/logseq-mcp-server-* dist/SHA256SUMS dist/LICENSE dist/THIRD-PARTY-NOTICES.txt
+            dist/logseq-mcp-server-* dist/SHA256SUMS dist/LICENSE dist/THIRD-PARTY-NOTICES.txt dist/*.whl

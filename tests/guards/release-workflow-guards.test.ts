@@ -236,11 +236,11 @@ describe('ADR-0035: release.yml is manual, main-only, dry-run by default and dra
     });
 
     it('gates to another branch', () => {
-      const broken = changed("    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices]\n    if: github.ref == 'refs/heads/main'\n", "    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices]\n    if: github.ref == 'refs/heads/feature/rust-spike'\n");
+      const broken = changed("    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices, wheels]\n    if: github.ref == 'refs/heads/main'\n", "    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices, wheels]\n    if: github.ref == 'refs/heads/feature/rust-spike'\n");
       expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/job "release" is not gated/);
     });
 
-    const releaseGate = "    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices]\n    if: github.ref == 'refs/heads/main'\n";
+    const releaseGate = "    name: Checksums, attestation and draft release\n    needs: [preflight, build, notices, wheels]\n    if: github.ref == 'refs/heads/main'\n";
 
     it('adds a status function to a job gate, so the last job could run past a failed leg', () => {
       for (const tail of ['always()', '!cancelled()', 'failure()', 'success() || always()']) {
@@ -322,7 +322,7 @@ describe('ADR-0035: release.yml is manual, main-only, dry-run by default and dra
     });
 
     it('publishes the draft afterwards', () => {
-      const broken = changed('            dist/logseq-mcp-server-* dist/SHA256SUMS dist/LICENSE dist/THIRD-PARTY-NOTICES.txt\n', '            dist/logseq-mcp-server-* dist/SHA256SUMS dist/LICENSE dist/THIRD-PARTY-NOTICES.txt\n          gh release edit "v${VERSION}" --draft=false\n');
+      const broken = changed('            dist/logseq-mcp-server-* dist/SHA256SUMS dist/LICENSE dist/THIRD-PARTY-NOTICES.txt dist/*.whl\n', '            dist/logseq-mcp-server-* dist/SHA256SUMS dist/LICENSE dist/THIRD-PARTY-NOTICES.txt dist/*.whl\n          gh release edit "v${VERSION}" --draft=false\n');
       expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/gh release edit/);
     });
 
@@ -347,8 +347,10 @@ describe('ADR-0035: release.yml is manual, main-only, dry-run by default and dra
     });
 
     it('lets the last job run past a failed leg', () => {
-      const broken = changed('    needs: [preflight, build, notices]\n', '    needs: [preflight, notices]\n');
-      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/does not need "build"/);
+      const broken = changed('    needs: [preflight, build, notices, wheels]\n', '    needs: [preflight, build, notices]\n');
+      expect(releaseWorkflowProblems(broken).join('\n')).toMatch(/does not need "wheels"/);
+      const noBuild = changed('    needs: [preflight, build, notices, wheels]\n', '    needs: [preflight, notices, wheels]\n');
+      expect(releaseWorkflowProblems(noBuild).join('\n')).toMatch(/does not need "build"/);
     });
 
     it('puts an input into a script instead of env', () => {
