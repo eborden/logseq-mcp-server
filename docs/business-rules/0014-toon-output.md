@@ -18,4 +18,4 @@ none-yet: #469 (adds a test that a TOON result equals the JSON result in data an
 
 | Date | Change | Issue/PR |
 |---|---|---|
-| 2026-10-09 | Introduced. | #468 |
+| 2026-10-09 | Introduced. | #468, #470 |
