@@ -153,7 +153,7 @@ impl LogseqClient {
         // `error` key, so the body is always checked.
         if let Value::Object(map) = &data {
             if let Some(error) = map.get("error") {
-                return Err(LogseqError::Api { message: js_string(error) });
+                return Err(LogseqError::Api { message: error_text(error) });
             }
         }
         Ok(data)
@@ -179,21 +179,11 @@ impl LogseqClient {
     }
 }
 
-// PARITY(#299): writes an API error value as a JavaScript template literal would (`[object Object]`, `a,b`) —
-// drop if Rust becomes the only server.
-/// What a JavaScript template literal makes of the `error` value, as in `${responseData.error}`.
-fn js_string(value: &Value) -> String {
+/// The `error` value of an API answer, as text: a string as it is, anything else as JSON.
+fn error_text(value: &Value) -> String {
     match value {
-        Value::String(s) => s.clone(),
-        Value::Null => "null".to_owned(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::Array(items) => items
-            .iter()
-            .map(|item| if item.is_null() { String::new() } else { js_string(item) })
-            .collect::<Vec<_>>()
-            .join(","),
-        Value::Object(_) => "[object Object]".to_owned(),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -358,12 +348,12 @@ mod tests {
     }
 
     #[test]
-    fn the_api_error_value_is_shown_as_javascript_would() {
-        assert_eq!(js_string(&serde_json::json!("x")), "x");
-        assert_eq!(js_string(&serde_json::json!(null)), "null");
-        assert_eq!(js_string(&serde_json::json!(false)), "false");
-        assert_eq!(js_string(&serde_json::json!(3)), "3");
-        assert_eq!(js_string(&serde_json::json!(["a", null, 1])), "a,,1");
-        assert_eq!(js_string(&serde_json::json!({"k": "v"})), "[object Object]");
+    fn the_api_error_value_is_shown_as_text_or_json() {
+        assert_eq!(error_text(&serde_json::json!("x")), "x");
+        assert_eq!(error_text(&serde_json::json!(null)), "null");
+        assert_eq!(error_text(&serde_json::json!(false)), "false");
+        assert_eq!(error_text(&serde_json::json!(3)), "3");
+        assert_eq!(error_text(&serde_json::json!(["a", null, 1])), r#"["a",null,1]"#);
+        assert_eq!(error_text(&serde_json::json!({"k": "v"})), r#"{"k":"v"}"#);
     }
 }
