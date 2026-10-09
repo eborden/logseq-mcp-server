@@ -155,6 +155,20 @@ async fn a_null_answer_is_a_warning_and_never_an_empty_range() {
     assert_eq!(result["entries"][0]["blocks"], json!([]));
 }
 
+// BR-0011, #318: a `null` answer to the search term's alias lookup is not "that name is no page".
+// The search still runs on the term alone, and the result says the other names may be missing.
+#[tokio::test]
+async fn a_null_answer_to_the_search_terms_alias_lookup_is_a_warning_and_the_term_still_searches() {
+    let logseq = mock_logseq(vec![json!([page(1, 20250101)]), json!([block(11, 1, "Atlas notes")]), Value::Null]).await;
+    let found = query_journals(&client(&logseq), &Args { search_term: Some("Atlas".into()), ..range(20250101, 20250101) }, TODAY).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 3);
+    let result = result_of(&found.json);
+    assert_eq!(result["summary"]["totalBlocks"], 1);
+    assert_eq!(result["warnings"][0]["code"], "alias_lookup_unavailable");
+    assert_eq!(result["warnings"].as_array().unwrap().len(), 1);
+    assert!(result.get("resolvedAliases").is_none());
+}
+
 #[tokio::test]
 async fn a_failed_call_is_an_error_and_never_an_empty_result() {
     let logseq = mock_logseq(vec![]).await;

@@ -15,6 +15,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use super::queries;
+use super::RETRY_ADVICE;
 pub use super::queries::linked_references_of_pages;
 use super::wire::{self, PulledPage};
 use crate::client::LogseqClient;
@@ -52,12 +53,15 @@ pub struct AliasSet {
     pub members: Vec<AliasMember>,
     /// The group was cut at [`MAX_ALIAS_SET_SIZE`]
     pub truncated: bool,
+    /// LogSeq answered the alias query with `null` (BR-0011): the group is unknown, not empty, and
+    /// the set holds only what the caller already had. The name the lookup was about, for the warning.
+    pub unavailable: Option<String>,
 }
 
 impl AliasSet {
     /// `singleAliasSet`: a set holding only `page`. No query, nothing to union.
     pub fn single(page: &PulledPage) -> AliasSet {
-        AliasSet { members: AliasMember::of(page).into_iter().collect(), truncated: false }
+        AliasSet { members: AliasMember::of(page).into_iter().collect(), truncated: false, unavailable: None }
     }
 
     /// `hasAliases`: the set holds more than the page asked about.
@@ -93,23 +97,38 @@ pub fn compare_code_units(a: &str, b: &str) -> Ordering {
     a.encode_utf16().cmp(b.encode_utf16())
 }
 
-/// `aliasSetWarnings`: the `alias_set_truncated` warning for each set that was cut.
+/// `aliasSetWarnings`: the `alias_set_truncated` warning for each set that was cut, and the
+/// `alias_lookup_unavailable` warning for each whose lookup LogSeq did not answer (#318). No
+/// `howToFetchAll` on the second: no parameter fetches what LogSeq did not answer.
 pub fn alias_set_warnings(sets: &[&AliasSet]) -> Vec<ResultWarning> {
-    sets.iter()
-        .filter(|set| set.truncated)
-        .map(|set| {
-            ResultWarning::new(
-                "alias_set_truncated",
-                format!(
-                    "The alias group of \"{}\" has more than {MAX_ALIAS_SET_SIZE} pages; \
-                     only the page itself and {} aliases were used, so references written under \
-                     the other names are missing. The maximum cannot be raised.",
-                    set.members.first().map_or("", |member| member.original_name.as_str()),
-                    MAX_ALIAS_SET_SIZE - 1
-                ),
-            )
-        })
-        .collect()
+    sets.iter().filter_map(|set| unavailable_warning(set).or_else(|| truncated_warning(set))).collect()
+}
+
+fn unavailable_warning(set: &AliasSet) -> Option<ResultWarning> {
+    let name = set.unavailable.as_ref()?;
+    Some(ResultWarning::new(
+        "alias_lookup_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the aliases of \"{name}\" (possibly no graph open or a \
+             re-index in progress), so references written under its other names may be missing. \
+             This does not mean it has no aliases. {RETRY_ADVICE}"
+        ),
+    ))
+}
+
+fn truncated_warning(set: &AliasSet) -> Option<ResultWarning> {
+    set.truncated.then(|| {
+        ResultWarning::new(
+            "alias_set_truncated",
+            format!(
+                "The alias group of \"{}\" has more than {MAX_ALIAS_SET_SIZE} pages; \
+                 only the page itself and {} aliases were used, so references written under \
+                 the other names are missing. The maximum cannot be raised.",
+                set.members.first().map_or("", |member| member.original_name.as_str()),
+                MAX_ALIAS_SET_SIZE - 1
+            ),
+        )
+    })
 }
 
 // PARITY(#299): sorts members with `localeCompare`, whose order depends on the host's locale (suspected TS
@@ -139,7 +158,7 @@ fn build_set(start: AliasMember, found: Vec<AliasMember>) -> AliasSet {
     others.truncate(room);
     let mut members = vec![start];
     members.extend(others);
-    AliasSet { members, truncated }
+    AliasSet { members, truncated, unavailable: None }
 }
 
 /// The alias sets of several resolved pages, in one Datalog query for all of them, and none when
@@ -164,9 +183,19 @@ pub async fn resolve_alias_sets(client: &LogseqClient, pages: &[&PulledPage]) ->
     let ids: Vec<PageId> = query_ids.iter().map(|&id| PageId::new(id)).collect::<Result<_, _>>()?;
     let query = queries::alias_sets(&ids);
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    // PARITY(#299): a `null` answer is read as "no rows", so the page looks like it has no aliases when
-    // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
-    let rows = wire::alias_set_rows(&answer)?.unwrap_or_default();
+    // A `null` is no answer, not "no aliases" (BR-0011): each queried page keeps its one-page set, marked unavailable
+    let Some(rows) = wire::alias_set_rows(&answer)? else {
+        return Ok(starts
+            .into_iter()
+            .map(|set| match set.members.first() {
+                Some(start) if query_ids.contains(&start.id) => {
+                    let name = start.original_name.clone();
+                    AliasSet { unavailable: Some(name), ..set }
+                }
+                _ => set,
+            })
+            .collect());
+    };
 
     let mut by_start: HashMap<i64, Vec<AliasMember>> = HashMap::new();
     for (start_id, page) in rows {
@@ -191,12 +220,14 @@ pub async fn resolve_alias_set(client: &LogseqClient, page: &PulledPage) -> Resu
 /// `resolveAliasSetByName`: the alias set of a page known only by name, or `None` when no page has
 /// that name or it has no aliases. For free text that may or may not be a page name (a
 /// `search_term`), where "not a page" is an ordinary answer, not an error. One Datalog query.
+/// A `null` answer is not that answer (BR-0011, #318): it is a set with no members, marked
+/// [`AliasSet::unavailable`], so the caller can say the lookup failed.
 pub async fn resolve_alias_set_by_name(client: &LogseqClient, name: &str) -> Result<Option<AliasSet>, ToolError> {
     let query = queries::alias_set_by_name(&PageName::new(name));
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    // PARITY(#299): a `null` answer is read as "no rows", so the name looks like a page with no aliases when
-    // LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #318, in both servers.
-    let rows = wire::alias_set_by_name_rows(&answer)?.unwrap_or_default();
+    let Some(rows) = wire::alias_set_by_name_rows(&answer)? else {
+        return Ok(Some(AliasSet { members: Vec::new(), truncated: false, unavailable: Some(name.to_owned()) }));
+    };
     Ok(alias_set_of_rows(&rows))
 }
 
@@ -274,6 +305,28 @@ mod tests {
              so references written under the other names are missing. The maximum cannot be raised."
         );
         assert!(alias_set_warnings(&[&AliasSet::single(&page(json!({"id": 1})))]).is_empty());
+    }
+
+    #[test]
+    fn an_unavailable_lookup_says_so_and_is_never_also_reported_as_cut() {
+        let unavailable = AliasSet { unavailable: Some("Atlas".to_owned()), ..AliasSet::single(&page(json!({"id": 1, "name": "atlas", "original-name": "Atlas"}))) };
+        let warnings = alias_set_warnings(&[&unavailable]);
+        let [warning] = &warnings[..] else { panic!("one warning") };
+        assert_eq!(warning.code, "alias_lookup_unavailable");
+        assert_eq!(
+            warning.message,
+            "LogSeq returned no answer when looking up the aliases of \"Atlas\" (possibly no graph open or a re-index in \
+             progress), so references written under its other names may be missing. \
+             This does not mean it has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+        );
+        assert_eq!(warning.how_to_fetch_all, None);
+        // the set is the page alone, so no names are reported as covered
+        assert_eq!(unavailable.resolved_aliases(), None);
+        // a set that is somehow both is reported once, as unavailable, and a cut set alone is still `alias_set_truncated`
+        let both = AliasSet { truncated: true, ..unavailable.clone() };
+        assert_eq!(alias_set_warnings(&[&both]).iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["alias_lookup_unavailable"]);
+        let cut = AliasSet { truncated: true, ..AliasSet::single(&page(json!({"id": 1, "name": "atlas", "original-name": "Atlas"}))) };
+        assert_eq!(alias_set_warnings(&[&cut]).iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["alias_set_truncated"]);
     }
 
     #[test]

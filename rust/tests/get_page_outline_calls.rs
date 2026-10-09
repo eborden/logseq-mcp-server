@@ -182,6 +182,28 @@ async fn a_null_answer_is_an_empty_outline_and_an_unreadable_one_is_an_error() {
     assert!(error.to_string().contains("[0][0]: a block needs an id"));
 }
 
+const RESOLVER_UNAVAILABLE: &str = "LogSeq returned no answer when looking up the page \"bob\" (possibly no graph open or a re-index in progress), so it can't tell whether the page exists. Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+
+// BR-0011, #301: a `null` answer from the resolver is an error that stops at once. It is not "no rows", so
+// it makes no leaf query and no suggestion lookup, and it never says the page is missing.
+#[tokio::test]
+async fn a_null_answer_from_the_resolver_is_an_error_with_no_further_call() {
+    let logseq = mock_logseq(vec![Value::Null]).await;
+    let error = get_page_outline(&client(&logseq), "bob").await.unwrap_err();
+    assert!(matches!(error, ToolError::Failed(_)), "{error}");
+    assert_eq!(error.to_string(), RESOLVER_UNAVAILABLE);
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_leaf_query_is_the_same_error_and_makes_no_suggestion_lookup() {
+    let logseq = mock_logseq(vec![json!([]), Value::Null]).await;
+    let error = get_page_outline(&client(&logseq), "bob").await.unwrap_err();
+    assert!(matches!(error, ToolError::Failed(_)), "{error}");
+    assert_eq!(error.to_string(), RESOLVER_UNAVAILABLE);
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery"]);
+}
+
 #[tokio::test]
 async fn an_ambiguous_name_stops_after_the_resolver() {
     let logseq = mock_logseq(vec![json!([

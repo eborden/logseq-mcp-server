@@ -2,7 +2,8 @@
 //! literal substring search over block content, newest first.
 //!
 //! Calls: 1 (the search query), or 2 with `include_context` (one batched lookup of the pages the
-//! returned blocks sit on, and none when no block has a page id). The match runs inside LogSeq
+//! returned blocks sit on, and none when no block has a page id; a `null` answer to it is a
+//! `context_unavailable` warning, not blocks with no context, BR-0011). The match runs inside LogSeq
 //! (`re-pattern` / `re-find` over the text with its metacharacters escaped), results are sorted
 //! here, newest first (highest block id), and cut to `limit`, since Datalog here has no `:limit`.
 //!
@@ -150,6 +151,32 @@ fn pulled_page_to_entity(pulled: &Map<String, Value>) -> Map<String, Value> {
     page
 }
 
+/// What to do about a lookup of pages that LogSeq did not answer: no parameter fetches it, so the warnings carry no
+/// `howToFetchAll` and `hasMore` stays false (BR-0011). The retry advice is in the message.
+const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+
+/// `include_context` could not read the pages of the `count` result blocks: they are returned without `context`.
+fn context_unavailable(count: usize) -> ResultWarning {
+    ResultWarning::new(
+        "context_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the pages of the {count} result block(s) (possibly no graph open or a re-index in \
+             progress), so their context is missing. This does not mean they have none. {RETRY_ADVICE}"
+        ),
+    )
+}
+
+/// `get_context_for_query` could not read the pages of the `count` keyword hits: a hit keeps the page its own block names, if any.
+pub fn hit_pages_unavailable(count: usize) -> ResultWarning {
+    ResultWarning::new(
+        "hit_pages_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the pages of the {count} keyword hit(s) (possibly no graph open or a re-index in \
+             progress), so a hit may be listed without its page. This does not mean it has none. {RETRY_ADVICE}"
+        ),
+    )
+}
+
 /// A block and what `include_context` adds to it.
 struct Context {
     page: Map<String, Value>,
@@ -159,10 +186,11 @@ struct Context {
 
 /// Each block with its `context` (page, references, tags), from one batched page lookup (not one
 /// per block). A block with no page id, or whose page isn't found, gets none. Only the blocks kept
-/// are passed, so the lookup covers no more pages than the result shows.
+/// are passed, so the lookup covers no more pages than the result shows. The flag is true when LogSeq
+/// answered `null` to the lookup (every block then gets none), which is not "no page found" (BR-0011).
 ///
 /// API calls: 1, or 0 when no block has a page id.
-async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<Vec<Option<Context>>, ToolError> {
+async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<(Vec<Option<Context>>, bool), ToolError> {
     let mut page_ids: Vec<i64> = Vec::new();
     for id in blocks.iter().filter_map(block_page_id) {
         if !page_ids.contains(&id) {
@@ -171,13 +199,14 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<Ve
     }
 
     let mut page_by_id: HashMap<i64, Map<String, Value>> = HashMap::new();
+    let mut unavailable = false;
     if !page_ids.is_empty() {
         let ids = page_ids.iter().map(|&id| PageId::new(id)).collect::<Result<Vec<_>, _>>()?;
         let query = pages_by_ids(&ids);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-        // PARITY(#299): a `null` answer is read as no pages, so every block silently loses its context, where
-        // BR-0011 asks for a warning that the context is unavailable (suspected TS bug) — fix per #326, in both servers.
-        for row in wire::page_rows(&answer)?.unwrap_or_default() {
+        let rows = wire::page_rows(&answer)?;
+        unavailable = rows.is_none();
+        for row in rows.unwrap_or_default() {
             let page = pulled_page_to_entity(row.as_object().expect("a checked page is an object"));
             if let Some(id) = page.get("id").and_then(crate::wire::whole_number) {
                 page_by_id.insert(id, page);
@@ -185,7 +214,7 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<Ve
         }
     }
 
-    Ok(blocks
+    let contexts = blocks
         .iter()
         .map(|block| {
             // No page id, or page not found: skip context for this block
@@ -193,7 +222,8 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<Ve
             let content = block.get("content").and_then(Value::as_str).unwrap_or("");
             Some(Context { page: page.clone(), references: extract_page_refs(content), tags: extract_tags(content) })
         })
-        .collect())
+        .collect();
+    Ok((contexts, unavailable))
 }
 
 /// A slim result: `toSlimBlock`, with its `context` slimmed too. Empty `references` and `tags` are
@@ -240,10 +270,11 @@ pub async fn find_blocks(client: &LogseqClient, query: &str) -> Result<Option<Ve
 }
 
 /// `blocks` as full results with `context` (page, references, tags) added from one batched page
-/// lookup (`withPageContext`). API calls: 1, or 0 when no block has a page id.
-pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>) -> Result<Vec<Value>, ToolError> {
-    let contexts = with_page_context(client, &blocks).await?;
-    Ok(blocks.iter().zip(&contexts).map(|(block, context)| full_result(block, context.as_ref())).collect())
+/// lookup (`withPageContext`), and whether LogSeq answered `null` to that lookup (the blocks then carry no
+/// `context`, and the caller says so with [`hit_pages_unavailable`]). API calls: 1, or 0 when no block has a page id.
+pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>) -> Result<(Vec<Value>, bool), ToolError> {
+    let (contexts, unavailable) = with_page_context(client, &blocks).await?;
+    Ok((blocks.iter().zip(&contexts).map(|(block, context)| full_result(block, context.as_ref())).collect(), unavailable))
 }
 
 /// Search blocks for `query`: the results and their meta (`totals.matches` is the number of
@@ -265,7 +296,10 @@ pub async fn search_blocks_with_meta(
     let total = matches.len();
     matches.truncate(limit.min(MAX_SEARCH_LIMIT) as usize);
 
-    let warnings: Vec<ResultWarning> = (total > matches.len())
+    // Page context only for the blocks kept, so the lookup never covers cut ones
+    let (contexts, context_missing) = if include_context { with_page_context(client, &matches).await? } else { (matches.iter().map(|_| None).collect(), false) };
+
+    let mut warnings: Vec<ResultWarning> = (total > matches.len())
         .then(|| {
             capped_truncation_warning(CappedTruncation {
                 what: "matching blocks",
@@ -282,10 +316,10 @@ pub async fn search_blocks_with_meta(
         })
         .into_iter()
         .collect();
+    if context_missing {
+        warnings.push(context_unavailable(matches.len()));
+    }
     let meta = ResultMeta::new(warnings, &[("matches", total)]);
-
-    // Page context only for the blocks kept, so the lookup never covers cut ones
-    let contexts: Vec<Option<Context>> = if include_context { with_page_context(client, &matches).await? } else { matches.iter().map(|_| None).collect() };
     let results = matches
         .iter()
         .zip(&contexts)

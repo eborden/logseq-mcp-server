@@ -173,6 +173,19 @@ fn resolve_from_rows(input: &str, name: &str, rows: &[ResolverRow]) -> Option<Re
     None
 }
 
+/// The advice every `*_unavailable` message ends with. No parameter fetches what LogSeq did not
+/// answer, so it is the only next step.
+pub const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+
+/// What a `null` answer to a page lookup is (BR-0011, #301): an error that says LogSeq gave no
+/// answer. It is not "not found", so it carries no closest names and costs no further call.
+fn lookup_unavailable(input: &str) -> ToolError {
+    ToolError::Failed(format!(
+        "LogSeq returned no answer when looking up the page \"{input}\" (possibly no graph open or a re-index in \
+         progress), so it can't tell whether the page exists. {RETRY_ADVICE}"
+    ))
+}
+
 async fn run(client: &LogseqClient, query: &Query) -> Result<serde_json::Value, ToolError> {
     Ok(client.execute_datalog_query(&query.text, &query.inputs).await?)
 }
@@ -195,16 +208,16 @@ async fn run(client: &LogseqClient, query: &Query) -> Result<serde_json::Value, 
 /// 4. **Namespace leaf**: `atlas` finds `projects/atlas`. One page resolves to it; several are
 ///    ambiguous.
 ///
-/// Infrastructure errors (connection, timeout, auth) propagate untouched.
+/// Infrastructure errors (connection, timeout, auth) propagate untouched. So does a `null` answer
+/// to either query, as a [`ToolError::Failed`] (BR-0011): LogSeq did not say the page is missing.
 pub async fn resolve_page(client: &LogseqClient, input: &str) -> Result<Resolution, ToolError> {
     let name = js::trim(input);
     let journal_day = iso_date_to_journal_day(name);
     let page_name = PageName::new(name);
 
     let answer = run(client, &queries::resolve_page(&page_name, journal_day)).await?;
-    // PARITY(#299): a `null` answer is read as "no rows", so the page is reported as not found
-    // when LogSeq didn't answer (suspected TS bug, BR-0011) — fix per #301, in both servers.
-    let rows = wire::resolver_rows(&answer)?.unwrap_or_default();
+    // A `null` is no answer, not "no rows" (BR-0011): stop here, with no leaf query and no suggestions
+    let rows = wire::resolver_rows(&answer)?.ok_or_else(|| lookup_unavailable(input))?;
     if let Some(resolution) = resolve_from_rows(input, name, &rows) {
         return Ok(resolution);
     }
@@ -212,8 +225,7 @@ pub async fn resolve_page(client: &LogseqClient, input: &str) -> Result<Resoluti
     // Last resort, and only for names that are not dates
     if journal_day.is_none() {
         let answer = run(client, &queries::namespace_leaf_pages(&page_name)).await?;
-        // PARITY(#299): the same `null` as "no rows" for the leaf lookup (suspected TS bug, BR-0011) — fix per #301.
-        let rows = wire::page_rows(&answer)?.unwrap_or_default();
+        let rows = wire::page_rows(&answer)?.ok_or_else(|| lookup_unavailable(input))?;
         let leaves = distinct_pages(rows.iter().collect());
         if !leaves.is_empty() {
             let reason = format!("namespace page ending in {}", json_string(&format!("/{name}")));

@@ -149,6 +149,62 @@ async fn a_block_with_no_page_costs_no_lookup() {
     assert!(context.page.is_none() && context.message.is_some());
 }
 
+// BR-0011 (#326): a `null` answer to the lookup of the blocks' pages is not "no pages"
+#[tokio::test]
+async fn a_null_page_lookup_is_a_warning_and_not_no_page_open() {
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, json!(null)),
+        (GET_CURRENT_BLOCK, block(105, "on bob", 20)),
+        (GET_SELECTED_BLOCKS, json!(null)),
+        (DATASCRIPT_QUERY, json!(null)),
+    ])
+    .await;
+    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+
+    assert_eq!(methods(&logseq).len(), 4);
+    assert!(context.message.is_none(), "no page is open is a guess when the names are unavailable");
+    assert!(context.page.is_none());
+    assert_eq!(context.has_more, Some(false));
+    let warnings = context.warnings.as_ref().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].code, "page_names_unavailable");
+    assert!(warnings[0].how_to_fetch_all.is_none());
+    assert!(context.focused_block.as_ref().unwrap().get("pageName").is_none());
+}
+
+#[tokio::test]
+async fn a_null_page_lookup_keeps_the_open_page_and_says_so_without_guessing_it_is_unknown() {
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, open_page(10, "Project Atlas")),
+        (GET_CURRENT_BLOCK, block(512, "on atlas", 10)),
+        (GET_SELECTED_BLOCKS, json!([block(105, "on bob", 20)])),
+        (DATASCRIPT_QUERY, json!(null)),
+    ])
+    .await;
+    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+
+    assert!(context.message.is_none());
+    assert_eq!(context.page.as_ref().unwrap()["originalName"], "Project Atlas");
+    let warning = &context.warnings.as_ref().unwrap()[0];
+    assert_eq!(warning.code, "page_names_unavailable");
+    assert!(!warning.message.contains("open page"), "{}", warning.message);
+}
+
+#[tokio::test]
+async fn an_empty_page_lookup_is_no_pages_and_carries_no_warning() {
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, json!(null)),
+        (GET_CURRENT_BLOCK, block(105, "on bob", 20)),
+        (GET_SELECTED_BLOCKS, json!(null)),
+        (DATASCRIPT_QUERY, json!([])),
+    ])
+    .await;
+    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+
+    assert!(context.warnings.is_none() && context.has_more.is_none());
+    assert!(context.message.is_some());
+}
+
 #[tokio::test]
 async fn a_zoomed_block_names_its_page_through_one_lookup() {
     let logseq = mock_logseq(&[
