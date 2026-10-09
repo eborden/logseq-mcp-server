@@ -1,0 +1,336 @@
+name: Release
+
+# Builds the native binaries and, on a real run, drafts the GitHub Release (ADR-0035). Nothing here publishes.
+#
+# Manual only, from main: this workflow never runs on push, tag or pull request. The maintainer starts it from the
+# Actions tab ("Run workflow", branch main). No session runs it, tags or releases anything (ADR-0017, CLAUDE.md).
+#
+# - dry_run (the default): builds every target, runs every gate leg and assembles the release set (binaries,
+#   SHA256SUMS, LICENSE, THIRD-PARTY-NOTICES.txt) as workflow artifacts. It makes no attestation, no release and no tag.
+# - dry_run off: the same, then attests build provenance for each binary and creates a DRAFT release v<version> at
+#   this run's commit. A draft is not public and has no tag. The maintainer publishes it from the Releases page, and
+#   that click creates the tag (ADR-0035 Decision 2 and 12).
+#
+# The version input must equal the version in rust/Cargo.toml, package.json and both plugin manifests, or the run fails
+# before it builds. A run fails if a release or a tag v<version> already exists, draft or not, so a stale draft is
+# never reused with different assets: the maintainer deletes it first, on purpose.
+#
+# Permissions: every job reads the repository only, except the last (release), which alone has contents: write and
+# the attestation permissions. Every third-party action is pinned by commit SHA (the version is in the comment).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to release, x.y.z. It must equal Cargo.toml, package.json and both plugin manifests.
+        type: string
+        required: true
+      dry_run:
+        description: Build and check only. Untick it to also attest the binaries and create the draft release.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Fails the run before any build when the version is wrong or v<version> is taken. It sees published releases and
+  # tags; the last job repeats the check with a token that also sees drafts.
+  preflight:
+    name: Check the version and that v<version> is free
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the version input against the four places that hold it
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::The version input must be plain x.y.z, with no v prefix and no pre-release part."
+            exit 1
+          fi
+          cargo_version="$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"$/\1/p' rust/Cargo.toml | head -n 1)"
+          status=0
+          check() {
+            if [ "$2" != "$VERSION" ]; then
+              echo "::error file=$1::$1 says version '$2', which is not the version input."
+              status=1
+            fi
+          }
+          check rust/Cargo.toml "$cargo_version"
+          check package.json "$(jq -r '.version' package.json)"
+          check .claude-plugin/plugin.json "$(jq -r '.version' .claude-plugin/plugin.json)"
+          check .claude-plugin/marketplace.json "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)"
+          exit "$status"
+
+      - name: Check that no release or tag v<version> exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: v${{ inputs.version }}
+        run: |
+          tag_hits="$(gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${TAG_NAME}" --jq '.[] | select(.ref == "refs/tags/" + env.TAG_NAME) | .ref')"
+          release_hits="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.tag_name == env.TAG_NAME) | .id')"
+          if [ -n "$tag_hits" ] || [ -n "$release_hits" ]; then
+            echo "::error::A release or tag ${TAG_NAME} already exists. Delete it deliberately first; this workflow never reuses one."
+            exit 1
+          fi
+
+  # One leg per target. A leg that fails its gate ships nothing: the last job needs every leg.
+  build:
+    name: Build and gate (${{ matrix.target }})
+    needs: preflight
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # Every leg runs to its end, so a dry run shows the result of each one.
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs the toolchain rust/rust-toolchain.toml names, with the target added. The build cache is off: a
+      # release is built from the lockfile alone, and a cold build is a few minutes (#304).
+      - name: Set up the Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          rust-src-dir: rust
+          target: ${{ matrix.target }}
+          cache: false
+          rustflags: ""
+          build-warnings: warn
+
+      - name: Check the compiler is the pinned one
+        working-directory: rust
+        run: |
+          expected="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustc --version | grep -q "^rustc ${expected} " || { rustc --version; echo "expected rustc ${expected}" >&2; exit 1; }
+
+      - name: Build (release)
+        id: build
+        working-directory: rust
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cargo build --release --locked --target "$TARGET"
+          bin="target/${TARGET}/release/logseq-mcp-server"
+          echo "sha256=$(shasum -a 256 "$bin" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      # The same steps ci.yml runs on the release build, against this target's build. The binary is the one just
+      # built: the parity test starts it through CARGO_BIN_EXE, and the step after the gate checks its bytes did not change.
+      - name: Parity test and its self-check
+        working-directory: rust
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo test --release --locked --target "$TARGET" --test parity --test parity_self_check
+
+      # The library's unit tests with debug_assertions off, as ci.yml runs them: LTO off and 16 codegen units keep
+      # it short and change nothing about debug_assertions.
+      - name: Unit tests (release)
+        working-directory: rust
+        env:
+          TARGET: ${{ matrix.target }}
+          CARGO_PROFILE_RELEASE_LTO: 'off'
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+        run: cargo test --release --locked --target "$TARGET" --lib
+
+      - name: Stage the binary the gate tested
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ inputs.version }}
+          BUILT_SHA256: ${{ steps.build.outputs.sha256 }}
+        run: |
+          bin="rust/target/${TARGET}/release/logseq-mcp-server"
+          now="$(shasum -a 256 "$bin" | cut -d ' ' -f 1)"
+          if [ "$now" != "$BUILT_SHA256" ]; then
+            echo "::error::The binary changed after the release build, so the gate did not test the bytes that would ship."
+            exit 1
+          fi
+          mkdir dist
+          asset="dist/logseq-mcp-server-${VERSION}-${TARGET}"
+          cp "$bin" "$asset"
+          chmod +x "$asset"
+          ls -l "$asset"
+          file "$asset"
+          shasum -a 256 "$asset"
+
+      # The musl binary is the one that has to run on any distribution, so it has to be static.
+      - name: Check the musl binary is static
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ inputs.version }}
+        run: file "dist/logseq-mcp-server-${VERSION}-${TARGET}" | grep -Eq 'statically linked|static-pie linked'
+
+      # arm64 macOS needs at least an ad-hoc signature to run, which the linker adds (the parity test already ran the
+      # binary). Shown for the dry-run report, never a gate: codesign exits non-zero for a binary with no signature.
+      - name: Show the macOS signature
+        if: runner.os == 'macOS'
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ inputs.version }}
+        run: codesign --display --verbose=2 "dist/logseq-mcp-server-${VERSION}-${TARGET}" 2>&1 || true
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binary-${{ matrix.target }}
+          path: dist/logseq-mcp-server-*
+          if-no-files-found: error
+          retention-days: 7
+
+  # THIRD-PARTY-NOTICES.txt: the licences of the crates the three targets build, from Cargo.lock (rust/about.toml and
+  # rust/about.hbs). cargo-about is a release binary, pinned by version and by the SHA-256 of the tarball (from the
+  # release's <archive>.sha256 file); to bump it, change both and read that file. It reads only Cargo.lock and the
+  # downloaded crates, and runs with the read-only token.
+  notices:
+    name: Licence notices
+    needs: preflight
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_ABOUT_VERSION: '0.9.2'
+      CARGO_ABOUT_SHA256: 9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up the Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+        with:
+          rust-src-dir: rust
+          cache: false
+          rustflags: ""
+          build-warnings: warn
+
+      - name: Install cargo-about (pinned by checksum)
+        run: |
+          dir="cargo-about-${CARGO_ABOUT_VERSION}-x86_64-unknown-linux-musl"
+          archive="${dir}.tar.gz"
+          curl --fail --silent --show-error --location --output "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/EmbarkStudios/cargo-about/releases/download/${CARGO_ABOUT_VERSION}/${archive}"
+          echo "${CARGO_ABOUT_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check -
+          tar --extract --gzip --file "${RUNNER_TEMP}/${archive}" --directory "${RUNNER_TEMP}" "${dir}/cargo-about"
+          mv "${RUNNER_TEMP}/${dir}/cargo-about" "${RUNNER_TEMP}/cargo-about"
+
+      - name: Download the locked crates
+        working-directory: rust
+        run: cargo fetch --locked
+
+      # Fails on a licence rust/about.toml doesn't accept, or a crate with none it can read, so a new dependency
+      # can't ship unnoticed.
+      - name: Generate THIRD-PARTY-NOTICES.txt
+        working-directory: rust
+        run: '"${RUNNER_TEMP}/cargo-about" generate --locked --offline --fail --config about.toml --output-file ../THIRD-PARTY-NOTICES.txt about.hbs'
+
+      - name: Collect the notices
+        run: |
+          mkdir notices
+          cp LICENSE THIRD-PARTY-NOTICES.txt notices/
+          wc -l notices/THIRD-PARTY-NOTICES.txt
+
+      - name: Upload the notices
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notices
+          path: notices/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job with a write token. It joins the legs, writes SHA256SUMS, and on a real run attests and drafts.
+  release:
+    name: Checksums, attestation and draft release
+    needs: [preflight, build, notices]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Creates the draft release. A draft is not public and creates no tag.
+      contents: write
+      # Sigstore signs the attestation with this run's OIDC identity, and the attestations API stores it.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the binaries and the notices
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      # With this token the list includes drafts, which the preflight's read-only token can't see.
+      - name: Check again that no release or tag v<version> exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: v${{ inputs.version }}
+        run: |
+          tag_hits="$(gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${TAG_NAME}" --jq '.[] | select(.ref == "refs/tags/" + env.TAG_NAME) | .ref')"
+          release_hits="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.tag_name == env.TAG_NAME) | .id')"
+          if [ -n "$tag_hits" ] || [ -n "$release_hits" ]; then
+            echo "::error::A release or tag ${TAG_NAME} already exists, as a draft or published. Delete it deliberately first."
+            exit 1
+          fi
+
+      # Exactly the release set and nothing else, so an unexpected file can't ride along.
+      - name: Write SHA256SUMS
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd dist
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-musl; do
+            test -f "logseq-mcp-server-${VERSION}-${target}"
+          done
+          test -f LICENSE
+          test -f THIRD-PARTY-NOTICES.txt
+          test "$(find . -type f | wc -l)" -eq 5
+          LC_ALL=C sha256sum "logseq-mcp-server-${VERSION}-aarch64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-apple-darwin" "logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl" LICENSE THIRD-PARTY-NOTICES.txt > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cat SHA256SUMS
+
+      # On a dry run this is the release set to rehearse the pre-publish check with (ADR-0035 Decision 12.4).
+      - name: Upload the release set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-set
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Attest build provenance for the binaries
+        if: ${{ !inputs.dry_run }}
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/logseq-mcp-server-*
+
+      # A draft: not public, and no tag until the maintainer publishes it from the Releases page.
+      - name: Create the draft release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --target "$GITHUB_SHA" \
+            --title "v${VERSION}" \
+            --notes "Built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} at ${GITHUB_SHA}. Check a download against SHA256SUMS, or with gh attestation verify." \
+            dist/logseq-mcp-server-* dist/SHA256SUMS dist/LICENSE dist/THIRD-PARTY-NOTICES.txt
