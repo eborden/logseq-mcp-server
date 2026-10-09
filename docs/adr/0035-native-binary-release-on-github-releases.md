@@ -111,8 +111,10 @@ Date: 2026-10-09
 ## Mechanical enforcement
 
 - test: `tests/rust-guards/version.test.ts` (the server reports the version in `rust/Cargo.toml`, and the package, the plugin manifest and the marketplace entry equal it)
-- test: `tests/guards/adr-workflow-guards.test.ts` (publish.yml triggers only on workflow_dispatch, defaults dry_run to true and is gated to main, and no other workflow runs npm publish; this holds the manual-publish rule for npm only, and #419 replaces it with the maintainer's OK per Decision 11)
+- test: `tests/guards/adr-workflow-guards.test.ts` (publish.yml is gone, and no workflow runs npm publish or reads NODE_AUTH_TOKEN or NPM_TOKEN; the manual-publish guards for publish.yml were removed in #419 with the maintainer's OK per Decision 11)
 - ci: `.github/workflows/ci.yml` (the ShellCheck job lints every tracked shell script, which will include the launcher)
 - none-yet: #418 (the release workflow: a guard test that release.yml triggers only on workflow_dispatch, is gated to main, defaults dry_run to true, creates only a draft, pins its actions by SHA, and that no other workflow creates a release or a tag; and the dry run that proves each gate leg)
-- none-yet: #419 (the launcher, its tests against a stub server and a file URL, a guard that the plugin manifest starts the launcher and that no manifest names a dist path, and package.json private)
+- test: `tests/guards/launcher.test.ts` (the launcher against a fake release over file:// and a local HTTP server: the platform mapping, a refused checksum, a missing file, an unsupported platform, the cache and nothing left half-written, both overrides, a missing tool, nothing on stdout, and the default download URL)
+- test: `tests/guards/adr-0018-plugin-layout.test.ts` (plugin.json starts the launcher with sh, the launcher is tracked, and no manifest names a dist path)
+- test: `tests/guards/package-tooling.test.ts` (package.json is private, and has no bin, main, files, build or prepublishOnly)
 - reviewer: the first release, its tag and any npm publish are made by the maintainer from the Actions and Releases pages, never from a session (CLAUDE.md, Common Gotchas); a reviewer checks that no PR adds a step that tags, releases or publishes outside the manual workflows, and that no doc names an npm package this repository doesn't own
