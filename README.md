@@ -28,7 +28,7 @@ Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 
 ## Install
 
-The server is a Rust binary. There is no npm package or release binary yet: how it ships is open (#350, #355). Until then, build it from a clone. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+The server is a Rust binary. There is no npm package or release binary yet: how it ships is open (#350, #355). Until then, build it from a clone. The name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`; it would run someone else's package. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
@@ -73,7 +73,7 @@ claude plugin marketplace add eborden/logseq-mcp-server
 claude plugin install logseq@logseq-mcp-server
 ```
 
-The plugin starts the server with `node dist/index.js`, and `dist/` is not committed. Until the package is published to npm (tracked in #14), a marketplace install has no built server. Build from a clone and load the plugin from there instead:
+The plugin starts the server with `node dist/index.js`, and `dist/` is not committed. No package of this project is published to npm (the npm name `logseq-mcp-server` is another project's, #417), so a marketplace install has no built server. Build from a clone and load the plugin from there instead:
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
@@ -198,7 +198,7 @@ Gets: All journal entries in date range
 
 ## Publishing
 
-> **Stale until #350 and #355**, as above: this is the npm flow of the TypeScript server, which is retired. How the Rust binary is published needs its own decision.
+> **Stale until #350 and #355**, as above: this is the npm flow of the TypeScript server, which is retired. How the Rust binary is published needs its own decision. The steps below also assume the npm name `logseq-mcp-server`, which another project owns (#417), so they cannot publish this project as written.
 
 For the maintainer. Nothing publishes automatically: `.github/workflows/publish.yml` runs only when started by hand from the Actions tab, and only on `main`.
 
