@@ -107,7 +107,7 @@ Find the pages that reference a specific page, with the blocks that do. Capped: 
 - `max_pages` (optional): Most source pages returned (default: **20**, max: **100**)
 - `max_blocks_per_page` (optional): Most linking blocks kept per source page (default: **10**, max: **50**)
 
-A larger value of either is clamped to its maximum, not rejected, and a fractional one is floored.
+A larger value of either is clamped to its maximum, not rejected. Both are whole numbers: a fraction is rejected.
 
 **Returns:** a bare array of `[page, blocks]` pairs, one per source page, **ranked by the number of blocks that link the page, most first**, ties broken by lowercase page name and then page id. The order is the same on every run, with or without aliases, and applies to every result, not only a cut one: the first entry is the page that links the target most, so match pages by name, not by position. Each page's blocks stay in the order given (nothing ranks them). The cut at `max_pages` keeps the top of this ranking, so a page left out links the target no more than the last page kept (it can tie with it). The ranking counts linking blocks, not importance: a blocker can sit on a page with a single linking block. A second content block, `{ "meta": ... }`, follows when there is a cut, a resolved alias or ISO-date name (`resolvedFrom`), a page with aliases (`resolvedAliases`) or, with next-step tips on (the default), a tip. **The block being there doesn't mean a cut:** a stock server adds one with only `meta.tips` to any non-empty result, and with tips off an uncut exact name gets one block. The signal is `meta.warnings` and `meta.totals`.
 
@@ -441,7 +441,7 @@ Track how a concept appears and evolves over time.
 - `start_date` (optional): Start date in YYYYMMDD format
 - `end_date` (optional): End date in YYYYMMDD format
 - `group_by` (optional): Grouping level: 'day', 'week', 'month'
-- `max_entries` (optional): Most mentions kept in `timeline` (default: **100**, max: **500**; a larger value is clamped to 500, floored, not rejected). Dates narrow only dated mentions: a mention on a non-journal page has no date and passes every `start_date` and `end_date`, so no date range reaches it
+- `max_entries` (optional): Most mentions kept in `timeline` (default: **100**, max: **500**; a larger value is clamped to 500, not rejected; a fraction is rejected). Dates narrow only dated mentions: a mention on a non-journal page has no date and passes every `start_date` and `end_date`, so no date range reaches it
 
 **Returns:**
 - Timeline of mentions
