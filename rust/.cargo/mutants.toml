@@ -14,11 +14,9 @@
 # Every cargo call the tool makes gets --locked, as CI's own build and test do, so a run can never change Cargo.lock.
 additional_cargo_args = ["--locked"]
 
-# Copy the restored target/ (the dependencies' build output, from the shared Swatinem/rust-cache key) into the tool's scratch
-# copy of the tree. Without it every scratch copy, one for the baseline and one per --jobs, builds all dependencies again. The
-# tool's own book says the toolchain does not reuse products after a copy; whether the registry crates' output survives it
-# is what the PR 1 measurement of #364 answers (a run with --copy-target=false beside one with true), and this line follows it.
-copy_target = true
+# copy_target stays at its default (false): the tool then doesn't copy the restored target/ into its scratch copies of the tree.
+# Measured in CI for #364 PR 1, on a one-in-100 sample of the mutants with the dependency cache restored: copying it cut the
+# baseline build from 51 s to 47 s and the run from 425 s to 420 s, so it isn't worth the copy and the disk (one target/ per job).
 
 # Ignores. An entry here removes the mutants whose name it matches, from the run and from the score. It is matched against the
 # name `cargo mutants --list` prints, which includes the file, the line and the column, so a pattern must name the function and
