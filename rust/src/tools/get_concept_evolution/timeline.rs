@@ -64,29 +64,12 @@ pub fn day_of(block: &Value) -> Option<i64> {
     journal_day_of(block.get("page")).filter(|day| *day != 0)
 }
 
-/// The blocks once each, by `id`: a later block with the same id takes the earlier one's place in
-/// the order (`new Map(blocks.map(b => [b.id, b])).values()`), so the Datalog pull of a block the tree
-/// also holds is the one kept.
-///
-/// PARITY(#299): the later block replaces the earlier one in its place, so a block on the page that also
-/// links it comes back as the Datalog pull (kebab-case keys, no `children`) and the tree's block, with its
-/// children, is lost (suspected TS bug: a fix would keep the tree's block) — drop if Rust becomes the only
-/// server.
+/// The blocks once each, by `id`: a later block with the same id is dropped, so a block on the page
+/// that also links it stays the tree's block, with its children, and not the Datalog pull of it.
 pub fn unique_by_id(blocks: Vec<Value>) -> Vec<Value> {
-    let mut places: HashMap<i64, usize> = HashMap::new();
-    let mut unique: Vec<Value> = Vec::with_capacity(blocks.len());
-    for block in blocks {
-        // `check_block` made the id a whole number
-        let id = block.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
-        match places.get(&id) {
-            Some(&at) => unique[at] = block,
-            None => {
-                places.insert(id, unique.len());
-                unique.push(block);
-            }
-        }
-    }
-    unique
+    let mut seen: HashSet<i64> = HashSet::new();
+    // `check_block` made the id a whole number
+    blocks.into_iter().filter(|block| seen.insert(block.get("id").and_then(crate::wire::whole_number).unwrap_or_default())).collect()
 }
 
 /// The blocks inside the date bounds. A block with no day is kept; a bound that is 0 or absent is no
@@ -270,11 +253,11 @@ mod tests {
     }
 
     #[test]
-    fn a_later_block_with_the_same_id_takes_the_earlier_one_s_place() {
+    fn a_later_block_with_the_same_id_is_dropped_and_the_first_one_stays() {
         let first = json!({"id": 1, "uuid": "tree"});
         let second = json!({"id": 2, "uuid": "other"});
         let again = json!({"id": 1, "uuid": "pull"});
-        assert_eq!(unique_by_id(vec![first, second.clone(), again.clone()]), [again, second]);
+        assert_eq!(unique_by_id(vec![first.clone(), second.clone(), again]), [first, second]);
     }
 
     #[test]
