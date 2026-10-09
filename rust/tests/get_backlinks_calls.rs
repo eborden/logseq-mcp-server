@@ -60,7 +60,7 @@ async fn mock_logseq(answers: Vec<Value>) -> MockLogseq {
 }
 
 fn client(logseq: &MockLogseq) -> LogseqClient {
-    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None })
+    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
 
 fn page(id: i64, name: &str, original: &str, alias: &[i64]) -> Value {

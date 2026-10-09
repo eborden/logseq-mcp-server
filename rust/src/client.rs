@@ -11,7 +11,7 @@ use crate::config::Config;
 use crate::edn::DatalogInput;
 
 /// The per-call timeout when the config sets no `timeoutMs`, as in `src/client.ts`.
-pub const DEFAULT_TIMEOUT_MS: f64 = 30000.0;
+pub const DEFAULT_TIMEOUT_MS: u64 = 30000;
 
 /// A LogSeq call failed. The first three are failures of the connection itself
 /// ([`LogseqError::is_infrastructure`]) and must never be turned into "no data" (BR-0003).
@@ -22,7 +22,7 @@ pub enum LogseqError {
     /// Nothing answered at the API URL: LogSeq is closed or its API server is off.
     NotRunning { api_url: String, detail: String },
     /// LogSeq didn't answer within the timeout.
-    Timeout { api_url: String, timeout_ms: f64 },
+    Timeout { api_url: String, timeout_ms: u64 },
     /// LogSeq rejected the token (HTTP 401).
     Auth { api_url: String },
     /// Any other non-2xx status.
@@ -31,9 +31,6 @@ pub enum LogseqError {
     Api { message: String },
     /// The body was not JSON. Its text is not shown: it can hold graph data.
     InvalidBody { method: String },
-    /// `timeoutMs` is too large to be a timeout. TypeScript fails each call too, with Node's
-    /// own `RangeError` wording; this message is ours.
-    TimeoutTooLarge { timeout_ms: f64 },
 }
 
 impl LogseqError {
@@ -75,10 +72,6 @@ impl fmt::Display for LogseqError {
             LogseqError::InvalidBody { method } => {
                 write!(f, "LogSeq answered {method} with a body that is not JSON")
             }
-            LogseqError::TimeoutTooLarge { timeout_ms } => write!(
-                f,
-                "\"timeoutMs\" in ~/.logseq-mcp/config.json is too large to be a timeout ({timeout_ms}); use a smaller value (default 30000, per API call)"
-            ),
         }
     }
 }
@@ -95,11 +88,8 @@ pub struct LogseqClient {
     http: reqwest::Client,
     api_url: String,
     auth_token: String,
-    timeout_ms: f64,
-    /// `None` when `timeout_ms` is too large for a `Duration` (it is positive and finite, so
-    /// that is the only way it fails). Each call then fails with [`LogseqError::TimeoutTooLarge`]
-    /// rather than panicking, as TypeScript's `AbortSignal.timeout` throws on every call.
-    timeout: Option<Duration>,
+    /// Whole milliseconds, from 1 to [`crate::config::MAX_TIMEOUT_MS`]: the config checks it at load.
+    timeout_ms: u64,
 }
 
 impl LogseqClient {
@@ -115,21 +105,19 @@ impl LogseqClient {
             api_url: config.api_url.clone(),
             auth_token: config.auth_token.clone(),
             timeout_ms,
-            timeout: Duration::try_from_secs_f64(timeout_ms / 1000.0).ok(),
         }
     }
 
     /// Call a LogSeq API method, e.g. `logseq.Editor.getBlock`. The response is returned as
     /// LogSeq sent it (it isn't wrapped); checking its shape is the caller's job.
     pub async fn call_api(&self, method: &str, args: &[Value]) -> Result<Value, LogseqError> {
-        let timeout = self.timeout.ok_or(LogseqError::TimeoutTooLarge { timeout_ms: self.timeout_ms })?;
         // A fresh timeout per call: it bounds each request, not a whole tool run.
         let response = self
             .http
             .post(format!("{}/api", self.api_url))
             .bearer_auth(&self.auth_token)
             .json(&ApiRequest { method, args })
-            .timeout(timeout)
+            .timeout(Duration::from_millis(self.timeout_ms))
             .send()
             .await
             .map_err(|error| self.transport_error(error))?;
@@ -235,7 +223,7 @@ mod tests {
         (url, handle)
     }
 
-    fn client(api_url: &str, timeout_ms: Option<f64>) -> LogseqClient {
+    fn client(api_url: &str, timeout_ms: Option<u64>) -> LogseqClient {
         LogseqClient::new(&Config { api_url: api_url.into(), auth_token: TOKEN.into(), timeout_ms, tips: None })
     }
 
@@ -320,19 +308,19 @@ mod tests {
     #[tokio::test]
     async fn a_hung_call_times_out() {
         let (url, _server) = serve_once(None).await;
-        let error = client(&url, Some(100.0)).call_api("logseq.App.getCurrentGraph", &[]).await.unwrap_err();
+        let error = client(&url, Some(100)).call_api("logseq.App.getCurrentGraph", &[]).await.unwrap_err();
         assert!(matches!(error, LogseqError::Timeout { .. }), "{error:?}");
         assert!(error.is_infrastructure());
         assert!(error.to_string().starts_with(&format!("LogSeq at {url} did not respond within 100ms")));
     }
 
     #[tokio::test]
-    async fn a_timeout_too_large_for_a_duration_fails_the_call_without_panicking() {
-        // parse_config accepts any positive finite timeoutMs; 1e300 ms overflows a Duration.
-        let error = client("http://127.0.0.1:1", Some(1e300)).call_api("logseq.App.getCurrentGraph", &[]).await.unwrap_err();
-        assert!(matches!(error, LogseqError::TimeoutTooLarge { .. }), "{error:?}");
-        assert!(!error.is_infrastructure());
-        assert!(error.to_string().starts_with("\"timeoutMs\" in ~/.logseq-mcp/config.json is too large"));
+    async fn the_largest_timeout_the_config_accepts_is_a_working_timeout() {
+        // The config refuses anything above MAX_TIMEOUT_MS at load, so no call checks it again; the
+        // largest accepted value must still build a request and get its answer, not panic.
+        let (url, _server) = serve_once(ok("{\"graph\":1}")).await;
+        let data = client(&url, Some(crate::config::MAX_TIMEOUT_MS)).call_api("logseq.App.getCurrentGraph", &[]).await.unwrap();
+        assert_eq!(data, serde_json::json!({"graph": 1}));
     }
 
     #[tokio::test]

@@ -73,7 +73,7 @@ async fn mock_logseq(answers: &[(&str, Value)]) -> MockLogseq {
 }
 
 fn client(logseq: &MockLogseq) -> LogseqClient {
-    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None })
+    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
 
 /// The methods called, sorted: the Editor calls arrive in no fixed order.
