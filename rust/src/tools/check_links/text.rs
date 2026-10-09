@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 
 use crate::js;
+use crate::refs;
 
 /// Characters of context an excerpt keeps before and after the position it points at.
 const EXCERPT_BEFORE: usize = 30;
@@ -77,58 +78,29 @@ pub struct RefsPreservedCheck {
     pub removed: Vec<RemovedRef>,
 }
 
-/// Each `[[term]]` of the text as a `(start, end)` range of `chars`, brackets included: the
-/// script's `\[\[([^\[\]]+)\]\]`, which perl and grep apply one line at a time, so
-/// `/\[\[([^\[\]\n]+)\]\]/g`. Matches don't overlap, and a failed attempt moves on one character.
-fn link_ranges(chars: &[char]) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::new();
-    let mut at = 0;
-    while at + 1 < chars.len() {
-        if chars[at] == '[' && chars[at + 1] == '[' {
-            let term_start = at + 2;
-            let term_end = term_start + chars[term_start..].iter().take_while(|c| !matches!(c, '[' | ']' | '\n')).count();
-            if term_end > term_start && chars.get(term_end) == Some(&']') && chars.get(term_end + 1) == Some(&']') {
-                ranges.push((at, term_end + 2));
-                at = term_end + 2;
-                continue;
-            }
-        }
-        at += 1;
-    }
-    ranges
-}
-
-/// The term between the brackets of a range of [`link_ranges`].
-fn term_of(chars: &[char], (start, end): (usize, usize)) -> String {
-    chars[start + 2..end - 2].iter().collect()
-}
-
-/// `stripBrackets`: `[[term]]` to `term`, one pass, as the script's `s/\[\[([^\[\]]+)\]\]/$1/g`.
+/// `stripBrackets`: `[[term]]` to `term`, one pass. The refs are those of [`refs`].
 pub fn strip_brackets(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
-    for range in link_ranges(&chars) {
-        out.extend(&chars[at..range.0]);
-        out.push_str(&term_of(&chars, range));
-        at = range.1;
+    for found in refs::page_refs(text) {
+        out.push_str(&text[at..found.range.start]);
+        out.push_str(found.name);
+        at = found.range.end;
     }
-    out.extend(&chars[at..]);
+    out.push_str(&text[at..]);
     out
 }
 
 /// A `[[term]]` count per term as written, in the order each term first appears.
 pub fn link_counts(text: &str) -> Vec<(String, usize)> {
-    let chars: Vec<char> = text.chars().collect();
     let mut counts: Vec<(String, usize)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
-    for range in link_ranges(&chars) {
-        let term = term_of(&chars, range);
-        match index.get(&term) {
+    for found in refs::page_refs(text) {
+        match index.get(found.name) {
             Some(&at) => counts[at].1 += 1,
             None => {
-                index.insert(term.clone(), counts.len());
-                counts.push((term, 1));
+                index.insert(found.name.to_owned(), counts.len());
+                counts.push((found.name.to_owned(), 1));
             }
         }
     }
@@ -208,14 +180,15 @@ pub fn check_prose(before: &str, after: &str) -> ProseCheck {
     }
 }
 
-/// The start of the first `[[` opened before the previous one closed on its line: the script's
-/// `\[\[[^][]*\[\[`, which can't run past a newline (`/\[\[[^\[\]\n]*\[\[/`).
+/// The start of the first `[[` opened before the previous one closed on its line: a `[[`, then a run
+/// of the characters a ref's name may hold ([`refs::is_name_char`], which can't run past a newline),
+/// then another `[[`.
 fn first_nested(chars: &[char]) -> Option<usize> {
     (0..chars.len().saturating_sub(1)).find(|&at| {
         if chars[at] != '[' || chars[at + 1] != '[' {
             return false;
         }
-        let run_end = at + 2 + chars[at + 2..].iter().take_while(|c| !matches!(c, '[' | ']' | '\n')).count();
+        let run_end = at + 2 + chars[at + 2..].iter().take_while(|c| refs::is_name_char(**c)).count();
         chars.get(run_end) == Some(&'[') && chars.get(run_end + 1) == Some(&'[')
     })
 }

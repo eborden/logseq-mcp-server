@@ -47,7 +47,7 @@ pub fn search_tips(query: &str, results: &[Value], matches: Option<usize>) -> Ve
 /// The text, trimmed, up to the first run of white space (Rust's set).
 fn first_word(query: &str) -> Option<&str> {
     let trimmed = js::trim(query);
-    let word = trimmed.split(js::is_js_space).next().unwrap_or("");
+    let word = trimmed.split(char::is_whitespace).next().unwrap_or("");
     (!word.is_empty()).then_some(word)
 }
 

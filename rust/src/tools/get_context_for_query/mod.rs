@@ -33,6 +33,7 @@ use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::render_query_context;
 use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
+use crate::refs;
 use crate::resolve::RETRY_ADVICE;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::{Caps, TopicContext, TopicContextOutput, build_context_for_topic};
@@ -255,54 +256,10 @@ impl QueryContext {
     }
 }
 
-/// `extractTopicsFromQuery`, the `[[page references]]`: the text between `[[` and `]]`, at least one
-/// character, none of them `]`.
-fn page_refs(query: &str) -> Vec<&str> {
-    let bytes = query.as_bytes();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at + 1 < bytes.len() {
-        if bytes[at] == b'[' && bytes[at + 1] == b'[' {
-            let start = at + 2;
-            // `[^\]]+` runs to the next `]`, which must start the closing `]]`
-            if let Some(end) = bytes[start..].iter().position(|&byte| byte == b']').map(|offset| start + offset) {
-                if end > start && bytes.get(end + 1) == Some(&b']') {
-                    found.push(&query[start..end]);
-                    at = end + 2;
-                    continue;
-                }
-            }
-        }
-        at += 1;
-    }
-    found
-}
-
-/// `extractTopicsFromQuery`, the `#tags`: the text after a `#`, at least one character, none of them
-/// whitespace or `#`.
-fn tags(query: &str) -> Vec<&str> {
-    let bytes = query.as_bytes();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at < bytes.len() {
-        if bytes[at] == b'#' {
-            let start = at + 1;
-            let end = query[start..].char_indices().find(|&(_, c)| c == '#' || js::is_js_space(c)).map_or(query.len(), |(offset, _)| start + offset);
-            if end > start {
-                found.push(&query[start..end]);
-                at = end;
-                continue;
-            }
-        }
-        at += 1;
-    }
-    found
-}
-
 /// `extractTopicsFromQuery`: the `[[page references]]`, then the `#tags`, each once, first seen first.
 fn extract_topics(query: &str) -> Vec<String> {
     let mut seen = HashSet::new();
-    page_refs(query).into_iter().chain(tags(query)).filter(|topic| seen.insert(*topic)).map(str::to_owned).collect()
+    refs::page_refs(query).into_iter().map(|found| found.name).chain(refs::tags(query)).filter(|topic| seen.insert(*topic)).map(str::to_owned).collect()
 }
 
 /// The words a keyword search looks for: the first three words of the query, lowercased, longer
@@ -310,7 +267,7 @@ fn extract_topics(query: &str) -> Vec<String> {
 fn keywords(query: &str) -> Vec<String> {
     query
         .to_lowercase()
-        .split(js::is_js_space)
+        .split(char::is_whitespace)
         .filter(|word| word.chars().count() > 3 && !COMMON_WORDS.contains(word))
         .take(3)
         .map(str::to_owned)
@@ -563,28 +520,12 @@ mod tests {
 
     #[test]
     fn topics_are_the_page_references_then_the_tags_each_once() {
-        // the comma after a tag is part of it, as the regex `[^\s#]+` has it
+        // the comma after a tag is part of it: a tag runs to white space or `#` (`refs::tags`)
         assert_eq!(extract_topics("what about [[Atlas]] and #beta, [[Bob Smith]] #beta [[Atlas]] #gamma#delta"), ["Atlas", "Bob Smith", "beta,", "beta", "gamma", "delta"]);
+        // the grammar of `refs::page_refs`: a name holds no bracket or newline, so `[[[c]]` is the topic `c`,
+        // a ref over two lines is none, and a nested ref gives its inner name only
+        assert_eq!(extract_topics("[[[c]] [[x\ny]] [[a [[b]] d]]"), ["c", "b"]);
         assert_eq!(extract_topics("nothing here"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn a_page_reference_is_one_or_more_characters_up_to_a_closing_pair() {
-        assert_eq!(page_refs("[[a]] [[b c]]"), ["a", "b c"]);
-        // an empty one, an unclosed one and one with a lone `]` before the pair are not references
-        assert_eq!(page_refs("[[]] [[open [[x]b]]"), Vec::<&str>::new());
-        // a `[` inside is part of the name
-        assert_eq!(page_refs("[[[a]]"), ["[a"]);
-        assert_eq!(page_refs("[[a]]]"), ["a"]);
-        assert_eq!(page_refs("[[caf\u{e9}]]"), ["caf\u{e9}"]);
-    }
-
-    #[test]
-    fn a_tag_runs_to_whitespace_or_the_next_hash() {
-        assert_eq!(tags("#a #b-c, # d #\u{e9}t\u{e9}\n#e"), ["a", "b-c,", "\u{e9}t\u{e9}", "e"]);
-        assert_eq!(tags("###"), Vec::<&str>::new());
-        assert_eq!(tags("end#"), Vec::<&str>::new());
-        assert_eq!(tags("a#b#c"), ["b", "c"]);
     }
 
     #[test]
