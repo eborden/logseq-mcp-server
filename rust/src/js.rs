@@ -1,12 +1,9 @@
-//! What the TypeScript server inherits from JavaScript and puts in its output: how a number is
-//! written and how `JSON.stringify` orders object keys. Each is here once, named for the
-//! JavaScript behavior it copies, so a tool can say "as `JSON.stringify` writes it" instead of
-//! redoing the rule.
+//! The two JavaScript behaviors the server still needs. Results are not one of them: every tool
+//! result is written by `serde_json` (ADR-0009, ADR-0034), with an object's keys in insertion order
+//! and a number in serde's spelling, and the recorded results are compared by meaning.
 //!
-//! Text is not here any more. A length or a cut in the output counts code points (`chars()`),
-//! and white space is Rust's `char::is_whitespace` (#299, wave C2).
-
-use serde_json::Value;
+//! - White space (`trim`, `trim_end`) is Rust's `char::is_whitespace` (#299, wave C2).
+//! - [`number_to_string`] is how LogSeq spells a number. It is not here to match the TypeScript server.
 
 /// The text without white space at either end: Rust's `char::is_whitespace` (Unicode `White_Space`).
 /// The TypeScript server used JavaScript's set, which adds U+FEFF and leaves out U+0085; the
@@ -20,11 +17,12 @@ pub fn trim_end(value: &str) -> &str {
     value.trim_end()
 }
 
-// PARITY(#299): the Markdown property value and the backlink sort key are parity uses of this function, to go
-// with the result serialisation. `Scalar::to_js_string` in `args.rs` also calls it, and that use is not
-// parity: LogSeq is ClojureScript and its `(str ?v)` writes a number as JavaScript does (`1e+21`,
-// `0.000001`), so a `query_by_property` value must keep this spelling. Do not delete the function.
 /// A number as `String(n)` or a template literal writes it (ECMAScript `Number::toString`).
+///
+/// This is not parity code. `Scalar::to_js_string` in `args.rs` uses it to spell a `query_by_property`
+/// value the way LogSeq stored it: LogSeq is ClojureScript, so its `(str ?v)` writes a number as
+/// JavaScript does (`1e+21`, `0.000001`, `3` for `3.0`), and a value spelled any other way would match
+/// nothing. Nothing else calls it: results, Markdown property values and sort keys use serde's spelling.
 /// JSON has no NaN or infinity, so a value that came from JSON is always finite.
 pub fn number_to_string(n: f64) -> String {
     if n == 0.0 {
@@ -56,51 +54,9 @@ pub fn number_to_string(n: f64) -> String {
     }
 }
 
-// PARITY(#299): `JSON.stringify` writes integer-like object keys first and numbers its own way — drop if
-// Rust becomes the only server.
-/// `JSON.stringify(value)`, for the results (ADR-0031, ADR-0009). A message that quotes a value
-/// writes it with serde instead (`Value::to_string`). Numbers are written as JavaScript writes
-/// them, and an object's integer-like keys come first, in ascending order, then the others in
-/// the order they came: a JavaScript object keeps its keys that way.
-pub fn json_stringify(value: &Value) -> String {
-    match value {
-        Value::Null => "null".to_owned(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => number_to_string(n.as_f64().expect("a JSON number is finite")),
-        Value::String(s) => serde_json::to_string(s).expect("a string serializes"),
-        Value::Array(items) => format!("[{}]", items.iter().map(json_stringify).collect::<Vec<_>>().join(",")),
-        Value::Object(map) => {
-            let entries: Vec<String> = entries_in_js_order(map)
-                .into_iter()
-                .map(|(key, value)| format!("{}:{}", serde_json::to_string(key).expect("a key serializes"), json_stringify(value)))
-                .collect();
-            format!("{{{}}}", entries.join(","))
-        }
-    }
-}
-
-// PARITY(#299): a JavaScript object lists integer-like keys first, whatever order they came in — drop if
-// Rust becomes the only server.
-/// An object's entries in the order `Object.entries` (and `JSON.stringify`) gives them: integer-like
-/// keys first, in ascending order, then the others in the order they came.
-pub fn entries_in_js_order(map: &serde_json::Map<String, Value>) -> Vec<(&String, &Value)> {
-    let mut indices: Vec<(u32, (&String, &Value))> =
-        map.iter().filter_map(|(key, value)| array_index(key).map(|index| (index, (key, value)))).collect();
-    indices.sort_by_key(|(index, _)| *index);
-    let others = map.iter().filter(|(key, _)| array_index(key).is_none());
-    indices.into_iter().map(|(_, entry)| entry).chain(others).collect()
-}
-
-/// A key JavaScript treats as an array index: a canonical decimal below 2^32 - 1.
-fn array_index(key: &str) -> Option<u32> {
-    let canonical = key == "0" || (!key.starts_with('0') && !key.is_empty() && key.bytes().all(|b| b.is_ascii_digit()));
-    canonical.then(|| key.parse::<u32>().ok()).flatten().filter(|index| *index != u32::MAX)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn trim_removes_what_rust_calls_white_space() {
@@ -133,14 +89,5 @@ mod tests {
         ] {
             assert_eq!(number_to_string(n), expected, "{n:e}");
         }
-    }
-
-    #[test]
-    fn stringify_matches_json_stringify() {
-        let value: Value = serde_json::from_str(r#"{"b":1e2,"2":true,"a":[null,1.5,"x\"y"],"1":{"z":1e21},"01":0}"#).unwrap();
-        // JSON.stringify of the same JSON.parse: the integer keys first, "01" is not one.
-        assert_eq!(json_stringify(&value), r#"{"1":{"z":1e+21},"2":true,"b":100,"a":[null,1.5,"x\"y"],"01":0}"#);
-        assert_eq!(json_stringify(&json!({})), "{}");
-        assert_eq!(json_stringify(&json!("é\n")), "\"é\\n\"");
     }
 }

@@ -346,11 +346,14 @@ mod tests {
     }
 
     #[test]
-    fn results_keep_key_order_as_json_stringify_does() {
-        // A pulled LogSeq entity is passed through as it came; sorting its keys would break
-        // byte-for-byte parity with the TypeScript server (ADR-0025 Decision 2).
+    fn results_keep_keys_in_insertion_order() {
+        // A pulled LogSeq entity is passed through as it came; sorting its keys would break the order BR-0004
+        // and BR-0013 promise, and the recorded results keep it.
         let entity: Value = serde_json::from_str(r#"{"uuid":"u","content":"c","id":1}"#).unwrap();
         assert_eq!(json!({"warnings": [], "block": entity}).to_string(), r#"{"warnings":[],"block":{"uuid":"u","content":"c","id":1}}"#);
+        // A key that reads as an integer stays where it came: serde keeps insertion order, no integer-first hoisting
+        let numbered: Value = serde_json::from_str(r#"{"b":1,"2":true,"a":{"10":0,"9":0,"x":1},"1":null}"#).unwrap();
+        assert_eq!(numbered.to_string(), r#"{"b":1,"2":true,"a":{"10":0,"9":0,"x":1},"1":null}"#);
         let error = error_result("No \"page\"");
         assert_eq!(serde_json::to_value(&error.content[0]).unwrap()["text"], r#"{"error":"No \"page\""}"#);
     }
