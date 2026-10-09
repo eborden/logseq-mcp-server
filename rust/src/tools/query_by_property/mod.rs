@@ -27,6 +27,7 @@ use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::meta::{ResultMeta, ResultWarning};
+use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, blocks_inline_max, capped_truncation_warning};
@@ -85,10 +86,8 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
     let found = query_by_property_with_meta(client, &args.property_key, &args.property_value, args.slim_results, args.limit).await?;
-    // `null` from LogSeq is `null` here, and has no meta or tips (BR-0011)
-    let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
-
     let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
+    // `property_tips` has none for an empty list, which is what a `null` answer gives (BR-0011)
     let tips = if tips_enabled { property_tips(&found.results) } else { Vec::new() };
     // The meta when the list was cut, the tips beside it or alone
     let meta = match (&found.meta, tips.is_empty()) {
@@ -113,8 +112,23 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
 pub struct PropertyResults {
     /// Slim blocks, or full ones (camelCase keys) with `slim_results: false`
     pub results: Vec<Value>,
-    /// Only when `limit` cut the list, so output below the cap carries none
+    /// Only when `limit` cut the list or LogSeq answered `null` (`property_query_unavailable`, BR-0011, #415), so
+    /// output below the cap carries none
     pub meta: Option<ResultMeta>,
+}
+
+/// The query was not answered: `results` is `[]`, but not because nothing matches. No parameter fetches what LogSeq did
+/// not answer, so the warning carries no `howToFetchAll` and `hasMore` stays false (BR-0011). The retry advice is in the
+/// message.
+fn property_query_unavailable(property_key: &str) -> ResultWarning {
+    ResultWarning::new(
+        "property_query_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up blocks with the property {} (possibly no graph open or a re-index in \
+             progress), so the empty list may not mean nothing matches. {RETRY_ADVICE}",
+            json!(property_key)
+        ),
+    )
 }
 
 /// A block's id as the sort reads it.
@@ -135,8 +149,9 @@ fn by_page_then_block(a: &Map<String, Value>, b: &Map<String, Value>) -> Orderin
 /// Query blocks whose property `property_key` equals `property_value`: the first `limit` of them
 /// (default 100, at most [`MAX_PROPERTY_LIMIT`]) after sorting by page id, then block id, which is
 /// stable and no ranking. The meta carries a `results_truncated` warning and `totals.matches`, the
-/// number of matching blocks before the cut, known from the one query. `None` when LogSeq answers
-/// `null` (no matches is an empty `results`).
+/// number of matching blocks before the cut, known from the one query. When LogSeq answers `null` the results are
+/// `[]` and the meta carries a `property_query_unavailable` warning and no `totals` (BR-0011, #415); no matches is
+/// an empty `results` and no meta.
 ///
 /// The warning never suggests a `limit` above the maximum, and a cut at the maximum carries no
 /// `howToFetchAll`, so `hasMore` is false there (BR-0006).
@@ -148,12 +163,15 @@ pub async fn query_by_property_with_meta(
     property_value: &Scalar,
     slim_results: bool,
     limit: u64,
-) -> Result<Option<PropertyResults>, ToolError> {
+) -> Result<PropertyResults, ToolError> {
     // A key LogSeq can't have is refused before any call
     let key = PropertyKey::parse(property_key)?;
     let query = queries::blocks_by_property(&key, &property_value.to_js_string());
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    let Some(pulled) = wire::blocks(&answer)? else { return Ok(None) };
+    let Some(pulled) = wire::blocks(&answer)? else {
+        let meta = ResultMeta::new(vec![property_query_unavailable(property_key)], &[]);
+        return Ok(PropertyResults { results: Vec::new(), meta: Some(meta) });
+    };
 
     let mut matches: Vec<Map<String, Value>> = pulled
         .iter()
@@ -201,7 +219,7 @@ pub async fn query_by_property_with_meta(
             }
         })
         .collect();
-    Ok(Some(PropertyResults { results, meta }))
+    Ok(PropertyResults { results, meta })
 }
 
 #[cfg(test)]
