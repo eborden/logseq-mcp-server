@@ -299,8 +299,10 @@ impl<'de> Deserializer<'de> for Wire<'de> {
         }
     }
 
+    /// A newtype is read as what it wraps, in the place the newtype itself sits: the wrapped type is not a field
+    /// of a struct, so a `null` is read as an `Option` inside it reads one anywhere else, and not as a field's.
     fn deserialize_newtype_struct<V: Visitor<'de>>(self, _name: &'static str, visitor: V) -> Result<V::Value, Issue> {
-        visitor.visit_newtype_struct(self)
+        visitor.visit_newtype_struct(Wire::new(self.value))
     }
 
     /// An enum of unit variants, named by a string (`"outbound"`).

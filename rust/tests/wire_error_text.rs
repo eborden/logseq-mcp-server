@@ -13,7 +13,7 @@ const ALLOWED: [(&str, &str); 5] = [
     ("src/args.rs", "reads the arguments a client sent, never a LogSeq answer (ADR-0004 is about the answer); its one visitor builds no error text"),
     ("src/resolve/wire.rs", "hand-written row visitors whose only error is `invalid_length`, which the deserializer turns into fixed text"),
     ("src/tools/get_page_outline/wire.rs", "`TryFrom` with `type Error = &'static str`, and a `custom(\"...\")` with a literal"),
-    ("src/wire.rs", "hand-written visitors (`Id`, `Number`, `Object`, `Optional`) whose errors are `invalid_value` with a literal, which the deserializer turns into fixed text"),
+    ("src/wire.rs", "hand-written visitors (`Id`, `Number`, `Object`) whose errors are `invalid_value` with a literal, which the deserializer turns into fixed text"),
     ("src/wire/deserializer.rs", "defines `custom`, the one place a message is kept as given (`Problem::Other`), and says that only fixed text may be passed"),
 ];
 
