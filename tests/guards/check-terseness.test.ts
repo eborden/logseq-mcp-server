@@ -201,6 +201,13 @@ describe('check-terseness.sh source line (#185)', () => {
     expect(r.out).toContain('the tags line links 2 journal days but the source line says 5');
   });
 
+  it('leaves the Weekly Summary tag out of the day-link count whatever its case', () => {
+    const tags = 'tags:: [[weekly summary]], [[2025-01-06]], [[2025-01-07]], [[2025-01-08]], [[2025-01-09]], [[2025-01-10]]';
+    const r = run('Weekly 2025-01-06.md', page(tags, WEEKLY_SOURCE));
+    expect(r.code).toBe(0);
+    expect(r.out).not.toContain('the tags line links');
+  });
+
   it('warns, without failing, when the day links and the days disagree', () => {
     const r = run('Weekly 2025-01-06.md', page('tags:: [[Weekly Summary]], [[Jan 6th, 2025]]', WEEKLY_SOURCE));
     expect(r.code).toBe(0);
