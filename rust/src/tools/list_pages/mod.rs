@@ -25,7 +25,7 @@ use crate::errors::ToolError;
 use crate::js;
 use crate::meta::ResultWarning;
 use crate::tips::tips_content;
-use crate::tool::{input_schema, read_only_annotations, result_value, success_result, with_empty_required};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, capped_truncation_warning};
 
 use self::tips::list_pages_tips;

@@ -26,7 +26,7 @@ use crate::errors::ToolError;
 use crate::js;
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
-use crate::tool::{input_schema, read_only_annotations, result_value, success_result, with_empty_required};
+use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 
 pub const NAME: &str = "logseq_get_current_context";
 
