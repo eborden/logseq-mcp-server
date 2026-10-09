@@ -169,6 +169,7 @@
   "context_for_query markdown: no hits makes no page lookup": 1,
   "context_for_query markdown: no keywords": 0,
   "context_for_query markdown: no query": 0,
+  "context_for_query markdown: the hit pages answer null": 2,
   "context_for_query markdown: the pages of the hits kept only, and the cut in the footer": 2,
   "context_for_query markdown: the search answers null": 1,
   "context_for_query: LogSeq error from a topic": 2,

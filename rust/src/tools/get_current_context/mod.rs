@@ -4,7 +4,10 @@
 //! Calls: 3 Editor calls made at once (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`),
 //! plus one Datalog pull by `:db/id` only when a block's page is not already known (#15). It never
 //! fetches all pages. An answer of `null` is a case of its own: no page open is a normal result
-//! (`page: null` with a message), not an error. Infrastructure errors propagate (BR-0003).
+//! (`page: null` with a message), not an error. A `null` answer to the Datalog pull is not "no pages"
+//! (BR-0011): it is a `page_names_unavailable` warning, and with no page known the "No page is open"
+//! message is left out, since the open page may be one that could not be read. Infrastructure errors
+//! propagate (BR-0003).
 //!
 //! This directory holds everything only the current context uses: the answers it reads
 //! (`wire.rs`). What it shares with other tools is outside it: the page lookup by id, slim output,
@@ -24,6 +27,7 @@ use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
 use crate::js;
+use crate::meta::ResultWarning;
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
@@ -56,11 +60,18 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option
     Ok(success_result(vec![ContentBlock::text(js::json_stringify(&context.into_value()))]))
 }
 
-/// What the user is looking at, as written in BR-0013's order: `message` (the verdict, only when no page is open),
+/// What the user is looking at, as written in BR-0013's order: what must not be missed (`hasMore` and `warnings`,
+/// both only when the page names could not be read, then `message`, the verdict, only when no page is open),
 /// then the data: `page` (`null` when nothing is open), `focusedBlock` and `selectedBlocks`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CurrentContext {
-    /// Says so when no page is open
+    /// `false`, present only with `warnings`: no parameter fetches what LogSeq did not answer
+    #[serde(rename = "hasMore", skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<bool>,
+    /// A `page_names_unavailable` warning when the lookup of the pages of the blocks got no answer
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warnings: Option<Vec<ResultWarning>>,
+    /// Says so when no page is open, unless the page names could not be read and no page is known
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<&'static str>,
     /// `null` when nothing is open
@@ -76,6 +87,19 @@ impl CurrentContext {
     pub fn into_value(self) -> Value {
         result_value(&self)
     }
+}
+
+/// LogSeq did not answer the lookup of the pages of the focused or selected blocks. No `howToFetchAll`: no parameter
+/// fetches what LogSeq did not answer (like `pages_unavailable`, #64), so `hasMore` stays false.
+fn page_names_unavailable(no_page_known: bool) -> ResultWarning {
+    let consequence = if no_page_known { "their page names are missing and the open page could not be determined" } else { "their page names are missing" };
+    ResultWarning::new(
+        "page_names_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the pages of the focused or selected blocks (possibly no graph open or a re-index in \
+             progress), so {consequence}. This does not mean no page is open. Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+        ),
+    )
 }
 
 /// The id of the page a block sits on (`blockPageId`): `None` when the block carries no page.
@@ -143,14 +167,16 @@ pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext
         }
     }
 
+    // A `null` answer to the lookup is not "no pages" (BR-0011): the blocks keep no page name, and the open page
+    // may be one of those pages, so the result says so rather than that no page is open.
+    let mut names_unavailable = false;
     if !missing_ids.is_empty() {
         let ids = missing_ids.iter().map(|&id| PageId::new(id)).collect::<Result<Vec<_>, _>>()?;
         let query = pages_by_ids(&ids);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-        // PARITY(#299): a `null` answer is read as no pages, so every block silently loses its page name and the
-        // result may say no page is open, where BR-0011 asks for a warning that the names are unavailable
-        // (suspected TS bug) — fix per #326, in both servers.
-        for pulled in wire::page_rows(&answer)?.unwrap_or_default().into_iter().flatten() {
+        let rows = wire::page_rows(&answer)?;
+        names_unavailable = rows.is_none();
+        for pulled in rows.unwrap_or_default().into_iter().flatten() {
             if let Some(id) = id_of(Some(&pulled)) {
                 page_names.insert(id, page_display_name(Some(&pulled)));
             }
@@ -174,8 +200,12 @@ pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext
         }
     }
 
+    let warnings = names_unavailable.then(|| vec![page_names_unavailable(page.is_none())]);
     Ok(CurrentContext {
-        message: page.is_none().then_some(NO_PAGE_OPEN_MESSAGE),
+        has_more: warnings.as_ref().map(|_| false),
+        // With the names unavailable and no page known, "no page is open" would be a guess
+        message: (page.is_none() && !names_unavailable).then_some(NO_PAGE_OPEN_MESSAGE),
+        warnings,
         page,
         focused_block: focused.map(slim),
         selected_blocks: (!selected_blocks.is_empty()).then(|| selected_blocks.iter().map(|block| slim(block)).collect()),
@@ -246,7 +276,7 @@ mod tests {
 
     #[test]
     fn the_message_comes_before_a_null_page_and_the_blocks() {
-        let context = CurrentContext { message: Some(NO_PAGE_OPEN_MESSAGE), page: None, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![]) };
+        let context = CurrentContext { has_more: None, warnings: None, message: Some(NO_PAGE_OPEN_MESSAGE), page: None, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![]) };
         assert_eq!(
             js::json_stringify(&context.clone().into_value()),
             r#"{"message":"No page is open in LogSeq (for example the All Pages view is showing).","page":null,"focusedBlock":{"uuid":"u"},"selectedBlocks":[]}"#
@@ -258,10 +288,34 @@ mod tests {
     fn the_order_does_not_depend_on_which_optional_keys_are_there() {
         let page = Some(object(json!({"name": "atlas"})));
         // a page is open and nothing is focused or selected: `page` alone, with no message
-        let open = CurrentContext { message: None, page: page.clone(), focused_block: None, selected_blocks: None };
+        let open = CurrentContext { has_more: None, warnings: None, message: None, page: page.clone(), focused_block: None, selected_blocks: None };
         assert_eq!(keys(&open.into_value()), ["page"]);
         // a block is focused and others are selected
-        let busy = CurrentContext { message: None, page, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![object(json!({"uuid": "v"}))]) };
+        let busy = CurrentContext { has_more: None, warnings: None, message: None, page, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![object(json!({"uuid": "v"}))]) };
         assert_eq!(keys(&busy.into_value()), ["page", "focusedBlock", "selectedBlocks"]);
+    }
+
+    #[test]
+    fn the_warning_comes_before_the_message_and_the_data() {
+        let context = CurrentContext {
+            has_more: Some(false),
+            warnings: Some(vec![page_names_unavailable(false)]),
+            message: None,
+            page: Some(object(json!({"name": "atlas"}))),
+            focused_block: Some(object(json!({"uuid": "u"}))),
+            selected_blocks: None,
+        };
+        assert_eq!(keys(&context.into_value()), ["hasMore", "warnings", "page", "focusedBlock"]);
+        let context =
+            CurrentContext { has_more: Some(false), warnings: Some(vec![page_names_unavailable(true)]), message: Some("m"), page: None, focused_block: None, selected_blocks: None };
+        assert_eq!(keys(&context.into_value()), ["hasMore", "warnings", "message", "page"]);
+    }
+
+    #[test]
+    fn the_warning_says_the_open_page_is_unknown_only_when_no_page_is_known() {
+        assert!(page_names_unavailable(true).message.contains("the open page could not be determined"));
+        assert!(!page_names_unavailable(false).message.contains("open page"));
+        assert_eq!(page_names_unavailable(true).code, "page_names_unavailable");
+        assert!(page_names_unavailable(true).how_to_fetch_all.is_none());
     }
 }
