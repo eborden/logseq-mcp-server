@@ -345,6 +345,40 @@ mod tests {
         assert_eq!(ref_at("[[a [[b]] c\n]]"), None);
     }
 
+    /// `ref_at` as it was before it read the line once: `page_refs` over the line, first ref, if it
+    /// starts at 0. The oracle that pins the behaviour of the linear version.
+    fn ref_at_by_page_refs(text: &str) -> Option<(&str, &str)> {
+        if let Some(found) = leaf_ref_at(text) {
+            return Some(found);
+        }
+        if !text.starts_with("[[") {
+            return None;
+        }
+        let line = &text[..text.find('\n').unwrap_or(text.len())];
+        let outer = page_refs(line).into_iter().next().filter(|found| found.range.start == 0)?;
+        Some((outer.name, &text[outer.range.end..]))
+    }
+
+    #[test]
+    fn ref_at_agrees_with_page_refs_on_every_short_text_over_a_small_alphabet() {
+        // every text of up to 9 characters from `[`, `]`, `a`, ` ` and a newline: 2.4 million texts
+        let alphabet = ['[', ']', 'a', ' ', '\n'];
+        let mut checked = 0;
+        for len in 0..=9u32 {
+            for n in 0..(alphabet.len() as u32).pow(len) {
+                let mut text = String::new();
+                let mut rest = n;
+                for _ in 0..len {
+                    text.push(alphabet[(rest % alphabet.len() as u32) as usize]);
+                    rest /= alphabet.len() as u32;
+                }
+                assert_eq!(ref_at(&text), ref_at_by_page_refs(&text), "text {text:?}");
+                checked += 1;
+            }
+        }
+        assert!(checked > 2_000_000);
+    }
+
     #[test]
     fn a_name_run_stops_at_a_bracket_or_a_newline() {
         assert_eq!(name_len("abc]]"), 3);
