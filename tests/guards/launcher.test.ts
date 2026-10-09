@@ -98,6 +98,8 @@ function run(env: Record<string, string>, options: { input?: string; args?: stri
     child.stderr.on('data', chunk => (stderr += chunk));
     child.on('error', reject);
     child.on('close', status => resolve({ status, stdout, stderr }));
+    // a launcher that refuses to start exits without reading stdin, so the write can hit a closed pipe
+    child.stdin.on('error', () => {});
     child.stdin.end(options.input ?? '');
   });
 }
