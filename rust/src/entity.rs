@@ -19,6 +19,8 @@ use serde_json::Value;
 
 use crate::wire::{Parsed, Part, Reader, entity_id};
 
+pub(crate) mod shape;
+
 /// A whole number a JSON value holds, as the id of an entity is.
 fn whole(value: Option<&Value>) -> Option<i64> {
     value.and_then(crate::wire::whole_number)

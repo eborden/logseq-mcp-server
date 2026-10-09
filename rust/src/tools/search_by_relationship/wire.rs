@@ -8,7 +8,8 @@
 
 use serde_json::{Map, Value};
 
-use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
+use crate::entity::shape::Block;
+use crate::wire::{DATALOG_METHOD, Id, ResponseError, parse, sent_cells, sent_list};
 
 /// The method whose answer [`blocks`] reads.
 pub const BLOCKS_METHOD: &str = "logseq.Editor.getPageBlocksTree";
@@ -16,55 +17,21 @@ pub const BLOCKS_METHOD: &str = "logseq.Editor.getPageBlocksTree";
 /// `responses.nullableBlockRows`: `[block | null]` per row, or `None` for a `null` answer. A `null`
 /// cell is skipped (`extractBlocks`).
 pub fn block_rows(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
-    let mut reader = Reader::default();
-    let rows = reader
-        .rows(answer, 1, |r, cells| {
-            r.at(Part::Index(0), |r| match cells.first() {
-                Some(Value::Null) => Ok(None),
-                cell => {
-                    r.check_block(cell)?;
-                    Ok(cell.and_then(Value::as_object).cloned())
-                }
-            })
-        })
-        .map_err(|issue| to_error(DATALOG_METHOD, issue))?;
-    Ok(rows.map(|rows| rows.into_iter().flatten().collect()))
+    let cells = sent_cells::<Block>(DATALOG_METHOD, answer)?;
+    Ok(cells.map(|cells| cells.into_iter().flatten().filter_map(|cell| if let Value::Object(map) = cell { Some(map) } else { None }).collect()))
 }
 
 /// `responses.idRows`: `[id]` per row, or `None` for a `null` answer.
 ///
-/// An id must be a whole number here. `z.number()` takes a fraction, and the TypeScript tool then
-/// fails at `groundIds` on the next hop, or not at all after the last one; LogSeq never sends one
-/// (see `crate::wire`).
+/// An id must be a whole number here: the next hop binds it into a query.
 pub fn id_rows(answer: &Value) -> Result<Option<Vec<i64>>, ResponseError> {
-    let mut reader = Reader::default();
-    reader
-        .rows(answer, 1, |r, cells| {
-            r.at(Part::Index(0), |r| match cells.first() {
-                Some(value) => {
-                    let n = r.number_value(value)?;
-                    // 2^53 is where an f64 stops holding every whole number, as a JavaScript number does
-                    if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 { Ok(n as i64) } else { Err(r.mismatch("int", Some(value))) }
-                }
-                None => Err(r.mismatch("number", None)),
-            })
-        })
-        .map_err(|issue| to_error(DATALOG_METHOD, issue))
+    Ok(parse::<Option<Vec<(Id,)>>>(DATALOG_METHOD, answer)?.map(|rows| rows.into_iter().map(|(id,)| id.0).collect()))
 }
 
 /// `responses.blocks`: the top-level blocks of a page tree, or `None` for a `null` answer. Each is
 /// checked as a block and returned as sent, children included.
 pub fn blocks(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
-    let mut reader = Reader::default();
-    let items = match answer {
-        Value::Null => return Ok(None),
-        Value::Array(items) => items,
-        other => return Err(to_error(BLOCKS_METHOD, reader.mismatch("array", Some(other)))),
-    };
-    for (i, item) in items.iter().enumerate() {
-        reader.at(Part::Index(i), |r| r.check_block(Some(item))).map_err(|issue| to_error(BLOCKS_METHOD, issue))?;
-    }
-    Ok(Some(items.clone()))
+    sent_list::<Block>(BLOCKS_METHOD, answer)
 }
 
 #[cfg(test)]
@@ -89,21 +56,22 @@ mod tests {
     }
 
     #[test]
-    fn a_block_is_checked_as_a_block_in_the_schemas_order() {
-        assert_eq!(problem(block_rows(&json!([[{"uuid": "u"}]]))), "[0][0].id: Invalid input: expected number, received undefined");
-        assert_eq!(problem(block_rows(&json!([[{"id": 1}]]))), "[0][0].uuid: Invalid input: expected string, received undefined");
-        assert_eq!(problem(block_rows(&json!([[{"id": 1, "uuid": "u"}, {"id": 2, "uuid": "v"}]]))), "[0]: Too big: expected array to have <1 items");
-        assert_eq!(problem(block_rows(&json!({}))), "(response): Invalid input: expected array, received object");
-        assert_eq!(problem(blocks(&json!([{"id": 1, "uuid": "u"}, {"id": 2}]))), "[1].uuid: Invalid input: expected string, received undefined");
+    fn a_block_is_checked_as_a_block() {
+        assert_eq!(problem(block_rows(&json!([[{"uuid": "u"}]]))), "answer[0][0].id: required, but missing");
+        assert_eq!(problem(block_rows(&json!([[{"id": 1}]]))), "answer[0][0].uuid: required, but missing");
+        assert_eq!(problem(block_rows(&json!([[{"id": 1, "uuid": "u"}, {"id": 2, "uuid": "v"}]]))), "answer[0]: the row has more cells than this server reads");
+        assert_eq!(problem(block_rows(&json!({}))), "answer: expected a list, got an object");
+        assert_eq!(problem(blocks(&json!([{"id": 1, "uuid": "u"}, {"id": 2}]))), "answer[1].uuid: required, but missing");
         assert_eq!(blocks(&json!({})).unwrap_err().method, BLOCKS_METHOD);
     }
 
     #[test]
     fn page_ids_are_whole_numbers() {
         assert_eq!(id_rows(&json!([[3], [4]])).unwrap().unwrap(), vec![3, 4]);
-        assert_eq!(problem(id_rows(&json!([["3"]]))), "[0][0]: Invalid input: expected number, received string");
-        assert_eq!(problem(id_rows(&json!([[]]))), "[0][0]: Invalid input: expected number, received undefined");
-        assert_eq!(problem(id_rows(&json!([[2.5]]))), "[0][0]: Invalid input: expected int, received number");
+        assert_eq!(id_rows(&json!([[5.0]])).unwrap().unwrap(), vec![5]);
+        assert_eq!(problem(id_rows(&json!([["3"]]))), "answer[0][0]: expected a whole number, got a string");
+        assert_eq!(problem(id_rows(&json!([[]]))), "answer[0]: the row has fewer cells than this server reads");
+        assert_eq!(problem(id_rows(&json!([[2.5]]))), "answer[0][0]: expected a whole number, got a number with a fraction");
     }
 
     #[test]

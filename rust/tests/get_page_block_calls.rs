@@ -123,7 +123,7 @@ async fn a_missing_block_is_the_same_error_in_markdown() {
 async fn an_answer_that_is_not_a_block_is_a_response_error() {
     let logseq = mock_logseq(vec![json!({"id": 1})]).await;
     let error = get_block::get_block(&client(&logseq), &uuid(5), false, false).await.unwrap_err();
-    assert!(matches!(&error, ToolError::Response(response) if response.path == "uuid"), "{error}");
+    assert!(matches!(&error, ToolError::Response(response) if response.path == "answer.uuid"), "{error}");
 }
 
 // ---- logseq_get_page
@@ -319,7 +319,7 @@ async fn resolve_refs_annotates_the_blocks_and_adds_the_meta_even_when_nothing_h
 async fn an_answer_that_is_not_a_page_is_a_response_error_naming_the_method() {
     let logseq = mock_logseq(vec![json!({"id": 1})]).await;
     let error = get_page::get_page(&client(&logseq), "x", false, false).await.unwrap_err();
-    assert!(matches!(&error, ToolError::Response(r) if r.method == "logseq.Editor.getPage" && r.path == "name"), "{error}");
+    assert!(matches!(&error, ToolError::Response(r) if r.method == "logseq.Editor.getPage" && r.path == "answer.name"), "{error}");
 }
 
 #[tokio::test]

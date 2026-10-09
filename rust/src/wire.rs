@@ -30,7 +30,7 @@ mod deserializer;
 #[cfg(test)]
 mod reading;
 
-use self::deserializer::Wire;
+use self::deserializer::{Part as ReadPart, Wire};
 
 /// The most a whole number can be, as a JavaScript number holds it: 2^53, where an f64 stops holding every
 /// whole number.
@@ -102,6 +102,43 @@ pub(crate) fn parse<T: DeserializeOwned>(method: &str, answer: &Value) -> Result
 /// (BR-0004) and reads through [`crate::entity`].
 pub(crate) fn check<T: DeserializeOwned>(method: &str, answer: &Value) -> Result<(), ResponseError> {
     parse::<T>(method, answer).map(|_| ())
+}
+
+/// The items of a list answer, as LogSeq sent them. Meant for an answer that has just been read as a list,
+/// which is what makes the empty case a list with nothing in it and never a stand-in for another kind of
+/// answer.
+fn items(answer: &Value) -> &[Value] {
+    answer.as_array().map(Vec::as_slice).unwrap_or_default()
+}
+
+/// A list answer whose every item must be a `T`, kept as LogSeq sent it (BR-0004). `null` is `None`, which is
+/// not an empty list (BR-0011).
+pub(crate) fn sent_list<T: DeserializeOwned>(method: &str, answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
+    Ok(parse::<Option<Vec<T>>>(method, answer)?.map(|_| items(answer).to_vec()))
+}
+
+/// Rows of one cell each, the cell a `T` or `null`: `[block | null]` per row. A `null` cell is `None`; any
+/// other is the object as LogSeq sent it. The whole answer `null` is `None` too, one level out.
+pub(crate) fn sent_cells<T: DeserializeOwned>(method: &str, answer: &Value) -> Result<Option<Vec<Option<Value>>>, ResponseError> {
+    let Some(rows) = parse::<Option<Vec<(Option<T>,)>>>(method, answer)? else { return Ok(None) };
+    debug_assert_eq!(rows.len(), items(answer).len());
+    Ok(Some(rows.iter().zip(items(answer)).map(|((cell,), row)| cell.as_ref().and_then(|_| row.get(0)).cloned()).collect()))
+}
+
+/// Rows of one cell each, the cell a `T` (a `null` cell is an error): the cells as LogSeq sent them.
+pub(crate) fn sent_required_cells<T: DeserializeOwned>(method: &str, answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
+    let Some(rows) = parse::<Option<Vec<(T,)>>>(method, answer)? else { return Ok(None) };
+    debug_assert_eq!(rows.len(), items(answer).len());
+    Ok(Some(items(answer).iter().filter_map(|row| row.get(0)).cloned().collect()))
+}
+
+/// `value` must be a `T`; it sits at `answer[at[0]][at[1]]...`, which is where an error says it is. For a
+/// cell that is checked after the row it is in has been read.
+pub(crate) fn check_at<T: DeserializeOwned>(method: &str, value: &Value, at: &[usize]) -> Result<(), ResponseError> {
+    T::deserialize(Wire(value)).map(|_| ()).map_err(|issue| {
+        let issue = at.iter().rev().fold(issue, |issue, index| issue.at(ReadPart::Index(*index)));
+        ResponseError::from_issue(method, &issue)
+    })
 }
 
 /// A whole number: a `:db/id`, or a count. `5` and `5.0` alike, up to 2^53 (see [`whole_number`]).
