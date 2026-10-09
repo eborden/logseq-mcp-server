@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
 import { createHash } from 'crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
 import { createServer, type Server } from 'http';
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
@@ -18,6 +18,8 @@ const NAME = 'logseq-mcp-server';
 const VERSION = '9.8.7';
 const TARGET = 'x86_64-unknown-linux-musl';
 const STUB_OUTPUT = 'stub-server-ran';
+const HTTP_WARNING =
+  'logseq-mcp-server: warning: LOGSEQ_MCP_RELEASE_BASE_URL is plain http, so the checksums come from the same unprotected place as the binary and prove nothing against an attacker on the network.';
 
 const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 
@@ -36,6 +38,8 @@ interface Release {
 }
 
 interface Run {
+  /** The pid of the process the test started: the launcher, and after an `exec` the server in its place */
+  pid: number | undefined;
   status: number | null;
   stdout: string;
   stderr: string;
@@ -66,13 +70,13 @@ function fakeUname(os: string, arch: string) {
 }
 
 /** A release directory for `target` with the four files and a matching SHA256SUMS. `tamper` changes a file after it was summed. */
-function makeRelease(name: string, options: { target?: string; omit?: string[]; tamper?: Record<string, string>; sums?: (files: Record<string, string>) => string } = {}): Release {
+function makeRelease(name: string, options: { target?: string; omit?: string[]; tamper?: Record<string, string>; sums?: (files: Record<string, string>) => string; binary?: string } = {}): Release {
   const target = options.target ?? TARGET;
   const dir = join(scratch, name);
   mkdirSync(dir, { recursive: true });
   const asset = `${NAME}-${VERSION}-${target}`;
   const files: Record<string, string> = {
-    [asset]: STUB_BINARY,
+    [asset]: options.binary ?? STUB_BINARY,
     LICENSE: 'MIT License\n',
     'THIRD-PARTY-NOTICES.txt': 'notices\n',
   };
@@ -86,9 +90,14 @@ function makeRelease(name: string, options: { target?: string; omit?: string[]; 
 const fileUrl = (dir: string) => `file://${dir}`;
 
 /** The launcher, as the plugin starts it: `sh <script> args`, stdin fed `input`. */
-function run(env: Record<string, string>, options: { input?: string; args?: string[]; script?: string; path?: string } = {}): Promise<Run> {
+function run(env: Record<string, string>, options: { input?: string; args?: string[]; script?: string; path?: string; umask?: string } = {}): Promise<Run> {
   return new Promise((resolve, reject) => {
-    const child = spawn('/bin/sh', [options.script ?? launcher, ...(options.args ?? [])], {
+    // with a umask, a wrapper sets it and then `exec`s the launcher, so the launcher still has the pid the test started
+    const command =
+      options.umask === undefined
+        ? [options.script ?? launcher]
+        : ['-c', 'umask "$1"; shift; exec /bin/sh "$@"', 'sh', options.umask, options.script ?? launcher];
+    const child = spawn('/bin/sh', [...command, ...(options.args ?? [])], {
       env: { PATH: options.path ?? `${fakeBin}${delimiter}${process.env.PATH}`, HOME: join(scratch, 'home'), XDG_CACHE_HOME: cacheRoot, ...env },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -97,7 +106,7 @@ function run(env: Record<string, string>, options: { input?: string; args?: stri
     child.stdout.on('data', chunk => (stdout += chunk));
     child.stderr.on('data', chunk => (stderr += chunk));
     child.on('error', reject);
-    child.on('close', status => resolve({ status, stdout, stderr }));
+    child.on('close', status => resolve({ pid: child.pid, status, stdout, stderr }));
     // a launcher that refuses to start exits without reading stdin, so the write can hit a closed pipe
     child.stdin.on('error', () => {});
     child.stdin.end(options.input ?? '');
@@ -157,7 +166,7 @@ describe('a download that checks out', () => {
     const server = await serve(release.files);
     try {
       const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: `http://127.0.0.1:${port(server)}/` }, { input: 'hi\n' });
-      expect(result.stderr).toBe('');
+      expect(result.stderr).toBe(`${HTTP_WARNING}\n`);
       expect(result.stdout).toContain(STUB_OUTPUT);
       expect(result.status).toBe(0);
     } finally {
@@ -173,6 +182,28 @@ describe('a download that checks out', () => {
       expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toContain(`the release has no file named ${NAME}-${VERSION}-${TARGET}`);
+      expect(cacheContents()).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it.each([
+    [403, 'the server refused or rate-limited the download of SHA256SUMS'],
+    [429, 'the server refused or rate-limited the download of SHA256SUMS'],
+    [500, 'the server answered with an error for SHA256SUMS'],
+    [503, 'the server answered with an error for SHA256SUMS'],
+    [418, 'the server answered with an error for SHA256SUMS'],
+  ])("reports an HTTP %i as the server's answer, not as a missing file, and shows no body", async (code, message) => {
+    const server = await serve({}, code);
+    try {
+      const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: `http://127.0.0.1:${port(server)}` });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain(message);
+      expect(result.stderr).toContain(`${code}`);
+      expect(result.stderr).not.toContain('no file named');
+      expect(result.stderr).not.toContain('the body of the error answer');
       expect(cacheContents()).toEqual([]);
     } finally {
       server.close();
@@ -238,6 +269,107 @@ describe('the cache', () => {
     expect(cacheContents()).toEqual([]);
     // and not even an empty staging directory
     expect(existsSync(cacheDir()) ? readdirSync(cacheDir()) : []).toEqual([]);
+  });
+});
+
+describe('the cache is private to the user', () => {
+  const mode = (path: string) => statSync(path).mode & 0o777;
+
+  it('creates 0700 directories and 0600 files (0700 for the binary) whatever the umask, and leaves the server its own umask', async () => {
+    const release = makeRelease('release', { binary: `#!/bin/sh\nprintf 'umask=%s\\n' "$(umask)"\n` });
+    const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) }, { umask: '000' });
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe('umask=0000\n');
+    expect(mode(join(cacheRoot, NAME))).toBe(0o700);
+    expect(mode(cacheDir())).toBe(0o700);
+    expect(mode(join(cacheDir(), `${NAME}-${VERSION}-${TARGET}`))).toBe(0o700);
+    for (const file of ['SHA256SUMS', 'LICENSE', 'THIRD-PARTY-NOTICES.txt']) expect(mode(join(cacheDir(), file)), file).toBe(0o600);
+    expect(readdirSync(cacheDir()).sort()).toEqual(['LICENSE', 'SHA256SUMS', 'THIRD-PARTY-NOTICES.txt', `${NAME}-${VERSION}-${TARGET}`].sort());
+  });
+
+  it('refuses a relative XDG_CACHE_HOME, and a relative HOME when XDG_CACHE_HOME is not set', async () => {
+    const release = makeRelease('release');
+    const relatives: Record<string, string>[] = [{ XDG_CACHE_HOME: 'relative/cache' }, { XDG_CACHE_HOME: '', HOME: 'relative/home' }];
+    for (const env of relatives) {
+      const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir), ...env });
+      expect(result.status, JSON.stringify(env)).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('the cache directory must be an absolute path');
+    }
+  });
+
+  it.each([0o777, 0o775, 0o757, 0o770])('refuses an existing version directory with mode %o, and runs nothing from it', async dirMode => {
+    const release = makeRelease('release');
+    await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    chmodSync(cacheDir(), dirMode);
+    try {
+      const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('is writable by group or others, so it is not trusted');
+    } finally {
+      chmodSync(cacheDir(), 0o700);
+    }
+  });
+
+  it('refuses a group- or world-writable parent directory too, before it downloads anything', async () => {
+    mkdirSync(join(cacheRoot, NAME), { recursive: true });
+    chmodSync(join(cacheRoot, NAME), 0o777);
+    const release = makeRelease('release');
+    const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('is writable by group or others, so it is not trusted');
+    expect(cacheContents()).toEqual([]);
+  });
+
+  it('accepts a 0755 directory it owns (readable by others, not writable)', async () => {
+    const release = makeRelease('release');
+    mkdirSync(cacheDir(), { recursive: true, mode: 0o755 });
+    const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    expect(result.status).toBe(0);
+  });
+
+  it('sweeps staging directories left by a killed start once they are over a day old, and leaves a fresh one', async () => {
+    const release = makeRelease('release');
+    const old = join(cacheDir(), '.partial.11111');
+    const fresh = join(cacheDir(), '.partial.22222');
+    for (const dir of [old, fresh]) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${NAME}-${VERSION}-${TARGET}`), 'half a download');
+    }
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+    utimesSync(old, threeDaysAgo, threeDaysAgo);
+    const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    expect(result.status).toBe(0);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+  });
+});
+
+describe('the launcher is replaced by the server (exec)', () => {
+  // The server reports its own pid and its parent. After `exec` its pid is the one the test started (the launcher's),
+  // and its parent is the test process, so no launcher process is left beside it. A launcher that ran the server as a
+  // child would report a different pid and the launcher's as its parent.
+  const REPORTER = `#!/bin/sh\nprintf 'pid=%s ppid=%s\\n' "$$" "$PPID"\n`;
+
+  it("runs the downloaded server in the launcher's own process", async () => {
+    const release = makeRelease('release', { binary: REPORTER });
+    const result = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    expect(result.stdout).toBe(`pid=${result.pid} ppid=${process.pid}\n`);
+  });
+
+  it("runs a cached server in the launcher's own process", async () => {
+    const release = makeRelease('release', { binary: REPORTER });
+    await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    const second = await run({ LOGSEQ_MCP_RELEASE_BASE_URL: fileUrl(release.dir) });
+    expect(second.stdout).toBe(`pid=${second.pid} ppid=${process.pid}\n`);
+  });
+
+  it("runs a LOGSEQ_MCP_BINARY server in the launcher's own process", async () => {
+    const binary = join(scratch, 'my-server');
+    writeExecutable(binary, REPORTER);
+    const result = await run({ LOGSEQ_MCP_BINARY: binary });
+    expect(result.stdout).toBe(`pid=${result.pid} ppid=${process.pid}\n`);
   });
 });
 
@@ -311,10 +443,12 @@ describe('refusals', () => {
   });
 
   it('refuses a package.json it cannot take a version from', async () => {
-    writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version: '1.0.0/../../x' }));
-    const result = await run({});
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('cannot read a valid version from package.json');
+    for (const version of ['1.0.0/../../x', '..', '.', '.hidden', '-1', 'v1', '']) {
+      writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version }, null, 2));
+      const bad = await run({});
+      expect(bad.status, version).toBe(1);
+      expect(bad.stderr, version).toContain('cannot read a valid version from package.json');
+    }
     rmSync(join(pluginRoot, 'package.json'));
     const missing = await run({});
     expect(missing.status).toBe(1);
@@ -459,6 +593,7 @@ describe('the default download', () => {
     expect(calls).toHaveLength(1);
     const base = `https://github.com/eborden/logseq-mcp-server/releases/download/v${pkg.version}`;
     expect(calls[0]).toMatch(new RegExp(`(^| )${base.replace(/[.]/g, '\\.')}/SHA256SUMS$`));
+    expect(calls[0].startsWith('-q ')).toBe(true); // ~/.curlrc is ignored
     expect(calls[0]).toContain('--proto =https');
     expect(calls[0]).toContain('--proto-redir =https');
     expect(result.stderr).toContain(`from ${base}`);
@@ -516,15 +651,27 @@ describe('the script itself', () => {
     expect(lastExec).toBeGreaterThan(text.indexOf('verify "$asset"'));
     expect(lastExec).toBeGreaterThan(text.indexOf('mv -f "$stage/$asset" "$cache/$asset"'));
   });
+
+  it('ends with exec of the cached binary, and execs it on a cache hit too', () => {
+    const lines = text.split('\n').filter(line => line.trim() !== '');
+    expect(lines[lines.length - 1]).toBe('exec "$cache/$asset" "$@"');
+    expect(text).toMatch(/^ {2}exec "\$cache\/\$asset" "\$@"$/m);
+  });
+
+  it('runs curl with -q first, so ~/.curlrc cannot change what is checked', () => {
+    const calls = text.split('\n').filter(line => /(^|\$\()\s*curl /.test(line.trim()) && !line.trim().startsWith('#'));
+    expect(calls.length).toBeGreaterThan(0);
+    for (const line of calls) expect(line, 'a curl call without -q first').toMatch(/curl -q /);
+  });
 });
 
 /** A local HTTP server that answers GET /<file> with the file's text, and 404 for anything else. */
-function serve(files: Record<string, string>): Promise<Server> {
+function serve(files: Record<string, string>, missingStatus = 404): Promise<Server> {
   return new Promise(resolve => {
     const server = createServer((request, response) => {
       const body = files[(request.url ?? '').replace(/^\//, '')];
       if (body === undefined) {
-        response.writeHead(404).end('not found');
+        response.writeHead(missingStatus).end('the body of the error answer');
       } else {
         response.writeHead(200, { 'content-type': 'application/octet-stream' }).end(body);
       }
