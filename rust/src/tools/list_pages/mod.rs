@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::meta::ResultWarning;
@@ -38,8 +38,6 @@ pub const DEFAULT_LIST_PAGES_LIMIT: u64 = 200;
 /// Most pages one call returns. A larger `limit` is clamped to it, and `offset` reaches the pages
 /// past it, so a cut at the maximum still has a `howToFetchAll`.
 pub const MAX_LIST_PAGES_LIMIT: u64 = 1000;
-/// Pages skipped when `offset` is absent.
-pub const DEFAULT_LIST_PAGES_OFFSET: u64 = 0;
 
 /// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
 const DESCRIPTION: &str = "List non-journal pages as { name, aliases? }, filtered by name_contains (substring of name or alias). Aliases nest under pages.\n\n\
@@ -64,17 +62,6 @@ pub struct Args {
     pub offset: u64,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        name_contains: read.optional_string("name_contains")?,
-        limit: read.count_or("limit", 0, DEFAULT_LIST_PAGES_LIMIT)?,
-        offset: read.count_or("offset", 0, DEFAULT_LIST_PAGES_OFFSET)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -84,7 +71,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the list, then its tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let result = list_pages(client, &args).await?;
     let mut content = vec![ContentBlock::text(result.to_value().to_string())];
     if tips_enabled {
@@ -436,13 +423,21 @@ mod tests {
 
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
-        let defaults = read_args(None).unwrap();
+        let defaults = parse_args::<Args>(None).unwrap();
         assert_eq!(defaults, Args { name_contains: None, limit: 200, offset: 0 });
         assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
         let bad = json!({"limit": 2.5, "offset": -1});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': 2.5\n\nExpected: an integer, not a fraction\nExample: limit: 5"
         );
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        sweep::<Args>(json!({}), "name_contains", Takes::Text, false);
+        sweep::<Args>(json!({}), "limit", Takes::Count(0), false);
+        sweep::<Args>(json!({}), "offset", Takes::Count(0), false);
     }
 }

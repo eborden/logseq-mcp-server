@@ -1,10 +1,5 @@
-//! Tool arguments at the boundary: the parameter aliases (BR-0008, `src/utils/param-aliases.ts`)
-//! and the wording of a bad argument (`src/utils/parse-args.ts`).
-//!
-//! The arguments are parsed into a typed struct by serde, as the server does for every tool
-//! (`parse_args` in `server.rs`). What this module adds is the TypeScript server's text for a
-//! failure, which the parity harness compares byte for byte, so a model sees one message
-//! whichever server answers.
+//! Tool arguments at the boundary: the parameter aliases (BR-0008). A tool folds them in first, and
+//! then parses what is left into its `Args` type with `crate::args::parse_args`.
 
 use serde_json::{Map, Value};
 
@@ -68,31 +63,6 @@ fn same_value(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// What `parseArgs` made of a bad required string parameter: `missing` when it is absent or
-/// `null`, else the value as JSON, and what was expected (`expectedMessage`, `exampleFor`). The wording
-/// (`a string, not a number`, `(required)`) began as zod's and is this server's own readable message now.
-/// `args` are the arguments as sent.
-pub fn bad_string_param(param: &str, args: Option<&Map<String, Value>>) -> InvalidParameter {
-    let sent = args.and_then(|args| args.get(param)).filter(|value| !value.is_null());
-    let (value, expected) = match sent {
-        None => ("missing".to_owned(), "a string (required)".to_owned()),
-        Some(value) => (value.to_string(), format!("a string, not {}", kind_of(value))),
-    };
-    InvalidParameter { param: param.to_owned(), value, expected, example: Some(format!("{param}: \"...\"")) }
-}
-
-/// What a value is, in the words of the `Expected:` line (`kindOf`).
-fn kind_of(value: &Value) -> &'static str {
-    match value {
-        Value::Array(_) => "an array",
-        Value::Object(_) => "an object",
-        Value::Number(_) => "a number",
-        Value::Bool(_) => "a boolean",
-        Value::String(_) => "a string",
-        Value::Null => "a null",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,27 +119,5 @@ mod tests {
     #[test]
     fn no_arguments_pass_through() {
         assert_eq!(resolve_param_aliases(PAGE, None).unwrap(), None);
-    }
-
-    #[test]
-    fn a_missing_or_null_parameter_is_missing_and_a_wrong_type_is_shown() {
-        assert_eq!(
-            bad_string_param("page_name", args(json!({})).as_ref()).to_string(),
-            "Invalid parameter 'page_name': missing\n\nExpected: a string (required)\nExample: page_name: \"...\""
-        );
-        assert_eq!(bad_string_param("page_name", args(json!({"page_name": null})).as_ref()).value, "missing");
-        assert_eq!(bad_string_param("page_name", None).value, "missing");
-        for (sent, shown, kind) in [
-            (json!(42), "42", "a number"),
-            (json!(true), "true", "a boolean"),
-            (json!(["a"]), "[\"a\"]", "an array"),
-            (json!({"b": 1, "1": 2}), "{\"b\":1,\"1\":2}", "an object"),
-            // a number is written as serde writes it, not as JavaScript does (`100000000000000000000`)
-            (json!(1e20), "1e+20", "a number"),
-            (json!(1e21), "1e+21", "a number"),
-        ] {
-            let error = bad_string_param("page_name", args(json!({ "page_name": sent })).as_ref());
-            assert_eq!((error.value.as_str(), error.expected), (shown, format!("a string, not {kind}")));
-        }
     }
 }

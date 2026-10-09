@@ -23,7 +23,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, ToolError};
@@ -67,28 +67,27 @@ pub const MAX_BLOCKS_PER_PAGE: u64 = 50;
 /// Source pages named in a `page_blocks_truncated` message; the rest are counted.
 const MAX_NAMED_PAGES: usize = 5;
 
-fn default_max_pages() -> u32 {
-    DEFAULT_MAX_PAGES as u32
+fn default_max_pages() -> u64 {
+    DEFAULT_MAX_PAGES
 }
 
-fn default_max_blocks_per_page() -> u32 {
-    DEFAULT_MAX_BLOCKS_PER_PAGE as u32
+fn default_max_blocks_per_page() -> u64 {
+    DEFAULT_MAX_BLOCKS_PER_PAGE
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// ignores them.
+#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Page to get backlinks for (name, alias or ISO date)
     pub page_name: String,
     /// Max source pages (default: 20, max: 100)
     #[serde(default = "default_max_pages")]
-    pub max_pages: u32,
+    pub max_pages: u64,
     /// Max linking blocks per source page (default: 10, max: 50)
     #[serde(default = "default_max_blocks_per_page")]
-    pub max_blocks_per_page: u32,
+    pub max_blocks_per_page: u64,
 }
 
 /// The tool as `tools/list` shows it.
@@ -101,10 +100,7 @@ pub fn definition() -> Tool {
 /// A call: aliases folded, arguments read, the tool, then its tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let read = Arguments::new(arguments.as_ref());
-    let page_name = read.required_string("page_name")?;
-    let max_pages = read.count_or("max_pages", 0, DEFAULT_MAX_PAGES)?;
-    let max_blocks_per_page = read.count_or("max_blocks_per_page", 0, DEFAULT_MAX_BLOCKS_PER_PAGE)?;
+    let Args { page_name, max_pages, max_blocks_per_page } = parse_args::<Args>(arguments.as_ref())?;
 
     let outcome = get_backlinks_with_meta(client, &page_name, max_pages, max_blocks_per_page).await?;
     let has_results = !outcome.results.is_empty();
@@ -475,6 +471,19 @@ fn backlinks_unavailable(page: &str) -> ResultWarning {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"page_name": "Atlas"});
+        assert_eq!(
+            parse_args::<Args>(base.as_object()).unwrap(),
+            Args { page_name: "Atlas".into(), max_pages: 20, max_blocks_per_page: 10 }
+        );
+        sweep::<Args>(json!({}), "page_name", Takes::Text, true);
+        sweep::<Args>(base.clone(), "max_pages", Takes::Count(0), false);
+        sweep::<Args>(base, "max_blocks_per_page", Takes::Count(0), false);
+    }
 
     fn block(id: i64) -> Value {
         json!({"id": id, "uuid": format!("u{id}")})

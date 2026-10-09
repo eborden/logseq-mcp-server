@@ -22,7 +22,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
@@ -71,18 +71,6 @@ pub struct Args {
     pub slim_results: bool,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        query: read.required_string("query")?,
-        limit: read.optional_count("limit", 0)?,
-        include_context: read.boolean("include_context", false)?,
-        slim_results: read.boolean("slim_results", DEFAULT_SLIM_RESULTS)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -92,7 +80,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the search, then its meta and tips.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let found = search_blocks_with_meta(client, &args.query, args.limit, args.include_context, args.slim_results).await?;
     // `null` from LogSeq is `null` here, and has no meta or tips: no matches is an empty array
     let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
@@ -411,16 +399,26 @@ mod tests {
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let only_query = json!({"query": "x"});
-        let defaults = read_args(only_query.as_object()).unwrap();
+        let defaults = parse_args::<Args>(only_query.as_object()).unwrap();
         assert_eq!(defaults, Args { query: "x".into(), limit: None, include_context: false, slim_results: true });
         assert_eq!(serde_json::from_value::<Args>(only_query).unwrap(), defaults);
         // the first argument in schema order that is wrong is the one reported
         let bad = json!({"slim_results": 0, "limit": "a"});
-        assert_eq!(read_args(bad.as_object()).unwrap_err().to_string(), "Invalid parameter 'query': missing\n\nExpected: a string (required)\nExample: query: \"...\"");
+        assert_eq!(parse_args::<Args>(bad.as_object()).unwrap_err().to_string(), "Invalid parameter 'query': missing\n\nExpected: a string (required)\nExample: query: \"...\"");
         let bad = json!({"query": "x", "slim_results": 0, "limit": "a"});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': \"a\"\n\nExpected: a number, not a string\nExample: limit: 5"
         );
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"query": "x"});
+        sweep::<Args>(json!({}), "query", Takes::Text, true);
+        sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "include_context", Takes::Flag, false);
+        sweep::<Args>(base, "slim_results", Takes::Flag, false);
     }
 }

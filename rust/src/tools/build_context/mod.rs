@@ -31,7 +31,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::compact::compact_topic_context;
 use crate::edn::PageName;
@@ -71,39 +71,38 @@ pub const DEFAULT_MAX_REFERENCES: u64 = 20;
 /// Whether `temporalContext` is added when `include_temporal_context` is absent.
 pub const DEFAULT_INCLUDE_TEMPORAL_CONTEXT: bool = true;
 
-fn default_max_blocks() -> u32 {
-    DEFAULT_MAX_BLOCKS as u32
+fn default_max_blocks() -> u64 {
+    DEFAULT_MAX_BLOCKS
 }
 
-fn default_max_related_pages() -> u32 {
-    DEFAULT_MAX_RELATED_PAGES as u32
+fn default_max_related_pages() -> u64 {
+    DEFAULT_MAX_RELATED_PAGES
 }
 
-fn default_max_references() -> u32 {
-    DEFAULT_MAX_REFERENCES as u32
+fn default_max_references() -> u64 {
+    DEFAULT_MAX_REFERENCES
 }
 
 fn default_include_temporal_context() -> bool {
     DEFAULT_INCLUDE_TEMPORAL_CONTEXT
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// ignores them.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
 pub struct Args {
     /// Topic to build context for (page name, alias or ISO date)
     pub topic_name: String,
     /// Maximum number of blocks to include (default: 50)
     #[serde(default = "default_max_blocks")]
-    pub max_blocks: u32,
+    pub max_blocks: u64,
     /// Maximum number of related pages to include (default: 10)
     #[serde(default = "default_max_related_pages")]
-    pub max_related_pages: u32,
+    pub max_related_pages: u64,
     /// Maximum number of reference blocks to include (default: 20)
     #[serde(default = "default_max_references")]
-    pub max_references: u32,
+    pub max_references: u64,
     /// Include temporal context for journal pages (default: true)
     #[serde(default = "default_include_temporal_context")]
     pub include_temporal_context: bool,
@@ -117,8 +116,7 @@ pub struct Args {
     pub compact: bool,
 }
 
-/// What a call asked for, read from the arguments in the order the schema lists them, so the first
-/// one that is wrong is the one reported, as `parseArgs` does.
+/// What a call asked for, from the arguments parsed into [`Args`].
 #[derive(Debug, PartialEq)]
 struct Request {
     topic_name: String,
@@ -128,19 +126,13 @@ struct Request {
     resolve_refs: bool,
 }
 
-fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
-    let read = Arguments::new(arguments);
-    let topic_name = read.required_string("topic_name")?;
-    let max_blocks = read.count_or("max_blocks", 0, DEFAULT_MAX_BLOCKS)?;
-    let max_related_pages = read.count_or("max_related_pages", 0, DEFAULT_MAX_RELATED_PAGES)?;
-    let max_references = read.count_or("max_references", 0, DEFAULT_MAX_REFERENCES)?;
-    let include_temporal_context = read.boolean("include_temporal_context", DEFAULT_INCLUDE_TEMPORAL_CONTEXT)?;
-    let resolve_refs = read.boolean("resolve_refs", false)?;
-    let format = OutputFormat::read(&read)?;
-    let compact = read.boolean("compact", false)?;
-    // Compact output drops the bodies, so there is nothing to resolve refs in
-    let caps = Caps { max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs: resolve_refs && !compact };
-    Ok(Request { topic_name, caps, format, compact, resolve_refs })
+impl From<Args> for Request {
+    fn from(args: Args) -> Request {
+        let Args { topic_name, max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs, format, compact } = args;
+        // Compact output drops the bodies, so there is nothing to resolve refs in
+        let caps = Caps { max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs: resolve_refs && !compact };
+        Request { topic_name, caps, format, compact, resolve_refs }
+    }
 }
 
 /// The tool as `tools/list` shows it.
@@ -154,7 +146,7 @@ pub fn definition() -> Tool {
 /// tool makes no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let request = read_args(arguments.as_ref())?;
+    let request = Request::from(parse_args::<Args>(arguments.as_ref())?);
     let mut context = build_context_for_topic(client, &request.topic_name, request.caps).await?;
     // Compact output has no block bodies to resolve refs in. Say so rather than drop the request silently.
     if request.compact && request.resolve_refs {
@@ -551,20 +543,34 @@ mod tests {
     #[test]
     fn the_arguments_are_read_in_schema_order_and_the_aliases_are_folded() {
         let folded = resolve_param_aliases(ALIASES, args(json!({"page_name": "Atlas", "max_blocks": 3}))).unwrap();
-        let request = read_args(folded.as_ref()).unwrap();
+        let request = Request::from(parse_args::<Args>(folded.as_ref()).unwrap());
         assert_eq!(request.topic_name, "Atlas");
         assert_eq!(request.caps, Caps { max_blocks: 3, ..Caps::default() });
-        let error = read_args(args(json!({"topic_name": "a", "max_blocks": -1, "format": "xml"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"topic_name": "a", "max_blocks": -1, "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_blocks': -1"), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'topic_name': missing"), "{error}");
     }
 
     #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"topic_name": "Atlas"});
+        sweep::<Args>(json!({}), "topic_name", Takes::Text, true);
+        for count in ["max_blocks", "max_related_pages", "max_references"] {
+            sweep::<Args>(base.clone(), count, Takes::Count(0), false);
+        }
+        for flag in ["include_temporal_context", "resolve_refs", "compact"] {
+            sweep::<Args>(base.clone(), flag, Takes::Flag, false);
+        }
+        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
+    }
+
+    #[test]
     fn compact_skips_resolve_refs_but_the_request_remembers_it_was_asked() {
-        let request = read_args(args(json!({"topic_name": "a", "resolve_refs": true, "compact": true})).as_ref()).unwrap();
+        let request = Request::from(parse_args::<Args>(args(json!({"topic_name": "a", "resolve_refs": true, "compact": true})).as_ref()).unwrap());
         assert!(!request.caps.resolve_refs && request.resolve_refs && request.compact);
-        let request = read_args(args(json!({"topic_name": "a", "resolve_refs": true})).as_ref()).unwrap();
+        let request = Request::from(parse_args::<Args>(args(json!({"topic_name": "a", "resolve_refs": true})).as_ref()).unwrap());
         assert!(request.caps.resolve_refs);
     }
 

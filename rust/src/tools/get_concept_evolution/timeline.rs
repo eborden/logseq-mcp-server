@@ -25,9 +25,6 @@ use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warni
 /// narrows them.
 pub const MAX_ENTRIES: u64 = 500;
 
-/// The periods `group_by` names, in the order the schema lists them (`GROUP_BY_PERIODS`).
-pub const GROUP_BY_VALUES: &[&str] = &["day", "week", "month"];
-
 /// The periods mentions are grouped into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -38,17 +35,6 @@ pub enum GroupBy {
     Day,
     Week,
     Month,
-}
-
-impl GroupBy {
-    pub fn from_word(word: &str) -> Option<GroupBy> {
-        Some(match word {
-            "day" => GroupBy::Day,
-            "week" => GroupBy::Week,
-            "month" => GroupBy::Month,
-            _ => return None,
-        })
-    }
 }
 
 /// One day's mentions: the day (`None` for the blocks with no journal day) and which blocks.

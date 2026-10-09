@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::errors::{InvalidParameter, MatchedBy, ToolError};
 use crate::meta::ResultWarning;
@@ -57,13 +57,6 @@ pub struct Args {
     pub after: String,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args { before: read.required_string_max("before", MAX_TEXT_CHARS)?, after: read.required_string_max("after", MAX_TEXT_CHARS)? })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -73,7 +66,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, then the checks.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let result = check_links(client, &args.before, &args.after).await?;
     Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
@@ -265,8 +258,8 @@ mod tests {
         assert_eq!(value["refs"]["unresolved"].to_string(), r#"["gone"]"#);
     }
 
-    fn read(value: Value) -> Result<Args, ToolError> {
-        read_args(value.as_object())
+    fn read(value: Value) -> Result<Args, InvalidParameter> {
+        parse_args::<Args>(value.as_object())
     }
 
     #[test]
@@ -283,20 +276,27 @@ mod tests {
     }
 
     #[test]
-    fn a_text_over_the_cap_is_zods_too_big_and_the_cap_counts_characters() {
+    fn a_text_over_the_cap_is_too_long_and_the_cap_counts_characters() {
         let long = "x".repeat(MAX_TEXT_CHARS + 1);
         assert_eq!(
             read(json!({"before": long, "after": ""})).unwrap_err().to_string(),
-            format!("Invalid parameter 'before': \"{long}\"\n\nExpected: Too big: expected string to have <=50000 characters")
+            format!("Invalid parameter 'before': \"{long}\"\n\nExpected: at most 50000 characters")
         );
         assert!(read(json!({"before": "x".repeat(MAX_TEXT_CHARS), "after": ""})).is_ok());
         // an emoji is one character: 50,001 of them are over the cap, 50,000 are not
         let emoji = "\u{1F600}".repeat(50_001);
         assert_eq!(
             read(json!({"before": "", "after": emoji})).unwrap_err().to_string(),
-            format!("Invalid parameter 'after': \"{emoji}\"\n\nExpected: Too big: expected string to have <=50000 characters")
+            format!("Invalid parameter 'after': \"{emoji}\"\n\nExpected: at most 50000 characters")
         );
         assert!(read(json!({"before": "", "after": "\u{1F600}".repeat(50_000)})).is_ok());
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        sweep::<Args>(json!({"after": "x"}), "before", Takes::Text, true);
+        sweep::<Args>(json!({"before": "x"}), "after", Takes::Text, true);
     }
 
     #[test]

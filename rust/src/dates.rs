@@ -15,10 +15,6 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The words `preset` takes, in the order the TypeScript schema lists them (`DATE_PRESETS`).
-pub const DATE_PRESET_VALUES: &[&str] =
-    &["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"];
-
 /// A named period (`DatePreset`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -34,23 +30,6 @@ pub enum DatePreset {
     LastMonth,
     ThisYear,
     YearToDate,
-}
-
-impl DatePreset {
-    /// The preset a word names, as `isDatePreset` knows it.
-    pub fn from_word(word: &str) -> Option<DatePreset> {
-        Some(match word {
-            "today" => DatePreset::Today,
-            "yesterday" => DatePreset::Yesterday,
-            "this_week" => DatePreset::ThisWeek,
-            "last_week" => DatePreset::LastWeek,
-            "this_month" => DatePreset::ThisMonth,
-            "last_month" => DatePreset::LastMonth,
-            "this_year" => DatePreset::ThisYear,
-            "year_to_date" => DatePreset::YearToDate,
-            _ => return None,
-        })
-    }
 }
 
 /// A day of the proleptic Gregorian calendar, with no time zone. The fields are what
@@ -334,11 +313,12 @@ mod tests {
 
     #[test]
     fn a_preset_is_known_by_the_words_the_schema_lists() {
-        for word in DATE_PRESET_VALUES {
-            assert!(DatePreset::from_word(word).is_some(), "{word}");
-        }
-        assert_eq!(DatePreset::from_word("next_week"), None);
-        assert_eq!(DatePreset::from_word("Today"), None);
+        let preset = |word: &str| serde_json::from_value::<DatePreset>(serde_json::json!(word)).ok();
+        let words = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"];
+        let known: Vec<_> = words.iter().map(|word| preset(word).unwrap_or_else(|| panic!("{word}"))).collect();
+        assert_eq!(known.len(), 8);
+        assert_eq!(preset("next_week"), None);
+        assert_eq!(preset("Today"), None);
     }
 
     #[test]
