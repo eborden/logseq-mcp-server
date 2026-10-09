@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 /// compare equal only when they are the same string, so a tie never depends on arrival order.
 ///
 /// It is a plain order and not a dictionary one. Every capital letter sorts with its lowercase
-/// (`Zoe` after `alice`, `alice` before `Alice`), an accented letter sorts after every unaccented
+/// (`Zoe` after `alice`, `Alice` before `alice`), an accented letter sorts after every unaccented
 /// one (`Zoe` before `Ágata`), and ideographs follow their code points, block after block.
 /// Each character is lowercased on its own (`char::to_lowercase`), so no context or locale is read.
 pub fn by_name(a: &str, b: &str) -> Ordering {

@@ -15,6 +15,7 @@
 mod tips;
 mod wire;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
@@ -398,13 +399,16 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
         return Ok(None);
     };
     let mut groups = group_by_source_page(rows);
-    // By name ([`order::by_name`]), then page id. A page without a name sorts first.
-    groups.sort_by(|a, b| {
-        let name = |backlink: &Backlink| backlink.page.get("name").map(js_string).unwrap_or_default();
-        let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
-        order::by_name(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
-    });
+    groups.sort_by(by_page_name_then_id);
     Ok(Some(groups))
+}
+
+/// The order of the source pages of the aliased path: by name ([`order::by_name`]), then page id. A page
+/// without a name sorts first, as the empty name.
+fn by_page_name_then_id(a: &Backlink, b: &Backlink) -> Ordering {
+    let name = |backlink: &Backlink| backlink.page.get("name").map(js_string).unwrap_or_default();
+    let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
+    order::by_name(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
 }
 
 /// `getBacklinksWithMeta`: every page and block that links to `page_name` under any of its names.
@@ -482,6 +486,15 @@ mod tests {
             page: json!({"id": id, "name": name, "originalName": name.to_uppercase()}),
             blocks: (0..blocks as i64).map(|i| block(id * 1000 + i)).collect(),
         }
+    }
+
+    #[test]
+    fn the_aliased_groups_sort_by_name_then_id_and_a_nameless_page_sorts_first() {
+        let nameless = Backlink { page: json!({"id": 9}), blocks: vec![] };
+        let mut groups = vec![source(3, "z", 1), source(2, "a", 1), nameless, source(1, "a", 1)];
+        groups.sort_by(by_page_name_then_id);
+        let ids: Vec<i64> = groups.iter().map(|g| g.page["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, [9, 1, 2, 3]);
     }
 
     fn names(results: &[Backlink]) -> Vec<String> {
