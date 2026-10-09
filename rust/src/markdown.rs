@@ -248,8 +248,7 @@ fn property_value(value: &Value) -> Option<String> {
 /// ([`pre_block_lines`]) is the faithful form, and is preferred.
 pub fn render_properties(properties: Option<&Value>) -> Vec<String> {
     let Some(Value::Object(map)) = properties else { return Vec::new() };
-    js::entries_in_js_order(map)
-        .into_iter()
+    map.iter()
         .filter_map(|(key, value)| property_value(value).map(|text| format!("{}:: {text}", kebab_key(key))))
         .collect()
 }
@@ -560,10 +559,10 @@ mod tests {
     }
 
     #[test]
-    fn properties_come_out_in_the_order_javascript_lists_object_keys() {
-        // integer-like keys first, ascending, then the rest in the order they came
+    fn properties_come_out_in_the_order_they_are_stored() {
+        // a numeric-looking key is a key like any other: no key is moved ahead of the rest
         let props = json!({"b": "x", "10": "ten", "2": "two", "a": "y"});
-        assert_eq!(render_properties(Some(&props)), ["2:: two", "10:: ten", "b:: x", "a:: y"]);
+        assert_eq!(render_properties(Some(&props)), ["b:: x", "10:: ten", "2:: two", "a:: y"]);
     }
 
     #[test]
