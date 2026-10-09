@@ -314,10 +314,9 @@ async fn an_answer_that_is_not_a_target_is_a_response_error_and_not_an_empty_res
 #[tokio::test]
 async fn a_connection_failure_propagates_instead_of_returning_unresolved_blocks() {
     let unreachable: LogseqClient = {
-        // a port nothing listens on: bound to get a free one, then closed
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let api_url = format!("http://{}", listener.local_addr().unwrap());
-        drop(listener);
+        // Port 1 is privileged and never bound, so the connection is refused. A port freed by dropping a listener
+        // could be handed to another test's mock in this binary, and the call would land on it (#450).
+        let api_url = "http://127.0.0.1:1".to_owned();
         LogseqClient::new(&logseq_mcp_server::config::Config { api_url, auth_token: "t".into(), timeout_ms: Some(2000), tips: None })
     };
     let error = resolve_block_refs(&unreachable, &[root(&format!("(({}))", uuid(2)))]).await.unwrap_err();
