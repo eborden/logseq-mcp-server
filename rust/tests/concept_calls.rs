@@ -359,6 +359,20 @@ async fn a_missing_page_or_an_infrastructure_error_is_not_a_warning() {
 }
 
 #[tokio::test]
+async fn a_mention_with_no_week_lands_in_no_week_group_and_does_not_abort_the_call() {
+    // a journal day of six digits (LogSeq sends eight) has no week; the dated one beside it does
+    let logseq = mock_logseq(vec![root(), json!([]), editor_page(), json!([mention(301, 40, 202501), mention(302, 41, 20250101)])]).await;
+    let options = EvolutionOptions { group_by: Some(GroupBy::Week), ..EvolutionOptions::default() };
+    let evolution = get_concept_evolution(&client(&logseq), "Project Atlas", options).await.unwrap();
+    assert_eq!(evolution.summary.total_mentions, 2);
+    assert_eq!(evolution.timeline.len(), 2, "the timeline still lists both days");
+    let grouped = evolution.grouped_timeline.unwrap();
+    let keys: Vec<&str> = grouped.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(keys, ["2025-W01"]);
+    assert_eq!(grouped[0].1.len(), 1);
+}
+
+#[tokio::test]
 async fn the_cap_and_the_grouping_cost_no_call() {
     let mentions: Vec<Value> = (0..5).map(|i| mention(300 + i, 40 + i, 20250301 + i)).collect();
     let logseq = mock_logseq(vec![root(), json!([]), editor_page(), Value::Array(mentions)]).await;
