@@ -520,8 +520,11 @@ mod tests {
 
     #[test]
     fn topics_are_the_page_references_then_the_tags_each_once() {
-        // the comma after a tag is part of it, as the regex `[^\s#]+` has it
+        // the comma after a tag is part of it: a tag runs to white space or `#` (`refs::tags`)
         assert_eq!(extract_topics("what about [[Atlas]] and #beta, [[Bob Smith]] #beta [[Atlas]] #gamma#delta"), ["Atlas", "Bob Smith", "beta,", "beta", "gamma", "delta"]);
+        // the grammar of `refs::page_refs`: a name holds no bracket or newline, so `[[[c]]` is the topic `c`,
+        // a ref over two lines is none, and a nested ref gives its inner name only
+        assert_eq!(extract_topics("[[[c]] [[x\ny]] [[a [[b]] d]]"), ["c", "b"]);
         assert_eq!(extract_topics("nothing here"), Vec::<String>::new());
     }
 

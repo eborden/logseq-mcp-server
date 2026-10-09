@@ -152,6 +152,8 @@ mod tests {
         assert_eq!(extract_tags("no tags"), Vec::<String>::new());
         assert_eq!(extract_tags("#é #\u{1F680}x"), ["é", "\u{1F680}x"]);
         assert_eq!(extract_tags("#a\u{85}b"), ["a"]);
+        // U+FEFF is not white space to Rust, so it stays in the tag
+        assert_eq!(extract_tags("#a\u{feff}b"), ["a\u{feff}b"]);
     }
 
     #[test]
