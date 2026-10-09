@@ -75,7 +75,20 @@ package_json=$here/../package.json
 if [ ! -f "$package_json" ]; then
   die "cannot find package.json next to this script, so the version to fetch is unknown."
 fi
-version=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$package_json" | sed -n '1p')
+# Read with shell builtins only, so a start from the cache forks nothing but uname: the first line that has a
+# "version" key, cut down to its value.
+version=
+while IFS= read -r line; do
+  case $line in
+    *'"version"'*)
+      version=${line#*'"version"'}
+      version=${version#*:}
+      version=${version#*\"}
+      version=${version%%\"*}
+      break
+      ;;
+  esac
+done <"$package_json"
 case $version in
   '' | *[!0-9A-Za-z.+-]*)
     die "cannot read a valid version from package.json."
