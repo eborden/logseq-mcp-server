@@ -174,9 +174,9 @@ fn the_closest_names_of_a_missing_page_are_recorded_only_when_the_rules_reject_t
 }
 
 #[test]
-fn a_group_is_written_one_case_to_a_line_as_json_stringify_writes_it() {
-    let cases = [json!({"name": "a", "n": 1.0, "k": {"2": "b", "1": "a", "x": 1e21}}), json!({"name": "b é\n"})];
-    assert_eq!(render_group("g", &cases), "{\"group\":\"g\",\"cases\":[\n  {\"name\":\"a\",\"n\":1,\"k\":{\"1\":\"a\",\"2\":\"b\",\"x\":1e+21}},\n  {\"name\":\"b é\\n\"}\n]}\n");
+fn a_group_is_written_one_case_to_a_line_minified_with_its_keys_in_the_order_they_came() {
+    let cases = [json!({"name": "a", "n": 1.5, "k": {"2": "b", "1": "a", "x": 0.5}}), json!({"name": "b é\n"})];
+    assert_eq!(render_group("g", &cases), "{\"group\":\"g\",\"cases\":[\n  {\"name\":\"a\",\"n\":1.5,\"k\":{\"2\":\"b\",\"1\":\"a\",\"x\":0.5}},\n  {\"name\":\"b é\\n\"}\n]}\n");
 }
 
 // ---- what a recording changes in the tool list

@@ -304,12 +304,13 @@ fn a_json_tool_result_has_to_be_minified() {
         let failures = compare_results(&expected, &tool_result(layout), &[]);
         assert!(failures.iter().any(|f| f.contains("not minified")), "{layout:?} passed: {failures:?}");
     }
-    // A spelling JSON.stringify would not have written is not minified either (the Node harness agrees)
-    for spelling in [r#"{"a":1,"b":[1.0,2]}"#, r#"{"a":1,"b":[1e0,2]}"#, r#"{"a":1,"b":[1,2],"c":"\u0041"}"#, r#"{"a":1,"b":[1,2],"c":"\/"}"#] {
+    // A spelling serde_json would not have written is not minified either: a whole number as a float, an exponent, an escape
+    for spelling in [r#"{"a":1,"b":[1.0,2]}"#, r#"{"a":1,"b":[1e0,2]}"#, r#"{"a":1,"b":[1,2],"c":"\u0041"}"#, r#"{"a":1,"b":[1,2],"c":"\/"}"#, r#"{"a":1.50}"#] {
         assert!(!minified_failures(&tool_result(spelling)).is_empty(), "{spelling} passed");
     }
-    // What JSON.stringify writes is minified, the number corners included
-    assert_eq!(minified_failures(&tool_result(r#"{"a":1e+21,"b":[0.1,1.5e-7],"c":"é😀\u0001\n\""}"#)), Vec::<String>::new());
+    // What serde_json writes is minified, the number corners included
+    let corners = json!({"a": 1e21, "b": [0.1, 1.5e-7], "c": "é😀\u{1}\n\""}).to_string();
+    assert_eq!(minified_failures(&tool_result(&corners)), Vec::<String>::new());
     // Whitespace inside a string is the value's, not layout
     let spaced = tool_result(r#"{"a":"x  y\n"}"#);
     assert_eq!(compare_results(&spaced, &spaced, &[]), Vec::<String>::new());

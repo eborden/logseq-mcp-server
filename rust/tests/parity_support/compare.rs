@@ -10,8 +10,8 @@
 //!   byte: a markdown result (`format: "markdown"`), a prompt's messages, a resource read, and the frame of a
 //!   page-not-found message outside the closest names. Nothing else compares text.
 //! - [`minified_failures`] holds every JSON tool result to ADR-0009 separately, so deep equality can't let
-//!   layout whitespace through: the text is parsed, written again as `JSON.stringify` writes it (`js::json_stringify`), and
-//!   has to be as long.
+//!   layout whitespace through: the text is parsed, written again by `serde_json` (`Value`'s `Display`, which writes no
+//!   layout, the server's own writer), and has to be as long.
 //! - [`compare_calls`] holds the LogSeq calls to a case's recorded calls and its ceiling (ADR-0034 Decision 5): each
 //!   call made matches a recorded call, in any order, and there are at most as many as the ceiling. [`stale_ceiling`]
 //!   is the other side: a run of the cases as committed that makes fewer than the ceiling fails until it is lowered.
@@ -19,7 +19,6 @@
 
 use std::collections::BTreeSet;
 
-use logseq_mcp_server::js;
 use serde_json::{Map, Value, json};
 
 use super::cases::{Canned, Case};
@@ -77,12 +76,28 @@ pub fn same_tool_text(expected: &str, actual: &str) -> bool {
     }
 }
 
+/// Whether a number is a whole number written as a float (`1.0`, `3e0`): the compact spelling is the integer
+/// (`1`, `3`). A float too large for an integer (`1e21`) has no such spelling and is not one.
+fn is_whole_float(n: &serde_json::Number) -> bool {
+    n.is_f64() && n.as_f64().is_some_and(|f| f.fract() == 0.0 && f.abs() < 9.0e18)
+}
+
+fn has_whole_float(value: &Value) -> bool {
+    match value {
+        Value::Number(n) => is_whole_float(n),
+        Value::Array(items) => items.iter().any(has_whole_float),
+        Value::Object(map) => map.values().any(has_whole_float),
+        _ => false,
+    }
+}
+
 /// The JSON texts of a tool result's `content` that are not minified (ADR-0009): a text that parses as JSON and
-/// is not as long as the same value written the way `JSON.stringify` writes it has layout whitespace in it, or a
-/// spelling of a string or number that `JSON.stringify` would not have written (`\u0041`, `1.0`, `1e0`). The
-/// re-serialization is `js::json_stringify`, which writes numbers and strings as JavaScript does, so this agrees
-/// with the Node harness (`minifiedFailures`, which re-serializes with `JSON.stringify`) in every case. Lengths
-/// are in UTF-16 units, as JavaScript counts them.
+/// is not byte for byte what `serde_json` writes for the same value has layout whitespace in it, or a spelling
+/// of a string or number that is not the compact one (`\u0041`, `\/`, `1e0`, `1e+21`). The server writes every
+/// result with `serde_json` (`Value`'s `Display`, no layout), so that writer is the measure. A whole number
+/// written as a float (`1.0`) is not minified either: its compact spelling is `1`. Numbers still compare by
+/// value (ADR-0034), so `3` and `3.0` are one number to `values_equal`; this check is the one place that holds
+/// the spelling.
 pub fn minified_failures(result: &Value) -> Vec<String> {
     let blocks = result.get("content").and_then(Value::as_array).cloned().unwrap_or_default();
     blocks
@@ -90,9 +105,13 @@ pub fn minified_failures(result: &Value) -> Vec<String> {
         .enumerate()
         .filter_map(|(i, block)| {
             let text = block.get("text")?.as_str()?;
-            let compact = js::json_stringify(&json_container(text)?);
-            let (have, want) = (text.encode_utf16().count(), compact.encode_utf16().count());
-            (have != want).then(|| format!("content[{i}].text is JSON that is not minified (ADR-0009): {have} characters, {want} written as JSON.stringify writes it"))
+            let value = json_container(text)?;
+            let compact = value.to_string();
+            if text != compact {
+                let (have, want) = (text.encode_utf16().count(), compact.encode_utf16().count());
+                return Some(format!("content[{i}].text is JSON that is not minified (ADR-0009): {have} characters, {want} written without layout and in the compact spelling"));
+            }
+            has_whole_float(&value).then(|| format!("content[{i}].text is JSON that is not minified (ADR-0009): a whole number is written as a float"))
         })
         .collect()
 }
