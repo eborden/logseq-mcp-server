@@ -170,8 +170,8 @@ impl Server {
             if let Some(error) = reply.get("error") {
                 let code = error.get("code").and_then(Value::as_i64).unwrap_or_default();
                 let message = error.get("message").and_then(Value::as_str).unwrap_or_default();
-                // The MCP SDK's client puts the code in front of the message
-                return Err(Failure::Rpc(RpcError { code, message: format!("MCP error {code}: {message}"), data: error.get("data").cloned() }));
+                // The error as the server sent it: the message as written, with its `data`
+                return Err(Failure::Rpc(RpcError { code, message: message.to_owned(), data: error.get("data").cloned() }));
             }
             return Ok(reply.get("result").cloned().unwrap_or(Value::Null));
         }
