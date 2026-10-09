@@ -265,7 +265,7 @@ async fn a_non_positive_page_id_is_an_error_and_makes_no_lookup() {
 }
 
 #[tokio::test]
-async fn a_page_id_of_zero_with_no_db_id_names_no_page_and_makes_no_lookup() {
+async fn a_page_id_of_zero_is_an_id_and_so_an_error_like_a_negative_one_and_makes_no_lookup() {
     let logseq = mock_logseq(&[
         (GET_CURRENT_PAGE, json!(null)),
         (GET_CURRENT_BLOCK, json!({"id": 5, "uuid": "00000000-0000-4000-8000-000000000005", "content": "on page 0", "page": {"id": 0}})),
@@ -273,9 +273,8 @@ async fn a_page_id_of_zero_with_no_db_id_names_no_page_and_makes_no_lookup() {
         (DATASCRIPT_QUERY, json!([])),
     ])
     .await;
-    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+    let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
 
     assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS], "no lookup is made");
-    assert!(context.page.is_none());
-    assert!(context.focused_block.as_ref().unwrap().get("pageName").is_none());
 }
+    assert!(matches!(&error, ToolError::InvalidValue(_)), "{error}");

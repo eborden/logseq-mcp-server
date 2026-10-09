@@ -303,11 +303,9 @@ pub struct EntityRef {
     pub db_id: Option<i64>,
 }
 
-// PARITY(#299): `entity?.id || entity?.['db/id']`, so an id of 0 falls through to `db/id` (suspected TS bug:
-// `??` was meant) — drop if Rust becomes the only server.
-/// `entityId`: `id`, else `db/id` when `id` is absent or zero (`entity?.id || entity?.['db/id']`).
+/// `entityId`: `id`, else `db/id` when `id` is absent. An `id` of 0 is an id.
 pub(crate) fn entity_id(id: Option<i64>, db_id: Option<i64>) -> Option<i64> {
-    id.filter(|id| *id != 0).or(db_id)
+    id.or(db_id)
 }
 
 impl EntityRef {
