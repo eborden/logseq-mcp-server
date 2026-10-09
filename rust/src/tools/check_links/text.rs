@@ -1,11 +1,9 @@
-//! The checks of `logseq_check_links` that read only the two texts (checks 1, 2 and 4 of
-//! `src/tools/check-links.ts`). Each matches the script it replaced, regex for regex, and the
-//! crate has no regex engine, so the three patterns are scanned by hand.
+//! The checks of `logseq_check_links` that read only the two texts (checks 1, 2 and 4 of the tool's
+//! list). The crate has no regex engine, so the three patterns are scanned by hand.
 //!
-//! The texts are read as `char`s. The TypeScript code counts UTF-16 code units, but every position
-//! it reports is a whole code point (it steps back from the middle of a surrogate pair), and two
-//! strings first differ at the same code point however it is counted, so a `char` index is the
-//! same position.
+//! The texts are read as `char`s. A position is reported as a whole code point (never the middle of
+//! a surrogate pair), and two strings first differ at the same code point however it is counted,
+//! so a `char` index is the same position as a UTF-16 one.
 
 use std::collections::HashMap;
 

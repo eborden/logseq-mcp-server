@@ -1,4 +1,4 @@
-//! `logseq_check_links` (the Rust side of `src/tools/check-links.ts`, #146): the concept-linking
+//! `logseq_check_links` (#146): the concept-linking
 //! safety gate, run in the server. It checks a text before and after a pass that added `[[links]]`:
 //!
 //! 1. **Prose preserved:** stripping `[[ ]]` from both texts leaves them identical.
@@ -30,7 +30,7 @@ use self::text::{BracketCheck, ProseCheck, RefsPreservedCheck, check_brackets, c
 
 pub const NAME: &str = "logseq_check_links";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.\n\n\
 **Can't find:** a link to the wrong page, or a name split across a ref.";
 

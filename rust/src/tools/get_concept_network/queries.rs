@@ -1,5 +1,4 @@
-//! The Datalog queries only `get_concept_network` makes (`connectedPages` and
-//! `connectedPagesGrouped` in `src/datalog/queries.ts`). The frontier's ids are embedded, bound
+//! The Datalog queries only `get_concept_network` makes. The frontier's ids are embedded, bound
 //! straight to the entity variable (constraint 6): [`PageId`] makes sure each is a real id, and no
 //! string is part of either query.
 
@@ -10,7 +9,7 @@ use crate::edn::{PageId, Query, ground_ids};
 /// count]`. When two frontier pages link to each other the same links come back once from each
 /// side, so the caller sets (never adds) a pair's count.
 ///
-/// The text keeps the TypeScript query's two `;;` comments. A comment runs to the end of its line,
+/// The text keeps two `;;` comments. A comment runs to the end of its line,
 /// so each is followed by a real newline and can't swallow the clauses after it.
 pub fn connected_pages(frontier: &[PageId]) -> Query {
     assert!(!frontier.is_empty(), "connectedPages needs at least one frontier id");

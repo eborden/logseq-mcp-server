@@ -49,8 +49,8 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
     Ok(Some(out))
 }
 
-/// Whether two arguments carry the same value. Numbers compare by value, as JavaScript holds
-/// them (`1` and `1.0` are one number; serde_json's own `==` tells them apart), and an object's keys
+/// Whether two arguments carry the same value. Numbers compare by value, since a JSON client
+/// may write one number either way (`1` and `1.0` are one number; serde_json's own `==` tells them apart), and an object's keys
 /// may come in any order.
 fn same_value(a: &Value, b: &Value) -> bool {
     match (a, b) {
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn numbers_are_the_same_when_their_values_are() {
-        // `1` and `1.0` are one number in JavaScript, which serde_json's `==` calls two
+        // `1` and `1.0` are one number to a JSON client, which serde_json's `==` calls two
         let sent: Value = serde_json::from_str(r#"{"name": 1, "page": 1.0}"#).unwrap();
         assert_eq!(resolved(sent).get("page_name"), Some(&json!(1)));
         let nested: Value = serde_json::from_str(r#"{"name": [1, {"a": 2}], "page": [1.0, {"a": 2.0}]}"#).unwrap();

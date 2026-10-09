@@ -1,7 +1,6 @@
-//! What the concept timeline reads from LogSeq: the blocks that mention the page (`responses.blockRows`
-//! in `src/response-schemas.ts`), and, through `get_page`'s own readers, the page's block tree and the
-//! page itself (`responses.blocks` and `responses.editorPage`). Every block is checked against the
-//! TypeScript schema and returned as the JSON LogSeq sent, since the result carries it as it came.
+//! What the concept timeline reads from LogSeq: the blocks that mention the page, and,
+//! through `get_page`'s own readers, the page's block tree and the page itself. Every block is
+//! checked against its wire type and returned as the JSON LogSeq sent, since the result carries it as it came.
 
 use serde_json::Value;
 

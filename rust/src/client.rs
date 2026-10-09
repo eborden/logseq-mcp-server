@@ -1,5 +1,4 @@
-//! HTTP client for LogSeq's API (the Rust side of `src/client.ts` and the connection errors in
-//! `src/errors.ts`). Every call is one `POST {apiUrl}/api` with a bearer token and its own timeout.
+//! HTTP client for LogSeq's API and the errors of its connection. Every call is one `POST {apiUrl}/api` with a bearer token and its own timeout.
 
 use std::fmt;
 use std::time::Duration;
@@ -10,13 +9,13 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::edn::DatalogInput;
 
-/// The per-call timeout when the config sets no `timeoutMs`, as in `src/client.ts`.
+/// The per-call timeout when the config sets no `timeoutMs`.
 pub const DEFAULT_TIMEOUT_MS: u64 = 30000;
 
 /// A LogSeq call failed. The first three are failures of the connection itself
 /// ([`LogseqError::is_infrastructure`]) and must never be turned into "no data" (BR-0003).
-/// No message includes the token (ADR-0003). The messages match `src/errors.ts` word for word,
-/// except `NotRunning`'s `detail`, which is the HTTP library's own wording.
+/// No message includes the token (ADR-0003). The messages are fixed text, except
+/// `NotRunning`'s `detail`, which is the HTTP library's own wording.
 #[derive(Debug)]
 pub enum LogseqError {
     /// Nothing answered at the API URL: LogSeq is closed or its API server is off.
@@ -97,7 +96,7 @@ impl LogseqClient {
         let timeout_ms = config.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
         LogseqClient {
             // No proxy, whatever HTTP_PROXY or ALL_PROXY say: a proxy would see the token and
-            // every query and answer (ADR-0003, BR-0001). Node's fetch ignores them too.
+            // every query and answer (ADR-0003, BR-0001).
             http: reqwest::Client::builder()
                 .no_proxy()
                 .build()
@@ -160,8 +159,8 @@ impl LogseqClient {
         if error.is_timeout() {
             LogseqError::Timeout { api_url: self.api_url.clone(), timeout_ms: self.timeout_ms }
         } else {
-            // A refused or failed connection, or a body cut off mid-read. TypeScript maps the
-            // same failures (fetch failed, ECONNREFUSED) to LogSeqNotRunningError.
+            // A refused or failed connection, or a body cut off mid-read: none reached an answer
+            // from LogSeq, so all are `NotRunning`.
             LogseqError::NotRunning { api_url: self.api_url.clone(), detail: error.to_string() }
         }
     }

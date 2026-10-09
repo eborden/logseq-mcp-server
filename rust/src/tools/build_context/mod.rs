@@ -1,4 +1,4 @@
-//! `logseq_build_context` (the Rust side of `src/tools/build-context.ts`): everything on one topic
+//! `logseq_build_context`: everything on one topic
 //! in a call. The page's blocks, the pages that link to it and the blocks that do, capped by
 //! `max_blocks`, `max_related_pages` and `max_references`. `get_context_for_query` builds one of
 //! these for each topic of its query.
@@ -53,7 +53,7 @@ use self::queries::{get_blocks_on_pages, get_page_blocks};
 
 pub const NAME: &str = "logseq_build_context";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n\
 **Use when:** researching or explaining a topic that has a page.\n\
 **Can't find:** topics with no page (use logseq_search_blocks), or anything past the caps (see hasMore and warnings).\n\
@@ -88,7 +88,7 @@ fn default_include_temporal_context() -> bool {
 }
 
 /// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
-/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
 /// ignores them.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {

@@ -1,5 +1,4 @@
-//! Resolving `((uuid))` block refs and `{{embed}}`s in returned blocks (the Rust side of
-//! `src/utils/resolve-refs.ts`, #18, BR-0007).
+//! Resolving `((uuid))` block refs and `{{embed}}`s in returned blocks (#18, BR-0007).
 //!
 //! The blocks keep their `content` untouched. A block that holds at least one ref or embed gains:
 //! - `resolvedContent`: its content with every resolvable ref replaced inline by the target's
@@ -103,7 +102,7 @@ struct RefStore {
     unavailable: HashSet<String>,
 }
 
-/// Strings in the order they were first added, as a JavaScript `Set` keeps them.
+/// Strings in the order they were first added (a set that keeps insertion order).
 #[derive(Default)]
 struct OrderedSet {
     items: Vec<String>,

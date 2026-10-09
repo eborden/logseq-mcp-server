@@ -388,7 +388,7 @@ pub fn run_parity_with(run: &Run, launch: &dyn Fn(&Path, &Path, i64) -> Server) 
             }
             results.insert(case.name.clone(), result);
         }
-        // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0032).
+        // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0034 Decision 4).
         // A recording checks the results it is about to write, which `record.rs` does once the run is over.
         if !run.record {
             failures.extend(check_reference_lists(run.unperturbed));

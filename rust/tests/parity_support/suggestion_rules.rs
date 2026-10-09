@@ -1,10 +1,10 @@
-//! The closest-name rules of ADR-0032 (closest-page-suggestions-match-by-meaning), Decision 3 (#335), as
+//! The closest-name rules of ADR-0034 (golden-results-are-the-contract), Decision 4 (#335), as
 //! the ADR states them. The list of names after `Closest:` in a page-not-found
 //! message is held to rules, not bytes: the recorded lists are the TypeScript matcher's, which no server now
 //! has.
 //!
 //! This file is the checker and nothing else: the comparator (`compare.rs`) decides when to run it. The words
-//! below are the ADR's: the reference is the TypeScript server's recorded result for a case; the candidates
+//! below are the ADR's: the reference is the recorded golden result for a case; the candidates
 //! are the `originalName` strings of the stubbed `logseq.Editor.getAllPages` answer; `fold` is trim, Unicode
 //! NFD, drop combining marks, lowercase; E, P, T and N are the sets the ADR names. The fold here is its own
 //! (the server's is in `src/fuzzy.rs`), so a change there is judged by a second reading of the rule.
@@ -190,7 +190,7 @@ pub fn check_list(list: &str, input: &str, candidates: &[String]) -> Vec<String>
                 show(names)
             ));
         }
-        // Among the names listed: which of more than three exact or prefix matches are listed is left unchecked (ADR-0032)
+        // Among the names listed: which of more than three exact or prefix matches are listed is left unchecked (ADR-0034 Decision 4)
         for (at, name) in names.iter().enumerate() {
             if !prefix.contains(name) {
                 continue;
@@ -299,7 +299,7 @@ pub fn read_message(result: &Value, site: Site) -> Option<String> {
     }
 }
 
-/// A copy of a result with the message at a site replaced, serialized as the TypeScript server does (minified).
+/// A copy of a result with the message at a site replaced, serialized minified (ADR-0009).
 pub fn with_message(result: &Value, site: Site, message: &str) -> Value {
     let mut copy = result.clone();
     match site {
@@ -339,7 +339,7 @@ pub fn candidates_of(case: &Case) -> Vec<String> {
     names
 }
 
-// ---- the recorded set has to exercise the rules (ADR-0032 Decision 3)
+// ---- the recorded set has to exercise the rules (ADR-0034 Decision 4)
 
 /// What a recorded case needs for the minimum set, in the order the ADR lists them.
 pub const REQUIRED_CASES: [&str; 8] = [
@@ -410,7 +410,7 @@ pub fn check_reference_lists(cases: &[Case]) -> Vec<String> {
     failures
 }
 
-/// Failures for the required cases the recorded set lacks (ADR-0032 Decision 3).
+/// Failures for the required cases the recorded set lacks (ADR-0034 Decision 4).
 pub fn missing_required_cases(cases: &[Case]) -> Vec<String> {
     let seen: Vec<&str> = cases.iter().flat_map(required_kinds_of).collect();
     REQUIRED_CASES

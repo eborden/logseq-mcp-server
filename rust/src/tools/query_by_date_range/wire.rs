@@ -1,6 +1,5 @@
-//! What the date-range tool reads from LogSeq: the journal pages and the blocks its queries pull
-//! (`responses.nullablePageRows` and `responses.nullableBlockRows` in `src/response-schemas.ts`).
-//! Each page and block is checked against the TypeScript schema and returned as the JSON LogSeq
+//! What the date-range tool reads from LogSeq: the journal pages and the blocks its queries pull.
+//! Each page and block is checked against its wire type and returned as the JSON LogSeq
 //! sent, since a full result carries it as it came.
 //!
 //! Both answers are `null` or a list of rows, one cell each, and a `null` cell is skipped

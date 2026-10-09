@@ -1,4 +1,4 @@
-//! `logseq_get_backlinks` (the Rust side of `src/tools/get-backlinks.ts`): the pages and blocks
+//! `logseq_get_backlinks`: the pages and blocks
 //! that link to a page under any of its names, most-linking pages first, capped by `max_pages`
 //! and `max_blocks_per_page` (#61, #178).
 //!
@@ -41,7 +41,7 @@ use self::wire::LINKED_REFERENCES_METHOD;
 
 pub const NAME: &str = "logseq_get_backlinks";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n\
 **Use when:** \"what links to X?\" or \"where is X used?\"\n\
 **Can't find:** unlinked text mentions (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n\
@@ -76,7 +76,7 @@ fn default_max_blocks_per_page() -> u64 {
 }
 
 /// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
-/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
 /// ignores them.
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
@@ -142,7 +142,7 @@ fn block_count(backlink: &Backlink) -> String {
     format!("{n} linking {}", if n == 1 { "block" } else { "blocks" })
 }
 
-/// `String(value)` for the strings and numbers a page or block carries.
+/// A string or number a page or block carries, as text.
 fn js_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),

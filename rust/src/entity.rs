@@ -1,5 +1,4 @@
-//! Pages and blocks as LogSeq spells them (the Rust side of `src/utils/entity-fields.ts` and the
-//! entity schemas in `src/response-schemas.ts`).
+//! Pages and blocks as LogSeq spells them.
 //!
 //! LogSeq spells an entity two ways. `logseq.Editor.*` camelizes keys (`originalName`,
 //! `journalDay`); a Datalog pull keeps LogSeq's own (`original-name`, `journal-day`). A tool's full

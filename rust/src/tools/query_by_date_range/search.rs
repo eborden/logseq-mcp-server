@@ -1,5 +1,4 @@
-//! Whether a top-level block matches `search_term` (`blockMatcher` in
-//! `src/tools/query-by-date-range.ts`): case-insensitive and literal.
+//! Whether a top-level block matches `search_term`: case-insensitive and literal.
 //!
 //! When the term is the name of a page that has aliases (#69), a block also matches if it
 //! references any page of the group (`#tag` and `[[link]]` forms included), or if its text holds
@@ -86,7 +85,7 @@ fn is_letter_or_number(c: char) -> bool {
 // PARITY(#299): matches the group's other names with a case-insensitive Unicode regular expression, whose
 // case folding is approximated here by upper-then-lower case of a single character, and three listed
 // exceptions — drop if Rust becomes the only server.
-/// A character as the `iu` flags of a JavaScript regular expression compare it: by simple case
+/// A character as a case-insensitive Unicode regular expression (the `iu` flags) compares it: by simple case
 /// folding, so `ſ` and `s` are one. Folded as lowercase of uppercase when each is one character; a
 /// character whose case change is longer (`ß`, `İ`) or that has no simple fold (`ı`) stays as it is.
 fn fold(c: char) -> char {

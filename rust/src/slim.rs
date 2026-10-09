@@ -1,8 +1,8 @@
-//! Slim output (BR-0012; the Rust side of `src/utils/slim-entities.ts`): the essential fields of a
+//! Slim output (BR-0012): the essential fields of a
 //! block or a page, with the empty ones left out. A tool that offers `slim_results` builds each
 //! entry here, so every tool slims the same way.
 //!
-//! Entries are `serde_json` maps in the key order the TypeScript server writes them (ADR-0009).
+//! Entries are `serde_json` maps in the key order the result writes them (ADR-0009, BR-0013).
 //! The entities they read are the `Value`s LogSeq sent, in either key spelling (see [`crate::entity`]).
 
 use serde_json::{Map, Value};

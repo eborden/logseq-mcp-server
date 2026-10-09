@@ -1,5 +1,4 @@
-//! The Datalog query that pulls full page entities for some ids (`getPagesByIds` in
-//! `src/datalog/queries.ts`). The block search (`include_context`) and the current context both make
+//! The Datalog query that pulls full page entities for some ids. The block search (`include_context`) and the current context both make
 //! it, so it is here and not in either tool's directory. Only page `:db/id`s are embedded, through
 //! [`ground_ids`], which takes [`PageId`]s and not numbers; nothing is bound with `:in`.
 

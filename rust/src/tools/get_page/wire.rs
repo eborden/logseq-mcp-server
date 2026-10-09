@@ -1,5 +1,4 @@
-//! What `logseq.Editor.getPage` and `getPageBlocksTree` answer (`responses.editorPage` and
-//! `responses.blocks` in `src/response-schemas.ts`). The page and its blocks are returned as
+//! What `logseq.Editor.getPage` and `getPageBlocksTree` answer. The page and its blocks are returned as
 //! LogSeq sent them, since the result carries them whole (BR-0004).
 
 use serde_json::Value;

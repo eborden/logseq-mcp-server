@@ -1,9 +1,9 @@
-//! `logseq_list_pages` (the Rust side of `src/tools/list-pages.ts`): the non-journal pages in name
+//! `logseq_list_pages`: the non-journal pages in name
 //! order, each with the other names it goes by (`alias::`), filtered by `name_contains`.
 //!
 //! Calls: 1 (`logseq.Editor.getAllPages`), whatever the filter, `limit`, `offset` or number of
 //! aliases. The `alias` ids and `file` ride on every page entity, so the alias groups are folded
-//! here in TypeScript's way (#171), and the window is cut here.
+//! here (#171), and the window is cut here.
 //!
 //! This directory holds everything only the list uses: the answer it reads (`wire.rs`) and its tip
 //! (`tips.rs`).
@@ -39,7 +39,7 @@ pub const DEFAULT_LIST_PAGES_LIMIT: u64 = 200;
 /// past it, so a cut at the maximum still has a `howToFetchAll`.
 pub const MAX_LIST_PAGES_LIMIT: u64 = 1000;
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "List non-journal pages as { name, aliases? }, filtered by name_contains (substring of name or alias). Aliases nest under pages.\n\n\
 **Use when:** unsure which pages exist or what the user calls something.\n\
 **Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.\n\
@@ -49,7 +49,7 @@ fn default_limit() -> u64 {
     DEFAULT_LIST_PAGES_LIMIT
 }
 
-/// The list's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The list's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Filter pages whose name or alias contains this text (case-insensitive)

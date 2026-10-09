@@ -1,4 +1,4 @@
-//! `logseq_get_concept_evolution` (the Rust side of `src/tools/get-concept-evolution.ts`): a concept
+//! `logseq_get_concept_evolution`: a concept
 //! over time. The blocks on its page and the blocks that link to it, by journal day, oldest first, with
 //! the mentions on non-journal pages last, optionally grouped by day, week or month and cut by date.
 //!
@@ -48,7 +48,7 @@ pub use self::timeline::GroupBy;
 
 pub const NAME: &str = "logseq_get_concept_evolution";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.\n\n\
 **Use when:** \"how has X evolved?\" or \"what's the history of Y?\"\n\
 **Can't find:** unlinked plain-text mentions (logseq_search_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n\
@@ -65,7 +65,7 @@ fn default_max_entries() -> u64 {
 }
 
 /// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
-/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as every TypeScript tool
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
 /// ignores them. The tool does no range check on the dates: 0 or an absent date is no bound, and any
 /// other whole number is compared with each block's `YYYYMMDD` day.
 #[derive(Debug, Deserialize, JsonSchema)]

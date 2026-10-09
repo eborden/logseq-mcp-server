@@ -1,5 +1,4 @@
-//! The one Datalog query only the page outline makes (`pageOutlineBlocks` in
-//! `src/datalog/queries.ts`). Only the page's `:db/id` is embedded, through [`ground_ids`], which
+//! The one Datalog query only the page outline makes. Only the page's `:db/id` is embedded, through [`ground_ids`], which
 //! takes a [`PageId`] and not a number.
 
 use crate::edn::{PageId, Query, ground_ids};

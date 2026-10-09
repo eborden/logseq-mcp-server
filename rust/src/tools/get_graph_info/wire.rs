@@ -1,4 +1,4 @@
-//! What `logseq.App.getCurrentGraph` answers (`graphInfoSchema` in `src/response-schemas.ts`).
+//! What `logseq.App.getCurrentGraph` answers.
 
 use serde_json::Value;
 

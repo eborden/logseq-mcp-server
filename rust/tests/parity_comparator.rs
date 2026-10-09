@@ -9,8 +9,8 @@
 //!   (`stale_ceiling` is the other side: fewer than the ceiling is a failure to lower it, for a run of the cases as committed);
 //! - a result: its keys and content blocks, a JSON text by deep equality and minified, every other text byte for
 //!   byte, a resource's `contents`, a prompt's messages, a JSON-RPC error (`compare_results`);
-//! - `tools/list` by meaning (ADR-0031): the normalization of a schema and the failures it still reports;
-//! - the closest names of a missing page by the rules of ADR-0032.
+//! - `tools/list` by meaning (ADR-0034 Decision 3): the normalization of a schema and the failures it still reports;
+//! - the closest names of a missing page by the rules of ADR-0034 Decision 4.
 
 mod parity_support;
 
@@ -255,7 +255,7 @@ fn a_prompt_is_compared_by_the_text_of_each_message_and_everything_else_by_value
     assert_eq!(compare_results(&got, &prompt("Monthly", vec![message("Write a summary\nSteps:")]), &[]), vec![r#"description: expected "Weekly", got "Monthly""#.to_owned()]);
 }
 
-// ---- tools/list, by meaning (ADR-0031)
+// ---- tools/list, by meaning (ADR-0034 Decision 3)
 
 /// The tool list with one tool's input schema edited.
 fn with_schema(tools: &[Value], name: &str, edit: impl FnOnce(&mut Value)) -> Vec<Value> {
@@ -607,7 +607,7 @@ fn null_is_dropped_only_from_optional_top_level_arguments_and_not_from_nested_ob
     assert_eq!(compare_tool_lists(&plain, &tool_with(schema(json!({"type": "string"}), json!({"anyOf": [{"type": "string"}, {"type": "null"}]})))).len(), 2);
 }
 
-// ---- the closest names of a missing page (ADR-0032)
+// ---- the closest names of a missing page (ADR-0034 Decision 4)
 
 const PAGES: [&str; 7] = ["Alice", "Alice Notes", "Alicia Cole", "Bob", "Project Atlas", "Project Zed", "Project Quill"];
 
@@ -823,7 +823,7 @@ fn a_result_with_no_message_where_the_reference_has_one_fails() {
     assert!(failures.join("\n").contains("content[0].text differs"), "{failures:?}");
 }
 
-// ---- the recorded set (ADR-0032 Decision 3)
+// ---- the recorded set (ADR-0034 Decision 4)
 
 #[test]
 fn the_recorded_set_holds_every_case_the_adr_requires_and_the_references_pass_the_rules() {

@@ -1,8 +1,6 @@
-//! The warnings a capped list carries (BR-0006; the Rust side of `truncationWarning`,
-//! `cappedTruncationWarning`, `largeResultNote`, `INLINE_ITEMS` and `blocksInlineMax` in
-//! `src/utils/result-meta.ts`). A tool that cuts a list builds its warning here, so every cut says
-//! how many were shown, how many there were, and what to do about the rest. The words are the
-//! TypeScript server's, byte for byte.
+//! The warnings a capped list carries (BR-0006). A tool that cuts a list builds its warning here, so every cut says
+//! how many were shown, how many there were, and what to do about the rest. The words are held byte for
+//! byte by the recorded results (ADR-0034).
 
 use crate::meta::ResultWarning;
 

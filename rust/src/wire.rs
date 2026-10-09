@@ -1,5 +1,4 @@
-//! What LogSeq answers, read into typed values at the boundary (the Rust side of
-//! `src/response-schemas.ts` and `src/utils/parse-response.ts`, #202). Each tool's wire types are
+//! What LogSeq answers, read into typed values at the boundary (#202). Each tool's wire types are
 //! types that derive `Deserialize`, written beside the code that reads them: the resolver's in
 //! `resolve/wire.rs`, a tool's in its own directory, the pages and blocks several tools carry as
 //! LogSeq sent them in `entity/shape.rs`. [`parse`] reads an answer into one, through the
@@ -7,23 +6,23 @@
 //!
 //! A tool never reads a `serde_json::Value` it got from LogSeq without its answer having been parsed
 //! first, and an answer that isn't the shape asked for is a [`ResponseError`], never "no data"
-//! (BR-0003). As in TypeScript:
+//! (BR-0003). So:
 //! - extra keys pass, since LogSeq adds them;
 //! - `null` is a case of its own (BR-0011): `parse::<Option<T>>` returns `None` for a `null` answer
 //!   and the tool decides what that means. In a field, `null` is not "absent": see [`Optional`];
 //! - the error names the method and where the first mismatch is, in this server's words, and never a
 //!   value from the answer, because an answer is the user's graph (ADR-0004).
 //!
-//! Unlike the TypeScript schemas, a type names the fields the code reads and no others. A field
-//! nothing reads can hold anything, so a mistyped one no longer fails an answer; one the code reads
+//! A type names the fields the code reads and no others. A field
+//! nothing reads can hold anything, so a mistyped one doesn't fail an answer; one the code reads
 //! still does, and so does one it needs and doesn't find.
 //!
 //! The first mismatch is the first the reader meets, which for an object is the first key LogSeq sent
 //! (a missing field is found after all of them), and for a row is the first cell in order.
 //!
-//! One deliberate difference: an `:db/id` must be a whole number. zod's `z.number()` takes a
-//! fraction, and the TypeScript tools then fail at `groundIds` or carry on, depending on which
-//! page it was. LogSeq never sends one, so the Rust side refuses it where it reads it.
+//! An `:db/id` must be a whole number. A JSON number may be a fraction, and an id that is one would
+//! fail later at `ground_ids` or carry on, depending on which page it was. LogSeq never sends one,
+//! so it is refused where it is read.
 
 use std::fmt;
 

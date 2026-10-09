@@ -1,4 +1,4 @@
-//! `logseq_search_blocks` (the Rust side of `src/tools/search-blocks.ts`): a case-insensitive,
+//! `logseq_search_blocks`: a case-insensitive,
 //! literal substring search over block content, newest first.
 //!
 //! Calls: 1 (the search query), or 2 with `include_context` (one batched lookup of the pages the
@@ -47,7 +47,7 @@ pub const MAX_SEARCH_LIMIT: u64 = 500;
 /// How to reach matches past the maximum: no parameter fetches them.
 const NARROWER: &str = "Narrow the query to see the rest.";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.\n\n\
 **Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).\n\
 **Next:** logseq_build_context on a result's page.";
@@ -56,7 +56,7 @@ fn default_slim_results() -> bool {
     DEFAULT_SLIM_RESULTS
 }
 
-/// The search's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The search's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Text to search for in block content

@@ -1,7 +1,7 @@
 //! The LogSeq traffic of `logseq_get_current_context` against a mock LogSeq on a local port: how
-//! many calls it makes, with which inputs. The Rust side of the call count in `CLAUDE.md` ("Current
+//! many calls it makes, with which inputs. The call count is that in `CLAUDE.md` ("Current
 //! Implementation Status"); the parity harness (`parity.rs`) checks the same calls and the
-//! result bytes against the TypeScript server. Every page and block here is made up (BR-0001).
+//! result bytes against the recorded results. Every page and block here is made up (BR-0001).
 //!
 //! The three Editor calls are made at once, so they reach LogSeq in no fixed order: this mock answers
 //! by method, not by arrival.
@@ -241,7 +241,7 @@ async fn infrastructure_and_shape_errors_are_errors_and_not_an_empty_context() {
     .await;
     let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
     assert!(matches!(&error, ToolError::Logseq(_)), "{error}");
-    // `Promise.all` lets the other fetches finish after one fails, so TypeScript always makes all three calls
+    // the other fetches finish after one fails, so all three calls are always made
     assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS]);
 
     let logseq = mock_logseq(&[(GET_CURRENT_PAGE, json!(null)), (GET_CURRENT_BLOCK, json!(null)), (GET_SELECTED_BLOCKS, json!({"id": 1}))]).await;
@@ -252,15 +252,15 @@ async fn infrastructure_and_shape_errors_are_errors_and_not_an_empty_context() {
 
 #[tokio::test]
 async fn with_two_answers_wrong_the_error_is_the_first_in_a_fixed_order() {
-    // TypeScript reports whichever arrives first; Rust reports the page, then the block, then the selection
+    // the errors are raised in a fixed order: the page, then the block, then the selection
     let logseq = mock_logseq(&[(GET_CURRENT_PAGE, json!(5)), (GET_CURRENT_BLOCK, json!({"id": 1})), (GET_SELECTED_BLOCKS, json!({"id": 1}))]).await;
     let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
     assert!(matches!(&error, ToolError::Response(response) if response.method == GET_CURRENT_PAGE), "{error}");
     assert_eq!(methods(&logseq).len(), 3);
 }
 
-// A deliberate difference from TypeScript, which embeds any integer in the `ground` clause and gets no row: a
-// page id that is not positive can't be a `:db/id`, so `PageId` refuses it before any query is made.
+// A page id that is not positive can't be a `:db/id` (embedding one in the `ground` clause would only get no row),
+// so `PageId` refuses it before any query is made.
 #[tokio::test]
 async fn a_non_positive_page_id_is_an_error_and_makes_no_lookup() {
     let logseq = mock_logseq(&[

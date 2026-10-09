@@ -1,6 +1,6 @@
 //! Server `instructions`, sent in the `initialize` response (#44). Hosts show them to the model once per
-//! session, so every character is paid for every session. The text is the TypeScript server's, byte for byte, as
-//! recorded in the guide resource (`rust/tests/data/parity/resources.json`).
+//! session, so every character is paid for every session. The text is held byte for byte by
+//! the guide resource (`rust/tests/data/parity/resources.json`).
 
 /// The server instructions.
 pub const SERVER_INSTRUCTIONS: &str = r##"Read-only access to a LogSeq graph. Nothing here edits it.
@@ -25,7 +25,7 @@ mod tests {
     use super::*;
 
     /// The instructions are model-facing text paid for every session, and the parity harness holds the guide resource, which
-    /// embeds them, to the bytes recorded from the TypeScript server (`rust/tests/data/parity/resources.json`). This keeps the
+    /// embeds them, to the bytes recorded in `rust/tests/data/parity/resources.json`. This keeps the
     /// two things that don't move: the opening line, and that every tool the text names is a tool this server has.
     #[test]
     fn the_text_opens_read_only_and_names_only_real_tools() {

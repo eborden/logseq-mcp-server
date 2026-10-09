@@ -1,4 +1,4 @@
-//! `logseq_get_block` (the Rust side of `src/tools/get-block.ts`): one block by uuid, optionally
+//! `logseq_get_block`: one block by uuid, optionally
 //! with its children, optionally with its `((uuid))` refs and `{{embed}}`s resolved.
 //!
 //! Calls: 1 (`logseq.Editor.getBlock`), and with `resolve_refs` up to 2 more Datalog queries, one
@@ -29,14 +29,14 @@ use crate::tool::{input_schema, read_only_annotations, success_result};
 
 pub const NAME: &str = "logseq_get_block";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.\n\n\
 **Can't find:** blocks by text (logseq_search_blocks) or by numeric id. For a whole page use logseq_get_page.";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("block_uuid", &["uuid"])];
 
-/// The block tool's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The block tool's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     /// UUID of the block to retrieve

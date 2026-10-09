@@ -1,5 +1,5 @@
 //! What every tool shares: the read-only hints, the input schema generated from its argument
-//! type, and turning a tool's outcome into the TypeScript server's results. A tool's own code is in
+//! type, and turning a tool's outcome into its result. A tool's own code is in
 //! its directory under `tools/`; its arguments are parsed by `crate::args::parse_args`.
 
 use std::sync::Arc;
@@ -20,7 +20,7 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
 /// A tool's `inputSchema`, generated from the type its arguments are parsed into, so the two
 /// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, `null` in an
 /// `Option`'s type, `format` on numbers). The parity harness compares schemas by meaning (#292), so
-/// zod's serialization isn't copied, only the contract:
+/// only the contract matters, not how a schema is spelled:
 /// - every named type (an enum such as `format`) is written where it is used, with no `$defs` and
 ///   no `$ref` (`inline_subschemas`): the MCP SDK's client drops `$defs` from a tool's `inputSchema`
 ///   (the parity harness reads the list through that client, and so do real clients), so a `$ref`
@@ -30,9 +30,9 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
 ///   the contract) are dropped, as rmcp's own `schema_for_input` does;
 /// - an argument type with no fields still gets `"properties": {}`, as rmcp's own empty-input
 ///   schema has it: schemars leaves the key out, and a client may look for it;
-/// - the arguments are an object, and unknown fields are ignored, as every TypeScript tool
-///   ignores them (the param aliases rely on it), so there's no `additionalProperties: false`;
-/// - a count, limit, offset or depth is an integer (#293: `z.int().min(0)`): schemars gives an
+/// - the arguments are an object, and unknown fields are ignored, as in every tool
+///   (the param aliases rely on it), so there's no `additionalProperties: false`;
+/// - a count, limit, offset or depth is an integer (#293): schemars gives an
 ///   unsigned type `"type": "integer"` and `"minimum": 0`, plus a `format` the comparison drops. A
 ///   parameter whose minimum is 1 says so with `#[schemars(range(min = 1))]`, and
 ///   `crate::args::parse_args`, the one parse of a tool's arguments, enforces the schema's minimum.
@@ -69,12 +69,12 @@ pub fn success_result(content: Vec<ContentBlock>) -> CallToolResult {
     result
 }
 
-/// A failed call, as `{"error": message}` with `isError`, the TypeScript server's shape.
+/// A failed call, as `{"error": message}` with `isError`.
 pub fn error_result(message: &str) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(json!({ "error": message }).to_string())])
 }
 
-/// What the TypeScript server returns for a tool's outcome: the result itself, an ambiguous name as
+/// What a client gets for a tool's outcome: the result itself, an ambiguous name as
 /// a result with the candidates (not a failure), and anything else `{"error": message}` with
 /// `isError`.
 pub fn into_result(outcome: Result<CallToolResult, ToolError>) -> CallToolResult {
@@ -193,7 +193,7 @@ mod tests {
     use super::*;
     use serde::Deserialize;
 
-    /// `format` as the TypeScript tools take it. The doc comment is the type's, not the property's.
+    /// `format` as the tools take it. The doc comment is the type's, not the property's.
     #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
     #[serde(rename_all = "lowercase")]
     enum Format {
@@ -205,7 +205,7 @@ mod tests {
         50.0
     }
 
-    /// One field of each kind the TypeScript tools take, modelled on the ADR-0016 snapshot
+    /// One field of each kind the tools take, modelled on the recorded `tool-list` golden
     /// (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
     #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
     struct SampleArgs {
@@ -224,7 +224,7 @@ mod tests {
     }
 
 
-    /// The TypeScript snapshot's schema for fields of each kind in [`SampleArgs`]
+    /// The recorded schema for fields of each kind in [`SampleArgs`]
     /// (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
     fn typescript_sample_schema() -> Value {
         json!({
@@ -323,7 +323,7 @@ mod tests {
                 max_nodes: 50.0
             }
         );
-        // zod's z.number() takes a fraction; the tool clamps or floors it.
+        // A `number` argument takes a fraction; the tool clamps or floors it.
         assert_eq!(parse(json!({"page_name": "x", "max_nodes": 2.5})).unwrap().max_nodes, 2.5);
         assert!(parse(json!({"page_name": "x", "limit": "5"})).is_err());
         assert!(parse(json!({"page_name": "x", "include_children": "true"})).is_err());

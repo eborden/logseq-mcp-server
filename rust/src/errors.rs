@@ -1,6 +1,7 @@
-//! What can stop a tool, as one type (the Rust side of `src/errors.ts`). The server turns each
-//! into the TypeScript server's result: an [`AmbiguousPage`] into a structured result, anything
-//! else into `{"error": message}` with `isError`. The messages match `src/errors.ts` word for word.
+//! What can stop a tool, as one type. The server turns each
+//! into a result: an [`AmbiguousPage`] into a structured result, anything
+//! else into `{"error": message}` with `isError`. The messages are fixed text, recorded in the goldens
+//! where a result carries one.
 //!
 //! None of them shows a value from the user's graph beyond the page name they asked for
 //! (ADR-0004), and none includes the token (ADR-0003).

@@ -3,9 +3,9 @@
 The LogSeq MCP server in Rust. It began as a bounded spike
 ([ADR-0025](../docs/adr/0025-rust-implementation-alongside-typescript.md), #122) beside a TypeScript server, and
 since the Go on #349 (2026-10-08) it is the only server on this branch: the TypeScript server was removed in #356.
-The tool contract it keeps is that server's. Comments in this crate that name `src/*.ts` files mean that server as
-of commit `10103c8` (its last version is readable there, as `10103c8:src/client.ts`), and
-`tests/data/parity/` holds its recorded results, which the parity test holds this crate to (`cargo test`, below).
+The tool contract it keeps is that server's: `tests/data/parity/` holds the results recorded from it (its last version
+is readable at commit `10103c8`, as `10103c8:src/client.ts`), which the parity test holds this crate to (`cargo test`,
+below). Comments in this crate say why the Rust code does what it does, not what that server did.
 `// PARITY(#299)` tags the code that exists only to match it.
 
 It lists all 16 tools, the five prompts, the reading guide and the page resource, and the server
@@ -20,25 +20,25 @@ bound with `:in`, a capped result with a warning, sibling order by the `:block/l
 |---|---|
 | `src/env.rs` | The environment, read once at startup into `Env`: `config_path` (`LOGSEQ_MCP_CONFIG` or `~/.logseq-mcp/config.json`, absolute by type), `tips` (`LOGSEQ_MCP_TIPS`) and `clock` (`LOGSEQ_MCP_NOW`, a fixed instant in milliseconds for the parity test; unset is the system clock; a release build ignores it). Nothing else reads a variable (`tests/env_reads.rs`) |
 | `src/config.rs` | The config file, parsed once. Its errors never show a file value (ADR-0003) |
-| `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and the same error mapping as the TypeScript server's client |
-| `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as `JSON.stringify` would (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
+| `src/client.rs` | `call_api` and `execute_datalog_query`: bearer token, a timeout per call, and an error type for each way a call fails |
+| `src/edn.rs` | What goes into a query, typed by meaning so an invalid value can't be built: `PageName` (lowercase on construction), `JournalDay` (a real `YYYYMMDD` date), `PageId` (positive `:db/id`), `BlockUuid` (strict, lowercase). `DatalogInput` binds them to `:in` as compact JSON text, which LogSeq reads as EDN (ADR-0013); `ground_ids` and `ground_uuids` write the embedded `ground` literals |
 | `src/server.rs` | rmcp `ServerHandler`: `initialize` (the name, `serverInfo.version` from `Cargo.toml` and the `instructions`), `tools/list`, `tools/call`, and the prompt and resource requests. It only wires: each tool is in `src/tools/`, what they share is in `src/tool.rs` |
-| `src/prompts.rs`, `src/instructions.rs`, `src/mcp_error.rs` | The five prompts (`prompts.ts`: `prompts/list` and `prompts/get`, each one short user message that names the tools; arguments are strings, an unknown or malformed one is `InvalidParams`; the week and month come from the server's clock, never read inside a builder). The server `instructions` (`instructions.ts`, byte for byte; the guide resource's recorded bytes hold them). And the JSON-RPC error that answers a bad prompt or resource request (the message as written, and `data: { uri }` on resource-not-found), shared by the prompts and the resources |
-| `src/markdown.rs`, `src/resources.rs` | The one Markdown renderer (`markdown.ts`: title, resolved-from note, page properties and the pre-block rule, the block outline with its cap, a single block, the warnings/hasMore/tips footer); `compact`, `show_uuid` and `show_page` on the outline are the context tools' (#312). And the resources (`resources.ts`): `resources/templates/list` and `resources/read` of `logseq://page/{name}`, cut at `MAX_PAGE_CHARS`. `resources/list` and the reading guide `logseq://guide` (the instructions plus a one-line index of the tools, prompts and resources) are here too |
-| `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type (every named type written in place: the MCP SDK's client drops `$defs`), argument parsing at the boundary, and the TypeScript server's result shapes |
+| `src/prompts.rs`, `src/instructions.rs`, `src/mcp_error.rs` | The five prompts (`prompts/list` and `prompts/get`, each one short user message that names the tools; arguments are strings, an unknown or malformed one is `InvalidParams`; the week and month come from the server's clock, never read inside a builder). The server `instructions` (byte for byte; the guide resource's recorded bytes hold them). And the JSON-RPC error that answers a bad prompt or resource request (the message as written, and `data: { uri }` on resource-not-found), shared by the prompts and the resources |
+| `src/markdown.rs`, `src/resources.rs` | The one Markdown renderer (title, resolved-from note, page properties and the pre-block rule, the block outline with its cap, a single block, the warnings/hasMore/tips footer); `compact`, `show_uuid` and `show_page` on the outline are the context tools' (#312). And the resources: `resources/templates/list` and `resources/read` of `logseq://page/{name}`, cut at `MAX_PAGE_CHARS`. `resources/list` and the reading guide `logseq://guide` (the instructions plus a one-line index of the tools, prompts and resources) are here too |
+| `src/tool.rs` | What every tool shares: the read-only hints, the input schema generated from the argument type (every named type written in place: the MCP SDK's client drops `$defs`), argument parsing at the boundary, and the shapes of a tool's results |
 | `src/tools/<tool>/` | One directory per tool: `mod.rs` (`NAME`, `definition`, `call`) and everything only that tool uses: its queries, the LogSeq answers it reads (`wire.rs`), its tip and its tests. `src/tools/mod.rs` registers them. Today: `get_page_outline/` (#125), `get_backlinks/` (#307), `get_graph_info/`, `list_pages/` and `search_blocks/` (#306), `get_block/` and `get_page/` (#308), `query_by_date_range/` (#311), `build_context/` and `get_context_for_query/` (#312), `search_by_relationship/` and `check_links/` (#314), `get_concept_network/` and `get_concept_evolution/` (#313) |
-| `src/markdown_context.rs`, `src/compact.rs`, `src/snippet.rs` | Markdown for the context tools (`markdown-context.ts`: a topic's blocks, related pages and references by source page, and a query's topics and keyword hits, and a concept network's pages by depth and its links, #313); `compact` JSON (`compact.ts`: a block is `{ uuid, snippet }`, a page `{ id, name, originalName }`); and the first-line snippet (`snippet.ts`), also the outline's |
+| `src/markdown_context.rs`, `src/compact.rs`, `src/snippet.rs` | Markdown for the context tools (a topic's blocks, related pages and references by source page, and a query's topics and keyword hits, and a concept network's pages by depth and its links, #313); `compact` JSON (a block is `{ uuid, snippet }`, a page `{ id, name, originalName }`); and the first-line snippet, also the outline's |
 | `src/args.rs` | `parse_args`: a tool's arguments deserialized once into its `Args` type (the type its `inputSchema` is generated from), `null` as absent, nothing coerced, a bad one an `InvalidParameter` naming the parameter and the rule (`an integer, not a fraction`, `at least 0`, `at most 9007199254740991`), worded in this one file |
-| `src/entity.rs`, `src/entity/shape.rs`, `src/slim.rs` | A page or block as LogSeq spells it, in either key spelling (`entity-fields.ts`); the shapes that check the fields the code reads of one (`entity/shape.rs`); and slim output (`slim-entities.ts`, BR-0012). Entities stay the `Value`s LogSeq sent, so a full result carries them as they came |
-| `src/truncation.rs`, `src/escape.rs` | The warnings a capped list carries (`result-meta.ts`) and regex escaping (`escape-regex.ts`) |
-| `src/wire.rs` | LogSeq's answers parsed into types that derive `Deserialize`, at the boundary (the Rust side of `src/response-schemas.ts`), through the deserializer in `src/wire/deserializer.rs`. A type names the fields the code reads and no others; a mismatch is a `ResponseError` that names the method and the path (`answer[0].id: expected a whole number, got a string`) and never a value from the answer (ADR-0004), and is never "no data" |
+| `src/entity.rs`, `src/entity/shape.rs`, `src/slim.rs` | A page or block as LogSeq spells it, in either key spelling; the shapes that check the fields the code reads of one (`entity/shape.rs`); and slim output (BR-0012). Entities stay the `Value`s LogSeq sent, so a full result carries them as they came |
+| `src/truncation.rs`, `src/escape.rs` | The warnings a capped list carries and regex escaping |
+| `src/wire.rs` | LogSeq's answers parsed into types that derive `Deserialize`, at the boundary, through the deserializer in `src/wire/deserializer.rs`. A type names the fields the code reads and no others; a mismatch is a `ResponseError` that names the method and the path (`answer[0].id: expected a whole number, got a string`) and never a value from the answer (ADR-0004), and is never "no data" |
 | `src/resolve/` | The shared page resolver (BR-0010): exact name, alias, ISO date, namespace leaf, the closest names for a miss. Its queries and wire types are in the directory, since only it reads them. `resolve/alias.rs` holds the alias groups (#69): one query for any number of pages, none for a page with no alias link. `resolve/link_targets.rs` resolves the many names of a `[[link]]` pass by name or alias in one query (#146) |
-| `src/pages_by_ids.rs` | The query that pulls full page entities for some ids (`getPagesByIds`), shared by `search_blocks` (`include_context`) and `get_current_context` (#327) |
-| `src/block_tree.rs` | `camelizeKeys` and `camelizeBlock`: a pulled block in the Editor API's spelling; `orderSiblings`: sibling blocks in page order, by their `:block/left` chain; and `buildBlockTrees`: the trees of many pages from the flat blocks one query pulls |
-| `src/dates.rs`, `src/block_budget.rs` | Calendar dates (`date-utils.ts`, `date-presets.ts`): the eight presets as plain calendar arithmetic, and a `Clock` that reads today's date in the host's local zone through `localtime_r`, so it honours `TZ` as Node does. And `block-budget.ts`: cutting block trees to a count of blocks, nested ones included |
-| `src/resolve_refs/`, `src/output_format.rs` | `((uuid))` refs and `{{embed}}`s resolved in returned blocks, one batched query per nesting level (BR-0007; `resolve-refs.ts`), with the ref and embed patterns written out since the crate has no regex engine; and the `format` parameter, `json` or `markdown` |
-| `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (messages word for word as `src/errors.ts`), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
-| `src/fuzzy.rs` | The closest names for a missing page, picked with `nucleo-matcher` (`Pattern::new`, `AtomKind::Fuzzy`): names equal to the input first, then names that start with it, then names that contain each of its words in order, best score first. The parity test holds the list to ADR-0032's rules, not to the TypeScript server's bytes |
+| `src/pages_by_ids.rs` | The query that pulls full page entities for some ids, shared by `search_blocks` (`include_context`) and `get_current_context` (#327) |
+| `src/block_tree.rs` | A pulled block in the Editor API's spelling (`camelize_keys`, `camelize_block`); sibling blocks in page order, by their `:block/left` chain (`order_siblings`); and the trees of many pages from the flat blocks one query pulls (`build_block_trees`) |
+| `src/dates.rs`, `src/block_budget.rs` | Calendar dates: the eight presets as plain calendar arithmetic, and a `Clock` that reads today's date in the host's local zone through `localtime_r`, so it honours `TZ`. And cutting block trees to a count of blocks, nested ones included |
+| `src/resolve_refs/`, `src/output_format.rs` | `((uuid))` refs and `{{embed}}`s resolved in returned blocks, one batched query per nesting level (BR-0007), with the ref and embed patterns written out since the crate has no regex engine; and the `format` parameter, `json` or `markdown` |
+| `src/errors.rs`, `src/meta.rs`, `src/tips.rs`, `src/params.rs` | What tools share: the errors (their messages are fixed text), `ResultMeta` and the ambiguous-name result, next-step tips, parameter aliases and the wording of a bad argument |
+| `src/fuzzy.rs` | The closest names for a missing page, picked with `nucleo-matcher` (`Pattern::new`, `AtomKind::Fuzzy`): names equal to the input first, then names that start with it, then names that contain each of its words in order, best score first. The parity test holds the list to the rules of ADR-0034 Decision 4, not to recorded bytes |
 | `src/js.rs` | `number_to_string`, how LogSeq (ClojureScript) spells a number in `(str ?v)`, for a `query_by_property` value. Results are written by `serde_json`, keys in insertion order. `trim` and the white-space set are Rust's, and text lengths and cuts count code points (#299) |
 | `src/order.rs` | The one fixed order for names: lowercase by code point, then the name itself (#299) |
 | `tests/no_stdout.rs` | Fails on any write to stdout, which is the MCP channel (ADR-0004) |
@@ -65,15 +65,15 @@ cargo build --release   # target/release/logseq-mcp-server
 The unit tests never contact LogSeq. The client and outline tests run their own mock HTTP server on
 a free local port.
 
-## Parity with the TypeScript server
+## Parity with the recorded results
 
 `cargo test --locked` runs the golden-result test (#124, #371). `tests/parity.rs` starts the binary cargo built,
 answers its LogSeq calls from a stub on a random local port, and holds it to what the TypeScript server did
 before it was retired, as recorded in `tests/data/parity/`: each result (a JSON tool result by deep equality, then
 minified; markdown, prompts, resources and the frame of a page-not-found message byte for byte; the closest names
-of a page-not-found message by the rules of ADR-0032, below), the LogSeq calls (by a bounded count and an effect, not
+of a page-not-found message by the rules of ADR-0034 Decision 4, below), the LogSeq calls (by a bounded count and an effect, not
 by text or order: every call matches a recorded call, at most a ceiling are made, all are reads; below) and
-`tools/list` by meaning (ADR-0031). `parity_self_check.rs` runs the cases once more with the last answer of each
+`tools/list` by meaning (ADR-0034 Decision 3). `parity_self_check.rs` runs the cases once more with the last answer of each
 changed and requires every case with a LogSeq call to fail, again with every ceiling one lower, and the closest-name
 rules to catch every kind of wrong list. `parity_comparator.rs` and `parity_harness.rs` hold the
 comparator, the stub and the run to their own rules. Fixtures are made up (BR-0001). `cargo-mutants` (ADR-0033)
@@ -96,7 +96,7 @@ case with no `expected` takes its result. One whose result differs from the reco
 test uses, takes the new one. One that is the same by meaning keeps the bytes recorded for it, so the diff is the
 change and not the spelling of the Rust server's output. The tool list is done the same way, tool by tool. It
 refuses to run when `CI` is set or in a release build, and writes nothing when a case's LogSeq calls are wrong or the
-closest names would break ADR-0032's rules. A recorded result is the tool contract: a change to one needs the
+closest names would break the rules of ADR-0034 Decision 4. A recorded result is the tool contract: a change to one needs the
 maintainer's explicit OK, recorded on the pull request, and the `golden-change` label that the `golden-files` job of
 `ci.yml` looks for.
 
@@ -158,13 +158,13 @@ run (#359):
 cargo test --release --locked --test parity --test parity_self_check
 ```
 
-The closest names after `Closest:` in a page-not-found message are not compared byte for byte (ADR-0032 Decision 3,
+The closest names after `Closest:` in a page-not-found message are not compared byte for byte (ADR-0034 Decision 4,
 `tests/parity_support/suggestion_rules.rs`): the test checks the message frame, that the list is one to three distinct
 page names, that exact and prefix matches come first, that every name covers every word typed, and that there are as
 many as there are to list, up to three. It fails when the recorded cases lack one the ADR requires.
 
 ## Running it
 
-It reads the same config file as the TypeScript server. To point it at this worktree's fixture
+It reads `~/.logseq-mcp/config.json`, or the absolute path in `LOGSEQ_MCP_CONFIG`. To point it at this worktree's fixture
 instance rather than the personal graph, run `npx tsx scripts/logseq-instance.ts start` and set
 the `LOGSEQ_MCP_CONFIG` it prints.

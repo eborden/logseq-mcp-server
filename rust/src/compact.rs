@@ -1,4 +1,4 @@
-//! `compact` JSON (#43; the Rust side of `src/utils/compact.ts`): the same result with ids, titles
+//! `compact` JSON (#43): the same result with ids, titles
 //! and link targets, and no block bodies. A block shrinks to `{ uuid, snippet }`, where the snippet
 //! is its first line cut to 80 characters; the model reads only the blocks it picks, with
 //! `logseq_get_block`. The Markdown form of `compact` shows the same snippets.

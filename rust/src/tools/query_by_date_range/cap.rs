@@ -1,6 +1,5 @@
 //! `max_blocks` (#61): keeping the first blocks across the days of a result, and the
-//! `blocks_truncated` warning that says where the cut fell and how to read on (`capEntries` and
-//! `blocksTruncated` in `src/tools/query-by-date-range.ts`; #187).
+//! `blocks_truncated` warning that says where the cut fell and how to read on (#187).
 
 use serde_json::Value;
 

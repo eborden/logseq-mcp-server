@@ -1,4 +1,4 @@
-//! `logseq_query_by_property` (the Rust side of `src/tools/query-by-property.ts`): the blocks whose
+//! `logseq_query_by_property`: the blocks whose
 //! property equals a value, flat, with their page's name.
 //!
 //! Calls: 1, whatever the number of matches (#33). The match runs inside LogSeq, against
@@ -46,7 +46,7 @@ pub const MAX_PROPERTY_LIMIT: u64 = 500;
 /// The query takes only a key and an exact value, so nothing narrows it further.
 const NARROWER: &str = "No other parameter narrows this query.";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.\n\n\
 **Matching:** key as stored (created-at) or camelCase; values are exact strings (\"42\", \"true\"); a multi-value property matches if any one value equals it. Flat list with page name, no children.\n\
 **Can't find:** partial values, ranges, or over 500 matches. For text use logseq_search_blocks.";
@@ -59,7 +59,7 @@ fn default_slim_results() -> bool {
     DEFAULT_SLIM_RESULTS
 }
 
-/// The search's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The search's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)

@@ -7,12 +7,12 @@
 //! - the result: a JSON tool result by deep equality (key order ignored, array order kept, numbers by value)
 //!   and minified (ADR-0009), every other text (markdown, a prompt's messages, a resource read, the frame of a
 //!   page-not-found message) byte for byte, and the closest names of a page-not-found message by the rules of
-//!   ADR-0032 (#335);
+//!   ADR-0034 Decision 4 (#335);
 //! - the LogSeq calls (ADR-0034 Decision 5): every call the server makes matches a recorded call in method, query
 //!   text (layout aside) and inputs, whatever the server does with the answer, and there are at most as many as the
 //!   case's ceiling (`call-ceilings.json`). Their order and grouping are not compared, a repeated query is matched
 //!   to its recorded calls in the recorded order, and every recorded call is a read;
-//! and once: `tools/list` by meaning against the recorded list (ADR-0031, #292), that startup and `tools/list`
+//! and once: `tools/list` by meaning against the recorded list (ADR-0034 Decision 3, #292), that startup and `tools/list`
 //! make no LogSeq call, and that the recorded set exercises the closest-name rules.
 //!
 //! Every rule that decides whether an answer matches is in `parity_support/compare.rs`. `parity_self_check.rs`
@@ -345,7 +345,7 @@ fn the_frame_of_a_page_not_found_message_is_byte_for_byte() {
     assert!(!compare_results(&reference, &other_frame, &candidates).is_empty());
 }
 
-// ---- the closest-name rules (ADR-0032), and the self-check that wrong lists are caught
+// ---- the closest-name rules (ADR-0034 Decision 4), and the self-check that wrong lists are caught
 
 fn names(list: &[&str]) -> Vec<String> {
     list.iter().map(|n| (*n).to_owned()).collect()

@@ -1,6 +1,5 @@
-//! Turning a Datalog pull into the shape the Editor API answers with (the Rust side of the key
-//! helpers in `src/utils/block-tree.ts`): `journal-day` becomes `journalDay`, `path-refs` becomes
-//! `pathRefs`. A tool that merges a pulled block into a result the Editor API also produces
+//! Turning a Datalog pull into the shape the Editor API answers with: `journal-day` becomes
+//! `journalDay`, `path-refs` becomes `pathRefs`. A tool that merges a pulled block into a result the Editor API also produces
 //! (the aliased backlinks) camelizes it first, so both paths give one shape.
 //!
 //! It also puts sibling blocks in page order (`orderSiblings`): LogSeq doesn't store an order, each
@@ -32,8 +31,7 @@ pub fn camelize(key: &str) -> String {
 }
 
 /// `camelizeKeys`: the top-level keys of a pulled entity, camelized. Nested values are untouched.
-/// Two keys that camelize to one name keep the first's place and the last's value, as assigning
-/// to a JavaScript object does.
+/// Two keys that camelize to one name keep the first's place and the last's value.
 pub fn camelize_keys(entity: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::with_capacity(entity.len());
     for (key, value) in entity {
@@ -134,7 +132,7 @@ pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> H
     build_block_trees_ordered(blocks, page_ids).into_iter().collect()
 }
 
-/// [`build_block_trees`] in the order the TypeScript `Map` holds its entries: the pages of
+/// [`build_block_trees`] in insertion order: the pages of
 /// `page_ids` first, in that order, then every other page in the order its first top-level block
 /// came. A caller that writes the pages one after the other (the context Markdown) needs it.
 pub fn build_block_trees_ordered(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> Vec<(i64, Vec<Value>)> {
@@ -372,7 +370,7 @@ mod tests {
     fn a_block_that_is_its_own_parent_or_in_a_cycle_does_not_loop() {
         let trees = build_block_trees(flat(vec![block(1, 10, 1, 1)]), &[10]);
         assert_eq!(trees[&10].len(), 1);
-        // 2 and 3 are each other's parent: neither is a root, so both are lost, as in TypeScript
+        // 2 and 3 are each other's parent: neither is a root, so both are lost (a cycle has no top to start from)
         let trees = build_block_trees(flat(vec![block(2, 10, 3, 3), block(3, 10, 2, 2)]), &[10]);
         assert!(trees[&10].is_empty());
     }

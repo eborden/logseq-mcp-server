@@ -1,4 +1,4 @@
-//! MCP prompts (the Rust side of `src/prompts.ts`, #46): reusable starting messages a host shows as
+//! MCP prompts (#46): reusable starting messages a host shows as
 //! slash commands or menu entries. Each returns one short user message that tells the model which
 //! tools to call, in what order, and what to hand back. The server stays read-only (BR-0002): a
 //! prompt never calls LogSeq and never asks the model to write to the graph through these tools.
@@ -50,7 +50,7 @@ fn invalid(message: &str) -> ErrorData {
     mcp_error(ErrorCode::INVALID_PARAMS, message)
 }
 
-/// `JSON.stringify` of a string.
+/// A string as a JSON string literal.
 fn quoted(text: &str) -> String {
     Value::from(text).to_string()
 }
@@ -452,8 +452,7 @@ pub fn get(name: &str, arguments: Option<&JsonObject>, today: CalendarDate) -> R
     })?;
     let empty = JsonObject::new();
     let raw = arguments.unwrap_or(&empty);
-    // Every value must be a string. The TypeScript SDK checks this before the prompt sees the request (and
-    // answers -32603 with the zod issues); a malformed argument is `InvalidParams` here.
+    // Every value must be a string; a malformed argument is `InvalidParams`.
     let mut strings = Arguments::new();
     for (key, value) in raw {
         let Some(text) = value.as_str() else {

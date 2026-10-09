@@ -345,9 +345,9 @@ async fn the_gate_cannot_tell_the_two_graphs_apart_the_roster_result_also_passes
 /// it is at the end of the shorter one. Line and column are 1-based, in characters. The excerpts are
 /// the line at that position, cut to 30 characters before it and 50 from it on, behind `...`.
 ///
-/// The TypeScript reference this is ported from (`referenceProse`) reads the line start as
-/// `lastIndexOf('\n', i - 1)`, which for `i == 0` looks at the first character: a text that opens
-/// with a newline gets an empty excerpt (the tool copies that, as parity with the TypeScript server).
+/// The reference reads the line start as the position after the last newline at or before `i - 1`,
+/// which for `i == 0` looks at the first character: a text that opens
+/// with a newline gets an empty excerpt (the tool keeps that behaviour).
 fn reference_prose(before: &str, after: &str) -> Value {
     fn strip(text: &str) -> Vec<char> {
         let c: Vec<char> = text.chars().collect();
@@ -471,7 +471,7 @@ async fn the_prose_check_matches_the_reference_on_the_tricky_pairs() {
 }
 
 const PIECES: &[&str] = &["a", "b", "x", " ", "\n", "[[", "]]", "[", "]", "[[p]]", "😀", "😁", "é", "."];
-/// The TypeScript test's count. Each pair goes both ways, so 40,000 comparisons.
+/// Each pair goes both ways, so 40,000 comparisons.
 const PAIRS: usize = 20_000;
 
 /// A LogSeq that keeps its connections open and answers every request with no rows. The shared mock closes the

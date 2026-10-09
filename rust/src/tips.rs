@@ -1,4 +1,4 @@
-//! Next-step tips (#44, BR-0009; the Rust side of `src/utils/tips.ts`). After a result the model
+//! Next-step tips (#44, BR-0009). After a result the model
 //! usually needs one more call, and a tip names it with ready-to-use arguments. Tips are built
 //! from the result, never by the tool's own code, so the primary result keeps its shape; they
 //! travel in a trailing `{"meta":{"tips":[...]}}` content block, and there is none when there are

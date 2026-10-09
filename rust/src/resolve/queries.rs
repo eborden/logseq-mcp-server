@@ -1,9 +1,7 @@
-//! The Datalog queries of the page resolver (the Rust side of `resolvePage` and
-//! `namespaceLeafPages` in `src/datalog/queries.ts`). Every string is bound with `:in`
+//! The Datalog queries of the page resolver . Every string is bound with `:in`
 //! (ADR-0013), so no page name is part of the query text.
 //!
-//! The text is the TypeScript text with its whitespace collapsed; LogSeq doesn't care how a query
-//! is laid out and the parity harness compares it collapsed.
+//! The text has its whitespace collapsed; LogSeq doesn't care how a query is laid out.
 
 use crate::edn::{DatalogInput, JournalDay, PageId, PageName, Query, ground_ids};
 

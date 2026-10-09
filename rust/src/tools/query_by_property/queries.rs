@@ -1,5 +1,4 @@
-//! The one Datalog query the property search makes (`blocksByProperty` and `normalizePropertyKey`
-//! in `src/datalog/queries.ts`). Both the key and the value are bound with `:in` (ADR-0013), so
+//! The one Datalog query the property search makes. Both the key and the value are bound with `:in` (ADR-0013), so
 //! nothing the caller sent is part of the query text.
 
 use crate::edn::{DatalogInput, Query};
