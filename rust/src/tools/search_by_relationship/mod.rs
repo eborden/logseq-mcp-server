@@ -11,6 +11,10 @@
 //! one page make no hop query and return a `same_topic` warning. The cut is applied after the
 //! queries, so it costs no call.
 //!
+//! A `null` answer is not an empty one (BR-0011, #342). It costs no extra call and adds a warning
+//! with no `howToFetchAll`: `relationship_unavailable` for a relationship query, `hop_unavailable`
+//! (the walk stops at that hop) and `page_blocks_unavailable` for a page tree of a found connection.
+//!
 //! This directory holds what only this search uses: its queries (`queries.rs`) and the answers it
 //! reads (`wire.rs`). The alias groups, the page resolver, the block budget and the truncation
 //! warnings are shared. The tool has no tips.
@@ -295,6 +299,9 @@ enum Walk {
     Connected,
     /// None was, and the walk may be incomplete when a hop was cut: `(hop, pages that hop reached)`
     NotConnected { cut_at: Option<(u64, usize)> },
+    /// LogSeq gave no answer (`null`) for `hop`, so the walk stopped there with no further call (BR-0011).
+    /// "Not connected" is not known. `cut_at` is an earlier hop that was cut, which stays true.
+    Unavailable { hop: u64, cut_at: Option<(u64, usize)> },
 }
 
 /// The walk of `connected-within`: a level-synchronous BFS, one query per hop for the whole frontier
@@ -316,9 +323,10 @@ async fn walk(client: &LogseqClient, seeds: &[i64], targets: &HashSet<i64>, max_
         let ids = frontier.iter().map(|&id| PageId::new(id)).collect::<Result<Vec<_>, _>>()?;
         let query = queries::neighbor_pages(&ids);
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-        // PARITY(#299): a `null` answer is read as no neighbours, so the walk ends "not connected" when LogSeq
-        // didn't answer (suspected TS bug, BR-0011) — fix per #342, in both servers.
-        let neighbors = wire::id_rows(&answer)?.unwrap_or_default();
+        // `null` is not "no neighbours" (BR-0011): the walk stops here instead of ending "not connected"
+        let Some(neighbors) = wire::id_rows(&answer)? else {
+            return Ok(Walk::Unavailable { hop: depth, cut_at });
+        };
 
         if neighbors.iter().any(|id| targets.contains(id)) {
             return Ok(Walk::Connected);
@@ -339,12 +347,68 @@ fn member_ids(set: &AliasSet) -> Vec<i64> {
     set.members.iter().map(|member| member.id).collect()
 }
 
-/// `getPageBlocksTree` for a page's lookup name.
-async fn fetch_tree(client: &LogseqClient, name: &str) -> Result<Vec<Value>, ToolError> {
+/// `getPageBlocksTree` for a page's lookup name, or `None` when LogSeq gave no answer (`null`, BR-0011),
+/// which is not a page with no blocks.
+async fn fetch_tree(client: &LogseqClient, name: &str) -> Result<Option<Vec<Value>>, ToolError> {
     let answer = client.call_api("logseq.Editor.getPageBlocksTree", &[Value::from(name)]).await?;
-    // PARITY(#299): a `null` tree is read as a page with no blocks, with no warning (suspected TS bug, BR-0011) —
-    // fix per #342, in both servers.
-    Ok(wire::blocks(&answer)?.unwrap_or_default())
+    Ok(wire::blocks(&answer)?)
+}
+
+/// No `howToFetchAll` on the warnings below: no parameter fetches what LogSeq did not answer (like
+/// `pages_unavailable`, #64), so `hasMore` is unaffected. The retry advice is in the message.
+const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+
+/// What the query of a relationship type looks for, for the warning.
+fn relationship_sought(relationship_type: RelationshipType, topic_a: &str, topic_b: &str) -> String {
+    match relationship_type {
+        RelationshipType::References => format!("the blocks of \"{topic_a}\" that reference \"{topic_b}\""),
+        RelationshipType::InPagesLinkingTo => format!("the blocks that reference \"{topic_a}\" in pages linking to \"{topic_b}\""),
+        RelationshipType::ReferencedBy => format!("the blocks that reference \"{topic_a}\" in pages referenced by \"{topic_b}\""),
+        RelationshipType::ConnectedWithin => unreachable!("connected-within has its own warnings"),
+    }
+}
+
+fn relationship_unavailable(relationship_type: RelationshipType, topic_a: &str, topic_b: &str) -> ResultWarning {
+    ResultWarning::new(
+        "relationship_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up {} (possibly no graph open or a re-index in progress), \
+             so the empty results may not mean nothing matches. {RETRY_ADVICE}",
+            relationship_sought(relationship_type, topic_a, topic_b)
+        ),
+    )
+}
+
+fn frontier_truncated((depth, reached): (u64, usize)) -> ResultWarning {
+    ResultWarning::new(
+        "frontier_truncated",
+        format!(
+            "Hop {depth} reached {reached} pages; only {DEFAULT_MAX_FRONTIER} were expanded, \
+             so \"not connected\" may be a false negative. Try a smaller max_distance or more specific topics."
+        ),
+    )
+}
+
+fn hop_unavailable(hop: u64) -> ResultWarning {
+    ResultWarning::new(
+        "hop_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the pages reached at hop {hop} (possibly no graph open or a \
+             re-index in progress), so the walk stopped there and \"not connected\" may be wrong. \
+             This does not mean the topics are not connected. {RETRY_ADVICE}"
+        ),
+    )
+}
+
+fn page_blocks_unavailable(which: &str, topic: &str) -> ResultWarning {
+    ResultWarning::new(
+        "page_blocks_unavailable",
+        format!(
+            "LogSeq returned no answer when looking up the blocks of topic {which} (\"{topic}\") (possibly no graph open or a \
+             re-index in progress), so its blocks are missing from the results although the topics are connected. \
+             This does not mean the page has no blocks. {RETRY_ADVICE}"
+        ),
+    )
 }
 
 /// `searchByRelationship`: blocks tied to topic A by a link to topic B. Returns the result as the
@@ -389,7 +453,10 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
             } else {
                 queries::blocks_on_page_referencing(&PageName::new(name_a), &PageName::new(name_b))
             };
-            results = fetch_blocks(client, query).await?;
+            results = fetch_blocks(client, query).await?.unwrap_or_else(|| {
+                warnings.push(relationship_unavailable(*relationship_type, topic_a, topic_b));
+                Vec::new()
+            });
         }
         // Blocks that reference topic A, on pages that also hold a block referencing topic B (inbound: the
         // pages that link to B).
@@ -399,7 +466,10 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
             } else {
                 queries::blocks_referencing_in_pages_linking(&PageName::new(name_a), &PageName::new(name_b))
             };
-            results = fetch_blocks(client, query).await?;
+            results = fetch_blocks(client, query).await?.unwrap_or_else(|| {
+                warnings.push(relationship_unavailable(*relationship_type, topic_a, topic_b));
+                Vec::new()
+            });
         }
         // Blocks that reference topic A, on pages that a block on topic B's page references (outbound: the
         // pages B links to). The TypeScript server ran the inbound query here too, against its own
@@ -410,7 +480,10 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
             } else {
                 queries::blocks_referencing_in_pages_referenced_by(&PageName::new(name_a), &PageName::new(name_b))
             };
-            results = fetch_blocks(client, query).await?;
+            results = fetch_blocks(client, query).await?.unwrap_or_else(|| {
+                warnings.push(relationship_unavailable(*relationship_type, topic_a, topic_b));
+                Vec::new()
+            });
         }
         RelationshipType::ConnectedWithin => {
             // The ids come from the resolved pages and their alias groups, so no further lookups are
@@ -447,20 +520,25 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
 
                 match walk(client, &seeds, &targets, *max_distance).await? {
                     Walk::Connected => {
-                        // If connected, return blocks from both topics
+                        // If connected, return blocks from both topics. A tree LogSeq didn't answer is
+                        // missing, not empty: the connection stays reported and a warning says what's absent.
                         let tree_a = fetch_tree(client, name_a).await?;
                         let tree_b = fetch_tree(client, name_b).await?;
+                        if tree_a.is_none() {
+                            warnings.push(page_blocks_unavailable("A", topic_a));
+                        }
+                        if tree_b.is_none() {
+                            warnings.push(page_blocks_unavailable("B", topic_b));
+                        }
+                        let (tree_a, tree_b) = (tree_a.unwrap_or_default(), tree_b.unwrap_or_default());
                         results = tree_a.iter().chain(&tree_b).cloned().collect();
                         trees = Some((tree_a, tree_b));
                     }
-                    Walk::NotConnected { cut_at: Some((depth, reached)) } => warnings.push(ResultWarning::new(
-                        "frontier_truncated",
-                        format!(
-                            "Hop {depth} reached {reached} pages; only {DEFAULT_MAX_FRONTIER} were expanded, \
-                             so \"not connected\" may be a false negative. Try a smaller max_distance or more specific topics."
-                        ),
-                    )),
-                    Walk::NotConnected { cut_at: None } => {}
+                    Walk::NotConnected { cut_at } => warnings.extend(cut_at.map(frontier_truncated)),
+                    Walk::Unavailable { hop, cut_at } => {
+                        warnings.extend(cut_at.map(frontier_truncated));
+                        warnings.push(hop_unavailable(hop));
+                    }
                 }
             }
         }
@@ -504,12 +582,11 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
     Ok(Value::Object(result))
 }
 
-/// A query for blocks, run and unwrapped (`extractBlocks`).
-async fn fetch_blocks(client: &LogseqClient, query: crate::edn::Query) -> Result<Vec<Value>, ToolError> {
+/// A query for blocks, run and unwrapped (`extractBlocks`), or `None` when LogSeq gave no answer
+/// (`null`, BR-0011), which is not "nothing matches".
+async fn fetch_blocks(client: &LogseqClient, query: crate::edn::Query) -> Result<Option<Vec<Value>>, ToolError> {
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    // PARITY(#299): a `null` answer is read as no rows, so the search finds nothing when LogSeq didn't answer
-    // (suspected TS bug, BR-0011) — fix per #342, in both servers.
-    Ok(wire::block_rows(&answer)?.unwrap_or_default().into_iter().map(Value::Object).collect())
+    Ok(wire::block_rows(&answer)?.map(|rows| rows.into_iter().map(Value::Object).collect()))
 }
 
 #[cfg(test)]
