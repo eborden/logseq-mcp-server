@@ -153,7 +153,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, argum
 pub struct Entry {
     /// `YYYYMMDD`
     pub date: i64,
-    /// The page as the Editor API spells it (`camelizeKeys` of the pull)
+    /// The page as the Editor API spells it (the pull's keys, camelized)
     pub page: Value,
     /// The day's top-level blocks (kept ones only, after the cap), each with its `children`
     pub blocks: Vec<Value>,
@@ -172,11 +172,11 @@ struct Journal {
     /// The page as the Editor API spells it
     page: Map<String, Value>,
     id: Option<i64>,
-    /// `page.journalDay || 0`
+    /// The page's journal day, or 0 when it has none
     day: i64,
 }
 
-/// `fetchPages`: the journal pages a query finds, or `None` when LogSeq answered `null`. `null` is
+/// The journal pages a query finds, or `None` when LogSeq answered `null`. `null` is
 /// not `[]` (BR-0011, #269): an empty array is a range with no journals, `null` is no answer at all.
 async fn fetch_journals(client: &LogseqClient, query: crate::edn::Query) -> Result<Option<Vec<Journal>>, ToolError> {
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
@@ -219,7 +219,7 @@ fn blocks_unavailable(page_count: usize) -> ResultWarning {
     )
 }
 
-/// The first non-blank line of a block, trimmed and shortened (`snippetOf`), as the page outline
+/// The first non-blank line of a block, trimmed and shortened, as the page outline
 /// takes it. Over 80 characters (code points) it is cut to 77 and ends in `...`, so a cut never
 /// lands inside a character. Unlike the outline's snippet, white space the cut leaves at the end
 /// stays.
@@ -245,7 +245,7 @@ fn trees_of(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> (HashMap<i64, 
             if let Some(id) = block.get("id").and_then(crate::wire::whole_number) {
                 refs_by_block.insert(id, extract_concept_refs(&block));
             }
-            // `refs.map(ref => ({ id: entityId(ref) }))`: a ref with no id is `{}`
+            // each ref as `{ id }`: a ref with no id is `{}`
             let bare: Vec<Value> = refs
                 .iter()
                 .map(|reference| {

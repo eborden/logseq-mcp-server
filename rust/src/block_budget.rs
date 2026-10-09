@@ -7,12 +7,12 @@
 
 use serde_json::{Map, Value};
 
-/// `block.children ?? []`: a block's children, none for a leaf or a block with no such key.
+/// A block's children, none for a leaf or a block with no such key.
 fn children_of(block: &Value) -> &[Value] {
     block.get("children").and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
 
-/// `countBlocks`: the number of blocks in these trees, nested ones included.
+/// The number of blocks in these trees, nested ones included.
 pub fn count_blocks(blocks: &[Value]) -> usize {
     blocks.iter().map(|block| 1 + count_blocks(children_of(block))).sum()
 }
@@ -31,7 +31,7 @@ impl Budget {
     }
 }
 
-/// `takeBlocks`: the first `budget.room` blocks of these trees in document order: a block, then its
+/// The first `budget.room` blocks of these trees in document order: a block, then its
 /// children, then its next sibling. What is kept is a valid tree. A kept block whose children
 /// don't all fit keeps the first ones that do and gains `childrenTruncated: true`, so it isn't
 /// mistaken for a leaf (slim output drops an empty `children`).

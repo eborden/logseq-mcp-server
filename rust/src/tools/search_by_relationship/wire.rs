@@ -1,6 +1,5 @@
-//! What the relationship search reads from LogSeq: the blocks of its queries
-//! (`responses.nullableBlockRows`), the page ids of a hop (`responses.idRows`) and a page's block
-//! tree (`responses.blocks`). Blocks are checked against their wire types and kept as the JSON
+//! What the relationship search reads from LogSeq: the blocks of its queries,
+//! the page ids of a hop and a page's block tree. Blocks are checked against their wire types and kept as the JSON
 //! LogSeq sent, since a result carries them as they came (BR-0004).
 //!
 //! `null` is a case of its own (BR-0011): each parser returns `None` for it and the tool decides
@@ -14,21 +13,21 @@ use crate::wire::{DATALOG_METHOD, Id, ResponseError, parse, sent_cells, sent_lis
 /// The method whose answer [`blocks`] reads.
 pub const BLOCKS_METHOD: &str = "logseq.Editor.getPageBlocksTree";
 
-/// `responses.nullableBlockRows`: `[block | null]` per row, or `None` for a `null` answer. A `null`
-/// cell is skipped (`extractBlocks`).
+/// The answer: `[block | null]` per row, or `None` for a `null` answer. A `null`
+/// cell is skipped.
 pub fn block_rows(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
     let cells = sent_cells::<Block>(DATALOG_METHOD, answer)?;
     Ok(cells.map(|cells| cells.into_iter().flatten().filter_map(|cell| if let Value::Object(map) = cell { Some(map) } else { None }).collect()))
 }
 
-/// `responses.idRows`: `[id]` per row, or `None` for a `null` answer.
+/// The answer: `[id]` per row, or `None` for a `null` answer.
 ///
 /// An id must be a whole number here: the next hop binds it into a query.
 pub fn id_rows(answer: &Value) -> Result<Option<Vec<i64>>, ResponseError> {
     Ok(parse::<Option<Vec<(Id,)>>>(DATALOG_METHOD, answer)?.map(|rows| rows.into_iter().map(|(id,)| id.0).collect()))
 }
 
-/// `responses.blocks`: the top-level blocks of a page tree, or `None` for a `null` answer. Each is
+/// The top-level blocks of a page tree, or `None` for a `null` answer. Each is
 /// checked as a block and returned as sent, children included.
 pub fn blocks(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
     sent_list::<Block>(BLOCKS_METHOD, answer)

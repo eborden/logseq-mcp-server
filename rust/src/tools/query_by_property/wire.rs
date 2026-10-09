@@ -6,8 +6,8 @@ use serde_json::{Map, Value};
 use crate::entity::shape::Block;
 use crate::wire::{DATALOG_METHOD, ResponseError, sent_cells};
 
-/// `responses.nullableBlockRows`: `null`, or one row per match, `[block | null]`. A `null` cell is
-/// skipped (`filter(pulled => pulled != null)`), and every block is checked whole.
+/// The answer: `null`, or one row per match, `[block | null]`. A `null` cell is
+/// skipped, and every block is checked whole.
 pub fn blocks(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
     let cells = sent_cells::<Block>(DATALOG_METHOD, answer)?;
     Ok(cells.map(|cells| cells.into_iter().flatten().filter_map(|cell| if let Value::Object(map) = cell { Some(map) } else { None }).collect()))

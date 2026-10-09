@@ -1,6 +1,5 @@
 //! What the backlinks tool reads from LogSeq: the Editor API's linked references
-//! (`responses.linkedReferences`) and the blocks of the aliased Datalog query
-//! (`responses.nullableBlockRows`).
+//! and the blocks of the aliased Datalog query.
 //!
 //! Both are checked against their wire types and then kept as the values LogSeq sent: the
 //! tool's output carries each entity as it came (BR-0004), so a typed copy would only be thrown
@@ -25,7 +24,7 @@ pub struct Backlink {
 }
 
 impl Backlink {
-    /// The page of the first block (`blocks[0]?.page`), which names the source when `page` is null.
+    /// The page of the first block, which names the source when `page` is null.
     pub fn block_page(&self) -> Option<&Map<String, Value>> {
         self.blocks.first()?.get("page")?.as_object()
     }
@@ -43,7 +42,7 @@ impl Serialize for Backlink {
     }
 }
 
-/// `responses.linkedReferences`: `[page | null, blocks]` per source page, or `null`.
+/// The answer: `[page | null, blocks]` per source page, or `null`.
 pub fn linked_references(answer: Value) -> Result<Option<Vec<Backlink>>, ResponseError> {
     if parse::<Option<Vec<(Option<PageLike>, Vec<Block>)>>>(LINKED_REFERENCES_METHOD, &answer)?.is_none() {
         return Ok(None);
@@ -64,7 +63,7 @@ pub fn linked_references(answer: Value) -> Result<Option<Vec<Backlink>>, Respons
     backlinks.map(Some)
 }
 
-/// `responses.nullableBlockRows`: `[block | null]` per row, or `null`. A `null` cell is `None`,
+/// The answer: `[block | null]` per row, or `null`. A `null` cell is `None`,
 /// which the tool skips.
 pub fn block_rows(answer: Value) -> Result<Option<Vec<Option<Map<String, Value>>>>, ResponseError> {
     let cells = sent_cells::<Block>(DATALOG_METHOD, &answer)?;

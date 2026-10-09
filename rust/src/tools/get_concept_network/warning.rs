@@ -36,7 +36,7 @@ fn warning(message: String, how_to_fetch_all: Option<String>) -> ResultWarning {
     ResultWarning { code: CODE.to_owned(), message, how_to_fetch_all }
 }
 
-/// `networkTruncatedWarning`.
+/// The `network_truncated` warning.
 pub fn network_truncated_warning(f: TruncationFacts) -> ResultWarning {
     let base = format!("Kept {} pages; at least {} more connected pages were dropped.", f.kept, f.dropped);
     let suggested_nodes = f.kept + f.dropped;

@@ -1,5 +1,5 @@
-//! `resolveLinkTargets` (#146): many names resolved the way a `[[link]]` resolves, in one Datalog
-//! query however many names there are. These are routes 1 and 2 of [`super::resolve_page`] (exact
+//! Many names resolved the way a `[[link]]` resolves, in one Datalog
+//! query however many names there are (#146). These are routes 1 and 2 of [`super::resolve_page`] (exact
 //! name, then alias), with the same stub and ambiguity rules, so a file-less page counts as a page.
 //! ISO dates and namespace leaves are left out on purpose: `[[2025-01-01]]` and `[[atlas]]` link to
 //! the page with exactly that name, not to a journal or to `projects/atlas`.
@@ -30,7 +30,7 @@ pub fn link_key(name: &str) -> String {
     js::trim(name).to_lowercase()
 }
 
-/// `resolveLinkTargets`: names are trimmed and lowercased and duplicates are sent once. An empty
+/// Names are trimmed and lowercased and duplicates are sent once. An empty
 /// list, or one of blank names only, costs no call. Infrastructure errors propagate.
 pub async fn resolve_link_targets(client: &LogseqClient, names: &[&str]) -> Result<LinkTargetResolutions, ToolError> {
     let mut keys: Vec<String> = Vec::new();
@@ -57,7 +57,7 @@ pub async fn resolve_link_targets(client: &LogseqClient, names: &[&str]) -> Resu
         by_name.entry(name).or_default().push(wire::ResolverRow { page, via: Some(row.via) });
     }
     for key in keys {
-        // `resolveFromRows(key, ...)`: the name is the key, trimmed and lowercase already
+        // The name is the key, trimmed and lowercase already
         let resolution = by_name.get(&key).and_then(|rows| resolve_from_rows(&key, rows)).unwrap_or(Resolution::NotFound);
         resolutions.insert(key, resolution);
     }

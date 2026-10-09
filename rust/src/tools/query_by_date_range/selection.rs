@@ -33,7 +33,7 @@ fn invalid(param: &str, value: impl Into<String>, expected: &str, example: &str)
 /// the arguments' parse refuses it with the same words.
 const FORMAT: &str = DATE_FORMAT;
 
-/// `isValidDateFormat`: a whole number of 8 digits (year 1900 to 2100) that is a day the calendar has,
+/// Whether a date is a whole number of 8 digits (year 1900 to 2100) that is a day the calendar has,
 /// so `20250231` is not one.
 fn is_valid_date_format(date: i64) -> bool {
     if !(10_000_000..=99_999_999).contains(&date) {

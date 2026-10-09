@@ -68,7 +68,7 @@ const GUIDE_TOOL_ORDER: [&str; 16] = [
     "logseq_check_links",
 ];
 
-/// The reading guide as Markdown (`buildGuide`): the server instructions, then one line per tool (the first
+/// The reading guide as Markdown: the server instructions, then one line per tool (the first
 /// line of its description, which is what it does), per prompt and per resource.
 pub fn build_guide() -> String {
     let tools = tools::list();
@@ -77,7 +77,7 @@ pub fn build_guide() -> String {
         .map(|name| {
             let tool = tools.iter().find(|tool| tool.name == *name).expect("every tool in the guide order is registered");
             let description = tool.description.as_deref().unwrap_or_default();
-            // `summaryLine`: `description.split('\n', 1)[0].trim()`
+            // the first line of the description, trimmed
             format!("- {name}: {}", js::trim(description.split('\n').next().unwrap_or_default()))
         })
         .collect();

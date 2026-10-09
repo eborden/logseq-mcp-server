@@ -15,11 +15,11 @@ struct Hit {
     id: Id,
 }
 
-/// `responses.searchRows`, then `searchHitList` on the rows the search keeps: `null`, or the
+/// The search's rows, then the rows it keeps: `null`, or the
 /// blocks whose content is text, each checked whole.
 ///
 /// A row is `[block | null]`. A `null` cell is skipped, and so is a row whose `content` is not
-/// text (a block with none has nothing to search), as `searchBlocksWithMeta` has always skipped
+/// text (a block with none has nothing to search), as the search has always skipped
 /// it. Only that row's `id` is checked in the first pass; the blocks kept are then checked as
 /// blocks, in the row they came from.
 pub fn hits(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
@@ -33,7 +33,7 @@ pub fn hits(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
     Ok(Some(kept))
 }
 
-/// `responses.pageRows`: `null`, or one pulled page per row. A `null` cell is an error here.
+/// The answer: `null`, or one pulled page per row. A `null` cell is an error here.
 pub fn page_rows(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
     sent_required_cells::<PulledPage>(DATALOG_METHOD, answer)
 }

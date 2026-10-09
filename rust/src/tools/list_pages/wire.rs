@@ -14,7 +14,7 @@ pub struct ListedEntity {
     pub id: i64,
     /// `:block/name`, lowercase
     pub name: String,
-    /// `originalName`, or the name when the page has none or it is empty (`displayName`)
+    /// `originalName`, or the name when the page has none or it is empty
     pub display_name: String,
     /// LogSeq says it is a journal (`journal?`, or `journal`)
     pub journal: bool,
@@ -26,7 +26,7 @@ pub struct ListedEntity {
 
 impl From<EditorPage> for ListedEntity {
     fn from(page: EditorPage) -> Self {
-        // `page.originalName || page.name`: the Editor API's spelling only, and an empty one counts as missing
+        // the original name, else the name: the Editor API's spelling only, and an empty one counts as missing
         let display_name = page.original_name.into_option().filter(|name| !name.is_empty()).unwrap_or_else(|| page.name.clone());
         ListedEntity {
             id: page.id.0,
@@ -40,7 +40,7 @@ impl From<EditorPage> for ListedEntity {
     }
 }
 
-/// `responses.editorPages`: `null`, or one entity per page.
+/// The answer: `null`, or one entity per page.
 pub fn pages(answer: &Value) -> Result<Option<Vec<ListedEntity>>, ResponseError> {
     Ok(parse::<Option<Vec<EditorPage>>>(METHOD, answer)?.map(|pages| pages.into_iter().map(ListedEntity::from).collect()))
 }

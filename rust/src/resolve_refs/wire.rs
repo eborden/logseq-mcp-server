@@ -13,7 +13,7 @@ pub struct TargetPage {
     pub original_name: Option<String>,
 }
 
-/// A block or page the lookup pulled (`refTargets`). A block has `uuid`, `content`, `left`,
+/// A block or page the lookup pulled. A block has `uuid`, `content`, `left`,
 /// `parent` and `page`; a page has `name` and `original-name`. A placeholder LogSeq makes for a
 /// `((uuid))` that no real block has holds only `id`, `uuid` and `content`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -80,7 +80,7 @@ impl From<Pulled> for RefTarget {
     }
 }
 
-/// `responses.refTargetRows`: `null`, or one `[target | null]` per row. A `null` cell is `None`,
+/// The answer: `null`, or one `[target | null]` per row. A `null` cell is `None`,
 /// which the lookup skips.
 pub fn target_rows(answer: &Value) -> Result<Option<Vec<Option<RefTarget>>>, ResponseError> {
     Ok(parse::<Option<Vec<(Option<RefTarget>,)>>>(DATALOG_METHOD, answer)?.map(|rows| rows.into_iter().map(|(target,)| target).collect()))

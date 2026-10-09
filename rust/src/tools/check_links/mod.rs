@@ -71,12 +71,12 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
-/// `countOf(text, token)`: how many non-overlapping copies of `token` the text holds.
+/// How many non-overlapping copies of `token` the text holds.
 fn count_of(text: &str, token: &str) -> usize {
     text.matches(token).count()
 }
 
-/// `checkLinks`: run the linking gate over `before` and `after`. Returns each check's outcome, `ok`
+/// Runs the linking gate over `before` and `after`. Returns each check's outcome, `ok`
 /// for all four, and meta: `totals` counts the refs on each side and the distinct terms; a warning
 /// says when resolution could not run (LogSeq answered `null`) or a candidate list was cut.
 ///
@@ -159,7 +159,7 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
     let refs_ok = !targets.unavailable && unresolved.is_empty() && ambiguous_all_preexisting;
 
     Ok(result_value(&CheckLinksOutput {
-        // `buildResultMeta`: `hasMore` follows the warnings. None of these warnings offers a way to fetch more.
+        // `hasMore` follows the warnings. None of these warnings offers a way to fetch more.
         has_more: warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()),
         warnings: &warnings,
         totals: RefTotals { refs_before: count_of(before, "[["), refs_after: brackets.opens, terms: terms.len() },

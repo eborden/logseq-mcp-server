@@ -15,18 +15,18 @@ use crate::refs;
 /// (#42). `slim_results: false` is the opt-out. The default lives at the argument boundary.
 pub const DEFAULT_SLIM_RESULTS: bool = true;
 
-/// `extractPageRefs`: the `[[PageName]]` references in block content, without the brackets
+/// The `[[PageName]]` references in block content, without the brackets
 /// (the grammar of [`crate::refs`]).
 pub fn extract_page_refs(content: &str) -> Vec<String> {
     refs::page_refs(content).into_iter().map(|found| found.name.to_owned()).collect()
 }
 
-/// `extractTags`: the `#tag`s in block content, without the `#` (the grammar of [`crate::refs`]).
+/// The `#tag`s in block content, without the `#` (the grammar of [`crate::refs`]).
 pub fn extract_tags(content: &str) -> Vec<String> {
     refs::tags(content).into_iter().map(str::to_owned).collect()
 }
 
-/// `isEmptyValue`: a value that says nothing: null, an empty or blank string, an empty array or an
+/// A value that says nothing: null, an empty or blank string, an empty array or an
 /// empty object. `false` and `0` say something, so they are not empty.
 pub fn is_empty_value(value: &Value) -> bool {
     match value {
@@ -38,7 +38,7 @@ pub fn is_empty_value(value: &Value) -> bool {
     }
 }
 
-/// `nonEmptyProperties`: the properties without the empty ones, or `None` when none are left.
+/// The properties without the empty ones, or `None` when none are left.
 /// `status:: false` and `count:: 0` stay.
 pub fn non_empty_properties(properties: Option<&Value>) -> Option<Value> {
     let kept: Map<String, Value> =
@@ -46,7 +46,7 @@ pub fn non_empty_properties(properties: Option<&Value>) -> Option<Value> {
     (!kept.is_empty()).then_some(Value::Object(kept))
 }
 
-/// `toSlimBlock`: `uuid` and `content` always stay, even for an empty block. `pageName` is left out
+/// A slim block: `uuid` and `content` always stay, even for an empty block. `pageName` is left out
 /// when it is blank, `properties` when none has a value, and `marker`, `tags` and `pageRefs` when
 /// there are none. Children never carry `pageName`: they sit on their parent's page.
 ///
@@ -108,7 +108,7 @@ fn is_truthy(value: &Value) -> bool {
     }
 }
 
-/// `toSlimPage`: `name` and `originalName`, the properties that have a value, and the journal
+/// A slim page: `name` and `originalName`, the properties that have a value, and the journal
 /// metadata only for a journal page.
 pub fn to_slim_page(page: &Value) -> Map<String, Value> {
     let mut slim = Map::new();

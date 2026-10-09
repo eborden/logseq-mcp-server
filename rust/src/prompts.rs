@@ -155,7 +155,7 @@ pub struct WeekRange {
     pub partial: bool,
 }
 
-/// `resolveWeek`: work weeks run Monday to Friday. `week` is `this` (default), `last`, or any day in
+/// Work weeks run Monday to Friday. `week` is `this` (default), `last`, or any day in
 /// the week as `YYYY-MM-DD` / `YYYYMMDD`. A week still under way ends today.
 pub fn resolve_week(week: Option<&str>, today: CalendarDate) -> Result<WeekRange, ErrorData> {
     let spec = week.unwrap_or("this").to_lowercase();
@@ -213,7 +213,7 @@ fn parse_month(text: &str) -> Option<(u32, u32)> {
     Some((digits(bytes, 0, 4)?, digits(bytes, 5, 2)?))
 }
 
-/// `resolveMonth`: `month` is `this` (default), `last`, or `YYYY-MM`. A month still under way ends today.
+/// The range of a month: `month` is `this` (default), `last`, or `YYYY-MM`. A month still under way ends today.
 pub fn resolve_month(month: Option<&str>, today: CalendarDate) -> Result<MonthRange, ErrorData> {
     let spec = month.unwrap_or("this").to_lowercase();
     let first = match spec.as_str() {

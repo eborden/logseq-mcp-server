@@ -25,7 +25,7 @@ impl ResultWarning {
     }
 }
 
-/// `buildResultMeta`: `hasMore` is derived from the warnings, true when any of them offers a way
+/// `hasMore` is derived from the warnings, true when any of them offers a way
 /// to fetch the rest, so it can't be set without one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResultMeta {

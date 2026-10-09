@@ -36,7 +36,7 @@ pub struct TopConcept {
     pub days: usize,
 }
 
-/// `extractConceptRefs`: the concept refs of one flat Datalog block (pulled with nested
+/// The concept refs of one flat Datalog block (pulled with nested
 /// `:block/refs`). Dropped: refs without a name (block refs), journal pages, and
 /// [`BUILT_IN_CONCEPTS`]. Each page appears once.
 pub fn extract_concept_refs(block: &Map<String, Value>) -> Vec<ConceptRef> {
@@ -74,7 +74,7 @@ struct Tally {
     days: HashSet<i64>,
 }
 
-/// `rollUpTopConcepts`: the concepts the returned blocks reference, best first, at most `limit`.
+/// The concepts the returned blocks reference, best first, at most `limit`.
 ///
 /// Counts every block in the trees, children included: `count` is the number of blocks referencing
 /// a page, `days` the number of distinct entries (journal days) they sit on.

@@ -51,7 +51,7 @@ impl From<Cells> for ConnectedRow {
     }
 }
 
-/// `responses.connectedRows`: the rows, or `None` for a `null` answer, which is not an empty one
+/// The rows, or `None` for a `null` answer, which is not an empty one
 /// (BR-0011).
 pub fn connected_rows(answer: &Value) -> Result<Option<Vec<ConnectedRow>>, ResponseError> {
     parse(DATALOG_METHOD, answer)

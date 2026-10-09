@@ -2,7 +2,7 @@
 //! becomes one page, or the candidates when it is ambiguous, or "no such page" with the closest
 //! names. Every tool that takes a page goes through [`require_page`].
 //!
-//! The names of a `[[link]]` pass resolve many at a time in [`link_targets`] (`resolveLinkTargets`,
+//! The names of a `[[link]]` pass resolve many at a time in [`link_targets`] (for
 //! `check_links`). The alias groups (#69) are in [`alias`]: those of resolved pages, and that of a
 //! free-text name for a `search_term`.
 //!
@@ -29,7 +29,7 @@ use self::wire::ResolverRow;
 /// How many "did you mean" names a not-found message carries.
 const MAX_SUGGESTIONS: usize = 3;
 
-/// The method `suggestPages` reads every page name with.
+/// The method the closest-name search reads every page name with.
 const GET_ALL_PAGES: &str = "logseq.Editor.getAllPages";
 
 /// A name that resolved to exactly one page.
@@ -40,7 +40,7 @@ pub struct ResolvedPage {
     pub matched_by: MatchedBy,
     /// The original-case name of the page
     pub original_name: String,
-    /// The name to hand to follow-up calls (`lookupName`). For an exact match it is the caller's
+    /// The name to hand to follow-up calls. For an exact match it is the caller's
     /// own trimmed text, otherwise the resolved page's lowercase name.
     pub lookup_name: String,
 }

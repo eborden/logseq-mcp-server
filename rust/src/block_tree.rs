@@ -2,7 +2,7 @@
 //! `journalDay`, `path-refs` becomes `pathRefs`. A tool that merges a pulled block into a result the Editor API also produces
 //! (the aliased backlinks) camelizes it first, so both paths give one shape.
 //!
-//! It also puts sibling blocks in page order (`orderSiblings`): LogSeq doesn't store an order, each
+//! It also puts sibling blocks in page order: LogSeq doesn't store an order, each
 //! block says which block is to its `:block/left`, so the order is the chain those links make.
 //!
 //! [`build_block_trees`] rebuilds `getPageBlocksTree`-shaped trees from the flat blocks a Datalog
@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-/// `key.replace(/-([a-z])/g, (_, c) => c.toUpperCase())`: a dash before a lowercase ASCII letter
+/// A kebab-case key in camelCase: a dash before a lowercase ASCII letter
 /// goes, and the letter is capitalised. Matches don't overlap, scanning left to right, so
 /// `a--b` is `a-B` and `a-b-c` is `aBC`.
 pub fn camelize(key: &str) -> String {
@@ -30,7 +30,7 @@ pub fn camelize(key: &str) -> String {
     out
 }
 
-/// `camelizeKeys`: the top-level keys of a pulled entity, camelized. Nested values are untouched.
+/// The top-level keys of a pulled entity, camelized. Nested values are untouched.
 /// Two keys that camelize to one name keep the first's place and the last's value.
 pub fn camelize_keys(entity: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::with_capacity(entity.len());
@@ -40,7 +40,7 @@ pub fn camelize_keys(entity: &Map<String, Value>) -> Map<String, Value> {
     out
 }
 
-/// `camelizeBlock`: a pulled block the way the Editor API gives it: its top-level keys, plus the
+/// A pulled block the way the Editor API gives it: its top-level keys, plus the
 /// property names inside `properties` and `propertiesTextValues` and the names listed in
 /// `propertiesOrder` (Datalog has `logseq.order-list-type`, the Editor API `logseq.orderListType`).
 pub fn camelize_block(block: &Map<String, Value>) -> Map<String, Value> {
@@ -64,7 +64,7 @@ pub fn camelize_block(block: &Map<String, Value>) -> Map<String, Value> {
     out
 }
 
-/// `orderSiblings`: siblings in page order, by following the `:block/left` chain.
+/// Siblings in page order, by following the `:block/left` chain.
 ///
 /// The first sibling's `left` is the parent (or the page), which is not itself a sibling, so it
 /// is the head of the chain; each following sibling's `left` is the previous one. Blocks the
@@ -113,12 +113,12 @@ fn number_id(value: Option<&Value>) -> Option<i64> {
     value.and_then(crate::wire::whole_number)
 }
 
-/// `node.<key>?.id` of a block's `parent`, `page` or `left`: the `id` the reference carries.
+/// The `id` that a block's `parent`, `page` or `left` reference carries.
 fn reference_id(block: &Map<String, Value>, key: &str) -> Option<i64> {
     number_id(block.get(key).and_then(|reference| reference.get("id")))
 }
 
-/// `buildBlockTrees`: `getPageBlocksTree`-shaped trees from flat Datalog blocks, by page id.
+/// `getPageBlocksTree`-shaped trees from flat Datalog blocks, by page id.
 ///
 /// Mirrors the Editor API's output: camelCase keys, a `children` array on every block (empty for a
 /// leaf) and a 1-based `level`, after the keys the pull gave (`children` first, since it is made
@@ -127,7 +127,7 @@ fn reference_id(block: &Map<String, Value>, key: &str) -> Option<i64> {
 /// lost, under the page its `page` names, else its parent; a block with neither is dropped.
 ///
 /// Every page in `page_ids` has an entry, `[]` for a page with no blocks. A block whose own `id`
-/// is missing counts as id 0; every block the pull gives has one (`blockSchema`).
+/// is missing counts as id 0; every block the pull gives has one.
 pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> HashMap<i64, Vec<Value>> {
     build_block_trees_ordered(blocks, page_ids).into_iter().collect()
 }
@@ -162,7 +162,7 @@ pub fn build_block_trees_ordered(blocks: Vec<Map<String, Value>>, page_ids: &[i6
         match parent_id {
             Some(parent) if node_ids.contains(&parent) && parent != ids[i] => children_of.entry(parent).or_default().push(i),
             _ => {
-                // `node.page?.id ?? parentId`
+                // the block's page, else its parent
                 let Some(page_id) = reference_id(node, "page").or(parent_id) else { continue };
                 if !roots_of.contains_key(&page_id) {
                     page_order.push(page_id);

@@ -115,13 +115,13 @@ fn block_id(block: &Value) -> i64 {
     block.get("id").and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
-/// The id of the page a block sits on (`blockPageId`): undefined when the block carries no page.
+/// The id of the page a block sits on: `None` when the block carries no page.
 fn block_page_id(block: &Value) -> Option<i64> {
     id_of(block.get("page"))
 }
 
 /// A page pulled with `[*]` (kebab-case keys), as the camelCase page entity `getAllPages` returns
-/// and `toSlimPage` reads: the pull's keys, then the Editor API's spellings added. What it builds
+/// and the slim output reads: the pull's keys, then the Editor API's spellings added. What it builds
 /// carries both `originalName` and `original-name`.
 fn pulled_page_to_entity(pulled: &Map<String, Value>) -> Map<String, Value> {
     const RENAMED: [&str; 5] = ["original-name", "journal-day", "created-at", "updated-at", "properties-text-values"];
@@ -213,7 +213,7 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<(V
     Ok((contexts, unavailable))
 }
 
-/// A slim result: `toSlimBlock`, with its `context` slimmed too. Empty `references` and `tags` are
+/// A slim result: the slim block, with its `context` slimmed too. Empty `references` and `tags` are
 /// left out (#42): the block is slim, so the lists add only bytes.
 fn slim_result(block: &Value, context: Option<&Context>) -> Value {
     let block = block.as_object().expect("a checked block is an object");
@@ -257,7 +257,7 @@ pub async fn find_blocks(client: &LogseqClient, query: &str) -> Result<Option<Ve
 }
 
 /// `blocks` as full results with `context` (page, references, tags) added from one batched page
-/// lookup (`withPageContext`), and whether LogSeq answered `null` to that lookup (the blocks then carry no
+/// lookup, and whether LogSeq answered `null` to that lookup (the blocks then carry no
 /// `context`, and the caller says so with [`hit_pages_unavailable`]). API calls: 1, or 0 when no block has a page id.
 pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>) -> Result<(Vec<Value>, bool), ToolError> {
     let (contexts, unavailable) = with_page_context(client, &blocks).await?;

@@ -114,7 +114,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     Ok(success_result(vec![ContentBlock::text(evolution.to_value().to_string())]))
 }
 
-/// What `getConceptEvolution` takes beyond the concept (`ConceptEvolutionOptions`).
+/// What the evolution takes beyond the concept.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Options {
     /// `YYYYMMDD`; 0 or absent is no bound
@@ -185,7 +185,7 @@ struct TimelineEntry<'a> {
     blocks: &'a [Value],
 }
 
-/// The period keys of `groupedTimeline` as an object, in the order the periods were first met.
+/// The period keys of the grouped timeline as an object, in the order the periods were first met.
 struct GroupedTimeline<'a>(&'a [(String, Vec<Value>)]);
 
 impl Serialize for GroupedTimeline<'_> {
@@ -292,7 +292,7 @@ fn mentions_unavailable_warning() -> ResultWarning {
     )
 }
 
-/// `getConceptEvolution`: track how a concept evolves over time.
+/// Tracks how a concept evolves over time.
 ///
 /// `concept_name` is a page name, an alias or an ISO date (`2025-01-01`). When the name was an alias,
 /// date or namespace leaf rather than an exact name, `resolvedFrom` says which page was used. Mentions

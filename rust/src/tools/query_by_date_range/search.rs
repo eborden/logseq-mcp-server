@@ -25,7 +25,7 @@ pub struct BlockMatcher {
 }
 
 impl BlockMatcher {
-    /// `blockMatcher(searchTerm, aliasSet)`. The term's own name stays out of the whole-word
+    /// The matcher for a search term and its alias set, if any. The term's own name stays out of the whole-word
     /// names: `includes` matches it, and a case-folding comparison would also match spellings
     /// (`ſam` for `sam`) that `includes` does not.
     pub fn new(search_term: &str, alias_set: Option<&AliasSet>) -> BlockMatcher {

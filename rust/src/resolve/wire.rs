@@ -21,7 +21,7 @@ pub struct PulledPage {
     original_name: Option<String>,
     /// The page is backed by a file. A page that only exists as a link target has none (a stub).
     pub has_file: bool,
-    /// The page has at least one `:block/alias` link (`hasAliasLinks`). LogSeq stores each alias
+    /// The page has at least one `:block/alias` link. LogSeq stores each alias
     /// in both directions, so a page without any has no aliases and the alias lookup is skipped.
     pub has_alias_links: bool,
     /// The entity as LogSeq sent it, whole (`pull [*]`), for a tool whose result carries the page
@@ -52,7 +52,7 @@ impl PulledPage {
         self.name.as_deref().unwrap_or("").to_lowercase()
     }
 
-    /// `pageDisplayName`: the original-case name, else `:block/name`, else `""`. An empty
+    /// The original-case name, else `:block/name`, else `""`. An empty
     /// original name counts as missing.
     pub fn display_name(&self) -> String {
         self.original_name
@@ -100,7 +100,7 @@ impl<'de> Visitor<'de> for ResolverCellsVisitor {
     }
 }
 
-/// `responses.resolverRows`: `[page, via?]` per row.
+/// The answer: `[page, via?]` per row.
 pub fn resolver_rows(answer: &Value) -> Result<Option<Vec<ResolverRow>>, ResponseError> {
     let Some(rows) = parse::<Option<Vec<ResolverCells>>>(DATALOG_METHOD, answer)? else { return Ok(None) };
     Ok(Some(
@@ -153,7 +153,7 @@ impl<'de> Visitor<'de> for LinkTargetCellsVisitor {
     }
 }
 
-/// `responses.linkTargetRows`: `[page | null, via, name]` per row. The name may be anything, and only text is kept.
+/// The answer: `[page | null, via, name]` per row. The name may be anything, and only text is kept.
 pub fn link_target_rows(answer: &Value) -> Result<Option<Vec<LinkTargetRow>>, ResponseError> {
     let Some(rows) = parse::<Option<Vec<LinkTargetCells>>>(DATALOG_METHOD, answer)? else { return Ok(None) };
     Ok(Some(
@@ -168,13 +168,13 @@ pub fn link_target_rows(answer: &Value) -> Result<Option<Vec<LinkTargetRow>>, Re
     ))
 }
 
-/// `responses.aliasSetRows`: `[startId, member]` per row, the alias group of each start page.
+/// The answer: `[startId, member]` per row, the alias group of each start page.
 pub fn alias_set_rows(answer: &Value) -> Result<Option<Vec<(i64, PulledPage)>>, ResponseError> {
     let Some(rows) = parse::<Option<Vec<(Id, shape::PulledPage)>>>(DATALOG_METHOD, answer)? else { return Ok(None) };
     Ok(Some(rows.into_iter().zip(items(answer)).map(|((start, member), row)| (start.0, PulledPage::read(member, row.get(1)))).collect()))
 }
 
-/// `responses.aliasSetByNameRows`: `[startPage, member]` per row, the alias group of the page a name
+/// The answer: `[startPage, member]` per row, the alias group of the page a name
 /// found, both sides pulled.
 pub fn alias_set_by_name_rows(answer: &Value) -> Result<Option<Vec<(PulledPage, PulledPage)>>, ResponseError> {
     let Some(rows) = parse::<Option<Vec<(shape::PulledPage, shape::PulledPage)>>>(DATALOG_METHOD, answer)? else { return Ok(None) };
@@ -186,7 +186,7 @@ pub fn alias_set_by_name_rows(answer: &Value) -> Result<Option<Vec<(PulledPage, 
     ))
 }
 
-/// `responses.pageRows`: `[page]` per row.
+/// The answer: `[page]` per row.
 pub fn page_rows(answer: &Value) -> Result<Option<Vec<PulledPage>>, ResponseError> {
     let Some(rows) = parse::<Option<Vec<(shape::PulledPage,)>>>(DATALOG_METHOD, answer)? else { return Ok(None) };
     Ok(Some(rows.into_iter().zip(items(answer)).map(|((page,), row)| PulledPage::read(page, row.get(0))).collect()))
@@ -199,7 +199,7 @@ struct ListedName {
     original_name: Optional<String>,
 }
 
-/// `responses.pageNames`: `getAllPages`, read for the original name of each page. A page whose
+/// The answer of `getAllPages`, read for the original name of each page. A page whose
 /// `originalName` is absent is `None`.
 pub fn page_names(answer: &Value, method: &str) -> Result<Option<Vec<Option<String>>>, ResponseError> {
     Ok(parse::<Option<Vec<ListedName>>>(method, answer)?.map(|pages| pages.into_iter().map(|page| page.original_name.into_option()).collect()))

@@ -90,7 +90,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
 
     let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
     let tips = if tips_enabled { property_tips(&found.results) } else { Vec::new() };
-    // `metaContent(meta, tips)`: the meta when the list was cut, the tips beside it or alone
+    // The meta when the list was cut, the tips beside it or alone
     let meta = match (&found.meta, tips.is_empty()) {
         (None, true) => None,
         (None, false) => Some(json!({ "tips": tips })),

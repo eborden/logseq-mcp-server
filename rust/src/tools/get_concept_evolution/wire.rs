@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::entity::shape::Block;
 use crate::wire::{DATALOG_METHOD, ResponseError, sent_required_cells};
 
-/// `responses.blockRows`: `[block]` per row, or `None` for a `null` answer, which is not an empty
+/// The answer: `[block]` per row, or `None` for a `null` answer, which is not an empty
 /// one (BR-0011). Unlike the nullable rows other tools read, a `null` cell is an error here.
 pub fn block_rows(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
     sent_required_cells::<Block>(DATALOG_METHOD, answer)

@@ -38,7 +38,7 @@ pub enum DatalogInput {
     /// A bound of a range over `:block/journal-day`.
     DayBound(DayBound),
     /// `/` and a page name, for `clojure.string/ends-with?` on `:block/name`: the namespace
-    /// leaf lookup (`namespaceLeafPages`). Lowercase by construction, as the name is.
+    /// leaf lookup. Lowercase by construction, as the name is.
     LeafSuffix(PageName),
 }
 
