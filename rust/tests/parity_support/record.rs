@@ -9,7 +9,7 @@
 //! it, so the diff of a re-record is the change and not the spelling of the Rust server's output. A case with no
 //! `expected` yet is new, and gets its result. The recorded `tools/list` is rewritten the same way, entry by entry
 //! (`compare_tool_lists`). The files are written as the Node recorder wrote them: one case per line, the case's
-//! JSON as `JSON.stringify` writes it (`js::json_stringify`), and the tool list indented by two spaces.
+//! JSON minified by `serde_json` (`Value`'s `Display`), and the tool list indented by two spaces.
 //!
 //! A re-record is a decision: a golden result is the tool contract (ADR-0034), and a change to one needs the
 //! maintainer's explicit OK, recorded on the pull request, and the `golden-change` label. So the recorder
@@ -30,7 +30,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use logseq_mcp_server::js;
 use serde_json::{Value, json};
 
 use super::cases::{Case, case_of, group_files_in, load_cases_for_recording, load_ceilings_in, load_tool_list_in, render_ceilings};
@@ -120,8 +119,8 @@ pub fn plan_group(name: &str, cases: &[Value], results: &HashMap<String, Value>)
 
 /// A group file's text: the group's name, then the cases one to a line.
 pub fn render_group(name: &str, cases: &[Value]) -> String {
-    let lines: Vec<String> = cases.iter().map(|case| format!("  {}", js::json_stringify(case))).collect();
-    format!("{{\"group\":{},\"cases\":[\n{}\n]}}\n", js::json_stringify(&json!(name)), lines.join(",\n"))
+    let lines: Vec<String> = cases.iter().map(|case| format!("  {case}")).collect();
+    format!("{{\"group\":{},\"cases\":[\n{}\n]}}\n", json!(name), lines.join(",\n"))
 }
 
 /// The recorded tool list as it will be written.
