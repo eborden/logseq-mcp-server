@@ -19,7 +19,9 @@ runs:
     #
     # Swatinem/rust-cache hashes the rustc version, the lockfile and every environment variable that starts with CARGO, CC,
     # CFLAGS, CXX, CMAKE or RUST into the key. rustflags and build-warnings are therefore the build job's exact values, and no
-    # variable of that kind is set before this step: the limits are loaded after it, and are not named like that.
+    # variable of that kind is set before this step: the limits are loaded after it, and are not named like that. The cache's
+    # version is also a hash of the paths it holds, so every input that changes them (cache-bin, cache-directories, the
+    # workspaces) must match the build job's too: the first run of this action set cache-bin to false and found no cache.
     - name: Set up the Rust toolchain and restore the dependency cache
       uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       with:
@@ -27,7 +29,6 @@ runs:
         cache-workspaces: rust
         cache-shared-key: rust-deps
         cache-save-if: 'false'
-        cache-bin: 'false'
         rustflags: ""
         build-warnings: warn
 

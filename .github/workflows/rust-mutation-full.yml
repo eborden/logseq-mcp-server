@@ -205,7 +205,7 @@ jobs:
     timeout-minutes: 300
     env:
       # One in SHARDS of the crate's mutants, taken round-robin (`--sharding round-robin --shard 0/SHARDS`) so the sample has the
-      # real mix of fast, slow and unviable mutants and not the first 1% of the source. Small enough to run five times.
+      # real mix of fast, slow and unviable mutants and not the first 1% of the source. Small enough to run a few times.
       SHARDS: '100'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -214,11 +214,12 @@ jobs:
 
       - uses: ./.github/actions/rust-mutation-setup
 
-      # Five runs of the same sample, one after another. What a run changes: --jobs (the seconds per mutant under load, and the
-      # timeouts that come from the load and not from the mutant), whether the tool copies the restored target/ into its scratch
-      # trees (the baseline's build time), and CARGO_INCREMENTAL, which setup-rust-toolchain turns off for the whole job (so every
-      # mutant would rebuild the crate whole). A run that breaks fails the job.
-      - name: Run the sample five ways
+      # Three runs of the same sample, one after another, all with incremental builds on (the first calibration, with the cache
+      # not restored, measured them at about half the seconds per mutant of builds without, and --jobs 2 no faster than --jobs 1).
+      # What these change: whether the tool copies the restored target/ into its scratch trees (the baseline's build time, which
+      # the first calibration couldn't show because its dependency cache wasn't restored), and --jobs. A run that breaks fails
+      # the job.
+      - name: Run the sample three ways
         run: |
           mkdir -p "${RUNNER_TEMP}/calibrate"
           printf '## Calibration of one in %s of the mutants\n' "${SHARDS}" >> "$GITHUB_STEP_SUMMARY"
@@ -243,15 +244,13 @@ jobs:
                 --label "${label}" --outcomes "${dir}/mutants.out/outcomes.json" --wall "${wall}"
             } >> "$GITHUB_STEP_SUMMARY"
           }
-          calibrate j1-nocopy-inc0 1 false 0
-          calibrate j1-copy-inc0 1 true 0
+          calibrate j1-nocopy-inc1 1 false 1
           calibrate j1-copy-inc1 1 true 1
-          calibrate j2-copy-inc0 2 true 0
           calibrate j2-copy-inc1 2 true 1
           {
             printf '\n### Seconds per test binary in the unmutated baseline (from the first run)\n\n```\n'
             "${RATCHET}" test-times \
-              --log "${RUNNER_TEMP}/calibrate/j1-nocopy-inc0/mutants.out/log/baseline.log"
+              --log "${RUNNER_TEMP}/calibrate/j1-nocopy-inc1/mutants.out/log/baseline.log"
             printf '```\n'
           } >> "$GITHUB_STEP_SUMMARY"
 

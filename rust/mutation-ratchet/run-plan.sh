@@ -23,7 +23,9 @@ run() {
   mkdir -p "${dir}"
   local start code=0
   start="$(date +%s)"
-  (cd "${crate_dir}" && cargo mutants --jobs "${MUTANT_JOBS}" --no-shuffle --colors never --output "${dir}" "$@") || code=$?
+  # Incremental builds on: the build job turns them off (setup-rust-toolchain), but every mutant is a small edit of one file, and
+  # the calibration of #364 PR 1 measured about half the seconds per mutant with them (12 s against 23 s).
+  (cd "${crate_dir}" && CARGO_INCREMENTAL=1 cargo mutants --jobs "${MUTANT_JOBS}" --no-shuffle --colors never --output "${dir}" "$@") || code=$?
   echo "${code}" > "${dir}/exit"
   echo "$(($(date +%s) - start))" > "${dir}/wall"
   echo "cargo mutants (${name}) exited ${code} after $(cat "${dir}/wall") s"
