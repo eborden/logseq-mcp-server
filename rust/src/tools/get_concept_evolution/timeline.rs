@@ -68,7 +68,7 @@ pub fn day_of(block: &Value) -> Option<i64> {
 /// that also links it stays the tree's block, with its children, and not the Datalog pull of it.
 pub fn unique_by_id(blocks: Vec<Value>) -> Vec<Value> {
     let mut seen: HashSet<i64> = HashSet::new();
-    // `check_block` made the id a whole number
+    // the `Block` shape (`entity/shape.rs`) made the id a whole number
     blocks.into_iter().filter(|block| seen.insert(block.get("id").and_then(crate::wire::whole_number).unwrap_or_default())).collect()
 }
 

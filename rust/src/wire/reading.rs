@@ -63,7 +63,7 @@ fn a_field_that_is_not_there_is_missing_at_its_own_path() {
 #[test]
 fn a_field_that_may_be_left_out_may_not_be_null() {
     let page: Page = parse(METHOD, &json!({"id": 1})).unwrap();
-    assert!(page.name.as_ref().is_none() && page.links.as_ref().is_none());
+    assert!(page.name.into_option().is_none() && page.links.into_option().is_none());
     assert_eq!(problem::<Page>(json!({"id": 1, "name": null})), "answer.name: expected a string, got null");
     assert_eq!(problem::<Page>(json!({"id": 1, "links": null})), "answer.links: expected a list, got null");
     assert_eq!(problem::<Page>(json!({"id": 1, "links": [null]})), "answer.links[0]: expected an object, got null");
