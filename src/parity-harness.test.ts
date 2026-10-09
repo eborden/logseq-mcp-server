@@ -724,7 +724,8 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
       mode: 'check',
       server: { command: 'x', args: ['a', '--b'] },
       onlyTestedTools: true,
-      isReference: false
+      isReference: false,
+      realClock: false
     });
     expect(parseCommandLine(['--self-check', '--tested-tools-only', '--', 'x'])).toMatchObject({ mode: 'self-check', onlyTestedTools: true });
     expect(parseCommandLine(['--perturb', '--', 'x'])).toMatchObject({ mode: 'perturb', onlyTestedTools: false });
@@ -739,7 +740,8 @@ describe('the parity command line (--tested-tools-only, #125)', () => {
       mode: 'check',
       server: { command: '/bin/server', args: ['--b', 'c'] },
       onlyTestedTools: true,
-      isReference: false
+      isReference: false,
+      realClock: false
     });
     expect(parseCommandLine(['--self-check', '/bin/server'])).toMatchObject({ mode: 'self-check', server: { command: '/bin/server' } });
     // only flags: the TypeScript server
@@ -763,6 +765,7 @@ describe('the parity command line (--real-clock, #359)', () => {
       mode: 'check',
       server: { command: 'x', args: ['a'] },
       onlyTestedTools: false,
+      isReference: false,
       realClock: true
     });
     expect(parseCommandLine(['--real-clock', '/bin/server'])).toMatchObject({ realClock: true, server: { command: '/bin/server' } });

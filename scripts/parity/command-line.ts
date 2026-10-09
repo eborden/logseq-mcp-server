@@ -15,6 +15,7 @@ export function parseCommandLine(argv: string[]): {
   onlyTestedTools: boolean;
   /** True for the TypeScript server, the reference: its closest names are compared byte for byte; any other server's by the rules of ADR-0032 */
   isReference: boolean;
+  realClock: boolean;
 } {
   // The command follows `--`. vite-node, which CI runs this with from the lockfile, swallows every
   // `--` before the script sees its arguments, so without one the command starts at the first
@@ -45,5 +46,5 @@ export function parseCommandLine(argv: string[]): {
     throw new Error(`--record needs every case, so it can't take --real-clock\n${USAGE}`);
   }
   const server = command.length > 0 ? { command: command[0], args: command.slice(1) } : typescriptServer();
-  return { mode: modes[0] ?? 'check', server, onlyTestedTools, isReference: command.length === 0 };
+  return { mode: modes[0] ?? 'check', server, onlyTestedTools, isReference: command.length === 0, realClock };
 }
