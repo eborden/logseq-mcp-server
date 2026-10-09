@@ -43,7 +43,6 @@ use crate::client::LogseqClient;
 use crate::dates::{CalendarDate, Clock, DATE_PRESET_VALUES, DatePreset};
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set_by_name};
 use crate::resolve_refs::resolve_block_refs;
@@ -452,7 +451,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         parts.push(("summary", summary));
         parts.extend(alias_parts);
         parts.extend(cut_meta);
-        return Ok(JournalsResult { json: js::json_stringify(&object_of(parts)), top_concept });
+        return Ok(JournalsResult { json: object_of(parts).to_string(), top_concept });
     }
 
     // Opt-in (#18): resolve once over every returned block, whatever the number of days. Only the
@@ -494,7 +493,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
     parts.push(("summary", summary));
     parts.extend(alias_parts);
     parts.extend(meta);
-    Ok(JournalsResult { json: js::json_stringify(&object_of(parts)), top_concept })
+    Ok(JournalsResult { json: object_of(parts).to_string(), top_concept })
 }
 
 #[cfg(test)]
@@ -657,9 +656,9 @@ mod tests {
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) };
         let parts = meta_parts(&[warning], Some((9, 2)));
         assert_eq!(
-            js::json_stringify(&object_of(parts)),
+            object_of(parts).to_string(),
             r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#
         );
-        assert_eq!(js::json_stringify(&object_of(meta_parts(&[], None))), r#"{"hasMore":false,"warnings":[]}"#);
+        assert_eq!(object_of(meta_parts(&[], None)).to_string(), r#"{"hasMore":false,"warnings":[]}"#);
     }
 }

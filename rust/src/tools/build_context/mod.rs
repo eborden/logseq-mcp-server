@@ -37,7 +37,6 @@ use crate::compact::compact_topic_context;
 use crate::edn::PageName;
 use crate::entity::{id_of, journal_day_of, journal_flag};
 use crate::errors::{MatchedBy, ToolError};
-use crate::js;
 use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::{ContextRenderOptions, render_topic_context};
 use crate::meta::ResultWarning;
@@ -171,7 +170,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
     }
     let shown = if request.compact { compact_topic_context(&result) } else { result };
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&shown))]))
+    Ok(success_result(vec![ContentBlock::text(shown.to_string())]))
 }
 
 /// What `buildContextForTopic` takes beyond the topic (`ContextOptions`).
@@ -607,7 +606,7 @@ mod tests {
 
     #[test]
     fn a_journal_says_so_with_its_day_and_any_other_page_says_it_is_not_one() {
-        let written = |page: Value| js::json_stringify(&result_value(&temporal_context(&page)));
+        let written = |page: Value| result_value(&temporal_context(&page)).to_string();
         assert_eq!(written(json!({"journal?": true, "journal-day": 20250101})), r#"{"isJournal":true,"date":20250101}"#);
         assert_eq!(written(json!({"journal?": true})), r#"{"isJournal":true}"#);
         assert_eq!(written(json!({"journal?": false, "journal-day": 20250101})), r#"{"isJournal":false}"#);
@@ -632,7 +631,7 @@ mod tests {
     #[test]
     fn a_context_writes_what_was_answered_then_what_must_not_be_missed_then_the_data() {
         assert_eq!(
-            js::json_stringify(&context().to_value(true)),
+            context().to_value(true).to_string(),
             concat!(
                 r#"{"topic":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,

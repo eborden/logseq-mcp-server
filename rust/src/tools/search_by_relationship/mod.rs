@@ -163,7 +163,7 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = read_args(arguments.as_ref())?;
     let result = search_by_relationship(client, &args).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&result))]))
+    Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
 /// `isInfrastructureError`: the connection to LogSeq failed (not running, timeout, rejected token).

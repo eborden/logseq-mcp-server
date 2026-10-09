@@ -26,7 +26,6 @@ use crate::args::{Arguments, Scalar};
 use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
 use crate::tool::{input_schema, read_only_annotations, success_result};
@@ -101,7 +100,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     // `null` from LogSeq is `null` here, and has no meta or tips (BR-0011)
     let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
 
-    let mut content = vec![ContentBlock::text(js::json_stringify(&Value::Array(found.results.clone())))];
+    let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
     let tips = if tips_enabled { property_tips(&found.results) } else { Vec::new() };
     // `metaContent(meta, tips)`: the meta when the list was cut, the tips beside it or alone
     let meta = match (&found.meta, tips.is_empty()) {
@@ -116,7 +115,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
         }
     };
     if let Some(meta) = meta {
-        content.push(ContentBlock::text(js::json_stringify(&json!({ "meta": meta }))));
+        content.push(ContentBlock::text(json!({ "meta": meta }).to_string()));
     }
     Ok(success_result(content))
 }

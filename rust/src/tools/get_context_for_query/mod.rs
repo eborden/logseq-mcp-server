@@ -28,7 +28,6 @@ use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::compact::compact_query_context;
 use crate::errors::{Candidate, ToolError};
-use crate::js;
 use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::render_query_context;
 use crate::meta::ResultWarning;
@@ -140,7 +139,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
     }
     let shown = if request.compact { compact_query_context(&result) } else { result };
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&shown))]))
+    Ok(success_result(vec![ContentBlock::text(shown.to_string())]))
 }
 
 /// A warning of a query's result (`QueryWarning`): `code` and `message` first, then the detail (`topic`, and for
@@ -561,7 +560,7 @@ mod tests {
             totals: crate::tools::build_context::Totals { blocks: 12, related_pages: 5, references: 30 },
         };
         assert_eq!(
-            js::json_stringify(&result_value(&topic_warning(&context, "Atlas \"x\""))),
+            result_value(&topic_warning(&context, "Atlas \"x\"")).to_string(),
             concat!(
                 r#"{"code":"topic_truncated","message":"Context for \"Atlas \"x\"\" is capped: showing 10/12 blocks, 10/30 references, 5/5 related pages.","#,
                 r#""topic":"Atlas \"x\"","#,

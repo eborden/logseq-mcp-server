@@ -170,7 +170,7 @@ mod tests {
     }
 
     fn slim(block: Value, page_name: &str) -> String {
-        js::json_stringify(&Value::Object(to_slim_block(block.as_object().unwrap(), page_name)))
+        Value::Object(to_slim_block(block.as_object().unwrap(), page_name)).to_string()
     }
 
     #[test]
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn a_slim_page_names_its_journal_only_for_a_journal() {
-        let page = |value: Value| js::json_stringify(&Value::Object(to_slim_page(&value)));
+        let page = |value: Value| Value::Object(to_slim_page(&value)).to_string();
         assert_eq!(page(json!({"name": "alice", "originalName": "Alice", "properties": {"type": "person"}})), r#"{"name":"alice","originalName":"Alice","properties":{"type":"person"}}"#);
         assert_eq!(
             page(json!({"name": "jan 1st, 2025", "original-name": "Jan 1st, 2025", "journal?": true, "journalDay": 20250101})),

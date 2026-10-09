@@ -21,7 +21,6 @@ use serde_json::{Map, Value};
 use crate::args::Arguments;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
-use crate::js;
 use crate::markdown::{FooterMeta, render_block, with_footer};
 use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
@@ -79,7 +78,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     if args.format == Some(OutputFormat::Markdown) {
         return Ok(success_result(vec![ContentBlock::text(with_footer(render_block(&block), &FooterMeta::of_result(&block, &[])))]));
     }
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&block))]))
+    Ok(success_result(vec![ContentBlock::text(block.to_string())]))
 }
 
 /// `BlockNotFoundError`, which shows the uuid as the caller wrote it.

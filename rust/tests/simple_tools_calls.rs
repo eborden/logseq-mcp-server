@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::js;
 use logseq_mcp_server::args::Scalar;
 use logseq_mcp_server::tools::{get_graph_info, list_pages, query_by_property, search_blocks};
 use serde_json::{Value, json};
@@ -82,7 +81,7 @@ async fn the_graph_info_costs_one_call_with_no_arguments() {
 
     assert_eq!(methods(&logseq), ["logseq.App.getCurrentGraph"]);
     assert_eq!(logseq.seen.lock().unwrap()[0]["args"], json!([]));
-    assert_eq!(js::json_stringify(&graph), r#"{"name":"example","path":"/tmp/example","url":"logseq_local_/tmp/example"}"#);
+    assert_eq!(graph.to_string(), r#"{"name":"example","path":"/tmp/example","url":"logseq_local_/tmp/example"}"#);
 }
 
 #[tokio::test]

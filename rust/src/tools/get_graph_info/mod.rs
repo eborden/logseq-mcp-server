@@ -12,7 +12,6 @@ use serde::Deserialize;
 
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
-use crate::js;
 use crate::tool::{input_schema, read_only_annotations, success_result};
 
 pub const NAME: &str = "logseq_get_graph_info";
@@ -36,7 +35,7 @@ pub fn definition() -> Tool {
 /// A call: the graph LogSeq reports, as JSON.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let graph = get_graph_info(client).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&graph))]))
+    Ok(success_result(vec![ContentBlock::text(graph.to_string())]))
 }
 
 /// The open graph: `url`, `name` and `path`, as LogSeq answers them.
