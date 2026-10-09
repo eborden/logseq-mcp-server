@@ -129,6 +129,19 @@ async fn each_topic_costs_what_build_context_costs_and_a_missing_one_is_a_warnin
 }
 
 #[tokio::test]
+async fn a_ref_holding_a_ref_is_one_topic_and_costs_one_name_not_two() {
+    // [[Gone [[Inner]] tail]] is the one topic `Gone [[Inner]] tail`: no page, so the resolver, the
+    // leaf query and the suggestions, and nothing for `Inner`
+    let logseq = mock_logseq(vec![json!([]), json!([]), json!([])]).await;
+    let context = get_context_for_query(&client(&logseq), "about [[Gone [[Inner]] tail]]", 5, 20, false).await.unwrap();
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG, "logseq.Editor.getAllPages"]);
+    assert_eq!(args_of(&logseq, 0)[1], "\"gone [[inner]] tail\"");
+    assert_eq!(context.extracted_topics, ["Gone [[Inner]] tail"]);
+    assert!(context.contexts.is_empty());
+    assert_eq!(context.warnings.iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["topic_not_found"]);
+}
+
+#[tokio::test]
 async fn a_query_with_no_topic_is_one_search_and_one_more_for_the_pages_of_the_hits_for_markdown() {
     let hit = |id: i64, content: &str| json!([{"id": id, "uuid": uuid(id), "content": content, "page": {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}}]);
     let hits = || json!([hit(300, "The importer retries rows"), hit(250, "importer alone")]);
