@@ -35,7 +35,7 @@ pub fn server_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_logseq-mcp-server"))
 }
 
-/// A JSON-RPC error the server answered with, as the MCP SDK's client throws it.
+/// A JSON-RPC error the server answered with: its code, its message as written and its `data`.
 #[derive(Debug)]
 pub struct RpcError {
     pub code: i64,
