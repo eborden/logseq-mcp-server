@@ -28,23 +28,12 @@ Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 
 ## Install
 
-No npm package of this project is published, and the npm name `logseq-mcp-server` belongs to a different project. Don't run `npx logseq-mcp-server`: it would start that other package. Build the server from a clone instead.
-
-Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
-
-```bash
-git clone https://github.com/eborden/logseq-mcp-server
-cd logseq-mcp-server
-npm ci
-npm run build
-```
-
-This writes `dist/index.js`. Point the client at its absolute path.
+The package runs straight from npm with `npx`, so there is nothing to install globally. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
 
 ### Claude Code
 
 ```bash
-claude mcp add logseq -- node /absolute/path/to/logseq-mcp-server/dist/index.js
+claude mcp add logseq -- npx -y logseq-mcp-server
 ```
 
 Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills.
@@ -57,12 +46,24 @@ Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Su
 {
   "mcpServers": {
     "logseq": {
-      "command": "node",
-      "args": ["/absolute/path/to/logseq-mcp-server/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "logseq-mcp-server"]
     }
   }
 }
 ```
+
+### From a clone
+
+Build it as shown under [Install as a Claude Code plugin](#install-as-a-claude-code-plugin), then point the client at the built file:
+
+```bash
+claude mcp add logseq -- node /absolute/path/to/logseq-mcp-server/dist/index.js
+```
+
+In Claude Desktop, use `"command": "node"` with that path in `args`.
+
+The first npm release has not been published yet (see [Publishing](#publishing)), so until then use a clone.
 
 ## Install as a Claude Code plugin
 
@@ -75,7 +76,7 @@ claude plugin marketplace add eborden/logseq-mcp-server
 claude plugin install logseq@logseq-mcp-server
 ```
 
-The plugin starts the server with `node dist/index.js`, and `dist/` is not committed. No npm package of this project is published (see [Install](#install)), so a marketplace install has no built server. Build from a clone and load the plugin from there instead:
+The plugin starts the server with `node dist/index.js`, and `dist/` is not committed. Until the package is published to npm (tracked in #14), a marketplace install has no built server. Build from a clone and load the plugin from there instead:
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
