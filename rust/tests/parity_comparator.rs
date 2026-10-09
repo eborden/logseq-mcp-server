@@ -477,10 +477,12 @@ fn a_property_named_format_and_a_null_on_a_required_property_still_count() {
     assert!(failures[0].contains(r#""enum":["json","markdown"]"#), "{failures:?}");
     // The tools with a `format` parameter: its enum and description still count
     let with_format: Vec<&str> = tools.iter().filter(|t| t["inputSchema"]["properties"].get("format").is_some()).map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(with_format.len(), 5, "{with_format:?}");
+    // Five render Markdown; the flat-list tools take `toon` instead (BR-0014)
+    assert_eq!(with_format.len(), 7, "{with_format:?}");
     for name in with_format {
+        let words = if ["logseq_get_page_outline", "logseq_list_pages"].contains(&name) { r#"["json","toon"]"# } else { r#"["json","markdown"]"# };
         let enum_changed = with_schema(&tools, name, |s| s["properties"]["format"]["enum"] = json!(["json"]));
-        assert_eq!(compare_tool_lists(&tools, &enum_changed), vec![format!("{name}.inputSchema.properties.format.enum: expected [\"json\",\"markdown\"], got [\"json\"]")], "{name}");
+        assert_eq!(compare_tool_lists(&tools, &enum_changed), vec![format!("{name}.inputSchema.properties.format.enum: expected {words}, got [\"json\"]")], "{name}");
         let described = quirky(&with_schema(&tools, name, |s| s["properties"]["format"]["description"] = json!("other")));
         let failures = compare_tool_lists(&tools, &described);
         assert_eq!(failures.len(), 1, "{name}: {failures:?}");

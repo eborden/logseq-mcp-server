@@ -417,6 +417,14 @@
         "page_name": {
           "description": "Page name, alias, or ISO date (2025-01-01) for a journal",
           "type": "string"
+        },
+        "format": {
+          "description": "json (default), or toon text: a list's keys once, not on every row",
+          "type": "string",
+          "enum": [
+            "json",
+            "toon"
+          ]
         }
       },
       "required": [
@@ -458,6 +466,14 @@
           "format": "uint64",
           "minimum": 0,
           "default": 0
+        },
+        "format": {
+          "description": "json (default), or toon text: a list's keys once, not on every row",
+          "type": "string",
+          "enum": [
+            "json",
+            "toon"
+          ]
         }
       },
       "type": "object"

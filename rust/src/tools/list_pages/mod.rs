@@ -24,7 +24,8 @@ use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::meta::ResultWarning;
 use crate::order;
-use crate::tips::tips_content;
+use crate::output_format::ListFormat;
+use crate::tips::tips_value;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, capped_truncation_warning};
 
@@ -60,6 +61,8 @@ pub struct Args {
     /// Pages to skip, in name order; shifts if the graph changes
     #[serde(default)]
     pub offset: u64,
+    /// json (default), or toon text: a list's keys once, not on every row
+    pub format: Option<ListFormat>,
 }
 
 /// The tool as `tools/list` shows it.
@@ -73,11 +76,11 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
     let result = list_pages(client, &args).await?;
-    let mut content = vec![ContentBlock::text(result.to_value().to_string())];
+    let mut content = vec![ContentBlock::text(ListFormat::text(args.format, &result.to_value())?)];
     if tips_enabled {
         let first = result.pages.first().map(|page| page.name.as_str());
-        if let Some(tips) = tips_content(&list_pages_tips(args.name_contains.as_deref(), first)) {
-            content.push(ContentBlock::text(tips));
+        if let Some(tips) = tips_value(&list_pages_tips(args.name_contains.as_deref(), first)) {
+            content.push(ContentBlock::text(ListFormat::text(args.format, &tips)?));
         }
     }
     Ok(success_result(content))
@@ -404,6 +407,7 @@ mod tests {
                 "name_contains": {"type": "string", "description": "Filter pages whose name or alias contains this text (case-insensitive)"},
                 "limit": {"type": "integer", "minimum": 0, "default": 200, "description": "Max pages (default: 200, max: 1000)"},
                 "offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Pages to skip, in name order; shifts if the graph changes"},
+                "format": {"type": "string", "enum": ["json", "toon"], "description": "json (default), or toon text: a list's keys once, not on every row"},
             },
             "required": [],
         });
@@ -424,7 +428,7 @@ mod tests {
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let defaults = parse_args::<Args>(None).unwrap();
-        assert_eq!(defaults, Args { name_contains: None, limit: 200, offset: 0 });
+        assert_eq!(defaults, Args { name_contains: None, limit: 200, offset: 0, format: None });
         assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
         let bad = json!({"limit": 2.5, "offset": -1});
         assert_eq!(
