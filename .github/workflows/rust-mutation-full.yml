@@ -71,6 +71,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # The long jobs build into a scratch copy for hours. The hosted runner's disk is small, and a runner that fills it is lost
+      # without a log. The preinstalled toolchains nobody here uses are the easy gigabytes.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - uses: ./.github/actions/rust-mutation-setup
 
       - name: Plan the slice
@@ -140,6 +148,14 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
+
+      # The long jobs build into a scratch copy for hours. The hosted runner's disk is small, and a runner that fills it is lost
+      # without a log. The preinstalled toolchains nobody here uses are the easy gigabytes.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
 
       - uses: ./.github/actions/rust-mutation-setup
 

@@ -16,6 +16,20 @@ results="${2:?usage: run-plan.sh PLAN_DIR RESULTS_DIR}"
 
 crate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# A line of what the machine has left, every two minutes, in the job log. A hosted runner that runs out of memory or disk is
+# lost without a trace ("lost communication with the server"), which is what ended two slices of the first full run of #364 PR 1
+# after 70 and 130 minutes, and the log of a lost runner is gone. This leaves the trend in the log of a run that is cancelled
+# instead, and says whether the disk or the memory was climbing.
+monitor() {
+  while true; do
+    sleep 120
+    echo "machine: $(date -u +%H:%M:%S) disk free $(df -m / | awk 'NR==2 {print $4}') MB, scratch $(du -sm "${TMPDIR:-/tmp}" 2> /dev/null | cut -f1) MB, memory available $(free -m | awk 'NR==2 {print $7}') MB, load $(cut -d' ' -f1 /proc/loadavg)"
+  done
+}
+monitor &
+monitor_pid=$!
+trap 'kill "${monitor_pid}" 2> /dev/null || true' EXIT
+
 run() {
   local name="$1"
   shift
@@ -24,8 +38,10 @@ run() {
   local start code=0
   start="$(date +%s)"
   # Incremental builds on: the build job turns them off (setup-rust-toolchain), but every mutant is a small edit of one file, and
-  # the calibration of #364 PR 1 measured about half the seconds per mutant with them (12 s against 23 s).
-  (cd "${crate_dir}" && CARGO_INCREMENTAL=1 cargo mutants --jobs "${MUTANT_JOBS}" --no-shuffle --colors never --output "${dir}" "$@") || code=$?
+  # the calibration of #364 PR 1 measured about half the seconds per mutant with them (12 s against 23 s). --caught and
+  # --unviable print every mutant as it finishes, not only the missed ones, so the log says where a run stopped.
+  (cd "${crate_dir}" && CARGO_INCREMENTAL=1 cargo mutants --jobs "${MUTANT_JOBS}" --no-shuffle --colors never --caught --unviable \
+    --output "${dir}" "$@") || code=$?
   echo "${code}" > "${dir}/exit"
   echo "$(($(date +%s) - start))" > "${dir}/wall"
   echo "cargo mutants (${name}) exited ${code} after $(cat "${dir}/wall") s"
