@@ -77,10 +77,13 @@ async fn a_search_term_adds_one_query_for_its_alias_group_and_an_empty_one_adds_
     // the name is bound lowercase, as a JSON string
     assert_eq!(inputs(&logseq, 2), ["\"atlas\""]);
     assert_eq!(result_of(&found.json)["summary"]["totalBlocks"], 1);
+    assert_eq!(result_of(&found.json)["summary"]["searchTerm"], "Atlas");
 
     let logseq = mock_logseq(vec![json!([page(1, 20250101)]), json!([block(11, 1, "Atlas notes")])]).await;
-    query_journals(&client(&logseq), &Args { search_term: Some(String::new()), ..range(20250101, 20250101) }, TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &Args { search_term: Some(String::new()), ..range(20250101, 20250101) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
+    // an empty term is no search, so the summary does not echo it
+    assert!(result_of(&found.json)["summary"].get("searchTerm").is_none());
 }
 
 #[tokio::test]
