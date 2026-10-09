@@ -91,8 +91,7 @@ pub fn matches_of(input: &str, candidates: &[String]) -> Matches {
 /// A page-not-found message, read the way the ADR says: the frame, and the list between its edges.
 #[derive(Debug)]
 pub struct NotFound {
-    /// Everything up to and including `Closest: ` (a `MCP error <code>: ` prefix of a JSON-RPC error
-    /// included), or up to `No page <json>.` with no list
+    /// Everything up to and including `Closest: `, or up to `No page <json>.` with no list
     pub opening: String,
     /// The input, decoded
     pub input: String,
@@ -100,24 +99,9 @@ pub struct NotFound {
     pub list: Option<String>,
 }
 
-/// The rest of `text` after one `MCP error <code>: ` prefix.
-fn strip_mcp_error(text: &str) -> Option<&str> {
-    let rest = text.strip_prefix("MCP error ")?;
-    let rest = rest.strip_prefix('-').unwrap_or(rest);
-    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
-    if digits == 0 {
-        return None;
-    }
-    rest[digits..].strip_prefix(": ")
-}
-
 /// Read a message as a page-not-found message, or `None` when it isn't one.
 pub fn parse_not_found(message: &str) -> Option<NotFound> {
-    let mut rest = message;
-    while let Some(next) = strip_mcp_error(rest) {
-        rest = next;
-    }
-    let after_name = rest.strip_prefix("No page ")?;
+    let after_name = message.strip_prefix("No page ")?;
     // A JSON string literal: a quote, then any character but a quote or backslash, or a backslash and one more, then a quote
     let bytes = after_name.as_bytes();
     if bytes.first() != Some(&b'"') {

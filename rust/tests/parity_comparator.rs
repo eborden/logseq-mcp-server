@@ -232,10 +232,10 @@ fn a_resource_is_compared_by_the_text_of_each_block_and_its_other_fields() {
 
 #[test]
 fn a_json_rpc_error_recorded_as_a_result_is_compared_by_value() {
-    let error = json!({"error": {"code": -32002, "message": "MCP error -32002: No page"}});
+    let error = json!({"error": {"code": -32002, "message": "No page"}});
     assert_eq!(compare_results(&error, &error, &[]), Vec::<String>::new());
-    assert_eq!(compare_results(&error, &json!({"error": {"code": -32602, "message": "MCP error -32002: No page"}}), &[]).len(), 1);
-    assert_eq!(compare_results(&error, &json!({"error": {"code": -32002, "message": "MCP error -32002: No page", "data": {"uri": "x"}}}), &[]).len(), 1);
+    assert_eq!(compare_results(&error, &json!({"error": {"code": -32602, "message": "No page"}}), &[]).len(), 1);
+    assert_eq!(compare_results(&error, &json!({"error": {"code": -32002, "message": "No page", "data": {"uri": "x"}}}), &[]).len(), 1);
 }
 
 #[test]
@@ -628,7 +628,7 @@ fn tool_error(text: &str) -> Value {
 }
 
 fn resource_error(text: &str) -> Value {
-    json!({"error": {"code": -32002, "message": format!("MCP error -32002: MCP error -32002: {text}")}})
+    json!({"error": {"code": -32002, "message": text}})
 }
 
 /// The rule failures of a server that printed `list` where the reference printed `reference`, for the input.
@@ -658,8 +658,8 @@ fn the_input_and_the_list_are_read_out_of_the_message_in_a_tool_result_and_in_a_
     assert_eq!((quoted.opening.as_str(), quoted.input.as_str(), quoted.list.as_deref()), ("No page \"say \\\"hi\\\"\". Closest: ", "say \"hi\"", Some("A, B")));
     let bare = parse_not_found(&message("x", None)).unwrap();
     assert_eq!((bare.opening.as_str(), bare.input.as_str(), bare.list), ("No page \"x\".", "x", None));
-    let wrapped = parse_not_found(&format!("MCP error -32002: MCP error -32002: {}", message("x", Some("A")))).unwrap();
-    assert_eq!((wrapped.input.as_str(), wrapped.list.as_deref()), ("x", Some("A")));
+    // a JSON-RPC error's message is read as it is, and one with a prefix in front is not a not-found message
+    assert!(parse_not_found(&format!("MCP error -32002: {}", message("x", Some("A")))).is_none());
     assert!(parse_not_found("No page name in logseq://page/. Use logseq://page/{name}.").is_none());
 }
 
