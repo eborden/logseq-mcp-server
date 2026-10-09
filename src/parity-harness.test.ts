@@ -6,6 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { getPageOutlineCases } from '../scripts/parity/cases/get-page-outline.js';
 import { queryByDateRangeCases } from '../scripts/parity/cases/query-by-date-range.js';
+import { pageResourceCases } from '../scripts/parity/cases/page-resource.js';
 import { CASE_GROUPS, allCases, expectedFileOf } from '../scripts/parity/case-groups.js';
 import {
   compareCalls,
