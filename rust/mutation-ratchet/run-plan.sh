@@ -16,6 +16,9 @@ results="${2:?usage: run-plan.sh PLAN_DIR RESULTS_DIR}"
 
 crate_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Address space limit for the tool and everything it starts, in KB: 8 GB, on a 16 GB runner.
+memory_limit_kb=8388608
+
 # A line of what the machine has left, every two minutes, in the job log. A hosted runner that runs out of memory or disk is
 # lost without a trace ("lost communication with the server"), which is what ended two slices of the first full run of #364 PR 1
 # after 70 and 130 minutes, and the log of a lost runner is gone. This leaves the trend in the log of a run that is cancelled
@@ -40,11 +43,15 @@ run() {
   # Incremental builds on: the build job turns them off (setup-rust-toolchain), but every mutant is a small edit of one file, and
   # the calibration of #364 PR 1 measured about half the seconds per mutant with them (12 s against 23 s). --caught and
   # --unviable print every mutant as it finishes, not only the missed ones, so the log says where a run stopped.
-  # Niced, so the runner's own agent keeps its CPU: builds and tests use all 4 cores for hours, and three slices of the first
-  # full runs of #364 PR 1 ended with "The runner has received a shutdown signal" or "lost communication" while the disk
-  # (100 GB free) and the memory (13 GB free) were fine, which is what a starved agent looks like.
-  (cd "${crate_dir}" && CARGO_INCREMENTAL=1 nice -n 15 cargo mutants --jobs "${MUTANT_JOBS}" --no-shuffle --colors never --caught \
-    --unviable --output "${dir}" "$@") || code=$?
+  # Memory capped, because a mutant can turn a loop that ends into one that doesn't and allocates as it goes (a `while` that
+  # pushes to a Vec, with its index no longer advancing). That filled the 16 GB runner in under two minutes, before the tool's
+  # 183 s test timeout, and the runner was shut down with it: four slices of the first full runs of #364 PR 1 ended that way, at
+  # the same mutant of src/refs.rs, with the machine log showing the memory available fall from 13 GB to 0.3 GB between two
+  # lines two minutes apart. With the cap the test process fails to allocate and aborts, and the mutant counts as caught.
+  # The address space limit applies to every process the tool starts, rustc included: 8 GB is well above what a build of this
+  # crate maps (the baseline fails fast, exit 4, if it isn't). Niced too, so the runner's agent keeps its CPU.
+  (cd "${crate_dir}" && ulimit -v "${memory_limit_kb}" && CARGO_INCREMENTAL=1 nice -n 15 cargo mutants --jobs "${MUTANT_JOBS}" \
+    --no-shuffle --colors never --caught --unviable --output "${dir}" "$@") || code=$?
   echo "${code}" > "${dir}/exit"
   echo "$(($(date +%s) - start))" > "${dir}/wall"
   echo "cargo mutants (${name}) exited ${code} after $(cat "${dir}/wall") s"
