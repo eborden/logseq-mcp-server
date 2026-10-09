@@ -16,11 +16,17 @@ pub const DEFAULT_API_URL: &str = "http://127.0.0.1:12315";
 /// What a field must be, the `<field> <problem>` tail of a [`ConfigError::Validation`] message.
 const AUTH_TOKEN_REQUIRED: &str = "is required";
 const NOT_A_STRING: &str = "must be a string";
-/// Known divergence from TypeScript: `"timeoutMs": 1e999` is `Infinity` to `JSON.parse`, so TS
-/// reports this validation error, but serde_json rejects the number itself ("number out of
-/// range"), so it is [`ConfigError::InvalidJson`] here. Neither shows a file value. Mapping it
-/// would need the key, which serde_json's error doesn't give.
-const TIMEOUT_MS: &str = "must be a positive finite number";
+/// The largest `timeoutMs` the file may set: `i32::MAX` ms, about 24.8 days, the longest timer
+/// the JavaScript runtimes take. Anything longer is no timeout in practice, so it is refused at
+/// load (ADR-0019) and no call has to check it again.
+pub const MAX_TIMEOUT_MS: u64 = 2_147_483_647;
+/// A `timeoutMs` that is no whole number of milliseconds of at least 1: a string, `null`, a
+/// fraction, zero or a negative number.
+const TIMEOUT_MS: &str = "must be a whole number of milliseconds, at least 1";
+/// A whole `timeoutMs` above [`MAX_TIMEOUT_MS`]. The limit in the text is the constant, not a file value.
+const TIMEOUT_MS_TOO_LARGE: &str = "must be at most 2147483647 milliseconds (about 24.8 days)";
+// `"timeoutMs": 1e999` never reaches these checks: serde_json rejects the number itself
+// ("number out of range"), so the file is `ConfigError::InvalidJson`, which shows no file value.
 const TIPS: &str = "must be a boolean";
 
 /// Replaces a JSON parser message that quotes the file, as `REDACTED_JSON_DETAIL` does in TypeScript.
@@ -32,8 +38,8 @@ pub const REDACTED_JSON_DETAIL: &str = "the file is not valid JSON (an unquoted 
 pub struct Config {
     pub api_url: String,
     pub auth_token: String,
-    /// Per-call timeout in milliseconds; positive and finite when set.
-    pub timeout_ms: Option<f64>,
+    /// Per-call timeout in whole milliseconds, from 1 to [`MAX_TIMEOUT_MS`], when set.
+    pub timeout_ms: Option<u64>,
     pub tips: Option<bool>,
 }
 
@@ -122,10 +128,7 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     };
     let timeout_ms = match object.get("timeoutMs") {
         None => None,
-        Some(Value::Number(n)) => match n.as_f64() {
-            Some(ms) if ms > 0.0 && ms.is_finite() => Some(ms),
-            _ => return Err(invalid("timeoutMs", TIMEOUT_MS)),
-        },
+        Some(Value::Number(n)) => Some(timeout_ms(n).map_err(|problem| invalid("timeoutMs", problem))?),
         Some(_) => return Err(invalid("timeoutMs", TIMEOUT_MS)),
     };
     let tips = match object.get("tips") {
@@ -135,6 +138,22 @@ pub fn parse_config(text: &str) -> Result<Config, ConfigError> {
     };
 
     Ok(Config { api_url, auth_token, timeout_ms, tips })
+}
+
+/// A `timeoutMs` number as whole milliseconds. JSON has one number type, so `5000.0` and `5e3`
+/// are whole numbers like `5000`; a fraction is not. The problem names the rule, never the value.
+fn timeout_ms(n: &serde_json::Number) -> Result<u64, &'static str> {
+    let ms = match n.as_u64() {
+        Some(ms) => ms,
+        // Not a non-negative integer literal: a float (whole or not) or a negative number.
+        // A float past u64's range saturates in `as`, which is still above the maximum.
+        None => n.as_f64().filter(|f| f.fract() == 0.0 && *f >= 1.0).ok_or(TIMEOUT_MS)? as u64,
+    };
+    match ms {
+        0 => Err(TIMEOUT_MS),
+        1..=MAX_TIMEOUT_MS => Ok(ms),
+        _ => Err(TIMEOUT_MS_TOO_LARGE),
+    }
 }
 
 /// The parser's reason, unless it quotes the file. serde_json's syntax messages name a line and
@@ -160,7 +179,7 @@ mod tests {
     #[test]
     fn parses_every_field_and_drops_unknown_keys() {
         let config = parse_config(&format!(
-            r#"{{"apiUrl":"http://127.0.0.1:4000","authToken":"{TOKEN}","timeoutMs":1500.5,"tips":false,"extra":1}}"#
+            r#"{{"apiUrl":"http://127.0.0.1:4000","authToken":"{TOKEN}","timeoutMs":1500,"tips":false,"extra":1}}"#
         ))
         .unwrap();
         assert_eq!(
@@ -168,7 +187,7 @@ mod tests {
             Config {
                 api_url: "http://127.0.0.1:4000".into(),
                 auth_token: TOKEN.into(),
-                timeout_ms: Some(1500.5),
+                timeout_ms: Some(1500),
                 tips: Some(false),
             }
         );
@@ -217,6 +236,67 @@ mod tests {
         }
     }
 
+    fn timeout_of(timeout: &str) -> Result<Option<u64>, (String, String)> {
+        match parse_config(&format!(r#"{{"authToken":"x","timeoutMs":{timeout}}}"#)) {
+            Ok(config) => Ok(config.timeout_ms),
+            Err(ConfigError::Validation { field, problem }) => Err((field, problem)),
+            other => panic!("timeoutMs {timeout}: expected a config or a validation error, got {other:?}"),
+        }
+    }
+
+    fn timeout_error(problem: &str) -> Result<Option<u64>, (String, String)> {
+        Err(("timeoutMs".into(), problem.into()))
+    }
+
+    #[test]
+    fn the_timeout_is_checked_at_its_bounds_when_the_config_loads() {
+        // The smallest and the largest accepted value, and the first one past each end.
+        assert_eq!(timeout_of("1"), Ok(Some(1)));
+        assert_eq!(timeout_of("0"), timeout_error(TIMEOUT_MS));
+        assert_eq!(timeout_of("2147483647"), Ok(Some(MAX_TIMEOUT_MS)));
+        assert_eq!(timeout_of("2147483648"), timeout_error(TIMEOUT_MS_TOO_LARGE));
+        assert_eq!(MAX_TIMEOUT_MS, i32::MAX as u64);
+        assert!(TIMEOUT_MS_TOO_LARGE.contains(&(MAX_TIMEOUT_MS).to_string()));
+        // Far past it: past u64 (a float or a big integer literal), and an exact u64::MAX.
+        for too_large in ["18446744073709551615", "18446744073709551616", "1e300", "2147483648.0"] {
+            assert_eq!(timeout_of(too_large), timeout_error(TIMEOUT_MS_TOO_LARGE), "timeoutMs {too_large}");
+        }
+    }
+
+    #[test]
+    fn a_timeout_that_is_no_whole_number_is_refused_at_load() {
+        for fraction in ["1500.5", "0.5", "0.999", "2147483646.5", "-1500.5", "1e-3"] {
+            assert_eq!(timeout_of(fraction), timeout_error(TIMEOUT_MS), "timeoutMs {fraction}");
+        }
+        // JSON has one number type, so a whole number written as a float is the same number.
+        for (written, ms) in [("5000.0", 5000), ("5e3", 5000), ("1.0", 1), ("2147483647.0", 2147483647)] {
+            assert_eq!(timeout_of(written), Ok(Some(ms)), "timeoutMs {written}");
+        }
+        for not_positive in ["-1", "-0", "-0.0", "0.0", "-9223372036854775808", "-1e300"] {
+            assert_eq!(timeout_of(not_positive), timeout_error(TIMEOUT_MS), "timeoutMs {not_positive}");
+        }
+        assert_eq!(timeout_of("null"), timeout_error(TIMEOUT_MS));
+        assert_eq!(parse_config(r#"{"authToken":"x"}"#).unwrap().timeout_ms, None);
+    }
+
+    #[test]
+    fn the_timeout_error_never_shows_the_value() {
+        // Each message is the same fixed text whatever the file held (ADR-0003).
+        for (value, rule) in [
+            ("1500.5", "must be a whole number of milliseconds, at least 1"),
+            ("-7777", "must be a whole number of milliseconds, at least 1"),
+            ("2147483649", "must be at most 2147483647 milliseconds (about 24.8 days)"),
+            ("123456789012345678901234567890", "must be at most 2147483647 milliseconds (about 24.8 days)"),
+        ] {
+            let text = format!(r#"{{"authToken":"x","timeoutMs":{value}}}"#);
+            assert_eq!(
+                parse_config(&text).unwrap_err().to_string(),
+                format!("Configuration validation failed: timeoutMs {rule}"),
+                "timeoutMs {value}"
+            );
+        }
+    }
+
     #[test]
     fn validation_messages_never_show_a_file_value() {
         let text = format!(r#"{{"authToken":"{TOKEN}","apiUrl":["{TOKEN}"],"timeoutMs":"{TOKEN}"}}"#);
@@ -249,8 +329,7 @@ mod tests {
 
     #[test]
     fn an_infinite_timeout_is_invalid_json_not_a_validation_error() {
-        // Pins the divergence documented on TIMEOUT_MS: TypeScript gives
-        // ConfigValidationError(timeoutMs) for this file.
+        // serde_json rejects the number itself, so no timeoutMs check sees it (see MAX_TIMEOUT_MS).
         match parse_config(r#"{"authToken":"x","timeoutMs":1e999}"#) {
             Err(ConfigError::InvalidJson { detail }) => assert!(detail.starts_with("number out of range"), "{detail}"),
             other => panic!("expected InvalidJson, got {other:?}"),

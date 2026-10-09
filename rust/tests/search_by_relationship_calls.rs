@@ -63,7 +63,7 @@ async fn mock_logseq(answer: impl Fn(&Value) -> Value + Send + 'static) -> MockL
 }
 
 fn client(logseq: &MockLogseq) -> LogseqClient {
-    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None })
+    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
 
 fn uuid(n: i64) -> String {
@@ -399,7 +399,7 @@ async fn a_failed_connection_is_the_error_even_when_the_other_topic_is_not_found
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         format!("http://{}", listener.local_addr().unwrap())
     };
-    let client = LogseqClient::new(&Config { api_url: dead, auth_token: "t".into(), timeout_ms: Some(2000.0), tips: None });
+    let client = LogseqClient::new(&Config { api_url: dead, auth_token: "t".into(), timeout_ms: Some(2000), tips: None });
 
     let error = search_by_relationship(&client, &args("Atlas", "Bob", RelationshipType::References)).await.unwrap_err();
 
