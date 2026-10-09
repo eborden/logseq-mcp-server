@@ -257,14 +257,12 @@ pub fn cap_backlinks(fetched: Vec<Backlink>, target: &str, max_pages: u64, max_b
             paging: None,
         });
         // The counts are in hand, so say where the cut fell: the dropped pages link the target no more than this
-        // PARITY(#299): the first dropped page's count has no "linking block(s)" after it, unlike the last kept
-        // page's (suspected TS inconsistency) — drop if Rust becomes the only server.
         let edge = match kept_count {
             0 => String::new(),
             n => format!(
                 " The last page kept has {}, the first dropped page has {}.",
                 block_count(&ranked[n - 1]),
-                ranked[n].blocks.len()
+                block_count(&ranked[n])
             ),
         };
         // Raising max_pages shows pages whose blocks may then be cut by the per-page cap
@@ -526,7 +524,7 @@ mod tests {
         assert_eq!(
             warning.message,
             "Showing 20 of 25 source pages, ranked by linking blocks (most first, ties by page name). \
-             The last page kept has 1 linking block, the first dropped page has 1. \
+             The last page kept has 1 linking block, the first dropped page has 1 linking block. \
              Blocks per page are capped separately by max_blocks_per_page."
         );
         assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_pages to 25 (or higher) to get all 25."));
