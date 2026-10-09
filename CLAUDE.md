@@ -187,7 +187,7 @@ Done by whoever merges:
 
 This is an MCP (Model Context Protocol) server that provides Claude with 16 tools for querying LogSeq knowledge graphs. It is written in Rust (the crate in `rust/`, see `rust/README.md` for the file-by-file map) and uses LogSeq's HTTP API and DataScript query engine to enable efficient graph traversal and context building.
 
-The repo is Rust-only since #356 (the Go on #349, ADR-0025). A TypeScript server was the first implementation, and the Rust crate was held to its results byte for byte. Its last version is readable with `git show 10103c8:<path>`, and comments in the crate that name a `src/*.ts` file mean it. Its recorded results, with the cases they belong to (`rust/tests/data/parity/`), are the golden tests of the Rust server and the tool contract. Node is still here for the tooling around the crate: the guard tests, the integration suites and the scripts, all dev-only. The Rust binary is released as native binaries on GitHub Releases and started by a launcher script, `scripts/logseq-mcp-server.sh` (ADR-0035); `package.json` is private tooling and `publish.yml` is gone.
+The repo is Rust-only since #356 (the Go on #349, ADR-0025). A TypeScript server was the first implementation, and the Rust crate was held to its results byte for byte. Its last version is readable with `git show 35fa2dd3:<path>`, and comments in the crate that name a `src/*.ts` file mean it. Its recorded results, with the cases they belong to (`rust/tests/data/parity/`), are the golden tests of the Rust server and the tool contract. Node is still here for the tooling around the crate: the guard tests, the integration suites and the scripts, all dev-only. The Rust binary is released as native binaries on GitHub Releases and started by a launcher script, `scripts/logseq-mcp-server.sh` (ADR-0035); `package.json` is private tooling and `publish.yml` is gone.
 
 **Key Stats:**
 - 16 MCP tools for graph operations, search, and temporal queries
@@ -458,7 +458,7 @@ The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
 - Strings embedded in query text, later bound with `:in` once probing showed it works: [ADR-0006](docs/adr/0006-embed-strings-in-datalog-queries.md), superseded by [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)
 - Pages without blocks, fixed by splitting queries (d6c3151): [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md)
 - Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 16 registered in `rust/src/tools/mod.rs` today.
-- A Rust implementation beside the TypeScript server (ADR-0025, ADR-0031, #122), held to its results byte for byte, then the TypeScript server removed after the Go on #349 (#356, last version at `10103c8`)
+- A Rust implementation beside the TypeScript server (ADR-0025, ADR-0031, #122), held to its results byte for byte, then the TypeScript server removed after the Go on #349 (#356, last version at `35fa2dd3`)
 - Oct 2026: a review of 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers set the roadmap in GitHub issues #3–#18. Probing the Datalog constraints and measuring API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`) corrected constraints 1, 2 and 4.
 
 ### Lessons Learned

@@ -4,7 +4,7 @@ Read this before you write or change code in this repo. It describes how to thin
 
 This server is a small Rust program (the crate in `rust/`) that sits between an MCP client and a LogSeq desktop app. It reads from a personal knowledge graph over a local HTTP API and returns results to an LLM. Every principle below is scoped to that.
 
-The principles were first written for a TypeScript server, which was retired after the Go on #349 (#356, ADR-0025). The repo is Rust-only now, so each "In this repo" paragraph below names the Rust crate's pieces. Where code or a comment names a `src/*.ts` file, it means that server as of commit `10103c8`, whose last version is readable with `git show 10103c8:<path>`. The tool contract it set lives on as the recorded results in `rust/tests/data/parity/`, which the parity test holds the Rust server to. Code that exists only to match that server's bytes or quirks is tagged `// PARITY(#299)` (`grep -rn 'PARITY(#299)' rust/src` lists it).
+The principles were first written for a TypeScript server, which was retired after the Go on #349 (#356, ADR-0025). The repo is Rust-only now, so each "In this repo" paragraph below names the Rust crate's pieces. Where code or a comment names a `src/*.ts` file, it means that server as of commit `35fa2dd3`, whose last version is readable with `git show 35fa2dd3:<path>`. The tool contract it set lives on as the recorded results in `rust/tests/data/parity/`, which the parity test holds the Rust server to. Code that exists only to match that server's bytes or quirks is tagged `// PARITY(#299)` (`grep -rn 'PARITY(#299)' rust/src` lists it).
 
 ## 0. How to use this document
 

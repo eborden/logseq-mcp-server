@@ -27,7 +27,7 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-The recorded `tools/list` (`fa00871:scripts/parity/expected/tool-list.json`) records every tool's name, description, annotations and input schema, and the parity test (`cargo test`, `rust/tests/parity.rs`) holds the Rust server to it by meaning (ADR-0031), so a rename, removal or new required parameter fails until a reviewer accepts the change to the recorded file deliberately.
+The recorded `tools/list` (`a50196eb:scripts/parity/expected/tool-list.json`) records every tool's name, description, annotations and input schema, and the parity test (`cargo test`, `rust/tests/parity.rs`) holds the Rust server to it by meaning (ADR-0031), so a rename, removal or new required parameter fails until a reviewer accepts the change to the recorded file deliberately.
 
 - test: `tests/guards/tool-list.test.ts` (the recorded list is the one the guardrails of ADR-0015 and ADR-0016 hold)
 - test: `tests/guards/tool-list.test.ts` (the canonical parameter stays required for every aliased tool of the recorded list, and no alias is advertised; the aliases are checked against the `ALIASES` constants in `rust/src/tools`)
