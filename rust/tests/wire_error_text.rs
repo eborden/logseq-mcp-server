@@ -117,14 +117,19 @@ fn serde_keys(code: &str) -> Vec<&'static str> {
     found
 }
 
-/// The reader traits (`READER_TRAITS`) that a source text implements by hand, whatever the lifetime is called.
+/// The reader traits (`READER_TRAITS`) that a source text implements by hand, whatever the lifetime is called and
+/// however rustfmt wrapped the line: whitespace of any kind, newlines too, may sit between the closing `>` and
+/// the `for` (or a `where`) that follows it.
 fn reader_impls(code: &str) -> Vec<&'static str> {
     let mut found = Vec::new();
     for name in READER_TRAITS {
         let head = format!("{name}<'");
         for (at, _) in code.match_indices(&head) {
             let rest = &code[at + head.len()..];
-            if rest.find('>').is_some_and(|close| rest[close + 1..].starts_with(" for ")) {
+            let Some(close) = rest.find('>') else { continue };
+            let next = rest[close + 1..].trim_start();
+            let word = next.split(|ch: char| !ch.is_alphanumeric() && ch != '_').next().unwrap_or("");
+            if matches!(word, "for" | "where") {
                 found.push(name);
             }
         }
@@ -303,6 +308,58 @@ fn the_scan_catches_a_reader_trait_whatever_its_lifetime_is_called() {
         ("impl<'a> DeserializeSeed<'a> for Mine {}\n", "DeserializeSeed"),
     ] {
         assert!(tokens_in(source).contains(&name), "`{name}` implemented by hand must be caught: {source}");
+    }
+}
+
+#[test]
+fn the_scan_catches_a_reader_trait_impl_that_rustfmt_wrapped() {
+    for (source, name) in [
+        ("impl<'de> Deserialize<'de>\n    for SomeVeryLongTypeName<WithGenerics> {}\n", "Deserialize"),
+        ("impl<'de> Deserialize<'de>\nfor SomeVeryLongTypeName {}\n", "Deserialize"),
+        ("impl<'de> Deserialize<'de>\n        where\n    T: Clone,\n{}\n", "Deserialize"),
+        ("impl<'a> Deserialize<'a>  \n   for Mine {}\n", "Deserialize"),
+        ("impl<'de> DeserializeSeed<'de>\n    for SomeVeryLongTypeName<WithGenerics> {}\n", "DeserializeSeed"),
+        ("impl<'de> DeserializeSeed<'de>\n    where\n        T: Clone,\n{}\n", "DeserializeSeed"),
+        ("impl<'de> Visitor<'de>\n    for SomeVeryLongVisitorName<WithGenerics> {}\n", "Visitor"),
+        ("impl<'de> Visitor<'de>\n    where\n        T: Clone,\n{}\n", "Visitor"),
+        ("impl Visitor<'_>\n\tfor Mine {}\n", "Visitor"),
+    ] {
+        assert!(tokens_in(source).contains(&name), "a wrapped `{name}` impl must be caught: {source}");
+    }
+}
+
+/// What the five-token scan this one replaced caught, spelled the way the old scan saw it and the way rustfmt
+/// might wrap or space it. Every one must still be caught: a guard may only get stronger.
+#[test]
+fn everything_the_old_five_token_scan_caught_is_still_caught() {
+    let corpus = [
+        // `serde(try_from`
+        "#[serde(try_from = \"Raw\")]\nstruct A;\n",
+        "#[serde(try_from=\"Raw\")]\nstruct A;\n",
+        "#[serde(\n    try_from = \"Raw\"\n)]\nstruct A;\n",
+        "#[serde(try_from = \"Raw\", default)]\nstruct A;\n",
+        // `try_from = "`
+        "#[cfg_attr(feature = \"x\", serde(try_from = \"Raw\"))]\nstruct A;\n",
+        "#[some(try_from = \"Raw\")]\nstruct A;\n",
+        // `deserialize_with`
+        "#[serde(deserialize_with = \"f\")]\nx: u8,\n",
+        "#[serde(\n    default,\n    deserialize_with = \"f\"\n)]\nx: u8,\n",
+        "#[serde(default, deserialize_with=\"f\")]\nx: u8,\n",
+        // `serde(with`
+        "#[serde(with = \"m\")]\nx: u8,\n",
+        "#[serde(with=\"m\")]\nx: u8,\n",
+        "#[serde(\n    with = \"m\"\n)]\nx: u8,\n",
+        "#[serde(with = \"m\", default)]\nx: u8,\n",
+        // `Error::custom(`
+        "Err(de::Error::custom(\"x\"))\n",
+        "Err(Error::custom(\"x\"))\n",
+        "Err(serde::de::Error::custom(\n    \"x\",\n))\n",
+        "Err(de::Error\n    ::custom(\"x\"))\n",
+        "Err(de::Error::custom(format!(\"bad {value}\")))\n",
+        "x.map_err(|_| <E as de::Error>::custom(\"x\"))\n",
+    ];
+    for source in corpus {
+        assert!(!tokens_in(source).is_empty(), "the old scan caught this, so this one must: {source}");
     }
 }
 
