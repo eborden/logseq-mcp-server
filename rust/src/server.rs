@@ -165,10 +165,10 @@ mod tests {
         responses
     }
 
-    /// A local URL nothing listens on: bound to get a free port, then closed.
-    async fn closed_port_url() -> String {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        format!("http://{}", listener.local_addr().unwrap())
+    /// A local URL nothing listens on: port 1 is privileged and never bound, so a call is refused. A port freed by
+    /// dropping a listener could be handed to a parallel test that binds `127.0.0.1:0` (#450).
+    fn closed_port_url() -> String {
+        "http://127.0.0.1:1".to_owned()
     }
 
     fn initialize() -> Value {
@@ -183,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_reports_the_name_version_and_instructions() {
-        let responses = exchange(&closed_port_url().await, &[initialize()]).await;
+        let responses = exchange(&closed_port_url(), &[initialize()]).await;
         let result = &responses[0]["result"];
         assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
         assert_eq!(result["serverInfo"]["version"], SERVER_VERSION);
@@ -196,7 +196,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompts_are_listed_and_got_and_a_bad_request_is_invalid_params() {
-        let responses = exchange(&closed_port_url().await, &[
+        let responses = exchange(&closed_port_url(), &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
             json!({"jsonrpc": "2.0", "id": 2, "method": "prompts/list"}),
@@ -218,7 +218,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_guide_is_listed_and_read() {
-        let responses = exchange(&closed_port_url().await, &[
+        let responses = exchange(&closed_port_url(), &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
             json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
@@ -239,7 +239,7 @@ mod tests {
 
     #[tokio::test]
     async fn tools_list_returns_every_tool_read_only() {
-        let responses = exchange(&closed_port_url().await, &[
+        let responses = exchange(&closed_port_url(), &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
@@ -266,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_call_is_an_error_result_not_a_protocol_error() {
-        let api_url = closed_port_url().await;
+        let api_url = closed_port_url();
         let responses = exchange(&api_url, &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
