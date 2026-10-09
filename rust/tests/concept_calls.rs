@@ -171,6 +171,25 @@ async fn a_null_answer_at_a_later_depth_keeps_what_was_found_and_leaves_truncate
 }
 
 #[tokio::test]
+async fn a_null_answer_for_the_aliased_first_depth_is_a_links_unavailable_warning_beside_the_alias_group() {
+    // the alias group answers, then the grouped depth-1 query (a separate branch of the walk) answers null
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        json!([[10, {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}], [10, {"id": 11, "name": "atlas", "original-name": "Atlas"}]]),
+        json!(null),
+    ])
+    .await;
+    let network = get_concept_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 3);
+    assert!(args_of(&logseq, 2)[0].as_str().unwrap().contains("[(ground [[10 10] [11 10]]) [[?source ?group] ...]]"));
+    assert_eq!(network.nodes.len(), 1);
+    assert_eq!(network.resolved_aliases.as_deref(), Some(&["Atlas".to_owned(), "Project Atlas".to_owned()][..]));
+    assert_eq!(codes(&network.warnings), ["links_unavailable"]);
+    assert!(network.warnings[0].message.contains("depth 1"), "{}", network.warnings[0].message);
+    assert!(!network.has_more() && !network.truncated);
+}
+
+#[tokio::test]
 async fn an_infrastructure_error_for_the_connected_pages_propagates() {
     let failing = mock_logseq(vec![root(), json!({"error": "Query timed out"})]).await;
     let error = get_concept_network(&client(&failing), "Project Atlas", 2, Options::default()).await.unwrap_err();
@@ -285,6 +304,23 @@ async fn a_null_mentions_answer_is_a_mentions_unavailable_warning_and_the_page_s
     // a real [] is a concept nothing mentions, and says nothing
     let empty = evolution_with(vec![root(), evolution_tree(), editor_page(), json!([])]).await;
     assert!(empty.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn the_unavailable_warnings_come_in_call_order_before_the_cut_and_beside_its_totals() {
+    // a tree with blocks, a null page and null mentions: page before mentions
+    let evolution = evolution_with(vec![root(), evolution_tree(), json!(null), json!(null)]).await;
+    assert_eq!(codes(&evolution.warnings), ["page_unavailable", "mentions_unavailable"]);
+
+    // and with the cap biting, the cut follows them and `totals` appears with them
+    let logseq = mock_logseq(vec![root(), evolution_tree(), json!(null), json!(null)]).await;
+    let options = EvolutionOptions { max_entries: 1, ..EvolutionOptions::default() };
+    let evolution = get_concept_evolution(&client(&logseq), "Project Atlas", options).await.unwrap();
+    assert_eq!(codes(&evolution.warnings), ["page_unavailable", "mentions_unavailable", "entries_truncated"]);
+    let value = evolution.to_value();
+    assert_eq!(value["totals"]["mentions"], 2);
+    // only the cut can be fetched with a parameter, so `hasMore` is about it alone
+    assert_eq!(value["hasMore"], evolution.warnings[2].how_to_fetch_all.is_some());
 }
 
 #[tokio::test]
