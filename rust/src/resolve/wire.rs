@@ -304,10 +304,10 @@ mod tests {
     }
 
     #[test]
-    fn an_id_falls_back_to_db_id_when_it_is_zero_or_absent() {
+    fn an_id_falls_back_to_db_id_only_when_it_is_absent() {
         let page = |value: Value| resolver_rows(&json!([[value]])).unwrap().unwrap().remove(0).page;
         assert_eq!(page(json!({"db/id": 7})).entity_id(), Some(7));
-        assert_eq!(page(json!({"id": 0, "db/id": 7})).entity_id(), Some(7));
+        assert_eq!(page(json!({"id": 0, "db/id": 7})).entity_id(), Some(0));
         assert_eq!(page(json!({"id": 3, "db/id": 7})).entity_id(), Some(3));
         assert_eq!(page(json!({})).entity_id(), None);
     }

@@ -24,8 +24,8 @@ fn whole(value: Option<&Value>) -> Option<i64> {
     value.and_then(crate::wire::whole_number)
 }
 
-/// `entityId`: the id of an entity or of a reference to one, in either spelling. A zero or missing
-/// `id` falls through to `db/id`; LogSeq never issues id 0.
+/// `entityId`: the id of an entity or of a reference to one, in either spelling. A missing `id`
+/// falls through to `db/id`; an `id` of 0 is an id.
 pub fn id_of(entity: Option<&Value>) -> Option<i64> {
     let map = entity?.as_object()?;
     entity_id(whole(map.get("id")), whole(map.get("db/id")))
@@ -200,9 +200,9 @@ mod tests {
     }
 
     #[test]
-    fn an_id_falls_through_to_db_id_when_it_is_zero_or_missing() {
+    fn an_id_falls_through_to_db_id_only_when_it_is_missing() {
         assert_eq!(id_of(Some(&json!({"id": 7, "db/id": 9}))), Some(7));
-        assert_eq!(id_of(Some(&json!({"id": 0, "db/id": 9}))), Some(9));
+        assert_eq!(id_of(Some(&json!({"id": 0, "db/id": 9}))), Some(0));
         assert_eq!(id_of(Some(&json!({"db/id": 9}))), Some(9));
         assert_eq!(id_of(Some(&json!({}))), None);
         assert_eq!(id_of(Some(&json!(null))), None);
