@@ -29,8 +29,9 @@ use serde_json::Value;
 pub(crate) enum Part {
     /// The nth item of a list (a row, or a cell of a row)
     Index(usize),
-    /// A field of an object. Only ever a field the reading type names, never one LogSeq chose.
-    Key(String),
+    /// A field of an object. Only ever a field the reading type names (the `&'static str` from its list of
+    /// fields), never a key LogSeq chose: a property name or a page name is the user's graph (ADR-0004).
+    Key(&'static str),
 }
 
 /// What is wrong, in words that never include a value from the answer.
@@ -44,7 +45,10 @@ pub(crate) enum Problem {
     Missing,
     TooFewCells,
     TooManyCells,
-    /// Anything a type said itself, in a fixed text
+    /// Anything a type said itself. The text must be fixed text written in this crate: `custom` keeps what it
+    /// is given, so a `try_from` or `deserialize_with` that formats a received value into its error would put
+    /// the value in a message (ADR-0004). `rust/tests/wire_error_text.rs` lists where `custom` can be called
+    /// from.
     Other(String),
 }
 
@@ -161,6 +165,7 @@ fn wanted(expected: &dyn Expected) -> String {
 }
 
 impl de::Error for Issue {
+    /// Keeps the message as given. Only fixed text may be passed: see [`Problem::Other`].
     fn custom<T: fmt::Display>(message: T) -> Self {
         Issue::new(Problem::Other(message.to_string()))
     }
@@ -187,11 +192,11 @@ impl de::Error for Issue {
     }
 
     fn missing_field(field: &'static str) -> Self {
-        Issue { path: vec![Part::Key(field.to_owned())], problem: Problem::Missing }
+        Issue { path: vec![Part::Key(field)], problem: Problem::Missing }
     }
 
     fn duplicate_field(field: &'static str) -> Self {
-        Issue { path: vec![Part::Key(field.to_owned())], problem: Problem::Other("given twice".to_owned()) }
+        Issue { path: vec![Part::Key(field)], problem: Problem::Other("given twice".to_owned()) }
     }
 }
 
@@ -219,7 +224,7 @@ impl<'de> Deserializer<'de> for Wire<'de> {
             }
             Value::String(text) => visitor.visit_borrowed_str(text),
             Value::Array(items) => visitor.visit_seq(Items { items: items.iter(), next: 0 }),
-            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None }),
+            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: &[] }),
         }
     }
 
@@ -255,13 +260,18 @@ impl<'de> Deserializer<'de> for Wire<'de> {
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Issue> {
         match self.0 {
-            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None }),
+            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: &[] }),
             other => Err(Issue::wrong_type("an object", other)),
         }
     }
 
-    fn deserialize_struct<V: Visitor<'de>>(self, _name: &'static str, _fields: &'static [&'static str], visitor: V) -> Result<V::Value, Issue> {
-        self.deserialize_map(visitor)
+    /// An object read as a struct: the key of a field that fails is put in the path when the type names it, and
+    /// only then.
+    fn deserialize_struct<V: Visitor<'de>>(self, _name: &'static str, fields: &'static [&'static str], visitor: V) -> Result<V::Value, Issue> {
+        match self.0 {
+            Value::Object(map) => visitor.visit_map(Fields { entries: map.iter(), pending: None, named: fields }),
+            other => Err(Issue::wrong_type("an object", other)),
+        }
     }
 
     fn deserialize_newtype_struct<V: Visitor<'de>>(self, _name: &'static str, visitor: V) -> Result<V::Value, Issue> {
@@ -307,10 +317,13 @@ impl<'de> SeqAccess<'de> for Items<'de> {
     }
 }
 
-/// The entries of an object, in the order LogSeq sent them. The key of each rides on its error.
+/// The entries of an object, in the order LogSeq sent them. The key of an entry rides on its error when it is
+/// one of `named`, the fields the reading type has, and never otherwise: any other key is LogSeq's, or the
+/// user's (a map of properties, say), and stays out of every message.
 struct Fields<'v> {
     entries: serde_json::map::Iter<'v>,
     pending: Option<(&'v String, &'v Value)>,
+    named: &'static [&'static str],
 }
 
 impl<'de> MapAccess<'de> for Fields<'de> {
@@ -324,7 +337,11 @@ impl<'de> MapAccess<'de> for Fields<'de> {
 
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, Issue> {
         let Some((key, value)) = self.pending.take() else { return Err(Issue::other("a value with no key")) };
-        seed.deserialize(Wire(value)).map_err(|issue| issue.at(Part::Key(key.clone())))
+        let named = self.named.iter().find(|name| **name == key.as_str());
+        seed.deserialize(Wire(value)).map_err(|issue| match named {
+            Some(name) => issue.at(Part::Key(name)),
+            None => issue,
+        })
     }
 
     fn size_hint(&self) -> Option<usize> {

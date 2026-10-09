@@ -168,3 +168,17 @@ fn the_message_names_the_method_the_path_and_the_problem() {
         "LogSeq answered logseq.Editor.getAllPages in a shape this server can't read: answer[1].id: expected a whole number, got a string\n\nSteps to fix:\n1. "
     ));
 }
+
+#[test]
+fn a_key_that_is_not_a_field_the_type_names_is_never_in_the_path() {
+    // a map of the user's own keys (properties, page names): its keys are the graph, and stay out
+    let said = problem::<std::collections::HashMap<String, Id>>(json!({"Alice's private page": "x"}));
+    assert_eq!(said, "answer: expected a whole number, got a string");
+    let said = problem::<std::collections::BTreeMap<String, Vec<Id>>>(json!({"journal 2025-01-01": [1, "x"]}));
+    assert_eq!(said, "answer[1]: expected a whole number, got a string");
+    // a struct names its fields: those are in the path, and an unknown key whose name looks like data is skipped
+    // without being read, and is not said when a field next to it fails
+    let answer = json!({"Alice's private page": {"deep": [1, 2]}, "id": "x"});
+    assert_eq!(problem::<Page>(answer), "answer.id: expected a whole number, got a string");
+    assert!(parse::<Page>(METHOD, &json!({"Alice's private page": "anything", "id": 1})).is_ok());
+}

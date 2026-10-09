@@ -53,8 +53,18 @@ impl<'de> Visitor<'de> for ParentVisitor {
         IdVisitor.visit_f64(value).map(|id| Parent::Id(id.0))
     }
 
+    /// An object: its `id`, and its `db/id`, each a whole number when it is there. They are read from the object
+    /// by hand, not as a struct, because a union read through `deserialize_any` is not told which fields it has,
+    /// so an error here is at the parent and its fixed text says which fields.
     fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Parent, A::Error> {
-        EntityRef::deserialize(MapAccessDeserializer::new(map)).map(Parent::Ref)
+        let object = Value::deserialize(MapAccessDeserializer::new(map))?;
+        let id_of = |key: &str| -> Result<Option<i64>, A::Error> {
+            match object.get(key) {
+                None => Ok(None),
+                Some(value) => crate::wire::whole_number(value).map(Some).ok_or_else(|| de::Error::custom("a parent's id and db/id must each be a whole number")),
+            }
+        };
+        Ok(Parent::Ref(EntityRef { id: id_of("id")?, db_id: id_of("db/id")? }))
     }
 }
 
@@ -158,10 +168,11 @@ mod tests {
         let parent = |value: Value| outline_rows(&json!([[{"id": 1, "uuid": "u", "parent": value}]]));
         for (bad, said) in [
             (json!("a"), "answer[0][0].parent: expected a whole number or an object, got a string"),
-            (json!({"id": "a"}), "answer[0][0].parent.id: expected a whole number, got a string"),
+            (json!({"id": "a"}), "answer[0][0].parent: a parent's id and db/id must each be a whole number"),
             (json!(null), "answer[0][0].parent: expected a whole number or an object, got null"),
             (json!(true), "answer[0][0].parent: expected a whole number or an object, got a boolean"),
-            (json!({"id": 1, "db/id": "x"}), "answer[0][0].parent.db/id: expected a whole number, got a string"),
+            (json!({"id": 1, "db/id": "x"}), "answer[0][0].parent: a parent's id and db/id must each be a whole number"),
+            (json!({"id": null}), "answer[0][0].parent: a parent's id and db/id must each be a whole number"),
             (json!(1.5), "answer[0][0].parent: expected a whole number, got a number with a fraction"),
         ] {
             assert_eq!(problem(parent(bad)), said);
@@ -201,5 +212,18 @@ mod tests {
         assert_eq!(problem(outline_rows(&json!([[{"id": 1.5, "uuid": "u"}]]))), "answer[0][0].id: expected a whole number, got a number with a fraction");
         // JSON.parse reads 5.0 as 5.
         assert!(outline_rows(&json!([[{"id": 5.0, "uuid": "u"}]])).is_ok());
+    }
+
+    #[test]
+    fn a_null_in_any_field_that_may_be_left_out_is_a_mismatch_and_leaving_it_out_is_not() {
+        for key in ["id", "db/id", "content", "left", "parent"] {
+            let mut block = json!({"id": 1, "db/id": 2, "uuid": "u"});
+            block.as_object_mut().unwrap().remove(key);
+            assert!(outline_rows(&json!([[block.clone()]])).is_ok(), "{key} left out");
+            block[key] = Value::Null;
+            let said = problem(outline_rows(&json!([[block]])));
+            assert!(said.starts_with(&format!("answer[0][0].{key}: expected ")), "{said}");
+        }
+        assert_eq!(problem(outline_rows(&json!([[{"id": 1, "uuid": null}]]))), "answer[0][0].uuid: expected a string, got null");
     }
 }
