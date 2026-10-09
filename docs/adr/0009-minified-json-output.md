@@ -25,4 +25,4 @@ Date: 2026-01-23
 ## Mechanical enforcement
 
 - test: `rust/tests/parity.rs` (every tool result, and the error and ambiguous-page results, is compared with the golden results in `rust/tests/data/parity/`, which hold minified JSON, and each JSON result has to be minified, so layout whitespace fails it: `compare_results` and `minified_failures` in `rust/tests/parity_support/compare.rs`)
-- test: `rust/src/tool.rs` (`results_keep_key_order_as_json_stringify_does`: results keep their keys in insertion order, as `JSON.stringify` writes them)
+- test: `rust/src/tool.rs` (`results_keep_keys_in_insertion_order`: results keep their keys in insertion order, integer-like keys included, and are written with no layout)

@@ -1,5 +1,4 @@
-//! Resolving `((uuid))` block refs and `{{embed}}`s in returned blocks (the Rust side of
-//! `src/utils/resolve-refs.ts`, #18, BR-0007).
+//! Resolving `((uuid))` block refs and `{{embed}}`s in returned blocks (#18, BR-0007).
 //!
 //! The blocks keep their `content` untouched. A block that holds at least one ref or embed gains:
 //! - `resolvedContent`: its content with every resolvable ref replaced inline by the target's
@@ -103,7 +102,7 @@ struct RefStore {
     unavailable: HashSet<String>,
 }
 
-/// Strings in the order they were first added, as a JavaScript `Set` keeps them.
+/// Strings in the order they were first added (a set that keeps insertion order).
 #[derive(Default)]
 struct OrderedSet {
     items: Vec<String>,
@@ -131,7 +130,7 @@ fn is_placeholder(row: &RefTarget) -> bool {
     row.page.as_ref().and_then(|page| page.id).is_none() && row.name.is_none()
 }
 
-/// `pageNameOf`: the name of the page a block sits on.
+/// The name of the page a block sits on.
 fn page_name_of(row: Option<&RefTarget>) -> Option<String> {
     let page = row?.page.as_ref()?;
     page.original_name.clone().or_else(|| page.name.clone())
@@ -300,7 +299,7 @@ struct ResolvedRef {
     status: &'static str,
 }
 
-/// `dedupeRefs`: one entry per embed kind, target and status.
+/// One entry per embed kind, target and status.
 fn dedupe_refs(refs: Vec<ResolvedRef>) -> Vec<ResolvedRef> {
     let mut seen = HashSet::new();
     refs.into_iter()
@@ -503,8 +502,9 @@ impl<'a> Renderer<'a> {
     /// A copy of `block` with `resolvedContent` and `resolvedRefs` when its content holds a ref or
     /// embed, and its `children` annotated the same way.
     fn annotate(&mut self, block: &Value) -> Value {
-        let mut out = spread(block);
-        let Some(map) = block.as_object() else { return Value::Object(out) };
+        // Not a block (an unfetched child is a `["uuid","<id>"]` tuple): pass it through as sent (BR-0007)
+        let Some(map) = block.as_object() else { return block.clone() };
+        let mut out = map.clone();
         if let Some(content) = map.get("content").and_then(Value::as_str).filter(|content| !scan(content).is_empty()) {
             let path: Vec<String> = map.get("uuid").and_then(Value::as_str).map(|uuid| uuid.to_lowercase()).into_iter().collect();
             let mut refs = Vec::new();
@@ -516,18 +516,6 @@ impl<'a> Renderer<'a> {
             out.insert("children".into(), Value::Array(children.iter().map(|child| self.annotate(child)).collect()));
         }
         Value::Object(out)
-    }
-}
-
-// PARITY(#299): `{ ...block }` on a child that isn't a block turns a list into an object keyed by position
-// (`{"0":"uuid","1":"<id>"}`), which is what a block's unfetched `children` become when `resolve_refs` is set
-// without `include_children` (suspected TS bug, #324) — drop if Rust becomes the only server.
-/// `{ ...value }`: an object's own keys, a list's positions as keys, and nothing for the rest.
-fn spread(value: &Value) -> Map<String, Value> {
-    match value {
-        Value::Object(map) => map.clone(),
-        Value::Array(items) => items.iter().enumerate().map(|(i, item)| (i.to_string(), item.clone())).collect(),
-        _ => Map::new(),
     }
 }
 
@@ -572,7 +560,7 @@ pub async fn resolve_block_refs_with(client: &LogseqClient, roots: &[Value], opt
     Ok(Resolved { blocks, warnings: renderer.all_warnings() })
 }
 
-/// `buildResultMeta(warnings)` without totals, as a block or page result carries it: `hasMore`,
+/// The result meta without totals, as a block or page result carries it: `hasMore`,
 /// then `warnings`. Adds both to `result`, after the keys it has.
 pub fn with_meta(mut result: Map<String, Value>, warnings: &[ResultWarning]) -> Map<String, Value> {
     result.insert("hasMore".into(), Value::Bool(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())));

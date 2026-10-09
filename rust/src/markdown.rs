@@ -1,4 +1,4 @@
-//! The one Markdown renderer (#43; the Rust side of `src/utils/markdown.ts`). Every tool that takes
+//! The one Markdown renderer (#43). Every tool that takes
 //! `format: "markdown"` and the `logseq://page/{name}` resource render through here, so a page
 //! looks the same wherever it is read. Never add a second renderer.
 //!
@@ -11,7 +11,7 @@
 //! - a short footer for warnings, `hasMore` and tips ([`render_footer`]).
 //!
 //! The functions are pure: they take the tools' result objects (`serde_json::Value`, as LogSeq
-//! sent them) and return text. They read tolerantly, as the TypeScript ones do, because the shapes
+//! sent them) and return text. They read tolerantly, because the shapes
 //! differ by source (Editor API camelCase, Datalog kebab-case, `children` that are unfetched
 //! `["uuid", "<id>"]` tuples rather than blocks).
 //!
@@ -19,22 +19,22 @@
 //! `((uuid))`), `show_uuid` (the `((uuid))` after a block's text) and `show_page` (`(in [[Page]])`
 //! after it). Only the context tools use them (`crate::markdown_context`).
 //!
-//! Lengths and cuts are in UTF-16 code units, as JavaScript counts them (see `js`).
+//! Lengths and cuts count characters (code points), never UTF-16 code units, so a cut never lands inside one.
 
 use serde_json::{Map, Value};
 
 use crate::js;
-use crate::snippet::Snippet;
+use crate::snippet::{Snippet, first_chars};
 
 /// Shown after the start of a first block that alone exceeds the limit.
 pub const TRUNCATED_BLOCK_MARKER: &str = "\n[This block is longer than the limit and was truncated here.]";
 
-/// `nonEmpty`: a string that isn't blank, as it is.
+/// A string that isn't blank, as it is.
 fn non_empty(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str).filter(|text| !js::trim(text).is_empty())
 }
 
-/// `pageTitle`: the original-case title of a page entity in any of the shapes the tools return,
+/// The original-case title of a page entity in any of the shapes the tools return,
 /// else its name, else `fallback`, else `""`.
 pub fn page_title(page: &Value, fallback: Option<&str>) -> String {
     non_empty(page.get("originalName"))
@@ -45,7 +45,7 @@ pub fn page_title(page: &Value, fallback: Option<&str>) -> String {
         .to_owned()
 }
 
-/// `isPreBlock`: either spelling of the flag, set to `true`.
+/// Either spelling of the flag, set to `true`.
 fn is_pre_block(block: &Map<String, Value>) -> bool {
     block.get("pre-block?") == Some(&Value::Bool(true)) || block.get("preBlock?") == Some(&Value::Bool(true))
 }
@@ -55,7 +55,7 @@ fn is_pre_block(block: &Map<String, Value>) -> bool {
 pub struct OutlineOptions {
     /// Titles and ids only: each block is its first-line snippet followed by its `((uuid))`
     pub compact: bool,
-    /// Stop after this many characters (UTF-16 code units) and report `cut`. Unlimited when `None`.
+    /// Stop after this many characters (code points) and report `cut`. Unlimited when `None`.
     pub max_chars: Option<usize>,
     /// Leave out pre-blocks, whose text is the page properties already rendered above
     pub skip_pre_blocks: bool,
@@ -74,12 +74,12 @@ pub struct Outline {
     pub cut: bool,
 }
 
-/// JavaScript's `string.length`.
+/// The length of a text in characters (code points), which is what the caps count.
 fn length(text: &str) -> usize {
-    text.encode_utf16().count()
+    text.chars().count()
 }
 
-/// `blockPageLink`: the page a block sits on, as a link, when its name is known: a search hit's
+/// The page a block sits on, as a link, when its name is known: a search hit's
 /// `context.page`, or a `page` entity with a name.
 fn block_page_link(block: &Map<String, Value>) -> Option<String> {
     let from_context = block.get("context").and_then(|context| context.get("page"));
@@ -90,7 +90,7 @@ fn block_page_link(block: &Map<String, Value>) -> Option<String> {
         .map(page_link)
 }
 
-/// `pageLink`: `[[Title]]`, the way a page is linked in LogSeq.
+/// A link to a page, `[[Title]]`, the way a page is linked in LogSeq.
 pub fn page_link(page: &Value) -> String {
     format!("[[{}]]", page_title(page, None))
 }
@@ -102,10 +102,7 @@ fn bullet_text(block: &Map<String, Value>, depth: usize, options: &OutlineOption
     let uuid = non_empty(block.get("uuid"));
     let page = if options.show_page { block_page_link(block) } else { None };
     if options.compact {
-        // PARITY(#299): a snippet cut inside an emoji ends in a lone surrogate in TypeScript, which a Rust string
-        // can't hold: it ends in U+FFFD here (suspected TS bug: `slice` should cut by code point) — drop if Rust
-        // becomes the only server.
-        let snippet = Snippet::of(block.get("content").and_then(Value::as_str)).to_string_lossy();
+        let snippet = Snippet::of(block.get("content").and_then(Value::as_str)).as_str().to_owned();
         let parts = [Some(snippet), uuid.map(|uuid| format!("(({uuid}))")), page.map(|page| format!("(in {page})"))];
         let text: Vec<String> = parts.into_iter().flatten().filter(|part| !part.is_empty()).collect();
         return js::trim_end(&format!("{indent}- {}", text.join(" "))).to_owned();
@@ -134,20 +131,6 @@ fn bullet_text(block: &Map<String, Value>, depth: usize, options: &OutlineOption
     lines.join("\n")
 }
 
-/// `text.slice(0, end)` in UTF-16 code units, for a `text` too long for what is left of the budget.
-// PARITY(#299): the cut is by UTF-16 code unit, as `slice` cuts. A cut between the halves of a surrogate
-// pair would leave a lone surrogate, which a Rust string can't hold (TypeScript writes it as a `\ud83d`
-// escape, ill-formed text that many clients show as U+FFFD): the cut stops one unit earlier instead
-// (suspected TS bug: `slice` should cut by code point) — drop if Rust becomes the only server.
-fn slice_start(text: &str, end: usize) -> String {
-    let units = js::utf16(text);
-    let mut end = end.min(units.len());
-    if end > 0 && (0xD800..0xDC00).contains(&units[end - 1]) {
-        end -= 1;
-    }
-    String::from_utf16(&units[..end]).expect("a cut that keeps both halves of every pair is well-formed")
-}
-
 struct Walk {
     out: Vec<String>,
     left: usize,
@@ -173,8 +156,8 @@ impl Walk {
                 // A first block over the cap would otherwise render as an empty page.
                 // Keep its start, with a marker, so the reader sees real content.
                 if self.out.is_empty() {
-                    let keep = self.left.saturating_sub(TRUNCATED_BLOCK_MARKER.len() + 1);
-                    self.out.push(format!("{}{TRUNCATED_BLOCK_MARKER}", slice_start(&text, keep)));
+                    let keep = self.left.saturating_sub(length(TRUNCATED_BLOCK_MARKER) + 1);
+                    self.out.push(format!("{}{TRUNCATED_BLOCK_MARKER}", first_chars(&text, keep)));
                 }
                 return;
             }
@@ -187,7 +170,7 @@ impl Walk {
     }
 }
 
-/// `renderOutline`: a block tree as an outline. Stops at `max_chars` when given, and says so
+/// A block tree as an outline. Stops at `max_chars` when given, and says so
 /// through `cut`; the caller owns the notice. Children that are not block objects (unfetched
 /// `["uuid", "<id>"]` tuples) are skipped.
 pub fn render_outline(blocks: &[Value], options: OutlineOptions) -> Outline {
@@ -196,7 +179,7 @@ pub fn render_outline(blocks: &[Value], options: OutlineOptions) -> Outline {
     Outline { lines: walk.out, cut: walk.cut }
 }
 
-/// `kebabKey`: `fooBar` back to `foo-bar`. The Editor API camelCases property keys, LogSeq files
+/// A property key in kebab-case: `fooBar` back to `foo-bar`. The Editor API camelCases property keys, LogSeq files
 /// write them kebab-case. `/([a-z0-9])([A-Z])/g`: matches don't overlap, so in `aBC` only `aB` matches.
 fn kebab_key(key: &str) -> String {
     let chars: Vec<char> = key.chars().collect();
@@ -220,7 +203,7 @@ fn as_link(value: &str) -> String {
     if value.contains("[[") { value.to_owned() } else { format!("[[{value}]]") }
 }
 
-/// `propertyValue`: a property's value as text, or `None` when it has nothing to show.
+/// A property's value as text, or `None` when it has nothing to show.
 fn property_value(value: &Value) -> Option<String> {
     match value {
         Value::Null => None,
@@ -235,26 +218,25 @@ fn property_value(value: &Value) -> Option<String> {
                 .collect();
             (!parts.is_empty()).then(|| parts.join(", "))
         }
-        Value::Object(_) => Some(js::json_stringify(value)),
+        Value::Object(_) => Some(value.to_string()),
         Value::Bool(flag) => Some(flag.to_string()),
-        Value::Number(n) => Some(js::number_to_string(n.as_f64().expect("a JSON number is finite"))),
+        Value::Number(n) => Some(n.to_string()),
         Value::String(text) => (!js::trim(text).is_empty()).then(|| text.clone()),
     }
 }
 
-/// `renderProperties`: properties as LogSeq writes them, `key:: value`, rebuilt from a `properties`
+/// Properties as LogSeq writes them, `key:: value`, rebuilt from a `properties`
 /// map. Keys are shown kebab-case, multi-value properties as `[[a]], [[b]]`. Empty values are left
 /// out. This is the fallback for a page whose pre-block was not fetched: the pre-block's own text
 /// ([`pre_block_lines`]) is the faithful form, and is preferred.
 pub fn render_properties(properties: Option<&Value>) -> Vec<String> {
     let Some(Value::Object(map)) = properties else { return Vec::new() };
-    js::entries_in_js_order(map)
-        .into_iter()
+    map.iter()
         .filter_map(|(key, value)| property_value(value).map(|text| format!("{}:: {text}", kebab_key(key))))
         .collect()
 }
 
-/// `preBlockLines`: the text of a page's pre-block (its property block) as lines, exactly as
+/// The text of a page's pre-block (its property block) as lines, exactly as
 /// LogSeq stores it, or `None` when the tree has none or it is empty. No key or value mapping
 /// happens, so nothing is lost.
 pub fn pre_block_lines(blocks: &[Value]) -> Option<Vec<String>> {
@@ -271,7 +253,7 @@ pub struct PropertyLines {
     pub from_pre_block: bool,
 }
 
-/// `propertyLines`: the pre-block's own text when the tree has one, else [`render_properties`] on
+/// The pre-block's own text when the tree has one, else [`render_properties`] on
 /// the `properties` map.
 pub fn property_lines(properties: Option<&Value>, blocks: Option<&[Value]>) -> PropertyLines {
     match blocks.and_then(pre_block_lines) {
@@ -294,20 +276,20 @@ pub struct PageRenderOptions<'a> {
     pub fallback_title: Option<&'a str>,
 }
 
-/// `resolvedFromLine`: the `(resolved from "x", matched by alias)` note for a page reached through
+/// The `(resolved from "x", matched by alias)` note for a page reached through
 /// an alias, date or namespace leaf.
 pub fn resolved_from_line(resolved_from: Option<&Value>) -> Option<String> {
     let map = resolved_from?.as_object()?;
     // The server sets both fields, so a map without them has no note to write.
-    let name = js::json_stringify(map.get("name")?);
+    let name = map.get("name")?.to_string();
     let matched_by = match map.get("matchedBy")? {
         Value::String(text) => text.clone(),
-        other => js::json_stringify(other),
+        other => other.to_string(),
     };
     Some(format!("(resolved from {name}, matched by {matched_by})"))
 }
 
-/// `renderPage`: one page as Markdown: title, resolved-from note, page properties, then the block
+/// One page as Markdown: title, resolved-from note, page properties, then the block
 /// outline (children of the page entity). No footer; add one with [`with_footer`].
 pub fn render_page(page: &Value, options: PageRenderOptions<'_>) -> String {
     let mut lines = vec![format!("# {}", page_title(page, options.fallback_title)), String::new()];
@@ -337,7 +319,7 @@ pub fn render_page(page: &Value, options: PageRenderOptions<'_>) -> String {
     format!("{}\n{body}{notice}\n", lines.join("\n"))
 }
 
-/// `renderBlock`: one block with its children (as many as were fetched), under a `Block ((uuid))`
+/// One block with its children (as many as were fetched), under a `Block ((uuid))`
 /// heading. A block's own text is what it holds; its page is not rendered, because the Editor API
 /// returns only a page id for it.
 pub fn render_block(block: &Value) -> String {
@@ -366,8 +348,8 @@ pub struct FooterMeta {
 }
 
 impl FooterMeta {
-    /// The meta a tool's result carries in its own fields (`warnings`, `hasMore`), as the TypeScript
-    /// tools pass the result itself to `withFooter`, with the tips the tool made.
+    /// The meta a tool's result carries in its own fields (`warnings`, `hasMore`): a tool passes the
+    /// result itself, with the tips it made.
     pub fn of_result(result: &Value, tips: &[String]) -> Self {
         let text = |value: Option<&Value>| value.and_then(Value::as_str).filter(|text| !text.is_empty()).map(str::to_owned);
         let warnings = result
@@ -389,7 +371,7 @@ impl FooterMeta {
     }
 }
 
-/// `renderFooter`: warnings, `hasMore` and tips as a short footer after a `---` rule, or `""` when
+/// Warnings, `hasMore` and tips as a short footer after a `---` rule, or `""` when
 /// there is nothing to say. The same information the JSON `meta` carries:
 ///
 /// ```text
@@ -420,7 +402,7 @@ pub fn render_footer(meta: &FooterMeta) -> String {
     if lines.is_empty() { String::new() } else { format!("---\n{}", lines.join("\n")) }
 }
 
-/// `withFooter`: `body` followed by the footer for `meta`, one paragraph apart. Just `body` when
+/// The body followed by the footer for `meta`, one paragraph apart. Just the body when
 /// the footer is empty.
 pub fn with_footer(body: String, meta: &FooterMeta) -> String {
     let footer = render_footer(meta);
@@ -504,16 +486,28 @@ mod tests {
     }
 
     #[test]
-    fn the_cut_counts_utf16_units_and_never_splits_a_surrogate_pair() {
-        // `- ` and the rocket (2 units) fill 4 of the 7 units left for text after the marker
-        assert_eq!(slice_start("- \u{1F680}\u{1F680}", 4), "- \u{1F680}");
-        assert_eq!(slice_start("- \u{1F680}\u{1F680}", 3), "- ", "a cut between the two halves of a rocket stops before it");
-        assert_eq!(slice_start("abc", 0), "");
-        assert_eq!(slice_start("abc", 10), "abc");
-        // a bullet of 3 rockets is 2 + 6 = 8 units; with 5 left it is over the cap
-        let cut = render_outline(&[json!({"content": "\u{1F680}\u{1F680}\u{1F680}"})], OutlineOptions { max_chars: Some(5), ..Default::default() });
+    fn the_cut_counts_characters_and_never_splits_one() {
+        let rockets = [json!({"content": "\u{1F680}\u{1F680}\u{1F680}"})];
+        let long_rockets = [json!({"content": "\u{1F680}".repeat(100)})];
+        // a bullet of 3 rockets is 2 + 3 = 5 characters and a newline: 6; with 5 left it is over the cap
+        let cut = render_outline(&rockets, OutlineOptions { max_chars: Some(5), ..Default::default() });
         assert!(cut.cut);
         assert_eq!(cut.lines, [TRUNCATED_BLOCK_MARKER]);
+        assert!(!render_outline(&rockets, OutlineOptions { max_chars: Some(6), ..Default::default() }).cut);
+        // `- ` and a rocket fill 3 of the characters left for text after the marker: a rocket is one character
+        let marker = length(TRUNCATED_BLOCK_MARKER);
+        let cut = render_outline(&long_rockets, OutlineOptions { max_chars: Some(marker + 1 + 3), ..Default::default() });
+        assert_eq!(cut.lines, [format!("- \u{1F680}{TRUNCATED_BLOCK_MARKER}")]);
+        // a ZWJ emoji is several code points, and the cut can fall between them, never inside one
+        let family = [json!({"content": format!("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}{}", "y".repeat(100))})];
+        let cut = render_outline(&family, OutlineOptions { max_chars: Some(marker + 1 + 4), ..Default::default() });
+        assert_eq!(cut.lines, [format!("- \u{1F468}\u{200D}{TRUNCATED_BLOCK_MARKER}")]);
+        // a combining mark stays with its letter when the cut falls after both
+        let accent = [json!({"content": format!("e\u{301}e\u{301}{}", "y".repeat(100))})];
+        let cut = render_outline(&accent, OutlineOptions { max_chars: Some(marker + 1 + 4), ..Default::default() });
+        assert_eq!(cut.lines, [format!("- e\u{301}{TRUNCATED_BLOCK_MARKER}")]);
+        assert!(cut.lines.iter().all(|line| !line.contains('\u{FFFD}')));
+        assert_eq!(first_chars("abc", 0), "");
     }
 
     #[test]
@@ -537,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn page_refs_keep_their_brackets_and_other_values_are_written_as_javascript_writes_them() {
+    fn page_refs_keep_their_brackets_and_other_values_are_written_by_serde() {
         let props = json!({
             "see-also": ["[[Project Atlas]]", "Carol", " ", 4, null, ["x"]],
             "owner": "[[Alice]]",
@@ -547,23 +541,25 @@ mod tests {
             "blank": "  ",
             "none": [null, ""],
         });
+        // a number is written as serde_json 1.0.151 writes it (`1e+21` for 1e21). The literal is pinned on purpose:
+        // a change to serde's spelling should fail here, not pass because the test uses the same writer.
         assert_eq!(
             render_properties(Some(&props)),
             [
                 "see-also:: [[Project Atlas]], [[Carol]], 4, [[x]]",
                 "owner:: [[Alice]]",
                 "ratings:: 1, 2.5",
-                r#"nested:: {"2":[true],"b":1}"#,
+                r#"nested:: {"b":1,"2":[true]}"#,
                 "big:: 1e+21",
             ]
         );
     }
 
     #[test]
-    fn properties_come_out_in_the_order_javascript_lists_object_keys() {
-        // integer-like keys first, ascending, then the rest in the order they came
+    fn properties_come_out_in_the_order_they_are_stored() {
+        // a numeric-looking key is a key like any other: no key is moved ahead of the rest
         let props = json!({"b": "x", "10": "ten", "2": "two", "a": "y"});
-        assert_eq!(render_properties(Some(&props)), ["2:: two", "10:: ten", "b:: x", "a:: y"]);
+        assert_eq!(render_properties(Some(&props)), ["b:: x", "10:: ten", "2:: two", "a:: y"]);
     }
 
     #[test]
@@ -708,7 +704,7 @@ mod tests {
             {"content": "", "resolvedContent": "not shown"},
         ]);
         let compact = OutlineOptions { compact: true, ..Default::default() };
-        // the bullet of a block with nothing to show is a bare dash, as `trimEnd` leaves it
+        // the bullet of a block with nothing to show is a bare dash, as trimming the end of a line leaves it
         assert_eq!(
             outline_with(blocks, compact),
             [format!("- First line (({UUID_A}))"), "\t- child ((u2))".to_owned(), format!("- (({UUID_A}))"), "- no uuid".to_owned(), "-".to_owned()]

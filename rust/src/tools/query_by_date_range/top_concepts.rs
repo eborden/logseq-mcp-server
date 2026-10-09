@@ -1,5 +1,4 @@
-//! `summary.topConcepts`: the pages the returned blocks reference most (the Rust side of
-//! `src/utils/top-concepts.ts`). Tags, `[[links]]` and aliases all end up as `:block/refs` of the
+//! `summary.topConcepts`: the pages the returned blocks reference most. Tags, `[[links]]` and aliases all end up as `:block/refs` of the
 //! same page, so they merge on page id with no parsing of content.
 
 use std::cmp::Ordering;
@@ -8,7 +7,6 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Map, Value};
 
 use crate::entity::id_of;
-use crate::resolve::alias::compare_code_units;
 
 /// Default for `top_concepts_limit`.
 pub const DEFAULT_TOP_CONCEPTS_LIMIT: u32 = 10;
@@ -38,7 +36,7 @@ pub struct TopConcept {
     pub days: usize,
 }
 
-/// `extractConceptRefs`: the concept refs of one flat Datalog block (pulled with nested
+/// The concept refs of one flat Datalog block (pulled with nested
 /// `:block/refs`). Dropped: refs without a name (block refs), journal pages, and
 /// [`BUILT_IN_CONCEPTS`]. Each page appears once.
 pub fn extract_concept_refs(block: &Map<String, Value>) -> Vec<ConceptRef> {
@@ -61,13 +59,12 @@ pub fn extract_concept_refs(block: &Map<String, Value>) -> Vec<ConceptRef> {
     out
 }
 
-/// Order: count desc, then days desc, then name (case-insensitive, then exact).
+/// Order: count desc, then days desc, then name ([`order::by_name`]: lowercase, then exact).
 fn compare_concepts(a: &TopConcept, b: &TopConcept) -> Ordering {
     b.count
         .cmp(&a.count)
         .then(b.days.cmp(&a.days))
-        .then_with(|| compare_code_units(&a.name.to_lowercase(), &b.name.to_lowercase()))
-        .then_with(|| compare_code_units(&a.name, &b.name))
+        .then_with(|| crate::order::by_name(&a.name, &b.name))
 }
 
 struct Tally {
@@ -77,7 +74,7 @@ struct Tally {
     days: HashSet<i64>,
 }
 
-/// `rollUpTopConcepts`: the concepts the returned blocks reference, best first, at most `limit`.
+/// The concepts the returned blocks reference, best first, at most `limit`.
 ///
 /// Counts every block in the trees, children included: `count` is the number of blocks referencing
 /// a page, `days` the number of distinct entries (journal days) they sit on.
@@ -135,7 +132,6 @@ pub fn concept_value(concept: &TopConcept) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::js;
     use serde_json::json;
 
     fn block(value: Value) -> Map<String, Value> {
@@ -215,6 +211,6 @@ mod tests {
     #[test]
     fn a_concept_is_written_as_name_count_days() {
         let concept = TopConcept { name: "Atlas".into(), count: 3, days: 2 };
-        assert_eq!(js::json_stringify(&concept_value(&concept)), r#"{"name":"Atlas","count":3,"days":2}"#);
+        assert_eq!(concept_value(&concept).to_string(), r#"{"name":"Atlas","count":3,"days":2}"#);
     }
 }

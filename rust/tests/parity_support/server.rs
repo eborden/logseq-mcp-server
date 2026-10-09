@@ -35,7 +35,7 @@ pub fn server_binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_logseq-mcp-server"))
 }
 
-/// A JSON-RPC error the server answered with, as the MCP SDK's client throws it.
+/// A JSON-RPC error the server answered with: its code, its message as written and its `data`.
 #[derive(Debug)]
 pub struct RpcError {
     pub code: i64,
@@ -170,8 +170,8 @@ impl Server {
             if let Some(error) = reply.get("error") {
                 let code = error.get("code").and_then(Value::as_i64).unwrap_or_default();
                 let message = error.get("message").and_then(Value::as_str).unwrap_or_default();
-                // The MCP SDK's client puts the code in front of the message
-                return Err(Failure::Rpc(RpcError { code, message: format!("MCP error {code}: {message}"), data: error.get("data").cloned() }));
+                // The error as the server sent it: the message as written, with its `data`
+                return Err(Failure::Rpc(RpcError { code, message: message.to_owned(), data: error.get("data").cloned() }));
             }
             return Ok(reply.get("result").cloned().unwrap_or(Value::Null));
         }
@@ -388,7 +388,7 @@ pub fn run_parity_with(run: &Run, launch: &dyn Fn(&Path, &Path, i64) -> Server) 
             }
             results.insert(case.name.clone(), result);
         }
-        // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0032).
+        // The reference is held to rules 3 to 6 when it is recorded, and the recorded set has to exercise them (ADR-0034 Decision 4).
         // A recording checks the results it is about to write, which `record.rs` does once the run is over.
         if !run.record {
             failures.extend(check_reference_lists(run.unperturbed));

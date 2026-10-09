@@ -1,8 +1,6 @@
-//! The warnings a capped list carries (BR-0006; the Rust side of `truncationWarning`,
-//! `cappedTruncationWarning`, `largeResultNote`, `INLINE_ITEMS` and `blocksInlineMax` in
-//! `src/utils/result-meta.ts`). A tool that cuts a list builds its warning here, so every cut says
-//! how many were shown, how many there were, and what to do about the rest. The words are the
-//! TypeScript server's, byte for byte.
+//! The warnings a capped list carries (BR-0006). A tool that cuts a list builds its warning here, so every cut says
+//! how many were shown, how many there were, and what to do about the rest. The words are held byte for
+//! byte by the recorded results (ADR-0034).
 
 use crate::meta::ResultWarning;
 
@@ -23,7 +21,7 @@ pub const INLINE_NETWORK_NODES: usize = 200;
 /// Listed pages (`list_pages`), counting aliased entries at about twice a plain one.
 pub const INLINE_PAGES: usize = 800;
 
-/// `blocksInlineMax`: the `inlineMax` for a list of blocks that may come back with
+/// The inline maximum for a list of blocks that may come back with
 /// `include_context` or unslimmed (`slim_results: false`).
 pub fn blocks_inline_max(context: bool, slim: bool) -> usize {
     match (context, slim) {
@@ -34,7 +32,7 @@ pub fn blocks_inline_max(context: bool, slim: bool) -> usize {
     }
 }
 
-/// `largeResultNote`: ` <LARGE_RESULT_NOTE>` when a call that returns `items` items goes past
+/// The note ` <LARGE_RESULT_NOTE>` when a call that returns `items` items goes past
 /// `inline_max`, else nothing. No `inline_max` means the caller makes no claim.
 pub fn large_result_note(items: usize, inline_max: Option<usize>) -> String {
     match inline_max {
@@ -43,7 +41,7 @@ pub fn large_result_note(items: usize, inline_max: Option<usize>) -> String {
     }
 }
 
-/// `truncationWarning`: a list cut at `shown` out of `total` items, where `param` raises the cap.
+/// The warning for a list cut at `shown` out of `total` items, where `param` raises the cap.
 pub fn truncation_warning(
     what: &str,
     shown: usize,
@@ -91,7 +89,7 @@ pub struct CappedTruncation<'a> {
     pub paging: Option<Paging<'a>>,
 }
 
-/// `cappedTruncationWarning`: a list cut at `shown` of `total` items, where `param` can't go above
+/// The warning for a list cut at `shown` of `total` items, where `param` can't go above
 /// `max` (#61). The suggested value never points past the maximum:
 /// - `total <= max`: raise `param` to `total`. With paging, the next page comes first and the raise
 ///   is the alternative.

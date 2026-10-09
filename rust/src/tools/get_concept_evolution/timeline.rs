@@ -1,4 +1,4 @@
-//! The timeline of a concept's mentions (the pure part of `src/tools/get-concept-evolution.ts`):
+//! The timeline of a concept's mentions (the pure part of the tool):
 //! which blocks pass the date bounds, how they are grouped by day, cut at `max_entries` and grouped
 //! by period, and the words of the cut. Blocks are the `Value`s LogSeq sent, and an entry names
 //! them by their place in the list of mentions, so the same block is never copied twice.
@@ -7,8 +7,7 @@
 //! journal) is undated, passes every date filter, and comes last.
 //!
 //! The period keys are plain calendar arithmetic on the `YYYYMMDD` number, with no time zone in it:
-//! the TypeScript code computes them from UTC midnights so a daylight-saving change can't move a
-//! day into another week (#249), and this has no local time to be moved by.
+//! there is no local time for a daylight-saving change to move a day into another week by (#249).
 
 use std::collections::{HashMap, HashSet};
 
@@ -25,9 +24,6 @@ use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warni
 /// narrows them.
 pub const MAX_ENTRIES: u64 = 500;
 
-/// The periods `group_by` names, in the order the schema lists them (`GROUP_BY_PERIODS`).
-pub const GROUP_BY_VALUES: &[&str] = &["day", "week", "month"];
-
 /// The periods mentions are grouped into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -40,17 +36,6 @@ pub enum GroupBy {
     Month,
 }
 
-impl GroupBy {
-    pub fn from_word(word: &str) -> Option<GroupBy> {
-        Some(match word {
-            "day" => GroupBy::Day,
-            "week" => GroupBy::Week,
-            "month" => GroupBy::Month,
-            _ => return None,
-        })
-    }
-}
-
 /// One day's mentions: the day (`None` for the blocks with no journal day) and which blocks.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
@@ -59,34 +44,17 @@ pub struct Entry {
     pub blocks: Vec<usize>,
 }
 
-/// `journalDayOf(block.page) || undefined`: the block's day, `None` when it has none or it is 0.
+/// The block's day, `None` when it has none or it is 0.
 pub fn day_of(block: &Value) -> Option<i64> {
     journal_day_of(block.get("page")).filter(|day| *day != 0)
 }
 
-/// The blocks once each, by `id`: a later block with the same id takes the earlier one's place in
-/// the order (`new Map(blocks.map(b => [b.id, b])).values()`), so the Datalog pull of a block the tree
-/// also holds is the one kept.
-///
-/// PARITY(#299): the later block replaces the earlier one in its place, so a block on the page that also
-/// links it comes back as the Datalog pull (kebab-case keys, no `children`) and the tree's block, with its
-/// children, is lost (suspected TS bug: a fix would keep the tree's block) — drop if Rust becomes the only
-/// server.
+/// The blocks once each, by `id`: a later block with the same id is dropped, so a block on the page
+/// that also links it stays the tree's block, with its children, and not the Datalog pull of it.
 pub fn unique_by_id(blocks: Vec<Value>) -> Vec<Value> {
-    let mut places: HashMap<i64, usize> = HashMap::new();
-    let mut unique: Vec<Value> = Vec::with_capacity(blocks.len());
-    for block in blocks {
-        // `check_block` made the id a whole number
-        let id = block.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
-        match places.get(&id) {
-            Some(&at) => unique[at] = block,
-            None => {
-                places.insert(id, unique.len());
-                unique.push(block);
-            }
-        }
-    }
-    unique
+    let mut seen: HashSet<i64> = HashSet::new();
+    // the `Block` shape (`entity/shape.rs`) made the id a whole number
+    blocks.into_iter().filter(|block| seen.insert(block.get("id").and_then(crate::wire::whole_number).unwrap_or_default())).collect()
 }
 
 /// The blocks inside the date bounds. A block with no day is kept; a bound that is 0 or absent is no
@@ -143,8 +111,7 @@ pub fn cap_timeline(full: &[Entry], max_entries: u64) -> Vec<Entry> {
     kept
 }
 
-/// The places of the blocks the timeline kept, in the order of the mentions (`filteredBlocks.filter(block =>
-/// kept.has(block))`).
+/// The places of the blocks the timeline kept, in the order of the mentions.
 pub fn shown_places(total: usize, timeline: &[Entry]) -> Vec<usize> {
     let kept: HashSet<usize> = timeline.iter().flat_map(|entry| entry.blocks.iter().copied()).collect();
     (0..total).filter(|place| kept.contains(place)).collect()
@@ -212,9 +179,11 @@ fn utc_days(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468 + (day - 1)
 }
 
-/// `getWeekIdentifier`: the week of a `YYYYMMDD` date as `YYYY-WW`. Not ISO weeks: week 1 is the first 7
-/// days of the year, whatever weekday they start on.
-pub fn week_identifier(date: i64) -> String {
+/// The week of a `YYYYMMDD` date as `YYYY-WW`. Not ISO weeks: week 1 is the first 7
+/// days of the year, whatever weekday they start on. `None` for a date whose month or day digits are
+/// missing (fewer than seven digits): it has no week. A 7- or 9-digit date does get one, from the
+/// characters at the same places (LogSeq's journal days always have eight digits).
+pub fn week_identifier(date: i64) -> Option<String> {
     let text: Vec<char> = date.to_string().chars().collect();
     // `substring(from, to)`
     let part = |from: usize, to: usize| -> String { text.iter().skip(from).take(to - from).collect() };
@@ -226,24 +195,21 @@ pub fn week_identifier(date: i64) -> String {
         }
         _ => None,
     };
-    // PARITY(#299): a date whose month or day digits are missing (fewer than seven digits) has no week, and JavaScript writes the number it computes for it as "NaN". A 7- or 9-digit
-    // date does get a week, from the characters at the same places (LogSeq's journal days always have eight
-    // digits) — drop if Rust becomes the only server.
-    let number = week.map_or_else(|| "NaN".to_owned(), |week| week.to_string());
-    format!("{year}-W{number:0>2}")
+    Some(format!("{year}-W{:0>2}", week?))
 }
 
-/// `getMonthIdentifier`: the month of a date as `YYYYMM`.
+/// The month of a date as `YYYYMM`.
 pub fn month_identifier(date: i64) -> String {
     date.to_string().chars().take(6).collect()
 }
 
-/// The key of the period a day falls in, for a grouping.
-pub fn period_key(group_by: GroupBy, date: i64) -> String {
+/// The key of the period a day falls in, for a grouping. `None` for a day with no week, which is
+/// grouped with the undated mentions: in no period.
+pub fn period_key(group_by: GroupBy, date: i64) -> Option<String> {
     match group_by {
-        GroupBy::Day => date.to_string(),
+        GroupBy::Day => Some(date.to_string()),
         GroupBy::Week => week_identifier(date),
-        GroupBy::Month => month_identifier(date),
+        GroupBy::Month => Some(month_identifier(date)),
     }
 }
 
@@ -270,11 +236,11 @@ mod tests {
     }
 
     #[test]
-    fn a_later_block_with_the_same_id_takes_the_earlier_one_s_place() {
+    fn a_later_block_with_the_same_id_is_dropped_and_the_first_one_stays() {
         let first = json!({"id": 1, "uuid": "tree"});
         let second = json!({"id": 2, "uuid": "other"});
         let again = json!({"id": 1, "uuid": "pull"});
-        assert_eq!(unique_by_id(vec![first, second.clone(), again.clone()]), [again, second]);
+        assert_eq!(unique_by_id(vec![first.clone(), second.clone(), again]), [first, second]);
     }
 
     #[test]
@@ -285,7 +251,7 @@ mod tests {
         assert_eq!(ids(filter_by_dates(blocks.clone(), None, Some(20250115))), [1, 3, 4]);
         assert_eq!(ids(filter_by_dates(blocks.clone(), Some(20250101), Some(20250101))), [1, 3, 4]);
         assert_eq!(ids(filter_by_dates(blocks.clone(), Some(0), Some(0))), [1, 2, 3, 4]);
-        // a day of 0 is no day: block 4 is undated, as `journalDayOf(page) || undefined` has it
+        // a day of 0 is no day: block 4 is undated
         assert_eq!(day_of(&blocks[3]), None);
     }
 
@@ -333,7 +299,7 @@ mod tests {
         assert!(warning.message.starts_with("Showing 500 of 600 mentions (oldest first, undated last; the timeline ends at 20240601): max_entries is capped at its maximum of 500 (700 was asked for), so the rest can't be fetched in one call. Set start_date to 20240601 for later dated mentions"), "{}", warning.message);
     }
 
-    /// A week as the TypeScript test computes it, with no date arithmetic in it: counting the days of the
+    /// A week computed independently of the code under test, with no date arithmetic in it: counting the days of the
     /// year, from 0, in sevens.
     fn counted_week(year: i64, month: i64, day: i64) -> String {
         let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
@@ -350,7 +316,7 @@ mod tests {
             for (m, length) in lengths.iter().enumerate() {
                 for day in 1..=*length {
                     let date = year * 10_000 + (m as i64 + 1) * 100 + day;
-                    assert_eq!(week_identifier(date), counted_week(year, m as i64 + 1, day), "{date}");
+                    assert_eq!(week_identifier(date), Some(counted_week(year, m as i64 + 1, day)), "{date}");
                 }
             }
         }
@@ -359,28 +325,31 @@ mod tests {
     #[test]
     fn a_week_is_the_same_on_the_days_around_a_daylight_saving_change() {
         // #249: 2025-03-09 is the day the clocks go forward in New York, 2025-04-06 in Sydney they go back
-        assert_eq!(week_identifier(20250308), "2025-W10");
-        assert_eq!(week_identifier(20250309), "2025-W10");
-        assert_eq!(week_identifier(20250310), "2025-W10");
-        assert_eq!(week_identifier(20250312), "2025-W11");
-        assert_eq!(week_identifier(20250408), "2025-W14");
-        assert_eq!(week_identifier(20250409), "2025-W15");
-        assert_eq!(week_identifier(20250101), "2025-W01");
-        assert_eq!(week_identifier(20251231), "2025-W53");
+        assert_eq!(week_identifier(20250308).as_deref(), Some("2025-W10"));
+        assert_eq!(week_identifier(20250309).as_deref(), Some("2025-W10"));
+        assert_eq!(week_identifier(20250310).as_deref(), Some("2025-W10"));
+        assert_eq!(week_identifier(20250312).as_deref(), Some("2025-W11"));
+        assert_eq!(week_identifier(20250408).as_deref(), Some("2025-W14"));
+        assert_eq!(week_identifier(20250409).as_deref(), Some("2025-W15"));
+        assert_eq!(week_identifier(20250101).as_deref(), Some("2025-W01"));
+        assert_eq!(week_identifier(20251231).as_deref(), Some("2025-W53"));
     }
 
     #[test]
-    fn a_day_or_a_month_is_the_digits_of_the_date_and_a_date_with_no_week_says_nan() {
-        assert_eq!(period_key(GroupBy::Day, 20250102), "20250102");
-        assert_eq!(period_key(GroupBy::Month, 20250102), "202501");
-        assert_eq!(period_key(GroupBy::Week, 20250102), "2025-W01");
-        assert_eq!(week_identifier(2025), "2025-WNaN");
-        assert_eq!(week_identifier(202501), "2025-WNaN");
+    fn a_day_or_a_month_is_the_digits_of_the_date_and_a_date_with_no_week_has_no_key() {
+        assert_eq!(period_key(GroupBy::Day, 20250102).as_deref(), Some("20250102"));
+        assert_eq!(period_key(GroupBy::Month, 20250102).as_deref(), Some("202501"));
+        assert_eq!(period_key(GroupBy::Week, 20250102).as_deref(), Some("2025-W01"));
+        assert_eq!(week_identifier(2025), None);
+        assert_eq!(week_identifier(202501), None);
+        assert_eq!(period_key(GroupBy::Week, 202501), None);
+        // only a week is missing: the day and the month are still the digits
+        assert_eq!(period_key(GroupBy::Day, 202501).as_deref(), Some("202501"));
         // a seventh digit is a day of one digit, and a ninth is never read
-        assert_eq!(week_identifier(2025011), "2025-W01");
-        assert_eq!(week_identifier(202501011), "2025-W01");
-        // a month past 12 or a day past the month's end rolls over, as `Date.UTC` has it
-        assert_eq!(week_identifier(20251301), "2025-W53");
+        assert_eq!(week_identifier(2025011).as_deref(), Some("2025-W01"));
+        assert_eq!(week_identifier(202501011).as_deref(), Some("2025-W01"));
+        // a month past 12 or a day past the month's end rolls over
+        assert_eq!(week_identifier(20251301).as_deref(), Some("2025-W53"));
         assert_eq!(week_identifier(20250230), week_identifier(20250302));
     }
 }

@@ -1,4 +1,4 @@
-//! MCP resources (the Rust side of `src/resources.ts`). Read-only, like everything here (BR-0002).
+//! MCP resources. Read-only, like everything here (BR-0002).
 //! Two: `logseq://page/{name}`, one page as Markdown text, through the same lookup as
 //! `logseq_get_page` (aliases, ISO dates, case-insensitive names) and the same renderer
 //! (`crate::markdown`, never a second one).
@@ -16,17 +16,17 @@ use crate::errors::ToolError;
 use crate::js;
 use crate::instructions::SERVER_INSTRUCTIONS;
 use crate::markdown::{FooterMeta, PageRenderOptions, render_page, with_footer};
-use crate::mcp_error::mcp_error;
+use crate::mcp_error::{mcp_error, resource_not_found};
 use crate::prompts;
 use crate::tools::{self, get_page::get_page};
 
 const PAGE_URI_PREFIX: &str = "logseq://page/";
 pub const PAGE_URI_TEMPLATE: &str = "logseq://page/{name}";
 
-/// Longest page name accepted in a resource URI, in UTF-16 code units, matching the prompt topic limit.
+/// Longest page name accepted in a resource URI, in characters, matching the prompt topic limit.
 const MAX_PAGE_NAME_LENGTH: usize = 200;
 
-/// Most characters (UTF-16 code units) of a page returned in one read. A page can be far larger
+/// Most characters of a page returned in one read. A page can be far larger
 /// than a context window; the cut is announced at the end of the text, never silent (BR-0006).
 pub const MAX_PAGE_CHARS: usize = 50_000;
 
@@ -47,7 +47,7 @@ pub fn list() -> Vec<Resource> {
     ]
 }
 
-/// The tools in the order `TOOL_DESCRIPTIONS` (`src/tool-descriptions.ts`) lists them, which the guide follows
+/// The tools in the order the guide lists them
 /// (`tools/list` has its own order). A test checks it names every tool once.
 const GUIDE_TOOL_ORDER: [&str; 16] = [
     "logseq_list_pages",
@@ -68,7 +68,7 @@ const GUIDE_TOOL_ORDER: [&str; 16] = [
     "logseq_check_links",
 ];
 
-/// The reading guide as Markdown (`buildGuide`): the server instructions, then one line per tool (the first
+/// The reading guide as Markdown: the server instructions, then one line per tool (the first
 /// line of its description, which is what it does), per prompt and per resource.
 pub fn build_guide() -> String {
     let tools = tools::list();
@@ -77,7 +77,7 @@ pub fn build_guide() -> String {
         .map(|name| {
             let tool = tools.iter().find(|tool| tool.name == *name).expect("every tool in the guide order is registered");
             let description = tool.description.as_deref().unwrap_or_default();
-            // `summaryLine`: `description.split('\n', 1)[0].trim()`
+            // the first line of the description, trimmed
             format!("- {name}: {}", js::trim(description.split('\n').next().unwrap_or_default()))
         })
         .collect();
@@ -145,7 +145,7 @@ fn page_name_from_uri(uri: &str) -> Result<String, ErrorData> {
     if name.is_empty() {
         return Err(mcp_error(ErrorCode::INVALID_PARAMS, &format!("No page name in {uri}. Use {PAGE_URI_TEMPLATE}.")));
     }
-    let length = name.encode_utf16().count();
+    let length = name.chars().count();
     if length > MAX_PAGE_NAME_LENGTH {
         return Err(mcp_error(ErrorCode::INVALID_PARAMS, &format!("Page name is {length} characters; the limit is {MAX_PAGE_NAME_LENGTH}.")));
     }
@@ -159,8 +159,8 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
     let page = match get_page(client, &name, true, false).await {
         Ok(page) => page,
         // rmcp rewrites -32002 to -32602 for a client that negotiated protocol 2026-07-28 or newer (SEP-2164); the
-        // TypeScript SDK can't negotiate that, so it's not a regression, and the rewrite stays (#299)
-        Err(error @ ToolError::PageNotFound(_)) => return Err(mcp_error(ErrorCode::RESOURCE_NOT_FOUND, &error.to_string())),
+        // SDK the recorded results came from can't negotiate that version, so no result differs for a version both speak, and the rewrite stays (#299)
+        Err(error @ ToolError::PageNotFound(_)) => return Err(resource_not_found(&error.to_string(), uri)),
         Err(error @ ToolError::AmbiguousPage(_)) => return Err(mcp_error(ErrorCode::INVALID_PARAMS, &error.to_string())),
         Err(error) => return Err(ErrorData::new(ErrorCode::INTERNAL_ERROR, error.to_string(), None)),
     };
@@ -185,10 +185,7 @@ pub async fn read(client: &LogseqClient, uri: &str) -> Result<ReadResourceResult
     if uri.starts_with(PAGE_URI_PREFIX) {
         return read_page(client, uri).await;
     }
-    Err(mcp_error(
-        ErrorCode::RESOURCE_NOT_FOUND,
-        &format!("Unknown resource {}. Available: {AVAILABLE}.", js::json_stringify(&Value::from(uri))),
-    ))
+    Err(resource_not_found(&format!("Unknown resource {}. Available: {AVAILABLE}.", Value::from(uri)), uri))
 }
 
 #[cfg(test)]
@@ -215,7 +212,7 @@ mod tests {
         for bad in ["logseq://page/50%", "logseq://page/a%2", "logseq://page/%zz", "logseq://page/%C3", "logseq://page/%FF", "logseq://page/%ED%A0%80"] {
             assert_eq!(
                 name_of(bad).unwrap_err(),
-                format!("MCP error -32602: Invalid page name encoding in {bad}. URL-encode the page name."),
+                format!("Invalid page name encoding in {bad}. URL-encode the page name."),
                 "{bad}"
             );
         }
@@ -223,22 +220,28 @@ mod tests {
 
     #[test]
     fn a_blank_name_and_a_long_one_are_invalid_params() {
-        assert_eq!(name_of("logseq://page/").unwrap_err(), "MCP error -32602: No page name in logseq://page/. Use logseq://page/{name}.");
-        assert!(name_of("logseq://page/%20%09").unwrap_err().starts_with("MCP error -32602: No page name in"));
+        assert_eq!(name_of("logseq://page/").unwrap_err(), "No page name in logseq://page/. Use logseq://page/{name}.");
+        assert!(name_of("logseq://page/%20%09").unwrap_err().starts_with("No page name in"));
         assert!(name_of(&format!("logseq://page/{}", "a".repeat(200))).is_ok());
         assert_eq!(
             name_of(&format!("logseq://page/{}", "a".repeat(201))).unwrap_err(),
-            "MCP error -32602: Page name is 201 characters; the limit is 200."
+            "Page name is 201 characters; the limit is 200."
         );
-        // the limit counts UTF-16 code units, as `.length` does: 100 rockets are 200, 101 are 202
-        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(100))).is_ok());
-        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(101))).unwrap_err().contains("is 202 characters"));
+        // the limit counts characters (code points): a rocket is one, so 200 rockets fit and 201 do not
+        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(200))).is_ok());
+        assert!(name_of(&format!("logseq://page/{}", "\u{1F680}".repeat(201))).unwrap_err().contains("is 201 characters"));
     }
 
     #[test]
-    fn errors_carry_the_code_and_the_sdk_prefix_and_no_data() {
-        let error = mcp_error(ErrorCode::RESOURCE_NOT_FOUND, "No page \"x\".");
-        assert_eq!((error.code.0, error.message.as_ref(), error.data), (-32002, "MCP error -32002: No page \"x\".", None));
+    fn errors_carry_the_code_and_the_message_as_written() {
+        let error = mcp_error(ErrorCode::INVALID_PARAMS, "No page \"x\".");
+        assert_eq!((error.code.0, error.message.as_ref(), error.data), (-32602, "No page \"x\".", None));
+    }
+
+    #[test]
+    fn resource_not_found_names_the_uri_in_its_data() {
+        let error = resource_not_found("No page \"x\".", "logseq://page/x");
+        assert_eq!((error.code.0, error.message.as_ref(), error.data), (-32002, "No page \"x\".", Some(json!({ "uri": "logseq://page/x" }))));
     }
 
     #[test]

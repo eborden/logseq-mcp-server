@@ -1,9 +1,8 @@
-//! Turning a Datalog pull into the shape the Editor API answers with (the Rust side of the key
-//! helpers in `src/utils/block-tree.ts`): `journal-day` becomes `journalDay`, `path-refs` becomes
-//! `pathRefs`. A tool that merges a pulled block into a result the Editor API also produces
+//! Turning a Datalog pull into the shape the Editor API answers with: `journal-day` becomes
+//! `journalDay`, `path-refs` becomes `pathRefs`. A tool that merges a pulled block into a result the Editor API also produces
 //! (the aliased backlinks) camelizes it first, so both paths give one shape.
 //!
-//! It also puts sibling blocks in page order (`orderSiblings`): LogSeq doesn't store an order, each
+//! It also puts sibling blocks in page order: LogSeq doesn't store an order, each
 //! block says which block is to its `:block/left`, so the order is the chain those links make.
 //!
 //! [`build_block_trees`] rebuilds `getPageBlocksTree`-shaped trees from the flat blocks a Datalog
@@ -13,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
-/// `key.replace(/-([a-z])/g, (_, c) => c.toUpperCase())`: a dash before a lowercase ASCII letter
+/// A kebab-case key in camelCase: a dash before a lowercase ASCII letter
 /// goes, and the letter is capitalised. Matches don't overlap, scanning left to right, so
 /// `a--b` is `a-B` and `a-b-c` is `aBC`.
 pub fn camelize(key: &str) -> String {
@@ -31,9 +30,8 @@ pub fn camelize(key: &str) -> String {
     out
 }
 
-/// `camelizeKeys`: the top-level keys of a pulled entity, camelized. Nested values are untouched.
-/// Two keys that camelize to one name keep the first's place and the last's value, as assigning
-/// to a JavaScript object does.
+/// The top-level keys of a pulled entity, camelized. Nested values are untouched.
+/// Two keys that camelize to one name keep the first's place and the last's value.
 pub fn camelize_keys(entity: &Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::with_capacity(entity.len());
     for (key, value) in entity {
@@ -42,7 +40,7 @@ pub fn camelize_keys(entity: &Map<String, Value>) -> Map<String, Value> {
     out
 }
 
-/// `camelizeBlock`: a pulled block the way the Editor API gives it: its top-level keys, plus the
+/// A pulled block the way the Editor API gives it: its top-level keys, plus the
 /// property names inside `properties` and `propertiesTextValues` and the names listed in
 /// `propertiesOrder` (Datalog has `logseq.order-list-type`, the Editor API `logseq.orderListType`).
 pub fn camelize_block(block: &Map<String, Value>) -> Map<String, Value> {
@@ -66,15 +64,13 @@ pub fn camelize_block(block: &Map<String, Value>) -> Map<String, Value> {
     out
 }
 
-// PARITY(#299): drops a sibling that shares an id with one already placed, though the doc says nothing is
-// dropped (suspected TS bug) — drop if Rust becomes the only server.
-/// `orderSiblings`: siblings in page order, by following the `:block/left` chain.
+/// Siblings in page order, by following the `:block/left` chain.
 ///
 /// The first sibling's `left` is the parent (or the page), which is not itself a sibling, so it
 /// is the head of the chain; each following sibling's `left` is the previous one. Blocks the
 /// chain can't reach (a corrupt graph, or a cycle) are appended in id order so nothing is
-/// dropped. Two siblings with one `left`: the first listed follows it. Two with one id: the
-/// first one the order reaches is kept.
+/// dropped. Two siblings with one `left`: the first listed follows it. Two with one id are both
+/// kept, each in the place the chain (or, failing that, the order of ids) gives it.
 ///
 /// `id` is a sibling's own id and `left` the id its `:block/left` points at, if it has one.
 pub fn order_siblings<T>(siblings: Vec<T>, id: impl Fn(&T) -> i64, left: impl Fn(&T) -> Option<i64>) -> Vec<T> {
@@ -95,18 +91,18 @@ pub fn order_siblings<T>(siblings: Vec<T>, id: impl Fn(&T) -> i64, left: impl Fn
     heads.sort_by_key(|&i| id(&siblings[i])); // a stable sort, as `Array.prototype.sort` is
 
     let mut order: Vec<usize> = Vec::with_capacity(siblings.len());
-    let mut seen: HashSet<i64> = HashSet::new();
+    let mut placed = vec![false; siblings.len()];
     for head in heads {
         let mut current = Some(head);
-        while let Some(i) = current.filter(|&i| !seen.contains(&id(&siblings[i]))) {
-            seen.insert(id(&siblings[i]));
+        while let Some(i) = current.filter(|&i| !placed[i]) {
+            placed[i] = true;
             order.push(i);
             current = by_left.get(&id(&siblings[i])).copied();
         }
     }
     let mut rest: Vec<usize> = (0..siblings.len()).collect();
     rest.sort_by_key(|&i| id(&siblings[i]));
-    order.extend(rest.into_iter().filter(|&i| !seen.contains(&id(&siblings[i]))));
+    order.extend(rest.into_iter().filter(|&i| !placed[i]));
 
     let mut slots: Vec<Option<T>> = siblings.into_iter().map(Some).collect();
     order.into_iter().map(|i| slots[i].take().expect("each sibling is placed once")).collect()
@@ -117,12 +113,12 @@ fn number_id(value: Option<&Value>) -> Option<i64> {
     value.and_then(crate::wire::whole_number)
 }
 
-/// `node.<key>?.id` of a block's `parent`, `page` or `left`: the `id` the reference carries.
+/// The `id` that a block's `parent`, `page` or `left` reference carries.
 fn reference_id(block: &Map<String, Value>, key: &str) -> Option<i64> {
     number_id(block.get(key).and_then(|reference| reference.get("id")))
 }
 
-/// `buildBlockTrees`: `getPageBlocksTree`-shaped trees from flat Datalog blocks, by page id.
+/// `getPageBlocksTree`-shaped trees from flat Datalog blocks, by page id.
 ///
 /// Mirrors the Editor API's output: camelCase keys, a `children` array on every block (empty for a
 /// leaf) and a 1-based `level`, after the keys the pull gave (`children` first, since it is made
@@ -131,12 +127,12 @@ fn reference_id(block: &Map<String, Value>, key: &str) -> Option<i64> {
 /// lost, under the page its `page` names, else its parent; a block with neither is dropped.
 ///
 /// Every page in `page_ids` has an entry, `[]` for a page with no blocks. A block whose own `id`
-/// is missing counts as id 0; every block the pull gives has one (`blockSchema`).
+/// is missing counts as id 0; every block the pull gives has one.
 pub fn build_block_trees(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> HashMap<i64, Vec<Value>> {
     build_block_trees_ordered(blocks, page_ids).into_iter().collect()
 }
 
-/// [`build_block_trees`] in the order the TypeScript `Map` holds its entries: the pages of
+/// [`build_block_trees`] in insertion order: the pages of
 /// `page_ids` first, in that order, then every other page in the order its first top-level block
 /// came. A caller that writes the pages one after the other (the context Markdown) needs it.
 pub fn build_block_trees_ordered(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> Vec<(i64, Vec<Value>)> {
@@ -166,7 +162,7 @@ pub fn build_block_trees_ordered(blocks: Vec<Map<String, Value>>, page_ids: &[i6
         match parent_id {
             Some(parent) if node_ids.contains(&parent) && parent != ids[i] => children_of.entry(parent).or_default().push(i),
             _ => {
-                // `node.page?.id ?? parentId`
+                // the block's page, else its parent
                 let Some(page_id) = reference_id(node, "page").or(parent_id) else { continue };
                 if !roots_of.contains_key(&page_id) {
                     page_order.push(page_id);
@@ -234,17 +230,17 @@ mod tests {
     #[test]
     fn two_keys_that_camelize_alike_keep_the_first_place_and_the_last_value() {
         let out = camelize_keys(&object(json!({"a-b": 1, "z": 0, "aB": 2})));
-        assert_eq!(crate::js::json_stringify(&Value::Object(out)), r#"{"aB":2,"z":0}"#);
+        assert_eq!(Value::Object(out).to_string(), r#"{"aB":2,"z":0}"#);
         // a block spelled both ways: the camelCase twin's list wins, at the kebab-case key's place
         let block = object(json!({"properties-order": ["a-b"], "x": 1, "propertiesOrder": ["c-d"]}));
-        assert_eq!(crate::js::json_stringify(&Value::Object(camelize_block(&block))), r#"{"propertiesOrder":["cD"],"x":1}"#);
+        assert_eq!(Value::Object(camelize_block(&block)).to_string(), r#"{"propertiesOrder":["cD"],"x":1}"#);
     }
 
     #[test]
     fn properties_that_are_not_a_map_are_left_alone() {
         let block = object(json!({"properties": null, "properties-text-values": [1], "properties-order": "x-y"}));
         assert_eq!(
-            crate::js::json_stringify(&Value::Object(camelize_block(&block))),
+            Value::Object(camelize_block(&block)).to_string(),
             r#"{"properties":null,"propertiesTextValues":[1],"propertiesOrder":"x-y"}"#
         );
     }
@@ -310,9 +306,11 @@ mod tests {
     }
 
     #[test]
-    fn a_sibling_that_shares_an_id_with_a_placed_one_is_dropped() {
-        // suspected TS bug, kept: nothing is dropped, the doc says, yet the second 7 is
-        assert_eq!(ordered(vec![(7, Some(1)), (7, Some(1))]), [7]);
+    fn a_sibling_that_shares_an_id_with_a_placed_one_is_kept() {
+        // nothing is dropped: both 7s come back, the second after the first
+        assert_eq!(ordered(vec![(7, Some(1)), (7, Some(1))]), [7, 7]);
+        // a duplicate met again along a chain is kept, and the chain stops at the first block it has placed
+        assert_eq!(ordered(vec![(7, Some(1)), (8, Some(7)), (7, Some(8))]), [7, 8, 7]);
     }
 
     fn flat(blocks: Vec<Value>) -> Vec<Map<String, Value>> {
@@ -372,7 +370,7 @@ mod tests {
     fn a_block_that_is_its_own_parent_or_in_a_cycle_does_not_loop() {
         let trees = build_block_trees(flat(vec![block(1, 10, 1, 1)]), &[10]);
         assert_eq!(trees[&10].len(), 1);
-        // 2 and 3 are each other's parent: neither is a root, so both are lost, as in TypeScript
+        // 2 and 3 are each other's parent: neither is a root, so both are lost (a cycle has no top to start from)
         let trees = build_block_trees(flat(vec![block(2, 10, 3, 3), block(3, 10, 2, 2)]), &[10]);
         assert!(trees[&10].is_empty());
     }

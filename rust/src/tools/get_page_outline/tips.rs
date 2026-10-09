@@ -1,4 +1,4 @@
-//! What the page outline suggests next (`logseq_get_page_outline` in `src/utils/tips.ts`).
+//! What the page outline suggests next.
 
 use serde_json::json;
 

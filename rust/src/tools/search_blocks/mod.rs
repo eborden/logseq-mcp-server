@@ -1,4 +1,4 @@
-//! `logseq_search_blocks` (the Rust side of `src/tools/search-blocks.ts`): a case-insensitive,
+//! `logseq_search_blocks`: a case-insensitive,
 //! literal substring search over block content, newest first.
 //!
 //! Calls: 1 (the search query), or 2 with `include_context` (one batched lookup of the pages the
@@ -22,12 +22,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
@@ -48,7 +47,7 @@ pub const MAX_SEARCH_LIMIT: u64 = 500;
 /// How to reach matches past the maximum: no parameter fetches them.
 const NARROWER: &str = "Narrow the query to see the rest.";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.\n\n\
 **Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).\n\
 **Next:** logseq_build_context on a result's page.";
@@ -57,7 +56,7 @@ fn default_slim_results() -> bool {
     DEFAULT_SLIM_RESULTS
 }
 
-/// The search's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The search's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Text to search for in block content
@@ -72,18 +71,6 @@ pub struct Args {
     pub slim_results: bool,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        query: read.required_string("query")?,
-        limit: read.optional_count("limit", 0)?,
-        include_context: read.boolean("include_context", false)?,
-        slim_results: read.boolean("slim_results", DEFAULT_SLIM_RESULTS)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -93,18 +80,18 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the search, then its meta and tips.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let found = search_blocks_with_meta(client, &args.query, args.limit, args.include_context, args.slim_results).await?;
     // `null` from LogSeq is `null` here, and has no meta or tips: no matches is an empty array
     let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
 
-    let mut content = vec![ContentBlock::text(js::json_stringify(&Value::Array(found.results.clone())))];
+    let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
     let tips = if tips_enabled { search_tips(&args.query, &found.results, found.matches()) } else { Vec::new() };
     let mut meta = serde_json::to_value(&found.meta).expect("a result meta serializes");
     if !tips.is_empty() {
         meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
     }
-    content.push(ContentBlock::text(js::json_stringify(&json!({ "meta": meta }))));
+    content.push(ContentBlock::text(json!({ "meta": meta }).to_string()));
     Ok(success_result(content))
 }
 
@@ -128,13 +115,13 @@ fn block_id(block: &Value) -> i64 {
     block.get("id").and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
-/// The id of the page a block sits on (`blockPageId`): undefined when the block carries no page.
+/// The id of the page a block sits on: `None` when the block carries no page.
 fn block_page_id(block: &Value) -> Option<i64> {
     id_of(block.get("page"))
 }
 
 /// A page pulled with `[*]` (kebab-case keys), as the camelCase page entity `getAllPages` returns
-/// and `toSlimPage` reads: the pull's keys, then the Editor API's spellings added. What it builds
+/// and the slim output reads: the pull's keys, then the Editor API's spellings added. What it builds
 /// carries both `originalName` and `original-name`.
 fn pulled_page_to_entity(pulled: &Map<String, Value>) -> Map<String, Value> {
     const RENAMED: [&str; 5] = ["original-name", "journal-day", "created-at", "updated-at", "properties-text-values"];
@@ -226,7 +213,7 @@ async fn with_page_context(client: &LogseqClient, blocks: &[Value]) -> Result<(V
     Ok((contexts, unavailable))
 }
 
-/// A slim result: `toSlimBlock`, with its `context` slimmed too. Empty `references` and `tags` are
+/// A slim result: the slim block, with its `context` slimmed too. Empty `references` and `tags` are
 /// left out (#42): the block is slim, so the lists add only bytes.
 fn slim_result(block: &Value, context: Option<&Context>) -> Value {
     let block = block.as_object().expect("a checked block is an object");
@@ -270,7 +257,7 @@ pub async fn find_blocks(client: &LogseqClient, query: &str) -> Result<Option<Ve
 }
 
 /// `blocks` as full results with `context` (page, references, tags) added from one batched page
-/// lookup (`withPageContext`), and whether LogSeq answered `null` to that lookup (the blocks then carry no
+/// lookup, and whether LogSeq answered `null` to that lookup (the blocks then carry no
 /// `context`, and the caller says so with [`hit_pages_unavailable`]). API calls: 1, or 0 when no block has a page id.
 pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>) -> Result<(Vec<Value>, bool), ToolError> {
     let (contexts, unavailable) = with_page_context(client, &blocks).await?;
@@ -341,12 +328,12 @@ mod tests {
         });
         let entity = pulled_page_to_entity(pulled.as_object().unwrap());
         assert_eq!(
-            js::json_stringify(&Value::Object(entity)),
+            Value::Object(entity).to_string(),
             r#"{"id":5,"name":"alice","uuid":"u","originalName":"Alice","original-name":"Alice","journalDay":20250101,"createdAt":7,"updatedAt":8,"propertiesTextValues":{"a":"b"}}"#
         );
         // a pull without the renamed keys adds none
         let bare = json!({"id": 6, "name": "bob"});
-        assert_eq!(js::json_stringify(&Value::Object(pulled_page_to_entity(bare.as_object().unwrap()))), r#"{"id":6,"name":"bob"}"#);
+        assert_eq!(Value::Object(pulled_page_to_entity(bare.as_object().unwrap())).to_string(), r#"{"id":6,"name":"bob"}"#);
     }
 
     fn block(id: i64, content: &str) -> Value {
@@ -361,11 +348,11 @@ mod tests {
     #[test]
     fn a_full_result_is_the_block_as_it_came_with_its_context_after_it() {
         assert_eq!(
-            js::json_stringify(&full_result(&block(1, "hi [[Bob]]"), None)),
+            full_result(&block(1, "hi [[Bob]]"), None).to_string(),
             r#"{"id":1,"uuid":"u1","content":"hi [[Bob]]","page":{"id":5,"name":"alice","original-name":"Alice"}}"#
         );
         assert_eq!(
-            js::json_stringify(&full_result(&block(1, "hi [[Bob]]"), Some(&context()))),
+            full_result(&block(1, "hi [[Bob]]"), Some(&context())).to_string(),
             r#"{"id":1,"uuid":"u1","content":"hi [[Bob]]","page":{"id":5,"name":"alice","original-name":"Alice"},"context":{"page":{"id":5,"name":"alice","originalName":"Alice","original-name":"Alice","journal?":false},"references":["Bob"],"tags":[]}}"#
         );
     }
@@ -373,11 +360,11 @@ mod tests {
     #[test]
     fn a_slim_result_names_the_page_and_leaves_out_what_is_empty() {
         assert_eq!(
-            js::json_stringify(&slim_result(&block(1, "hi [[Bob]] #t"), None)),
+            slim_result(&block(1, "hi [[Bob]] #t"), None).to_string(),
             r##"{"uuid":"u1","content":"hi [[Bob]] #t","pageName":"Alice","tags":["t"],"pageRefs":["Bob"]}"##
         );
         assert_eq!(
-            js::json_stringify(&slim_result(&block(1, "hi [[Bob]]"), Some(&context()))),
+            slim_result(&block(1, "hi [[Bob]]"), Some(&context())).to_string(),
             r#"{"uuid":"u1","content":"hi [[Bob]]","pageName":"Alice","pageRefs":["Bob"],"context":{"page":{"name":"alice","originalName":"Alice"},"references":["Bob"]}}"#
         );
     }
@@ -412,16 +399,26 @@ mod tests {
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let only_query = json!({"query": "x"});
-        let defaults = read_args(only_query.as_object()).unwrap();
+        let defaults = parse_args::<Args>(only_query.as_object()).unwrap();
         assert_eq!(defaults, Args { query: "x".into(), limit: None, include_context: false, slim_results: true });
         assert_eq!(serde_json::from_value::<Args>(only_query).unwrap(), defaults);
         // the first argument in schema order that is wrong is the one reported
         let bad = json!({"slim_results": 0, "limit": "a"});
-        assert_eq!(read_args(bad.as_object()).unwrap_err().to_string(), "Invalid parameter 'query': missing\n\nExpected: a string (required)\nExample: query: \"...\"");
+        assert_eq!(parse_args::<Args>(bad.as_object()).unwrap_err().to_string(), "Invalid parameter 'query': missing\n\nExpected: a string (required)\nExample: query: \"...\"");
         let bad = json!({"query": "x", "slim_results": 0, "limit": "a"});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': \"a\"\n\nExpected: a number, not a string\nExample: limit: 5"
         );
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"query": "x"});
+        sweep::<Args>(json!({}), "query", Takes::Text, true);
+        sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "include_context", Takes::Flag, false);
+        sweep::<Args>(base, "slim_results", Takes::Flag, false);
     }
 }

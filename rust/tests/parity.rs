@@ -7,12 +7,12 @@
 //! - the result: a JSON tool result by deep equality (key order ignored, array order kept, numbers by value)
 //!   and minified (ADR-0009), every other text (markdown, a prompt's messages, a resource read, the frame of a
 //!   page-not-found message) byte for byte, and the closest names of a page-not-found message by the rules of
-//!   ADR-0032 (#335);
+//!   ADR-0034 Decision 4 (#335);
 //! - the LogSeq calls (ADR-0034 Decision 5): every call the server makes matches a recorded call in method, query
 //!   text (layout aside) and inputs, whatever the server does with the answer, and there are at most as many as the
 //!   case's ceiling (`call-ceilings.json`). Their order and grouping are not compared, a repeated query is matched
 //!   to its recorded calls in the recorded order, and every recorded call is a read;
-//! and once: `tools/list` by meaning against the recorded list (ADR-0031, #292), that startup and `tools/list`
+//! and once: `tools/list` by meaning against the recorded list (ADR-0034 Decision 3, #292), that startup and `tools/list`
 //! make no LogSeq call, and that the recorded set exercises the closest-name rules.
 //!
 //! Every rule that decides whether an answer matches is in `parity_support/compare.rs`. `parity_self_check.rs`
@@ -304,12 +304,13 @@ fn a_json_tool_result_has_to_be_minified() {
         let failures = compare_results(&expected, &tool_result(layout), &[]);
         assert!(failures.iter().any(|f| f.contains("not minified")), "{layout:?} passed: {failures:?}");
     }
-    // A spelling JSON.stringify would not have written is not minified either (the Node harness agrees)
-    for spelling in [r#"{"a":1,"b":[1.0,2]}"#, r#"{"a":1,"b":[1e0,2]}"#, r#"{"a":1,"b":[1,2],"c":"\u0041"}"#, r#"{"a":1,"b":[1,2],"c":"\/"}"#] {
+    // A spelling serde_json would not have written is not minified either: a whole number as a float, an exponent, an escape
+    for spelling in [r#"{"a":1,"b":[1.0,2]}"#, r#"{"a":1,"b":[1e0,2]}"#, r#"{"a":1,"b":[1,2],"c":"\u0041"}"#, r#"{"a":1,"b":[1,2],"c":"\/"}"#, r#"{"a":1.50}"#] {
         assert!(!minified_failures(&tool_result(spelling)).is_empty(), "{spelling} passed");
     }
-    // What JSON.stringify writes is minified, the number corners included
-    assert_eq!(minified_failures(&tool_result(r#"{"a":1e+21,"b":[0.1,1.5e-7],"c":"é😀\u0001\n\""}"#)), Vec::<String>::new());
+    // What serde_json writes is minified, the number corners included
+    let corners = json!({"a": 1e21, "b": [0.1, 1.5e-7], "c": "é😀\u{1}\n\""}).to_string();
+    assert_eq!(minified_failures(&tool_result(&corners)), Vec::<String>::new());
     // Whitespace inside a string is the value's, not layout
     let spaced = tool_result(r#"{"a":"x  y\n"}"#);
     assert_eq!(compare_results(&spaced, &spaced, &[]), Vec::<String>::new());
@@ -344,7 +345,7 @@ fn the_frame_of_a_page_not_found_message_is_byte_for_byte() {
     assert!(!compare_results(&reference, &other_frame, &candidates).is_empty());
 }
 
-// ---- the closest-name rules (ADR-0032), and the self-check that wrong lists are caught
+// ---- the closest-name rules (ADR-0034 Decision 4), and the self-check that wrong lists are caught
 
 fn names(list: &[&str]) -> Vec<String> {
     list.iter().map(|n| (*n).to_owned()).collect()
@@ -365,11 +366,12 @@ fn a_page_not_found_message_is_read_by_its_frame() {
     assert_eq!(parsed.opening, "No page \"Atlas\". Closest: ");
     let bare = parse_not_found(&message("2025-01-01", None)).unwrap();
     assert_eq!((bare.opening.as_str(), bare.list), ("No page \"2025-01-01\".", None));
-    // A JSON-RPC error carries its code in front, more than once; an escaped quote stays in the input
-    let wrapped = format!("MCP error -32602: MCP error -32602: {}", message("a \"b\"", Some("A B")));
-    let parsed = parse_not_found(&wrapped).unwrap();
+    // A JSON-RPC error's message is recorded as the server sent it, with nothing in front; an escaped quote
+    // stays in the input, and a message with something in front is not read as a not-found message
+    let parsed = parse_not_found(&message("a \"b\"", Some("A B"))).unwrap();
     assert_eq!(parsed.input, "a \"b\"");
-    assert!(parsed.opening.starts_with("MCP error -32602: MCP error -32602: No page "));
+    assert!(parsed.opening.starts_with("No page "));
+    assert!(parse_not_found(&format!("MCP error -32602: {}", message("a \"b\"", Some("A B")))).is_none());
     assert!(parse_not_found("No page \"a\". Closest: . Try something.").is_none());
     assert!(parse_not_found("Page not found").is_none());
 }

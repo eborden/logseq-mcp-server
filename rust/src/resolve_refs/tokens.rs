@@ -1,12 +1,12 @@
-//! Finding refs and embeds in a block's text, and cleaning a target's text (the scanner and
-//! `cleanContent` of `src/utils/resolve-refs.ts`). The TypeScript server does both with regular
-//! expressions; the crate has no regex engine, and each pattern is small, so they are written out
-//! here, with the same matches: the same leftmost-first alternation, the same `\s`
-//! ([`js::is_js_space`]) and the same ASCII-only case folding as the `i` flag.
+//! Finding refs and embeds in a block's text, and cleaning a target's text.
+//! Both are small regex-shaped patterns and the crate has no regex engine, so they are written out
+//! here: leftmost-first alternation, white space as Rust takes it (`char::is_whitespace`, not the
+//! wider `\s` of a JavaScript regex) and ASCII-only case folding, as the `i` flag does.
 
 use std::ops::Range;
 
 use crate::js;
+use crate::refs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -60,9 +60,9 @@ fn strip_ci<'a>(s: &'a str, lit: &str) -> Option<&'a str> {
     head.eq_ignore_ascii_case(lit).then(|| &s[lit.len()..])
 }
 
-/// `\s*`
+/// `\s*`, with Rust's white space
 fn skip_space(s: &str) -> &str {
-    s.trim_start_matches(js::is_js_space)
+    s.trim_start_matches(char::is_whitespace)
 }
 
 /// `\s+`
@@ -90,14 +90,12 @@ fn block_embed(rest: &str) -> Option<(&str, &str)> {
     Some((id, rest))
 }
 
-/// `\{\{embed\s+\[\[([^\[\]\n]+)\]\]\s*\}\}`, the text after the opening `{{`.
+/// `\{\{embed\s+<page ref>\s*\}\}`, the text after the opening `{{`. The page ref is the one
+/// grammar of [`refs`].
 fn page_embed(rest: &str) -> Option<(&str, &str)> {
-    let rest = skip_space_1(strip_ci(rest, "embed")?)?.strip_prefix("[[")?;
-    // The name can't hold a bracket, so the first one ends it, and it must be the `]]`
-    let name_len = rest.find(['[', ']', '\n']).unwrap_or(rest.len());
-    let (name, rest) = rest.split_at(name_len);
-    let rest = skip_space(rest.strip_prefix("]]")?).strip_prefix("}}")?;
-    (!name.is_empty()).then_some((name, rest))
+    let (name, rest) = refs::ref_at(skip_space_1(strip_ci(rest, "embed")?)?)?;
+    let rest = skip_space(rest).strip_prefix("}}")?;
+    Some((name, rest))
 }
 
 /// `\(\((UUID)\)\)`, the text after the opening `((`.
@@ -106,7 +104,7 @@ fn plain_ref(rest: &str) -> Option<(&str, &str)> {
     Some((id, rest.strip_prefix("))")?))
 }
 
-/// The refs and embeds in `text`, in order, as `matchAll` finds them: `{{embed ((uuid))}}`,
+/// The refs and embeds in `text`, in order, left to right and not overlapping: `{{embed ((uuid))}}`,
 /// `{{embed [[page]]}}` and `((uuid))`, in that order of precedence at a position. Only strict
 /// uuids match, so `((not a uuid))` is left alone.
 pub fn scan(text: &str) -> Vec<Found> {
@@ -175,7 +173,7 @@ fn id_line(s: &str) -> Option<usize> {
     Some(s.len() - rest.len() + ending)
 }
 
-/// `cleanContent`: a block's text without the `id::` property line LogSeq stores in it, wherever
+/// A block's text without the `id::` property line LogSeq stores in it, wherever
 /// it sits, with any spacing and line ending and only at the start of a line, then without
 /// trailing white space.
 pub fn clean_content(content: &str) -> String {
@@ -238,10 +236,10 @@ mod tests {
         // no space after "embed" is no embed, and the ref inside is found on its own
         let tight = format!("{{{{embed(({A}))}}}}");
         assert_eq!(kinds(&tight).iter().map(|k| k.0).collect::<Vec<_>>(), [Kind::Ref]);
-        // U+0085 is not white space in JavaScript
-        assert_eq!(kinds(&format!("{{{{embed\u{85}(({A}))}}}}")).iter().map(|k| k.0).collect::<Vec<_>>(), [Kind::Ref]);
-        // U+FEFF is
-        assert_eq!(kinds(&format!("{{{{embed\u{feff}(({A}))}}}}"))[0].0, Kind::BlockEmbed);
+        // U+FEFF is not white space (Rust's set, not JavaScript's)
+        assert_eq!(kinds(&format!("{{{{embed\u{feff}(({A}))}}}}")).iter().map(|k| k.0).collect::<Vec<_>>(), [Kind::Ref]);
+        // U+0085 is
+        assert_eq!(kinds(&format!("{{{{embed\u{85}(({A}))}}}}"))[0].0, Kind::BlockEmbed);
     }
 
     #[test]

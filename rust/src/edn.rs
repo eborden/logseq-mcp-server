@@ -2,8 +2,8 @@
 //! the few literals still embedded in its text (`ground` vectors of entity ids and `#uuid`s).
 //!
 //! Each value's type says what it means, and only a valid one can be built, so the checks the
-//! TypeScript builders make at run time (`toLowerCase()` before every `:block/name` lookup,
-//! `groundIds`' `Number.isInteger`, `groundUuids`' pattern) happen once, where the value is
+//! builders would otherwise repeat at run time (lowercasing before every `:block/name` lookup,
+//! an integer check on every id, the uuid pattern) happen once, where the value is
 //! parsed, and a query builder can't skip them:
 //! - [`PageName`] is lowercased when it is made (constraint 5), so a `:block/name` lookup can't
 //!   be sent mixed case. There is no way to get one from a `String` without lowercasing it.
@@ -13,12 +13,12 @@
 //! LogSeq reads every input after the query string as EDN, so a bare string is read as a symbol
 //! and matches nothing. Each input is sent as its JSON text: a JSON string literal is a valid EDN
 //! string literal, a JSON array of strings a valid EDN vector, and quotes, backslashes and control
-//! characters come out escaped. The text is byte for byte what `JSON.stringify` gives for the same
-//! value in `src/client.ts`, which the parity harness (#124) compares.
+//! characters come out escaped. The text is the compact JSON `serde_json` writes for the
+//! value.
 //!
 //! [`DatalogInput`] has no `From<String>` or `From<i64>`: which variant a value is must be written
 //! out, so a page name can't slip through as free text by `.into()`. There is no list of plain
-//! strings either: the only list input the TypeScript builders bind is a list of page names.
+//! strings either: the only list input a query binds is a list of page names.
 
 use std::fmt;
 
@@ -38,7 +38,7 @@ pub enum DatalogInput {
     /// A bound of a range over `:block/journal-day`.
     DayBound(DayBound),
     /// `/` and a page name, for `clojure.string/ends-with?` on `:block/name`: the namespace
-    /// leaf lookup (`namespaceLeafPages`). Lowercase by construction, as the name is.
+    /// leaf lookup. Lowercase by construction, as the name is.
     LeafSuffix(PageName),
 }
 
@@ -98,7 +98,7 @@ impl std::error::Error for InvalidValue {}
 pub struct PageName(String);
 
 impl PageName {
-    /// Lowercases `name` as `toLowerCase()` does (Unicode default case conversion). Any string
+    /// Lowercases `name` with Unicode default case conversion (`str::to_lowercase`). Any string
     /// is a name LogSeq can be asked about, so this can't fail.
     pub fn new(name: &str) -> Self {
         PageName(name.to_lowercase())
@@ -170,7 +170,7 @@ impl JournalDay {
     }
 }
 
-/// A bound of a range over `:block/journal-day`, as `assertJournalBounds` takes it: any whole number.
+/// A bound of a range over `:block/journal-day`: any whole number.
 /// It is compared with each page's journal day (`[(>= ?day ?start)]`), never read as a date, so
 /// it need not be one: a date range the tool accepted (`20250231`, day 31 of any month) is a bound
 /// where a [`JournalDay`] would refuse it.
@@ -178,7 +178,7 @@ impl JournalDay {
 pub struct DayBound(i64);
 
 impl DayBound {
-    /// Any whole number: `assertJournalBounds`'s `Number.isInteger` check is the `i64` type itself.
+    /// Any whole number: the `i64` type is the whole check.
     pub fn new(value: i64) -> DayBound {
         DayBound(value)
     }
@@ -213,8 +213,7 @@ impl PageId {
     }
 }
 
-/// A block uuid: 8-4-4-4-12 hex digits, any case on input, lowercase once parsed (as
-/// `groundUuids` writes it). The pattern leaves out quotes, brackets and whitespace, so an
+/// A block uuid: 8-4-4-4-12 hex digits, any case on input, lowercase once parsed. The pattern leaves out quotes, brackets and whitespace, so an
 /// embedded `#uuid "..."` literal can't be ended early. A string that isn't one can't become one.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BlockUuid(String);
@@ -235,7 +234,7 @@ impl BlockUuid {
     }
 }
 
-/// A `ground` clause binding each id to `variable`, as `DatalogQueryBuilder.groundIds` writes it:
+/// A `ground` clause binding each id to `variable`:
 /// `[(ground [1 2 3]) [?p ...]]`. Bind it straight to the entity variable (CLAUDE.md
 /// constraint 6). `variable` is part of the query, not input, so it must be a `?name`.
 pub fn ground_ids(ids: &[PageId], variable: &str) -> String {
@@ -276,13 +275,13 @@ mod tests {
 
     #[test]
     fn quotes_backslashes_and_control_characters_are_escaped_as_json_stringify_does() {
-        // Expected values are JSON.stringify's output for the same strings.
+        // Expected values are the compact JSON text of the same strings.
         assert_eq!(text(r#"foo "bar"#), r#""foo \"bar""#);
         assert_eq!(text(r"a\b"), r#""a\\b""#);
         assert_eq!(text("line\nnext\ttab\r"), r#""line\nnext\ttab\r""#);
         assert_eq!(text("\u{8}\u{c}"), r#""\b\f""#);
         assert_eq!(text("\u{1}\u{1f}"), r#""\u0001\u001f""#);
-        // JSON.stringify leaves DEL, non-ASCII and the line separators as they are.
+        // JSON leaves DEL, non-ASCII and the line separators as they are.
         assert_eq!(text("\u{7f}é\u{2028}🙂"), "\"\u{7f}é\u{2028}🙂\"");
         // A regex pattern for re-pattern keeps its backslashes doubled once.
         assert_eq!(text(r"(?i)a\.b"), r#""(?i)a\\.b""#);
@@ -298,7 +297,7 @@ mod tests {
     fn a_page_name_is_lowercased_when_made_and_sent_as_a_string() {
         assert_eq!(PageName::new("Project Atlas").as_str(), "project atlas");
         assert_eq!(DatalogInput::PageName(PageName::new("ALICE \"B\"")).to_edn(), r#""alice \"b\"""#);
-        // Unicode default case conversion, as toLowerCase(): final sigma, dotted capital I.
+        // Unicode default case conversion: final sigma, dotted capital I.
         assert_eq!(PageName::new("ΟΔΟΣ").as_str(), "οδος");
         assert_eq!(PageName::new("İ").as_str(), "i\u{307}");
         assert_eq!(PageName::new("already lower"), PageName::new("already lower"));

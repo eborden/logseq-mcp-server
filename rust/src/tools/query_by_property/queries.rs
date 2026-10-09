@@ -1,5 +1,4 @@
-//! The one Datalog query the property search makes (`blocksByProperty` and `normalizePropertyKey`
-//! in `src/datalog/queries.ts`). Both the key and the value are bound with `:in` (ADR-0013), so
+//! The one Datalog query the property search makes. Both the key and the value are bound with `:in` (ADR-0013), so
 //! nothing the caller sent is part of the query text.
 
 use crate::edn::{DatalogInput, Query};
@@ -7,12 +6,12 @@ use crate::errors::InvalidParameter;
 
 /// A property name LogSeq stores a key under: letters and digits, `-` and `_`, starting with a
 /// letter or digit, written in kebab-case and lowercase. It can only be made by [`PropertyKey::parse`],
-/// which is `normalizePropertyKey`, so a query can't be built from a name that was never checked.
+/// which normalizes the key, so a query can't be built from a name that was never checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyKey(String);
 
 impl PropertyKey {
-    /// `normalizePropertyKey`: `createdAt`, `created_at` and `created-at` are the key LogSeq
+    /// The property key: `createdAt`, `created_at` and `created-at` are the key LogSeq
     /// stores as `created-at`. A name with any other character is an `InvalidParameter`, raised
     /// before any LogSeq call.
     pub fn parse(name: &str) -> Result<Self, InvalidParameter> {

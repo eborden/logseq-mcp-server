@@ -1,4 +1,4 @@
-//! `compact` JSON (#43; the Rust side of `src/utils/compact.ts`): the same result with ids, titles
+//! `compact` JSON (#43): the same result with ids, titles
 //! and link targets, and no block bodies. A block shrinks to `{ uuid, snippet }`, where the snippet
 //! is its first line cut to 80 characters; the model reads only the blocks it picks, with
 //! `logseq_get_block`. The Markdown form of `compact` shows the same snippets.
@@ -15,20 +15,17 @@ use serde_json::{Map, Value};
 use crate::entity::{id_of, original_name_of};
 use crate::snippet::Snippet;
 
-/// `compactBlock`: `{ uuid, snippet }`. A block with no `uuid` has none here either.
+/// A compact block: `{ uuid, snippet }`. A block with no `uuid` has none here either.
 pub fn compact_block(block: &Value) -> Value {
     let mut out = Map::new();
     if let Some(uuid) = block.get("uuid") {
         out.insert("uuid".into(), uuid.clone());
     }
-    // PARITY(#299): a snippet cut inside an emoji ends in a lone surrogate in TypeScript, which a Rust string
-    // can't hold: it ends in U+FFFD here (suspected TS bug: `slice` should cut by code point) — drop if Rust
-    // becomes the only server.
-    out.insert("snippet".into(), Value::String(Snippet::of(block.get("content").and_then(Value::as_str)).to_string_lossy()));
+    out.insert("snippet".into(), Value::String(Snippet::of(block.get("content").and_then(Value::as_str)).as_str().to_owned()));
     Value::Object(out)
 }
 
-/// `compactPage`: `{ id, name, originalName }`, each only when the page has it.
+/// A compact page: `{ id, name, originalName }`, each only when the page has it.
 pub fn compact_page(page: &Value) -> Value {
     let mut out = Map::new();
     if let Some(id) = id_of(Some(page)) {
@@ -57,7 +54,7 @@ fn each(value: Option<&Value>, f: impl Fn(&Value) -> Value) -> Value {
     Value::Array(value.and_then(Value::as_array).map(|items| items.iter().map(f).collect()).unwrap_or_default())
 }
 
-/// `compactTopicContext`: a topic's context with block bodies replaced by snippets and pages by
+/// A topic's context with block bodies replaced by snippets and pages by
 /// their names.
 pub fn compact_topic_context(context: &Value) -> Value {
     let mut out = map_of(context);
@@ -84,12 +81,12 @@ pub fn compact_topic_context(context: &Value) -> Value {
     Value::Object(out)
 }
 
-/// `compactQueryContext`: a query's context with every topic compacted and the search hits reduced
+/// A query's context with every topic compacted and the search hits reduced
 /// to snippets.
 pub fn compact_query_context(context: &Value) -> Value {
     let mut out = map_of(context);
     out = with(out, "contexts", each(context.get("contexts"), compact_topic_context));
-    // `searchResults: undefined` is no key once written
+    // a missing `searchResults` stays a missing key
     if let Some(results) = context.get("searchResults") {
         out = with(out, "searchResults", each(Some(results), compact_block));
     }
@@ -99,22 +96,21 @@ pub fn compact_query_context(context: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::js::json_stringify;
     use serde_json::json;
 
     #[test]
     fn a_block_is_its_uuid_and_the_first_line_of_its_content() {
         assert_eq!(compact_block(&json!({"id": 1, "uuid": "u1", "content": "\n  Hello  \nmore", "page": {"id": 2}})), json!({"uuid": "u1", "snippet": "Hello"}));
         // a block with no content has an empty snippet, one with no uuid has none
-        assert_eq!(json_stringify(&compact_block(&json!({"uuid": "u2"}))), r#"{"uuid":"u2","snippet":""}"#);
-        assert_eq!(json_stringify(&compact_block(&json!({"content": "x"}))), r#"{"snippet":"x"}"#);
+        assert_eq!(compact_block(&json!({"uuid": "u2"})).to_string(), r#"{"uuid":"u2","snippet":""}"#);
+        assert_eq!(compact_block(&json!({"content": "x"})).to_string(), r#"{"snippet":"x"}"#);
     }
 
     #[test]
     fn a_page_is_its_id_name_and_original_name_in_either_spelling() {
-        assert_eq!(json_stringify(&compact_page(&json!({"id": 1, "name": "atlas", "original-name": "Atlas", "uuid": "x"}))), r#"{"id":1,"name":"atlas","originalName":"Atlas"}"#);
-        assert_eq!(json_stringify(&compact_page(&json!({"db/id": 7, "originalName": "Atlas"}))), r#"{"id":7,"originalName":"Atlas"}"#);
-        assert_eq!(json_stringify(&compact_page(&json!({"id": 3}))), r#"{"id":3}"#);
+        assert_eq!(compact_page(&json!({"id": 1, "name": "atlas", "original-name": "Atlas", "uuid": "x"})).to_string(), r#"{"id":1,"name":"atlas","originalName":"Atlas"}"#);
+        assert_eq!(compact_page(&json!({"db/id": 7, "originalName": "Atlas"})).to_string(), r#"{"id":7,"originalName":"Atlas"}"#);
+        assert_eq!(compact_page(&json!({"id": 3})).to_string(), r#"{"id":3}"#);
         assert_eq!(compact_page(&json!({})), json!({}));
     }
 
@@ -135,7 +131,7 @@ mod tests {
     #[test]
     fn a_topic_context_keeps_its_keys_and_loses_its_bodies() {
         assert_eq!(
-            json_stringify(&compact_topic_context(&context())),
+            compact_topic_context(&context()).to_string(),
             concat!(
                 r#"{"topic":"atlas","mainPage":{"id":1,"name":"atlas","originalName":"Atlas"},"#,
                 r#""directBlocks":[{"uuid":"u5","snippet":"first"}],"#,

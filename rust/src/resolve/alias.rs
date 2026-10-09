@@ -1,4 +1,4 @@
-//! Alias groups (#69; the Rust side of `src/utils/alias-set.ts`). `alias::` makes two names one
+//! Alias groups (#69). `alias::` makes two names one
 //! concept, but a reference written under either name points at its own page entity, so a tool
 //! that follows links to one page id misses the rest. A tool that follows links to a page asks
 //! for the page's [`AliasSet`] first and uses every id in it.
@@ -11,7 +11,6 @@
 //! [`resolve_alias_set_by_name`] is the group of a free-text name (a `search_term`), where "not a
 //! page" is an ordinary answer.
 
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use super::queries;
@@ -21,8 +20,8 @@ use super::wire::{self, PulledPage};
 use crate::client::LogseqClient;
 use crate::edn::{PageId, PageName};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
+use crate::order;
 
 /// Most pages one alias group may hold here. Groups are written by hand (`alias:: a, b, c`), so a
 /// handful is normal; the cap only bounds the id lists embedded in follow-up queries, and a group
@@ -39,7 +38,7 @@ pub struct AliasMember {
 }
 
 impl AliasMember {
-    /// `memberOf`: a page with an id. One without can't be queried and is not a member.
+    /// A page with an id. One without can't be queried and is not a member.
     fn of(page: &PulledPage) -> Option<AliasMember> {
         page.entity_id().map(|id| AliasMember { id, name: page.lower_name(), original_name: page.display_name() })
     }
@@ -59,45 +58,35 @@ pub struct AliasSet {
 }
 
 impl AliasSet {
-    /// `singleAliasSet`: a set holding only `page`. No query, nothing to union.
+    /// A set holding only `page`. No query, nothing to union.
     pub fn single(page: &PulledPage) -> AliasSet {
         AliasSet { members: AliasMember::of(page).into_iter().collect(), truncated: false, unavailable: None }
     }
 
-    /// `hasAliases`: the set holds more than the page asked about.
+    /// The set holds more than the page asked about.
     pub fn has_aliases(&self) -> bool {
         self.members.len() > 1
     }
 
-    /// `aliasIds`: page ids of the set, as ids a query can embed.
+    /// Page ids of the set, as ids a query can embed.
     pub fn ids(&self) -> Result<Vec<PageId>, ToolError> {
         self.members.iter().map(|member| PageId::new(member.id).map_err(ToolError::from)).collect()
     }
 
-    // PARITY(#299): orders names with `localeCompare('en')`, as `js::locale_compare` orders them (ICU root collation), then by
-    // code unit — drop if Rust becomes the only server.
     /// `resolvedAliases`: the original-case names the tool covered, sorted so asking by either
-    /// name of the group reports the same list. `None` when the page has no aliases, so default
-    /// output is unchanged. Names `en` collation ties fall back to code-unit order, so the order
-    /// never follows arrival order.
+    /// name of the group reports the same list ([`order::by_name`], a total order, so it never
+    /// follows arrival order). `None` when the page has no aliases, so default output is unchanged.
     pub fn resolved_aliases(&self) -> Option<Vec<String>> {
         if !self.has_aliases() {
             return None;
         }
         let mut names: Vec<String> = self.members.iter().map(|member| member.original_name.clone()).collect();
-        names.sort_by(|a, b| js::locale_compare(a, b).then_with(|| compare_code_units(a, b)));
+        names.sort_by(|a, b| order::by_name(a, b));
         Some(names)
     }
 }
 
-// PARITY(#299): orders by UTF-16 code unit, as JavaScript's `<` does, which differs from code point order for
-// a character above U+FFFF against one in U+E000..U+FFFF — drop if Rust becomes the only server.
-/// `a < b ? -1 : a > b ? 1 : 0`: JavaScript compares strings by UTF-16 code unit.
-pub fn compare_code_units(a: &str, b: &str) -> Ordering {
-    a.encode_utf16().cmp(b.encode_utf16())
-}
-
-/// `aliasSetWarnings`: the `alias_set_truncated` warning for each set that was cut, and the
+/// The `alias_set_truncated` warning for each set that was cut, and the
 /// `alias_lookup_unavailable` warning for each whose lookup LogSeq did not answer (#318). No
 /// `howToFetchAll` on the second: no parameter fetches what LogSeq did not answer.
 pub fn alias_set_warnings(sets: &[&AliasSet]) -> Vec<ResultWarning> {
@@ -131,9 +120,7 @@ fn truncated_warning(set: &AliasSet) -> Option<ResultWarning> {
     })
 }
 
-// PARITY(#299): sorts members with `localeCompare`, whose order depends on the host's locale (suspected TS
-// bug; see `js::locale_compare`) — drop if Rust becomes the only server.
-/// `buildSet`: fold query members into a set, start page first, the rest by name, capped.
+/// Folds query members into a set, start page first, the rest by name, capped.
 fn build_set(start: AliasMember, found: Vec<AliasMember>) -> AliasSet {
     let mut seen = HashSet::new();
     let mut others: Vec<AliasMember> = Vec::new();
@@ -152,7 +139,7 @@ fn build_set(start: AliasMember, found: Vec<AliasMember>) -> AliasSet {
             }
         }
     }
-    others.sort_by(|a, b| js::locale_compare(&a.name, &b.name).then(a.id.cmp(&b.id)));
+    others.sort_by(|a, b| order::by_name(&a.name, &b.name).then(a.id.cmp(&b.id)));
     let room = MAX_ALIAS_SET_SIZE - 1;
     let truncated = others.len() > room;
     others.truncate(room);
@@ -217,7 +204,7 @@ pub async fn resolve_alias_set(client: &LogseqClient, page: &PulledPage) -> Resu
     Ok(resolve_alias_sets(client, &[page]).await?.remove(0))
 }
 
-/// `resolveAliasSetByName`: the alias set of a page known only by name, or `None` when no page has
+/// The alias set of a page known only by name, or `None` when no page has
 /// that name or it has no aliases. For free text that may or may not be a page name (a
 /// `search_term`), where "not a page" is an ordinary answer, not an error. One Datalog query.
 /// A `null` answer is not that answer (BR-0011, #318): it is a set with no members, marked
@@ -231,7 +218,7 @@ pub async fn resolve_alias_set_by_name(client: &LogseqClient, name: &str) -> Res
     Ok(alias_set_of_rows(&rows))
 }
 
-/// What `resolveAliasSetByName` makes of the rows: the first start page that has an id, the
+/// What the by-name alias lookup makes of the rows: the first start page that has an id, the
 /// members of every row, and the set they make, or `None` when it holds no more than the start page.
 fn alias_set_of_rows(rows: &[(PulledPage, PulledPage)]) -> Option<AliasSet> {
     let first = rows.iter().find_map(|(start, _)| AliasMember::of(start))?;
@@ -287,7 +274,8 @@ mod tests {
     #[test]
     fn resolved_aliases_are_the_original_names_sorted() {
         let set = build_set(member(9, "Zoe"), vec![member(1, "alice notes"), member(2, "Álvaro"), member(3, "Alice")]);
-        assert_eq!(set.resolved_aliases().unwrap(), ["Alice", "alice notes", "Álvaro", "Zoe"]);
+        // by lowercase name in code point order: an accented letter comes after z, not beside a
+        assert_eq!(set.resolved_aliases().unwrap(), ["Alice", "alice notes", "Zoe", "Álvaro"]);
     }
 
     #[test]
@@ -329,10 +317,4 @@ mod tests {
         assert_eq!(alias_set_warnings(&[&cut]).iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["alias_set_truncated"]);
     }
 
-    #[test]
-    fn code_units_order_an_astral_character_before_a_private_use_one() {
-        // JavaScript's `<` compares UTF-16 units: U+1F680 is 0xD83D 0xDE80, below U+E000
-        assert_eq!(compare_code_units("\u{1F680}", "\u{E000}"), Ordering::Less);
-        assert_eq!("\u{1F680}".cmp("\u{E000}"), Ordering::Greater);
-    }
 }

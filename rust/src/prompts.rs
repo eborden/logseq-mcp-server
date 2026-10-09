@@ -1,4 +1,4 @@
-//! MCP prompts (the Rust side of `src/prompts.ts`, #46): reusable starting messages a host shows as
+//! MCP prompts (#46): reusable starting messages a host shows as
 //! slash commands or menu entries. Each returns one short user message that tells the model which
 //! tools to call, in what order, and what to hand back. The server stays read-only (BR-0002): a
 //! prompt never calls LogSeq and never asks the model to write to the graph through these tools.
@@ -21,7 +21,7 @@ use crate::dates::CalendarDate;
 use crate::js;
 use crate::mcp_error::mcp_error;
 
-/// Longest topic accepted, in UTF-16 code units (`.length`). A topic is a page name or a short
+/// Longest topic accepted, in characters. A topic is a page name or a short
 /// phrase, not a paragraph.
 pub const MAX_TOPIC_LENGTH: usize = 200;
 
@@ -50,22 +50,21 @@ fn invalid(message: &str) -> ErrorData {
     mcp_error(ErrorCode::INVALID_PARAMS, message)
 }
 
-/// `JSON.stringify` of a string.
+/// A string as a JSON string literal.
 fn quoted(text: &str) -> String {
-    js::json_stringify(&Value::from(text))
+    Value::from(text).to_string()
 }
 
-/// The length `.length` gives: UTF-16 code units.
+/// The length of a text in characters (code points).
 fn length(text: &str) -> usize {
-    text.encode_utf16().count()
+    text.chars().count()
 }
 
 /// Reject arguments the prompt does not declare, so a typo is not silently ignored. They are named in the
-/// order `Object.keys` lists them.
+/// order they were sent in.
 fn reject_unknown_arguments(definition: &PromptDefinition, raw: &JsonObject) -> Result<(), ErrorData> {
-    let unknown: Vec<String> = js::entries_in_js_order(raw)
-        .into_iter()
-        .map(|(key, _)| key)
+    let unknown: Vec<String> = raw
+        .keys()
         .filter(|key| !definition.arguments.iter().any(|known| known.name == key.as_str()))
         .map(|key| quoted(key))
         .collect();
@@ -156,7 +155,7 @@ pub struct WeekRange {
     pub partial: bool,
 }
 
-/// `resolveWeek`: work weeks run Monday to Friday. `week` is `this` (default), `last`, or any day in
+/// Work weeks run Monday to Friday. `week` is `this` (default), `last`, or any day in
 /// the week as `YYYY-MM-DD` / `YYYYMMDD`. A week still under way ends today.
 pub fn resolve_week(week: Option<&str>, today: CalendarDate) -> Result<WeekRange, ErrorData> {
     let spec = week.unwrap_or("this").to_lowercase();
@@ -214,7 +213,7 @@ fn parse_month(text: &str) -> Option<(u32, u32)> {
     Some((digits(bytes, 0, 4)?, digits(bytes, 5, 2)?))
 }
 
-/// `resolveMonth`: `month` is `this` (default), `last`, or `YYYY-MM`. A month still under way ends today.
+/// The range of a month: `month` is `this` (default), `last`, or `YYYY-MM`. A month still under way ends today.
 pub fn resolve_month(month: Option<&str>, today: CalendarDate) -> Result<MonthRange, ErrorData> {
     let spec = month.unwrap_or("this").to_lowercase();
     let first = match spec.as_str() {
@@ -453,8 +452,7 @@ pub fn get(name: &str, arguments: Option<&JsonObject>, today: CalendarDate) -> R
     })?;
     let empty = JsonObject::new();
     let raw = arguments.unwrap_or(&empty);
-    // Every value must be a string. The TypeScript SDK checks this before the prompt sees the request (and
-    // answers -32603 with the zod issues); a malformed argument is `InvalidParams` here.
+    // Every value must be a string; a malformed argument is `InvalidParams`.
     let mut strings = Arguments::new();
     for (key, value) in raw {
         let Some(text) = value.as_str() else {
@@ -533,12 +531,12 @@ mod tests {
     fn a_week_that_is_not_a_day_or_not_yet_is_invalid() {
         assert_eq!(
             week(Some("tomorrow"), TUESDAY).unwrap_err(),
-            r#"MCP error -32602: "week" must be "this", "last", or a date as YYYY-MM-DD or YYYYMMDD (any day in the week); got "tomorrow"."#
+            r#""week" must be "this", "last", or a date as YYYY-MM-DD or YYYYMMDD (any day in the week); got "tomorrow"."#
         );
         for bad in ["2025-02-30", "2025-13-01", "2025-00-10", "2025-03-00", "2025-3-5", "2025-03-051", "+2025-03-05"] {
             assert!(week(Some(bad), TUESDAY).unwrap_err().contains("must be \"this\""), "{bad}");
         }
-        assert_eq!(week(Some("2025-03-31"), TUESDAY).unwrap_err(), "MCP error -32602: The week of 2025-03-31 has not started yet. Use \"this\", \"last\", or a date in a past or current week.");
+        assert_eq!(week(Some("2025-03-31"), TUESDAY).unwrap_err(), "The week of 2025-03-31 has not started yet. Use \"this\", \"last\", or a date in a past or current week.");
         // a day later in the current week is not "not started"
         assert!(week(Some("2025-03-14"), TUESDAY).is_ok());
     }
@@ -556,11 +554,11 @@ mod tests {
 
     #[test]
     fn a_month_that_is_not_yyyy_mm_or_not_yet_is_invalid() {
-        assert_eq!(month(Some("march"), TUESDAY).unwrap_err(), r#"MCP error -32602: "month" must be "this", "last", or YYYY-MM; got "march"."#);
+        assert_eq!(month(Some("march"), TUESDAY).unwrap_err(), r#""month" must be "this", "last", or YYYY-MM; got "march"."#);
         for bad in ["2025-13", "2025-00", "2025-3", "2025-03-01", "202503"] {
             assert!(month(Some(bad), TUESDAY).unwrap_err().contains("must be \"this\""), "{bad}");
         }
-        assert_eq!(month(Some("2025-04"), TUESDAY).unwrap_err(), "MCP error -32602: 2025-04 has not started yet. Use \"this\", \"last\", or a past or current month.");
+        assert_eq!(month(Some("2025-04"), TUESDAY).unwrap_err(), "2025-04 has not started yet. Use \"this\", \"last\", or a past or current month.");
     }
 
     #[test]
@@ -600,25 +598,25 @@ mod tests {
 
     #[test]
     fn a_prompt_needs_its_required_argument_and_names_the_ones_it_has() {
-        assert_eq!(text_of("continue_on", json!({}), TUESDAY).unwrap_err(), r#"MCP error -32602: Prompt "continue_on" needs a non-empty "topic" argument."#);
+        assert_eq!(text_of("continue_on", json!({}), TUESDAY).unwrap_err(), r#"Prompt "continue_on" needs a non-empty "topic" argument."#);
         assert!(text_of("continue_on", json!({"topic": " \t "}), TUESDAY).unwrap_err().contains("needs a non-empty"));
         assert_eq!(
             text_of("continue_on", json!({"topic": "x", "tpoic": "y", "a": "b"}), TUESDAY).unwrap_err(),
-            r#"MCP error -32602: Prompt "continue_on" has no argument "tpoic", "a". Arguments: topic."#
+            r#"Prompt "continue_on" has no argument "tpoic", "a". Arguments: topic."#
         );
         assert_eq!(
             text_of("nope", json!({}), TUESDAY).unwrap_err(),
-            r#"MCP error -32602: Unknown prompt "nope". Available: weekly_summary, monthly_summary, continue_on, what_do_i_know, prioritize_tasks."#
+            r#"Unknown prompt "nope". Available: weekly_summary, monthly_summary, continue_on, what_do_i_know, prioritize_tasks."#
         );
-        assert_eq!(text_of("continue_on", json!({"topic": 5}), TUESDAY).unwrap_err(), r#"MCP error -32602: Argument "topic" of prompt "continue_on" must be a string."#);
+        assert_eq!(text_of("continue_on", json!({"topic": 5}), TUESDAY).unwrap_err(), r#"Argument "topic" of prompt "continue_on" must be a string."#);
     }
 
     #[test]
-    fn an_unknown_argument_is_named_in_the_order_object_keys_lists_it() {
-        // integer-like keys come first, then the rest in the order sent
+    fn an_unknown_argument_is_named_in_the_order_it_was_sent() {
+        // a numeric-looking name is not moved ahead of the rest
         assert_eq!(
             text_of("prioritize_tasks", json!({"b": "x", "10": "y", "2": "z"}), TUESDAY).unwrap_err(),
-            r#"MCP error -32602: Prompt "prioritize_tasks" has no argument "2", "10", "b". Arguments: focus."#
+            r#"Prompt "prioritize_tasks" has no argument "b", "10", "2". Arguments: focus."#
         );
     }
 
@@ -627,32 +625,33 @@ mod tests {
         let with = |args: &str| text_of("continue_on", serde_json::from_str(args).unwrap(), TUESDAY);
         assert_eq!(
             with(r#"{"topic": "atlas", "__proto__": "x"}"#).unwrap_err(),
-            r#"MCP error -32602: Prompt "continue_on" has no argument "__proto__". Arguments: topic."#
+            r#"Prompt "continue_on" has no argument "__proto__". Arguments: topic."#
         );
         assert_eq!(
             with(r#"{"__proto__": 5, "topic": "atlas"}"#).unwrap_err(),
-            r#"MCP error -32602: Argument "__proto__" of prompt "continue_on" must be a string."#
+            r#"Argument "__proto__" of prompt "continue_on" must be a string."#
         );
         assert_eq!(
             with(r#"{"topic": "atlas", "constructor": "z", "__proto__": "y"}"#).unwrap_err(),
-            r#"MCP error -32602: Prompt "continue_on" has no argument "constructor", "__proto__". Arguments: topic."#
+            r#"Prompt "continue_on" has no argument "constructor", "__proto__". Arguments: topic."#
         );
     }
 
     #[test]
-    fn a_topic_is_trimmed_quoted_and_capped_in_utf16_units() {
+    fn a_topic_is_trimmed_quoted_and_capped_in_characters() {
         let text = text_of("continue_on", json!({"topic": "  say \"hi\"\n "}), TUESDAY).unwrap();
         assert!(text.starts_with(r#"Help me continue where I left off on "say \"hi\"" in my LogSeq graph."#), "{text}");
         assert!(text_of("continue_on", json!({"topic": "a".repeat(200)}), TUESDAY).is_ok());
         assert_eq!(
             text_of("continue_on", json!({"topic": "a".repeat(201)}), TUESDAY).unwrap_err(),
-            "MCP error -32602: \"topic\" is 201 characters; the limit is 200. Use a page name or a short phrase."
+            "\"topic\" is 201 characters; the limit is 200. Use a page name or a short phrase."
         );
-        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(100)}), TUESDAY).is_ok());
-        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(101)}), TUESDAY).unwrap_err().contains("is 202 characters"));
+        // a rocket is one character, not two UTF-16 units
+        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(200)}), TUESDAY).is_ok());
+        assert!(text_of("continue_on", json!({"topic": "\u{1F680}".repeat(201)}), TUESDAY).unwrap_err().contains("is 201 characters"));
         assert_eq!(
             text_of("prioritize_tasks", json!({"focus": "a".repeat(201)}), TUESDAY).unwrap_err(),
-            "MCP error -32602: \"focus\" is 201 characters; the limit is 200."
+            "\"focus\" is 201 characters; the limit is 200."
         );
     }
 

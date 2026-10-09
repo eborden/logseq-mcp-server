@@ -1,5 +1,4 @@
-//! Which of a depth's new pages join the network (`selectCandidates` in
-//! `src/tools/get-concept-network.ts`). The caps keep a hub page usable: `max_fanout` limits what
+//! Which of a depth's new pages join the network. The caps keep a hub page usable: `max_fanout` limits what
 //! one page may add, `max_nodes` what the whole network may hold, and the choice never depends on
 //! the order the query's rows came in.
 
@@ -29,7 +28,7 @@ pub struct Selection {
     pub dropped_by_budget: usize,
 }
 
-/// `Number(a.isJournal) - Number(b.isJournal) || score(b) - score(a) || a.id - b.id`: non-journal
+/// The order of candidates: non-journal
 /// pages first, then the higher score, then the lower id.
 fn rank(score: impl Fn(&Candidate) -> i64) -> impl Fn(&Candidate, &Candidate) -> Ordering {
     move |a, b| {

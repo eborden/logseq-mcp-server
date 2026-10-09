@@ -1,4 +1,4 @@
-//! `logseq_get_page_outline` (the Rust side of `src/tools/get-page-outline.ts`): a page's
+//! `logseq_get_page_outline`: a page's
 //! top-level blocks with a first-line snippet and a child count each, so a model can choose what
 //! to read with `logseq_get_block` instead of loading a long page whole.
 //!
@@ -20,23 +20,24 @@ use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::args::parse_args;
 use crate::block_tree::order_siblings;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
 use crate::meta::{ResultMeta, ResultWarning};
-use crate::params::{ParamAliases, bad_string_param, resolve_param_aliases};
+use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::require_page;
 use crate::snippet::Snippet;
 use crate::tips::tips_content;
-use crate::tool::{input_schema, parse_args, read_only_annotations, success_result};
+use crate::tool::{input_schema, read_only_annotations, success_result};
 
 use self::tips::{TipBlock, outline_tips};
 use self::wire::OutlineBlock;
 
 pub const NAME: &str = "logseq_get_page_outline";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "List a page's top-level blocks: uuid, the first line (80 characters) and the number of children. Cheaper than logseq_get_page for a long page.\n\n\
 **Use when:** you need a page's shape before reading parts of it. Read the blocks you pick with logseq_get_block.\n\
 **Can't find:** nested blocks below the first level, or block text past the first line (logseq_get_block, logseq_get_page).";
@@ -44,7 +45,7 @@ const DESCRIPTION: &str = "List a page's top-level blocks: uuid, the first line 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
 
-/// The outline's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The outline's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     /// Page name, alias, or ISO date (2025-01-01) for a journal
@@ -58,11 +59,10 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Get Page Outline"))
 }
 
-/// A call: aliases folded, arguments parsed, the tool, then its tip.
+/// A call: aliases folded, arguments parsed (`page_name` is required), the tool, then its tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let args = parse_args::<Args>(arguments.clone())
-        .map_err(|_| ToolError::InvalidParameter(bad_string_param("page_name", arguments.as_ref())))?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let outline = get_page_outline(client, &args.page_name).await?;
     let mut content = vec![ContentBlock::text(serde_json::to_string(&outline).expect("an outline serializes"))];
     if tips_enabled {
@@ -130,8 +130,6 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
     let mut top: Vec<Top<'_>> = Vec::new();
     let mut child_count: HashMap<i64, usize> = HashMap::new();
     for block in rows.iter().flatten() {
-        // PARITY(#299): a parent counts by its `id` only, while a block's own id reads `id` then `db/id`
-        // (suspected TS inconsistency) — drop if Rust becomes the only server.
         let Some(parent_id) = block.parent.and_then(self::wire::Parent::id) else { continue };
         if parent_id == page_id {
             top.push(Top { id: block.entity_id().unwrap_or(0), left: block.left_id, block });
@@ -219,7 +217,13 @@ pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::testing::{Takes, sweep};
     use serde_json::{Value, json};
+
+    #[test]
+    fn page_name_is_a_required_string() {
+        sweep::<Args>(json!({}), "page_name", Takes::Text, true);
+    }
 
     fn rows(blocks: Vec<Value>) -> Vec<Option<OutlineBlock>> {
         let answer = Value::Array(blocks.into_iter().map(|b| json!([b])).collect());
@@ -300,6 +304,16 @@ mod tests {
         let rows = rows(vec![block(103, Some(10), 10, "top"), child]);
         let (blocks, _, _) = outline_of(10, &rows);
         assert_eq!(blocks[0].child_count, 1);
+    }
+
+    #[test]
+    fn a_parent_spelled_db_id_counts_as_the_page_or_the_parent_block() {
+        let mut top = block(103, None, 10, "top");
+        top["parent"] = json!({"db/id": 10});
+        let mut child = block(203, None, 103, "child");
+        child["parent"] = json!({"db/id": 103});
+        let (blocks, _, total) = outline_of(10, &rows(vec![top, child]));
+        assert_eq!((uuids(&blocks), blocks[0].child_count, total), (vec!["u103"], 1, 1));
     }
 
     #[test]

@@ -1,6 +1,5 @@
 //! `max_blocks` (#61): keeping the first blocks across the days of a result, and the
-//! `blocks_truncated` warning that says where the cut fell and how to read on (`capEntries` and
-//! `blocksTruncated` in `src/tools/query-by-date-range.ts`; #187).
+//! `blocks_truncated` warning that says where the cut fell and how to read on (#187).
 
 use serde_json::Value;
 
@@ -43,7 +42,7 @@ pub struct BlockCut {
     pub partial_block: bool,
 }
 
-/// `capEntries`: keep the first `cap` blocks across `entries` (#61), in the order of the entries.
+/// Keeps the first `cap` blocks across `entries` (#61), in the order of the entries.
 /// At or below the cap this returns `None` and the entries stay untouched. Days after the last
 /// kept block are dropped, empty ones included; a day kept part-way keeps its first blocks.
 pub fn cap_entries(entries: &[Entry], cap: usize, nested: bool) -> Option<BlockCut> {
@@ -101,7 +100,7 @@ pub struct TruncationOptions {
     pub requested: u64,
 }
 
-/// `blocksTruncated`: the `blocks_truncated` warning (#187). The message says what was kept and
+/// The `blocks_truncated` warning (#187). The message says what was kept and
 /// where the entries end, plus any fact about a day that no date range can fix. `howToFetchAll`
 /// leads with paging: a call from the day where the entries stop, with the same end of the range
 /// and the same `max_blocks`, which reaches whole days after the cut and never part of one. That is

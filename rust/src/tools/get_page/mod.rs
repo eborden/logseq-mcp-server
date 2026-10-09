@@ -1,4 +1,4 @@
-//! `logseq_get_page` (the Rust side of `src/tools/get-page.ts`): a page by name, optionally with
+//! `logseq_get_page`: a page by name, optionally with
 //! its blocks, optionally with their `((uuid))` refs and `{{embed}}`s resolved.
 //!
 //! Calls: 1 for the exact name of a page that has a file (`logseq.Editor.getPage` alone, no
@@ -25,7 +25,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, PageNotFound, ToolError};
 use crate::js;
@@ -42,7 +42,7 @@ use self::tips::page_tips;
 
 pub const NAME: &str = "logseq_get_page";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get a page by name (case-insensitive). With include_children, also its blocks.\n\n\
 **Use when:** you know the page name.\n\
 **Can't find:** pages by keyword (logseq_search_blocks, logseq_list_pages) or what links here (logseq_get_backlinks).\n\
@@ -51,7 +51,7 @@ const DESCRIPTION: &str = "Get a page by name (case-insensitive). With include_c
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
 
-/// The page tool's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The page tool's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     /// Page name, alias, or ISO date (2025-01-01) for a journal
@@ -66,18 +66,6 @@ pub struct Args {
     pub format: Option<OutputFormat>,
 }
 
-/// The arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        page_name: read.required_string("page_name")?,
-        include_children: read.boolean("include_children", false)?,
-        resolve_refs: read.boolean("resolve_refs", false)?,
-        format: OutputFormat::read(&read)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -88,14 +76,14 @@ pub fn definition() -> Tool {
 /// A call: aliases folded, arguments read, the page, then its tips.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let page = get_page(client, &args.page_name, args.include_children, args.resolve_refs).await?;
     let tips = if tips_enabled { page_tips(&page, &args.page_name, args.include_children) } else { Vec::new() };
     if args.format == Some(OutputFormat::Markdown) {
         let body = render_page(&page, PageRenderOptions { blocks_fetched: args.include_children, ..Default::default() });
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&page, &tips)))]));
     }
-    let mut content = vec![ContentBlock::text(js::json_stringify(&page))];
+    let mut content = vec![ContentBlock::text(page.to_string())];
     if let Some(tips) = tips_content(&tips) {
         content.push(ContentBlock::text(tips));
     }
@@ -228,12 +216,22 @@ mod tests {
     fn the_arguments_are_read_in_schema_order_and_the_aliases_are_folded() {
         let args = |value: Value| value.as_object().cloned();
         let folded = resolve_param_aliases(ALIASES, args(json!({"name": "Atlas", "resolve_refs": true}))).unwrap();
-        let read = read_args(folded.as_ref()).unwrap();
+        let read = parse_args::<Args>(folded.as_ref()).unwrap();
         assert_eq!((read.page_name.as_str(), read.include_children, read.resolve_refs), ("Atlas", false, true));
-        let error = read_args(args(json!({"page_name": "a", "include_children": "yes", "format": "xml"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"page_name": "a", "include_children": "yes", "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'include_children': \"yes\""), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'page_name': missing"), "{error}");
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"page_name": "Atlas"});
+        sweep::<Args>(json!({}), "page_name", Takes::Text, true);
+        sweep::<Args>(base.clone(), "include_children", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "resolve_refs", Takes::Flag, false);
+        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
     }
 
     #[test]

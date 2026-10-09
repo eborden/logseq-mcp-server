@@ -268,9 +268,9 @@ fn a_json_rpc_error_on_a_resource_or_prompt_is_the_result_of_the_case() {
     let mut server = stand_in(|_, _| Reply::Error { code: -32002, message: "No page".into(), data: Some(json!({"uri": "x"})) });
     server.initialize().unwrap();
     let read = plain_case("n", "t", Request::ReadResource("logseq://page/x".into()));
-    assert_eq!(server.run_case(&read).unwrap(), json!({"error": {"code": -32002, "message": "MCP error -32002: No page", "data": {"uri": "x"}}}));
+    assert_eq!(server.run_case(&read).unwrap(), json!({"error": {"code": -32002, "message": "No page", "data": {"uri": "x"}}}));
     let prompt = plain_case("n", "t", Request::GetPrompt { name: "x".into(), arguments: Some(json!({"a": "b"})) });
-    assert_eq!(server.run_case(&prompt).unwrap(), json!({"error": {"code": -32002, "message": "MCP error -32002: No page", "data": {"uri": "x"}}}));
+    assert_eq!(server.run_case(&prompt).unwrap(), json!({"error": {"code": -32002, "message": "No page", "data": {"uri": "x"}}}));
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn a_json_rpc_error_on_a_tool_call_or_a_listing_is_a_failure_of_the_case_and_the
     server.initialize().unwrap();
     for request in [Request::Tool, Request::ListPrompts, Request::ListResources, Request::ListResourceTemplates] {
         let error = server.run_case(&plain_case("n", "t", request)).unwrap_err();
-        assert_eq!((error.message.as_str(), error.server_gone), ("MCP error -32602: bad", false));
+        assert_eq!((error.message.as_str(), error.server_gone), ("bad", false));
     }
 }
 

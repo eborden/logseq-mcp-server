@@ -1,4 +1,4 @@
-//! `logseq_get_context_for_query` (the Rust side of `src/tools/get-context-for-query.ts`): context
+//! `logseq_get_context_for_query`: context
 //! for a natural-language question. Its `[[page]]` and `#tag` topics each get a
 //! `logseq_build_context` (with the caps 10 blocks, 5 related pages and 10 references), and a query
 //! that names none is searched for its first three words over three letters instead.
@@ -12,7 +12,7 @@
 //! A `null` answer is not "none" (BR-0011, #338): a keyword search LogSeq did not answer gives a `search_unavailable`
 //! warning beside the empty `searchResults`, and a topic whose context holds an `*_unavailable` warning gets one
 //! `topic_unavailable` warning about it, since a topic's own warnings are not repeated here. Neither has a
-//! `howToFetchAll`. A `null` answer from the page resolver fails the whole call (#301).
+//! `howToFetchAll`. A topic whose alias group was cut has its `alias_set_truncated` warning passed through, about the topic. A `null` answer from the page resolver fails the whole call (#301).
 //!
 //! `format: "markdown"` renders the result through [`crate::markdown_context`], its warnings and
 //! `hasMore` in a footer. `compact` reduces every block to its snippet and uuid ([`crate::compact`]).
@@ -24,15 +24,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::compact::compact_query_context;
 use crate::errors::{Candidate, ToolError};
-use crate::js;
 use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::render_query_context;
 use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
+use crate::refs;
 use crate::resolve::RETRY_ADVICE;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::{Caps, TopicContext, TopicContextOutput, build_context_for_topic};
@@ -41,7 +41,7 @@ use crate::truncation::{CappedTruncation, capped_truncation_warning};
 
 pub const NAME: &str = "logseq_get_context_for_query";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Context for a natural-language question. Takes [[page]] and #tag topics from the query, else searches its first 3 words over 3 letters (max 100 hits), and builds context for each.\n\n\
 **Can't find:** meaning, or over 100 keyword hits (put specific words first). Topics come from links, tags or literal words, so put page names in [[brackets]].\n\
 **Alternatives:** logseq_build_context for one known topic.";
@@ -67,57 +67,34 @@ const COMMON_WORDS: &[&str] = &[
     "on", "at", "to", "for", "of", "with", "about", "by",
 ];
 
-fn default_max_topics() -> u32 {
-    DEFAULT_MAX_TOPICS as u32
+fn default_max_topics() -> u64 {
+    DEFAULT_MAX_TOPICS
 }
 
-fn default_max_search_results() -> u32 {
-    DEFAULT_MAX_SEARCH_RESULTS as u32
+fn default_max_search_results() -> u64 {
+    DEFAULT_MAX_SEARCH_RESULTS
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
+/// ignores them.
+#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Natural language query (can include [[page references]] and #tags)
     pub query: String,
     /// Maximum number of topics to extract context for (default: 5)
+    // The tool slices with max_topics, so 0 would keep no topic at all (#293)
     #[serde(default = "default_max_topics")]
     #[schemars(range(min = 1))]
-    pub max_topics: u32,
+    pub max_topics: u64,
     /// Maximum number of search results for queries without explicit topics (default: 20, max: 100)
     #[serde(default = "default_max_search_results")]
-    pub max_search_results: u32,
+    pub max_search_results: u64,
     /// json (default), or markdown text. Markdown has block uuids only on search hits and with compact
     pub format: Option<OutputFormat>,
     /// Block snippets and uuids, no bodies. Read one with logseq_get_block
     #[serde(default)]
     pub compact: bool,
-}
-
-/// What a call asked for, read from the arguments in the order the schema lists them, so the first
-/// one that is wrong is the one reported, as `parseArgs` does.
-#[derive(Debug, PartialEq)]
-struct Request {
-    query: String,
-    max_topics: u64,
-    max_search_results: u64,
-    format: Option<OutputFormat>,
-    compact: bool,
-}
-
-fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Request {
-        query: read.required_string("query")?,
-        // The tool slices with max_topics, so 0 would keep no topic at all (#293)
-        max_topics: read.count_or("max_topics", 1, DEFAULT_MAX_TOPICS)?,
-        max_search_results: read.count_or("max_search_results", 0, DEFAULT_MAX_SEARCH_RESULTS)?,
-        format: OutputFormat::read(&read)?,
-        compact: read.boolean("compact", false)?,
-    })
 }
 
 /// The tool as `tools/list` shows it.
@@ -129,7 +106,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the context, then JSON, compact JSON or Markdown. This tool makes no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let request = read_args(arguments.as_ref())?;
+    let request = parse_args::<Args>(arguments.as_ref())?;
     // Markdown names the page of each keyword hit; JSON hits keep their shape
     let hit_pages = request.format == Some(OutputFormat::Markdown);
     let context = get_context_for_query(client, &request.query, request.max_topics, request.max_search_results, hit_pages).await?;
@@ -139,7 +116,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
     }
     let shown = if request.compact { compact_query_context(&result) } else { result };
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&shown))]))
+    Ok(success_result(vec![ContentBlock::text(shown.to_string())]))
 }
 
 /// A warning of a query's result (`QueryWarning`): `code` and `message` first, then the detail (`topic`, and for
@@ -214,9 +191,6 @@ struct QueryContextOutput<'a> {
     has_more: bool,
     warnings: &'a [QueryWarning],
     summary: QuerySummary,
-    // PARITY(#299): a topic's own warnings are dropped here, except as `topic_truncated` (it was cut) and
-    // `topic_unavailable` (LogSeq did not answer part of it, #338), so the `alias_set_truncated` warning of a
-    // topic whose alias group was cut is never shown (suspected TS bug) — drop if Rust becomes the only server.
     contexts: Vec<TopicContextOutput<'a>>,
     #[serde(rename = "searchResults", skip_serializing_if = "Option::is_none")]
     search_results: Option<&'a [Value]>,
@@ -258,63 +232,19 @@ impl QueryContext {
     }
 }
 
-/// `extractTopicsFromQuery`, the `[[page references]]`: the text between `[[` and `]]`, at least one
-/// character, none of them `]`.
-fn page_refs(query: &str) -> Vec<&str> {
-    let bytes = query.as_bytes();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at + 1 < bytes.len() {
-        if bytes[at] == b'[' && bytes[at + 1] == b'[' {
-            let start = at + 2;
-            // `[^\]]+` runs to the next `]`, which must start the closing `]]`
-            if let Some(end) = bytes[start..].iter().position(|&byte| byte == b']').map(|offset| start + offset) {
-                if end > start && bytes.get(end + 1) == Some(&b']') {
-                    found.push(&query[start..end]);
-                    at = end + 2;
-                    continue;
-                }
-            }
-        }
-        at += 1;
-    }
-    found
-}
-
-/// `extractTopicsFromQuery`, the `#tags`: the text after a `#`, at least one character, none of them
-/// whitespace or `#`.
-fn tags(query: &str) -> Vec<&str> {
-    let bytes = query.as_bytes();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at < bytes.len() {
-        if bytes[at] == b'#' {
-            let start = at + 1;
-            let end = query[start..].char_indices().find(|&(_, c)| c == '#' || js::is_js_space(c)).map_or(query.len(), |(offset, _)| start + offset);
-            if end > start {
-                found.push(&query[start..end]);
-                at = end;
-                continue;
-            }
-        }
-        at += 1;
-    }
-    found
-}
-
-/// `extractTopicsFromQuery`: the `[[page references]]`, then the `#tags`, each once, first seen first.
+/// The `[[page references]]`, then the `#tags`, each once, first seen first.
 fn extract_topics(query: &str) -> Vec<String> {
     let mut seen = HashSet::new();
-    page_refs(query).into_iter().chain(tags(query)).filter(|topic| seen.insert(*topic)).map(str::to_owned).collect()
+    refs::page_refs(query).into_iter().map(|found| found.name).chain(refs::tags(query)).filter(|topic| seen.insert(*topic)).map(str::to_owned).collect()
 }
 
 /// The words a keyword search looks for: the first three words of the query, lowercased, longer
-/// than three letters (UTF-16 code units, as `length` counts them) and not stop words.
+/// than three letters (characters) and not stop words.
 fn keywords(query: &str) -> Vec<String> {
     query
         .to_lowercase()
-        .split(js::is_js_space)
-        .filter(|word| js::utf16(word).len() > 3 && !COMMON_WORDS.contains(word))
+        .split(char::is_whitespace)
+        .filter(|word| word.chars().count() > 3 && !COMMON_WORDS.contains(word))
         .take(3)
         .map(str::to_owned)
         .collect()
@@ -339,11 +269,18 @@ fn topic_warning(context: &TopicContext, topic: &str) -> QueryWarning {
     .about(topic)
     .how_to_fetch_all(format!(
         "Call logseq_build_context with topic_name {} and raise max_blocks ({}), max_references ({}) and max_related_pages ({}).",
-        js::json_stringify(&json!(topic)),
+        json!(topic).to_string(),
         totals.blocks,
         totals.references,
         totals.related_pages
     ))
+}
+
+/// The topic's `alias_set_truncated` warning, as the query's own and about the topic: its alias group was cut, so
+/// references written under the other names are missing. It has no `howToFetchAll` (the maximum cannot be raised),
+/// so it is the one warning of a topic that is neither `topic_truncated` nor `topic_unavailable`'s to carry.
+fn topic_alias_warnings(context: &TopicContext, topic: &str) -> Vec<QueryWarning> {
+    context.warnings.iter().filter(|warning| warning.code == "alias_set_truncated").map(|warning| QueryWarning::from(warning.clone()).about(topic)).collect()
 }
 
 /// The roll-up for a topic whose context holds a warning that LogSeq did not answer part of it (a code ending in
@@ -362,7 +299,7 @@ fn topic_unavailable_warning(context: &TopicContext, topic: &str) -> Option<Quer
                 "LogSeq returned no answer to part of the context for \"{topic}\" ({}), so part of this topic's context could not be \
                  read and what is shown may be incomplete. Call logseq_build_context with topic_name {} for the warnings that say which part. {RETRY_ADVICE}",
                 codes.join(", "),
-                js::json_stringify(&json!(topic))
+                json!(topic).to_string()
             ),
         )
         .about(topic),
@@ -371,7 +308,7 @@ fn topic_unavailable_warning(context: &TopicContext, topic: &str) -> Option<Quer
 
 /// The keyword search was not answered: `searchResults` is `[]`, but not because nothing matches.
 fn search_unavailable(keywords: &[String]) -> QueryWarning {
-    let listed: Vec<String> = keywords.iter().map(|keyword| js::json_stringify(&json!(keyword))).collect();
+    let listed: Vec<String> = keywords.iter().map(|keyword| json!(keyword).to_string()).collect();
     QueryWarning::new(
         "search_unavailable",
         format!(
@@ -382,7 +319,7 @@ fn search_unavailable(keywords: &[String]) -> QueryWarning {
     )
 }
 
-/// `getContextForQuery`: the context for a natural-language query.
+/// The context for a natural-language query.
 ///
 /// `max_topics` cuts the topics extracted (at least 1). `max_search_results` is the keyword hits
 /// kept (clamped to [`MAX_SEARCH_RESULTS`]; a cut adds a `search_results_truncated` warning, and
@@ -419,6 +356,7 @@ pub async fn get_context_for_query(
                 if let Some(warning) = topic_unavailable_warning(&context, topic) {
                     warnings.push(warning);
                 }
+                warnings.extend(topic_alias_warnings(&context, topic));
                 contexts.push(context);
             }
             // A missing topic page is an expected partial result: skip it and say so. Everything else
@@ -455,7 +393,7 @@ pub async fn get_context_for_query(
             // the same whichever keyword is searched, since the filter needs all of them, and so is their
             // order: the search sorts newest first and the filter keeps it. The search is the only data
             // source on this path, so any failure propagates: an empty result must mean "nothing matched".
-            let searched = keywords.iter().fold(&keywords[0], |longest, keyword| if js::utf16(keyword).len() > js::utf16(longest).len() { keyword } else { longest });
+            let searched = keywords.iter().fold(&keywords[0], |longest, keyword| if keyword.chars().count() > longest.chars().count() { keyword } else { longest });
             // A `null` answer is no answer, not "no matches" (BR-0011, #338): `searchResults` stays `[]`, and a
             // warning says LogSeq did not answer, so the empty list is not read as a search that found nothing.
             let found = find_blocks(client, searched).await?;
@@ -546,40 +484,35 @@ mod tests {
 
     #[test]
     fn the_arguments_are_read_in_schema_order_and_a_topic_count_below_one_is_refused() {
-        let request = read_args(args(json!({"query": "q", "max_search_results": 0})).as_ref()).unwrap();
+        let request = parse_args::<Args>(args(json!({"query": "q", "max_search_results": 0})).as_ref()).unwrap();
         assert_eq!((request.max_topics, request.max_search_results, request.compact), (5, 0, false));
-        let error = read_args(args(json!({"query": "q", "max_topics": 0, "max_search_results": -1})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"query": "q", "max_topics": 0, "max_search_results": -1})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_topics': 0"), "{error}");
-        let error = read_args(args(json!({"query": "q", "compact": "yes"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"query": "q", "compact": "yes"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'compact': \"yes\""), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'query': missing"), "{error}");
     }
 
     #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"query": "q"});
+        sweep::<Args>(json!({}), "query", Takes::Text, true);
+        sweep::<Args>(base.clone(), "max_topics", Takes::Count(1), false);
+        sweep::<Args>(base.clone(), "max_search_results", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "compact", Takes::Flag, false);
+        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
+    }
+
+    #[test]
     fn topics_are_the_page_references_then_the_tags_each_once() {
-        // the comma after a tag is part of it, as the regex `[^\s#]+` has it
+        // the comma after a tag is part of it: a tag runs to white space or `#` (`refs::tags`)
         assert_eq!(extract_topics("what about [[Atlas]] and #beta, [[Bob Smith]] #beta [[Atlas]] #gamma#delta"), ["Atlas", "Bob Smith", "beta,", "beta", "gamma", "delta"]);
+        // the grammar of `refs::page_refs`: a name holds no bracket or newline, so `[[[c]]` is the topic `c`,
+        // a ref over two lines is none, and a nested ref gives its inner name only
+        assert_eq!(extract_topics("[[[c]] [[x\ny]] [[a [[b]] d]]"), ["c", "b"]);
         assert_eq!(extract_topics("nothing here"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn a_page_reference_is_one_or_more_characters_up_to_a_closing_pair() {
-        assert_eq!(page_refs("[[a]] [[b c]]"), ["a", "b c"]);
-        // an empty one, an unclosed one and one with a lone `]` before the pair are not references
-        assert_eq!(page_refs("[[]] [[open [[x]b]]"), Vec::<&str>::new());
-        // a `[` inside is part of the name
-        assert_eq!(page_refs("[[[a]]"), ["[a"]);
-        assert_eq!(page_refs("[[a]]]"), ["a"]);
-        assert_eq!(page_refs("[[caf\u{e9}]]"), ["caf\u{e9}"]);
-    }
-
-    #[test]
-    fn a_tag_runs_to_whitespace_or_the_next_hash() {
-        assert_eq!(tags("#a #b-c, # d #\u{e9}t\u{e9}\n#e"), ["a", "b-c,", "\u{e9}t\u{e9}", "e"]);
-        assert_eq!(tags("###"), Vec::<&str>::new());
-        assert_eq!(tags("end#"), Vec::<&str>::new());
-        assert_eq!(tags("a#b#c"), ["b", "c"]);
     }
 
     #[test]
@@ -588,14 +521,15 @@ mod tests {
         assert_eq!(keywords("how is it"), Vec::<String>::new());
         // a word of three letters is out, however it is spaced
         assert_eq!(keywords("abc\u{a0}abcd  efgh"), ["abcd", "efgh"]);
-        // length counts UTF-16 code units: two emoji are four of them
-        assert_eq!(keywords("\u{1F680}\u{1F680} xyz"), ["\u{1F680}\u{1F680}"]);
+        // length counts characters, not UTF-16 units: two emoji are two (out), four are four (in)
+        assert_eq!(keywords("\u{1F680}\u{1F680} xyz"), Vec::<String>::new());
+        assert_eq!(keywords("\u{1F680}\u{1F680}\u{1F680}\u{1F680} xyz"), ["\u{1F680}\u{1F680}\u{1F680}\u{1F680}"]);
     }
 
     #[test]
     fn the_longest_keyword_is_searched_and_the_first_of_equal_length() {
         let words = ["long".to_owned(), "longer".to_owned(), "second".to_owned()];
-        let searched = words.iter().fold(&words[0], |longest, keyword| if js::utf16(keyword).len() > js::utf16(longest).len() { keyword } else { longest });
+        let searched = words.iter().fold(&words[0], |longest, keyword| if keyword.chars().count() > longest.chars().count() { keyword } else { longest });
         assert_eq!(searched, "longer");
     }
 
@@ -614,7 +548,7 @@ mod tests {
             totals: crate::tools::build_context::Totals { blocks: 12, related_pages: 5, references: 30 },
         };
         assert_eq!(
-            js::json_stringify(&result_value(&topic_warning(&context, "Atlas \"x\""))),
+            result_value(&topic_warning(&context, "Atlas \"x\"")).to_string(),
             concat!(
                 r#"{"code":"topic_truncated","message":"Context for \"Atlas \"x\"\" is capped: showing 10/12 blocks, 10/30 references, 5/5 related pages.","#,
                 r#""topic":"Atlas \"x\"","#,
@@ -655,6 +589,18 @@ mod tests {
             warnings: vec![ResultWarning::new("alias_set_truncated", "m".into())],
             totals: crate::tools::build_context::Totals { blocks: 1, related_pages: 1, references: 0 },
         }
+    }
+
+    #[test]
+    fn a_topic_whose_alias_group_was_cut_passes_that_warning_on_about_the_topic() {
+        let context = topic("a", 1);
+        let warnings = topic_alias_warnings(&context, "a");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].code.as_str(), warnings[0].topic.as_deref(), warnings[0].how_to_fetch_all.as_deref()), ("alias_set_truncated", Some("a"), None));
+        // no other warning of a topic is passed on here: those are rolled up as topic_truncated / topic_unavailable
+        let mut other = topic("b", 2);
+        other.warnings = vec![ResultWarning::new("blocks_truncated", "m".into()), ResultWarning::new("page_blocks_unavailable", "m".into())];
+        assert!(topic_alias_warnings(&other, "b").is_empty());
     }
 
     #[test]

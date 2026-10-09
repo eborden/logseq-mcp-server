@@ -1,49 +1,50 @@
-//! The first-line snippet (`firstLineSnippet` in `src/utils/snippet.ts`): what a block looks like
+//! The first-line snippet: what a block looks like
 //! when the model should see what it is about without paying for its body. The page outline, the
 //! `compact` output of the context tools and compact Markdown all use it, so it is here and not in
 //! any one tool's directory.
+//!
+//! Lengths and cuts count code points (`chars()`), never UTF-16 code units, so a cut never lands
+//! inside a character: no lone surrogate and no U+FFFD (#299, wave C2). A cut can still fall
+//! between the code points of one visible character (a ZWJ emoji, a letter and its combining
+//! mark), as any count of characters does.
 
 use serde::Serialize;
-use serde::ser::Error as _;
-use serde_json::value::RawValue;
 
 use crate::js;
 
-/// Longest first-line snippet, in UTF-16 code units, ellipsis included (#43).
+/// Longest first-line snippet, in characters (code points), ellipsis included (#43).
 pub const SNIPPET_MAX_CHARS: usize = 80;
 
-/// The first non-blank line of a block's content, a UTF-16 string: kept as code units, since a
-/// cut can fall between the halves of a surrogate pair.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Snippet(Vec<u16>);
-
-impl Snippet {
-    // PARITY(#299): cuts at 80 UTF-16 code units with `slice`, which can split an emoji and leave a lone
-    // surrogate (suspected TS bug) — drop if Rust becomes the only server.
-    /// `firstLineSnippet`: the first non-blank line, trimmed, cut to 80 code units with a
-    /// trailing `...`. Empty for a block with no content.
-    pub fn of(content: Option<&str>) -> Snippet {
-        let line = content.and_then(|content| content.split('\n').map(js::trim).find(|line| !line.is_empty())).unwrap_or("");
-        let mut units = js::utf16(line);
-        if units.len() > SNIPPET_MAX_CHARS {
-            units.truncate(SNIPPET_MAX_CHARS - 3); // `slice(0, max(0, max - 3))`
-            while units.last().is_some_and(|&unit| char::from_u32(unit.into()).is_some_and(js::is_js_space)) {
-                units.pop(); // `trimEnd`
-            }
-            units.extend("...".encode_utf16());
-        }
-        Snippet(units)
-    }
-
-    /// The text, with a half of a surrogate pair replaced, for a reader that wants a `String`.
-    pub fn to_string_lossy(&self) -> String {
-        String::from_utf16_lossy(&self.0)
-    }
+/// The first non-blank line of a block's content, trimmed. Empty for a block with no content, or
+/// with only blank lines.
+pub fn first_non_blank_line(content: Option<&str>) -> &str {
+    content.and_then(|content| content.split('\n').map(js::trim).find(|line| !line.is_empty())).unwrap_or("")
 }
 
-impl Serialize for Snippet {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        RawValue::from_string(js::json_string_utf16(&self.0)).map_err(S::Error::custom)?.serialize(serializer)
+/// The first `count` characters (code points) of `text`, or all of it when it has fewer.
+pub fn first_chars(text: &str, count: usize) -> &str {
+    text.char_indices().nth(count).map_or(text, |(end, _)| &text[..end])
+}
+
+/// A block's first line, cut to [`SNIPPET_MAX_CHARS`] characters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct Snippet(String);
+
+impl Snippet {
+    /// The first non-blank line, trimmed, cut to 80 characters with a
+    /// trailing `...`. Empty for a block with no content.
+    pub fn of(content: Option<&str>) -> Snippet {
+        let line = first_non_blank_line(content);
+        if line.chars().count() <= SNIPPET_MAX_CHARS {
+            return Snippet(line.to_owned());
+        }
+        // `max - 3` characters, the white space the cut leaves at the end trimmed, then the ellipsis
+        Snippet(format!("{}...", js::trim_end(first_chars(line, SNIPPET_MAX_CHARS - 3))))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -52,18 +53,18 @@ mod tests {
     use super::*;
 
     fn snippet(content: &str) -> String {
-        Snippet::of(Some(content)).to_string_lossy()
+        Snippet::of(Some(content)).as_str().to_owned()
     }
 
     #[test]
     fn a_snippet_is_the_first_non_blank_line_trimmed() {
         assert_eq!(snippet("  \n\n  Hello  \nsecond"), "Hello");
         assert_eq!(snippet("   "), "");
-        assert_eq!(Snippet::of(None).to_string_lossy(), "");
+        assert_eq!(Snippet::of(None).as_str(), "");
     }
 
     #[test]
-    fn a_long_line_is_cut_to_eighty_units_with_an_ellipsis() {
+    fn a_long_line_is_cut_to_eighty_characters_with_an_ellipsis() {
         let eighty = "x".repeat(80);
         assert_eq!(snippet(&eighty), eighty);
         assert_eq!(snippet(&"x".repeat(81)), format!("{}...", "x".repeat(77)));
@@ -72,13 +73,39 @@ mod tests {
     }
 
     #[test]
-    fn a_cut_between_the_halves_of_an_emoji_keeps_the_lone_half_as_an_escape() {
-        // 76 units then an emoji: the cut at 77 keeps its first half, as slice() does
+    fn a_character_outside_the_bmp_counts_as_one_and_is_never_split() {
+        // 80 rockets are 160 UTF-16 units and 80 characters: no cut
+        let eighty = "\u{1F680}".repeat(80);
+        assert_eq!(snippet(&eighty), eighty);
+        // 81 are cut at 77 whole rockets
+        assert_eq!(snippet(&"\u{1F680}".repeat(81)), format!("{}...", "\u{1F680}".repeat(77)));
+        // a rocket at the boundary (the 77th character) stays whole
         let text = format!("{}\u{1F680}{}", "x".repeat(76), "y".repeat(10));
+        assert_eq!(snippet(&text), format!("{}\u{1F680}...", "x".repeat(76)));
         let json = serde_json::to_string(&Snippet::of(Some(&text))).unwrap();
-        assert_eq!(json, format!("\"{}\\ud83d...\"", "x".repeat(76)));
-        // an emoji that fits whole stays whole
-        let whole = serde_json::to_string(&Snippet::of(Some("\u{1F680} go"))).unwrap();
-        assert_eq!(whole, "\"\u{1F680} go\"");
+        assert_eq!(json, format!("\"{}\u{1F680}...\"", "x".repeat(76)));
+        assert!(!json.contains("\\ud") && !json.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn a_zwj_emoji_and_a_combining_mark_are_cut_by_code_point() {
+        // The family emoji is 5 code points (3 people, 2 joiners): the cut at 77 keeps only the first.
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        let text = format!("{}{family}{}", "x".repeat(76), "y".repeat(10));
+        assert_eq!(snippet(&text), format!("{}\u{1F468}...", "x".repeat(76)));
+        // "e" and a combining acute accent are 2 code points: a cut between them leaves a bare "e"
+        let text = format!("{}e\u{301}{}", "x".repeat(76), "y".repeat(10));
+        assert_eq!(snippet(&text), format!("{}e...", "x".repeat(76)));
+        // a cut after both keeps the mark with its letter
+        let text = format!("{}e\u{301}{}", "x".repeat(75), "y".repeat(10));
+        assert_eq!(snippet(&text), format!("{}e\u{301}...", "x".repeat(75)));
+    }
+
+    #[test]
+    fn first_chars_counts_code_points() {
+        assert_eq!(first_chars("a\u{1F680}b", 2), "a\u{1F680}");
+        assert_eq!(first_chars("abc", 0), "");
+        assert_eq!(first_chars("abc", 3), "abc");
+        assert_eq!(first_chars("abc", 10), "abc");
     }
 }

@@ -1,4 +1,4 @@
-//! `logseq_build_context` (the Rust side of `src/tools/build-context.ts`): everything on one topic
+//! `logseq_build_context`: everything on one topic
 //! in a call. The page's blocks, the pages that link to it and the blocks that do, capped by
 //! `max_blocks`, `max_related_pages` and `max_references`. `get_context_for_query` builds one of
 //! these for each topic of its query.
@@ -31,13 +31,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::compact::compact_topic_context;
 use crate::edn::PageName;
 use crate::entity::{id_of, journal_day_of, journal_flag};
 use crate::errors::{MatchedBy, ToolError};
-use crate::js;
 use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::{ContextRenderOptions, render_topic_context};
 use crate::meta::ResultWarning;
@@ -54,7 +53,7 @@ use self::queries::{get_blocks_on_pages, get_page_blocks};
 
 pub const NAME: &str = "logseq_build_context";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n\
 **Use when:** researching or explaining a topic that has a page.\n\
 **Can't find:** topics with no page (use logseq_search_blocks), or anything past the caps (see hasMore and warnings).\n\
@@ -72,39 +71,38 @@ pub const DEFAULT_MAX_REFERENCES: u64 = 20;
 /// Whether `temporalContext` is added when `include_temporal_context` is absent.
 pub const DEFAULT_INCLUDE_TEMPORAL_CONTEXT: bool = true;
 
-fn default_max_blocks() -> u32 {
-    DEFAULT_MAX_BLOCKS as u32
+fn default_max_blocks() -> u64 {
+    DEFAULT_MAX_BLOCKS
 }
 
-fn default_max_related_pages() -> u32 {
-    DEFAULT_MAX_RELATED_PAGES as u32
+fn default_max_related_pages() -> u64 {
+    DEFAULT_MAX_RELATED_PAGES
 }
 
-fn default_max_references() -> u32 {
-    DEFAULT_MAX_REFERENCES as u32
+fn default_max_references() -> u64 {
+    DEFAULT_MAX_REFERENCES
 }
 
 fn default_include_temporal_context() -> bool {
     DEFAULT_INCLUDE_TEMPORAL_CONTEXT
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
+/// ignores them.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
 pub struct Args {
     /// Topic to build context for (page name, alias or ISO date)
     pub topic_name: String,
     /// Maximum number of blocks to include (default: 50)
     #[serde(default = "default_max_blocks")]
-    pub max_blocks: u32,
+    pub max_blocks: u64,
     /// Maximum number of related pages to include (default: 10)
     #[serde(default = "default_max_related_pages")]
-    pub max_related_pages: u32,
+    pub max_related_pages: u64,
     /// Maximum number of reference blocks to include (default: 20)
     #[serde(default = "default_max_references")]
-    pub max_references: u32,
+    pub max_references: u64,
     /// Include temporal context for journal pages (default: true)
     #[serde(default = "default_include_temporal_context")]
     pub include_temporal_context: bool,
@@ -118,8 +116,7 @@ pub struct Args {
     pub compact: bool,
 }
 
-/// What a call asked for, read from the arguments in the order the schema lists them, so the first
-/// one that is wrong is the one reported, as `parseArgs` does.
+/// What a call asked for, from the arguments parsed into [`Args`].
 #[derive(Debug, PartialEq)]
 struct Request {
     topic_name: String,
@@ -129,19 +126,13 @@ struct Request {
     resolve_refs: bool,
 }
 
-fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
-    let read = Arguments::new(arguments);
-    let topic_name = read.required_string("topic_name")?;
-    let max_blocks = read.count_or("max_blocks", 0, DEFAULT_MAX_BLOCKS)?;
-    let max_related_pages = read.count_or("max_related_pages", 0, DEFAULT_MAX_RELATED_PAGES)?;
-    let max_references = read.count_or("max_references", 0, DEFAULT_MAX_REFERENCES)?;
-    let include_temporal_context = read.boolean("include_temporal_context", DEFAULT_INCLUDE_TEMPORAL_CONTEXT)?;
-    let resolve_refs = read.boolean("resolve_refs", false)?;
-    let format = OutputFormat::read(&read)?;
-    let compact = read.boolean("compact", false)?;
-    // Compact output drops the bodies, so there is nothing to resolve refs in
-    let caps = Caps { max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs: resolve_refs && !compact };
-    Ok(Request { topic_name, caps, format, compact, resolve_refs })
+impl From<Args> for Request {
+    fn from(args: Args) -> Request {
+        let Args { topic_name, max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs, format, compact } = args;
+        // Compact output drops the bodies, so there is nothing to resolve refs in
+        let caps = Caps { max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs: resolve_refs && !compact };
+        Request { topic_name, caps, format, compact, resolve_refs }
+    }
 }
 
 /// The tool as `tools/list` shows it.
@@ -155,7 +146,7 @@ pub fn definition() -> Tool {
 /// tool makes no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let request = read_args(arguments.as_ref())?;
+    let request = Request::from(parse_args::<Args>(arguments.as_ref())?);
     let mut context = build_context_for_topic(client, &request.topic_name, request.caps).await?;
     // Compact output has no block bodies to resolve refs in. Say so rather than drop the request silently.
     if request.compact && request.resolve_refs {
@@ -171,10 +162,10 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
     }
     let shown = if request.compact { compact_topic_context(&result) } else { result };
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&shown))]))
+    Ok(success_result(vec![ContentBlock::text(shown.to_string())]))
 }
 
-/// What `buildContextForTopic` takes beyond the topic (`ContextOptions`).
+/// What building a context takes beyond the topic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Caps {
     pub max_blocks: u64,
@@ -331,7 +322,7 @@ impl TopicContext {
     }
 }
 
-/// `mainPage.properties || {}`: the page's properties, or an empty object when it has none.
+/// The page's properties, or an empty object when it has none.
 fn page_properties(page: &Value) -> Value {
     match page.get("properties") {
         Some(properties) if !matches!(properties, Value::Null | Value::Bool(false)) => properties.clone(),
@@ -339,7 +330,7 @@ fn page_properties(page: &Value) -> Value {
     }
 }
 
-/// `resolvedFromInfo`: says the page isn't the exact name the caller gave. Absent for an exact match.
+/// Says the page isn't the exact name the caller gave (`resolvedFrom`). Absent for an exact match.
 pub fn resolved_from(input: &str, resolved: &ResolvedPage) -> Option<Value> {
     (resolved.matched_by != MatchedBy::Name)
         .then(|| json!({"name": input, "matchedBy": resolved.matched_by.as_str(), "resolvedTo": resolved.original_name}))
@@ -413,7 +404,7 @@ fn backlinks_unavailable_warning(page: &str) -> ResultWarning {
     )
 }
 
-/// `buildContextForTopic`: build the context of a topic.
+/// Builds the context of a topic.
 ///
 /// `topic_name` is a page name, an alias or an ISO date (`2025-01-01`) of a journal. The page is
 /// resolved first (BR-0010); with aliases, its blocks and references cover every name of the group
@@ -552,20 +543,34 @@ mod tests {
     #[test]
     fn the_arguments_are_read_in_schema_order_and_the_aliases_are_folded() {
         let folded = resolve_param_aliases(ALIASES, args(json!({"page_name": "Atlas", "max_blocks": 3}))).unwrap();
-        let request = read_args(folded.as_ref()).unwrap();
+        let request = Request::from(parse_args::<Args>(folded.as_ref()).unwrap());
         assert_eq!(request.topic_name, "Atlas");
         assert_eq!(request.caps, Caps { max_blocks: 3, ..Caps::default() });
-        let error = read_args(args(json!({"topic_name": "a", "max_blocks": -1, "format": "xml"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"topic_name": "a", "max_blocks": -1, "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_blocks': -1"), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'topic_name': missing"), "{error}");
     }
 
     #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"topic_name": "Atlas"});
+        sweep::<Args>(json!({}), "topic_name", Takes::Text, true);
+        for count in ["max_blocks", "max_related_pages", "max_references"] {
+            sweep::<Args>(base.clone(), count, Takes::Count(0), false);
+        }
+        for flag in ["include_temporal_context", "resolve_refs", "compact"] {
+            sweep::<Args>(base.clone(), flag, Takes::Flag, false);
+        }
+        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
+    }
+
+    #[test]
     fn compact_skips_resolve_refs_but_the_request_remembers_it_was_asked() {
-        let request = read_args(args(json!({"topic_name": "a", "resolve_refs": true, "compact": true})).as_ref()).unwrap();
+        let request = Request::from(parse_args::<Args>(args(json!({"topic_name": "a", "resolve_refs": true, "compact": true})).as_ref()).unwrap());
         assert!(!request.caps.resolve_refs && request.resolve_refs && request.compact);
-        let request = read_args(args(json!({"topic_name": "a", "resolve_refs": true})).as_ref()).unwrap();
+        let request = Request::from(parse_args::<Args>(args(json!({"topic_name": "a", "resolve_refs": true})).as_ref()).unwrap());
         assert!(request.caps.resolve_refs);
     }
 
@@ -607,7 +612,7 @@ mod tests {
 
     #[test]
     fn a_journal_says_so_with_its_day_and_any_other_page_says_it_is_not_one() {
-        let written = |page: Value| js::json_stringify(&result_value(&temporal_context(&page)));
+        let written = |page: Value| result_value(&temporal_context(&page)).to_string();
         assert_eq!(written(json!({"journal?": true, "journal-day": 20250101})), r#"{"isJournal":true,"date":20250101}"#);
         assert_eq!(written(json!({"journal?": true})), r#"{"isJournal":true}"#);
         assert_eq!(written(json!({"journal?": false, "journal-day": 20250101})), r#"{"isJournal":false}"#);
@@ -632,7 +637,7 @@ mod tests {
     #[test]
     fn a_context_writes_what_was_answered_then_what_must_not_be_missed_then_the_data() {
         assert_eq!(
-            js::json_stringify(&context().to_value(true)),
+            context().to_value(true).to_string(),
             concat!(
                 r#"{"topic":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,

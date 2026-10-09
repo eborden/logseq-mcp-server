@@ -2,7 +2,8 @@
 //! crate reads an environment variable or the home directory (`tests/env_reads.rs` checks it),
 //! so every setting the server takes from its environment is listed here and parsed here.
 //!
-//! The rules match `resolveConfigPath` and `resolveTipsEnabled` in `src/config.ts`.
+//! The config path (`LOGSEQ_MCP_CONFIG`) and the tips switch (`LOGSEQ_MCP_TIPS`) follow the rules
+//! set out on `config_path` and `tips` below.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,11 +18,11 @@ pub const CONFIG_PATH_ENV: &str = "LOGSEQ_MCP_CONFIG";
 pub const TIPS_ENV: &str = "LOGSEQ_MCP_TIPS";
 
 /// Environment variable that fixes the instant the tools read as "now", in milliseconds since
-/// 1970-01-01 UTC (`Date.now()`'s count). Only the parity harness sets it, so a result that depends on
+/// 1970-01-01 UTC. Only the parity harness sets it, so a result that depends on
 /// today's date (`last_n`, a preset) is the same on every day. Unset, the system clock is read.
 ///
 /// A test hook, so it exists in debug builds only (`cfg!(debug_assertions)`): a release binary
-/// ignores it, whatever it holds, as the TypeScript server has no such hook in production. The
+/// ignores it, whatever it holds, so production has no such hook. The
 /// parity job runs the debug binary.
 pub const NOW_ENV: &str = "LOGSEQ_MCP_NOW";
 
@@ -75,12 +76,12 @@ impl Env {
             .into_iter()
             .filter_map(|key| std::env::var_os(key).map(|value| (key.to_owned(), value.to_string_lossy().into_owned())))
             .collect();
-        // home_dir falls back to the passwd entry when HOME is unset, as Node's os.homedir() does.
+        // home_dir falls back to the passwd entry when HOME is unset.
         Env::from_vars(&vars, std::env::home_dir().as_deref())
     }
 
     /// Parse the variables in `vars` with `home` as the home directory. The config path is
-    /// checked before tips, as the TypeScript server checks it first.
+    /// checked before tips, so a bad path is reported first.
     pub fn from_vars(vars: &HashMap<String, String>, home: Option<&Path>) -> Result<Env, ConfigError> {
         Ok(Env {
             config_path: config_path(vars.get(CONFIG_PATH_ENV).map(String::as_str), home)?,
@@ -91,7 +92,7 @@ impl Env {
 }
 
 /// `LOGSEQ_MCP_CONFIG` when set (it must be absolute), else `~/.logseq-mcp/config.json`. An
-/// empty or blank variable is ignored. The error echoes the value, as `resolveConfigPath` does:
+/// empty or blank variable is ignored. The error echoes the value:
 /// it's a path the user set, with no secret in it.
 fn config_path(raw: Option<&str>, home: Option<&Path>) -> Result<ConfigPath, ConfigError> {
     let raw = raw.unwrap_or_default();
@@ -117,7 +118,7 @@ fn config_path(raw: Option<&str>, home: Option<&Path>) -> Result<ConfigPath, Con
 
 /// `LOGSEQ_MCP_TIPS`, case-insensitive with surrounding whitespace ignored (as `trim()` does). Any other value is an
 /// error, so a typo such as `disabled` can't leave tips on silently. The message echoes the
-/// value, which holds no secret, as in TypeScript.
+/// value, which holds no secret.
 fn tips(raw: Option<&str>) -> Result<TipsOverride, ConfigError> {
     let Some(raw) = raw else { return Ok(TipsOverride::Unset) };
     let flag = crate::js::trim(raw).to_lowercase();
@@ -232,10 +233,10 @@ mod tests {
     }
 
     #[test]
-    fn values_are_trimmed_as_javascript_trims() {
-        assert_eq!(env(&[(TIPS_ENV, "\u{feff}off")], home()).unwrap().tips, TipsOverride::Off);
-        assert_eq!(env(&[(TIPS_ENV, "\u{feff}")], home()).unwrap().tips, TipsOverride::Unset);
-        let env = env(&[(CONFIG_PATH_ENV, "\u{feff}/tmp/instance/config.json")], None).unwrap();
+    fn values_are_trimmed_as_rust_trims() {
+        assert_eq!(env(&[(TIPS_ENV, "\u{85}off")], home()).unwrap().tips, TipsOverride::Off);
+        assert_eq!(env(&[(TIPS_ENV, "\u{85}")], home()).unwrap().tips, TipsOverride::Unset);
+        let env = env(&[(CONFIG_PATH_ENV, "\u{85}/tmp/instance/config.json")], None).unwrap();
         assert_eq!(env.config_path.as_path(), Path::new("/tmp/instance/config.json"));
     }
 

@@ -1,10 +1,8 @@
-//! The Datalog queries only the relationship search makes (`blocksOnPageReferencing`,
-//! `blocksReferencingInPagesLinking`, their alias-group forms and `neighborPages` in
-//! `src/datalog/queries.ts`), and the outbound pair for `referenced-by`, which the TypeScript server never had (#299). A page name is bound with `:in` (ADR-0013), lowercase by
+//! The Datalog queries only the relationship search makes, among them the outbound pair
+//! for `referenced-by` (#299). A page name is bound with `:in` (ADR-0013), lowercase by
 //! construction; page ids are embedded through `ground_ids`, which takes only a valid [`PageId`].
 //!
-//! The text is the TypeScript text with its whitespace collapsed; LogSeq doesn't care how a query
-//! is laid out and the parity harness compares it collapsed.
+//! The text has its whitespace collapsed; LogSeq doesn't care how a query is laid out.
 
 use crate::edn::{DatalogInput, PageId, PageName, Query, ground_ids};
 use crate::errors::ToolError;
@@ -45,7 +43,7 @@ pub fn blocks_referencing_in_pages_referenced_by(a: &PageName, b: &PageName) -> 
     }
 }
 
-/// `assertNonEmptyIds`: a list with no page id can't be queried.
+/// A list with no page id can't be queried.
 fn assert_non_empty(method: &str, lists: &[&[PageId]]) -> Result<(), ToolError> {
     if lists.iter().any(|list| list.is_empty()) {
         return Err(ToolError::Failed(format!("{method} needs at least one page id in each list")));

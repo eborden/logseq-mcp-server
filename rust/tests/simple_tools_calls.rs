@@ -1,7 +1,7 @@
 //! The LogSeq traffic of `logseq_get_graph_info`, `logseq_list_pages`, `logseq_search_blocks` and `logseq_query_by_property`
-//! against a mock LogSeq on a local port: how many calls each makes, with which inputs. The Rust
-//! side of the call counts in `CLAUDE.md` ("Current Implementation Status"); the parity harness
-//! (`parity.rs`) checks the same calls and the result bytes against the TypeScript server.
+//! against a mock LogSeq on a local port: how many calls each makes, with which inputs. The call
+//! counts are those in `CLAUDE.md` ("Current Implementation Status"); the parity harness
+//! (`parity.rs`) checks the same calls and the result bytes against the recorded results.
 //! Every page and block here is made up (BR-0001).
 
 use std::sync::{Arc, Mutex};
@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::js;
 use logseq_mcp_server::args::Scalar;
 use logseq_mcp_server::tools::{get_graph_info, list_pages, query_by_property, search_blocks};
 use serde_json::{Value, json};
@@ -60,7 +59,7 @@ async fn mock_logseq(answers: Vec<Value>) -> MockLogseq {
 }
 
 fn client(logseq: &MockLogseq) -> LogseqClient {
-    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None })
+    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
 
 fn methods(logseq: &MockLogseq) -> Vec<String> {
@@ -82,7 +81,7 @@ async fn the_graph_info_costs_one_call_with_no_arguments() {
 
     assert_eq!(methods(&logseq), ["logseq.App.getCurrentGraph"]);
     assert_eq!(logseq.seen.lock().unwrap()[0]["args"], json!([]));
-    assert_eq!(js::json_stringify(&graph), r#"{"name":"example","path":"/tmp/example","url":"logseq_local_/tmp/example"}"#);
+    assert_eq!(graph.to_string(), r#"{"name":"example","path":"/tmp/example","url":"logseq_local_/tmp/example"}"#);
 }
 
 #[tokio::test]
@@ -125,7 +124,7 @@ async fn a_search_costs_one_call_and_binds_its_text_with_in() {
     let seen = logseq.seen.lock().unwrap();
     let query = seen[0]["args"][0].as_str().unwrap();
     assert!(!query.contains("a.b"), "the text is never part of the query: {query}");
-    // JSON.stringify of the string (?i)a\.b \(x\), escaped once for the regex and once for EDN
+    // the JSON text of the string (?i)a\.b \(x\), escaped once for the regex and once for EDN
     assert_eq!(seen[0]["args"][1], r#""(?i)a\\.b \\(x\\)""#);
     assert_eq!(seen[0]["args"].as_array().unwrap().len(), 2);
     // newest first

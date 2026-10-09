@@ -2,7 +2,7 @@
 //! tool is in `tools/`, and what they share is in `tool.rs`.
 //!
 //! Tools are listed by hand rather than with rmcp's `#[tool]` macros, so every byte of a tool's
-//! definition is ours to match against the TypeScript snapshot (ADR-0016, ADR-0025 Decision 2).
+//! definition is ours to match against the recorded `tool-list` golden (ADR-0016, ADR-0034 Decision 3).
 
 use std::sync::Arc;
 
@@ -22,10 +22,10 @@ use crate::resources;
 use crate::tool::{error_result, into_result};
 use crate::tools;
 
-/// The server name the TypeScript server reports (`src/index.ts`).
+/// The server name `serverInfo` reports.
 pub const SERVER_NAME: &str = "logseq-mcp-server";
 
-/// The package's `version` in `Cargo.toml`, 1.0.0 as the TypeScript server's `serverInfo` was. Cargo owns it
+/// The package's `version` in `Cargo.toml`, 1.0.0, as the first release of the server was. Cargo owns it
 /// now; `tests/rust-guards/version.test.ts` keeps it equal to package.json and the plugin manifest until
 /// #355 changes how the server ships.
 pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -142,7 +142,7 @@ mod tests {
         let client = LogseqClient::new(&Config {
             api_url: api_url.into(),
             auth_token: "unused".into(),
-            timeout_ms: Some(2000.0),
+            timeout_ms: Some(2000),
             tips: None,
         });
         let (server_io, client_io) = tokio::io::duplex(1 << 16);
@@ -212,7 +212,7 @@ mod tests {
         assert!(got["messages"][0]["content"]["text"].as_str().unwrap().starts_with("Help me continue where I left off on \"project atlas\""));
         assert!(got.get("resultType").is_none(), "the TypeScript server sends no resultType: {got}");
         assert_eq!(responses[3]["error"]["code"], -32602);
-        assert_eq!(responses[3]["error"]["message"], r#"MCP error -32602: Prompt "continue_on" needs a non-empty "topic" argument."#);
+        assert_eq!(responses[3]["error"]["message"], r#"Prompt "continue_on" needs a non-empty "topic" argument."#);
         assert_eq!(responses[4]["error"]["code"], -32602);
     }
 
@@ -232,8 +232,9 @@ mod tests {
         assert!(guide["text"].as_str().unwrap().starts_with("# LogSeq MCP guide\n\nRead-only access to a LogSeq graph."));
         assert_eq!(
             responses[3]["error"]["message"],
-            r#"MCP error -32002: Unknown resource "logseq://nope". Available: logseq://guide, logseq://page/{name}."#
+            r#"Unknown resource "logseq://nope". Available: logseq://guide, logseq://page/{name}."#
         );
+        assert_eq!(responses[3]["error"]["data"], serde_json::json!({ "uri": "logseq://nope" }));
     }
 
     #[tokio::test]

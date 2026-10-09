@@ -1,8 +1,8 @@
 //! The ref resolver's LogSeq traffic and results against a mock LogSeq on a local port: how many
 //! queries it makes (one per nesting level, none when nothing has a ref), what it binds and what
-//! it makes of each answer. The Rust side of `src/utils/resolve-refs.test.ts`; the parity harness
-//! (`parity.rs`) checks the same calls and the result bytes against the TypeScript
-//! server, through `logseq_get_block` and `logseq_get_page`. Every page and block here is made up
+//! it makes of each answer. The parity harness
+//! (`parity.rs`) checks the same calls and the result bytes against the recorded
+//! results, through `logseq_get_block` and `logseq_get_page`. Every page and block here is made up
 //! (BR-0001).
 
 mod common;
@@ -262,7 +262,7 @@ async fn a_page_embed_with_no_entity_is_missing_and_keeps_the_name_as_written() 
 }
 
 #[tokio::test]
-async fn refs_in_children_are_resolved_in_the_same_batch_and_unfetched_children_become_objects() {
+async fn refs_in_children_are_resolved_in_the_same_batch() {
     let logseq = mock_logseq(vec![json!([target(2, "one", 100, 100), target(3, "two", 100, 100)])]).await;
     let mut parent = root(&format!("top (({}))", uuid(2)));
     parent["children"] = json!([editor_block(5, &format!("child (({}))", uuid(3))), editor_block(6, "no ref")]);
@@ -273,8 +273,32 @@ async fn refs_in_children_are_resolved_in_the_same_batch_and_unfetched_children_
     assert_eq!(resolved.blocks[0]["resolvedContent"], "top one");
     assert_eq!(resolved.blocks[0]["children"][0]["resolvedContent"], "child two");
     assert!(resolved.blocks[0]["children"][1].get("resolvedContent").is_none());
-    // suspected TS bug, kept: `{ ...child }` turns an unfetched `["uuid", "abc"]` into an object
-    assert_eq!(text(&resolved.blocks[1]["children"]), r#"[{"0":"uuid","1":"abc"}]"#);
+}
+
+#[tokio::test]
+async fn a_root_that_is_not_a_block_comes_back_as_sent_beside_a_root_that_is_annotated() {
+    let logseq = mock_logseq(vec![json!([target(2, "one", 100, 100)])]).await;
+    let roots = [json!(["uuid", "abc"]), root(&format!("top (({}))", uuid(2)))];
+    let resolved = resolve_block_refs(&client(&logseq), &roots).await.unwrap();
+
+    assert_eq!(resolved.blocks[0], json!(["uuid", "abc"]));
+    assert_eq!(resolved.blocks[1]["resolvedContent"], "top one");
+}
+
+#[tokio::test]
+async fn an_unfetched_child_tuple_is_left_as_sent_beside_real_children_that_are_still_annotated() {
+    let logseq = mock_logseq(vec![json!([target(2, "one", 100, 100)])]).await;
+    let mut parent = root("top");
+    parent["children"] = json!([["uuid", "abc"], editor_block(5, &format!("child (({}))", uuid(2))), "bare"]);
+    let unfetched = json!({"id": 7, "uuid": uuid(7), "content": "x", "children": [["uuid", "abc"]]});
+    let resolved = resolve_block_refs(&client(&logseq), &[parent, unfetched]).await.unwrap();
+
+    let children = &resolved.blocks[0]["children"];
+    assert_eq!(children[0], json!(["uuid", "abc"]));
+    assert_eq!(children[1]["resolvedContent"], "child one");
+    // anything else that is not a block comes back untouched too
+    assert_eq!(children[2], "bare");
+    assert_eq!(text(&resolved.blocks[1]["children"]), r#"[["uuid","abc"]]"#);
 }
 
 #[tokio::test]
@@ -282,7 +306,7 @@ async fn an_answer_that_is_not_a_target_is_a_response_error_and_not_an_empty_res
     let logseq = mock_logseq(vec![json!([[{"uuid": "no id"}]])]).await;
     let error = resolve_block_refs(&client(&logseq), &[root(&format!("(({}))", uuid(2)))]).await.unwrap_err();
     match error {
-        ToolError::Response(response) => assert_eq!((response.method.as_str(), response.path.as_str()), ("logseq.DB.datascriptQuery", "[0][0].id")),
+        ToolError::Response(response) => assert_eq!((response.method.as_str(), response.path.as_str()), ("logseq.DB.datascriptQuery", "answer[0][0].id")),
         other => panic!("expected a response error, got {other}"),
     }
 }
@@ -294,7 +318,7 @@ async fn a_connection_failure_propagates_instead_of_returning_unresolved_blocks(
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api_url = format!("http://{}", listener.local_addr().unwrap());
         drop(listener);
-        LogseqClient::new(&logseq_mcp_server::config::Config { api_url, auth_token: "t".into(), timeout_ms: Some(2000.0), tips: None })
+        LogseqClient::new(&logseq_mcp_server::config::Config { api_url, auth_token: "t".into(), timeout_ms: Some(2000), tips: None })
     };
     let error = resolve_block_refs(&unreachable, &[root(&format!("(({}))", uuid(2)))]).await.unwrap_err();
     assert!(matches!(error, ToolError::Logseq(_)), "{error}");

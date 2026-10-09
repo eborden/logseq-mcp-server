@@ -1,4 +1,4 @@
-//! `logseq_get_current_context` (the Rust side of `src/tools/get-current-context.ts`): what the user
+//! `logseq_get_current_context`: what the user
 //! is looking at in LogSeq right now: the open page, the block being edited and any selected blocks.
 //!
 //! Calls: 3 Editor calls made at once (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`),
@@ -26,7 +26,6 @@ use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
@@ -34,7 +33,7 @@ use crate::tool::{input_schema, read_only_annotations, result_value, success_res
 
 pub const NAME: &str = "logseq_get_current_context";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n\
 **Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_build_context or logseq_get_page.\n\n\
 **Can't find:** anything not open right now. Returns page: null with a message when no page is open.";
@@ -57,7 +56,7 @@ pub fn definition() -> Tool {
 /// A call: the context LogSeq is showing, as JSON.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let context = get_current_context(client).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&context.into_value()))]))
+    Ok(success_result(vec![ContentBlock::text(context.into_value().to_string())]))
 }
 
 /// What the user is looking at, as written in BR-0013's order: what must not be missed (`hasMore` and `warnings`,
@@ -102,18 +101,18 @@ fn page_names_unavailable(no_page_known: bool) -> ResultWarning {
     )
 }
 
-/// The id of the page a block sits on (`blockPageId`): `None` when the block carries no page.
+/// The id of the page a block sits on: `None` when the block carries no page.
 fn block_page_id(block: &Map<String, Value>) -> Option<i64> {
     id_of(block.get("page"))
 }
 
-/// `isBlockEntity`: `getCurrentPage` answers a block, not a page, when the user has zoomed into
+/// Whether the entity is a block. `getCurrentPage` answers a block, not a page, when the user has zoomed into
 /// one. It has no `name`, and it has a `page`.
 fn is_block_entity(entity: &Map<String, Value>) -> bool {
     !entity.contains_key("name") && entity.get("uuid").is_some_and(Value::is_string) && entity.contains_key("page")
 }
 
-/// `withFetchedChildren`: without `includeChildren`, the Editor API gives a block's `children` as
+/// Without `includeChildren`, the Editor API gives a block's `children` as
 /// unfetched `["uuid", "<id>"]` tuples rather than blocks. Keep only the children that are blocks
 /// with text, so slimming has nothing to choke on; `logseq_get_block` fetches the rest.
 fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
@@ -133,20 +132,17 @@ fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
 ///
 /// API calls: 3 Editor calls, plus 1 Datalog query only when a block's page is not already known.
 pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext, ToolError> {
-    // `Promise.all` rejects on the first error, but the other two fetches still run to completion, so the
-    // TypeScript server always makes all three calls. `join!` lets all three finish too, and the errors are
-    // then raised in a fixed order (page, block, selection). With two answers wrong at once TypeScript reports
-    // whichever arrives first, so the parity cases never have two.
+    // All three calls are always made, and `join!` lets all three finish, so the errors are raised in a
+    // fixed order (page, block, selection). With two answers wrong at once the first in that order is
+    // reported, and the parity cases never have two.
     let (page_answer, block_answer, selected_answer) =
         tokio::join!(fetch_current_page(client), fetch_current_block(client), fetch_selected_blocks(client));
     let (current_page, current_block, selected) = (page_answer?, block_answer?, selected_answer?);
 
     // `getCurrentPage` answers the block itself when the user has zoomed into one.
     let zoomed_block = current_page.as_ref().and_then(Value::as_object).filter(|entity| is_block_entity(entity));
-    // PARITY(#299): an answer with no `name` and no `page` is neither a page nor a zoomed block, and is read as a
-    // page anyway, so a block that lacks its `page` shows up as a page with an empty name (suspected TS bug) —
-    // drop if Rust becomes the only server.
-    let page_entity = current_page.as_ref().filter(|_| zoomed_block.is_none());
+    // A page has a `name`. An answer with neither a `name` nor a `page` is no page and no zoomed block, so no page is open.
+    let page_entity = current_page.as_ref().filter(|entity| zoomed_block.is_none() && entity.get("name").is_some());
 
     let focused = current_block.as_ref().and_then(Value::as_object).or(zoomed_block);
     let selected_blocks: Vec<&Map<String, Value>> = selected.iter().flatten().filter_map(Value::as_object).collect();
@@ -256,7 +252,7 @@ mod tests {
         assert!(is_block_entity(&object(json!({"id": 1, "uuid": "u", "page": {"id": 2}}))));
         assert!(!is_block_entity(&object(json!({"id": 1, "uuid": "u", "name": "a", "page": {"id": 2}}))));
         assert!(!is_block_entity(&object(json!({"id": 1, "uuid": "u"}))));
-        // a `null` name is a name, as `name !== undefined` has it
+        // a `null` name is a name: only a missing `name` key makes a block
         assert!(!is_block_entity(&object(json!({"id": 1, "uuid": "u", "name": null, "page": {"id": 2}}))));
     }
 
@@ -266,7 +262,7 @@ mod tests {
             "id": 1, "uuid": "a", "children": [["uuid", "x"], {"id": 3, "uuid": "c", "content": "kid", "children": [["uuid", "y"]]}, {"id": 4}, "text"], "content": "p"
         }));
         assert_eq!(
-            js::json_stringify(&Value::Object(with_fetched_children(&block))),
+            Value::Object(with_fetched_children(&block)).to_string(),
             r#"{"id":1,"uuid":"a","content":"p","children":[{"id":3,"uuid":"c","content":"kid","children":[]}]}"#
         );
         // children that are not a list are left as they came
@@ -278,7 +274,7 @@ mod tests {
     fn the_message_comes_before_a_null_page_and_the_blocks() {
         let context = CurrentContext { has_more: None, warnings: None, message: Some(NO_PAGE_OPEN_MESSAGE), page: None, focused_block: Some(object(json!({"uuid": "u"}))), selected_blocks: Some(vec![]) };
         assert_eq!(
-            js::json_stringify(&context.clone().into_value()),
+            context.clone().into_value().to_string(),
             r#"{"message":"No page is open in LogSeq (for example the All Pages view is showing).","page":null,"focusedBlock":{"uuid":"u"},"selectedBlocks":[]}"#
         );
         assert_eq!(keys(&context.into_value()), ["message", "page", "focusedBlock", "selectedBlocks"]);

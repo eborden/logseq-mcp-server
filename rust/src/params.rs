@@ -1,22 +1,16 @@
-//! Tool arguments at the boundary: the parameter aliases (BR-0008, `src/utils/param-aliases.ts`)
-//! and the wording of a bad argument (`src/utils/parse-args.ts`).
-//!
-//! The arguments are parsed into a typed struct by serde, as the server does for every tool
-//! (`parse_args` in `server.rs`). What this module adds is the TypeScript server's text for a
-//! failure, which the parity harness compares byte for byte, so a model sees one message
-//! whichever server answers.
+//! Tool arguments at the boundary: the parameter aliases (BR-0008). A tool folds them in first, and
+//! then parses what is left into its `Args` type with `crate::args::parse_args`.
 
 use serde_json::{Map, Value};
 
 use crate::errors::{InvalidParameter, ToolError};
-use crate::js;
 
 /// Alternative names a tool accepts for a canonical parameter: `(canonical, aliases)`. They are
 /// not in the input schema, so they cost no tokens in `tools/list`. Best-effort, not a contract:
 /// a client that validates against the schema rejects an alias-only call before it gets here.
 pub type ParamAliases = &'static [(&'static str, &'static [&'static str])];
 
-/// `resolveParamAliases`: the arguments with every alias folded into its canonical parameter and
+/// The arguments with every alias folded into its canonical parameter and
 /// the alias keys removed. Other arguments pass through untouched. An alias and the canonical
 /// name (or two aliases) may both be given if they carry the same value. Different values are
 /// ambiguous, and nothing is picked silently: that is an [`InvalidParameter`].
@@ -38,10 +32,10 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
                     out.insert((*canonical).to_owned(), args[*alias].clone());
                 }
                 Some(chosen_key) if !same_value(&args[chosen_key], &args[*alias]) => {
-                    let chosen_value = js::json_stringify(&args[chosen_key]);
+                    let chosen_value = args[chosen_key].to_string();
                     return Err(ToolError::InvalidParameter(InvalidParameter {
                         param: (*alias).to_owned(),
-                        value: js::json_stringify(&args[*alias]),
+                        value: args[*alias].to_string(),
                         expected: format!(
                             "the same value as '{chosen_key}' ({chosen_value}), or only one of them. '{alias}' is an alias of '{canonical}'"
                         ),
@@ -55,8 +49,8 @@ pub fn resolve_param_aliases(aliases: ParamAliases, args: Option<Map<String, Val
     Ok(Some(out))
 }
 
-/// Whether two arguments carry the same value. Numbers compare by value, as JavaScript holds
-/// them (`1` and `1.0` are one number; serde_json's own `==` tells them apart), and an object's keys
+/// Whether two arguments carry the same value. Numbers compare by value, since a JSON client
+/// may write one number either way (`1` and `1.0` are one number; serde_json's own `==` tells them apart), and an object's keys
 /// may come in any order.
 fn same_value(a: &Value, b: &Value) -> bool {
     match (a, b) {
@@ -66,31 +60,6 @@ fn same_value(a: &Value, b: &Value) -> bool {
             a.len() == b.len() && a.iter().all(|(key, a)| b.get(key).is_some_and(|b| same_value(a, b)))
         }
         _ => a == b,
-    }
-}
-
-/// What `parseArgs` made of a bad required string parameter: `missing` when it is absent or
-/// `null`, else the value as JSON, and what was expected (`expectedMessage`, `exampleFor`). The wording
-/// (`a string, not a number`, `(required)`) began as zod's and is this server's own readable message now.
-/// `args` are the arguments as sent.
-pub fn bad_string_param(param: &str, args: Option<&Map<String, Value>>) -> InvalidParameter {
-    let sent = args.and_then(|args| args.get(param)).filter(|value| !value.is_null());
-    let (value, expected) = match sent {
-        None => ("missing".to_owned(), "a string (required)".to_owned()),
-        Some(value) => (js::json_stringify(value), format!("a string, not {}", kind_of(value))),
-    };
-    InvalidParameter { param: param.to_owned(), value, expected, example: Some(format!("{param}: \"...\"")) }
-}
-
-/// What a value is, in the words of the `Expected:` line (`kindOf`).
-fn kind_of(value: &Value) -> &'static str {
-    match value {
-        Value::Array(_) => "an array",
-        Value::Object(_) => "an object",
-        Value::Number(_) => "a number",
-        Value::Bool(_) => "a boolean",
-        Value::String(_) => "a string",
-        Value::Null => "a null",
     }
 }
 
@@ -124,7 +93,7 @@ mod tests {
 
     #[test]
     fn numbers_are_the_same_when_their_values_are() {
-        // `1` and `1.0` are one number in JavaScript, which serde_json's `==` calls two
+        // `1` and `1.0` are one number to a JSON client, which serde_json's `==` calls two
         let sent: Value = serde_json::from_str(r#"{"name": 1, "page": 1.0}"#).unwrap();
         assert_eq!(resolved(sent).get("page_name"), Some(&json!(1)));
         let nested: Value = serde_json::from_str(r#"{"name": [1, {"a": 2}], "page": [1.0, {"a": 2.0}]}"#).unwrap();
@@ -150,25 +119,5 @@ mod tests {
     #[test]
     fn no_arguments_pass_through() {
         assert_eq!(resolve_param_aliases(PAGE, None).unwrap(), None);
-    }
-
-    #[test]
-    fn a_missing_or_null_parameter_is_missing_and_a_wrong_type_is_shown() {
-        assert_eq!(
-            bad_string_param("page_name", args(json!({})).as_ref()).to_string(),
-            "Invalid parameter 'page_name': missing\n\nExpected: a string (required)\nExample: page_name: \"...\""
-        );
-        assert_eq!(bad_string_param("page_name", args(json!({"page_name": null})).as_ref()).value, "missing");
-        assert_eq!(bad_string_param("page_name", None).value, "missing");
-        for (sent, shown, kind) in [
-            (json!(42), "42", "a number"),
-            (json!(true), "true", "a boolean"),
-            (json!(["a"]), "[\"a\"]", "an array"),
-            (json!({"b": 1, "1": 2}), "{\"1\":2,\"b\":1}", "an object"),
-            (json!(1e21), "1e+21", "a number"),
-        ] {
-            let error = bad_string_param("page_name", args(json!({ "page_name": sent })).as_ref());
-            assert_eq!((error.value.as_str(), error.expected), (shown, format!("a string, not {kind}")));
-        }
     }
 }

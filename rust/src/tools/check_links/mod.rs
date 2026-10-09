@@ -1,4 +1,4 @@
-//! `logseq_check_links` (the Rust side of `src/tools/check-links.ts`, #146): the concept-linking
+//! `logseq_check_links` (#146): the concept-linking
 //! safety gate, run in the server. It checks a text before and after a pass that added `[[links]]`:
 //!
 //! 1. **Prose preserved:** stripping `[[ ]]` from both texts leaves them identical.
@@ -19,12 +19,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::errors::{InvalidParameter, MatchedBy, ToolError};
-use crate::js;
 use crate::meta::ResultWarning;
-use crate::resolve::alias::compare_code_units;
 use crate::resolve::{Resolution, link_key, resolve_link_targets};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 
@@ -32,12 +30,12 @@ use self::text::{BracketCheck, ProseCheck, RefsPreservedCheck, check_brackets, c
 
 pub const NAME: &str = "logseq_check_links";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.\n\n\
 **Can't find:** a link to the wrong page, or a name split across a ref.";
 
-/// Most UTF-16 code units (`string.length`) `before` or `after` may hold, about 12k tokens each. A
-/// journal day or page file is well under. An emoji counts as two.
+/// Most characters (code points) `before` or `after` may hold, about 12k tokens each. A
+/// journal day or page file is well under. An emoji counts as one.
 pub const MAX_TEXT_CHARS: usize = 50_000;
 
 /// Most distinct `[[terms]]` one call resolves. More is rejected before any LogSeq call.
@@ -47,10 +45,8 @@ pub const MAX_LINK_TERMS: usize = 500;
 /// [`MAX_TEXT_CHARS`], so the input stays bounded (ADR-0011). An empty string is a text, not a
 /// missing one. The cap on distinct terms is checked by [`check_links`], before any LogSeq call.
 ///
-/// Units: the cap counts UTF-16 code units (`string.length`), while the advertised JSON Schema
-/// `maxLength` counts code points. Text outside the Basic Multilingual Plane takes two units per
-/// character, so about 25,000 emoji pass a validating client and are then rejected here, with a clear
-/// error and no LogSeq call. Deliberate, as in TypeScript: the cap bounds memory.
+/// Units: the cap counts code points, which is what the advertised JSON Schema `maxLength` counts
+/// too, so a client that validates against the schema and the server agree on every text.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Text before linking
@@ -59,13 +55,6 @@ pub struct Args {
     /// before plus [[links]], at most 500 distinct terms
     #[schemars(length(max = 50000))]
     pub after: String,
-}
-
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args { before: read.required_string_max("before", MAX_TEXT_CHARS)?, after: read.required_string_max("after", MAX_TEXT_CHARS)? })
 }
 
 /// The tool as `tools/list` shows it.
@@ -77,17 +66,17 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, then the checks.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let result = check_links(client, &args.before, &args.after).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&result))]))
+    Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
-/// `countOf(text, token)`: how many non-overlapping copies of `token` the text holds.
+/// How many non-overlapping copies of `token` the text holds.
 fn count_of(text: &str, token: &str) -> usize {
     text.matches(token).count()
 }
 
-/// `checkLinks`: run the linking gate over `before` and `after`. Returns each check's outcome, `ok`
+/// Runs the linking gate over `before` and `after`. Returns each check's outcome, `ok`
 /// for all four, and meta: `totals` counts the refs on each side and the distinct terms; a warning
 /// says when resolution could not run (LogSeq answered `null`) or a candidate list was cut.
 ///
@@ -99,8 +88,7 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
     let refs_preserved = check_refs_preserved(before, after);
 
     let mut terms: Vec<String> = link_counts(after).into_iter().map(|(term, _)| term).collect();
-    // PARITY(#299): orders by UTF-16 code unit, as JavaScript's `<` does — drop if Rust becomes the only server.
-    terms.sort_by(|x, y| compare_code_units(x, y));
+    terms.sort();
     let distinct_keys: std::collections::HashSet<String> = terms.iter().map(|term| key_of(term)).collect();
     if distinct_keys.len() > MAX_LINK_TERMS {
         return Err(ToolError::InvalidParameter(InvalidParameter {
@@ -171,7 +159,7 @@ pub async fn check_links(client: &LogseqClient, before: &str, after: &str) -> Re
     let refs_ok = !targets.unavailable && unresolved.is_empty() && ambiguous_all_preexisting;
 
     Ok(result_value(&CheckLinksOutput {
-        // `buildResultMeta`: `hasMore` follows the warnings. None of these warnings offers a way to fetch more.
+        // `hasMore` follows the warnings. None of these warnings offers a way to fetch more.
         has_more: warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()),
         warnings: &warnings,
         totals: RefTotals { refs_before: count_of(before, "[["), refs_after: brackets.opens, terms: terms.len() },
@@ -267,11 +255,11 @@ mod tests {
         assert_eq!(keys(&value["refs"]), ["ok", "resolved", "unresolved", "ambiguous"]);
         assert_eq!(keys(&value["refs"]["resolved"][0]), ["term", "page", "matchedBy"]);
         assert_eq!(keys(&value["refs"]["ambiguous"][0]), ["term", "candidates", "totalCandidates", "preexisting"]);
-        assert_eq!(js::json_stringify(&value["refs"]["unresolved"]), r#"["gone"]"#);
+        assert_eq!(value["refs"]["unresolved"].to_string(), r#"["gone"]"#);
     }
 
-    fn read(value: Value) -> Result<Args, ToolError> {
-        read_args(value.as_object())
+    fn read(value: Value) -> Result<Args, InvalidParameter> {
+        parse_args::<Args>(value.as_object())
     }
 
     #[test]
@@ -288,20 +276,27 @@ mod tests {
     }
 
     #[test]
-    fn a_text_over_the_cap_is_zods_too_big_and_the_cap_counts_utf16_units() {
+    fn a_text_over_the_cap_is_too_long_and_the_cap_counts_characters() {
         let long = "x".repeat(MAX_TEXT_CHARS + 1);
         assert_eq!(
             read(json!({"before": long, "after": ""})).unwrap_err().to_string(),
-            format!("Invalid parameter 'before': \"{long}\"\n\nExpected: Too big: expected string to have <=50000 characters")
+            format!("Invalid parameter 'before': \"{long}\"\n\nExpected: at most 50000 characters")
         );
         assert!(read(json!({"before": "x".repeat(MAX_TEXT_CHARS), "after": ""})).is_ok());
-        // 25,001 emoji are 50,002 units
-        let emoji = "\u{1F600}".repeat(25_001);
+        // an emoji is one character: 50,001 of them are over the cap, 50,000 are not
+        let emoji = "\u{1F600}".repeat(50_001);
         assert_eq!(
             read(json!({"before": "", "after": emoji})).unwrap_err().to_string(),
-            format!("Invalid parameter 'after': \"{emoji}\"\n\nExpected: Too big: expected string to have <=50000 characters")
+            format!("Invalid parameter 'after': \"{emoji}\"\n\nExpected: at most 50000 characters")
         );
-        assert!(read(json!({"before": "", "after": "\u{1F600}".repeat(25_000)})).is_ok());
+        assert!(read(json!({"before": "", "after": "\u{1F600}".repeat(50_000)})).is_ok());
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        sweep::<Args>(json!({"after": "x"}), "before", Takes::Text, true);
+        sweep::<Args>(json!({"before": "x"}), "after", Takes::Text, true);
     }
 
     #[test]

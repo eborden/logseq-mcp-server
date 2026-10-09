@@ -1,12 +1,13 @@
 //! The LogSeq traffic of `logseq_query_by_date_range` against a mock LogSeq on a local port: how
-//! many calls it makes, in which order and with which inputs. The Rust side of the call counts in
+//! many calls it makes, in which order and with which inputs. The call counts are those in
 //! `CLAUDE.md` ("Current Implementation Status"); the parity harness (`parity.rs`) checks
-//! the same calls and the result bytes against the TypeScript server. Every page and block here
+//! the same calls and the result bytes against the recorded results. Every page and block here
 //! is made up (BR-0001).
 
 mod common;
 
 use common::{args_of, client, methods, mock_logseq};
+use logseq_mcp_server::args::YyyyMmDd;
 use logseq_mcp_server::dates::{CalendarDate, DatePreset};
 use logseq_mcp_server::errors::ToolError;
 use logseq_mcp_server::tools::query_by_date_range::{Args, query_journals};
@@ -31,7 +32,7 @@ fn args() -> Args {
 }
 
 fn range(start: i64, end: i64) -> Args {
-    Args { start_date: Some(start), end_date: Some(end), ..args() }
+    Args { start_date: Some(YyyyMmDd(start)), end_date: Some(YyyyMmDd(end)), ..args() }
 }
 
 fn page(id: i64, day: i64) -> Value {
@@ -77,10 +78,13 @@ async fn a_search_term_adds_one_query_for_its_alias_group_and_an_empty_one_adds_
     // the name is bound lowercase, as a JSON string
     assert_eq!(inputs(&logseq, 2), ["\"atlas\""]);
     assert_eq!(result_of(&found.json)["summary"]["totalBlocks"], 1);
+    assert_eq!(result_of(&found.json)["summary"]["searchTerm"], "Atlas");
 
     let logseq = mock_logseq(vec![json!([page(1, 20250101)]), json!([block(11, 1, "Atlas notes")])]).await;
-    query_journals(&client(&logseq), &Args { search_term: Some(String::new()), ..range(20250101, 20250101) }, TODAY).await.unwrap();
+    let found = query_journals(&client(&logseq), &Args { search_term: Some(String::new()), ..range(20250101, 20250101) }, TODAY).await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
+    // an empty term is no search, so the summary does not echo it
+    assert!(result_of(&found.json)["summary"].get("searchTerm").is_none());
 }
 
 #[tokio::test]

@@ -1,13 +1,11 @@
-//! How the caller chose the range (`resolveSelection` in `src/tools/query-by-date-range.ts`).
+//! How the caller chose the range.
 //! Exactly one of three groups must be given: explicit dates (`start_date` with `end_date`),
 //! `last_n`, or `preset`. A preset is resolved against today here, so everything after this sees
 //! plain dates.
 
-use serde_json::Value;
-
+use crate::args::DATE_FORMAT;
 use crate::dates::{CalendarDate, DatePreset, resolve_date_preset};
 use crate::errors::InvalidParameter;
-use crate::js;
 
 /// The three groups of arguments that choose a range, as sent.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -31,25 +29,18 @@ fn invalid(param: &str, value: impl Into<String>, expected: &str, example: &str)
     InvalidParameter { param: param.to_owned(), value: value.into(), expected: expected.to_owned(), example: Some(example.to_owned()) }
 }
 
-/// What a date must be, as the refusal says it.
-const FORMAT: &str = "Date in YYYYMMDD format (8 digits, valid year/month/day)";
+/// What a date must be, as the refusal says it. A date that is no whole number never gets this far:
+/// the arguments' parse refuses it with the same words.
+const FORMAT: &str = DATE_FORMAT;
 
-/// The refusal of a date argument that is no whole number (a fraction, or beyond the largest safe
-/// integer): it is not in `YYYYMMDD` format, so it is worded as a date of the wrong format is.
-pub fn bad_date(param: &str, value: &Value, example: &str) -> InvalidParameter {
-    invalid(param, js::json_stringify(value), FORMAT, example)
-}
-
-// PARITY(#299): checks the day against 31 whatever the month, so `20250231` passes and the query asks for
-// it as a bound (suspected TS bug: it is no date) — drop if Rust becomes the only server.
-/// `isValidDateFormat`: a whole number of 8 digits (year 1900 to 2100, month 1 to 12, day 1 to 31).
-/// A day is checked against 31 whatever the month, so `20250231` passes.
+/// Whether a date is a whole number of 8 digits (year 1900 to 2100) that is a day the calendar has,
+/// so `20250231` is not one.
 fn is_valid_date_format(date: i64) -> bool {
     if !(10_000_000..=99_999_999).contains(&date) {
         return false;
     }
     let (year, month, day) = (date / 10_000, date / 100 % 100, date % 100);
-    (1900..=2100).contains(&year) && (1..=12).contains(&month) && (1..=31).contains(&day)
+    (1900..=2100).contains(&year) && CalendarDate::real(year as i32, month as u32, day as u32).is_some()
 }
 
 /// The one validation path for choosing a range.
@@ -177,10 +168,10 @@ mod tests {
 
     #[test]
     fn a_date_is_eight_digits_with_a_year_a_month_and_a_day_in_range() {
-        for good in [19000101, 21001231, 20250231, 20251115] {
+        for good in [19000101, 21001231, 20240229, 20250228, 20251115] {
             assert!(is_valid_date_format(good), "{good}");
         }
-        for bad in [2025011, 202501011, 18991231, 21010101, 20250001, 20251301, 20250100, 20250132, -2025011, 0] {
+        for bad in [2025011, 202501011, 18991231, 21010101, 20250001, 20251301, 20250100, 20250132, 20250231, 20250229, 20250431, 19000229, -2025011, 0] {
             assert!(!is_valid_date_format(bad), "{bad}");
         }
     }

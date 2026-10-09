@@ -9,8 +9,8 @@
 //!   (`stale_ceiling` is the other side: fewer than the ceiling is a failure to lower it, for a run of the cases as committed);
 //! - a result: its keys and content blocks, a JSON text by deep equality and minified, every other text byte for
 //!   byte, a resource's `contents`, a prompt's messages, a JSON-RPC error (`compare_results`);
-//! - `tools/list` by meaning (ADR-0031): the normalization of a schema and the failures it still reports;
-//! - the closest names of a missing page by the rules of ADR-0032.
+//! - `tools/list` by meaning (ADR-0034 Decision 3): the normalization of a schema and the failures it still reports;
+//! - the closest names of a missing page by the rules of ADR-0034 Decision 4.
 
 mod parity_support;
 
@@ -232,10 +232,10 @@ fn a_resource_is_compared_by_the_text_of_each_block_and_its_other_fields() {
 
 #[test]
 fn a_json_rpc_error_recorded_as_a_result_is_compared_by_value() {
-    let error = json!({"error": {"code": -32002, "message": "MCP error -32002: No page"}});
+    let error = json!({"error": {"code": -32002, "message": "No page"}});
     assert_eq!(compare_results(&error, &error, &[]), Vec::<String>::new());
-    assert_eq!(compare_results(&error, &json!({"error": {"code": -32602, "message": "MCP error -32002: No page"}}), &[]).len(), 1);
-    assert_eq!(compare_results(&error, &json!({"error": {"code": -32002, "message": "MCP error -32002: No page", "data": {"uri": "x"}}}), &[]).len(), 1);
+    assert_eq!(compare_results(&error, &json!({"error": {"code": -32602, "message": "No page"}}), &[]).len(), 1);
+    assert_eq!(compare_results(&error, &json!({"error": {"code": -32002, "message": "No page", "data": {"uri": "x"}}}), &[]).len(), 1);
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn a_prompt_is_compared_by_the_text_of_each_message_and_everything_else_by_value
     assert_eq!(compare_results(&got, &prompt("Monthly", vec![message("Write a summary\nSteps:")]), &[]), vec![r#"description: expected "Weekly", got "Monthly""#.to_owned()]);
 }
 
-// ---- tools/list, by meaning (ADR-0031)
+// ---- tools/list, by meaning (ADR-0034 Decision 3)
 
 /// The tool list with one tool's input schema edited.
 fn with_schema(tools: &[Value], name: &str, edit: impl FnOnce(&mut Value)) -> Vec<Value> {
@@ -607,7 +607,7 @@ fn null_is_dropped_only_from_optional_top_level_arguments_and_not_from_nested_ob
     assert_eq!(compare_tool_lists(&plain, &tool_with(schema(json!({"type": "string"}), json!({"anyOf": [{"type": "string"}, {"type": "null"}]})))).len(), 2);
 }
 
-// ---- the closest names of a missing page (ADR-0032)
+// ---- the closest names of a missing page (ADR-0034 Decision 4)
 
 const PAGES: [&str; 7] = ["Alice", "Alice Notes", "Alicia Cole", "Bob", "Project Atlas", "Project Zed", "Project Quill"];
 
@@ -628,7 +628,7 @@ fn tool_error(text: &str) -> Value {
 }
 
 fn resource_error(text: &str) -> Value {
-    json!({"error": {"code": -32002, "message": format!("MCP error -32002: MCP error -32002: {text}")}})
+    json!({"error": {"code": -32002, "message": text}})
 }
 
 /// The rule failures of a server that printed `list` where the reference printed `reference`, for the input.
@@ -658,8 +658,8 @@ fn the_input_and_the_list_are_read_out_of_the_message_in_a_tool_result_and_in_a_
     assert_eq!((quoted.opening.as_str(), quoted.input.as_str(), quoted.list.as_deref()), ("No page \"say \\\"hi\\\"\". Closest: ", "say \"hi\"", Some("A, B")));
     let bare = parse_not_found(&message("x", None)).unwrap();
     assert_eq!((bare.opening.as_str(), bare.input.as_str(), bare.list), ("No page \"x\".", "x", None));
-    let wrapped = parse_not_found(&format!("MCP error -32002: MCP error -32002: {}", message("x", Some("A")))).unwrap();
-    assert_eq!((wrapped.input.as_str(), wrapped.list.as_deref()), ("x", Some("A")));
+    // a JSON-RPC error's message is read as it is, and one with a prefix in front is not a not-found message
+    assert!(parse_not_found(&format!("MCP error -32002: {}", message("x", Some("A")))).is_none());
     assert!(parse_not_found("No page name in logseq://page/. Use logseq://page/{name}.").is_none());
 }
 
@@ -823,7 +823,7 @@ fn a_result_with_no_message_where_the_reference_has_one_fails() {
     assert!(failures.join("\n").contains("content[0].text differs"), "{failures:?}");
 }
 
-// ---- the recorded set (ADR-0032 Decision 3)
+// ---- the recorded set (ADR-0034 Decision 4)
 
 #[test]
 fn the_recorded_set_holds_every_case_the_adr_requires_and_the_references_pass_the_rules() {

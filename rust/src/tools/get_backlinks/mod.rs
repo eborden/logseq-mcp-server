@@ -1,4 +1,4 @@
-//! `logseq_get_backlinks` (the Rust side of `src/tools/get-backlinks.ts`): the pages and blocks
+//! `logseq_get_backlinks`: the pages and blocks
 //! that link to a page under any of its names, most-linking pages first, capped by `max_pages`
 //! and `max_blocks_per_page` (#61, #178).
 //!
@@ -15,6 +15,7 @@
 mod tips;
 mod wire;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
@@ -22,14 +23,14 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, ToolError};
-use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
+use crate::order;
 use crate::params::{ParamAliases, resolve_param_aliases};
-use crate::resolve::alias::{AliasSet, alias_set_warnings, compare_code_units, linked_references_of_pages, resolve_alias_set};
+use crate::resolve::alias::{AliasSet, alias_set_warnings, linked_references_of_pages, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning, large_result_note};
@@ -40,7 +41,7 @@ use self::wire::LINKED_REFERENCES_METHOD;
 
 pub const NAME: &str = "logseq_get_backlinks";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n\
 **Use when:** \"what links to X?\" or \"where is X used?\"\n\
 **Can't find:** unlinked text mentions (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n\
@@ -66,28 +67,27 @@ pub const MAX_BLOCKS_PER_PAGE: u64 = 50;
 /// Source pages named in a `page_blocks_truncated` message; the rest are counted.
 const MAX_NAMED_PAGES: usize = 5;
 
-fn default_max_pages() -> u32 {
-    DEFAULT_MAX_PAGES as u32
+fn default_max_pages() -> u64 {
+    DEFAULT_MAX_PAGES
 }
 
-fn default_max_blocks_per_page() -> u32 {
-    DEFAULT_MAX_BLOCKS_PER_PAGE as u32
+fn default_max_blocks_per_page() -> u64 {
+    DEFAULT_MAX_BLOCKS_PER_PAGE
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
-#[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
+/// ignores them.
+#[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Page to get backlinks for (name, alias or ISO date)
     pub page_name: String,
     /// Max source pages (default: 20, max: 100)
     #[serde(default = "default_max_pages")]
-    pub max_pages: u32,
+    pub max_pages: u64,
     /// Max linking blocks per source page (default: 10, max: 50)
     #[serde(default = "default_max_blocks_per_page")]
-    pub max_blocks_per_page: u32,
+    pub max_blocks_per_page: u64,
 }
 
 /// The tool as `tools/list` shows it.
@@ -100,14 +100,11 @@ pub fn definition() -> Tool {
 /// A call: aliases folded, arguments read, the tool, then its tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let read = Arguments::new(arguments.as_ref());
-    let page_name = read.required_string("page_name")?;
-    let max_pages = read.count_or("max_pages", 0, DEFAULT_MAX_PAGES)?;
-    let max_blocks_per_page = read.count_or("max_blocks_per_page", 0, DEFAULT_MAX_BLOCKS_PER_PAGE)?;
+    let Args { page_name, max_pages, max_blocks_per_page } = parse_args::<Args>(arguments.as_ref())?;
 
     let outcome = get_backlinks_with_meta(client, &page_name, max_pages, max_blocks_per_page).await?;
     let has_results = !outcome.results.is_empty();
-    let text = js::json_stringify(&Value::Array(outcome.results.into_iter().map(Backlink::into_value).collect()));
+    let text = Value::Array(outcome.results.into_iter().map(Backlink::into_value).collect()).to_string();
     let mut content = vec![ContentBlock::text(text)];
     let tips = if tips_enabled { backlink_tips(&page_name, has_results) } else { Vec::new() };
     if let Some(meta) = meta_content(outcome.meta, &tips) {
@@ -116,7 +113,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     Ok(success_result(content))
 }
 
-/// `metaContent(meta, tips)`: the trailing `{"meta": ...}` block, which carries the tips too, or
+/// The trailing `{"meta": ...}` block, which carries the tips too, or
 /// nothing when there is neither.
 fn meta_content(meta: Option<Map<String, Value>>, tips: &[String]) -> Option<String> {
     let merged = match (meta, tips.is_empty()) {
@@ -128,7 +125,7 @@ fn meta_content(meta: Option<Map<String, Value>>, tips: &[String]) -> Option<Str
             merged
         }
     };
-    Some(js::json_stringify(&json!({ "meta": Value::Object(merged) })))
+    Some(json!({ "meta": Value::Object(merged) }).to_string())
 }
 
 /// `[sourcePage, linking blocks]` ranked and cut: the result and what the cut says about it.
@@ -145,11 +142,11 @@ fn block_count(backlink: &Backlink) -> String {
     format!("{n} linking {}", if n == 1 { "block" } else { "blocks" })
 }
 
-/// `String(value)` for the strings and numbers a page or block carries.
+/// A string or number a page or block carries, as text.
 fn js_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
-        Value::Number(n) => js::number_to_string(n.as_f64().expect("a JSON number is finite")),
+        Value::Number(n) => n.to_string(),
         other => other.to_string(),
     }
 }
@@ -159,13 +156,13 @@ fn field<'a>(map: Option<&'a Map<String, Value>>, key: &str) -> Option<&'a Value
     map.and_then(|map| map.get(key))
 }
 
-/// The first of `candidates` that is present (`a ?? b ?? c`; a `null` can't occur, the schema
+/// The first of `candidates` that is present (a `null` can't occur, the schema
 /// refuses it).
 fn first_present<'a>(candidates: impl IntoIterator<Item = Option<&'a Value>>) -> Option<&'a Value> {
     candidates.into_iter().flatten().find(|value| !value.is_null())
 }
 
-/// `sourceName`: the name a warning shows for a source page: the page's, else its first block's
+/// The name a warning shows for a source page: the page's, else its first block's
 /// page (a tuple can have no page), else a neutral label.
 fn source_name(backlink: &Backlink) -> String {
     let page = backlink.page.as_object();
@@ -190,7 +187,7 @@ fn rank_id(backlink: &Backlink) -> i64 {
     first_present([field(backlink.page.as_object(), "id"), field(backlink.block_page(), "id")]).and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
-/// `rankBacklinks`: source pages ranked by how many blocks link the target, most first (#178).
+/// Source pages ranked by how many blocks link the target, most first (#178).
 /// Ties break by page name (lowercase, plain code-unit order), then by page id, so the order is
 /// the same on every run and on both paths: the Editor call's order is LogSeq's own and the alias
 /// group's is by name, and neither says which pages link most. The blocks of each page keep the
@@ -201,13 +198,13 @@ pub fn rank_backlinks(results: Vec<Backlink>) -> Vec<Backlink> {
         b.2.blocks
             .len()
             .cmp(&a.2.blocks.len())
-            .then_with(|| compare_code_units(&a.0, &b.0))
+            .then_with(|| order::by_name(&a.0, &b.0))
             .then_with(|| a.1.cmp(&b.1))
     });
     keyed.into_iter().map(|(_, _, backlink)| backlink).collect()
 }
 
-/// `pagesThatFit` (#196): the most source pages, from the top of the ranking, whose blocks still
+/// The most source pages (#196), from the top of the ranking, whose blocks still
 /// plausibly come back inline: the longest prefix of `results` that holds at most
 /// [`INLINE_BLOCKS`] blocks once each page is cut to `block_cap`.
 fn pages_that_fit(results: &[Backlink], block_cap: usize) -> usize {
@@ -223,7 +220,7 @@ fn pages_that_fit(results: &[Backlink], block_cap: usize) -> usize {
     pages
 }
 
-/// `capBacklinks`: rank `fetched`, then cut to `max_pages` source pages and `max_blocks_per_page`
+/// Ranks `fetched`, then cuts to `max_pages` source pages and `max_blocks_per_page`
 /// blocks each (#61), keeping the first of each in that order. The ranking applies whether or
 /// not a cap bites, so the order is the same at every cap value and a smaller cap is always a
 /// prefix of a larger one. A result that fits both caps comes back ranked, with no warning and no
@@ -257,14 +254,12 @@ pub fn cap_backlinks(fetched: Vec<Backlink>, target: &str, max_pages: u64, max_b
             paging: None,
         });
         // The counts are in hand, so say where the cut fell: the dropped pages link the target no more than this
-        // PARITY(#299): the first dropped page's count has no "linking block(s)" after it, unlike the last kept
-        // page's (suspected TS inconsistency) — drop if Rust becomes the only server.
         let edge = match kept_count {
             0 => String::new(),
             n => format!(
                 " The last page kept has {}, the first dropped page has {}.",
                 block_count(&ranked[n - 1]),
-                ranked[n].blocks.len()
+                block_count(&ranked[n])
             ),
         };
         // Raising max_pages shows pages whose blocks may then be cut by the per-page cap
@@ -380,7 +375,7 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
         .collect()
 }
 
-/// `fetchBacklinks`: the linked references of a resolved page. Without aliases this is the Editor
+/// The linked references of a resolved page. Without aliases this is the Editor
 /// API's own call for `resolved_name`, unchanged. For a page with aliases it is one Datalog query
 /// over the ids of the whole group, shaped like that call's result (camelCase entities, one
 /// `[page, blocks]` tuple per source page), the pages in order of name, then id. A caller that ranks
@@ -399,18 +394,19 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
         return Ok(None);
     };
     let mut groups = group_by_source_page(rows);
-    // PARITY(#299): orders names with `localeCompare`, as `js::locale_compare` orders them (ICU root collation) — drop if Rust
-    // becomes the only server.
-    // `String(a.page.name).localeCompare(String(b.page.name)) || a.page.id - b.page.id`
-    groups.sort_by(|a, b| {
-        let name = |backlink: &Backlink| backlink.page.get("name").map_or_else(|| "undefined".to_owned(), js_string);
-        let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
-        js::locale_compare(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
-    });
+    groups.sort_by(by_page_name_then_id);
     Ok(Some(groups))
 }
 
-/// `getBacklinksWithMeta`: every page and block that links to `page_name` under any of its names.
+/// The order of the source pages of the aliased path: by name ([`order::by_name`]), then page id. A page
+/// without a name sorts first, as the empty name.
+fn by_page_name_then_id(a: &Backlink, b: &Backlink) -> Ordering {
+    let name = |backlink: &Backlink| backlink.page.get("name").map(js_string).unwrap_or_default();
+    let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
+    order::by_name(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
+}
+
+/// Every page and block that links to `page_name` under any of its names.
 ///
 /// `page_name` is a page name, an alias, or an ISO date (`2025-01-01`) of a journal. The meta
 /// carries `resolvedFrom` when the name was an alias, date or namespace leaf rather than an exact
@@ -476,6 +472,19 @@ fn backlinks_unavailable(page: &str) -> ResultWarning {
 mod tests {
     use super::*;
 
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"page_name": "Atlas"});
+        assert_eq!(
+            parse_args::<Args>(base.as_object()).unwrap(),
+            Args { page_name: "Atlas".into(), max_pages: 20, max_blocks_per_page: 10 }
+        );
+        sweep::<Args>(json!({}), "page_name", Takes::Text, true);
+        sweep::<Args>(base.clone(), "max_pages", Takes::Count(0), false);
+        sweep::<Args>(base, "max_blocks_per_page", Takes::Count(0), false);
+    }
+
     fn block(id: i64) -> Value {
         json!({"id": id, "uuid": format!("u{id}")})
     }
@@ -485,6 +494,15 @@ mod tests {
             page: json!({"id": id, "name": name, "originalName": name.to_uppercase()}),
             blocks: (0..blocks as i64).map(|i| block(id * 1000 + i)).collect(),
         }
+    }
+
+    #[test]
+    fn the_aliased_groups_sort_by_name_then_id_and_a_nameless_page_sorts_first() {
+        let nameless = Backlink { page: json!({"id": 9}), blocks: vec![] };
+        let mut groups = vec![source(3, "z", 1), source(2, "a", 1), nameless, source(1, "a", 1)];
+        groups.sort_by(by_page_name_then_id);
+        let ids: Vec<i64> = groups.iter().map(|g| g.page["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, [9, 1, 2, 3]);
     }
 
     fn names(results: &[Backlink]) -> Vec<String> {
@@ -526,7 +544,7 @@ mod tests {
         assert_eq!(
             warning.message,
             "Showing 20 of 25 source pages, ranked by linking blocks (most first, ties by page name). \
-             The last page kept has 1 linking block, the first dropped page has 1. \
+             The last page kept has 1 linking block, the first dropped page has 1 linking block. \
              Blocks per page are capped separately by max_blocks_per_page."
         );
         assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_pages to 25 (or higher) to get all 25."));

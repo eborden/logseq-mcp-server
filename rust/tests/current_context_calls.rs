@@ -1,7 +1,7 @@
 //! The LogSeq traffic of `logseq_get_current_context` against a mock LogSeq on a local port: how
-//! many calls it makes, with which inputs. The Rust side of the call count in `CLAUDE.md` ("Current
+//! many calls it makes, with which inputs. The call count is that in `CLAUDE.md` ("Current
 //! Implementation Status"); the parity harness (`parity.rs`) checks the same calls and the
-//! result bytes against the TypeScript server. Every page and block here is made up (BR-0001).
+//! result bytes against the recorded results. Every page and block here is made up (BR-0001).
 //!
 //! The three Editor calls are made at once, so they reach LogSeq in no fixed order: this mock answers
 //! by method, not by arrival.
@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex};
 use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::js;
 use logseq_mcp_server::tools::get_current_context;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -73,7 +72,7 @@ async fn mock_logseq(answers: &[(&str, Value)]) -> MockLogseq {
 }
 
 fn client(logseq: &MockLogseq) -> LogseqClient {
-    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None })
+    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
 
 /// The methods called, sorted: the Editor calls arrive in no fixed order.
@@ -99,7 +98,7 @@ async fn nothing_open_costs_the_three_editor_calls_with_no_arguments() {
     assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS]);
     assert!(logseq.seen.lock().unwrap().iter().all(|call| call["args"] == json!([])));
     assert_eq!(
-        js::json_stringify(&context.into_value()),
+        context.into_value().to_string(),
         r#"{"message":"No page is open in LogSeq (for example the All Pages view is showing).","page":null}"#
     );
 }
@@ -142,6 +141,19 @@ async fn a_block_with_no_page_costs_no_lookup() {
         (GET_CURRENT_PAGE, json!(null)),
         (GET_CURRENT_BLOCK, json!({"id": 5, "uuid": "00000000-0000-4000-8000-000000000005", "content": "orphan"})),
         (GET_SELECTED_BLOCKS, json!([])),
+    ])
+    .await;
+    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 3);
+    assert!(context.page.is_none() && context.message.is_some());
+}
+
+#[tokio::test]
+async fn an_answer_with_neither_a_name_nor_a_page_is_no_page_and_says_none_is_open() {
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, json!({"id": 5, "uuid": "00000000-0000-4000-8000-000000000005", "content": "orphan"})),
+        (GET_CURRENT_BLOCK, json!(null)),
+        (GET_SELECTED_BLOCKS, json!(null)),
     ])
     .await;
     let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
@@ -216,7 +228,7 @@ async fn a_zoomed_block_names_its_page_through_one_lookup() {
     .await;
     let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
     assert_eq!(methods(&logseq).len(), 4);
-    assert_eq!(js::json_stringify(&context.into_value()), r#"{"page":{"name":"project atlas","originalName":"Project Atlas"},"focusedBlock":{"uuid":"00000000-0000-4000-8000-000000000512","content":"zoomed","pageName":"Project Atlas"}}"#);
+    assert_eq!(context.into_value().to_string(), r#"{"page":{"name":"project atlas","originalName":"Project Atlas"},"focusedBlock":{"uuid":"00000000-0000-4000-8000-000000000512","content":"zoomed","pageName":"Project Atlas"}}"#);
 }
 
 #[tokio::test]
@@ -229,7 +241,7 @@ async fn infrastructure_and_shape_errors_are_errors_and_not_an_empty_context() {
     .await;
     let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
     assert!(matches!(&error, ToolError::Logseq(_)), "{error}");
-    // `Promise.all` lets the other fetches finish after one fails, so TypeScript always makes all three calls
+    // the other fetches finish after one fails, so all three calls are always made
     assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS]);
 
     let logseq = mock_logseq(&[(GET_CURRENT_PAGE, json!(null)), (GET_CURRENT_BLOCK, json!(null)), (GET_SELECTED_BLOCKS, json!({"id": 1}))]).await;
@@ -240,15 +252,15 @@ async fn infrastructure_and_shape_errors_are_errors_and_not_an_empty_context() {
 
 #[tokio::test]
 async fn with_two_answers_wrong_the_error_is_the_first_in_a_fixed_order() {
-    // TypeScript reports whichever arrives first; Rust reports the page, then the block, then the selection
+    // the errors are raised in a fixed order: the page, then the block, then the selection
     let logseq = mock_logseq(&[(GET_CURRENT_PAGE, json!(5)), (GET_CURRENT_BLOCK, json!({"id": 1})), (GET_SELECTED_BLOCKS, json!({"id": 1}))]).await;
     let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
     assert!(matches!(&error, ToolError::Response(response) if response.method == GET_CURRENT_PAGE), "{error}");
     assert_eq!(methods(&logseq).len(), 3);
 }
 
-// A deliberate difference from TypeScript, which embeds any integer in the `ground` clause and gets no row: a
-// page id that is not positive can't be a `:db/id`, so `PageId` refuses it before any query is made.
+// A page id that is not positive can't be a `:db/id` (embedding one in the `ground` clause would only get no row),
+// so `PageId` refuses it before any query is made.
 #[tokio::test]
 async fn a_non_positive_page_id_is_an_error_and_makes_no_lookup() {
     let logseq = mock_logseq(&[
@@ -265,7 +277,7 @@ async fn a_non_positive_page_id_is_an_error_and_makes_no_lookup() {
 }
 
 #[tokio::test]
-async fn a_page_id_of_zero_with_no_db_id_names_no_page_and_makes_no_lookup() {
+async fn a_page_id_of_zero_is_an_id_and_so_an_error_like_a_negative_one_and_makes_no_lookup() {
     let logseq = mock_logseq(&[
         (GET_CURRENT_PAGE, json!(null)),
         (GET_CURRENT_BLOCK, json!({"id": 5, "uuid": "00000000-0000-4000-8000-000000000005", "content": "on page 0", "page": {"id": 0}})),
@@ -273,9 +285,8 @@ async fn a_page_id_of_zero_with_no_db_id_names_no_page_and_makes_no_lookup() {
         (DATASCRIPT_QUERY, json!([])),
     ])
     .await;
-    let context = get_current_context::get_current_context(&client(&logseq)).await.unwrap();
+    let error = get_current_context::get_current_context(&client(&logseq)).await.unwrap_err();
 
+    assert!(matches!(&error, ToolError::InvalidValue(_)), "{error}");
     assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS], "no lookup is made");
-    assert!(context.page.is_none());
-    assert!(context.focused_block.as_ref().unwrap().get("pageName").is_none());
 }

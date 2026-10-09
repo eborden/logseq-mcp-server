@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use logseq_mcp_server::js;
 use serde_json::Value;
 
 use super::cases::Canned;
@@ -34,9 +33,9 @@ pub fn normalize_query(query: &str) -> String {
     query.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A value as `JSON.stringify` writes it, to compare what the server sent with what a case lists.
+/// A value as minified JSON, to compare what the server sent with what a case lists.
 fn stringify(value: &Value) -> String {
-    js::json_stringify(value)
+    value.to_string()
 }
 
 /// A call as a failure message names it: the method, plus the query text for a Datalog query or the args for any

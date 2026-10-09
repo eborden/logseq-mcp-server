@@ -1,4 +1,4 @@
-//! `logseq_get_concept_network` (the Rust side of `src/tools/get-concept-network.ts`): the pages
+//! `logseq_get_concept_network`: the pages
 //! linked to a concept as nodes and edges, in both link directions, up to `max_depth` hops, with one
 //! edge per page pair and its reference count.
 //!
@@ -35,11 +35,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::ToolError;
-use crate::js;
 use crate::markdown::{FooterMeta, with_footer};
 use crate::markdown_context::render_network;
 use crate::meta::ResultWarning;
@@ -60,7 +59,7 @@ pub use self::warning::{MAX_FANOUT_LIMIT, MAX_NODES_LIMIT};
 
 pub const NAME: &str = "logseq_get_concept_network";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n\
 **Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n\
 **Can't find:** unlinked pages, or what pages say (logseq_build_context).";
@@ -77,38 +76,36 @@ pub const DEFAULT_MAX_FANOUT: u64 = 15;
 /// The deepest the handler lets a caller walk.
 pub const MAX_DEPTH_LIMIT: u64 = 3;
 
-fn default_max_depth() -> u32 {
-    DEFAULT_MAX_DEPTH as u32
+fn default_max_depth() -> u64 {
+    DEFAULT_MAX_DEPTH
 }
 
-fn default_max_nodes() -> u32 {
-    DEFAULT_MAX_NODES as u32
+fn default_max_nodes() -> u64 {
+    DEFAULT_MAX_NODES
 }
 
-fn default_max_fanout() -> u32 {
-    DEFAULT_MAX_FANOUT as u32
+fn default_max_fanout() -> u64 {
+    DEFAULT_MAX_FANOUT
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them.
-/// `max_nodes` and `max_fanout` start at 1, a `max_depth` of 0 returns the root alone.
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
+/// ignores them. `max_nodes` and `max_fanout` start at 1, a `max_depth` of 0 returns the root alone.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
 pub struct Args {
     /// Root concept (page name, alias or ISO date)
     pub concept_name: String,
     /// Maximum depth to traverse (default: 2, max: 3)
     #[serde(default = "default_max_depth")]
-    pub max_depth: u32,
+    pub max_depth: u64,
     /// Maximum pages in the network, root included (default: 50, max: 500)
     #[serde(default = "default_max_nodes")]
     #[schemars(range(min = 1))]
-    pub max_nodes: u32,
+    pub max_nodes: u64,
     /// Maximum new pages any one page may add (default: 15, max: 100)
     #[serde(default = "default_max_fanout")]
     #[schemars(range(min = 1))]
-    pub max_fanout: u32,
+    pub max_fanout: u64,
     /// Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.
     #[serde(default)]
     pub expand_journals: bool,
@@ -116,8 +113,7 @@ pub struct Args {
     pub format: Option<OutputFormat>,
 }
 
-/// What a call asked for, read from the arguments in the order the schema lists them, so the first
-/// one that is wrong is the one reported, as `parseArgs` does.
+/// What a call asked for, from the arguments parsed into [`Args`].
 #[derive(Debug, PartialEq)]
 struct Request {
     concept_name: String,
@@ -126,15 +122,11 @@ struct Request {
     format: Option<OutputFormat>,
 }
 
-fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
-    let read = Arguments::new(arguments);
-    let concept_name = read.required_string("concept_name")?;
-    let max_depth = read.count_or("max_depth", 0, DEFAULT_MAX_DEPTH)?;
-    let max_nodes = read.count_or("max_nodes", 1, DEFAULT_MAX_NODES)?;
-    let max_fanout = read.count_or("max_fanout", 1, DEFAULT_MAX_FANOUT)?;
-    let expand_journals = read.boolean("expand_journals", false)?;
-    let format = OutputFormat::read(&read)?;
-    Ok(Request { concept_name, max_depth, options: Options { max_nodes, max_fanout, expand_journals }, format })
+impl From<Args> for Request {
+    fn from(args: Args) -> Request {
+        let Args { concept_name, max_depth, max_nodes, max_fanout, expand_journals, format } = args;
+        Request { concept_name, max_depth, options: Options { max_nodes, max_fanout, expand_journals }, format }
+    }
 }
 
 /// The tool as `tools/list` shows it.
@@ -149,7 +141,7 @@ pub fn definition() -> Tool {
 /// no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let request = read_args(arguments.as_ref())?;
+    let request = Request::from(parse_args::<Args>(arguments.as_ref())?);
     // Safeguards: caps on the walk, whatever the caller asks for
     let options = Options {
         max_nodes: request.options.max_nodes.min(MAX_NODES_LIMIT as u64),
@@ -162,10 +154,10 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         let body = render_network(&result);
         return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
     }
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&result))]))
+    Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
-/// What `getConceptNetwork` takes beyond the root and the depth (`ConceptNetworkOptions`).
+/// What the network walk takes beyond the root and the depth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
     /// Hard cap on nodes in the result, root included
@@ -251,8 +243,7 @@ fn links_unavailable(depth: i64) -> ResultWarning {
     )
 }
 
-/// `normalizeCap`: a whole number of at least 1 (a JavaScript number is floored, and an argument is
-/// whole already).
+/// A cap: a whole number of at least 1 (an argument is whole already).
 fn cap(value: u64) -> usize {
     usize::try_from(value.max(1)).unwrap_or(usize::MAX)
 }
@@ -262,7 +253,7 @@ fn page_ids(ids: &[i64]) -> Result<Vec<PageId>, ToolError> {
     ids.iter().map(|&id| PageId::new(id).map_err(ToolError::from)).collect()
 }
 
-/// `getConceptNetwork`: the network of pages linked to a concept, by batched Datalog queries.
+/// The network of pages linked to a concept, by batched Datalog queries.
 ///
 /// One query for the root plus one per depth level (at most `max_depth` + 1 calls), each covering
 /// the whole BFS frontier in both link directions.
@@ -460,27 +451,43 @@ mod tests {
         assert!(tool.description.as_deref().unwrap().contains("**Can't find:**"));
     }
 
+    fn parse_request(arguments: Option<&JsonObject>) -> Result<Request, crate::errors::InvalidParameter> {
+        parse_args::<Args>(arguments).map(Request::from)
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"concept_name": "Atlas"});
+        sweep::<Args>(json!({}), "concept_name", Takes::Text, true);
+        sweep::<Args>(base.clone(), "max_depth", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "max_nodes", Takes::Count(1), false);
+        sweep::<Args>(base.clone(), "max_fanout", Takes::Count(1), false);
+        sweep::<Args>(base.clone(), "expand_journals", Takes::Flag, false);
+        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
+    }
+
     #[test]
     fn the_arguments_are_read_in_schema_order_and_the_aliases_are_folded() {
         let folded = resolve_param_aliases(ALIASES, args(json!({"page": "Atlas", "max_depth": 3, "expand_journals": true}))).unwrap();
-        let request = read_args(folded.as_ref()).unwrap();
+        let request = parse_request(folded.as_ref()).unwrap();
         assert_eq!(request.concept_name, "Atlas");
         assert_eq!(request.max_depth, 3);
         assert_eq!(request.options, Options { expand_journals: true, ..Options::default() });
-        let request = read_args(args(json!({"concept_name": "a", "format": "markdown"})).as_ref()).unwrap();
+        let request = parse_request(args(json!({"concept_name": "a", "format": "markdown"})).as_ref()).unwrap();
         assert_eq!((request.max_depth, request.format), (2, Some(OutputFormat::Markdown)));
-        let error = read_args(args(json!({"concept_name": "a", "max_depth": -1, "max_nodes": 0})).as_ref()).unwrap_err();
+        let error = parse_request(args(json!({"concept_name": "a", "max_depth": -1, "max_nodes": 0})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_depth': -1"), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = parse_request(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'concept_name': missing"), "{error}");
     }
 
     #[test]
     fn max_nodes_and_max_fanout_start_at_one_and_max_depth_at_zero() {
-        let request = read_args(args(json!({"concept_name": "a", "max_depth": 0, "max_nodes": 1, "max_fanout": 1})).as_ref()).unwrap();
+        let request = parse_request(args(json!({"concept_name": "a", "max_depth": 0, "max_nodes": 1, "max_fanout": 1})).as_ref()).unwrap();
         assert_eq!((request.max_depth, request.options.max_nodes, request.options.max_fanout), (0, 1, 1));
         for param in ["max_nodes", "max_fanout"] {
-            let error = read_args(args(json!({"concept_name": "a", param: 0})).as_ref()).unwrap_err();
+            let error = parse_request(args(json!({"concept_name": "a", param: 0})).as_ref()).unwrap_err();
             assert!(error.to_string().starts_with(&format!("Invalid parameter '{param}': 0")), "{error}");
             assert!(error.to_string().contains("at least 1"), "{error}");
         }
@@ -498,7 +505,7 @@ mod tests {
             warnings: vec![ResultWarning { code: "w".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }],
         };
         assert_eq!(
-            js::json_stringify(&network.to_value()),
+            network.to_value().to_string(),
             concat!(
                 r#"{"concept":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,

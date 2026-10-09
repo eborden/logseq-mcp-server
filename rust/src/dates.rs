@@ -1,23 +1,16 @@
-//! Calendar dates for the date-range tool (the Rust side of `src/utils/date-utils.ts` and
-//! `src/utils/date-presets.ts`): the date of "now" in the host's local time zone, the date presets
+//! Calendar dates for the date-range tool: the date of "now" in the host's local time zone, the date presets
 //! (`last_week`, `this_month`, ...) and LogSeq's `YYYYMMDD` integer.
 //!
-//! The TypeScript code reads the clock through `new Date()` and uses the *local* components
-//! (`getFullYear`, `getMonth`, `getDate`, `getDay`), so "today" is the calendar day in the zone of
-//! the machine running the server, which is the machine running LogSeq. This module does the same:
-//! [`Clock::today`] asks the C library for the local date of an instant (`localtime_r`, which
-//! honours `TZ` as Node does), and every other function here is plain calendar arithmetic on a
+//! "Today" is the calendar day in the zone of the machine running the server, which is the machine
+//! running LogSeq (its journal days are in that zone). [`Clock::today`] asks the C library for the local date of an instant (`localtime_r`, which
+//! honours `TZ`), and every other function here is plain calendar arithmetic on a
 //! [`CalendarDate`], with no zone in it. A preset therefore depends on the host's zone in exactly
-//! the one place the TypeScript one does.
+//! that one place.
 //!
 //! Weeks run Monday to Sunday (ISO 8601). `this_week`, `this_month` and `this_year` cover the whole
 //! calendar period, so they can end after today; `year_to_date` is January 1 through today.
 
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// The words `preset` takes, in the order the TypeScript schema lists them (`DATE_PRESETS`).
-pub const DATE_PRESET_VALUES: &[&str] =
-    &["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"];
 
 /// A named period (`DatePreset`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
@@ -36,25 +29,8 @@ pub enum DatePreset {
     YearToDate,
 }
 
-impl DatePreset {
-    /// The preset a word names, as `isDatePreset` knows it.
-    pub fn from_word(word: &str) -> Option<DatePreset> {
-        Some(match word {
-            "today" => DatePreset::Today,
-            "yesterday" => DatePreset::Yesterday,
-            "this_week" => DatePreset::ThisWeek,
-            "last_week" => DatePreset::LastWeek,
-            "this_month" => DatePreset::ThisMonth,
-            "last_month" => DatePreset::LastMonth,
-            "this_year" => DatePreset::ThisYear,
-            "year_to_date" => DatePreset::YearToDate,
-            _ => return None,
-        })
-    }
-}
-
-/// A day of the proleptic Gregorian calendar, with no time zone. The fields are what
-/// `getFullYear()`, `getMonth() + 1` and `getDate()` give.
+/// A day of the proleptic Gregorian calendar, with no time zone. The fields are the year, the
+/// month (1 to 12) and the day of the month.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CalendarDate {
     pub year: i32,
@@ -72,14 +48,13 @@ pub struct DateRange {
 }
 
 impl CalendarDate {
-    /// `formatLogseqDate`: `20250131` for January 31 2025. For a year before 1000 JavaScript's
-    /// `parseInt` of the unpadded year gives the same number, so this is plain arithmetic.
+    /// `20250131` for January 31 2025. The year is not padded, so a year before 1000 gives fewer
+    /// digits and this is plain arithmetic.
     pub fn to_logseq_day(self) -> u32 {
         (self.year as u32) * 10_000 + self.month * 100 + self.day
     }
 
-    /// The day `year`-`month`-`day` if the calendar has it, as `new Date(year, month - 1, day)` read back
-    /// through `getFullYear`, `getMonth` and `getDate` is that day (a 30th of February is none).
+    /// The day `year`-`month`-`day` if the calendar has it (a 30th of February is none).
     pub fn real(year: i32, month: u32, day: u32) -> Option<CalendarDate> {
         if !(1..=12).contains(&month) || day == 0 {
             return None;
@@ -113,35 +88,35 @@ impl CalendarDate {
         CalendarDate { year, month, day }
     }
 
-    /// `shiftDays`: this day moved by `delta` calendar days. Calendar arithmetic, so a daylight
+    /// This day moved by `delta` calendar days. Calendar arithmetic, so a daylight
     /// saving change never moves the day.
     pub fn shifted(self, delta: i64) -> CalendarDate {
         CalendarDate::from_days(self.days() + delta)
     }
 
-    /// `getDay()`: Sunday 0 to Saturday 6.
+    /// Sunday 0 to Saturday 6.
     fn weekday(self) -> i64 {
         (self.days() + 4).rem_euclid(7) // 1970-01-01 was a Thursday
     }
 
-    /// `mondayOf`: the Monday of the ISO week this day is in.
+    /// The Monday of the ISO week this day is in.
     pub fn monday(self) -> CalendarDate {
         self.shifted(-((self.weekday() + 6) % 7))
     }
 
-    /// The first day of this month, `delta` months on (`new Date(year, month + delta, 1)`).
+    /// The first day of this month, `delta` months on.
     pub fn first_of_month(self, delta: i32) -> CalendarDate {
         let months = self.year * 12 + (self.month as i32 - 1) + delta;
         CalendarDate { year: months.div_euclid(12), month: months.rem_euclid(12) as u32 + 1, day: 1 }
     }
 
-    /// The day before the first of the month `delta` months on (`new Date(year, month + delta, 0)`).
+    /// The day before the first of the month `delta` months on.
     pub fn last_of_month_before(self, delta: i32) -> CalendarDate {
         self.first_of_month(delta).shifted(-1)
     }
 }
 
-/// `resolveDatePreset`: a preset as an inclusive `YYYYMMDD` range, against `today`.
+/// A preset as an inclusive `YYYYMMDD` range, against `today`.
 pub fn resolve_date_preset(preset: DatePreset, today: CalendarDate) -> DateRange {
     let range = |start: CalendarDate, end: CalendarDate| DateRange { start: start.to_logseq_day(), end: end.to_logseq_day() };
     let january_first = CalendarDate { year: today.year, month: 1, day: 1 };
@@ -173,7 +148,7 @@ pub fn resolve_date_preset(preset: DatePreset, today: CalendarDate) -> DateRange
 pub enum Clock {
     #[default]
     System,
-    /// Milliseconds since 1970-01-01 UTC, as `Date.now()` counts them
+    /// Milliseconds since 1970-01-01 UTC
     Fixed(i64),
 }
 
@@ -189,8 +164,8 @@ impl Clock {
         }
     }
 
-    /// The calendar day of now in the host's local time zone: what `new Date()`'s local
-    /// components say (`formatLogseqDate(now)`, `startOfDay(now)`).
+    /// The calendar day of now in the host's local time zone: what the local
+    /// calendar says.
     pub fn today(self) -> CalendarDate {
         local_date(self.now_ms())
     }
@@ -212,9 +187,8 @@ fn local_date(epoch_ms: i64) -> CalendarDate {
     CalendarDate { year: local.tm_year + 1900, month: (local.tm_mon + 1) as u32, day: local.tm_mday as u32 }
 }
 
-// A known difference from the TypeScript server (listed in #299): where there is no `localtime_r` (not a
-// unix host), "today" is the UTC day, and the TypeScript server reads the local one everywhere. A real
-// local-time implementation would replace this, not remove it.
+// A known limit (listed in #299): where there is no `localtime_r` (not a unix host), "today" is the
+// UTC day, not the local one. A real local-time implementation would replace this, not remove it.
 #[cfg(not(unix))]
 fn local_date(epoch_ms: i64) -> CalendarDate {
     utc_date(epoch_ms)
@@ -303,7 +277,7 @@ mod tests {
         assert_eq!(range(DatePreset::YearToDate, date(2025, 1, 1)), (20250101, 20250101));
     }
 
-    /// The edges `resolveDatePreset` can get wrong: a day that borrows from the month before, a leap day, the last day
+    /// The edges a preset can get wrong: a day that borrows from the month before, a leap day, the last day
     /// of a year, and the last day of a 30-day month reached from a 31-day one.
     #[test]
     fn presets_hold_at_month_and_year_edges_and_on_a_leap_day() {
@@ -334,11 +308,12 @@ mod tests {
 
     #[test]
     fn a_preset_is_known_by_the_words_the_schema_lists() {
-        for word in DATE_PRESET_VALUES {
-            assert!(DatePreset::from_word(word).is_some(), "{word}");
-        }
-        assert_eq!(DatePreset::from_word("next_week"), None);
-        assert_eq!(DatePreset::from_word("Today"), None);
+        let preset = |word: &str| serde_json::from_value::<DatePreset>(serde_json::json!(word)).ok();
+        let words = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"];
+        let known: Vec<_> = words.iter().map(|word| preset(word).unwrap_or_else(|| panic!("{word}"))).collect();
+        assert_eq!(known.len(), 8);
+        assert_eq!(preset("next_week"), None);
+        assert_eq!(preset("Today"), None);
     }
 
     #[test]

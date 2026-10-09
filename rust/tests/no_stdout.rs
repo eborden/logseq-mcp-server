@@ -1,5 +1,5 @@
-//! Stdout is the MCP stdio channel (ADR-0004): nothing in `src/` may print to it. The Rust side
-//! of `src/no-stdout.test.ts`. `rmcp::transport::stdio()` in `main.rs` is the one writer, and
+//! Stdout is the MCP stdio channel (ADR-0004): nothing in `src/` may print to it.
+//! `rmcp::transport::stdio()` in `main.rs` is the one writer, and
 //! it is the protocol itself.
 
 use std::fs;

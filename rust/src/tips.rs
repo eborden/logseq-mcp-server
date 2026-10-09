@@ -1,4 +1,4 @@
-//! Next-step tips (#44, BR-0009; the Rust side of `src/utils/tips.ts`). After a result the model
+//! Next-step tips (#44, BR-0009). After a result the model
 //! usually needs one more call, and a tip names it with ready-to-use arguments. Tips are built
 //! from the result, never by the tool's own code, so the primary result keeps its shape; they
 //! travel in a trailing `{"meta":{"tips":[...]}}` content block, and there is none when there are
@@ -14,15 +14,15 @@ pub const MAX_TIPS: usize = 2;
 /// A suggested call: the tool name followed by its arguments as JSON, so a name with quotes,
 /// backslashes or newlines stays a valid call.
 pub fn suggest_call(tool: &str, args: &Value) -> String {
-    format!("{tool} {}", js::json_stringify(args))
+    format!("{tool} {}", args)
 }
 
-/// A text that isn't blank (`nonEmptyString`).
+/// A text that isn't blank.
 pub fn non_empty(text: &str) -> Option<&str> {
     (!js::trim(text).is_empty()).then_some(text)
 }
 
-/// `metaContent(null, tips)`: the trailing block that carries the tips, or `None` when there are none.
+/// The trailing block that carries the tips, or `None` when there are none.
 pub fn tips_content(tips: &[String]) -> Option<String> {
     (!tips.is_empty()).then(|| json!({"meta": {"tips": tips}}).to_string())
 }
@@ -31,7 +31,7 @@ fn as_object(value: Option<&Value>) -> Option<&Map<String, Value>> {
     value.and_then(Value::as_object)
 }
 
-/// `nonEmptyString`: a string that isn't blank, as it is.
+/// A string that isn't blank, as it is.
 fn non_empty_value(value: Option<&Value>) -> Option<&str> {
     value.and_then(Value::as_str).filter(|text| !js::trim(text).is_empty())
 }
@@ -42,7 +42,7 @@ fn name_of_page<'v>(page: Option<&'v Map<String, Value>>) -> Option<&'v str> {
     non_empty_value(page.get("originalName")).or_else(|| non_empty_value(page.get("original-name"))).or_else(|| non_empty_value(page.get("name")))
 }
 
-/// `pageNameOf`: the page name of a block in the shapes the tools return: slim blocks (`pageName`),
+/// The page name of a block in the shapes the tools return: slim blocks (`pageName`),
 /// search context (`context.page`), and a full block's own `page`.
 fn page_name_of(block: &Value) -> Option<&str> {
     let block = block.as_object()?;
@@ -52,7 +52,7 @@ fn page_name_of(block: &Value) -> Option<&str> {
         .or_else(|| name_of_page(as_object(block.get("page"))))
 }
 
-/// `journalStatus`: whether the page behind a block is a journal date page. True or false when the
+/// Whether the page behind a block is a journal date page. True or false when the
 /// block carries a page entity with a name, `None` when only a name (a slim block) or a bare id is
 /// known.
 pub(crate) fn journal_status(block: &Value) -> Option<bool> {
@@ -70,7 +70,7 @@ pub(crate) fn journal_status(block: &Value) -> Option<bool> {
     )
 }
 
-/// `topicsOf`: the topic names a block mentions: its `#tags` and `[[page refs]]` (slim blocks), and
+/// The topic names a block mentions: its `#tags` and `[[page refs]]` (slim blocks), and
 /// `context.tags`.
 fn topics_of(block: &Value) -> Vec<&str> {
     let Some(block) = block.as_object() else { return Vec::new() };
@@ -82,7 +82,7 @@ fn topics_of(block: &Value) -> Vec<&str> {
         .collect()
 }
 
-/// `mostCommon`: the most frequent value; the first one seen wins a tie.
+/// The most frequent value; the first one seen wins a tie.
 fn most_common<'v>(values: impl IntoIterator<Item = &'v str>) -> Option<&'v str> {
     let mut counts: Vec<(&str, usize)> = Vec::new();
     for value in values {
@@ -107,7 +107,7 @@ pub(crate) enum Kind {
     Topic,
 }
 
-/// `suggestTopic`: the topic worth a `build_context` call for a set of hit blocks. Most hits sit on
+/// The topic worth a `build_context` call for a set of hit blocks. Most hits sit on
 /// journal date pages, which make the least informative next step, so in order:
 /// 1. the page most hits are on, among pages known not to be journals;
 /// 2. the `#tag` or `[[ref]]` most hits mention (slim hits carry no journal flag);

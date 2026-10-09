@@ -1,4 +1,4 @@
-//! `logseq_query_by_property` (the Rust side of `src/tools/query-by-property.ts`): the blocks whose
+//! `logseq_query_by_property`: the blocks whose
 //! property equals a value, flat, with their page's name.
 //!
 //! Calls: 1, whatever the number of matches (#33). The match runs inside LogSeq, against
@@ -22,11 +22,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::{Arguments, Scalar};
+use crate::args::{Scalar, parse_args};
 use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
 use crate::tool::{input_schema, read_only_annotations, success_result};
@@ -47,7 +46,7 @@ pub const MAX_PROPERTY_LIMIT: u64 = 500;
 /// The query takes only a key and an exact value, so nothing narrows it further.
 const NARROWER: &str = "No other parameter narrows this query.";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.\n\n\
 **Matching:** key as stored (created-at) or camelCase; values are exact strings (\"42\", \"true\"); a multi-value property matches if any one value equals it. Flat list with page name, no children.\n\
 **Can't find:** partial values, ranges, or over 500 matches. For text use logseq_search_blocks.";
@@ -60,7 +59,7 @@ fn default_slim_results() -> bool {
     DEFAULT_SLIM_RESULTS
 }
 
-/// The search's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The search's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Name of the property to query (letters, digits, "-" and "_"; createdAt and created-at are equivalent)
@@ -75,18 +74,6 @@ pub struct Args {
     pub slim_results: bool,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        property_key: read.required_string("property_key")?,
-        property_value: read.required_scalar("property_value")?,
-        limit: read.count_or("limit", 0, DEFAULT_PROPERTY_LIMIT)?,
-        slim_results: read.boolean("slim_results", DEFAULT_SLIM_RESULTS)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -96,14 +83,14 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the query, then its meta and tips.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let found = query_by_property_with_meta(client, &args.property_key, &args.property_value, args.slim_results, args.limit).await?;
     // `null` from LogSeq is `null` here, and has no meta or tips (BR-0011)
     let Some(found) = found else { return Ok(success_result(vec![ContentBlock::text("null")])) };
 
-    let mut content = vec![ContentBlock::text(js::json_stringify(&Value::Array(found.results.clone())))];
+    let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
     let tips = if tips_enabled { property_tips(&found.results) } else { Vec::new() };
-    // `metaContent(meta, tips)`: the meta when the list was cut, the tips beside it or alone
+    // The meta when the list was cut, the tips beside it or alone
     let meta = match (&found.meta, tips.is_empty()) {
         (None, true) => None,
         (None, false) => Some(json!({ "tips": tips })),
@@ -116,7 +103,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
         }
     };
     if let Some(meta) = meta {
-        content.push(ContentBlock::text(js::json_stringify(&json!({ "meta": meta }))));
+        content.push(ContentBlock::text(json!({ "meta": meta }).to_string()));
     }
     Ok(success_result(content))
 }
@@ -135,15 +122,12 @@ fn block_id(block: &Map<String, Value>) -> i64 {
     block.get("id").and_then(crate::wire::whole_number).unwrap_or(0)
 }
 
-// PARITY(#299): the sort reads only `page.id`, so a page spelled `db/id`, which LogSeq never sends for a
-// nested pull, sorts as page 0 (suspected TS bug: read it as `entityId` does) - drop if Rust becomes the only
-// server.
-/// `a.page?.id ?? 0`: the id of the page a block sits on, 0 when it carries none.
+/// The id of the page a block sits on (`id`, else `db/id`), 0 when it carries none.
 fn page_id(block: &Map<String, Value>) -> i64 {
-    block.get("page").and_then(|page| page.get("id")).and_then(crate::wire::whole_number).unwrap_or(0)
+    crate::entity::id_of(block.get("page")).unwrap_or(0)
 }
 
-/// `(a.page?.id ?? 0) - (b.page?.id ?? 0) || a.id - b.id`: page id, then block id.
+/// Page id (`page_id`, 0 for none), then block id.
 fn by_page_then_block(a: &Map<String, Value>, b: &Map<String, Value>) -> Ordering {
     page_id(a).cmp(&page_id(b)).then_with(|| block_id(a).cmp(&block_id(b)))
 }
@@ -242,6 +226,16 @@ mod tests {
     }
 
     #[test]
+    fn a_page_spelled_db_id_sorts_by_that_id_not_as_page_zero() {
+        let mut spelled = block(5, None);
+        spelled.insert("page".into(), json!({"db/id": 30}));
+        let mut blocks = vec![spelled, block(7, Some(10)), block(6, Some(40))];
+        blocks.sort_by(by_page_then_block);
+        let ids: Vec<i64> = blocks.iter().map(block_id).collect();
+        assert_eq!(ids, [7, 5, 6]);
+    }
+
+    #[test]
     fn the_schema_means_what_the_typescript_one_means() {
         // `inputSchema` of logseq_query_by_property in the ADR-0016 snapshot
         let typescript = json!({
@@ -272,9 +266,24 @@ mod tests {
     }
 
     #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"property_key": "status", "property_value": "done"});
+        let without = |param: &str| {
+            let mut base = base.clone();
+            base.as_object_mut().unwrap().remove(param);
+            base
+        };
+        sweep::<Args>(without("property_key"), "property_key", Takes::Text, true);
+        sweep::<Args>(without("property_value"), "property_value", Takes::Scalar, true);
+        sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
+        sweep::<Args>(base, "slim_results", Takes::Flag, false);
+    }
+
+    #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let required = json!({"property_key": "status", "property_value": 3});
-        let defaults = read_args(required.as_object()).unwrap();
+        let defaults = parse_args::<Args>(required.as_object()).unwrap();
         assert_eq!(
             defaults,
             Args { property_key: "status".into(), property_value: Scalar::Number(3.0), limit: 100, slim_results: true }
@@ -283,17 +292,17 @@ mod tests {
         // the first argument in schema order that is wrong is the one reported
         let bad = json!({"slim_results": 0, "limit": "a", "property_value": []});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'property_key': missing\n\nExpected: a string (required)\nExample: property_key: \"...\""
         );
         let bad = json!({"property_key": "a", "slim_results": 0, "limit": "a", "property_value": []});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'property_value': []\n\nExpected: a string, a number or a boolean, not an array\nExample: property_value: \"...\""
         );
         let bad = json!({"property_key": "a", "slim_results": 0, "limit": "a", "property_value": false});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': \"a\"\n\nExpected: a number, not a string\nExample: limit: 5"
         );
     }

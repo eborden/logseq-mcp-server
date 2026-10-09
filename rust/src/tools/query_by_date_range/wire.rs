@@ -1,41 +1,31 @@
-//! What the date-range tool reads from LogSeq: the journal pages and the blocks its queries pull
-//! (`responses.nullablePageRows` and `responses.nullableBlockRows` in `src/response-schemas.ts`).
-//! Each page and block is checked against the TypeScript schema and returned as the JSON LogSeq
+//! What the date-range tool reads from LogSeq: the journal pages and the blocks its queries pull.
+//! Each page and block is checked against its wire type and returned as the JSON LogSeq
 //! sent, since a full result carries it as it came.
 //!
 //! Both answers are `null` or a list of rows, one cell each, and a `null` cell is skipped
-//! (`filter(row => row != null)`). A `null` answer is not an empty one (BR-0011): the tool says
+//! (the row is dropped). A `null` answer is not an empty one (BR-0011): the tool says
 //! LogSeq gave no answer.
 
+use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
+use crate::entity::shape::{Block, PulledPage};
+use crate::wire::{DATALOG_METHOD, ResponseError, sent_cells};
 
-/// Rows of one cell each, the cell `null` or an object that `check` accepts.
-fn rows(answer: &Value, check: impl Fn(&mut Reader, Option<&Value>) -> crate::wire::Parsed<()>) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
-    let mut reader = Reader::default();
-    let rows = reader
-        .rows(answer, 1, |r, cells| {
-            r.at(Part::Index(0), |r| match cells.first() {
-                Some(Value::Null) => Ok(None),
-                cell => {
-                    check(r, cell)?;
-                    Ok(cell.and_then(Value::as_object).cloned())
-                }
-            })
-        })
-        .map_err(|issue| to_error(DATALOG_METHOD, issue))?;
-    Ok(rows.map(|rows| rows.into_iter().flatten().collect()))
+/// Rows of one cell each, the cell `null` or an object that is a `T`; the objects kept, as sent.
+fn rows<T: DeserializeOwned>(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
+    let cells = sent_cells::<T>(DATALOG_METHOD, answer)?;
+    Ok(cells.map(|cells| cells.into_iter().flatten().filter_map(|cell| if let Value::Object(map) = cell { Some(map) } else { None }).collect()))
 }
 
-/// `responses.nullablePageRows`: the pulled journal pages, or `None` for a `null` answer.
+/// The pulled journal pages, or `None` for a `null` answer.
 pub fn pages(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
-    rows(answer, |r, cell| r.check_pulled_page(cell))
+    rows::<PulledPage>(answer)
 }
 
-/// `responses.nullableBlockRows`: the pulled blocks, or `None` for a `null` answer.
+/// The pulled blocks, or `None` for a `null` answer.
 pub fn blocks(answer: &Value) -> Result<Option<Vec<Map<String, Value>>>, ResponseError> {
-    rows(answer, |r, cell| r.check_block(cell))
+    rows::<Block>(answer)
 }
 
 #[cfg(test)]
@@ -60,14 +50,20 @@ mod tests {
 
     #[test]
     fn a_page_is_checked_as_a_pulled_page_and_a_block_as_a_block() {
-        assert_eq!(problem(pages(&json!([[{"id": "x"}]]))), "[0][0].id: Invalid input: expected number, received string");
-        assert_eq!(problem(pages(&json!([[{"id": 1, "journal-day": "x"}]]))), "[0][0].journal-day: Invalid input: expected number, received string");
-        assert_eq!(problem(blocks(&json!([[{"uuid": "u"}]]))), "[0][0].id: Invalid input: expected number, received undefined");
+        assert_eq!(problem(pages(&json!([[{"id": "x"}]]))), "answer[0][0].id: expected a whole number, got a string");
+        assert_eq!(problem(pages(&json!([[{"id": 1, "journal-day": "x"}]]))), "answer[0][0].journal-day: expected a number, got a string");
+        assert_eq!(problem(blocks(&json!([[{"uuid": "u"}]]))), "answer[0][0].id: required, but missing");
         assert_eq!(
             problem(blocks(&json!([[{"id": 1, "uuid": "u", "refs": [{"name": 3}]}]]))),
-            "[0][0].refs[0].name: Invalid input: expected string, received number"
+            "answer[0][0].refs[0].name: expected a string, got a number"
         );
-        assert_eq!(problem(blocks(&json!([[{"id": 1, "uuid": "u"}, {"id": 2, "uuid": "v"}]]))), "[0]: Too big: expected array to have <1 items");
-        assert_eq!(problem(pages(&json!({}))), "(response): Invalid input: expected array, received object");
+        assert_eq!(problem(blocks(&json!([[{"id": 1, "uuid": "u"}, {"id": 2, "uuid": "v"}]]))), "answer[0]: the row has more cells than this server reads");
+        assert_eq!(problem(pages(&json!({}))), "answer: expected a list, got an object");
+    }
+
+    #[test]
+    fn a_page_field_nothing_reads_may_hold_anything() {
+        let page = json!({"id": 1, "name": "jan 1st, 2025", "uuid": 5, "namespace": 7, "created-at": "x", "updated-at": [], "properties-text-values": null});
+        assert_eq!(pages(&json!([[page.clone()]])).unwrap(), Some(vec![page.as_object().unwrap().clone()]));
     }
 }

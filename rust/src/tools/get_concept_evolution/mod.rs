@@ -1,4 +1,4 @@
-//! `logseq_get_concept_evolution` (the Rust side of `src/tools/get-concept-evolution.ts`): a concept
+//! `logseq_get_concept_evolution`: a concept
 //! over time. The blocks on its page and the blocks that link to it, by journal day, oldest first, with
 //! the mentions on non-journal pages last, optionally grouped by day, week or month and cut by date.
 //!
@@ -25,11 +25,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::edn::{PageId, PageName};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{alias_set_warnings, resolve_alias_set};
@@ -40,7 +39,7 @@ use crate::tools::get_page::wire as page_wire;
 
 use self::queries::{blocks_referencing_page, blocks_referencing_pages};
 use self::timeline::{
-    Entry, GROUP_BY_VALUES, cap_timeline, day_of, entries_truncated, filter_by_dates, full_timeline, period_key, shown_places,
+    Entry, cap_timeline, day_of, entries_truncated, filter_by_dates, full_timeline, period_key, shown_places,
     unique_by_id,
 };
 use self::wire::block_rows;
@@ -49,7 +48,7 @@ pub use self::timeline::GroupBy;
 
 pub const NAME: &str = "logseq_get_concept_evolution";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.\n\n\
 **Use when:** \"how has X evolved?\" or \"what's the history of Y?\"\n\
 **Can't find:** unlinked plain-text mentions (logseq_search_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n\
@@ -61,17 +60,15 @@ const ALIASES: ParamAliases = &[("concept_name", &["name", "page", "page_name"])
 /// Mentions kept when `max_entries` is absent.
 pub const DEFAULT_MAX_ENTRIES: u64 = 100;
 
-fn default_max_entries() -> u32 {
-    DEFAULT_MAX_ENTRIES as u32
+fn default_max_entries() -> u64 {
+    DEFAULT_MAX_ENTRIES
 }
 
-/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type
-/// (ADR-0019); a call reads its arguments through [`Arguments`], which words a bad one as the
-/// TypeScript server does. Unknown fields are ignored, as every TypeScript tool ignores them. The tool
-/// does no range check on the dates: 0 or an absent date is no bound, and any other whole number is compared
-/// with each block's `YYYYMMDD` day.
+/// The tool's arguments, as `tools/list` shows them. The schema is generated from this type, and a
+/// call parses its arguments into it (ADR-0019). Unknown fields are ignored, as in every tool (see `input_schema`)
+/// ignores them. The tool does no range check on the dates: 0 or an absent date is no bound, and any
+/// other whole number is compared with each block's `YYYYMMDD` day.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[allow(dead_code)]
 pub struct Args {
     /// Concept to track (page name, alias or ISO date)
     pub concept_name: String,
@@ -85,25 +82,21 @@ pub struct Args {
     pub group_by: Option<GroupBy>,
     /// Max mentions, oldest first (default: 100, max: 500)
     #[serde(default = "default_max_entries")]
-    pub max_entries: u32,
+    pub max_entries: u64,
 }
 
-/// What a call asked for, read from the arguments in the order the schema lists them, so the first
-/// one that is wrong is the one reported, as `parseArgs` does.
+/// What a call asked for, from the arguments parsed into [`Args`].
 #[derive(Debug, PartialEq)]
 struct Request {
     concept_name: String,
     options: Options,
 }
 
-fn read_args(arguments: Option<&JsonObject>) -> Result<Request, ToolError> {
-    let read = Arguments::new(arguments);
-    let concept_name = read.required_string("concept_name")?;
-    let start_date = read.optional_whole("start_date", "start_date: 20251115")?;
-    let end_date = read.optional_whole("end_date", "end_date: 20251120")?;
-    let group_by = read.optional_enum("group_by", GROUP_BY_VALUES)?.and_then(GroupBy::from_word);
-    let max_entries = read.count_or("max_entries", 0, DEFAULT_MAX_ENTRIES)?;
-    Ok(Request { concept_name, options: Options { start_date, end_date, group_by, max_entries } })
+impl From<Args> for Request {
+    fn from(args: Args) -> Request {
+        let Args { concept_name, start_date, end_date, group_by, max_entries } = args;
+        Request { concept_name, options: Options { start_date, end_date, group_by, max_entries } }
+    }
 }
 
 /// The tool as `tools/list` shows it.
@@ -116,12 +109,12 @@ pub fn definition() -> Tool {
 /// A call: aliases folded, arguments read, the timeline. This tool makes no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let request = read_args(arguments.as_ref())?;
+    let request = Request::from(parse_args::<Args>(arguments.as_ref())?);
     let evolution = get_concept_evolution(client, &request.concept_name, request.options).await?;
-    Ok(success_result(vec![ContentBlock::text(js::json_stringify(&evolution.to_value()))]))
+    Ok(success_result(vec![ContentBlock::text(evolution.to_value().to_string())]))
 }
 
-/// What `getConceptEvolution` takes beyond the concept (`ConceptEvolutionOptions`).
+/// What the evolution takes beyond the concept.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Options {
     /// `YYYYMMDD`; 0 or absent is no bound
@@ -192,7 +185,7 @@ struct TimelineEntry<'a> {
     blocks: &'a [Value],
 }
 
-/// The period keys of `groupedTimeline` as an object, in the order the periods were first met.
+/// The period keys of the grouped timeline as an object, in the order the periods were first met.
 struct GroupedTimeline<'a>(&'a [(String, Vec<Value>)]);
 
 impl Serialize for GroupedTimeline<'_> {
@@ -299,7 +292,7 @@ fn mentions_unavailable_warning() -> ResultWarning {
     )
 }
 
-/// `getConceptEvolution`: track how a concept evolves over time.
+/// Tracks how a concept evolves over time.
 ///
 /// `concept_name` is a page name, an alias or an ISO date (`2025-01-01`). When the name was an alias,
 /// date or namespace leaf rather than an exact name, `resolvedFrom` says which page was used. Mentions
@@ -378,9 +371,8 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
         let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
         for &place in &shown {
             let block = &filtered[place];
-            // `if (!date) continue`
-            let Some(date) = day_of(block) else { continue };
-            let key = period_key(period, date);
+            // `if (!date) continue`; a date with no week is no more in a period than an undated block
+            let Some(key) = day_of(block).and_then(|date| period_key(period, date)) else { continue };
             match groups.iter_mut().find(|(seen, _)| *seen == key) {
                 Some((_, blocks)) => blocks.push(block.clone()),
                 None => groups.push((key, vec![block.clone()])),
@@ -469,23 +461,38 @@ mod tests {
     #[test]
     fn the_arguments_are_read_in_schema_order_and_the_aliases_are_folded() {
         let folded = resolve_param_aliases(ALIASES, args(json!({"name": "Atlas", "group_by": "week", "start_date": 20250101, "max_entries": 7}))).unwrap();
-        let request = read_args(folded.as_ref()).unwrap();
+        let read = |value: Value| parse_args::<Args>(args(value).as_ref()).map(Request::from);
+        let request = Request::from(parse_args::<Args>(folded.as_ref()).unwrap());
         assert_eq!(request.concept_name, "Atlas");
         assert_eq!(
             request.options,
             Options { start_date: Some(20250101), end_date: None, group_by: Some(GroupBy::Week), max_entries: 7 }
         );
-        assert_eq!(read_args(args(json!({"concept_name": "a"})).as_ref()).unwrap().options, Options::default());
+        assert_eq!(read(json!({"concept_name": "a"})).unwrap().options, Options::default());
         // a date is a whole number, which the tool does no range check on; a fraction is no date
-        assert!(read_args(args(json!({"concept_name": "a", "end_date": 2})).as_ref()).is_ok());
-        let error = read_args(args(json!({"concept_name": "a", "end_date": 2.5})).as_ref()).unwrap_err();
-        assert_eq!(error.to_string(), "Invalid parameter 'end_date': 2.5\n\nExpected: an integer, not a fraction\nExample: end_date: 20251120");
-        let error = read_args(args(json!({"concept_name": "a", "group_by": "year", "max_entries": -1})).as_ref()).unwrap_err();
+        assert!(read(json!({"concept_name": "a", "end_date": 2})).is_ok());
+        let error = read(json!({"concept_name": "a", "end_date": 2.5})).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Invalid parameter 'end_date': 2.5\n\nExpected: an integer, not a fraction\nExample: end_date: 20251115"
+        );
+        let error = read(json!({"concept_name": "a", "group_by": "year", "max_entries": -1})).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'group_by': \"year\""), "{error}");
-        let error = read_args(args(json!({"concept_name": "a", "max_entries": -1})).as_ref()).unwrap_err();
+        let error = read(json!({"concept_name": "a", "max_entries": -1})).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_entries': -1"), "{error}");
-        let error = read_args(args(json!({})).as_ref()).unwrap_err();
+        let error = read(json!({})).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'concept_name': missing"), "{error}");
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"concept_name": "Atlas"});
+        sweep::<Args>(json!({}), "concept_name", Takes::Text, true);
+        sweep::<Args>(base.clone(), "start_date", Takes::Whole, false);
+        sweep::<Args>(base.clone(), "end_date", Takes::Whole, false);
+        sweep::<Args>(base.clone(), "group_by", Takes::Words(&["day", "week", "month"]), false);
+        sweep::<Args>(base, "max_entries", Takes::Count(0), false);
     }
 
     fn mention(id: i64, day: Option<i64>) -> Value {
@@ -510,7 +517,7 @@ mod tests {
 
     #[test]
     fn a_result_says_what_it_answered_what_may_be_missing_and_the_summary_before_the_timeline() {
-        let text = js::json_stringify(&evolution().to_value());
+        let text = evolution().to_value().to_string();
         assert_eq!(
             text,
             concat!(
@@ -569,23 +576,23 @@ mod tests {
             ..evolution()
         };
         assert_eq!(
-            js::json_stringify(&plain.to_value()),
+            plain.to_value().to_string(),
             r#"{"concept":"atlas","summary":{"totalMentions":0,"dateRange":{"earliest":null,"latest":null},"journalMentions":0,"nonJournalMentions":0},"timeline":[]}"#
         );
         // an alias group's warning alone adds the meta, with no totals
         let aliased = ConceptEvolution { total_mentions_before_cut: None, ..evolution() };
-        assert!(!js::json_stringify(&aliased.to_value()).contains("totals"));
+        assert!(!aliased.to_value().to_string().contains("totals"));
         // grouping asked for and nothing to group is an empty object, not an absent key
         let empty = ConceptEvolution { grouped_timeline: Some(vec![]), ..plain };
-        assert!(js::json_stringify(&empty.to_value()).contains(r#""groupedTimeline":{}"#));
+        assert!(empty.to_value().to_string().contains(r#""groupedTimeline":{}"#));
     }
 
     #[test]
-    fn grouped_keys_that_are_whole_numbers_come_first_as_javascript_writes_an_object() {
+    fn grouped_keys_stay_in_the_order_the_periods_were_first_met_whole_numbers_included() {
         let grouped = ConceptEvolution {
             grouped_timeline: Some(vec![("2025-W02".into(), vec![]), ("20250301".into(), vec![]), ("20250201".into(), vec![])]),
             ..evolution()
         };
-        assert!(js::json_stringify(&grouped.to_value()).contains(r#""groupedTimeline":{"20250201":[],"20250301":[],"2025-W02":[]}"#));
+        assert!(grouped.to_value().to_string().contains(r#""groupedTimeline":{"2025-W02":[],"20250301":[],"20250201":[]}"#));
     }
 }

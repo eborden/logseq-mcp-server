@@ -1,7 +1,7 @@
-//! What a block search suggests next (`logseq_search_blocks` in `src/utils/tips.ts`). Tips are
+//! What a block search suggests next. Tips are
 //! built from the finished result, as JSON, never by the search itself, so the result keeps its
-//! shape: they read the same fields the TypeScript tips read (`pageName`, `context.page`, `page`,
-//! `tags`, `pageRefs`), in the same order.
+//! shape: they read these fields (`pageName`, `context.page`, `page`,
+//! `tags`, `pageRefs`), in this order.
 
 use serde_json::{Value, json};
 
@@ -44,10 +44,10 @@ pub fn search_tips(query: &str, results: &[Value], matches: Option<usize>) -> Ve
     tips
 }
 
-/// `query.trim().split(/\s+/)[0]`: the text up to the first run of white space.
+/// The text, trimmed, up to the first run of white space (Rust's set).
 fn first_word(query: &str) -> Option<&str> {
     let trimmed = js::trim(query);
-    let word = trimmed.split(js::is_js_space).next().unwrap_or("");
+    let word = trimmed.split(char::is_whitespace).next().unwrap_or("");
     (!word.is_empty()).then_some(word)
 }
 
@@ -124,8 +124,9 @@ mod tests {
     }
 
     #[test]
-    fn the_first_word_stops_at_javascript_white_space() {
+    fn the_first_word_stops_at_white_space() {
         assert_eq!(first_word("\u{a0}one\u{3000}two"), Some("one"));
-        assert_eq!(first_word("one\u{85}two"), Some("one\u{85}two"));
+        assert_eq!(first_word("one\u{85}two"), Some("one"));
+        assert_eq!(first_word("one\u{feff}two"), Some("one\u{feff}two"));
     }
 }

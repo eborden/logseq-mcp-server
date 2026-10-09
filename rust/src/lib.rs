@@ -1,4 +1,4 @@
-//! Spike: the LogSeq MCP server in Rust, beside the TypeScript one (ADR-0025, #122).
+//! The LogSeq MCP server in Rust (ADR-0025, #122).
 //!
 //! Stdout is the MCP stdio channel. Nothing in this crate prints to it; logs go to stderr
 //! (ADR-0004), and `tests/no_stdout.rs` fails on a `print!`/`println!` or a direct stdout write.
@@ -29,10 +29,12 @@ pub mod markdown;
 pub mod markdown_context;
 pub mod mcp_error;
 pub mod meta;
+pub mod order;
 pub mod output_format;
 pub mod pages_by_ids;
 pub mod params;
 pub mod prompts;
+pub mod refs;
 pub mod resolve;
 pub mod resolve_refs;
 pub mod resources;

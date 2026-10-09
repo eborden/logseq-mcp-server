@@ -345,9 +345,9 @@ async fn the_gate_cannot_tell_the_two_graphs_apart_the_roster_result_also_passes
 /// it is at the end of the shorter one. Line and column are 1-based, in characters. The excerpts are
 /// the line at that position, cut to 30 characters before it and 50 from it on, behind `...`.
 ///
-/// The TypeScript reference this is ported from (`referenceProse`) reads the line start as
-/// `lastIndexOf('\n', i - 1)`, which for `i == 0` looks at the first character: a text that opens
-/// with a newline gets an empty excerpt (the tool copies that, as parity with the TypeScript server).
+/// The reference reads the line start as the position after the last newline at or before `i - 1`,
+/// which for `i == 0` looks at the first character: a text that opens
+/// with a newline gets an empty excerpt (the tool keeps that behaviour).
 fn reference_prose(before: &str, after: &str) -> Value {
     fn strip(text: &str) -> Vec<char> {
         let c: Vec<char> = text.chars().collect();
@@ -471,7 +471,7 @@ async fn the_prose_check_matches_the_reference_on_the_tricky_pairs() {
 }
 
 const PIECES: &[&str] = &["a", "b", "x", " ", "\n", "[[", "]]", "[", "]", "[[p]]", "😀", "😁", "é", "."];
-/// The TypeScript test's count. Each pair goes both ways, so 40,000 comparisons.
+/// Each pair goes both ways, so 40,000 comparisons.
 const PAIRS: usize = 20_000;
 
 /// A LogSeq that keeps its connections open and answers every request with no rows. The shared mock closes the
@@ -580,17 +580,17 @@ async fn terms_are_checked_and_listed_sorted_whatever_order_after_has_them_in() 
 }
 
 #[tokio::test]
-async fn terms_sort_by_utf16_code_unit_so_a_capital_comes_before_a_lowercase_letter() {
+async fn terms_sort_by_code_point_so_a_capital_comes_before_a_lowercase_letter() {
     let (result, bound) = gate_over(&pages_named(&["Bob", "alice"]), "alice Bob", "[[alice]] [[Bob]]").await;
 
     assert_eq!(terms_of(&result["refs"], "resolved"), [json!("Bob"), json!("alice")]);
     assert_eq!(bound, json!("[\"bob\",\"alice\"]"));
 
-    // An astral character (UTF-16 units D83D DE00) sorts before a fullwidth letter (FF41) by code unit, after it by code point
+    // An astral character (UTF-16 units D83D DE00) sorts after a fullwidth letter (FF41) by code point, before it by code unit
     let (result, bound) = gate_over(&[], "z \u{1F600} \u{FF41}", "[[\u{FF41}]] [[\u{1F600}]] [[Z]]").await;
 
-    assert_eq!(terms_of(&result["refs"], "unresolved"), [json!("Z"), json!("\u{1F600}"), json!("\u{FF41}")]);
-    assert_eq!(bound, json!("[\"z\",\"\u{1F600}\",\"\u{FF41}\"]"));
+    assert_eq!(terms_of(&result["refs"], "unresolved"), [json!("Z"), json!("\u{FF41}"), json!("\u{1F600}")]);
+    assert_eq!(bound, json!("[\"z\",\"\u{FF41}\",\"\u{1F600}\"]"));
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-//! What a page suggests next (`logseq_get_page` in `src/utils/tips.ts`).
+//! What a page suggests next.
 
 use serde_json::{Value, json};
 

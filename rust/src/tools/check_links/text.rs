@@ -1,17 +1,16 @@
-//! The checks of `logseq_check_links` that read only the two texts (checks 1, 2 and 4 of
-//! `src/tools/check-links.ts`). Each matches the script it replaced, regex for regex, and the
-//! crate has no regex engine, so the three patterns are scanned by hand.
+//! The checks of `logseq_check_links` that read only the two texts (checks 1, 2 and 4 of the tool's
+//! list). The crate has no regex engine, so the three patterns are scanned by hand.
 //!
-//! The texts are read as `char`s. The TypeScript code counts UTF-16 code units, but every position
-//! it reports is a whole code point (it steps back from the middle of a surrogate pair), and two
-//! strings first differ at the same code point however it is counted, so a `char` index is the
-//! same position.
+//! The texts are read as `char`s. A position is reported as a whole code point (never the middle of
+//! a surrogate pair), and two strings first differ at the same code point however it is counted,
+//! so a `char` index is the same position as a UTF-16 one.
 
 use std::collections::HashMap;
 
 use serde::Serialize;
 
 use crate::js;
+use crate::refs;
 
 /// Characters of context an excerpt keeps before and after the position it points at.
 const EXCERPT_BEFORE: usize = 30;
@@ -77,65 +76,36 @@ pub struct RefsPreservedCheck {
     pub removed: Vec<RemovedRef>,
 }
 
-/// Each `[[term]]` of the text as a `(start, end)` range of `chars`, brackets included: the
-/// script's `\[\[([^\[\]]+)\]\]`, which perl and grep apply one line at a time, so
-/// `/\[\[([^\[\]\n]+)\]\]/g`. Matches don't overlap, and a failed attempt moves on one character.
-fn link_ranges(chars: &[char]) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::new();
-    let mut at = 0;
-    while at + 1 < chars.len() {
-        if chars[at] == '[' && chars[at + 1] == '[' {
-            let term_start = at + 2;
-            let term_end = term_start + chars[term_start..].iter().take_while(|c| !matches!(c, '[' | ']' | '\n')).count();
-            if term_end > term_start && chars.get(term_end) == Some(&']') && chars.get(term_end + 1) == Some(&']') {
-                ranges.push((at, term_end + 2));
-                at = term_end + 2;
-                continue;
-            }
-        }
-        at += 1;
-    }
-    ranges
-}
-
-/// The term between the brackets of a range of [`link_ranges`].
-fn term_of(chars: &[char], (start, end): (usize, usize)) -> String {
-    chars[start + 2..end - 2].iter().collect()
-}
-
-/// `stripBrackets`: `[[term]]` to `term`, one pass, as the script's `s/\[\[([^\[\]]+)\]\]/$1/g`.
+/// `[[term]]` to `term`, one pass. The refs are those of [`refs`].
 pub fn strip_brackets(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
-    for range in link_ranges(&chars) {
-        out.extend(&chars[at..range.0]);
-        out.push_str(&term_of(&chars, range));
-        at = range.1;
+    for found in refs::page_refs(text) {
+        out.push_str(&text[at..found.range.start]);
+        out.push_str(found.name);
+        at = found.range.end;
     }
-    out.extend(&chars[at..]);
+    out.push_str(&text[at..]);
     out
 }
 
 /// A `[[term]]` count per term as written, in the order each term first appears.
 pub fn link_counts(text: &str) -> Vec<(String, usize)> {
-    let chars: Vec<char> = text.chars().collect();
     let mut counts: Vec<(String, usize)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
-    for range in link_ranges(&chars) {
-        let term = term_of(&chars, range);
-        match index.get(&term) {
+    for found in refs::page_refs(text) {
+        match index.get(found.name) {
             Some(&at) => counts[at].1 += 1,
             None => {
-                index.insert(term.clone(), counts.len());
-                counts.push((term, 1));
+                index.insert(found.name.to_owned(), counts.len());
+                counts.push((found.name.to_owned(), 1));
             }
         }
     }
     counts
 }
 
-/// The page name a term links to (`keyOf`): trimmed and lowercased, as LogSeq trims ref names and
+/// The page name a term links to: trimmed and lowercased, as LogSeq trims ref names and
 /// stores `:block/name` lowercase. This is one place where the tool departs from the script, which
 /// lowercases without trimming: `[[ Alice ]]` resolves to `Alice` here.
 pub fn key_of(term: &str) -> String {
@@ -160,15 +130,8 @@ pub fn key_counts(text: &str) -> Vec<(String, usize)> {
     counts
 }
 
-/// `text.lastIndexOf('\n', index - 1)`. A `fromIndex` below 0 counts as 0, so for `index == 0` it
-/// looks at the first character only.
-// PARITY(#299): at index 0 the lookup finds a newline that is the first character, which puts the line start
-// past the index and leaves the excerpt empty (suspected TS bug: a negative `fromIndex` was meant to find none)
-// — drop if Rust becomes the only server.
+/// The last newline before `index`. There is none before index 0.
 fn last_newline_before(chars: &[char], index: usize) -> Option<usize> {
-    if index == 0 {
-        return (chars.first() == Some(&'\n')).then_some(0);
-    }
     chars[..index].iter().rposition(|c| *c == '\n')
 }
 
@@ -176,7 +139,7 @@ fn last_newline_before(chars: &[char], index: usize) -> Option<usize> {
 fn excerpt(chars: &[char], index: usize) -> String {
     let start = last_newline_before(chars, index).map_or(0, |at| at + 1);
     let end = chars[index..].iter().position(|c| *c == '\n').map_or(chars.len(), |at| index + at);
-    let head = if start <= index { &chars[start..index] } else { &[][..] };
+    let head = &chars[start..index];
     let tail = &chars[index..end];
     let left: String = if head.len() > EXCERPT_BEFORE {
         format!("...{}", head[head.len() - EXCERPT_BEFORE..].iter().collect::<String>())
@@ -215,14 +178,15 @@ pub fn check_prose(before: &str, after: &str) -> ProseCheck {
     }
 }
 
-/// The start of the first `[[` opened before the previous one closed on its line: the script's
-/// `\[\[[^][]*\[\[`, which can't run past a newline (`/\[\[[^\[\]\n]*\[\[/`).
+/// The start of the first `[[` opened before the previous one closed on its line: a `[[`, then a run
+/// of the characters a ref's name may hold ([`refs::is_name_char`], which can't run past a newline),
+/// then another `[[`.
 fn first_nested(chars: &[char]) -> Option<usize> {
     (0..chars.len().saturating_sub(1)).find(|&at| {
         if chars[at] != '[' || chars[at + 1] != '[' {
             return false;
         }
-        let run_end = at + 2 + chars[at + 2..].iter().take_while(|c| !matches!(c, '[' | ']' | '\n')).count();
+        let run_end = at + 2 + chars[at + 2..].iter().take_while(|c| refs::is_name_char(**c)).count();
         chars.get(run_end) == Some(&'[') && chars.get(run_end + 1) == Some(&'[')
     })
 }
@@ -252,8 +216,7 @@ pub fn check_refs_preserved(before: &str, after: &str) -> RefsPreservedCheck {
             removed.push(RemovedRef { term: spelling[&key].clone(), before: count, after: left });
         }
     }
-    // PARITY(#299): orders by UTF-16 code unit, as JavaScript's `<` does — drop if Rust becomes the only server.
-    removed.sort_by(|x, y| crate::resolve::alias::compare_code_units(&x.term, &y.term));
+    removed.sort_by(|x, y| x.term.cmp(&y.term));
     RefsPreservedCheck { ok: removed.is_empty(), removed }
 }
 
@@ -326,7 +289,7 @@ mod tests {
 
     #[test]
     fn a_difference_at_a_leading_newline_has_an_empty_excerpt() {
-        // `lastIndexOf('\n', -1)` looks at index 0, finds the newline there and starts the line after it
+        // the line a leading newline sits on is empty, whether or not index 0 looks for a newline before it
         let difference = check_prose("\nx", "y").first_difference.unwrap();
         assert_eq!((difference.line, difference.column), (1, 1));
         assert_eq!(difference.before, "");
@@ -348,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn a_removed_ref_is_reported_by_its_first_spelling_and_in_code_unit_order() {
+    fn a_removed_ref_is_reported_by_its_first_spelling_and_in_code_point_order() {
         let check = check_refs_preserved("[[Zed]] [[bob]] [[Bob]] [[Alice]]", "Zed [[BOB]] [[Alice]]");
         assert!(!check.ok);
         assert_eq!(
@@ -360,6 +323,13 @@ mod tests {
         );
         assert!(check_refs_preserved("[[Alice]]", "[[alice]] and [[Alice]]").ok);
         assert!(check_refs_preserved("plain", "[[plain]]").ok);
+    }
+
+    #[test]
+    fn removed_refs_are_in_code_point_order_so_an_astral_character_follows_a_fullwidth_one() {
+        // UTF-16 units would put U+1F600 (D83D DE00) before U+FF41; its code point is after
+        let check = check_refs_preserved("[[\u{1F600}]] [[\u{FF41}]]", "none");
+        assert_eq!(check.removed.iter().map(|r| r.term.as_str()).collect::<Vec<_>>(), ["\u{FF41}", "\u{1F600}"]);
     }
 
     #[test]

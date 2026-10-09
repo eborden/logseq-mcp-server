@@ -1,4 +1,4 @@
-//! Markdown for the context tools (#43; the Rust side of `src/utils/markdown-context.ts`), built on
+//! Markdown for the context tools (#43), built on
 //! the shared pieces in `crate::markdown`: `build_context` and `get_context_for_query` here, and
 //! the concept network (`render_network`, #313). Same conventions: `[[Page]]` links, `- ` bullets,
 //! `((uuid))` refs untouched. Warnings, `hasMore` and tips are not rendered here; the tool adds
@@ -53,7 +53,7 @@ fn array<'a>(context: &'a Value, key: &str) -> &'a [Value] {
     context.get(key).and_then(Value::as_array).map_or(&[], Vec::as_slice)
 }
 
-/// `blockTree`: the topic's blocks as a tree. `directBlocks` are flat Datalog pulls, in query order;
+/// The topic's blocks as a tree. `directBlocks` are flat Datalog pulls, in query order;
 /// the `:block/parent` and `:block/left` links give back the page's order and nesting. A block whose
 /// parent was cut by `max_blocks` is shown as a top-level one, and a pull with neither link is too, so
 /// nothing is dropped. The trees of the pages of an alias group follow the main page's, in the order
@@ -79,13 +79,13 @@ fn alone(block: &Value) -> Value {
     Value::Object(map)
 }
 
-/// `groupBySource`: reference blocks grouped by the page they sit on, in first-seen order.
+/// Reference blocks grouped by the page they sit on, in first-seen order.
 fn group_by_source(references: &[Value]) -> Vec<(Value, Vec<Value>)> {
     let mut groups: Vec<(Value, Vec<Value>)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
     for reference in references {
         let page = reference.get("sourcePage").filter(|page| page.is_object()).cloned().unwrap_or_else(|| json!({}));
-        // `String(entityId(page) ?? pageTitle(page))`
+        // the page's id as text, else its title
         let key = id_of(Some(&page)).map_or_else(|| page_title(&page, None), |id| id.to_string());
         let at = *index.entry(key).or_insert_with(|| {
             groups.push((page.clone(), Vec::new()));
@@ -96,7 +96,7 @@ fn group_by_source(references: &[Value]) -> Vec<(Value, Vec<Value>)> {
     groups
 }
 
-/// `renderTopicContext`: a topic's context: title, page properties, its blocks, related pages, and
+/// A topic's context: title, page properties, its blocks, related pages, and
 /// the blocks that reference it grouped by source page.
 pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> String {
     let ContextRenderOptions { compact, heading_level } = options;
@@ -179,7 +179,7 @@ pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> S
     format!("{}\n", js::trim_end(&lines.join("\n")))
 }
 
-/// `renderQueryContext`: context for a natural-language query: the topics found, each topic's
+/// Context for a natural-language query: the topics found, each topic's
 /// context one heading level down, and the keyword search results when the query named no topic.
 pub fn render_query_context(context: &Value, compact: bool) -> String {
     let query = context.get("query").and_then(Value::as_str).unwrap_or_default();
@@ -216,7 +216,7 @@ pub fn render_query_context(context: &Value, compact: bool) -> String {
     format!("{}\n", parts.join("\n\n"))
 }
 
-/// `renderNetwork`: a concept network: the pages grouped by distance from the root, then one line per
+/// A concept network: the pages grouped by distance from the root, then one line per
 /// linked pair. `A -> B` means blocks on A reference B, `A <- B` that blocks on B reference A, and
 /// `A <-> B (out/in)` both; the number is the reference count. `A` is always the page closer to the
 /// root.

@@ -1,27 +1,16 @@
-//! What `logseq.App.getCurrentGraph` answers (`graphInfoSchema` in `src/response-schemas.ts`).
+//! What `logseq.App.getCurrentGraph` answers.
 
 use serde_json::Value;
 
-use crate::wire::{Reader, ResponseError, to_error};
+use crate::wire::{Object, ResponseError, parse};
 
 /// The method the answer comes from, as a response error names it.
 pub const METHOD: &str = "logseq.App.getCurrentGraph";
 
-/// `responses.graphInfo`: `null`, or an object whose `url`, `name` and `path` are text when
-/// present. The answer is returned as it came: other keys pass, and key order is LogSeq's.
+/// `null`, or the graph LogSeq reports. The tool hands it on as it came (its `url`, `name` and `path`, and any other
+/// key, in LogSeq's order) and reads none of its fields, so none is checked: only that it is an object.
 pub fn graph_info(answer: &Value) -> Result<Option<&Value>, ResponseError> {
-    if answer.is_null() {
-        return Ok(None);
-    }
-    let mut reader = Reader::default();
-    let checked = (|| {
-        let map = reader.object(Some(answer))?;
-        reader.string(map, "url")?;
-        reader.string(map, "name")?;
-        reader.string(map, "path")?;
-        Ok(())
-    })();
-    checked.map(|()| Some(answer)).map_err(|issue| to_error(METHOD, issue))
+    Ok(parse::<Option<Object>>(METHOD, answer)?.map(|_| answer))
 }
 
 #[cfg(test)]
@@ -43,9 +32,16 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_shape_is_an_error_naming_the_path_and_no_value() {
-        assert_eq!(problem(json!([])), "logseq.App.getCurrentGraph: (response): Invalid input: expected object, received array");
-        assert_eq!(problem(json!({"name": 3})), "logseq.App.getCurrentGraph: name: Invalid input: expected string, received number");
-        assert_eq!(problem(json!({"path": null})), "logseq.App.getCurrentGraph: path: Invalid input: expected string, received null");
+    fn a_field_nothing_reads_may_hold_anything() {
+        for answer in [json!({"name": 3}), json!({"url": null, "path": [1], "name": {"a": 1}})] {
+            assert_eq!(graph_info(&answer).unwrap(), Some(&answer), "{answer}");
+        }
+    }
+
+    #[test]
+    fn an_answer_that_is_not_an_object_is_an_error_naming_the_method_and_no_value() {
+        assert_eq!(problem(json!([])), "logseq.App.getCurrentGraph: answer: expected an object, got a list");
+        assert_eq!(problem(json!("secret")), "logseq.App.getCurrentGraph: answer: expected an object, got a string");
+        assert_eq!(problem(json!(7)), "logseq.App.getCurrentGraph: answer: expected an object, got a number");
     }
 }

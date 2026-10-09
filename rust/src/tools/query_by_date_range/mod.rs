@@ -1,4 +1,4 @@
-//! `logseq_query_by_date_range` (the Rust side of `src/tools/query-by-date-range.ts`): journal
+//! `logseq_query_by_date_range`: journal
 //! entries for a range chosen one of three ways (explicit dates, the `last_n` most recent journals,
 //! or a named `preset`), with the blocks of each day as trees, an optional search, a roll-up of the
 //! pages the period was about (`summary.topConcepts`) and a cap on the blocks returned.
@@ -36,24 +36,24 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::args::Arguments;
+use crate::args::{YyyyMmDd, parse_args};
 use crate::block_budget::count_blocks;
 use crate::block_tree::{build_block_trees, camelize_keys};
 use crate::client::LogseqClient;
-use crate::dates::{CalendarDate, Clock, DATE_PRESET_VALUES, DatePreset};
+use crate::dates::{CalendarDate, Clock, DatePreset};
 use crate::entity::{id_of, page_display_name};
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set_by_name};
 use crate::resolve_refs::resolve_block_refs;
 use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
+use crate::snippet::{first_chars, first_non_blank_line};
 use crate::tips::tips_content;
 use crate::tool::{input_schema, read_only_annotations, success_result};
 
 use self::cap::{BlockCut, MAX_DATE_RANGE_BLOCKS, TruncationOptions, blocks_truncated, cap_entries};
 use self::search::BlockMatcher;
-use self::selection::{Resolved, Selection, bad_date, resolve_selection};
+use self::selection::{Resolved, Selection, resolve_selection};
 use self::tips::date_range_tips;
 use self::top_concepts::{ConceptRef, DEFAULT_TOP_CONCEPTS_LIMIT, concept_value, extract_concept_refs, roll_up_top_concepts};
 
@@ -61,13 +61,13 @@ pub use self::cap::DEFAULT_DATE_RANGE_MAX_BLOCKS;
 
 pub const NAME: &str = "logseq_query_by_date_range";
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.\n\n\
 **Use when:** \"what did I do last week?\" or catching up. summary.topConcepts shows what a period was about.\n\
 **Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n\
 **Alternatives:** logseq_get_concept_evolution, logseq_search_blocks.";
 
-/// Longest first-line snippet of the outline, in UTF-16 code units, ellipsis included.
+/// Longest first-line snippet of the outline, in characters (code points), ellipsis included.
 const SNIPPET_LENGTH: usize = 80;
 
 fn default_slim_results() -> bool {
@@ -78,29 +78,29 @@ fn default_include_content() -> bool {
     true
 }
 
-fn default_top_concepts_limit() -> u32 {
-    DEFAULT_TOP_CONCEPTS_LIMIT
+fn default_top_concepts_limit() -> u64 {
+    u64::from(DEFAULT_TOP_CONCEPTS_LIMIT)
 }
 
 fn default_max_blocks() -> u64 {
     DEFAULT_DATE_RANGE_MAX_BLOCKS
 }
 
-/// The tool's arguments. Unknown fields are ignored, as every TypeScript tool ignores them. Which
+/// The tool's arguments. Unknown fields are ignored, as in every tool (see `input_schema`). Which
 /// selection was given (exactly one of `start_date` with `end_date`, `last_n` or `preset`) and the
-/// `YYYYMMDD` format are checked by [`query_journals`], as in TypeScript; the types and the counts'
-/// minimums are checked when the arguments are read.
+/// `YYYYMMDD` format are checked by [`query_journals`]; the types and the counts'
+/// minimums are checked when the arguments are parsed.
 #[derive(Debug, Clone, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Start date in YYYYMMDD format (e.g., 20251115). Needs end_date
     #[schemars(with = "Option<f64>")]
-    pub start_date: Option<i64>,
+    pub start_date: Option<YyyyMmDd>,
     /// End date in YYYYMMDD format (e.g., 20251120). Needs start_date
     #[schemars(with = "Option<f64>")]
-    pub end_date: Option<i64>,
+    pub end_date: Option<YyyyMmDd>,
     /// The N most recent journals that exist (whole number, 1+), newest first
     #[schemars(range(min = 1))]
-    pub last_n: Option<u32>,
+    pub last_n: Option<u64>,
     /// Named period in local time; weeks run Monday to Sunday
     pub preset: Option<DatePreset>,
     /// Optional search term to filter blocks
@@ -113,7 +113,7 @@ pub struct Args {
     pub include_content: bool,
     /// Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it
     #[serde(default = "default_top_concepts_limit")]
-    pub top_concepts_limit: u32,
+    pub top_concepts_limit: u64,
     /// Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)
     #[serde(default)]
     pub resolve_refs: bool,
@@ -122,28 +122,10 @@ pub struct Args {
     pub max_blocks: u64,
 }
 
-/// A count a `u32` field holds: a larger one is as good as the largest, since each of these
-/// (`last_n`, `top_concepts_limit`) only ever cuts a list at that many.
+/// A count a `u32` holds: a larger one is as good as the largest, since `last_n` only ever cuts a
+/// list at that many.
 fn saturate(count: u64) -> u32 {
     u32::try_from(count).unwrap_or(u32::MAX)
-}
-
-/// The arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        start_date: read.optional_whole_or("start_date", |value, _| bad_date("start_date", value, "20251115 for November 15, 2025"))?,
-        end_date: read.optional_whole_or("end_date", |value, _| bad_date("end_date", value, "20251120 for November 20, 2025"))?,
-        last_n: read.optional_count("last_n", 1)?.map(saturate),
-        preset: read.optional_enum("preset", DATE_PRESET_VALUES)?.and_then(DatePreset::from_word),
-        search_term: read.optional_string("search_term")?,
-        slim_results: read.boolean("slim_results", DEFAULT_SLIM_RESULTS)?,
-        include_content: read.boolean("include_content", true)?,
-        top_concepts_limit: saturate(read.count_or("top_concepts_limit", 0, u64::from(DEFAULT_TOP_CONCEPTS_LIMIT))?),
-        resolve_refs: read.boolean("resolve_refs", false)?,
-        max_blocks: read.count_or("max_blocks", 0, DEFAULT_DATE_RANGE_MAX_BLOCKS)?,
-    })
 }
 
 /// The tool as `tools/list` shows it.
@@ -155,7 +137,7 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the journals, then the tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let result = query_journals(client, &args, clock.today()).await?;
     let mut content = vec![ContentBlock::text(result.json)];
     if tips_enabled {
@@ -171,7 +153,7 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, argum
 pub struct Entry {
     /// `YYYYMMDD`
     pub date: i64,
-    /// The page as the Editor API spells it (`camelizeKeys` of the pull)
+    /// The page as the Editor API spells it (the pull's keys, camelized)
     pub page: Value,
     /// The day's top-level blocks (kept ones only, after the cap), each with its `children`
     pub blocks: Vec<Value>,
@@ -190,11 +172,11 @@ struct Journal {
     /// The page as the Editor API spells it
     page: Map<String, Value>,
     id: Option<i64>,
-    /// `page.journalDay || 0`
+    /// The page's journal day, or 0 when it has none
     day: i64,
 }
 
-/// `fetchPages`: the journal pages a query finds, or `None` when LogSeq answered `null`. `null` is
+/// The journal pages a query finds, or `None` when LogSeq answered `null`. `null` is
 /// not `[]` (BR-0011, #269): an empty array is a range with no journals, `null` is no answer at all.
 async fn fetch_journals(client: &LogseqClient, query: crate::edn::Query) -> Result<Option<Vec<Journal>>, ToolError> {
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
@@ -237,20 +219,17 @@ fn blocks_unavailable(page_count: usize) -> ResultWarning {
     )
 }
 
-// PARITY(#299): cuts at 80 UTF-16 code units with `slice`, which can split an emoji and leave a lone
-// surrogate, and takes the first line even when it is blank, where the page outline takes the first
-// non-blank one (suspected TS bugs) — drop if Rust becomes the only server.
-/// The first line of a block, trimmed and shortened (`snippetOf`), as UTF-16 code units: a cut
-/// between the halves of an emoji leaves a lone surrogate, as `slice` does.
-fn snippet_of(block: &Value) -> Vec<u16> {
-    let content = block.get("content").and_then(Value::as_str).unwrap_or("");
-    let first_line = js::trim(content.split('\n').next().unwrap_or(""));
-    let mut units = js::utf16(first_line);
-    if units.len() > SNIPPET_LENGTH {
-        units.truncate(SNIPPET_LENGTH - 3);
-        units.extend("...".encode_utf16());
+/// The first non-blank line of a block, trimmed and shortened, as the page outline
+/// takes it. Over 80 characters (code points) it is cut to 77 and ends in `...`, so a cut never
+/// lands inside a character. Unlike the outline's snippet, white space the cut leaves at the end
+/// stays.
+fn snippet_of(block: &Value) -> String {
+    let line = first_non_blank_line(block.get("content").and_then(Value::as_str));
+    if line.chars().count() > SNIPPET_LENGTH {
+        format!("{}...", first_chars(line, SNIPPET_LENGTH - 3))
+    } else {
+        line.to_owned()
     }
-    units
 }
 
 /// The block trees of the blocks one query pulled, and each block's concepts for the roll-up.
@@ -266,7 +245,7 @@ fn trees_of(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> (HashMap<i64, 
             if let Some(id) = block.get("id").and_then(crate::wire::whole_number) {
                 refs_by_block.insert(id, extract_concept_refs(&block));
             }
-            // `refs.map(ref => ({ id: entityId(ref) }))`: a ref with no id is `{}`
+            // each ref as `{ id }`: a ref with no id is `{}`
             let bare: Vec<Value> = refs
                 .iter()
                 .map(|reference| {
@@ -287,22 +266,20 @@ fn trees_of(blocks: Vec<Map<String, Value>>, page_ids: &[i64]) -> (HashMap<i64, 
 /// `{"hasMore":..,"warnings":[..],"totals":{..}}` as keys of the result: `hasMore` is true when any
 /// warning offers a way to fetch the rest, and `totals` (what there was before a cut) comes only
 /// with a cut.
-fn meta_parts(warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> Vec<(&'static str, String)> {
+fn meta_parts(warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> Vec<(&'static str, Value)> {
     let mut parts = vec![
-        ("hasMore", warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()).to_string()),
-        ("warnings", js::json_stringify(&serde_json::to_value(warnings).expect("warnings serialize"))),
+        ("hasMore", Value::Bool(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()))),
+        ("warnings", serde_json::to_value(warnings).expect("warnings serialize")),
     ];
     if let Some((blocks, days)) = totals {
-        let totals = Value::Object(Map::from_iter([("blocks".to_owned(), Value::from(blocks)), ("days".to_owned(), Value::from(days))]));
-        parts.push(("totals", js::json_stringify(&totals)));
+        parts.push(("totals", Value::Object(Map::from_iter([("blocks".to_owned(), Value::from(blocks)), ("days".to_owned(), Value::from(days))]))));
     }
     parts
 }
 
-/// A JSON object from keys and the JSON text of each value, in order.
-fn object_text(parts: &[(&str, String)]) -> String {
-    let fields: Vec<String> = parts.iter().map(|(key, text)| format!("{}:{text}", js::json_stringify(&Value::from(*key)))).collect();
-    format!("{{{}}}", fields.join(","))
+/// A JSON object from keys and values, in order.
+fn object_of(parts: Vec<(&str, Value)>) -> Value {
+    Value::Object(parts.into_iter().map(|(key, value)| (key.to_owned(), value)).collect())
 }
 
 /// Query journal entries for a range chosen one of three ways: explicit dates, the `last_n` most
@@ -312,7 +289,7 @@ fn object_text(parts: &[(&str, String)]) -> String {
 /// before any LogSeq call is made.
 pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarDate) -> Result<JournalsResult, ToolError> {
     let selection = resolve_selection(
-        Selection { start_date: args.start_date, end_date: args.end_date, last_n: args.last_n, preset: args.preset },
+        Selection { start_date: args.start_date.map(|day| day.0), end_date: args.end_date.map(|day| day.0), last_n: args.last_n.map(saturate), preset: args.preset },
         today,
     )?;
     let search_term = args.search_term.as_deref().filter(|term| !term.is_empty());
@@ -387,21 +364,20 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         }
     }
 
-    let date_range = object_text(&[("start", range_start.to_string()), ("end", range_end.to_string())]);
+    let date_range = object_of(vec![("start", Value::from(range_start)), ("end", Value::from(range_end))]);
     // The summary describes every block found, cut or not (#61), so a cut result still shows what the period was about
     let mut summary = Map::new();
     summary.insert("totalDays".to_owned(), Value::from(all_entries.len()));
     summary.insert("totalBlocks".to_owned(), Value::from(total_blocks));
-    // PARITY(#299): an empty `search_term` is no search, yet it is echoed here, since only an absent one is
-    // `undefined` (suspected TS bug) — drop if Rust becomes the only server.
-    if let Some(term) = &args.search_term {
-        summary.insert("searchTerm".to_owned(), Value::from(term.as_str()));
+    // An empty `search_term` is no search, so it is not echoed
+    if let Some(term) = search_term {
+        summary.insert("searchTerm".to_owned(), Value::from(term));
     }
     let top = if args.top_concepts_limit > 0 {
         let top = roll_up_top_concepts(
             all_entries.iter().map(|entry| (entry.date, entry.blocks.as_slice())),
             &refs_by_block,
-            u64::from(args.top_concepts_limit),
+            args.top_concepts_limit,
         );
         summary.insert("topConcepts".to_owned(), Value::Array(top.iter().map(concept_value).collect()));
         top
@@ -409,7 +385,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         Vec::new()
     };
     let top_concept = top.first().map(|concept| concept.name.clone());
-    let summary = js::json_stringify(&Value::Object(summary));
+    let summary = Value::Object(summary);
 
     // Cap the blocks (#61) on data already fetched, so it adds no API call. At or below the cap
     // nothing changes. What comes after (resolving refs, slimming) sees only the kept blocks.
@@ -430,34 +406,34 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
             &TruncationOptions { nested: args.include_content, newest_first, start: range_start, end: range_end, requested: args.max_blocks },
         ));
     }
-    let mut alias_parts: Vec<(&str, String)> = Vec::new();
+    let mut alias_parts: Vec<(&str, Value)> = Vec::new();
     if let Some(names) = alias_set.as_ref().and_then(AliasSet::resolved_aliases) {
-        alias_parts.push(("resolvedAliases", js::json_stringify(&Value::from(names))));
+        alias_parts.push(("resolvedAliases", Value::from(names)));
     }
     // The meta comes only with something to say, so output below the cap is unchanged
     let cut_meta = if warnings.is_empty() { Vec::new() } else { meta_parts(&warnings, totals) };
 
     let page_name = |entry: &Entry| page_display_name(Some(&entry.page));
-    let mut parts: Vec<(&str, String)> = vec![("dateRange", date_range)];
+    let mut parts: Vec<(&str, Value)> = vec![("dateRange", date_range)];
 
     if !args.include_content {
-        let entries_text: Vec<String> = entries
+        let entries_value: Vec<Value> = entries
             .iter()
             .map(|entry| {
-                let snippets: Vec<String> = entry.blocks.iter().map(|block| js::json_string_utf16(&snippet_of(block))).collect();
-                object_text(&[
-                    ("date", entry.date.to_string()),
-                    ("pageName", js::json_stringify(&Value::from(page_name(entry)))),
-                    ("blockCount", count_blocks(&entry.blocks).to_string()),
-                    ("snippets", format!("[{}]", snippets.join(","))),
+                let snippets: Vec<Value> = entry.blocks.iter().map(|block| Value::String(snippet_of(block))).collect();
+                object_of(vec![
+                    ("date", Value::from(entry.date)),
+                    ("pageName", Value::from(page_name(entry))),
+                    ("blockCount", Value::from(count_blocks(&entry.blocks))),
+                    ("snippets", Value::Array(snippets)),
                 ])
             })
             .collect();
-        parts.push(("entries", format!("[{}]", entries_text.join(","))));
+        parts.push(("entries", Value::Array(entries_value)));
         parts.push(("summary", summary));
         parts.extend(alias_parts);
         parts.extend(cut_meta);
-        return Ok(JournalsResult { json: object_text(&parts), top_concept });
+        return Ok(JournalsResult { json: object_of(parts).to_string(), top_concept });
     }
 
     // Opt-in (#18): resolve once over every returned block, whatever the number of days. Only the
@@ -478,7 +454,7 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
         meta = meta_parts(&warnings, totals);
     }
 
-    let entries_text: Vec<Value> = entries
+    let entries_value: Vec<Value> = entries
         .iter()
         .map(|entry| {
             let mut map = Map::new();
@@ -495,11 +471,11 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
             Value::Object(map)
         })
         .collect();
-    parts.push(("entries", js::json_stringify(&Value::Array(entries_text))));
+    parts.push(("entries", Value::Array(entries_value)));
     parts.push(("summary", summary));
     parts.extend(alias_parts);
     parts.extend(meta);
-    Ok(JournalsResult { json: object_text(&parts), top_concept })
+    Ok(JournalsResult { json: object_of(parts).to_string(), top_concept })
 }
 
 #[cfg(test)]
@@ -551,8 +527,32 @@ mod tests {
     }
 
     fn read(value: Value) -> Result<Args, String> {
-        read_args(value.as_object()).map_err(|error| error.to_string())
+        parse_args::<Args>(value.as_object()).map_err(|error| error.to_string())
     }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        let base = json!({"last_n": 7});
+        let without = |param: &str| {
+            let mut base = base.clone();
+            base.as_object_mut().unwrap().remove(param);
+            base
+        };
+        sweep::<Args>(base.clone(), "start_date", Takes::Date, false);
+        sweep::<Args>(base.clone(), "end_date", Takes::Date, false);
+        sweep::<Args>(json!({}), "last_n", Takes::Count(1), false);
+        sweep::<Args>(without("preset"), "preset", Takes::Words(&DATE_PRESET_WORDS), false);
+        sweep::<Args>(base.clone(), "search_term", Takes::Text, false);
+        sweep::<Args>(base.clone(), "slim_results", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "include_content", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "top_concepts_limit", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "resolve_refs", Takes::Flag, false);
+        sweep::<Args>(base, "max_blocks", Takes::Count(0), false);
+    }
+
+    /// The words `preset` takes, as the schema lists them.
+    const DATE_PRESET_WORDS: [&str; 8] = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"];
 
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
@@ -606,15 +606,15 @@ mod tests {
     #[test]
     fn a_date_is_a_whole_number_and_anything_else_is_refused_as_a_date_of_the_wrong_format() {
         let args = read(json!({"start_date": 20250101, "end_date": 20250102.0})).unwrap();
-        assert_eq!((args.start_date, args.end_date), (Some(20_250_101), Some(20_250_102)));
+        assert_eq!((args.start_date, args.end_date), (Some(YyyyMmDd(20_250_101)), Some(YyyyMmDd(20_250_102))));
         let format = "Expected: Date in YYYYMMDD format (8 digits, valid year/month/day)";
         assert_eq!(
             read(json!({"start_date": 20250101.5, "end_date": 20250102})).unwrap_err(),
-            format!("Invalid parameter 'start_date': 20250101.5\n\n{format}\nExample: 20251115 for November 15, 2025")
+            format!("Invalid parameter 'start_date': 20250101.5\n\n{format}\nExample: start_date: 20251115")
         );
         assert_eq!(
             read(json!({"start_date": 20250101, "end_date": 1e300})).unwrap_err(),
-            format!("Invalid parameter 'end_date': 1e+300\n\n{format}\nExample: 20251120 for November 20, 2025")
+            format!("Invalid parameter 'end_date': 1e+300\n\n{format}\nExample: end_date: 20251115")
         );
     }
 
@@ -623,25 +623,37 @@ mod tests {
     }
 
     fn snippet(content: &str) -> String {
-        String::from_utf16_lossy(&snippet_of(&block(content)))
+        snippet_of(&block(content))
     }
 
     #[test]
-    fn a_snippet_is_the_first_line_trimmed_even_when_blank_and_cut_at_eighty_units() {
+    fn a_snippet_is_the_first_non_blank_line_trimmed_and_cut_at_eighty_characters() {
         assert_eq!(snippet("  Hello  \nsecond"), "Hello");
-        // unlike the page outline, the first line is the first line: a blank one gives an empty snippet
-        assert_eq!(snippet("\n\nHello"), "");
+        // as the page outline takes it: blank lines before the first one with text are skipped
+        assert_eq!(snippet("\n\nHello"), "Hello");
+        assert_eq!(snippet("  \n \t \n  Hello  \nsecond"), "Hello");
+        assert_eq!(snippet("\n  \n"), "");
         assert_eq!(snippet(&"x".repeat(80)), "x".repeat(80));
         assert_eq!(snippet(&"x".repeat(81)), format!("{}...", "x".repeat(77)));
         // no trimEnd after the cut: a space stays
         assert_eq!(snippet(&format!("{} {}", "x".repeat(76), "y".repeat(10))), format!("{} ...", "x".repeat(76)));
-        assert_eq!(js::json_string_utf16(&snippet_of(&json!({"id": 1}))), "\"\"");
+        assert_eq!(snippet_of(&json!({"id": 1})), "");
     }
 
     #[test]
-    fn a_snippet_cut_inside_an_emoji_keeps_the_lone_half_as_an_escape() {
+    fn a_snippet_cuts_by_code_point_so_no_lone_surrogate_or_replacement_character_appears() {
+        // 80 rockets are 160 UTF-16 units and 80 characters: no cut
+        assert_eq!(snippet(&"\u{1F680}".repeat(80)), "\u{1F680}".repeat(80));
+        assert_eq!(snippet(&"\u{1F680}".repeat(81)), format!("{}...", "\u{1F680}".repeat(77)));
+        // a rocket at the boundary (the 77th character) stays whole, and its JSON has no escape for half of it
         let text = format!("{}\u{1F680}{}", "x".repeat(76), "y".repeat(10));
-        assert_eq!(js::json_string_utf16(&snippet_of(&block(&text))), format!("\"{}\\ud83d...\"", "x".repeat(76)));
+        assert_eq!(snippet(&text), format!("{}\u{1F680}...", "x".repeat(76)));
+        let json = serde_json::to_string(&snippet(&text)).unwrap();
+        assert!(!json.contains("\\ud") && !json.contains('\u{FFFD}'), "{json}");
+        // a ZWJ emoji is cut between its code points; a letter and its combining mark likewise
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+        assert_eq!(snippet(&format!("{}{family}{}", "x".repeat(76), "y".repeat(10))), format!("{}\u{1F468}...", "x".repeat(76)));
+        assert_eq!(snippet(&format!("{}e\u{301}{}", "x".repeat(76), "y".repeat(10))), format!("{}e...", "x".repeat(76)));
     }
 
     #[test]
@@ -649,7 +661,10 @@ mod tests {
         assert_eq!(Value::from(20250101_i64).to_string(), "20250101");
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) };
         let parts = meta_parts(&[warning], Some((9, 2)));
-        assert_eq!(object_text(&parts), r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#);
-        assert_eq!(object_text(&meta_parts(&[], None)), r#"{"hasMore":false,"warnings":[]}"#);
+        assert_eq!(
+            object_of(parts).to_string(),
+            r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#
+        );
+        assert_eq!(object_of(meta_parts(&[], None)).to_string(), r#"{"hasMore":false,"warnings":[]}"#);
     }
 }

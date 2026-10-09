@@ -1,10 +1,10 @@
-//! What `logseq.Editor.getPage` and `getPageBlocksTree` answer (`responses.editorPage` and
-//! `responses.blocks` in `src/response-schemas.ts`). The page and its blocks are returned as
+//! What `logseq.Editor.getPage` and `getPageBlocksTree` answer. The page and its blocks are returned as
 //! LogSeq sent them, since the result carries them whole (BR-0004).
 
 use serde_json::Value;
 
-use crate::wire::{Part, Reader, ResponseError, to_error};
+use crate::entity::shape::{Block, EditorPage};
+use crate::wire::{ResponseError, parse, sent_list};
 
 /// The method the page comes from, as a response error names it.
 pub const PAGE_METHOD: &str = "logseq.Editor.getPage";
@@ -13,25 +13,12 @@ pub const BLOCKS_METHOD: &str = "logseq.Editor.getPageBlocksTree";
 
 /// `null`, or the page, checked as an Editor API page (camelCase keys).
 pub fn page(answer: &Value) -> Result<Option<Value>, ResponseError> {
-    if answer.is_null() {
-        return Ok(None);
-    }
-    Reader::default().check_editor_page(Some(answer)).map_err(|issue| to_error(PAGE_METHOD, issue))?;
-    Ok(Some(answer.clone()))
+    Ok(parse::<Option<EditorPage>>(PAGE_METHOD, answer)?.map(|_| answer.clone()))
 }
 
 /// `null`, or the page's top-level blocks, each checked as a block.
 pub fn blocks(answer: &Value) -> Result<Option<Vec<Value>>, ResponseError> {
-    let mut reader = Reader::default();
-    let items = match answer {
-        Value::Null => return Ok(None),
-        Value::Array(items) => items,
-        other => return Err(to_error(BLOCKS_METHOD, reader.mismatch("array", Some(other)))),
-    };
-    for (i, item) in items.iter().enumerate() {
-        reader.at(Part::Index(i), |r| r.check_block(Some(item))).map_err(|issue| to_error(BLOCKS_METHOD, issue))?;
-    }
-    Ok(Some(items.clone()))
+    sent_list::<Block>(BLOCKS_METHOD, answer)
 }
 
 #[cfg(test)]
@@ -49,9 +36,21 @@ mod tests {
     #[test]
     fn something_that_is_not_a_page_is_an_error_naming_the_method_and_path() {
         let error = page(&json!({"id": 1})).unwrap_err();
-        assert_eq!((error.method.as_str(), error.path.as_str()), ("logseq.Editor.getPage", "name"));
+        assert_eq!((error.method.as_str(), error.path.as_str()), ("logseq.Editor.getPage", "answer.name"));
         // a pulled page's keys are not an Editor API page's: it needs `name` and `id`, which a pull also has
         assert!(page(&json!({"id": 1, "name": "a", "original-name": "A"})).is_ok());
+    }
+
+    #[test]
+    fn a_field_nothing_reads_may_hold_anything() {
+        // the uuid, namespace and times of a page are carried to the result and read by no code
+        let sent = json!({"id": 1, "name": "a", "uuid": 5, "namespace": "x", "createdAt": "never", "updatedAt": null});
+        assert_eq!(page(&sent).unwrap(), Some(sent));
+        // the ones that are read are checked
+        assert_eq!(page(&json!({"id": 1, "name": "a", "originalName": 4})).unwrap_err().path, "answer.originalName");
+        assert_eq!(page(&json!({"id": 1, "name": "a", "file": null})).unwrap_err().path, "answer.file");
+        assert_eq!(page(&json!({"id": 1, "name": "a", "alias": [{"id": "x"}]})).unwrap_err().path, "answer.alias[0].id");
+        assert_eq!(page(&json!({"id": 1, "name": "a", "journal?": 1})).unwrap_err().path, "answer.journal?");
     }
 
     #[test]
@@ -61,7 +60,7 @@ mod tests {
         let sent = json!([{"id": 1, "uuid": "u", "children": [{"id": 2, "uuid": "v"}]}]);
         assert_eq!(blocks(&sent).unwrap().unwrap().len(), 1);
         let error = blocks(&json!([{"id": 1, "uuid": "u"}, {"id": 2}])).unwrap_err();
-        assert_eq!((error.method.as_str(), error.path.as_str()), ("logseq.Editor.getPageBlocksTree", "[1].uuid"));
-        assert_eq!(blocks(&json!({})).unwrap_err().path, "(response)");
+        assert_eq!((error.method.as_str(), error.path.as_str()), ("logseq.Editor.getPageBlocksTree", "answer[1].uuid"));
+        assert_eq!(blocks(&json!({})).unwrap_err().path, "answer");
     }
 }

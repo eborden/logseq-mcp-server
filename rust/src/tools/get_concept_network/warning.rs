@@ -1,5 +1,4 @@
-//! The `network_truncated` warning (#132; `networkTruncatedWarning` in
-//! `src/tools/get-concept-network.ts`). Below the maxima it says what it always did. A cap that is
+//! The `network_truncated` warning (#132). Below the maxima it says what it always did. A cap that is
 //! already at its maximum (`max_nodes` 500, `max_fanout` 100) is never offered for raising, and a
 //! suggested `max_nodes` never goes past 500. When nothing is left to raise there is no
 //! `howToFetchAll`, so `hasMore` is false and the warning says the maximum was reached (BR-0006).
@@ -37,7 +36,7 @@ fn warning(message: String, how_to_fetch_all: Option<String>) -> ResultWarning {
     ResultWarning { code: CODE.to_owned(), message, how_to_fetch_all }
 }
 
-/// `networkTruncatedWarning`.
+/// The `network_truncated` warning.
 pub fn network_truncated_warning(f: TruncationFacts) -> ResultWarning {
     let base = format!("Kept {} pages; at least {} more connected pages were dropped.", f.kept, f.dropped);
     let suggested_nodes = f.kept + f.dropped;

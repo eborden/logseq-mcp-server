@@ -1,7 +1,7 @@
 //! The LogSeq traffic of the `logseq://page/{name}` resource against a mock LogSeq on a local port,
 //! and what it answers. It reads a page the way `logseq_get_page` does with `include_children`, so
 //! it makes the same calls: the page, then its blocks. The parity harness
-//! (`parity.rs`) checks the same against the TypeScript server. Every page and block here
+//! (`parity.rs`) checks the same against the recorded results. Every page and block here
 //! is made up (BR-0001).
 
 mod common;
@@ -78,9 +78,9 @@ async fn a_name_nothing_matches_is_resource_not_found_with_the_tool_s_message() 
     assert_eq!(error.code.0, -32002);
     assert_eq!(
         error.message,
-        "MCP error -32002: No page \"Atlas\". Closest: Project Atlas. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names."
+        "No page \"Atlas\". Closest: Project Atlas. Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names."
     );
-    assert!(error.data.is_none());
+    assert_eq!(error.data, Some(json!({"uri": "logseq://page/Atlas"})));
 }
 
 #[tokio::test]
@@ -89,7 +89,8 @@ async fn an_ambiguous_name_is_invalid_params() {
     let logseq = mock_logseq(vec![Value::Null, json!([[page(40, "alice", "Alice"), "alias"], [page(41, "alice notes", "Alice Notes"), "alias"]])]).await;
     let error = resources::read(&client(&logseq), "logseq://page/al").await.unwrap_err();
     assert_eq!(error.code.0, -32602);
-    assert!(error.message.starts_with("MCP error -32602: "), "{}", error.message);
+    assert!(error.message.starts_with("\"al\" matches 2 pages"), "{}", error.message);
+    assert!(error.data.is_none());
     assert_eq!(methods(&logseq).len(), 2);
 }
 
@@ -101,7 +102,7 @@ async fn a_bad_uri_is_refused_before_any_call() {
         assert_eq!(error.code.0, code, "{uri}");
     }
     let error = resources::read(&client(&logseq), "logseq://nope").await.unwrap_err();
-    assert_eq!(error.message, "MCP error -32002: Unknown resource \"logseq://nope\". Available: logseq://guide, logseq://page/{name}.");
+    assert_eq!(error.message, "Unknown resource \"logseq://nope\". Available: logseq://guide, logseq://page/{name}.");
     assert!(methods(&logseq).is_empty());
 }
 

@@ -1,7 +1,7 @@
 //! The backlinks tool's LogSeq traffic against a mock LogSeq on a local port: how many calls it
 //! makes, in which order, with which inputs, and what it answers. The parity harness
-//! (`parity.rs`) checks the same calls and the result bytes against the TypeScript
-//! server. Every page and block here is made up (BR-0001).
+//! (`parity.rs`) checks the same calls and the result bytes against the recorded
+//! results. Every page and block here is made up (BR-0001).
 //!
 //! The mock is the one `get_page_outline_calls.rs` has: each test file is its own crate, and
 //! sharing it would touch the outline's tests.
@@ -60,7 +60,7 @@ async fn mock_logseq(answers: Vec<Value>) -> MockLogseq {
 }
 
 fn client(logseq: &MockLogseq) -> LogseqClient {
-    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000.0), tips: None })
+    LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
 
 fn page(id: i64, name: &str, original: &str, alias: &[i64]) -> Value {
@@ -192,7 +192,7 @@ async fn a_null_answer_is_an_empty_list_and_a_warning_and_an_unreadable_one_is_a
     let logseq = mock_logseq(vec![json!([[page(10, "atlas", "Atlas", &[]), "name"]]), json!([[null, [{"uuid": "u"}]]])]).await;
     let error = run(&logseq, "atlas").await.unwrap_err();
     assert!(matches!(error, ToolError::Response(_)), "{error}");
-    assert!(error.to_string().contains("logseq.Editor.getPageLinkedReferences in a shape this server can't read: [0][1][0].id"));
+    assert!(error.to_string().contains("logseq.Editor.getPageLinkedReferences in a shape this server can't read: answer[0][1][0].id"));
 }
 
 #[tokio::test]

@@ -1,9 +1,9 @@
-//! `logseq_list_pages` (the Rust side of `src/tools/list-pages.ts`): the non-journal pages in name
+//! `logseq_list_pages`: the non-journal pages in name
 //! order, each with the other names it goes by (`alias::`), filtered by `name_contains`.
 //!
 //! Calls: 1 (`logseq.Editor.getAllPages`), whatever the filter, `limit`, `offset` or number of
 //! aliases. The `alias` ids and `file` ride on every page entity, so the alias groups are folded
-//! here in TypeScript's way (#171), and the window is cut here.
+//! here (#171), and the window is cut here.
 //!
 //! This directory holds everything only the list uses: the answer it reads (`wire.rs`) and its tip
 //! (`tips.rs`).
@@ -19,11 +19,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::args::Arguments;
+use crate::args::parse_args;
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
-use crate::js;
 use crate::meta::ResultWarning;
+use crate::order;
 use crate::tips::tips_content;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, capped_truncation_warning};
@@ -38,10 +38,8 @@ pub const DEFAULT_LIST_PAGES_LIMIT: u64 = 200;
 /// Most pages one call returns. A larger `limit` is clamped to it, and `offset` reaches the pages
 /// past it, so a cut at the maximum still has a `howToFetchAll`.
 pub const MAX_LIST_PAGES_LIMIT: u64 = 1000;
-/// Pages skipped when `offset` is absent.
-pub const DEFAULT_LIST_PAGES_OFFSET: u64 = 0;
 
-/// The description the TypeScript server gives the tool (`src/tool-descriptions.ts`).
+/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "List non-journal pages as { name, aliases? }, filtered by name_contains (substring of name or alias). Aliases nest under pages.\n\n\
 **Use when:** unsure which pages exist or what the user calls something.\n\
 **Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.\n\
@@ -51,7 +49,7 @@ fn default_limit() -> u64 {
     DEFAULT_LIST_PAGES_LIMIT
 }
 
-/// The list's arguments. Unknown fields are ignored, as every TypeScript tool ignores them.
+/// The list's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Filter pages whose name or alias contains this text (case-insensitive)
@@ -64,17 +62,6 @@ pub struct Args {
     pub offset: u64,
 }
 
-/// Read the arguments in the order the schema lists them, so the first one that is wrong is the one
-/// reported, as `parseArgs` does.
-fn read_args(arguments: Option<&JsonObject>) -> Result<Args, ToolError> {
-    let read = Arguments::new(arguments);
-    Ok(Args {
-        name_contains: read.optional_string("name_contains")?,
-        limit: read.count_or("limit", 0, DEFAULT_LIST_PAGES_LIMIT)?,
-        offset: read.count_or("offset", 0, DEFAULT_LIST_PAGES_OFFSET)?,
-    })
-}
-
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
@@ -84,9 +71,9 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the list, then its tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = read_args(arguments.as_ref())?;
+    let args = parse_args::<Args>(arguments.as_ref())?;
     let result = list_pages(client, &args).await?;
-    let mut content = vec![ContentBlock::text(js::json_stringify(&result.to_value()))];
+    let mut content = vec![ContentBlock::text(result.to_value().to_string())];
     if tips_enabled {
         let first = result.pages.first().map(|page| page.name.as_str());
         if let Some(tips) = tips_content(&list_pages_tips(args.name_contains.as_deref(), first)) {
@@ -151,19 +138,16 @@ struct Entry<'a> {
     aliases: Vec<&'a ListedEntity>,
 }
 
-/// A total order on page names. `localeCompare` is 0 for some distinct names (NFC and NFD, a
-/// zero-width space), and `getAllPages` order is not guaranteed, so a tie could put one name on two
-/// pages and drop the other.
+/// A total order on page names ([`order::by_name`]): `getAllPages` order is not guaranteed, so a
+/// tie between two names would put one name on two pages and drop the other.
 fn by_name(a: &ListedEntity, b: &ListedEntity) -> Ordering {
-    // PARITY(#299): `localeCompare`'s order, which follows the host's ICU (suspected TS bug) — replace with a fixed
-    // order if Rust becomes the only server, and keep the tie-break after it, which is what makes the order total.
-    js::locale_compare(&a.name, &b.name).then_with(|| a.name.encode_utf16().cmp(b.name.encode_utf16()))
+    order::by_name(&a.name, &b.name)
 }
 
 /// Fold alias links into the page list (#171), from the `alias` ids that `getAllPages` already
 /// carries on every entity, so it costs no call.
 ///
-/// Which page is canonical follows the resolver (`declaringPages`): a page with a file wrote the
+/// Which page is canonical follows the resolver: a page with a file wrote the
 /// `alias::` line, so it is canonical, and the file-less stubs LogSeq made for its alias names nest
 /// under it. LogSeq links an alias group of three or more as a clique, but the declaring page links
 /// all of them, so a stub's canonical pages are the file-backed pages it links to directly.
@@ -376,7 +360,7 @@ mod tests {
             total: 2,
             warning: None,
         };
-        assert_eq!(js::json_stringify(&plain.to_value()), r#"{"total":2,"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}]}"#);
+        assert_eq!(plain.to_value().to_string(), r#"{"total":2,"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}]}"#);
         assert_eq!(keys(&plain.to_value()), ["total", "pages"]);
         let cut = ListPagesResult {
             pages: vec![],
@@ -384,7 +368,7 @@ mod tests {
             warning: Some(ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }),
         };
         assert_eq!(
-            js::json_stringify(&cut.to_value()),
+            cut.to_value().to_string(),
             r#"{"total":3,"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"pages":[]}"#
         );
         assert_eq!(keys(&cut.to_value()), ["total", "hasMore", "warnings", "pages"]);
@@ -439,13 +423,21 @@ mod tests {
 
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
-        let defaults = read_args(None).unwrap();
+        let defaults = parse_args::<Args>(None).unwrap();
         assert_eq!(defaults, Args { name_contains: None, limit: 200, offset: 0 });
         assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
         let bad = json!({"limit": 2.5, "offset": -1});
         assert_eq!(
-            read_args(bad.as_object()).unwrap_err().to_string(),
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': 2.5\n\nExpected: an integer, not a fraction\nExample: limit: 5"
         );
+    }
+
+    #[test]
+    fn every_argument_takes_what_it_says_and_nothing_else() {
+        use crate::args::testing::{Takes, sweep};
+        sweep::<Args>(json!({}), "name_contains", Takes::Text, false);
+        sweep::<Args>(json!({}), "limit", Takes::Count(0), false);
+        sweep::<Args>(json!({}), "offset", Takes::Count(0), false);
     }
 }

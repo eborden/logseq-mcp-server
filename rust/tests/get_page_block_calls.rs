@@ -1,14 +1,13 @@
 //! The LogSeq traffic of `logseq_get_block` and `logseq_get_page` against a mock LogSeq on a local
 //! port: how many calls each makes, in which order, with which arguments, and what it answers. The
-//! Rust side of the call counts in `CLAUDE.md` ("Current Implementation Status"); the parity
+//! call counts are those in `CLAUDE.md` ("Current Implementation Status"); the parity
 //! harness (`parity.rs`) checks the same calls and the result bytes against the
-//! TypeScript server. Every page and block here is made up (BR-0001).
+//! recorded results. Every page and block here is made up (BR-0001).
 
 mod common;
 
 use common::{args_of, client, editor_block, methods, mock_logseq, uuid};
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::js;
 use logseq_mcp_server::tools::{get_block, get_page};
 use serde_json::{Value, json};
 
@@ -48,10 +47,10 @@ async fn a_block_costs_one_call_and_is_returned_as_sent() {
 
     assert_eq!(methods(&logseq), ["logseq.Editor.getBlock"]);
     assert_eq!(args_of(&logseq, 0), [json!(uuid(5))]);
-    // the block as it came, with a JavaScript object's integer-like keys first; no meta block, no tips
+    // the block as it came, its keys in the order LogSeq sent them (integer-like ones included); no meta block, no tips
     assert_eq!(
         text_of(&result, 0),
-        format!(r#"{{"id":5,"uuid":"{}","content":"Kickoff","children":[["uuid","{}"]],"propertiesOrder":[],"extra":{{"1":3,"2":1,"b":2}}}}"#, uuid(5), uuid(6))
+        format!(r#"{{"id":5,"uuid":"{}","content":"Kickoff","children":[["uuid","{}"]],"propertiesOrder":[],"extra":{{"2":1,"b":2,"1":3}}}}"#, uuid(5), uuid(6))
     );
     assert_eq!(serde_json::to_value(&result).unwrap()["content"].as_array().unwrap().len(), 1);
 }
@@ -123,7 +122,7 @@ async fn a_missing_block_is_the_same_error_in_markdown() {
 async fn an_answer_that_is_not_a_block_is_a_response_error() {
     let logseq = mock_logseq(vec![json!({"id": 1})]).await;
     let error = get_block::get_block(&client(&logseq), &uuid(5), false, false).await.unwrap_err();
-    assert!(matches!(&error, ToolError::Response(response) if response.path == "uuid"), "{error}");
+    assert!(matches!(&error, ToolError::Response(response) if response.path == "answer.uuid"), "{error}");
 }
 
 // ---- logseq_get_page
@@ -166,7 +165,7 @@ async fn the_blocks_cost_one_more_call_and_a_page_with_none_gets_no_children_key
     assert_eq!(args_of(&logseq, 1), [json!("Project Atlas")]);
     assert_eq!(page["children"].as_array().unwrap().len(), 2);
     // `children` is the last key
-    assert_eq!(js::json_stringify(&page).rsplit_once(r#","children":"#).map(|(_, rest)| rest.starts_with('[')), Some(true));
+    assert_eq!(page.to_string().rsplit_once(r#","children":"#).map(|(_, rest)| rest.starts_with('[')), Some(true));
 
     // A real `[]` is a page with no blocks and says nothing
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), json!([])]).await;
@@ -188,7 +187,7 @@ async fn a_null_block_tree_is_a_warning_and_not_a_page_with_no_blocks() {
     assert!(warnings[0].get("howToFetchAll").is_none());
     assert!(warnings[0]["message"].as_str().unwrap().contains("does not mean the page has no blocks"));
     // the meta follows the page's own keys
-    assert!(js::json_stringify(&page).contains(r#","hasMore":false,"warnings":[{"code":"page_blocks_unavailable","message":"#));
+    assert!(page.to_string().contains(r#","hasMore":false,"warnings":[{"code":"page_blocks_unavailable","message":"#));
 
     // With `resolve_refs` the warning is merged with the ones that path makes, and no ref lookup is made for no blocks
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), Value::Null]).await;
@@ -233,7 +232,7 @@ async fn an_alias_costs_the_failed_lookup_the_resolver_and_the_fetch_of_the_real
     assert_eq!(args_of(&logseq, 2), [json!("project atlas")]);
     assert_eq!(args_of(&logseq, 3), [json!("project atlas")]);
     // `resolvedFrom` carries the name as typed (untrimmed), then `children`
-    let written = js::json_stringify(&page);
+    let written = page.to_string();
     assert!(written.contains(r#""resolvedFrom":{"name":" Atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"children":["#), "{written}");
 }
 
@@ -306,20 +305,20 @@ async fn resolve_refs_annotates_the_blocks_and_adds_the_meta_even_when_nothing_h
     assert_eq!(methods(&logseq), ["logseq.Editor.getPage", "logseq.Editor.getPageBlocksTree", "logseq.DB.datascriptQuery"]);
     assert_eq!(page["children"][0]["resolvedContent"], "see Bob owns it");
     assert!(page["children"][1].get("resolvedContent").is_none());
-    assert!(js::json_stringify(&page).ends_with(r#""hasMore":false,"warnings":[]}"#));
+    assert!(page.to_string().ends_with(r#""hasMore":false,"warnings":[]}"#));
 
     // without include_children there are no blocks to look at: no query, and the meta all the same
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
     let page = get_page::get_page(&client(&logseq), "Project Atlas", false, true).await.unwrap();
     assert_eq!(methods(&logseq).len(), 1);
-    assert!(js::json_stringify(&page).ends_with(r#""file":{"id":5010},"hasMore":false,"warnings":[]}"#));
+    assert!(page.to_string().ends_with(r#""file":{"id":5010},"hasMore":false,"warnings":[]}"#));
 }
 
 #[tokio::test]
 async fn an_answer_that_is_not_a_page_is_a_response_error_naming_the_method() {
     let logseq = mock_logseq(vec![json!({"id": 1})]).await;
     let error = get_page::get_page(&client(&logseq), "x", false, false).await.unwrap_err();
-    assert!(matches!(&error, ToolError::Response(r) if r.method == "logseq.Editor.getPage" && r.path == "name"), "{error}");
+    assert!(matches!(&error, ToolError::Response(r) if r.method == "logseq.Editor.getPage" && r.path == "answer.name"), "{error}");
 }
 
 #[tokio::test]

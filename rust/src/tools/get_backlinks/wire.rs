@@ -1,16 +1,16 @@
 //! What the backlinks tool reads from LogSeq: the Editor API's linked references
-//! (`responses.linkedReferences`) and the blocks of the aliased Datalog query
-//! (`responses.nullableBlockRows`).
+//! and the blocks of the aliased Datalog query.
 //!
-//! Both are checked against the TypeScript schemas and then kept as the values LogSeq sent: the
+//! Both are checked against their wire types and then kept as the values LogSeq sent: the
 //! tool's output carries each entity as it came (BR-0004), so a typed copy would only be thrown
 //! away. The schema checks are `entity.rs`'s.
 
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
+use crate::entity::shape::{Block, PageLike};
 use crate::tool::result_value;
-use crate::wire::{DATALOG_METHOD, Part, Reader, ResponseError, to_error};
+use crate::wire::{DATALOG_METHOD, ResponseError, parse, sent_cells};
 
 /// The method whose answer [`linked_references`] reads.
 pub const LINKED_REFERENCES_METHOD: &str = "logseq.Editor.getPageLinkedReferences";
@@ -24,7 +24,7 @@ pub struct Backlink {
 }
 
 impl Backlink {
-    /// The page of the first block (`blocks[0]?.page`), which names the source when `page` is null.
+    /// The page of the first block, which names the source when `page` is null.
     pub fn block_page(&self) -> Option<&Map<String, Value>> {
         self.blocks.first()?.get("page")?.as_object()
     }
@@ -42,71 +42,32 @@ impl Serialize for Backlink {
     }
 }
 
-/// `responses.linkedReferences`: `[page | null, blocks]` per source page, or `null`.
+/// The answer: `[page | null, blocks]` per source page, or `null`.
 pub fn linked_references(answer: Value) -> Result<Option<Vec<Backlink>>, ResponseError> {
-    let mut reader = Reader::default();
-    let checked = reader
-        .rows(&answer, 2, |r, cells| {
-            r.at(Part::Index(0), |r| match cells.first() {
-                Some(Value::Null) => Ok(()),
-                other => r.check_page_like(other),
-            })?;
-            r.at(Part::Index(1), |r| match cells.get(1) {
-                Some(Value::Array(blocks)) => {
-                    for (i, block) in blocks.iter().enumerate() {
-                        r.at(Part::Index(i), |r| r.check_block(Some(block)))?;
-                    }
-                    Ok(())
-                }
-                other => Err(r.mismatch("array", other)),
-            })
-        })
-        .map_err(|issue| to_error(LINKED_REFERENCES_METHOD, issue))?;
-    if checked.is_none() {
+    if parse::<Option<Vec<(Option<PageLike>, Vec<Block>)>>>(LINKED_REFERENCES_METHOD, &answer)?.is_none() {
         return Ok(None);
     }
-    let Value::Array(rows) = answer else { unreachable!("rows() only accepts an array or null") };
-    Ok(Some(
-        rows.into_iter()
-            .map(|row| {
-                let Value::Array(mut cells) = row else { unreachable!("rows() only accepts arrays") };
-                let blocks = match cells.pop() {
-                    Some(Value::Array(blocks)) => blocks,
-                    _ => unreachable!("the blocks cell was checked to be an array"),
-                };
-                Backlink { page: cells.pop().unwrap_or(Value::Null), blocks }
-            })
-            .collect(),
-    ))
+    // The rows were read as `[page | null, blocks]`, so each is a list of those two cells. Said again here, as an
+    // error and not a panic, so that a change to the cells above can't go unmatched by this.
+    let backlinks: Result<Vec<Backlink>, ResponseError> = crate::wire::items(&answer)
+        .iter()
+        .map(|row| match row.as_array().map(Vec::as_slice) {
+            Some([page, Value::Array(blocks)]) => Ok(Backlink { page: page.clone(), blocks: blocks.clone() }),
+            _ => Err(ResponseError {
+                method: LINKED_REFERENCES_METHOD.to_owned(),
+                path: "answer".to_owned(),
+                problem: "a row is not the page and the blocks that were read".to_owned(),
+            }),
+        })
+        .collect();
+    backlinks.map(Some)
 }
 
-/// `responses.nullableBlockRows`: `[block | null]` per row, or `null`. A `null` cell is `None`,
+/// The answer: `[block | null]` per row, or `null`. A `null` cell is `None`,
 /// which the tool skips.
 pub fn block_rows(answer: Value) -> Result<Option<Vec<Option<Map<String, Value>>>>, ResponseError> {
-    let mut reader = Reader::default();
-    let checked = reader
-        .rows(&answer, 1, |r, cells| {
-            r.at(Part::Index(0), |r| match cells.first() {
-                Some(Value::Null) => Ok(()),
-                other => r.check_block(other),
-            })
-        })
-        .map_err(|issue| to_error(DATALOG_METHOD, issue))?;
-    if checked.is_none() {
-        return Ok(None);
-    }
-    let Value::Array(rows) = answer else { unreachable!("rows() only accepts an array or null") };
-    Ok(Some(
-        rows.into_iter()
-            .map(|row| {
-                let Value::Array(mut cells) = row else { unreachable!("rows() only accepts arrays") };
-                match cells.pop() {
-                    Some(Value::Object(block)) => Some(block),
-                    _ => None,
-                }
-            })
-            .collect(),
-    ))
+    let cells = sent_cells::<Block>(DATALOG_METHOD, &answer)?;
+    Ok(cells.map(|cells| cells.into_iter().map(|cell| cell.and_then(|block| if let Value::Object(block) = block { Some(block) } else { None })).collect()))
 }
 
 #[cfg(test)]
@@ -143,31 +104,28 @@ mod tests {
     #[test]
     fn a_wrong_shape_names_the_method_and_the_path() {
         let method = LINKED_REFERENCES_METHOD;
-        assert_eq!(problem(linked_references(json!({}))), format!("{method} (response): Invalid input: expected array, received object"));
-        assert_eq!(problem(linked_references(json!([1]))), format!("{method} [0]: Invalid input: expected tuple, received number"));
-        assert_eq!(problem(linked_references(json!([[null]]))), format!("{method} [0][1]: Invalid input: expected array, received undefined"));
-        // zod's tuple length rule, from `Reader::rows`: two cells short is `Too small` before any cell is read
-        assert_eq!(problem(linked_references(json!([[]]))), format!("{method} [0]: Too small: expected array to have >2 items"));
-        assert_eq!(
-            problem(linked_references(json!([[{"id": "a"}, []]]))),
-            format!("{method} [0][0].id: Invalid input: expected number, received string")
-        );
-        assert_eq!(
-            problem(linked_references(json!([[null, [{"uuid": "u"}]]]))),
-            format!("{method} [0][1][0].id: Invalid input: expected number, received undefined")
-        );
+        assert_eq!(problem(linked_references(json!({}))), format!("{method} answer: expected a list, got an object"));
+        assert_eq!(problem(linked_references(json!([1]))), format!("{method} answer[0]: expected a row, got a number"));
+        assert_eq!(problem(linked_references(json!([[null]]))), format!("{method} answer[0]: the row has fewer cells than this server reads"));
+        assert_eq!(problem(linked_references(json!([[]]))), format!("{method} answer[0]: the row has fewer cells than this server reads"));
+        assert_eq!(problem(linked_references(json!([[{"id": "a"}, []]]))), format!("{method} answer[0][0].id: expected a whole number, got a string"));
+        assert_eq!(problem(linked_references(json!([[null, [{"uuid": "u"}]]]))), format!("{method} answer[0][1][0].id: required, but missing"));
         assert_eq!(
             problem(linked_references(json!([[null, [{"id": 1, "uuid": "u", "page": {"name": 5}}]]]))),
-            format!("{method} [0][1][0].page.name: Invalid input: expected string, received number")
+            format!("{method} answer[0][1][0].page.name: expected a string, got a number")
         );
         assert_eq!(
             problem(linked_references(json!([[null, [{"id": 1, "uuid": "u", "refs": {}}]]]))),
-            format!("{method} [0][1][0].refs: Invalid input: expected array, received object")
+            format!("{method} answer[0][1][0].refs: expected a list, got an object")
         );
-        assert_eq!(
-            problem(linked_references(json!([[null, [], 3]]))),
-            format!("{method} [0]: Too big: expected array to have <2 items")
-        );
+        assert_eq!(problem(linked_references(json!([[null, [], 3]]))), format!("{method} answer[0]: the row has more cells than this server reads"));
+        assert_eq!(problem(linked_references(json!([[null, {}]]))), format!("{method} answer[0][1]: expected a list, got an object"));
+    }
+
+    #[test]
+    fn a_source_page_field_nothing_reads_may_hold_anything() {
+        let answer = json!([[{"id": 1, "uuid": 5, "namespace": [], "createdAt": "x", "created-at": null, "file": 3, "alias": "x"}, []]]);
+        assert_eq!(linked_references(answer).unwrap().unwrap().len(), 1);
     }
 
     #[test]
@@ -177,7 +135,7 @@ mod tests {
         assert_eq!(rows[1].as_ref().unwrap()["uuid"], "u");
         assert_eq!(
             problem(block_rows(json!([[{"id": 1}]]))),
-            format!("{DATALOG_METHOD} [0][0].uuid: Invalid input: expected string, received undefined")
+            format!("{DATALOG_METHOD} answer[0][0].uuid: required, but missing")
         );
     }
 }
