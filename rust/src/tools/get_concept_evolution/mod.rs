@@ -378,9 +378,8 @@ pub async fn get_concept_evolution(client: &LogseqClient, concept_name: &str, op
         let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
         for &place in &shown {
             let block = &filtered[place];
-            // `if (!date) continue`
-            let Some(date) = day_of(block) else { continue };
-            let key = period_key(period, date);
+            // `if (!date) continue`; a date with no week is no more in a period than an undated block
+            let Some(key) = day_of(block).and_then(|date| period_key(period, date)) else { continue };
             match groups.iter_mut().find(|(seen, _)| *seen == key) {
                 Some((_, blocks)) => blocks.push(block.clone()),
                 None => groups.push((key, vec![block.clone()])),
