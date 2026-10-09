@@ -3,22 +3,40 @@ import { readFileSync } from 'fs';
 
 const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf-8'));
 
-describe('package.json publish fields (#46)', () => {
-  it('exposes a bin for npx that points at the built entry', () => {
-    expect(pkg.bin['logseq-mcp-server']).toBe('dist/index.js');
-    expect(pkg.main).toBe('dist/index.js');
+// package.json is repository tooling, not a package (ADR-0035, #419): the server is the Rust binary, released on GitHub
+// Releases and started by scripts/logseq-mcp-server.sh. The npm name `logseq-mcp-server` belongs to another
+// maintainer, so nothing here may publish under it. The file keeps its name because ADR-0022 (engines.node) and
+// ADR-0023 (licence) cite it in their enforcement lines.
+describe('package.json is repository tooling (ADR-0035)', () => {
+  it('is private, so an npm publish by accident fails', () => {
+    expect(pkg.private).toBe(true);
   });
 
-  it('builds before publishing and ships the built output', () => {
-    expect(pkg.scripts.prepublishOnly).toBe('npm run build');
-    expect(pkg.files).toEqual(expect.arrayContaining(['dist', 'README.md', 'LICENSE']));
+  it('has none of the retired TypeScript server\'s packaging: no bin, main, files, build or prepublishOnly', () => {
+    for (const field of ['bin', 'main', 'files', 'exports', 'types']) {
+      expect(pkg, `package.json has "${field}"`).not.toHaveProperty(field);
+    }
+    for (const script of ['build', 'prepublish', 'prepublishOnly', 'prepack', 'prepare', 'publish', 'postpublish']) {
+      expect(pkg.scripts, `package.json has the script "${script}"`).not.toHaveProperty(script);
+    }
   });
 
+  it('names no dist path anywhere (the TypeScript build output is gone)', () => {
+    expect(JSON.stringify(pkg)).not.toMatch(/\bdist\b/);
+  });
+
+  it('the lockfile root records no bin either', () => {
+    const lock = JSON.parse(readFileSync(new URL('../../package-lock.json', import.meta.url), 'utf-8'));
+    expect(lock.packages['']).not.toHaveProperty('bin');
+  });
+});
+
+describe('package.json carries the repository metadata', () => {
   it('declares a Node floor that matches the dev toolchain (vite 7) and has global fetch and AbortSignal.timeout', () => {
     expect(pkg.engines.node).toBe('>=22.12.0');
   });
 
-  it('carries the metadata npm shows', () => {
+  it('is MIT, with the LICENSE file to match, and names the repository', () => {
     expect(pkg.license).toBe('MIT');
     const license = readFileSync(new URL('../../LICENSE', import.meta.url), 'utf-8');
     expect(license.split('\n')[0]).toBe('MIT License');

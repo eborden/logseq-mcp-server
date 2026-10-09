@@ -28,7 +28,7 @@ Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 
 ## Install
 
-The server is a Rust binary. There is no npm package or release binary yet: how it ships is open (#350, #355). Until then, build it from a clone. The name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`; it would run someone else's package. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+The server is a Rust binary. It ships as native binaries on GitHub Releases (ADR-0035), which the Claude Code plugin downloads for you, and there is no npm package: the name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`; it would run someone else's package. The first release is not published yet, so for now build it from a clone. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
@@ -44,7 +44,7 @@ cargo build --release --locked        # rust/target/release/logseq-mcp-server
 claude mcp add logseq -- /absolute/path/to/logseq-mcp-server/rust/target/release/logseq-mcp-server
 ```
 
-Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills (stale for now, see there).
+Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills and downloads the release binary (once a release is published).
 
 ### Claude Desktop
 
@@ -62,8 +62,6 @@ Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Su
 
 ## Install as a Claude Code plugin
 
-> **Stale until #350 and #355.** This section and [Publishing](#publishing) describe how the TypeScript server was packaged and published. The plugin manifest still starts `node dist/index.js`, `dist/` no longer builds (`npm run build` stops with a pointer to the Rust build), and nothing here has been updated for the Rust binary. Use the clone install above for now.
-
 The repo is both a Claude Code plugin and its own marketplace. The plugin bundles the MCP server and the `logseq-skills` workflows.
 
 First do steps 1-3 of Quick Start (HTTP server on, token, `~/.logseq-mcp/config.json`). The plugin carries no credentials.
@@ -73,14 +71,30 @@ claude plugin marketplace add eborden/logseq-mcp-server
 claude plugin install logseq@logseq-mcp-server
 ```
 
-The plugin starts the server with `node dist/index.js`, and `dist/` is not committed. No package of this project is published to npm (the npm name `logseq-mcp-server` is another project's, #417), so a marketplace install has no built server. Build from a clone and load the plugin from there instead:
+The plugin starts `scripts/logseq-mcp-server.sh`, a small POSIX `sh` launcher (ADR-0035). On the first start it downloads the release binary for your platform and for the plugin's own version from [GitHub Releases](https://github.com/eborden/logseq-mcp-server/releases), checks each download against the release's `SHA256SUMS` (it never runs a freshly downloaded file that doesn't match), caches it and replaces itself with the server. Later starts run the cached binary as it sits, without checking it again. Everything it says goes to stderr, since stdout is the MCP channel.
+
+- **Platforms:** macOS (Apple silicon and Intel) and Linux x86_64. Windows and Linux arm64 have no release binary yet; build from a clone and use `LOGSEQ_MCP_BINARY` below.
+- **Needs:** `sh`, `curl`, and `shasum` or `sha256sum`. No Node. The first start needs the network (a few MB from `github.com`); a proxy is read from `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`.
+- **Cache:** `~/Library/Caches/logseq-mcp-server/<version>/` on macOS, `~/.cache/logseq-mcp-server/<version>/` elsewhere (`XDG_CACHE_HOME` replaces the parent, and must be an absolute path). It holds the binary, `SHA256SUMS`, `LICENSE` and `THIRD-PARTY-NOTICES.txt`, created readable by you only (0700 and 0600). Because a cached binary is trusted as it sits and is not re-checked, the launcher refuses a cache directory that someone else owns or that group or others can write to. The check follows symlinks and tests the effective user, so it fails closed on purpose in two cases: a `sudo` or root run that keeps your `HOME`, and an NFS mount that maps owners differently. Both refusals name `XDG_CACHE_HOME`; point it at a directory of your own. A start that was killed hard can leave a `.partial.*` directory in it; the next download removes the ones over a day old, and nothing in them is ever run.
+- **Trust limits:** `SHA256SUMS` comes from the same release as the binary, so the check catches a corrupt or truncated download but not a compromised release or account (ADR-0035 Decision 4). The launcher doesn't verify a signature or an attestation; to tie a binary to the workflow run and commit that built it, run `gh attestation verify <binary> --repo eborden/logseq-mcp-server` by hand.
+- **Not released yet:** the first release is cut by the maintainer by hand, so until it is published the launcher stops with a message naming the file it couldn't find. Use the clone build below meanwhile.
+
+Two environment variables, set where the plugin's server starts, change where the binary comes from:
+
+| Variable | Effect |
+|---|---|
+| `LOGSEQ_MCP_BINARY` | An absolute path to a server binary to run as it is: no download, no checks. For offline use, or a binary you built (`cd rust && cargo build --release --locked`). |
+| `LOGSEQ_MCP_RELEASE_BASE_URL` | Where the release files are fetched from, in place of `https://github.com/eborden/logseq-mcp-server/releases/download/v<version>`. An `https://`, `http://` or `file://` base. The checksum checks still run, but over plain `http://` the checksums come from the same unprotected place as the binary, so they prove nothing against an attacker on the network (the launcher warns on stderr). |
+
+To use a clone's plugin with your own build, with no download:
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
-cd logseq-mcp-server
-npm ci && npm run build
-claude --plugin-dir .
+cd logseq-mcp-server/rust && cargo build --release --locked && cd ..
+LOGSEQ_MCP_BINARY="$PWD/rust/target/release/logseq-mcp-server" claude --plugin-dir .
 ```
+
+A binary you download by hand through a browser is quarantined by macOS, and Gatekeeper refuses it until you run `xattr -d com.apple.quarantine <file>`. The launcher's `curl` download isn't affected.
 
 Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The skills refer to them by bare name, so either form works.
 
@@ -196,18 +210,21 @@ Use: query_by_date_range(20251114, 20251120)
 Gets: All journal entries in date range
 ```
 
-## Publishing
+## Releasing
 
-> **Stale until #350 and #355**, as above: this is the npm flow of the TypeScript server, which is retired. How the Rust binary is published needs its own decision. The steps below also assume the npm name `logseq-mcp-server`, which another project owns (#417), so they cannot publish this project as written.
+For the maintainer. Nothing releases or publishes automatically, and nothing publishes to npm (ADR-0035). A release is the native binaries and `SHA256SUMS` on a GitHub Release, built by a manual workflow (the release workflow, #418) that runs only when started by hand from the Actions tab, only on `main`, and creates a draft release. You publish the draft yourself, which creates the tag.
 
-For the maintainer. Nothing publishes automatically: `.github/workflows/publish.yml` runs only when started by hand from the Actions tab, and only on `main`.
+The order, from ADR-0035 (Decision 12):
 
-1. Add an npm access token that can publish `logseq-mcp-server` as the repository secret `NPM_TOKEN` (Settings, Secrets and variables, Actions).
-2. Set the version in `package.json` and `.claude-plugin/plugin.json` (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it.
-3. Run the workflow with **dry_run** ticked first. It type-checks, runs the unit tests, builds, lists the tarball and runs `npm publish --dry-run`.
-4. Run it again with **dry_run** cleared. It runs `npm publish --provenance --access public`, which signs a provenance statement linking the package to the commit.
+1. Bump the version in `rust/Cargo.toml`, `package.json` and both `.claude-plugin/` manifests together (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it.
+2. Run the release workflow with `dry_run` on, read the artifacts, then with it off to create the draft.
+3. **Pre-publish check.** Draft assets can't be downloaded anonymously, so download them with `gh release download v<version> --dir <empty dir>` and run the launcher against that directory on a clean macOS and a clean Linux machine, then call one tool:
 
-To check a build locally first, `npm pack --dry-run` lists the tarball, and `npm pack` followed by `npm install ./logseq-mcp-server-*.tgz` in a scratch directory installs it.
+   ```bash
+   LOGSEQ_MCP_RELEASE_BASE_URL="file://<empty dir>" sh scripts/logseq-mcp-server.sh
+   ```
+
+4. Publish the draft. Then, on a clean machine with no override, start the plugin once and call one tool. A bad release is fixed by a new patch version, not an edit.
 
 ## Development
 

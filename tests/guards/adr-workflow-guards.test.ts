@@ -272,49 +272,6 @@ describe('workflow YAML reader', () => {
   });
 });
 
-// ADR-0017 (manual-npm-publish): publishing runs only when the maintainer starts
-// the workflow by hand, from main, and a run defaults to a dry run.
-describe('ADR-0017: publish.yml is manual, main-only and dry-run by default', () => {
-  const publish = parseWorkflowYaml(readWorkflow('publish.yml'));
-
-  it('triggers on workflow_dispatch and nothing else', () => {
-    expect(triggers(publish)).toEqual(['workflow_dispatch']);
-  });
-
-  it('has a boolean dry_run input that defaults to true', () => {
-    const dryRun = at(publish, 'on', 'workflow_dispatch', 'inputs', 'dry_run');
-    expect(at(dryRun, 'type').value).toBe('boolean');
-    expect(at(dryRun, 'default').value).toBe('true');
-  });
-
-  it('the step that publishes reads dry_run and runs npm publish --dry-run when it is set', () => {
-    const steps = [...at(publish, 'jobs').map.values()].flatMap(job => job.map.get('steps')?.items ?? []);
-    const publishing = steps.filter(step => /\bnpm\s+publish\b/.test(step.map.get('run')?.value ?? ''));
-    expect(publishing).toHaveLength(1);
-    const [step] = publishing;
-    expect(at(step, 'env', 'DRY_RUN').value).toMatch(/^\$\{\{\s*inputs\.dry_run\s*\}\}$/);
-    // The first npm publish in the script is the dry run, inside the DRY_RUN = true branch.
-    const script = at(step, 'run').value.split('\n').map(line => line.trim());
-    const check = script.findIndex(line => /^if \[ "\$DRY_RUN" = "true" \]; then$/.test(line));
-    const firstPublish = script.findIndex(line => /\bnpm\s+publish\b/.test(line));
-    expect(check, 'the publish script must branch on $DRY_RUN').toBeGreaterThanOrEqual(0);
-    expect(firstPublish).toBe(check + 1);
-    expect(script[firstPublish]).toMatch(/\s--dry-run(?:\s|$)/);
-  });
-
-  it('gates every job to refs/heads/main', () => {
-    const jobs = [...at(publish, 'jobs').map.entries()];
-    expect(jobs.length).toBeGreaterThan(0);
-    for (const [name, job] of jobs) {
-      // Extra conditions may be added with &&; an || would open the gate.
-      const condition = jobCondition(job);
-      expect(condition ?? '(no if: condition)', `job "${name}" must be gated to main`).toMatch(
-        /^github\.ref == 'refs\/heads\/main'(?:\s*&&(?!.*\|\|).*)?$/,
-      );
-    }
-  });
-});
-
 /** Raw-text lines that publish to a registry or use npm's publish token. */
 function publishLines(name: string, text: string): string[] {
   return text
@@ -324,10 +281,11 @@ function publishLines(name: string, text: string): string[] {
     .map(({ n }) => `${name}:${n}`);
 }
 
-// The guards above read only publish.yml, so an `npm publish` step added to another
-// workflow (ci.yml runs on every push to main) would reverse ADR-0017 with all of
-// them green. This scans the raw text, because the YAML reader skips `run: |` bodies.
-describe('ADR-0017: no other workflow publishes', () => {
+// ADR-0035 (which supersedes ADR-0017) keeps ADR-0017's npm rule: nothing publishes to npm. There is no npm channel in
+// the first release, publish.yml is gone (#419), and package.json is private. A workflow that ran `npm publish`
+// (ci.yml runs on every push to main) would reverse that with every other guard green, so this scans every
+// workflow's raw text, because the YAML reader skips `run: |` bodies.
+describe('ADR-0035: no workflow publishes to npm', () => {
   const WORKFLOWS_DIR = new URL('../../.github/workflows/', import.meta.url);
 
   it('flags publish commands and the npm token in raw workflow text', () => {
@@ -336,11 +294,15 @@ describe('ADR-0017: no other workflow publishes', () => {
     ).toEqual(['x.yml:2', 'x.yml:3', 'x.yml:4', 'x.yml:5']);
   });
 
-  it('no workflow besides publish.yml runs npm publish or reads NODE_AUTH_TOKEN or NPM_TOKEN', () => {
-    const others = readdirSync(WORKFLOWS_DIR).filter(name => /\.ya?ml$/.test(name) && name !== 'publish.yml');
-    expect(others.length).toBeGreaterThan(0);
-    const hits = others.flatMap(name => publishLines(name, readFileSync(new URL(name, WORKFLOWS_DIR), 'utf-8')));
-    expect(hits, 'publishing belongs only in publish.yml (ADR-0017)').toEqual([]);
+  it('no workflow runs npm publish or reads NODE_AUTH_TOKEN or NPM_TOKEN', () => {
+    const workflows = readdirSync(WORKFLOWS_DIR).filter(name => /\.ya?ml$/.test(name));
+    expect(workflows).toContain('ci.yml');
+    const hits = workflows.flatMap(name => publishLines(name, readFileSync(new URL(name, WORKFLOWS_DIR), 'utf-8')));
+    expect(hits, 'nothing publishes to npm (ADR-0035, Decision 8)').toEqual([]);
+  });
+
+  it('there is no publish.yml: it built the retired TypeScript server and would publish under a name this repository does not own', () => {
+    expect(readdirSync(WORKFLOWS_DIR)).not.toContain('publish.yml');
   });
 });
 
