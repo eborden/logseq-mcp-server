@@ -406,16 +406,208 @@ async fn a_failed_connection_is_the_error_even_when_the_other_topic_is_not_found
     assert!(error.to_string().starts_with("Cannot connect to LogSeq at"), "{error}");
 }
 
-#[tokio::test]
-async fn a_null_answer_is_read_as_no_blocks_as_the_typescript_server_does() {
+const RETRY: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+
+/// A search whose relationship query answers `answer`, and everything else as a real empty answer.
+async fn search_with_query_answer(relationship_type: RelationshipType, answer: Value) -> Value {
     let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
     let logseq = mock_logseq(move |request| match resolver_name(request) {
         Some(name) => resolve(&name, &pages),
-        None => Value::Null,
+        None => answer.clone(),
+    })
+    .await;
+    search_by_relationship(&client(&logseq), &args("Atlas", "Bob", relationship_type)).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_relationship_query_is_a_warning_not_no_matches() {
+    let cases = [
+        (RelationshipType::References, "the blocks of \"Atlas\" that reference \"Bob\""),
+        (RelationshipType::InPagesLinkingTo, "the blocks that reference \"Atlas\" in pages linking to \"Bob\""),
+        (RelationshipType::ReferencedBy, "the blocks that reference \"Atlas\" in pages referenced by \"Bob\""),
+    ];
+    for (relationship_type, sought) in cases {
+        let result = search_with_query_answer(relationship_type, Value::Null).await;
+
+        assert_eq!(result["results"], json!([]), "{relationship_type:?}");
+        assert_eq!(result["hasMore"], json!(false));
+        assert_eq!(
+            result["warnings"],
+            json!([{
+                "code": "relationship_unavailable",
+                "message": format!(
+                    "LogSeq returned no answer when looking up {sought} (possibly no graph open or a re-index in progress), \
+                     so the empty results may not mean nothing matches. {RETRY}"
+                ),
+            }]),
+            "{relationship_type:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_real_empty_answer_to_the_relationship_query_has_no_warning() {
+    for relationship_type in [RelationshipType::References, RelationshipType::InPagesLinkingTo, RelationshipType::ReferencedBy] {
+        let result = search_with_query_answer(relationship_type, json!([])).await;
+
+        assert_eq!((&result["results"], &result["warnings"]), (&json!([]), &json!([])), "{relationship_type:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_null_hop_stops_the_walk_with_no_more_calls_and_says_not_connected_may_be_wrong() {
+    let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
+    let logseq = mock_logseq(move |request| {
+        let text = text_of(request);
+        if let Some(name) = resolver_name(request) {
+            resolve(&name, &pages)
+        } else if text.contains("[(ground [10]) [?p ...]]") {
+            json!([[30]])
+        } else {
+            // hop 2 and anything after it
+            Value::Null
+        }
     })
     .await;
 
-    let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::References)).await.unwrap();
+    let mut args = args("Atlas", "Bob", RelationshipType::ConnectedWithin);
+    args.max_distance = 5;
+    let result = search_by_relationship(&client(&logseq), &args).await.unwrap();
 
+    // 2 resolvers, hop 1, hop 2 (null): no hop 3 and no trees, though 5 hops were allowed
+    assert_eq!(asked(&logseq).len(), 4);
     assert_eq!(result["results"], json!([]));
+    assert_eq!(result["hasMore"], json!(false));
+    assert_eq!(
+        result["warnings"],
+        json!([{
+            "code": "hop_unavailable",
+            "message": format!(
+                "LogSeq returned no answer when looking up the pages reached at hop 2 (possibly no graph open or a \
+                 re-index in progress), so the walk stopped there and \"not connected\" may be wrong. \
+                 This does not mean the topics are not connected. {RETRY}"
+            ),
+        }])
+    );
+}
+
+#[tokio::test]
+async fn a_null_page_tree_is_a_warning_naming_the_topic_and_the_connection_is_still_reported() {
+    // (which trees answer null, the warned topics, the blocks that remain)
+    let cases: [(&[&str], &[&str], &[i64]); 3] = [(&["Atlas"], &["A"], &[201]), (&["Bob"], &["B"], &[101]), (&["Atlas", "Bob"], &["A", "B"], &[])];
+    for (null_trees, warned, kept) in cases {
+        let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
+        let null_trees: Vec<String> = null_trees.iter().map(|name| (*name).to_owned()).collect();
+        let logseq = mock_logseq(move |request| {
+            let text = text_of(request);
+            if let Some(name) = resolver_name(request) {
+                resolve(&name, &pages)
+            } else if text.contains("[(ground [10]) [?p ...]]") {
+                json!([[20]])
+            } else if text == "logseq.Editor.getPageBlocksTree" {
+                match request["args"][0].as_str().unwrap() {
+                    name if null_trees.iter().any(|null| null == name) => Value::Null,
+                    "Atlas" => json!([editor_block(101)]),
+                    _ => json!([editor_block(201)]),
+                }
+            } else {
+                panic!("unexpected request {text}")
+            }
+        })
+        .await;
+
+        let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::ConnectedWithin)).await.unwrap();
+
+        // no extra call: 2 resolvers, hop 1, 2 trees
+        assert_eq!(asked(&logseq).len(), 5);
+        let kept_ids: Vec<i64> = result["results"].as_array().unwrap().iter().map(|block| block["id"].as_i64().unwrap()).collect();
+        assert_eq!(kept_ids, kept, "{warned:?}");
+        assert_eq!(result["hasMore"], json!(false));
+        let warnings = result["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), warned.len(), "{warned:?}");
+        for (warning, which) in warnings.iter().zip(warned) {
+            let topic = if *which == "A" { "Atlas" } else { "Bob" };
+            assert_eq!(warning["code"], "page_blocks_unavailable");
+            assert_eq!(
+                warning["message"],
+                format!(
+                    "LogSeq returned no answer when looking up the blocks of topic {which} (\"{topic}\") (possibly no graph open or a \
+                     re-index in progress), so its blocks are missing from the results although the topics are connected. \
+                     This does not mean the page has no blocks. {RETRY}"
+                )
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_real_empty_page_tree_has_no_warning() {
+    let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
+    let logseq = mock_logseq(move |request| {
+        let text = text_of(request);
+        if let Some(name) = resolver_name(request) {
+            resolve(&name, &pages)
+        } else if text.contains("[(ground [10]) [?p ...]]") {
+            json!([[20]])
+        } else {
+            json!([])
+        }
+    })
+    .await;
+
+    let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::ConnectedWithin)).await.unwrap();
+
+    assert_eq!((&result["results"], &result["warnings"]), (&json!([]), &json!([])));
+}
+
+#[tokio::test]
+async fn a_null_hop_after_a_cut_hop_keeps_the_frontier_warning_and_adds_its_own() {
+    let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
+    let logseq = mock_logseq(move |request| {
+        let text = text_of(request);
+        if let Some(name) = resolver_name(request) {
+            resolve(&name, &pages)
+        } else if text.contains("[(ground [10]) [?p ...]]") {
+            Value::Array((1000..1600).rev().map(|id| json!([id])).collect())
+        } else {
+            Value::Null
+        }
+    })
+    .await;
+
+    let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::ConnectedWithin)).await.unwrap();
+
+    let codes: Vec<&str> = result["warnings"].as_array().unwrap().iter().map(|warning| warning["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["frontier_truncated", "hop_unavailable"]);
+    assert_eq!(result["hasMore"], json!(false));
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_aliased_relationship_query_is_still_a_warning_not_no_matches() {
+    for relationship_type in [RelationshipType::References, RelationshipType::InPagesLinkingTo, RelationshipType::ReferencedBy] {
+        let pages = vec![page(10, "Atlas", &[11]), page(20, "Bob", &[])];
+        let logseq = mock_logseq(move |request| {
+            let text = text_of(request);
+            if let Some(name) = resolver_name(request) {
+                resolve(&name, &pages)
+            } else if text.starts_with("[:find ?start") {
+                json!([[10, {"id": 10, "name": "atlas", "original-name": "Atlas"}], [10, {"id": 11, "name": "project atlas", "original-name": "Project Atlas"}]])
+            } else {
+                // the query over the ids of the groups
+                Value::Null
+            }
+        })
+        .await;
+
+        let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", relationship_type)).await.unwrap();
+
+        // two resolvers, one alias lookup, the grouped query: the aliased path was taken
+        assert_eq!(asked(&logseq).len(), 4, "{relationship_type:?}");
+        assert_eq!(result["resolvedAliases"]["topicA"], json!(["Atlas", "Project Atlas"]), "{relationship_type:?}");
+        assert_eq!(result["results"], json!([]), "{relationship_type:?}");
+        assert_eq!(result["hasMore"], json!(false));
+        let warnings = result["warnings"].as_array().unwrap();
+        assert_eq!(warnings.len(), 1, "{relationship_type:?}");
+        assert_eq!(warnings[0]["code"], "relationship_unavailable", "{relationship_type:?}");
+    }
 }
