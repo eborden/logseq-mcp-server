@@ -180,6 +180,27 @@ describe('check-terseness.sh source line (#185)', () => {
     expect(r.out).toContain("no 'summary-source::' line");
   });
 
+  it('counts day links in any journal title format, not only the default one', () => {
+    // :journal/page-title-format is the graph's choice (#465), so the tags line is not always `MMM do, yyyy`.
+    const formats = [
+      'tags:: [[Weekly Summary]], [[2025-01-06]], [[2025-01-07]], [[2025-01-08]], [[2025-01-09]], [[2025-01-10]]',
+      'tags:: [[Weekly Summary]], [[Mon, 01/06/2025]], [[Tue, 01/07/2025]], [[Wed, 01/08/2025]], [[Thu, 01/09/2025]], [[Fri, 01/10/2025]]',
+      'tags:: [[Weekly Summary]], [[06-01-2025]], [[07-01-2025]], [[08-01-2025]], [[09-01-2025]], [[10-01-2025]]',
+      'tags:: [[Weekly Summary]], [[Monday, January 6th, 2025]], [[Tuesday, January 7th, 2025]], [[Wednesday, January 8th, 2025]], [[Thursday, January 9th, 2025]], [[Friday, January 10th, 2025]]',
+    ];
+    for (const tags of formats) {
+      const r = run('Weekly 2025-01-06.md', page(tags, WEEKLY_SOURCE));
+      expect(r.code).toBe(0);
+      expect(r.out).not.toContain('the tags line links');
+    }
+  });
+
+  it('still warns on a numeric-format tags line that links fewer days than the source line says', () => {
+    const r = run('Weekly 2025-01-06.md', page('tags:: [[Weekly Summary]], [[2025-01-06]], [[2025-01-07]]', WEEKLY_SOURCE));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('the tags line links 2 journal days but the source line says 5');
+  });
+
   it('warns, without failing, when the day links and the days disagree', () => {
     const r = run('Weekly 2025-01-06.md', page('tags:: [[Weekly Summary]], [[Jan 6th, 2025]]', WEEKLY_SOURCE));
     expect(r.code).toBe(0);
