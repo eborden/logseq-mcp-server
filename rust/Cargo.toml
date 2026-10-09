@@ -32,14 +32,6 @@ icu_normalizer = { version = "2.2", default-features = false, features = ["compi
 # General categories: letter and number for `query_by_date_range`'s whole-word test (`\p{L}`, `\p{N}`),
 # and mark for the fold above. Already in the tree, under idna_adapter, with the same features and version.
 icu_properties = { version = "2.2", default-features = false, features = ["compiled_data"] }
-# `localeCompare`'s order across scripts, which only the full collation tables give (Latin before Greek
-# before Cyrillic, `ß` as `ss`, ...). Same ICU4X release line as icu_properties (unicode-org/icu4x, Unicode-3.0
-# license, actively released: 2.3.1 as of Oct 2026) and built on the icu_properties and
-# icu_provider already locked, so the new builds are icu_collator and its data crate. Its data ships in the
-# binary (the PR records the size). The data is CLDR 48 root, as in Node 24's ICU 78, except for Han: ICU4X
-# orders ideographs by block (code point) and Node by radical and stroke. The maintainer accepted that
-# difference (#299, `js::locale_compare`).
-icu_collator = { version = "2.3", default-features = false, features = ["compiled_data"] }
 # The closest page names for a missing page (`src/fuzzy.rs`, ADR-0032): a maintained fuzzy matcher
 # (helix-editor/nucleo, MPL-2.0, accepted next to this repo's MIT licence by the maintainer on 2026-10-08)
 # in place of a port of fuzzysort. 0.3.1 doesn't compile with these two features off (`CaseMatching` and

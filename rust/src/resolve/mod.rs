@@ -21,6 +21,7 @@ use crate::edn::{JournalDay, PageName, Query};
 use crate::errors::{AmbiguousPage, Candidate, MAX_CANDIDATES, MatchedBy, PageNotFound, ToolError};
 use crate::fuzzy;
 use crate::js;
+use crate::order;
 pub use self::link_targets::{LinkTargetResolutions, link_key, resolve_link_targets};
 pub use self::wire::PulledPage;
 use self::wire::ResolverRow;
@@ -76,8 +77,6 @@ enum PageKey {
     Name(String),
 }
 
-// PARITY(#299): sorts by `localeCompare`, whose order depends on the host's locale (suspected TS bug; see
-// `js::locale_compare`) — drop if Rust becomes the only server.
 /// Pages from rows, one per entity, ordered by name so output never depends on row order.
 fn distinct_pages(pages: Vec<&PulledPage>) -> Vec<&PulledPage> {
     let mut seen = HashSet::new();
@@ -85,7 +84,7 @@ fn distinct_pages(pages: Vec<&PulledPage>) -> Vec<&PulledPage> {
         .into_iter()
         .filter(|page| seen.insert(page.entity_id().map_or_else(|| PageKey::Name(page.lower_name()), PageKey::Id)))
         .collect();
-    out.sort_by(|a, b| js::locale_compare(&a.lower_name(), &b.lower_name()));
+    out.sort_by(|a, b| order::by_name(&a.lower_name(), &b.lower_name()));
     out
 }
 

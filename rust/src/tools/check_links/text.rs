@@ -245,8 +245,7 @@ pub fn check_refs_preserved(before: &str, after: &str) -> RefsPreservedCheck {
             removed.push(RemovedRef { term: spelling[&key].clone(), before: count, after: left });
         }
     }
-    // PARITY(#299): orders by UTF-16 code unit, as JavaScript's `<` does — drop if Rust becomes the only server.
-    removed.sort_by(|x, y| crate::resolve::alias::compare_code_units(&x.term, &y.term));
+    removed.sort_by(|x, y| x.term.cmp(&y.term));
     RefsPreservedCheck { ok: removed.is_empty(), removed }
 }
 
@@ -341,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn a_removed_ref_is_reported_by_its_first_spelling_and_in_code_unit_order() {
+    fn a_removed_ref_is_reported_by_its_first_spelling_and_in_code_point_order() {
         let check = check_refs_preserved("[[Zed]] [[bob]] [[Bob]] [[Alice]]", "Zed [[BOB]] [[Alice]]");
         assert!(!check.ok);
         assert_eq!(
@@ -353,6 +352,13 @@ mod tests {
         );
         assert!(check_refs_preserved("[[Alice]]", "[[alice]] and [[Alice]]").ok);
         assert!(check_refs_preserved("plain", "[[plain]]").ok);
+    }
+
+    #[test]
+    fn removed_refs_are_in_code_point_order_so_an_astral_character_follows_a_fullwidth_one() {
+        // UTF-16 units would put U+1F600 (D83D DE00) before U+FF41; its code point is after
+        let check = check_refs_preserved("[[\u{1F600}]] [[\u{FF41}]]", "none");
+        assert_eq!(check.removed.iter().map(|r| r.term.as_str()).collect::<Vec<_>>(), ["\u{FF41}", "\u{1F600}"]);
     }
 
     #[test]

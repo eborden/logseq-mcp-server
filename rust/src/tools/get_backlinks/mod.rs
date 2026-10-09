@@ -15,6 +15,7 @@
 mod tips;
 mod wire;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
@@ -28,8 +29,9 @@ use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, ToolError};
 use crate::js;
 use crate::meta::{ResultMeta, ResultWarning};
+use crate::order;
 use crate::params::{ParamAliases, resolve_param_aliases};
-use crate::resolve::alias::{AliasSet, alias_set_warnings, compare_code_units, linked_references_of_pages, resolve_alias_set};
+use crate::resolve::alias::{AliasSet, alias_set_warnings, linked_references_of_pages, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning, large_result_note};
@@ -201,7 +203,7 @@ pub fn rank_backlinks(results: Vec<Backlink>) -> Vec<Backlink> {
         b.2.blocks
             .len()
             .cmp(&a.2.blocks.len())
-            .then_with(|| compare_code_units(&a.0, &b.0))
+            .then_with(|| order::by_name(&a.0, &b.0))
             .then_with(|| a.1.cmp(&b.1))
     });
     keyed.into_iter().map(|(_, _, backlink)| backlink).collect()
@@ -397,15 +399,16 @@ pub async fn fetch_backlinks(client: &LogseqClient, resolved_name: &str, alias_s
         return Ok(None);
     };
     let mut groups = group_by_source_page(rows);
-    // PARITY(#299): orders names with `localeCompare`, as `js::locale_compare` orders them (ICU root collation) — drop if Rust
-    // becomes the only server.
-    // `String(a.page.name).localeCompare(String(b.page.name)) || a.page.id - b.page.id`
-    groups.sort_by(|a, b| {
-        let name = |backlink: &Backlink| backlink.page.get("name").map_or_else(|| "undefined".to_owned(), js_string);
-        let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
-        js::locale_compare(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
-    });
+    groups.sort_by(by_page_name_then_id);
     Ok(Some(groups))
+}
+
+/// The order of the source pages of the aliased path: by name ([`order::by_name`]), then page id. A page
+/// without a name sorts first, as the empty name.
+fn by_page_name_then_id(a: &Backlink, b: &Backlink) -> Ordering {
+    let name = |backlink: &Backlink| backlink.page.get("name").map(js_string).unwrap_or_default();
+    let id = |backlink: &Backlink| backlink.page.get("id").and_then(crate::wire::whole_number).unwrap_or_default();
+    order::by_name(&name(a), &name(b)).then_with(|| id(a).cmp(&id(b)))
 }
 
 /// `getBacklinksWithMeta`: every page and block that links to `page_name` under any of its names.
@@ -483,6 +486,15 @@ mod tests {
             page: json!({"id": id, "name": name, "originalName": name.to_uppercase()}),
             blocks: (0..blocks as i64).map(|i| block(id * 1000 + i)).collect(),
         }
+    }
+
+    #[test]
+    fn the_aliased_groups_sort_by_name_then_id_and_a_nameless_page_sorts_first() {
+        let nameless = Backlink { page: json!({"id": 9}), blocks: vec![] };
+        let mut groups = vec![source(3, "z", 1), source(2, "a", 1), nameless, source(1, "a", 1)];
+        groups.sort_by(by_page_name_then_id);
+        let ids: Vec<i64> = groups.iter().map(|g| g.page["id"].as_i64().unwrap()).collect();
+        assert_eq!(ids, [9, 1, 2, 3]);
     }
 
     fn names(results: &[Backlink]) -> Vec<String> {

@@ -318,7 +318,7 @@ async fn a_connection_failure_propagates_instead_of_returning_unresolved_blocks(
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api_url = format!("http://{}", listener.local_addr().unwrap());
         drop(listener);
-        LogseqClient::new(&logseq_mcp_server::config::Config { api_url, auth_token: "t".into(), timeout_ms: Some(2000.0), tips: None })
+        LogseqClient::new(&logseq_mcp_server::config::Config { api_url, auth_token: "t".into(), timeout_ms: Some(2000), tips: None })
     };
     let error = resolve_block_refs(&unreachable, &[root(&format!("(({}))", uuid(2)))]).await.unwrap_err();
     assert!(matches!(error, ToolError::Logseq(_)), "{error}");
