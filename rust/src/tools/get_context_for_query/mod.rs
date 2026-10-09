@@ -510,8 +510,10 @@ mod tests {
         // the comma after a tag is part of it: a tag runs to white space or `#` (`refs::tags`)
         assert_eq!(extract_topics("what about [[Atlas]] and #beta, [[Bob Smith]] #beta [[Atlas]] #gamma#delta"), ["Atlas", "Bob Smith", "beta,", "beta", "gamma", "delta"]);
         // the grammar of `refs::page_refs`: a name holds no bracket or newline, so `[[[c]]` is the topic `c`,
-        // a ref over two lines is none, and a nested ref gives its inner name only
-        assert_eq!(extract_topics("[[[c]] [[x\ny]] [[a [[b]] d]]"), ["c", "b"]);
+        // a ref over two lines is none, and a ref that holds a ref is a topic beside the one inside it
+        assert_eq!(extract_topics("[[[c]] [[x\ny]] [[a [[b]] d]]"), ["c", "a [[b]] d", "b"]);
+        // a wrapper with no text of its own is only the ref inside it
+        assert_eq!(extract_topics("[[[[b]]]] [[ [[b]] ]]"), ["b"]);
         assert_eq!(extract_topics("nothing here"), Vec::<String>::new());
     }
 

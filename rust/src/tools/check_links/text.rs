@@ -76,14 +76,23 @@ pub struct RefsPreservedCheck {
     pub removed: Vec<RemovedRef>,
 }
 
-/// `[[term]]` to `term`, one pass. The refs are those of [`refs`].
+/// `[[term]]` to `term`, one pass. The refs are those of [`refs`], so a ref that holds another loses
+/// its brackets too: `[[a [[b]] c]]` is `a b c`. A wrapper with no text of its own is no ref, and
+/// keeps its brackets: `[[[[b]]]]` is `[[b]]`.
 pub fn strip_brackets(text: &str) -> String {
+    // The `[[` and `]]` of each ref. Refs can overlap, so the cuts are sorted before they are made;
+    // none overlaps another, since a ref inside another starts after its `[[`.
+    let mut cuts: Vec<usize> = Vec::new();
+    for found in refs::page_refs(text) {
+        cuts.push(found.range.start);
+        cuts.push(found.range.end - 2);
+    }
+    cuts.sort_unstable();
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
-    for found in refs::page_refs(text) {
-        out.push_str(&text[at..found.range.start]);
-        out.push_str(found.name);
-        at = found.range.end;
+    for cut in cuts {
+        out.push_str(&text[at..cut]);
+        at = cut + 2;
     }
     out.push_str(&text[at..]);
     out
@@ -180,7 +189,9 @@ pub fn check_prose(before: &str, after: &str) -> ProseCheck {
 
 /// The start of the first `[[` opened before the previous one closed on its line: a `[[`, then a run
 /// of the characters a ref's name may hold ([`refs::is_name_char`], which can't run past a newline),
-/// then another `[[`.
+/// then another `[[`. Both are pages (`[[a [[b]] c]]` is the page `a [[b]] c` and the page `b`), so
+/// this is a warning about formatting, not about what is linked: a nested link is easy to write by
+/// mistake, and it makes two pages of one.
 fn first_nested(chars: &[char]) -> Option<usize> {
     (0..chars.len().saturating_sub(1)).find(|&at| {
         if chars[at] != '[' || chars[at + 1] != '[' {
@@ -251,6 +262,26 @@ mod tests {
     }
 
     #[test]
+    fn a_ref_holding_a_ref_counts_as_a_page_beside_the_inner_one_and_a_wrapper_only_as_the_inner() {
+        assert_eq!(counts("[[a [[b]] c]] [[b]]"), [("a [[b]] c", 1), ("b", 2)]);
+        assert_eq!(counts("[[ [[b]] ]] [[[[b]]]]"), [("b", 2)]);
+        assert_eq!(counts("[[a [[b [[c]] ]] ]]"), [("a [[b [[c]] ]] ", 1), ("b [[c]] ", 1), ("c", 1)]);
+        assert_eq!(key_counts("[[A [[b]] c]] [[a [[B]] C]] [[B]]"), [("a [[b]] c".to_owned(), 2), ("b".to_owned(), 3)]);
+    }
+
+    #[test]
+    fn stripping_brackets_takes_those_of_an_outer_ref_and_the_one_inside_it() {
+        assert_eq!(strip_brackets("[[a [[b]] c]]"), "a b c");
+        assert_eq!(strip_brackets("x [[a [[b [[c]] ]] ]] y [[d]]"), "x a b c   y d");
+        assert_eq!(strip_brackets("[[[[a]]b]]"), "ab");
+        // a wrapper with no text of its own is no ref: only the inner one loses its brackets
+        assert_eq!(strip_brackets("[[[[b]]]]"), "[[b]]");
+        assert_eq!(strip_brackets("[[ [[b]] ]]"), "[[ b ]]");
+        // not closed: only what closed inside loses its brackets
+        assert_eq!(strip_brackets("[[a [[b]] c"), "[[a b c");
+    }
+
+    #[test]
     fn stripping_brackets_keeps_everything_else() {
         assert_eq!(strip_brackets("x [[Alice]] y [[ ]] [[a[[b]]"), "x Alice y   [[ab");
         assert_eq!(strip_brackets("no links ]] [["), "no links ]] [[");
@@ -271,6 +302,33 @@ mod tests {
             Some(ProseDifference { line: 2, column: 8, before: "two three".into(), after: "two thrae".into() })
         );
         assert!(!check.ok);
+    }
+
+    #[test]
+    fn prose_is_kept_when_a_link_holds_a_link_and_a_wrapper_keeps_its_brackets() {
+        // both texts read to `a b c`: the outer ref's brackets are links like the inner one's
+        assert!(check_prose("a b c", "[[a [[b]] c]]").ok);
+        assert!(check_prose("[[a [[b]] c]]", "a b c").ok);
+        // a wrapper with no text of its own is no ref, so its brackets are prose
+        assert!(!check_prose("b", "[[[[b]]]]").ok);
+        assert!(!check_prose("[[b]]", "[[[[b]]]]").ok);
+    }
+
+    #[test]
+    fn a_link_holding_a_link_is_still_flagged_as_nested_and_is_two_refs_to_keep() {
+        let check = check_brackets("see [[a [[b]] c]]");
+        assert_eq!((check.ok, check.opens, check.closes), (false, 2, 2));
+        assert_eq!(check.nested, Some(Nested { line: 1, excerpt: "see [[a [[b]] c]]".to_owned() }));
+        // a wrapper is flagged the same: `[[` opens inside `[[` on the line
+        assert!(check_brackets("[[ [[b]] ]]").nested.is_some());
+        // dropping either of the two refs is a removed ref
+        assert!(check_refs_preserved("[[a [[b]] c]]", "[[a [[b]] c]]").ok);
+        let outer_gone = check_refs_preserved("[[a [[b]] c]]", "a [[b]] c");
+        assert_eq!(outer_gone.removed, [RemovedRef { term: "a [[b]] c".into(), before: 1, after: 0 }]);
+        let both_gone = check_refs_preserved("[[a [[b]] c]]", "a b c");
+        assert_eq!(both_gone.removed.iter().map(|r| r.term.as_str()).collect::<Vec<_>>(), ["a [[b]] c", "b"]);
+        // a wrapper holds only the inner ref
+        assert!(check_refs_preserved("[[ [[b]] ]]", "x [[b]] y").ok);
     }
 
     #[test]

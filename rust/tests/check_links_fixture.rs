@@ -339,9 +339,12 @@ async fn the_gate_cannot_tell_the_two_graphs_apart_the_roster_result_also_passes
 
 // ---------------------------------------------------------------- check 1 against a reference
 
-/// The rule of check 1, written again from its definition and not from the tool's code: strip every
-/// `[[term]]` (one or more characters, none of them `[`, `]` or a newline) from both texts, and if
-/// they differ, report the first character where they do. Where a difference is a text that ends,
+/// The rule of check 1, written again from its definition and not from the tool's code: strip the
+/// brackets of every `[[term]]` from both texts, and if they differ, report the first character
+/// where they do. A term is one or more characters, none of them `[`, `]` or a newline, and may
+/// hold terms of its own (`[[a [[b]] c]]` is two refs, and loses both pairs). An outer one counts
+/// only with a character of its own that is not white space: a wrapper such as `[[ [[b]] ]]` is
+/// only the ref inside it, and keeps its brackets. Where a difference is a text that ends,
 /// it is at the end of the shorter one. Line and column are 1-based, in characters. The excerpts are
 /// the line at that position, cut to 30 characters before it and 50 from it on, behind `...`.
 ///
@@ -349,21 +352,58 @@ async fn the_gate_cannot_tell_the_two_graphs_apart_the_roster_result_also_passes
 /// which for `i == 0` looks at the first character: a text that opens
 /// with a newline gets an empty excerpt (the tool keeps that behaviour).
 fn reference_prose(before: &str, after: &str) -> Value {
-    fn strip(text: &str) -> Vec<char> {
-        let c: Vec<char> = text.chars().collect();
-        let (mut out, mut i) = (Vec::new(), 0);
-        while i < c.len() {
-            // the `[[`, then a run of characters outside `[`, `]` and a newline, then `]]`
-            let run_end = (i + 2..c.len()).find(|&j| matches!(c[j], '[' | ']' | '\n')).unwrap_or(c.len());
-            if c[i..].starts_with(&['[', '[']) && run_end > i + 2 && c[run_end..].starts_with(&[']', ']']) {
-                out.extend(&c[i + 2..run_end]);
-                i = run_end + 2;
+    /// The ref that opens at `i`, if it closes: where it ends, whether it holds a ref, whether it
+    /// has text of its own. By recursion on the definition, which is fine at the sizes used here.
+    fn parse(c: &[char], i: usize) -> Option<(usize, bool, bool)> {
+        if !c[i..].starts_with(&['[', '[']) {
+            return None;
+        }
+        let (mut j, mut nested, mut own) = (i + 2, false, false);
+        loop {
+            let ch = *c.get(j)?;
+            if c[j..].starts_with(&['[', '[']) {
+                j = parse(c, j)?.0;
+                nested = true;
+            } else if c[j..].starts_with(&[']', ']']) {
+                return (j > i + 2).then_some((j + 2, nested, own));
+            } else if matches!(ch, '[' | ']' | '\n') {
+                return None;
             } else {
-                out.push(c[i]);
-                i += 1;
+                own |= !ch.is_whitespace();
+                j += 1;
             }
         }
-        out
+    }
+    /// The positions of the brackets of the ref at `i` and of the refs inside it.
+    fn brackets(c: &[char], i: usize, out: &mut Vec<usize>) {
+        let (end, nested, own) = parse(c, i).expect("a ref that closed");
+        if !nested || own {
+            out.extend([i, i + 1, end - 2, end - 1]);
+        }
+        let mut j = i + 2;
+        while j < end - 2 {
+            match parse(c, j) {
+                Some((inner_end, ..)) => {
+                    brackets(c, j, out);
+                    j = inner_end;
+                }
+                None => j += 1,
+            }
+        }
+    }
+    fn strip(text: &str) -> Vec<char> {
+        let c: Vec<char> = text.chars().collect();
+        let (mut dropped, mut i) = (Vec::new(), 0);
+        while i < c.len() {
+            match parse(&c, i) {
+                Some((end, ..)) => {
+                    brackets(&c, i, &mut dropped);
+                    i = end;
+                }
+                None => i += 1,
+            }
+        }
+        c.iter().enumerate().filter(|(k, _)| !dropped.contains(k)).map(|(_, ch)| *ch).collect()
     }
     let (a, b) = (strip(before), strip(after));
     if a == b {
@@ -434,6 +474,13 @@ const TRICKY: &[(&str, &str)] = &[
     ("[[a]][[b]]", "a[[b]"),
     ("[[[a]]]", "[a]"),
     ("[[a [[b]] c]]", "[[a b c]]"),
+    ("a b c", "[[a [[b]] c]]"),
+    ("[[a [[b]] c]]", "a b c"),
+    ("b", "[[[[b]]]]"),
+    ("[[b]]", "[[ [[b]] ]]"),
+    ("[[a [[b [[c]] ]] ]]", "a b c  "),
+    ("[[a [[b]] c", "[[a b c"),
+    ("[[a [[b]]\nc]]", "[[a b\nc]]"),
     ("[[a\nb]]", "ab"),
     ("[[]]", ""),
     ("[[ ]]", " "),

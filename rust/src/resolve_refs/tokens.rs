@@ -262,6 +262,24 @@ mod tests {
     }
 
     #[test]
+    fn a_page_embed_may_name_a_page_that_holds_a_ref_and_a_wrapper_names_none() {
+        // `[[a [[b]] c]]` is the page `a [[b]] c` (`refs::ref_at`), embedded whole
+        let text = "{{embed [[Plan [[Atlas]] notes]]}}";
+        let found = scan(text);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].token.kind, Kind::PageEmbed);
+        assert_eq!((found[0].token.target.as_str(), found[0].token.key.as_str()), ("Plan [[Atlas]] notes", "plan [[atlas]] notes"));
+        assert_eq!(found[0].token.raw, text);
+        // a wrapper with no text of its own is no page, as before
+        assert!(scan("{{embed [[[[Atlas]]]]}}").is_empty());
+        assert!(scan("{{embed [[ [[Atlas]] ]]}}").is_empty());
+        // not closed on the line, or a name over a newline, is none
+        assert!(scan("{{embed [[Plan [[Atlas]] notes}}").is_empty());
+        assert!(scan("{{embed [[Plan [[Atlas]]\nnotes]]}}").is_empty());
+        assert!(scan("{{embed [[Plan [[Atlas]] notes]] tail}}").is_empty());
+    }
+
+    #[test]
     fn text_around_multibyte_characters_scans_without_splitting_them() {
         let text = format!("café ((x)) \u{1F680} (({A})) é{{{{");
         let found = scan(&text);
