@@ -16,4 +16,4 @@ none-yet: #469 (adds a test that pins a fixed value's TOON output, so key order 
 
 | Date | Change | Issue/PR |
 |---|---|---|
-| 2026-10-09 | Introduced. | #468 |
+| 2026-10-09 | Introduced. | #468, #472 |
