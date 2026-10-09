@@ -271,7 +271,27 @@ async fn a_cut_topic_keeps_its_truncation_warning_beside_the_roll_up() {
     assert_eq!(context.warnings.iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["topic_truncated", "topic_unavailable"]);
     // only the cut has a remedy, so `hasMore` is the cut's
     assert!(context.has_more());
+    // the two differ in remedy: the cut says how to fetch the rest, the roll-up has nothing to fetch
+    assert!(context.warnings[0].how_to_fetch_all.is_some());
     assert!(context.warnings[1].how_to_fetch_all.is_none());
+}
+
+#[tokio::test]
+async fn a_null_alias_lookup_in_a_topic_is_rolled_up_too_whatever_the_code_is() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        Value::Null,
+        json!([flat_block(101, 10, "Only")]),
+        json!([]),
+    ])
+    .await;
+    let context = get_context_for_query(&client(&logseq), "about [[Project Atlas]]", 5, 20, false).await.unwrap();
+    assert_eq!(codes(&context.contexts[0].warnings), ["alias_lookup_unavailable"]);
+    assert_eq!(context.warnings.len(), 1);
+    let warning = &context.warnings[0];
+    assert_eq!((warning.code.as_str(), warning.topic.as_deref()), ("topic_unavailable", Some("Project Atlas")));
+    assert!(warning.message.contains("(alias_lookup_unavailable)"), "{}", warning.message);
+    assert!(warning.how_to_fetch_all.is_none() && !context.has_more());
 }
 
 #[tokio::test]
