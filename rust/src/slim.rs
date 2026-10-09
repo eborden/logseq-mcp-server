@@ -139,10 +139,24 @@ mod tests {
         assert_eq!(extract_page_refs("[[]] [[a]"), Vec::<String>::new());
         assert_eq!(extract_page_refs("[[[a]]"), ["a"]);
         assert_eq!(extract_page_refs("[[a\nb]]"), Vec::<String>::new());
-        assert_eq!(extract_page_refs("[[a [[b]] c]]"), ["b"]);
+        assert_eq!(extract_page_refs("[[a [[b]] c]]"), ["a [[b]] c", "b"]);
         assert_eq!(extract_page_refs("[[a]][[b]]"), ["a", "b"]);
         assert_eq!(extract_page_refs("[[a]b]]"), Vec::<String>::new());
         assert_eq!(extract_page_refs("café [[naïve]]"), ["naïve"]);
+    }
+
+    #[test]
+    fn a_nested_ref_lists_the_outer_page_and_the_inner_one_and_a_wrapper_only_the_inner() {
+        assert_eq!(extract_page_refs("x [[a [[b]] c]]"), ["a [[b]] c", "b"]);
+        assert_eq!(extract_page_refs("[[a [[b [[c]] ]] ]]"), ["a [[b [[c]] ]] ", "b [[c]] ", "c"]);
+        assert_eq!(extract_page_refs("[[[[b]]]] [[ [[b]] ]]"), ["b", "b"]);
+        assert_eq!(extract_page_refs("[[a [[b]] c"), ["b"]);
+        assert_eq!(
+            slim(json!({"uuid": "u", "content": "x [[a [[b]] c]]"}), ""),
+            r#"{"uuid":"u","content":"x [[a [[b]] c]]","pageRefs":["a [[b]] c","b"]}"#
+        );
+        // a tag does not nest: its name holds no bracket
+        assert_eq!(extract_tags("#[[a [[b]] c]]"), ["[[a"]);
     }
 
     #[test]

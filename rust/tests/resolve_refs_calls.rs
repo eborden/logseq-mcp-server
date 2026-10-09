@@ -251,6 +251,30 @@ async fn a_page_embed_binds_the_lowercase_name_and_shows_the_top_level_blocks_in
 }
 
 #[tokio::test]
+async fn a_page_embed_of_a_page_named_with_a_nested_ref_binds_the_whole_name_in_the_same_one_call() {
+    let page = json!([{"id": 100, "name": "plan [[atlas]] notes", "original-name": "Plan [[Atlas]] notes"}]);
+    let logseq = mock_logseq(vec![json!([page, target(11, "First", 100, 100)])]).await;
+    let resolved = resolve_block_refs(&client(&logseq), &[root("{{embed [[Plan [[Atlas]] notes]]}}")]).await.unwrap();
+    // one call, as for a flat name: the name is one more value in the one `:in` list
+    assert_eq!(methods(&logseq).len(), 1);
+    assert_eq!(args_of(&logseq, 0)[1], "[\"plan [[atlas]] notes\"]");
+    assert_eq!(resolved.blocks[0]["resolvedContent"], "- First");
+    assert_eq!(
+        text(&resolved.blocks[0]["resolvedRefs"]),
+        r#"[{"embed":"page","content":"- First","page":"Plan [[Atlas]] notes","status":"ok"}]"#
+    );
+}
+
+#[tokio::test]
+async fn a_page_embed_of_a_wrapper_with_no_text_of_its_own_makes_no_call_and_stays_as_written() {
+    let logseq = mock_logseq(vec![]).await;
+    let resolved = resolve_block_refs(&client(&logseq), &[root("{{embed [[ [[Atlas]] ]]}} and {{embed [[[[Atlas]]]]}}")]).await.unwrap();
+    assert!(methods(&logseq).is_empty());
+    assert_eq!(resolved.blocks[0]["content"], "{{embed [[ [[Atlas]] ]]}} and {{embed [[[[Atlas]]]]}}");
+    assert!(resolved.blocks[0].get("resolvedContent").is_none());
+}
+
+#[tokio::test]
 async fn a_page_embed_with_no_entity_is_missing_and_keeps_the_name_as_written() {
     let logseq = mock_logseq(vec![json!([])]).await;
     let resolved = resolve_block_refs(&client(&logseq), &[root("{{embed [[ Nowhere ]]}}")]).await.unwrap();

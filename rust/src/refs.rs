@@ -5,11 +5,19 @@
 //! A page ref is `[[` + a name + `]]`. The name is one or more characters, none of them `[`, `]` or
 //! a newline. LogSeq's own pattern for a ref without nesting is `\[\[([^\[\]]+)\]\]`; a newline is
 //! left out as well, since a name is one line and `check_links` reads its texts a line at a time.
-//! So `[[a [[b]] c]]` holds one ref, `b` (the outer name has a bracket in it), `[[[a]]` holds `a`,
-//! and `[[]]`, `[[a]b]]` and `[[a\nb]]` hold none.
+//! So `[[[a]]` holds `a`, and `[[]]`, `[[a]b]]` and `[[a\nb]]` hold none.
 //!
-//! Matches run left to right and don't overlap. An attempt that fails moves on one character, so a
-//! ref can start inside the failed attempt.
+//! A ref may hold refs: `[[a [[b]] c]]` is the page `a [[b]] c`, and the `[[b]]` inside it is the
+//! page `b`. Both are refs, so refs can overlap, and [`page_refs`] lists the outer ref before the
+//! ones inside it (by where each starts). An outer ref is listed only when it has text of its own,
+//! a character that is not white space outside its nested refs. A wrapper with none, `[[[[b]]]]` or
+//! `[[ [[b]] ]]`, is only the page `b`. A ref is closed on its line: an outer ref with no closing
+//! `]]`, or one that runs over a newline, is no ref, though refs closed inside it still are. A
+//! stray `[` or `]` inside an outer ref (one that is not half of `[[` or `]]`) makes it no ref, as
+//! it does for a name without nesting.
+//!
+//! Matches run left to right. An attempt that fails moves on one character, so a ref can start
+//! inside the failed attempt: `[[a[[b]]` holds `b`, and `[[[a]]` holds `a`.
 //!
 //! A tag is a `#` followed by one or more characters that are neither white space
 //! ([`char::is_whitespace`]) nor `#`. The run ends at the next `#`, which starts a tag of its own,
@@ -22,6 +30,7 @@
 //! A `#[[` with no closing `]]` on its line falls back to the run rule, so `#[[weekly` is the tag
 //! `[[weekly`, as it always was.
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 /// A character a ref's name may hold.
@@ -34,8 +43,9 @@ pub fn name_len(text: &str) -> usize {
     text.find(|c| !is_name_char(c)).unwrap_or(text.len())
 }
 
-/// The ref that starts `text`, if one does: its name and the text after its closing `]]`.
-pub fn ref_at(text: &str) -> Option<(&str, &str)> {
+/// The ref without nesting that starts `text`, if one does: its name and the text after its closing
+/// `]]`.
+fn leaf_ref_at(text: &str) -> Option<(&str, &str)> {
     let after_open = text.strip_prefix("[[")?;
     let len = name_len(after_open);
     if len == 0 {
@@ -43,6 +53,21 @@ pub fn ref_at(text: &str) -> Option<(&str, &str)> {
     }
     let rest = after_open[len..].strip_prefix("]]")?;
     Some((&after_open[..len], rest))
+}
+
+/// The ref that starts `text`, if one does: its name and the text after its closing `]]`. One with
+/// nesting counts when [`page_refs`] lists it, so a wrapper with no text of its own is none.
+pub fn ref_at(text: &str) -> Option<(&str, &str)> {
+    if let Some(found) = leaf_ref_at(text) {
+        return Some(found);
+    }
+    if !text.starts_with("[[") {
+        return None;
+    }
+    // A ref never runs over a newline, so the scan is of the line only
+    let line = &text[..text.find('\n').unwrap_or(text.len())];
+    let outer = page_refs(line).into_iter().next().filter(|found| found.range.start == 0)?;
+    Some((outer.name, &text[outer.range.end..]))
 }
 
 /// A ref found in a text.
@@ -54,23 +79,78 @@ pub struct PageRef<'a> {
     pub name: &'a str,
 }
 
-/// Every ref in `text`, in order.
-pub fn page_refs(text: &str) -> Vec<PageRef<'_>> {
+/// A ref that closes where it starts, as the attempts to read one find it.
+#[derive(Debug, Clone, Copy)]
+struct Closed {
+    /// Where the closing `]]` ends
+    end: usize,
+    /// Whether [`page_refs`] lists it: it holds no ref, or it has text of its own
+    listed: bool,
+}
+
+/// The attempt to read a ref that starts at `at` (where `[[` is), calling `on_child` with the start
+/// of each ref inside it. `closed` holds what the attempts at every later start found. A start of
+/// `[[` inside this one that closed nothing fails it, since its name would hold a stray bracket.
+fn attempt(text: &str, at: usize, closed: &HashMap<usize, Closed>, mut on_child: impl FnMut(usize)) -> Option<Closed> {
     let bytes = text.as_bytes();
-    let mut found = Vec::new();
-    let mut at = 0;
-    while at + 1 < bytes.len() {
-        // `[` is ASCII, so `at` is on a character boundary whenever it holds one
-        if bytes[at] == b'[' {
-            if let Some((name, rest)) = ref_at(&text[at..]) {
-                let end = text.len() - rest.len();
-                found.push(PageRef { range: at..end, name });
-                at = end;
-                continue;
+    let mut i = at + 2;
+    let mut own_text = false;
+    let mut nested = false;
+    loop {
+        match *bytes.get(i)? {
+            b'[' if bytes.get(i + 1) == Some(&b'[') => {
+                let child = closed.get(&i)?;
+                on_child(i);
+                nested = true;
+                i = child.end;
+            }
+            b']' if bytes.get(i + 1) == Some(&b']') => {
+                // `[[]]` has no name
+                if i == at + 2 {
+                    return None;
+                }
+                return Some(Closed { end: i + 2, listed: !nested || own_text });
+            }
+            b'[' | b']' | b'\n' => return None,
+            _ => {
+                // `i` is on a character boundary: it only steps over whole characters and refs
+                let c = text[i..].chars().next()?;
+                own_text |= !c.is_whitespace();
+                i += c.len_utf8();
             }
         }
-        at += 1;
     }
+}
+
+/// Every ref in `text`, an outer ref before the refs inside it, in order of where each starts.
+pub fn page_refs(text: &str) -> Vec<PageRef<'_>> {
+    let bytes = text.as_bytes();
+    // `[` is ASCII, so each of these is on a character boundary
+    let opens: Vec<usize> = (0..bytes.len().saturating_sub(1)).filter(|&at| bytes[at] == b'[' && bytes[at + 1] == b'[').collect();
+    // Right to left, so each attempt finds the refs inside it settled. An attempt reads its own
+    // characters once and steps over the refs inside it, so the whole is linear in the text.
+    let mut closed: HashMap<usize, Closed> = HashMap::new();
+    for &at in opens.iter().rev() {
+        if let Some(found) = attempt(text, at, &closed, |_| {}) {
+            closed.insert(at, found);
+        }
+    }
+    // Left to right: a ref starts where the last one ended or later. What is inside a ref is found
+    // by reading it again, on a stack so a deep nest can't overflow the call stack.
+    let mut found = Vec::new();
+    let mut resume = 0;
+    for &top in &opens {
+        let Some(&outermost) = closed.get(&top).filter(|_| top >= resume) else { continue };
+        resume = outermost.end;
+        let mut pending = vec![top];
+        while let Some(start) = pending.pop() {
+            let Some(this) = attempt(text, start, &closed, |child| pending.push(child)) else { continue };
+            if this.listed {
+                found.push(PageRef { range: start..this.end, name: &text[start + 2..this.end - 2] });
+            }
+        }
+    }
+    found.sort_by_key(|found| found.range.start);
     found
 }
 
@@ -83,7 +163,7 @@ pub fn tags(text: &str) -> Vec<&str> {
         let start = at + offset + 1;
         // A name that follows the ref grammar, closed on its line. Without a closing `]]` the run
         // rule below reads `#[[weekly` as it always did.
-        if let Some((name, rest)) = ref_at(&text[start..]) {
+        if let Some((name, rest)) = leaf_ref_at(&text[start..]) {
             found.push(name);
             at = text.len() - rest.len();
             continue;
@@ -137,9 +217,80 @@ mod tests {
     }
 
     #[test]
-    fn nested_refs_leave_the_inner_one() {
-        assert_eq!(names("[[outer [[inner]] tail]]"), ["inner"]);
-        assert_eq!(names("[[a [[b [[c]] d]] e]]"), ["c"]);
+    fn a_ref_holding_a_ref_is_a_page_and_the_inner_one_is_another() {
+        assert_eq!(names("[[a [[b]] c]]"), ["a [[b]] c", "b"]);
+        assert_eq!(names("[[outer [[inner]] tail]]"), ["outer [[inner]] tail", "inner"]);
+        // outer first, by where each starts, and each range slices back to its own brackets
+        let text = "x [[a [[b]] c]] y";
+        let found = page_refs(text);
+        assert_eq!(found.iter().map(|f| f.range.clone()).collect::<Vec<_>>(), [2..15, 6..11]);
+        assert_eq!(&text[found[0].range.clone()], "[[a [[b]] c]]");
+        assert_eq!(&text[found[1].range.clone()], "[[b]]");
+        // nothing changes for refs that don't nest
+        assert_eq!(names("[[a]] [[b]]"), ["a", "b"]);
+        assert_eq!(names("[[a]][[b]]"), ["a", "b"]);
+    }
+
+    #[test]
+    fn two_levels_of_nesting_list_each_ref_by_where_it_starts() {
+        assert_eq!(names("[[a [[b [[c]] ]] ]]"), ["a [[b [[c]] ]] ", "b [[c]] ", "c"]);
+        assert_eq!(names("[[a [[b [[c]] d]] e]]"), ["a [[b [[c]] d]] e", "b [[c]] d", "c"]);
+        // siblings inside one outer ref, in order, and refs after it
+        assert_eq!(names("[[x [[a]] y [[b]] z]] [[c]]"), ["x [[a]] y [[b]] z", "a", "b", "c"]);
+        // a nested ref that closes right where its outer one does
+        assert_eq!(names("[[a [[b]]]]"), ["a [[b]]", "b"]);
+        assert_eq!(names("[[[[a]]b]]"), ["[[a]]b", "a"]);
+    }
+
+    #[test]
+    fn a_wrapper_with_no_text_of_its_own_is_only_the_refs_inside_it() {
+        assert_eq!(names("[[[[b]]]]"), ["b"]);
+        assert_eq!(names("[[ [[b]] ]]"), ["b"]);
+        assert_eq!(names("[[ [[a]] [[b]] ]]"), ["a", "b"]);
+        assert_eq!(names("[[\t[[b]]\r ]]"), ["b"]);
+        assert_eq!(names("[[[[a]][[b]]]]"), ["a", "b"]);
+        // a wrapper of wrappers
+        assert_eq!(names("[[ [[ [[b]] ]] ]]"), ["b"]);
+        // text of its own, however little, makes the outer a page
+        assert_eq!(names("[[x[[b]]]]"), ["x[[b]]", "b"]);
+        assert_eq!(names("[[ [[b]] .]]"), [" [[b]] .", "b"]);
+        assert_eq!(names("[[\u{a0}[[b]]]]"), ["b"]);
+    }
+
+    #[test]
+    fn an_outer_ref_that_is_not_closed_on_its_line_is_none_but_the_refs_inside_it_still_are() {
+        assert_eq!(names("[[a [[b]] c"), ["b"]);
+        assert_eq!(names("[[a [[b]]"), ["b"]);
+        assert_eq!(names("[[a [[b c]]"), ["b c"]);
+        assert_eq!(names("[[a [[b]]\nc]]"), ["b"]);
+        assert_eq!(names("[[a\n[[b]] c]]"), ["b"]);
+        // a nested ref across a newline is no ref, so it fails its outer one too
+        assert_eq!(names("[[a [[b\nc]] d]]"), Vec::<&str>::new());
+        assert_eq!(names("[[a [[b]] c]]\n[[d [[e]] f]]"), ["a [[b]] c", "b", "d [[e]] f", "e"]);
+    }
+
+    #[test]
+    fn a_stray_bracket_inside_an_outer_ref_makes_it_none() {
+        assert_eq!(names("[[a [[b]] ] c]]"), ["b"]);
+        assert_eq!(names("[[a [ [[b]] c]]"), ["b"]);
+        assert_eq!(names("[[a [[b]] c]]]"), ["a [[b]] c", "b"]);
+        // a nested ref that is no ref fails its outer one: `[[[b]]` closes nothing at its first `[[`
+        assert_eq!(names("[[x [[[b]] y]]"), ["b"]);
+    }
+
+    #[test]
+    fn a_deep_or_unclosed_nest_is_read_without_deep_calls_or_repeated_work() {
+        let depth = 20_000;
+        let deep = format!("{}b{}", "[[a ".repeat(depth), "]] ".repeat(depth));
+        let found = page_refs(&deep);
+        assert_eq!(found.len(), depth);
+        assert_eq!(found[0].range, 0..deep.trim_end().len());
+        assert_eq!(found[depth - 1].name, "a b");
+        // never closed: nothing, and not one attempt per start over the whole text
+        assert_eq!(page_refs(&"[[a ".repeat(depth)), Vec::new());
+        assert_eq!(page_refs(&"[[".repeat(depth)), Vec::new());
+        let one_line = format!("{}]]", "[[a ".repeat(depth));
+        assert_eq!(names(&one_line), ["a "]);
     }
 
     #[test]
@@ -177,6 +328,21 @@ mod tests {
         assert_eq!(ref_at("[[]]"), None);
         assert_eq!(ref_at("[[a]b]]"), None);
         assert_eq!(ref_at("[[a]]]"), Some(("a", "]")));
+    }
+
+    #[test]
+    fn ref_at_reads_an_outer_ref_with_text_of_its_own_and_not_a_wrapper() {
+        assert_eq!(ref_at("[[a [[b]] c]] tail"), Some(("a [[b]] c", " tail")));
+        assert_eq!(ref_at("[[a [[b [[c]] ]] ]]x"), Some(("a [[b [[c]] ]] ", "x")));
+        // a wrapper is only the ref inside it, and that one does not start the text
+        assert_eq!(ref_at("[[[[b]]]]"), None);
+        assert_eq!(ref_at("[[ [[b]] ]]"), None);
+        // not closed on the line, or a stray bracket
+        assert_eq!(ref_at("[[a [[b]] c"), None);
+        assert_eq!(ref_at("[[a [[b]]\nc]]"), None);
+        assert_eq!(ref_at("[[a [[b]] ] c]]"), None);
+        // only the line is read: a later line does not close it
+        assert_eq!(ref_at("[[a [[b]] c\n]]"), None);
     }
 
     #[test]
