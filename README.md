@@ -24,7 +24,7 @@ Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts o
    Tips are on by default: seven tools (`search_blocks`, `get_page`, `get_page_outline`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `list_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
 
    Some tools also accept `name`, `page` (and `page_name` or `uuid` where it fits) in place of their canonical parameter (`page_name`, `topic_name`, `concept_name`, `block_uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
-4. Connect it to your MCP client (next section). The server is a Rust binary you build from a clone, which needs the Rust toolchain that `rust/rust-toolchain.toml` pins (rustup reads it). Node is only for the repo's tooling and tests.
+4. Connect it to your MCP client (next section). The server is a Rust binary. Run it with `uvx`, which needs [uv](https://docs.astral.sh/uv/), or build it from a clone, which needs the Rust toolchain that `rust/rust-toolchain.toml` pins (rustup reads it). Node is only for the repo's tooling and tests.
 
 ## Install
 
@@ -32,12 +32,14 @@ The server is a Rust binary. Run it from PyPI with `uvx`, let the Claude Code pl
 
 ### uvx (PyPI)
 
+Needs [uv](https://docs.astral.sh/uv/). The package is [`logseq-mcp-server` on PyPI](https://pypi.org/project/logseq-mcp-server/).
+
 ```bash
 uvx logseq-mcp-server               # run it without installing
-uv tool install logseq-mcp-server   # or install it
+uv tool install logseq-mcp-server   # or install it, which puts `logseq-mcp-server` on your PATH
 ```
 
-The wheels (ADR-0036) exist for macOS (Apple silicon and Intel) and Linux x86_64, and carry the same binary, byte for byte, as the GitHub Release. Any other platform gets pip's "no matching distribution"; build from a clone there. In an MCP client config the command is `uvx` with the argument `logseq-mcp-server`.
+The wheels (ADR-0036) exist for macOS (Apple silicon and Intel) and Linux x86_64, and carry the same binary, byte for byte, as the GitHub Release. Windows and Linux arm64 have no wheel, so the install fails there; build from a clone instead. In an MCP client config the command is `uvx` with the argument `logseq-mcp-server`. If a client such as Claude Desktop can't find `uvx`, give the absolute path from `which uvx`. The server still reads `~/.logseq-mcp/config.json`, as in Quick Start.
 
 ### Build from a clone
 
@@ -72,7 +74,7 @@ Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Su
 }
 ```
 
-With a build from a clone, set `command` to the absolute path of `rust/target/release/logseq-mcp-server` and drop `args`.
+With a build from a clone, set `command` to the absolute path of `rust/target/release/logseq-mcp-server` and drop `args`. Do this on Windows, which has no wheel.
 
 ## Install as a Claude Code plugin
 
@@ -240,7 +242,7 @@ The order, from ADR-0035 (Decision 12) and ADR-0036 (Decision 9). Steps 2 and 5 
 
 4. Publish the draft. Then, on a clean machine with no override, start the plugin once and call one tool. A bad release is fixed by a new patch version, not an edit.
 5. Run `pypi.yml` with `version` set to the release (plain `x.y.z`, no `v`; the release has to be public) and `dry_run` on, read its log (checksums, attestations, the install check), then run it with `dry_run` off and approve the `pypi` environment. PyPI never accepts a file name twice, so a mistake costs a version number.
-6. On a clean macOS and a clean Linux machine with no override, run `uvx logseq-mcp-server` through an MCP client and call one tool. Only then add the `uvx` install to this README, the changelog and the links in `pypi/README.md`.
+6. **Post-publish check.** On a clean macOS and a clean Linux machine with no override, run `uvx logseq-mcp-server` through an MCP client and call one tool. A bad upload is fixed by a new patch version, not an edit.
 
 ## Development
 
