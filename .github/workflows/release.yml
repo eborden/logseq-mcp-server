@@ -322,6 +322,32 @@ jobs:
           cmp "${RUNNER_TEMP}/check/bin/logseq-mcp-server" "assets/logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl"
           test -x "${RUNNER_TEMP}/check/bin/logseq-mcp-server"
 
+      # Every wheel, not only the one this runner can install: its executable is the binary of the target its tag names.
+      # An independent read of the wheels, so a mix-up in the builder's target table can't ship a wheel with another
+      # target's binary.
+      - name: Check that each wheel carries its own binary
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 -I - <<'PY'
+          import os, sys, zipfile
+          version = os.environ["VERSION"]
+          pairs = {
+              "macosx_11_0_arm64": "aarch64-apple-darwin",
+              "macosx_10_12_x86_64": "x86_64-apple-darwin",
+              "manylinux_2_17_x86_64.musllinux_1_2_x86_64": "x86_64-unknown-linux-musl",
+          }
+          bad = False
+          for tag, target in pairs.items():
+              with zipfile.ZipFile(f"wheels/logseq_mcp_server-{version}-py3-none-{tag}.whl") as wheel:
+                  inside = wheel.read(f"logseq_mcp_server-{version}.data/scripts/logseq-mcp-server")
+              with open(f"assets/logseq-mcp-server-{version}-{target}", "rb") as asset:
+                  same = asset.read() == inside
+              print(f"{tag}: {'carries ' + target if same else 'DOES NOT carry ' + target}")
+              bad = bad or not same
+          sys.exit(1 if bad else 0)
+          PY
+
       # Exactly the three wheels and nothing else, so an unexpected file can't ride along into the release.
       - name: Check the wheel set
         env:
