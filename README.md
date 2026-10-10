@@ -212,12 +212,7 @@ Gets: All journal entries in date range
 
 For the maintainer. Nothing releases or publishes automatically, and nothing publishes to npm (ADR-0035). A release is the native binaries, the three PyPI wheels built from them and `SHA256SUMS` on a GitHub Release, built by a manual workflow (`release.yml`) that runs only when started by hand from the Actions tab, only on `main`, and creates a draft release. You publish the draft yourself, which creates the tag. A second manual workflow (`pypi.yml`, ADR-0036) then uploads the wheels of the public release to PyPI.
 
-**One-time setup before the first PyPI upload.** Without the environment, a real run of `pypi.yml` uploads with no second click, because GitHub creates an unprotected one.
-
-- In the repository settings, create the `pypi` environment with yourself as a required reviewer and deployment limited to `main`. Leave "Prevent self-review" off, or you can't approve your own run.
-- On PyPI, add a pending trusted publisher for the project `logseq-mcp-server`: owner `eborden`, repository `logseq-mcp-server`, workflow `pypi.yml`, environment `pypi`.
-
-The order, from ADR-0035 (Decision 12) and ADR-0036 (Decision 9):
+The order, from ADR-0035 (Decision 12) and ADR-0036 (Decision 9). Steps 2 and 5 are runs of a workflow from the Actions tab ("Run workflow", branch `main`):
 
 1. Bump the version in `rust/Cargo.toml`, `package.json` and both `.claude-plugin/` manifests together (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it with the release date. Merge that first: the release is built at the commit the run starts from.
 2. Run `release.yml` with `dry_run` on, read the artifacts and the logs (every leg of the build, and the `wheels` job), then with it off to create the draft.
