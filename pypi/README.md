@@ -2,7 +2,7 @@
 
 A read-only [MCP](https://modelcontextprotocol.io) server for [LogSeq](https://logseq.com) graphs. It gives an AI client 16 tools to search a graph, follow links, build context for a topic and read journals by date. It never writes to the graph.
 
-This package is the server itself: one native Rust binary, with no Python code and no runtime dependencies. It is the same binary, byte for byte, as the one on the project's [GitHub Releases](https://github.com/eborden/logseq-mcp-server/releases). The wheels are built from the release assets after the release is published.
+This package is the server itself: one native Rust binary, with no Python code and no runtime dependencies. It is the same binary, byte for byte, as the one on the project's [GitHub Releases](https://github.com/eborden/logseq-mcp-server/releases). The wheels are built and attested by the release workflow, attached to the release beside the binaries, and uploaded here from there once the release is public.
 
 ## Install
 
