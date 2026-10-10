@@ -4,20 +4,24 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Nothing has been released yet, so there is no released version to compare against. `package.json` says 1.0.0; everything below ships in the first release. When the maintainer cuts it, rename "Unreleased" to that version and date.
+1.0.0 is the first release, so there is no earlier release to compare against. Everything below ships in it.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-09
+
 ### Changed (server runtime)
 
-- **The server is now the Rust binary** (ADR-0035). There is no npm channel: the name `logseq-mcp-server` on npm is not this project, so `npx logseq-mcp-server` runs someone else's package and must not be used. Build from a clone of `main` (`cd rust && cargo build --release --locked`) until the first GitHub Release ships native binaries. Entries below that mention the npm package, `npx` or the TypeScript server are kept as history.
+- **The server is now the Rust binary** (ADR-0035, ADR-0036). It is released as native binaries on GitHub Releases for macOS (Apple silicon and Intel) and Linux x86_64, each listed in `SHA256SUMS` and attested with build provenance. The Claude Code plugin starts it through a small shell launcher that downloads the binary for the plugin's own version and checks it against `SHA256SUMS` before it runs. The same binaries are uploaded to PyPI as platform wheels, so `uvx logseq-mcp-server` runs the server on those platforms. There is no Windows or Linux arm64 binary yet. There is no npm channel: the name `logseq-mcp-server` on npm is not this project, so `npx logseq-mcp-server` runs someone else's package and must not be used. To build from a clone instead, run `cd rust && cargo build --release --locked`. Entries below that mention the npm package, `npx` or the TypeScript server are kept as history.
 
 ### Added
+
+- **Release workflow and PyPI wheels** (ADR-0035, ADR-0036). A manual `release.yml` builds the three binaries, runs the parity and unit tests against each, writes `SHA256SUMS` and the licence notices, builds the three PyPI wheels from the gated binaries, attests the binaries and the wheels and drafts the GitHub Release. A manual `pypi.yml` checks those wheels again against the public release and uploads them to PyPI by trusted publishing, behind a `pypi` environment that needs the maintainer's approval. Both run only by hand, from `main`, with a dry run by default.
 
 - **`format: "markdown"`** on `get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` (#43). The default stays `"json"`. Markdown is one plain text block: page properties, blocks as indented bullets with `((uuid))` refs kept, related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. About 45-85% fewer bytes than the JSON. Page properties print as the page stores them (the pre-block text, with its `[[refs]]` and hyphenated keys), and keyword search hits end with `((uuid)) (in [[Page]])` so they can be followed up.
 - **`compact`** on `build_context` and `get_context_for_query` (#43): block snippets (first line, 80 characters) and uuids instead of block bodies, in JSON and in Markdown. With `resolve_refs` on `build_context` the refs are not resolved, and a `resolve_refs_ignored_in_compact` warning says so.
 - **`logseq_get_page_outline`** (#43): a page's top-level blocks as `{ uuid, snippet, childCount }`, in two Datalog calls. Read the blocks you pick with `get_block`. Resolves aliases, ISO dates and ambiguous names like the other page tools.
-- **npm package.** (Superseded: there is no npm package, see the Unreleased note above. Do not run `npx logseq-mcp-server`: that name on npm is another project's package, not this one.) As first written: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 22.12 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
+- **npm package.** (Superseded: there is no npm package, see the server runtime note above. Do not run `npx logseq-mcp-server`: that name on npm is another project's package, not this one.) As first written: a `logseq-mcp-server` bin (the older `logseq-mcp` name stays), `files`, `engines` (Node 22.12 or newer), `prepublishOnly`, `repository` and `keywords`, plus an MIT `LICENSE` file. A manual `Publish to npm` GitHub workflow publishes with provenance (#46).
 - **MCP prompts**: `weekly_summary`, `monthly_summary`, `continue_on`, `what_do_i_know` and `prioritize_tasks`. Each tells the model which tools to call and what limits to keep, and defers to the `logseq-skills` workflow when the host has it (#46).
 - **MCP resources**: `logseq://guide` (the reading guide) and the `logseq://page/{name}` template (a page as Markdown text). Both are read-only (#46).
 - **Claude Code plugin and marketplace manifests**, with the skills moved to a root `skills/` directory so a plugin can find them. Skills refer to tools by bare name so they work under any host prefix (#45).
@@ -73,4 +77,5 @@ Nothing has been released yet, so there is no released version to compare agains
 
 - The unused `node-fetch` dependency. The client uses the global `fetch`.
 
-[Unreleased]: https://github.com/eborden/logseq-mcp-server/commits/main
+[Unreleased]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/eborden/logseq-mcp-server/releases/tag/v1.0.0
