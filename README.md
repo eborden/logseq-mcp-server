@@ -36,10 +36,10 @@ Needs [uv](https://docs.astral.sh/uv/). The package is [`logseq-mcp-server` on P
 
 ```bash
 uvx logseq-mcp-server               # run it without installing
-uv tool install logseq-mcp-server   # or install it, which puts `logseq-mcp-server` on your PATH
+uv tool install logseq-mcp-server   # or install it as a command (see `uv tool update-shell` if uv's tool directory is not on your PATH)
 ```
 
-The wheels (ADR-0036) exist for macOS (Apple silicon and Intel) and Linux x86_64, and carry the same binary, byte for byte, as the GitHub Release. Windows and Linux arm64 have no wheel, so the install fails there; build from a clone instead. In an MCP client config the command is `uvx` with the argument `logseq-mcp-server`. If a client such as Claude Desktop can't find `uvx`, give the absolute path from `which uvx`. The server still reads `~/.logseq-mcp/config.json`, as in Quick Start.
+The wheels (ADR-0036) exist for macOS (Apple silicon and Intel) and Linux x86_64, and carry the same binary, byte for byte, as the GitHub Release. Windows and Linux arm64 have no wheel, so the install fails there; build from a clone instead. In an MCP client config the command is `uvx` with the argument `logseq-mcp-server`. A client that does not start from your shell, such as a desktop app, may not find `uvx` on its PATH; if so, set `command` to the full path of the `uvx` executable. The server still reads `~/.logseq-mcp/config.json`, as in Quick Start.
 
 ### Build from a clone
 
