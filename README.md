@@ -216,16 +216,16 @@ The order, from ADR-0035 (Decision 12) and ADR-0036 (Decision 9). Steps 2 and 5 
 
 1. Bump the version in `rust/Cargo.toml`, `package.json` and both `.claude-plugin/` manifests together (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it with the release date. Merge that first: the release is built at the commit the run starts from.
 2. Run `release.yml` with `dry_run` on, read the artifacts and the logs (every leg of the build, and the `wheels` job), then with it off to create the draft.
-3. **Pre-publish check.** Draft assets can't be downloaded anonymously, so download them with `gh release download v<version> --dir <empty dir>`. On a clean macOS and a clean Linux machine, run the launcher against that directory and call one tool, then install a wheel from it and call one tool:
+3. **Pre-publish check.** Draft assets can't be downloaded anonymously, so download them with `gh release download v<version> --dir <empty dir>`. On a clean macOS and a clean Linux machine, run the launcher against that directory and call one tool, then install the wheel for that machine from it (`logseq_mcp_server-<version>-py3-none-<platform>.whl`, one per platform) and call one tool:
 
    ```bash
    LOGSEQ_MCP_RELEASE_BASE_URL="file://<empty dir>" sh scripts/logseq-mcp-server.sh
-   uvx --from <empty dir>/logseq_mcp_server-<version>-<tag>.whl logseq-mcp-server
+   uvx --from <empty dir>/<the wheel for this machine> logseq-mcp-server
    ```
 
 4. Publish the draft. Then, on a clean machine with no override, start the plugin once and call one tool. A bad release is fixed by a new patch version, not an edit.
-5. Run `pypi.yml` with `dry_run` on and read its log (checksums, attestations, the install check), then with it off, and approve the `pypi` environment. PyPI never accepts a file name twice, so a mistake costs a version number.
-6. On a clean macOS and a clean Linux machine with no override, run `uvx logseq-mcp-server` through an MCP client and call one tool. Only then add the `uvx` install to this README and the changelog.
+5. Run `pypi.yml` with `version` set to the release (plain `x.y.z`, no `v`; the release has to be public) and `dry_run` on, read its log (checksums, attestations, the install check), then run it with `dry_run` off and approve the `pypi` environment. PyPI never accepts a file name twice, so a mistake costs a version number.
+6. On a clean macOS and a clean Linux machine with no override, run `uvx logseq-mcp-server` through an MCP client and call one tool. Only then add the `uvx` install to this README, the changelog and the links in `pypi/README.md`.
 
 ## Development
 
