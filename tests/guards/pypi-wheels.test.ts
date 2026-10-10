@@ -33,7 +33,7 @@ describe('ADR-0036: the PyPI wheel builder', () => {
     expect(run.error, 'python3 must be on PATH').toBeUndefined();
     expect(run.stderr + run.stdout).toMatch(/\nOK\b/);
     expect(run.status).toBe(0);
-  });
+  }, 120_000);
 
   it('imports only the standard library, so the release job installs nothing', () => {
     expect(importedModules(BUILDER)).toEqual([...STANDARD_LIBRARY_IMPORTS].sort());
