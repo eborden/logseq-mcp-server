@@ -74,7 +74,7 @@ We publish the three binaries of ADR-0035 to PyPI as platform wheels. **The whee
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-09
 

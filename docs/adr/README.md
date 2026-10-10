@@ -52,7 +52,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0033-rust-mutation-testing-ratchet](0033-rust-mutation-testing-ratchet.md) | Ratchet per-file mutation scores on the Rust crate with cargo-mutants | accepted |
 | [0034-golden-results-are-the-contract](0034-golden-results-are-the-contract.md) | Make the recorded golden results the contract, compared by meaning, with LogSeq calls held to a bounded count | accepted |
 | [0035-native-binary-release-on-github-releases](0035-native-binary-release-on-github-releases.md) | Release the Rust server as native binaries on GitHub Releases, started by one thin launcher | accepted |
-| [0036-pypi-wheels-from-the-release-binaries](0036-pypi-wheels-from-the-release-binaries.md) | Publish the release binaries to PyPI as platform wheels built from the GitHub Release | proposed |
+| [0036-pypi-wheels-from-the-release-binaries](0036-pypi-wheels-from-the-release-binaries.md) | Publish the release binaries to PyPI as platform wheels built from the GitHub Release | accepted |
 
 ## File naming rule
 
