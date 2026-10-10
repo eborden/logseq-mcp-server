@@ -49,6 +49,17 @@ function wheelProblems(text: string): string[] {
   if (!/python3 -I -m unittest discover -s scripts\/pypi/.test(runs)) problems.push("the wheels job does not run the wheel builder's tests");
   if (!/python3 -I scripts\/pypi\/build_wheels\.py --version "\$VERSION" --assets assets --readme pypi\/README\.md --out wheels/.test(runs)) problems.push('the wheels job does not run build_wheels.py on the downloaded assets');
   if (!/cmp "\$\{RUNNER_TEMP\}\/check\/bin\/logseq-mcp-server" "assets\/logseq-mcp-server-\$\{VERSION\}-x86_64-unknown-linux-musl"/.test(runs)) problems.push('the wheels job does not check that the installed executable is the gated binary');
+  // Every wheel, not only the one the runner can install, carries the binary of the target its tag names
+  const carries = stepsOf(wheels).find(step => step.map.get('name')?.value === 'Check that each wheel carries its own binary');
+  const carriesRun = carries?.map.get('run')?.value ?? '';
+  if (!carries || !/zipfile\.ZipFile/.test(carriesRun) || !/sys\.exit\(1 if bad else 0\)/.test(carriesRun)) problems.push('the wheels job does not compare the binary inside every wheel with its target\'s asset');
+  for (const [tag, target] of [
+    ['macosx_11_0_arm64', 'aarch64-apple-darwin'],
+    ['macosx_10_12_x86_64', 'x86_64-apple-darwin'],
+    ['manylinux_2_17_x86_64.musllinux_1_2_x86_64', 'x86_64-unknown-linux-musl'],
+  ]) {
+    if (!carriesRun.includes(`"${tag}": "${target}"`)) problems.push(`the per-wheel binary check does not pair ${tag} with ${target}`);
+  }
   if (!/test "\$\(find \. -type f \| wc -l\)" -eq 3/.test(runs)) problems.push('the wheels job does not check that the wheel set is exactly three files');
   for (const wheel of WHEEL_NAMES) if (!runs.includes(`test -f "${wheel}"`)) problems.push(`the wheels job does not check that ${wheel} was built`);
   if (/\b(?:cargo|rustc|npm)\b/.test(runs) || /\bpip3?\s+install\b(?![^\n]*--no-index)/.test(runs) || /-m pip install\b(?![^\n]*--no-index)/.test(runs)) problems.push('the wheels job builds Rust or installs a package from an index: the wheels carry the gated binaries and the job installs nothing');
@@ -112,6 +123,12 @@ describe('ADR-0036: release.yml builds the PyPI wheels and attaches them to the 
 
     it('stops checking that the installed executable is the gated binary', () => {
       expect(problems(changed('          cmp "${RUNNER_TEMP}/check/bin/logseq-mcp-server" "assets/logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl"\n', ''))).toMatch(/installed executable is the gated binary/);
+    });
+
+    it('stops comparing every wheel with its binary, or pairs a tag with the wrong target', () => {
+      expect(problems(changed('      - name: Check that each wheel carries its own binary\n', '      - name: Check something else\n'))).toMatch(/does not compare the binary inside every wheel/);
+      expect(problems(changed('          sys.exit(1 if bad else 0)\n', '          sys.exit(0)\n'))).toMatch(/does not compare the binary inside every wheel/);
+      expect(problems(changed('"macosx_11_0_arm64": "aarch64-apple-darwin"', '"macosx_11_0_arm64": "x86_64-apple-darwin"'))).toMatch(/does not pair macosx_11_0_arm64 with aarch64-apple-darwin/);
     });
 
     it('stops checking the wheel set', () => {
