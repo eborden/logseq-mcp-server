@@ -39,6 +39,11 @@ describe('ADR-0036: the PyPI wheel builder', () => {
     expect(importedModules(BUILDER)).toEqual([...STANDARD_LIBRARY_IMPORTS].sort());
   });
 
+  it('does not import dynamically or run other programs, which the import list above would not see', () => {
+    const code = BUILDER.split('\n').filter(line => !line.trimStart().startsWith('#')).join('\n');
+    expect(code).not.toMatch(/__import__|importlib|\bexec\s*\(|\beval\s*\(|\bsubprocess\b|\bos\.system\b|\bctypes\b/);
+  });
+
   it('reads the imports of a source it is given', () => {
     expect(importedModules('import os, sys\nfrom pathlib import Path\n  import requests.adapters\n# import comment\nx = "import fake"\n')).toEqual(['os', 'pathlib', 'requests', 'sys']);
   });

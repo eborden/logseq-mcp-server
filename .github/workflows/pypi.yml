@@ -1,34 +1,41 @@
 name: PyPI
 
-# Builds the PyPI wheels from a PUBLISHED GitHub Release and, on a real run, uploads them to PyPI (ADR-0036). It
-# rebuilds nothing: a wheel carries the binary release.yml built, gated and attested, so PyPI and GitHub Releases hold
-# the same bytes. The release has to be public first, so this runs after the post-publish check of ADR-0035 Decision 12.
+# Uploads the PyPI wheels of a PUBLISHED GitHub Release to PyPI (ADR-0036). It builds nothing: release.yml builds the
+# three wheels from the binaries it gated, checksums them in SHA256SUMS, attests them and attaches them to the release,
+# and this workflow downloads those exact files, checks them again and uploads them. PyPI and GitHub Releases hold the
+# same bytes. The release has to be public first, so this runs after the post-publish check of ADR-0035 Decision 12.
 #
 # Manual only, from main: this workflow never runs on push, tag or pull request. The maintainer starts it from the
 # Actions tab ("Run workflow", branch main). No session runs it or uploads anything (ADR-0017, ADR-0035, CLAUDE.md).
 #
-# - dry_run (the default): checks the release, verifies each binary's attestation, builds the three wheels, installs
-#   the Linux one into a clean virtual environment and uploads the wheels as workflow artifacts. It uploads nothing to PyPI.
-# - dry_run off: the same, then the publish job uploads the wheels to PyPI. That job waits for the `pypi` environment,
-#   which the maintainer sets up with themselves as a required reviewer, so an upload is a second, deliberate click.
+# - dry_run (the default): checks the release, checks the three wheels against SHA256SUMS, verifies each wheel's
+#   attestation against this repository, release.yml, the main branch and the release's commit, installs the Linux
+#   wheel into a clean virtual environment, and uploads the wheels as workflow artifacts. It uploads nothing to PyPI.
+# - dry_run off: the same, then the publish job uploads the wheels to PyPI. That job waits for the `pypi` environment.
 #
-# The version input must equal the version in rust/Cargo.toml, package.json and both plugin manifests, and the GitHub
-# Release v<version> must be public (not a draft), or the run fails before it builds. PyPI never lets a file name be
-# uploaded twice, so a run also fails if the version is already on PyPI. A bad upload is fixed by a new version.
+# BEFORE THE FIRST REAL RUN the maintainer creates the `pypi` environment (repository settings) with themselves as a
+# required reviewer and deployment limited to main, and registers the pending trusted publisher on PyPI (ADR-0036
+# Decision 9). A job that names an environment that does not exist makes GitHub create an unprotected one, and then a
+# real run uploads with no second click. Nothing in this workflow can check that, so it is a prerequisite, not a guard.
+#
+# The GitHub Release v<version> must be public (not a draft or a pre-release), or the run fails before it downloads. PyPI
+# never lets a file name be uploaded twice, so a run also fails if the version is already on PyPI. A bad upload is
+# fixed by a new version. The version is the release's: its wheels were built from the four version files at release
+# time by release.yml, so this workflow does not read them again (they move on with main).
 #
 # Permissions: every job reads the repository only, except the last (publish), which alone has id-token: write, for
 # PyPI trusted publishing (no API token is stored anywhere). Every third-party action is pinned by commit SHA (the
-# version is in the comment). The one new third-party action is pypa/gh-action-pypi-publish, PyPA's own, which PyPI's
-# trusted-publishing guide names.
+# version is in the comment). The one third-party action added for this is pypa/gh-action-pypi-publish, PyPA's own,
+# which PyPI's trusted-publishing guide names.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: The version to publish, x.y.z. It must equal Cargo.toml, package.json and both plugin manifests, and the release v<version> must be public.
+        description: The version to publish, x.y.z. The GitHub Release v<version> must be public and carry the wheels.
         type: string
         required: true
       dry_run:
-        description: Build and check only. Untick it to also upload the wheels to PyPI.
+        description: Check only. Untick it to also upload the wheels to PyPI.
         type: boolean
         default: true
 
@@ -40,18 +47,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Fails the run before any build when the version is wrong, the release is not public, or PyPI already has the version.
+  # Fails the run before any download when the version is not plain x.y.z, the release is not public, or PyPI already has
+  # the version.
   preflight:
     name: Check the version, the release and PyPI
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Check the version input against the four places that hold it
+      - name: Check the version input
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -60,22 +64,9 @@ jobs:
             echo "::error::The version input must be plain x.y.z, with no v prefix and no pre-release part."
             exit 1
           fi
-          cargo_version="$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"$/\1/p' rust/Cargo.toml | head -n 1)"
-          status=0
-          check() {
-            if [ "$2" != "$VERSION" ]; then
-              echo "::error file=$1::$1 says version '$2', which is not the version input."
-              status=1
-            fi
-          }
-          check rust/Cargo.toml "$cargo_version"
-          check package.json "$(jq -r '.version' package.json)"
-          check .claude-plugin/plugin.json "$(jq -r '.version' .claude-plugin/plugin.json)"
-          check .claude-plugin/marketplace.json "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)"
-          exit "$status"
 
       # The read-only token can't see a draft, so a draft reads as "not found" here, which is the right answer: wheels
-      # are built only from a release that is already public.
+      # are uploaded only from a release that is already public.
       - name: Check that the release v<version> is public
         env:
           GH_TOKEN: ${{ github.token }}
@@ -101,80 +92,91 @@ jobs:
             *) echo "::error::PyPI answered HTTP ${code}, so the version can't be checked."; exit 1 ;;
           esac
 
-  build:
-    name: Build and check the wheels
+  verify:
+    name: Download and check the wheels
     needs: preflight
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # The wheels, SHA256SUMS, and the Linux binary the Linux wheel has to match. Nothing else is taken from the release.
+      - name: Download the wheels from the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: v${{ inputs.version }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir assets
+          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --dir assets \
+            --pattern '*.whl' --pattern SHA256SUMS --pattern "logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl"
+          ls -l assets
+          test "$(find assets -type f | wc -l)" -eq 5
 
-      # The builder's own tests: a refusal for a bad checksum, a mislabeled binary or a bad version still holds.
-      - name: Test the wheel builder
-        run: python3 -I -m unittest discover -s scripts/pypi
+      # SHA256SUMS lists exactly these three wheels, and each file is the listed bytes. The binary the Linux wheel will
+      # be compared with is checked against the same file.
+      - name: Check the wheels against SHA256SUMS
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd assets
+          wheels="logseq_mcp_server-${VERSION}-py3-none-macosx_11_0_arm64.whl logseq_mcp_server-${VERSION}-py3-none-macosx_10_12_x86_64.whl logseq_mcp_server-${VERSION}-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl"
+          binary="logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl"
+          : > wheels.sha256
+          for name in $wheels; do
+            test -f "$name"
+            test "$(grep -c -E -- "^[0-9a-f]{64}  ${name//./\\.}\$" SHA256SUMS)" -eq 1
+            grep -E -- "^[0-9a-f]{64}  ${name//./\\.}\$" SHA256SUMS >> wheels.sha256
+          done
+          test "$(grep -c -E '^[0-9a-f]{64}  logseq_mcp_server-.*\.whl$' SHA256SUMS)" -eq 3
+          sha256sum --check wheels.sha256
+          grep -E -- "^[0-9a-f]{64}  ${binary//./\\.}\$" SHA256SUMS | sha256sum --check -
+          cat wheels.sha256
 
-      - name: Download the release assets
+      # release.yml attested each wheel (ADR-0036). This ties the bytes about to be uploaded to that workflow in this
+      # repository, to the main branch, and to the commit the release is at, so a wheel swapped on the release afterwards
+      # fails, and so does an older attested wheel renamed for this version.
+      - name: Verify the attestation of each wheel
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: v${{ inputs.version }}
         run: |
-          mkdir assets
-          gh release download "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --dir assets \
-            --pattern 'logseq-mcp-server-*' --pattern SHA256SUMS --pattern LICENSE --pattern THIRD-PARTY-NOTICES.txt
-          ls -l assets
-          test "$(find assets -type f | wc -l)" -eq 6
-
-      # Each binary was attested by release.yml (ADR-0035 Decision 2). This ties the bytes about to ship to that
-      # workflow, in this repository, and fails for a binary that someone swapped on the release afterwards.
-      - name: Verify the attestation of each binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-        run: |
-          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-musl; do
-            gh attestation verify "assets/logseq-mcp-server-${VERSION}-${target}" \
+          commit="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG_NAME}" --jq .sha)"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          for wheel in assets/*.whl; do
+            gh attestation verify "$wheel" \
               --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml"
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+              --source-ref refs/heads/main \
+              --source-digest "$commit" \
+              --deny-self-hosted-runners
           done
 
-      # Refuses on a checksum that doesn't match, a binary for the wrong CPU or OS, or a missing file (ADR-0036).
-      - name: Build the wheels
-        env:
-          VERSION: ${{ inputs.version }}
-        run: python3 -I scripts/pypi/build_wheels.py --version "$VERSION" --assets assets --readme pypi/README.md --out dist
-
-      # What an install does, on the one wheel this runner can run: the executable lands on PATH with the release
-      # binary's bytes. The binary itself was gated on each target by release.yml.
+      # What an install does, on the one wheel this runner can run: the executable lands on PATH with the release's Linux
+      # binary, byte for byte. The binary itself was gated on its target by release.yml.
       - name: Install the Linux wheel into a clean environment
         env:
           VERSION: ${{ inputs.version }}
         run: |
           python3 -m venv "${RUNNER_TEMP}/check"
-          "${RUNNER_TEMP}/check/bin/python" -m pip install --no-index --no-deps dist/*musllinux_1_2_x86_64.whl
+          "${RUNNER_TEMP}/check/bin/python" -m pip install --no-index --no-deps assets/*musllinux_1_2_x86_64.whl
           cmp "${RUNNER_TEMP}/check/bin/logseq-mcp-server" "assets/logseq-mcp-server-${VERSION}-x86_64-unknown-linux-musl"
           test -x "${RUNNER_TEMP}/check/bin/logseq-mcp-server"
-
-      # Exactly the three wheels and nothing else, so an unexpected file can't ride along to PyPI.
-      - name: Check the wheel set
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          cd dist
-          test "$(find . -type f | wc -l)" -eq 3
-          test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_11_0_arm64.whl"
-          test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_10_12_x86_64.whl"
-          test -f "logseq_mcp_server-${VERSION}-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl"
-          sha256sum -- *.whl
 
       # On a dry run these are the wheels to inspect by hand (pip install, or unzip -l) before the real run.
       - name: Upload the wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheels
-          path: dist/*.whl
+          path: assets/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+      # The publish job checks the wheels it uploads against these hashes, so a change in transit can't reach PyPI.
+      - name: Upload the checksums of the wheels
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel-checksums
+          path: assets/wheels.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -183,7 +185,7 @@ jobs:
   # publisher the maintainer registers on PyPI). The action also publishes PEP 740 attestations for the files.
   publish:
     name: Upload the wheels to PyPI
-    needs: [preflight, build]
+    needs: [preflight, verify]
     if: github.ref == 'refs/heads/main' && !inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -200,7 +202,14 @@ jobs:
           name: wheels
           path: dist
 
-      - name: Check the wheel set again
+      - name: Download the checksums of the wheels
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wheel-checksums
+          path: checksums
+
+      # The same three files, with the same bytes, that the verify job checked.
+      - name: Check the wheels again
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -209,6 +218,8 @@ jobs:
           test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_11_0_arm64.whl"
           test -f "logseq_mcp_server-${VERSION}-py3-none-macosx_10_12_x86_64.whl"
           test -f "logseq_mcp_server-${VERSION}-py3-none-manylinux_2_17_x86_64.musllinux_1_2_x86_64.whl"
+          test "$(wc -l < ../checksums/wheels.sha256)" -eq 3
+          sha256sum --check ../checksums/wheels.sha256
 
       - name: Upload to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
