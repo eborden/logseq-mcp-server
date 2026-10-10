@@ -8,6 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- The README documents the `uvx logseq-mcp-server` install. The 1.0.0 wheels (macOS arm64 and x86_64, Linux x86_64) are on PyPI, carry the same binary as the GitHub Release, and `uvx` runs them without a Python process beside the server (ADR-0036).
+
 ## [1.0.0] - 2026-10-09
 
 ### Changed (server runtime)
