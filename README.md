@@ -28,7 +28,18 @@ Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 
 ## Install
 
-The server is a Rust binary. It ships as native binaries on GitHub Releases (ADR-0035), which the Claude Code plugin downloads for you, and there is no npm package: the name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`; it would run someone else's package. The first release is not published yet, so for now build it from a clone. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+The server is a Rust binary. Run it from PyPI with `uvx`, let the Claude Code plugin download it from GitHub Releases (ADR-0035), or build it from a clone. There is no npm package: the name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`; it would run someone else's package. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+
+### uvx (PyPI)
+
+```bash
+uvx logseq-mcp-server               # run it without installing
+uv tool install logseq-mcp-server   # or install it
+```
+
+The wheels (ADR-0036) exist for macOS (Apple silicon and Intel) and Linux x86_64, and carry the same binary, byte for byte, as the GitHub Release. Any other platform gets pip's "no matching distribution"; build from a clone there. In an MCP client config the command is `uvx` with the argument `logseq-mcp-server`.
+
+### Build from a clone
 
 ```bash
 git clone https://github.com/eborden/logseq-mcp-server
@@ -39,10 +50,12 @@ cargo build --release --locked        # rust/target/release/logseq-mcp-server
 ### Claude Code
 
 ```bash
+claude mcp add logseq -- uvx logseq-mcp-server
+# or, with a build from a clone:
 claude mcp add logseq -- /absolute/path/to/logseq-mcp-server/rust/target/release/logseq-mcp-server
 ```
 
-Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills and downloads the release binary (once a release is published).
+Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills and downloads the release binary.
 
 ### Claude Desktop
 
@@ -52,11 +65,14 @@ Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Su
 {
   "mcpServers": {
     "logseq": {
-      "command": "/absolute/path/to/logseq-mcp-server/rust/target/release/logseq-mcp-server"
+      "command": "uvx",
+      "args": ["logseq-mcp-server"]
     }
   }
 }
 ```
+
+With a build from a clone, set `command` to the absolute path of `rust/target/release/logseq-mcp-server` and drop `args`.
 
 ## Install as a Claude Code plugin
 
@@ -75,7 +91,6 @@ The plugin starts `scripts/logseq-mcp-server.sh`, a small POSIX `sh` launcher (A
 - **Needs:** `sh`, `curl`, and `shasum` or `sha256sum`. No Node. The first start needs the network (a few MB from `github.com`); a proxy is read from `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`.
 - **Cache:** `~/Library/Caches/logseq-mcp-server/<version>/` on macOS, `~/.cache/logseq-mcp-server/<version>/` elsewhere (`XDG_CACHE_HOME` replaces the parent, and must be an absolute path). It holds the binary, `SHA256SUMS`, `LICENSE` and `THIRD-PARTY-NOTICES.txt`, created readable by you only (0700 and 0600). Because a cached binary is trusted as it sits and is not re-checked, the launcher refuses a cache directory that someone else owns or that group or others can write to. The check follows symlinks and tests the effective user, so it fails closed on purpose in two cases: a `sudo` or root run that keeps your `HOME`, and an NFS mount that maps owners differently. Both refusals name `XDG_CACHE_HOME`; point it at a directory of your own. A start that was killed hard can leave a `.partial.*` directory in it; the next download removes the ones over a day old, and nothing in them is ever run.
 - **Trust limits:** `SHA256SUMS` comes from the same release as the binary, so the check catches a corrupt or truncated download but not a compromised release or account (ADR-0035 Decision 4). The launcher doesn't verify a signature or an attestation; to tie a binary to the workflow run and commit that built it, run `gh attestation verify <binary> --repo eborden/logseq-mcp-server` by hand.
-- **Not released yet:** the first release is cut by the maintainer by hand, so until it is published the launcher stops with a message naming the file it couldn't find. Use the clone build below meanwhile.
 
 Two environment variables, set where the plugin's server starts, change where the binary comes from:
 
