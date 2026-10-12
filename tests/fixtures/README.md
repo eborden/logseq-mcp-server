@@ -65,6 +65,7 @@ against a per-worktree instance (#118, LogSeq 0.10.15).
 | `empty page` | `pages/empty page.md` | **Empty page with a file**: one block with empty content. A file with no bytes is never indexed (the instance waits for it forever), so the file holds a single `-` |
 | `alice`, `bob` | `pages/Alice.md`, `pages/Bob.md` | Pages with a file, a page property (`role`) and **no alias** (the unchanged case in `alias-sets`). The files are capitalized, so `original-name` is `Alice` and `Bob`: lookups by `alice`, `Alice` or `ALICE` all find them |
 | `carol`, `bird watching`, `test data` | none | **Link targets only**: linked from blocks or a property value, with no file and no blocks |
+| `dave` | none | **Absent on purpose**: no page, link, alias or mention anywhere. The routing eval question `find-pages-2` asks which of Alice, Bob, Carol and Dave are missing, so Dave must stay absent (`tests/guards/routing-eval.test.ts` fails if it appears) |
 | `meeting`, `moving`, `planning`, `weekly review` | none | **Tags**: `#meeting`, `#moving`, `#[[weekly review]]` in blocks, `tags:: planning` on `project cascade` (its `:block/tags`) and `topic:: #planning` |
 
 ### Block refs and embeds (`block refs`, `pages/block refs.md`)
