@@ -36,20 +36,19 @@ export const V1_PARAMETER_NAMES = [
 ];
 
 /**
- * The v1 tools, exempt from every rule above until their rename lands (#489 to #495). A rename PR deletes the entry of
- * each tool it renames or merges away, because a name that is no longer in the recorded list is a stale entry and
- * fails the guard. The plan (#500) is done when this is empty and the constant is gone.
+ * The v1 tools that break a rule, exempt until their rename lands (#489 to #495). A rename PR deletes the entry of each
+ * tool it renames or merges away, and of each tool it leaves conforming (`get_page` and `get_block` keep their names):
+ * an entry whose name is gone from the recorded list, or whose tool already passes every rule, fails the guard. The
+ * three v1 tools that conform today (`check_links`, `get_current_context`, `get_graph_info`) have no entry, so the
+ * rules run on them now. The plan (#500) is done when this is empty and the constant is gone.
  */
 export const V1_TOOL_ALLOWANCES: readonly string[] = [
   'logseq_build_context',
-  'logseq_check_links',
   'logseq_get_backlinks',
   'logseq_get_block',
   'logseq_get_concept_evolution',
   'logseq_get_concept_network',
   'logseq_get_context_for_query',
-  'logseq_get_current_context',
-  'logseq_get_graph_info',
   'logseq_get_page',
   'logseq_get_page_outline',
   'logseq_list_pages',
@@ -59,38 +58,52 @@ export const V1_TOOL_ALLOWANCES: readonly string[] = [
   'logseq_search_by_relationship',
 ];
 
-/** Every way `tools` breaks the rules, one sentence each. An empty list means it conforms. */
+/** Every way one tool breaks the three rules, ignoring any allowance. */
+function toolViolations(tool: TaxonomyTool): string[] {
+  const violations: string[] = [];
+
+  const match = NAME_PATTERN.exec(tool.name);
+  if (!match) {
+    violations.push(`${tool.name}: the name must match ${NAME_PATTERN} (logseq_<type>_<object>, type one of get, find, explore, check).`);
+  } else {
+    const verb = TYPE_VERBS[match[1]];
+    const first = (tool.description ?? '').trimStart().split(/\s+/)[0];
+    if (first !== verb) {
+      violations.push(`${tool.name}: the description must open with "${verb}" (its type's verb), not "${first}".`);
+    }
+  }
+
+  for (const parameter of Object.keys(tool.inputSchema?.properties ?? {})) {
+    if (V1_PARAMETER_NAMES.includes(parameter)) {
+      violations.push(`${tool.name}: the parameter ${parameter} is a v1 name. Use the shared vocabulary of ADR-0037.`);
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Every way `tools` breaks the rules, one sentence each. An empty list means it conforms. A tool in `allowances` is
+ * exempt, but an entry must still be needed: one whose tool is gone from the list, or whose tool already passes every
+ * rule, is reported so the rename PR deletes it (the "no stale allowances" pattern of `DESCRIPTION_ALLOWANCES`).
+ */
 export function taxonomyViolations(tools: readonly TaxonomyTool[], allowances: readonly string[]): string[] {
   const violations: string[] = [];
-  const names = new Set(tools.map(tool => tool.name));
+  const byName = new Map(tools.map(tool => [tool.name, tool]));
 
   for (const entry of allowances) {
-    if (!names.has(entry)) {
+    const tool = byName.get(entry);
+    if (!tool) {
       violations.push(
         `V1_TOOL_ALLOWANCES lists ${entry}, which is not in the recorded tool list. Delete the entry (the rename PR that removed the tool does it).`
       );
+    } else if (toolViolations(tool).length === 0) {
+      violations.push(`${entry} already conforms to ADR-0037. Delete its V1_TOOL_ALLOWANCES entry.`);
     }
   }
 
   for (const tool of tools) {
-    if (allowances.includes(tool.name)) continue;
-
-    const match = NAME_PATTERN.exec(tool.name);
-    if (!match) {
-      violations.push(`${tool.name}: the name must match ${NAME_PATTERN} (logseq_<type>_<object>, type one of get, find, explore, check).`);
-    } else {
-      const verb = TYPE_VERBS[match[1]];
-      const first = (tool.description ?? '').trimStart().split(/\s+/)[0];
-      if (first !== verb) {
-        violations.push(`${tool.name}: the description must open with "${verb}" (its type's verb), not "${first}".`);
-      }
-    }
-
-    for (const parameter of Object.keys(tool.inputSchema?.properties ?? {})) {
-      if (V1_PARAMETER_NAMES.includes(parameter)) {
-        violations.push(`${tool.name}: the parameter ${parameter} is a v1 name. Use the shared vocabulary of ADR-0037.`);
-      }
-    }
+    if (!allowances.includes(tool.name)) violations.push(...toolViolations(tool));
   }
 
   return violations;
