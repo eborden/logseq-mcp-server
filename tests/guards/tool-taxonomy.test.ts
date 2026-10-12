@@ -4,6 +4,7 @@ import {
   taxonomyViolations,
   V1_PARAMETER_NAMES,
   V1_TOOL_ALLOWANCES,
+  TYPE_VERBS,
   type TaxonomyTool,
 } from './tool-taxonomy-rules.js';
 
@@ -23,6 +24,13 @@ const recorded = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as TaxonomyTo
 describe('tool taxonomy (ADR-0037)', () => {
   it('holds the recorded tool list to the naming rules, apart from the allowlisted v1 tools', () => {
     expect(taxonomyViolations(recorded, V1_TOOL_ALLOWANCES)).toEqual([]);
+  });
+
+  it('has no entry for a v1 tool that already conforms, so the rules run on it now', () => {
+    for (const name of ['logseq_check_links', 'logseq_get_current_context', 'logseq_get_graph_info']) {
+      expect(V1_TOOL_ALLOWANCES, name).not.toContain(name);
+    }
+    expect(V1_TOOL_ALLOWANCES).toHaveLength(13);
   });
 
   it('lists each allowance once', () => {
@@ -71,10 +79,37 @@ describe('each taxonomy rule can fail', () => {
     expect(violations(tool)).toEqual([expect.stringContaining(`the parameter ${parameter} is a v1 name`)]);
   });
 
+  it.each(Object.entries(TYPE_VERBS))('type %s opens with %s, and no other type\'s verb', (type, verb) => {
+    const tool = (opening: string): TaxonomyTool => ({ ...conforming, name: `logseq_${type}_thing`, description: `${opening} a thing.` });
+    expect(violations(tool(verb))).toEqual([]);
+    for (const other of Object.values(TYPE_VERBS).filter(v => v !== verb)) {
+      expect(violations(tool(other)), `${type} must not accept ${other}`).toEqual([
+        expect.stringContaining(`must open with "${verb}"`),
+      ]);
+    }
+  });
+
   it('fails a stale allowance', () => {
     expect(taxonomyViolations([conforming], ['logseq_get_backlinks'])).toEqual([
       expect.stringContaining('V1_TOOL_ALLOWANCES lists logseq_get_backlinks'),
     ]);
+  });
+
+  it('fails an allowlisted tool that already conforms, so its entry is deleted', () => {
+    expect(violations(conforming, [conforming.name])).toEqual([
+      `${conforming.name} already conforms to ADR-0037. Delete its V1_TOOL_ALLOWANCES entry.`,
+    ]);
+  });
+
+  it('forces out a name that persists once its parameters conform', () => {
+    const getPage = (parameter: string): TaxonomyTool => ({
+      name: 'logseq_get_page',
+      description: 'Get one page.',
+      inputSchema: { properties: { [parameter]: {} } },
+    });
+    expect(violations(getPage('page_name'), ['logseq_get_page'])).toEqual([]);
+    expect(violations(getPage('page'), ['logseq_get_page'])).toEqual([expect.stringContaining('already conforms')]);
+    expect(violations(getPage('page'))).toEqual([]);
   });
 
   it('exempts an allowlisted tool from the name, description and parameter rules', () => {
