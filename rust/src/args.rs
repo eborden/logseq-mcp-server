@@ -242,7 +242,8 @@ enum Kind {
     Scalar,
     /// One of these words
     Choice(Vec<String>),
-    /// A list of strings
+    /// A list of strings. Strings only: `Argument::list` reads every element as a string and its refusals say so, so
+    /// a list of another type of element needs its own kind and its own words before a tool takes one
     List,
 }
 
