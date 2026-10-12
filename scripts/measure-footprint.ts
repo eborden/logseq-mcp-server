@@ -6,7 +6,7 @@
 //
 // It prints aggregates only (median, then min and max over the runs):
 //   - cold start: process spawn to the first `initialize` response
-//   - resident memory: idle after the handshake, and after one logseq_get_page_outline call
+//   - resident memory: idle after the handshake, and after one logseq_get_page call with detail outline
 //   - size: the release binary
 //
 // The server talks to a stub LogSeq (scripts/lib/stub-logseq.ts) on a random local port with a fresh token, through

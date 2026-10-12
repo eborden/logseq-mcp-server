@@ -4,7 +4,7 @@ import { getGraphInfo } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * get_graph_info against the fixture graph. LogSeq names a graph after its folder, so the fixture
+ * get_graph against the fixture graph. LogSeq names a graph after its folder, so the fixture
  * is `graph`, opened from the instance's copy or some checkout's tests/fixtures/graph. Which is not asserted:
  * the path includes the user's home directory, and nothing here prints it.
  */

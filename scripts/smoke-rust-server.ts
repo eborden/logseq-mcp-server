@@ -5,7 +5,7 @@
  *   node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts rust/target/release/logseq-mcp-server
  *
  * It drives the binary over MCP stdio with the SDK client, the way Claude Code does, and calls
- * each of the 16 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
+ * each of the 15 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
  * gets one prompt and lists tools, prompts, resources and resource templates. A few items read the
  * clock (a preset, `last_n`, and the weekly and monthly prompts with no argument) and are checked against
  * today's local date, which a release binary reads from the system: no parity case can check that. It prints one
@@ -23,7 +23,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { connectFixture } from '../tests/integration/helpers/fixture-client.js';
 
-const EXPECTED_TOOLS = 16;
+const EXPECTED_TOOLS = 15;
 
 interface ToolCall {
   name: string;
@@ -51,12 +51,12 @@ const dateRangeOf = (result: Record<string, unknown>): { start?: unknown; end?: 
 
 // Made-up fixture pages and a known fixture block (tests/fixtures/README.md)
 const TOOL_CALLS: ToolCall[] = [
-  { name: 'logseq_get_graph_info', args: {} },
-  { name: 'logseq_get_current_context', args: {} },
+  { name: 'logseq_get_graph', args: {} },
+  { name: 'logseq_get_current', args: {} },
   { name: 'logseq_list_pages', args: { name_contains: 'project', limit: 10 } },
-  { name: 'logseq_get_page', args: { page_name: 'project atlas', include_children: true } },
-  { name: 'logseq_get_page_outline', args: { page_name: 'project atlas' } },
-  { name: 'logseq_get_block', args: { block_uuid: '0088f1a0-0000-4000-8000-000000000001' } },
+  { name: 'logseq_get_page', args: { page: 'project atlas', detail: 'full' } },
+  { name: 'logseq_get_page', label: 'outline', args: { page: 'project atlas', detail: 'outline' } },
+  { name: 'logseq_get_block', args: { uuid: '0088f1a0-0000-4000-8000-000000000001' } },
   { name: 'logseq_get_backlinks', args: { page_name: 'Bob' } },
   { name: 'logseq_search_blocks', args: { query: 'launch checklist', limit: 5 } },
   { name: 'logseq_query_by_property', args: { property_key: 'status', property_value: 'active' } },

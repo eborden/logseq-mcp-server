@@ -29,7 +29,7 @@ describe('Rejected auth token Integration Tests', () => {
   });
 
   it('reports the rejected token as an error that never shows a token', async () => {
-    const result = (await mcp.callTool({ name: 'logseq_get_graph_info', arguments: {} })) as {
+    const result = (await mcp.callTool({ name: 'logseq_get_graph', arguments: {} })) as {
       content: Array<{ text: string }>;
       isError?: boolean;
     };

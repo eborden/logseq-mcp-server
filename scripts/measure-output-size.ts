@@ -83,7 +83,7 @@ async function main() {
     ];
     // These have no slim_results parameter, so slim vs full does not apply. Sizes only.
     const plainCases: Array<[string, string, Args]> = [
-      ['get_page include_children', 'logseq_get_page', { page_name: subject, include_children: true }],
+      ['get_page detail full', 'logseq_get_page', { page: subject, detail: 'full' }],
       ['build_context', 'logseq_build_context', { topic_name: subject }]
     ];
 
@@ -99,11 +99,11 @@ async function main() {
     }
 
     // format: "markdown" (#43) against the default JSON, and compact against full. Bytes only.
-    const outline = await jsonOf(mcp, 'logseq_get_page_outline', { page_name: subject });
+    const outline = await jsonOf(mcp, 'logseq_get_page', { page: subject, detail: 'outline' });
     const pick = (outline.blocks as Array<{ uuid: string; childCount: number }>).find(b => b.childCount > 0) ?? outline.blocks[0];
     const formatCases: Array<[string, string, Args]> = [
-      ['get_page include_children', 'logseq_get_page', { page_name: subject, include_children: true }],
-      ...(pick ? ([['get_block include_children', 'logseq_get_block', { block_uuid: pick.uuid, include_children: true }]] as Array<[string, string, Args]>) : []),
+      ['get_page detail full', 'logseq_get_page', { page: subject, detail: 'full' }],
+      ...(pick ? ([['get_block include_children', 'logseq_get_block', { uuid: pick.uuid, include_children: true }]] as Array<[string, string, Args]>) : []),
       ['build_context', 'logseq_build_context', { topic_name: subject }],
       ['build_context (compact)', 'logseq_build_context', { topic_name: subject, compact: true }],
       ['get_context_for_query', 'logseq_get_context_for_query', { query: `what about [[${subject}]]?` }],
@@ -122,9 +122,9 @@ async function main() {
     ]);
     const biggest = [...sizeRows].sort((a, b) => b[1] - a[1])[0]?.[0];
     if (biggest) {
-      const pageJson = await sizeOf(mcp, 'logseq_get_page', { page_name: biggest, include_children: true });
-      const pageMarkdown = await sizeOf(mcp, 'logseq_get_page', { page_name: biggest, include_children: true, format: 'markdown' });
-      const outlineJson = await sizeOf(mcp, 'logseq_get_page_outline', { page_name: biggest });
+      const pageJson = await sizeOf(mcp, 'logseq_get_page', { page: biggest, detail: 'full' });
+      const pageMarkdown = await sizeOf(mcp, 'logseq_get_page', { page: biggest, detail: 'full', format: 'markdown' });
+      const outlineJson = await sizeOf(mcp, 'logseq_get_page', { page: biggest, detail: 'outline' });
       const contextJson = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest });
       const contextMarkdown = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest, format: 'markdown' });
       const contextCompact = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest, compact: true });

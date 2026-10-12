@@ -83,15 +83,15 @@ export async function getPage(
 ): Promise<Json> {
   return (
     await callTool(client, 'logseq_get_page', {
-      page_name: pageName,
-      include_children: includeChildren,
+      page: pageName,
+      detail: includeChildren ? 'full' : undefined,
       resolve_refs: options?.resolveRefs,
     })
   ).value;
 }
 
 export async function getPageOutline(client: LogseqClient, pageName: string): Promise<Json> {
-  return (await callTool(client, 'logseq_get_page_outline', { page_name: pageName })).value;
+  return (await callTool(client, 'logseq_get_page', { page: pageName, detail: 'outline' })).value;
 }
 
 export async function getBacklinksWithMeta(
@@ -123,7 +123,7 @@ export async function getBlock(
 ): Promise<Json> {
   return (
     await callTool(client, 'logseq_get_block', {
-      block_uuid: blockUuid,
+      uuid: blockUuid,
       include_children: includeChildren,
       resolve_refs: options?.resolveRefs,
     })
@@ -319,11 +319,11 @@ export async function getConceptEvolution(
 }
 
 export async function getGraphInfo(client: LogseqClient): Promise<Json> {
-  return (await callTool(client, 'logseq_get_graph_info', {})).value;
+  return (await callTool(client, 'logseq_get_graph', {})).value;
 }
 
 export async function getCurrentContext(client: LogseqClient): Promise<Json> {
-  return (await callTool(client, 'logseq_get_current_context', {})).value;
+  return (await callTool(client, 'logseq_get_current', {})).value;
 }
 
 export async function listPages(

@@ -25,7 +25,7 @@ Why this exists, in a few sentences. Link what a reader must know:
 the parent issue, the ADR or business rule (ADR-0007, BR-0006), and the
 architecture-foundations.md section numbers it touches.
 
-Example: "get_page_outline reports child counts, but a page with more than 200
+Example: "get_page with detail outline reports child counts, but a page with more than 200
 top-level blocks is cut with a warning and no way to page on (ADR-0011, BR-0006).
 Add an `offset` so a client can fetch the rest. Foundations 4.6 and 4.11."
 -->
