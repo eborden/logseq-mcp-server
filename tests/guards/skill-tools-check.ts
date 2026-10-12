@@ -236,7 +236,8 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
           }
         }
         for (const m of rest.matchAll(bareName)) {
-          if (!isTool(m[1]) && !inPath(rest, m.index, m[1].length, former)) bad.push(m[1]);
+          // One report per name per line: a bare name is often listed twice in a row of a table or a sentence.
+          if (!isTool(m[1]) && !bad.includes(m[1]) && !inPath(rest, m.index, m[1].length, former)) bad.push(m[1]);
         }
       }
       if (doc && marker) {
@@ -247,7 +248,7 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
           else if (!bad.includes(name)) out.push(`${path}:${lineNo}: "${name}" is not named on this line, so remove it from the history comment`);
         }
       }
-      for (const token of new Set(bad)) {
+      for (const token of bad) {
         if (named.includes(token)) continue;
         // A bare name is read as the tool with the prefix added, so the message says which tool is missing.
         const how = token.startsWith('logseq_') ? '' : `, as logseq_${token} (it is written without the prefix)`;

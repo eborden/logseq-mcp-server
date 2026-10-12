@@ -268,6 +268,11 @@ describe('the bare-name rule can fail (#510 self-test)', () => {
     expect(run('`get_widget` then `get_widget` again.\n')).toEqual([stale(1, 'get_widget')]);
   });
 
+  it('keeps the report of a repeated prefixed name as it was: once per occurrence', () => {
+    const line = 'doc.md:1: "logseq_get_widget" is not a tool in tool-list.json';
+    expect(run('`logseq_get_widget` and `logseq_get_widget`.\n')).toEqual([line, line]);
+  });
+
   it('skips a name inside a path', () => {
     expect(run('See `rust/src/tools/get_widget/mod.rs` and get_widget/.\n')).toEqual([]);
   });
