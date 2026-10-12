@@ -69,30 +69,67 @@ describe('tests/fixtures/routing-eval/questions.json', () => {
     }
   });
 
-  it('keeps the ground-truth questions exactly as ADR-0037 settles them, each accepting one type only', () => {
-    // The pin: widening a question's accepted types, changing its expected type, or dropping the mark fails here (#511).
-    // find-boundary-1 is a list of hits (find). The two explore ones read like a find but ask what something is or how it connects.
-    // The wording is pinned too: a reworded ground-truth question is a different question, so it takes an edit here and a new baseline run.
-    const pinned: Record<string, { type: ToolType; intent: string; text: string }> = {
-      'find-boundary-1': { type: 'find', intent: 'find-boundary', text: 'Where does project atlas come up in my notes?' },
-      'explore-boundary-1': { type: 'explore', intent: 'explore-boundary', text: 'Where does Bob stand on project atlas?' },
-      'explore-boundary-2': { type: 'explore', intent: 'explore-boundary', text: 'Where does project borealis stand, going by my notes?' },
-    };
-    const marked = questions.filter(question => question.ground_truth === true);
-    expect(marked.map(question => question.id).sort()).toEqual(Object.keys(pinned).sort());
-    for (const question of marked) {
-      expect(question.expected_type, question.id).toBe(pinned[question.id].type);
-      expect(question.question, question.id).toBe(pinned[question.id].text);
-      expect(question.ground_truth_reason, question.id).toContain('ADR-0037');
-      expect(question.intent, question.id).toBe(pinned[question.id].intent);
+  // The pin: widening a question's accepted types or tools, changing its expected type or intent, dropping the mark, or rewording the question
+  // or its reason fails (#511, #514). find-boundary-1 is a list of hits (find). The two explore boundary ones read like a find but ask what something
+  // is or how it connects. explore-topic-4 is a backlinks ask, which ADR-0037 folds into explore (maintainer decision, #514). A reworded ground-truth
+  // question is a different question, so it takes an edit here and a new baseline run.
+  const pinned: Record<string, { type: ToolType; intent: string; text: string; reason: string; v1: string[]; v2: string[] }> = {
+    'find-boundary-1': { type: 'find', intent: 'find-boundary', text: 'Where does project atlas come up in my notes?', reason: "ADR-0037's boundary test: the answer is a list of hits", v1: ['logseq_search_blocks'], v2: ['logseq_find_blocks'] },
+    'explore-boundary-1': { type: 'explore', intent: 'explore-boundary', text: 'Where does Bob stand on project atlas?', reason: "ADR-0037's boundary test: the answer is what Bob's part", v1: ['logseq_build_context', 'logseq_get_context_for_query'], v2: ['logseq_explore_context'] },
+    'explore-boundary-2': { type: 'explore', intent: 'explore-boundary', text: 'Where does project borealis stand, going by my notes?', reason: "ADR-0037's boundary test: the answer is where project borealis stands", v1: ['logseq_build_context', 'logseq_get_context_for_query'], v2: ['logseq_explore_context'] },
+    'explore-topic-4': { type: 'explore', intent: 'topic', text: 'What links to Bob?', reason: 'ADR-0037 folds get_backlinks into explore_context', v1: ['logseq_get_backlinks'], v2: ['logseq_explore_context'] },
+  };
+
+  /** What is wrong with the ground-truth questions of a list, as messages; empty when they are exactly the pinned ones. */
+  function groundTruthProblems(list: readonly Question[]): string[] {
+    const problems: string[] = [];
+    const marked = list.filter(question => question.ground_truth === true).map(question => question.id).sort();
+    if (JSON.stringify(marked) !== JSON.stringify(Object.keys(pinned).sort())) problems.push(`marked: ${marked.join(', ')}`);
+    for (const [id, pin] of Object.entries(pinned)) {
+      const question = list.find(candidate => candidate.id === id);
+      if (question === undefined) {
+        problems.push(`${id} is gone`);
+        continue;
+      }
+      const reason = question.ground_truth_reason ?? '';
+      if (question.expected_type !== pin.type) problems.push(`${id} expected_type`);
+      if (question.intent !== pin.intent) problems.push(`${id} intent`);
+      if (question.question !== pin.text) problems.push(`${id} text`);
+      if (!reason.includes(pin.reason) || !reason.includes('ADR-0037')) problems.push(`${id} reason`);
+      if (JSON.stringify(question.v1_tools) !== JSON.stringify(pin.v1)) problems.push(`${id} v1_tools`);
+      if (JSON.stringify(question.v2_tools) !== JSON.stringify(pin.v2)) problems.push(`${id} v2_tools`);
       for (const [surface, tools] of [['v1', question.v1_tools], ['v2', question.v2_tools]] as const) {
         for (const tool of tools) {
           // No tool of another type, and none typed by mode (search_by_relationship), so the accepted type is exactly one
-          expect(SURFACE_TOOL_TYPES[surface][tool], `${question.id} ${tool}`).toBe(pinned[question.id].type);
-          expect(tool, question.id).not.toBe('logseq_search_by_relationship');
+          if (SURFACE_TOOL_TYPES[surface][tool] !== pin.type || tool === 'logseq_search_by_relationship') problems.push(`${id} ${tool}`);
         }
       }
     }
+    return problems;
+  }
+
+  it('keeps the ground-truth questions exactly as ADR-0037 settles them, each accepting one type only', () => {
+    expect(groundTruthProblems(questions)).toEqual([]);
+  });
+
+  it('fails the ground-truth pins when a question is widened, retyped, unmarked, reworded or loses its reason', () => {
+    const change = (id: string, edit: (question: Question) => Question): Question[] => questions.map(question => (question.id === id ? edit(question) : question));
+    for (const id of Object.keys(pinned)) {
+      const otherType = pinned[id].type === 'find' ? 'logseq_build_context' : 'logseq_search_blocks';
+      const mutations: Record<string, Question[]> = {
+        widened: change(id, question => ({ ...question, v1_tools: [...question.v1_tools, otherType] })),
+        widenedV2: change(id, question => ({ ...question, v2_tools: [...question.v2_tools, 'logseq_find_pages'] })),
+        modeTyped: change(id, question => ({ ...question, v1_tools: [...question.v1_tools, 'logseq_search_by_relationship'] })),
+        retyped: change(id, question => ({ ...question, expected_type: pinned[id].type === 'find' ? 'explore' : 'find' })),
+        reintent: change(id, question => ({ ...question, intent: `${question.intent}-x` })),
+        unmarked: change(id, question => ({ ...question, ground_truth: undefined })),
+        reworded: change(id, question => ({ ...question, question: `${question.question} Please.` })),
+        noReason: change(id, question => ({ ...question, ground_truth_reason: 'ADR-0037' })),
+      };
+      for (const [name, mutated] of Object.entries(mutations)) expect(groundTruthProblems(mutated), `${id} ${name}`).not.toEqual([]);
+    }
+    // A fifth marked question is a change too
+    expect(groundTruthProblems(questions.map(question => (question.id === 'get-page-1' ? { ...question, ground_truth: true as const } : question)))).not.toEqual([]);
   });
 
   it('rejects a ground-truth question that widens its accepted types or leaves out its reason', () => {
