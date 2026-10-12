@@ -11,9 +11,15 @@ import { join } from 'path';
 export type Schema = {
   type?: string | string[];
   enum?: unknown[];
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
   anyOf?: Schema[];
   properties?: Record<string, Schema>;
   required?: string[];
+  /** Any other keyword: schemaMismatch reports the ones it cannot check. */
+  [keyword: string]: unknown;
 };
 export type RecordedTool = { name: string; inputSchema?: Schema };
 export type SkillFile = { path: string; text: string };
@@ -27,8 +33,15 @@ const EXAMPLE_INFO = /^json\s+tool=(\S+)\s*$/;
 
 const tokensOf = (line: string): string[] => [...line.matchAll(TOOL_TOKEN)].map(m => m[1]);
 
+// Keywords schemaMismatch checks, and the ones that say nothing about a value. Any other keyword is reported, so a
+// constraint added to a recorded schema later cannot pass unchecked.
+const CHECKED_KEYWORDS = ['type', 'enum', 'anyOf', 'minimum', 'maximum', 'minLength', 'maxLength'];
+const IGNORED_KEYWORDS = ['description', 'default', 'title', 'format', '$schema'];
+
 /** Why `value` doesn't match `schema`, or null. Supports what the recorded schemas use; anything else is reported. */
 export function schemaMismatch(value: unknown, schema: Schema): string | null {
+  const unknown = Object.keys(schema).filter(k => !CHECKED_KEYWORDS.includes(k) && !IGNORED_KEYWORDS.includes(k));
+  if (unknown.length > 0) return `the schema uses ${unknown.map(k => `"${k}"`).join(', ')}, which this guard cannot check`;
   if (schema.anyOf) {
     const reasons = schema.anyOf.map(s => schemaMismatch(value, s));
     return reasons.some(r => r === null) ? null : `matches none of the allowed types (${reasons.join('; ')})`;
@@ -57,6 +70,18 @@ export function schemaMismatch(value: unknown, schema: Schema): string | null {
   if (!typeOk) return `expected ${types.join(' or ')}, got ${value === null ? 'null' : typeof value}`;
   if (schema.enum && !schema.enum.includes(value)) {
     return `${JSON.stringify(value)} is not one of ${schema.enum.map(v => JSON.stringify(v)).join(', ')}`;
+  }
+  if (typeof value === 'number') {
+    if (schema.minimum !== undefined && value < schema.minimum) return `${value} is below the minimum of ${schema.minimum}`;
+    if (schema.maximum !== undefined && value > schema.maximum) return `${value} is above the maximum of ${schema.maximum}`;
+  }
+  if (typeof value === 'string') {
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      return `the string has ${value.length} characters, below the minLength of ${schema.minLength}`;
+    }
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+      return `the string has ${value.length} characters, above the maxLength of ${schema.maxLength}`;
+    }
   }
   return null;
 }
