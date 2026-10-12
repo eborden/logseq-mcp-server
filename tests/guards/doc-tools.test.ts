@@ -55,8 +55,11 @@ const NON_TOOL_TOKENS: Readonly<Record<string, string>> = {
   // The wheel's file name, `logseq_mcp_server-<version>-py3-none-<platform>.whl` (README, release steps).
   logseq_mcp_server: 'the PyPI wheel file name, not a tool',
   // The glob `mcp__plugin_logseq_logseq__logseq_*` (README). The `*` leaves no tool name after the host prefix, so the
-  // pattern reads the host prefix and the bare `logseq_` together.
-  logseq_logseq__logseq_: 'a host-prefix glob that ends in `*`, so it names no tool',
+  // pattern cannot read it as prefix plus name. It falls back to a match that starts inside `plugin_logseq_...` and
+  // ends at the `*`, which is why the key looks odd. A different host-prefix glob in another doc (for example
+  // `mcp__logseq__logseq_*`, which yields `logseq__logseq_`) needs its own odd-looking entry here. Entries apply to
+  // every doc in LIVE_DOCS, not per file.
+  logseq_logseq__logseq_: 'the README glob `mcp__plugin_logseq_logseq__logseq_*`, read as one token because it ends in `*`; names no tool',
 };
 
 const read = (path: string) => ({ path, text: readFileSync(fileURLToPath(new URL(path, ROOT)), 'utf-8') });
