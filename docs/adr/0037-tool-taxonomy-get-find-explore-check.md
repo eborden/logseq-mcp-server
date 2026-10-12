@@ -80,7 +80,7 @@ A future tool must fit exactly one of the four types, or it needs a new ADR.
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-12
 
