@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
+import {
+  markdownFiles,
+  schemaMismatch,
+  skillViolations,
+  type CheckOptions,
+  type RecordedTool,
+} from './skill-tools-check.js';
 
 /**
  * The skills name only real tools, and their JSON examples validate against the tool's inputSchema (#486, part of #500).
@@ -13,7 +20,7 @@ import { fileURLToPath } from 'url';
  * move in the same PR. Over every .md file under skills/logseq-skills/:
  *   1. every `logseq_[a-z_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
  *      `logseq_x`;
- *   2. every recorded tool has a section heading in the tool reference (TOOL_REFERENCE_PATH);
+ *   2. every recorded tool has a section heading in the tool reference (TOOL_REFERENCE_PATHS);
  *   3. every fenced block whose info string is `json tool=logseq_<name>` parses as a JSON object of arguments and
  *      validates against that tool's inputSchema: required properties present, no property outside `properties`,
  *      and primitive types and enums matched. The validator is hand-rolled (foundations 4.11, no new dependency);
@@ -29,200 +36,16 @@ const SKILLS_DIR = fileURLToPath(new URL('../../skills/logseq-skills', import.me
 const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
 
 /** The skill's tool reference, relative to SKILLS_DIR. A constant so #497 can split the file by type. */
-export const TOOL_REFERENCE_PATH = 'references/mcp-tools-reference.md';
+const TOOL_REFERENCE_PATHS: readonly string[] = ['references/mcp-tools-reference.md'];
 
 /** The minimum number of `json tool=<name>` examples per tool. 0 until #497 raises it to 2. */
-export const MIN_EXAMPLES_PER_TOOL = 0;
+const MIN_EXAMPLES_PER_TOOL = 0;
 
 /**
  * Tools the tool reference has no heading for on main (it notes `logseq_get_graph_info` in prose only). Skill edits
  * are out of scope for #486 (ADR-0024); the section lands with the skills rewrite (#497), which deletes this entry.
  */
-export const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph_info'];
-
-type Schema = {
-  type?: string | string[];
-  enum?: unknown[];
-  anyOf?: Schema[];
-  properties?: Record<string, Schema>;
-  required?: string[];
-};
-type RecordedTool = { name: string; inputSchema?: Schema };
-type SkillFile = { path: string; text: string };
-
-// An optional host prefix (`mcp__logseq__`, `mcp__plugin_logseq_logseq__`) and then the bare tool name. The prefix is
-// matched lazily up to the first `__logseq_`, so it is never read as part of the name.
-const TOOL_TOKEN = /(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z_]+)/g;
-const HEADING = /^#{1,6}\s+(.*)$/;
-const FENCE = /^\s*```(.*)$/;
-const EXAMPLE_INFO = /^json\s+tool=(\S+)\s*$/;
-
-const tokensOf = (line: string): string[] => [...line.matchAll(TOOL_TOKEN)].map(m => m[1]);
-
-/** Why `value` doesn't match `schema`, or null. Supports what the recorded schemas use; anything else is reported. */
-export function schemaMismatch(value: unknown, schema: Schema): string | null {
-  if (schema.anyOf) {
-    const reasons = schema.anyOf.map(s => schemaMismatch(value, s));
-    return reasons.some(r => r === null) ? null : `matches none of the allowed types (${reasons.join('; ')})`;
-  }
-  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
-  if (types.length === 0) return 'the schema has no type, which this guard cannot check';
-  const typeOk = types.some(t => {
-    switch (t) {
-      case 'string':
-        return typeof value === 'string';
-      case 'integer':
-        return typeof value === 'number' && Number.isInteger(value);
-      case 'number':
-        return typeof value === 'number';
-      case 'boolean':
-        return typeof value === 'boolean';
-      case 'null':
-        return value === null;
-      default:
-        return false;
-    }
-  });
-  if (!types.every(t => ['string', 'integer', 'number', 'boolean', 'null'].includes(t))) {
-    return `the schema type ${JSON.stringify(schema.type)} is not a primitive, which this guard cannot check`;
-  }
-  if (!typeOk) return `expected ${types.join(' or ')}, got ${value === null ? 'null' : typeof value}`;
-  if (schema.enum && !schema.enum.includes(value)) {
-    return `${JSON.stringify(value)} is not one of ${schema.enum.map(v => JSON.stringify(v)).join(', ')}`;
-  }
-  return null;
-}
-
-/** Violations for one `json tool=<name>` example. `line` is the line of the opening fence. */
-function exampleViolations(file: string, line: number, body: string[], tool: RecordedTool): string[] {
-  const where = (key?: string): string => {
-    const offset = key === undefined ? -1 : body.findIndex(l => l.includes(JSON.stringify(key)));
-    return `${file}:${offset === -1 ? line : line + 1 + offset}`;
-  };
-  let args: unknown;
-  try {
-    args = JSON.parse(body.join('\n'));
-  } catch (e) {
-    return [`${where()}: the ${tool.name} example is not valid JSON (${(e as Error).message})`];
-  }
-  if (typeof args !== 'object' || args === null || Array.isArray(args)) {
-    return [`${where()}: the ${tool.name} example must be a JSON object of arguments`];
-  }
-  const schema = tool.inputSchema ?? {};
-  const properties = schema.properties ?? {};
-  const out: string[] = [];
-  for (const key of schema.required ?? []) {
-    if (!(key in args)) out.push(`${where()}: the ${tool.name} example is missing the required argument "${key}"`);
-  }
-  for (const [key, value] of Object.entries(args)) {
-    if (!(key in properties)) {
-      out.push(`${where(key)}: the ${tool.name} example has an argument "${key}" that is not in its inputSchema`);
-      continue;
-    }
-    const why = schemaMismatch(value, properties[key]);
-    if (why) out.push(`${where(key)}: the ${tool.name} argument "${key}" is wrong: ${why}`);
-  }
-  return out;
-}
-
-export type CheckOptions = {
-  referencePath: string;
-  minExamples: number;
-  missingSectionAllowances: readonly string[];
-};
-
-/** Every violation of the four rules over `files`, each as `file:line: message`. Empty when the skills are clean. */
-export function skillViolations(files: SkillFile[], tools: RecordedTool[], options: CheckOptions): string[] {
-  const known = new Map(tools.map(t => [t.name, t]));
-  const out: string[] = [];
-  const examples = new Map<string, number>();
-  const sections = new Set<string>();
-
-  for (const { path, text } of files) {
-    const lines = text.split('\n');
-    let inFence = false;
-    for (let i = 0; i < lines.length; i++) {
-      const lineNo = i + 1;
-      const line = lines[i];
-
-      for (const token of tokensOf(line)) {
-        if (!known.has(token)) {
-          out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json`);
-        }
-      }
-
-      if (path === options.referencePath && !inFence) {
-        const heading = HEADING.exec(line);
-        if (heading) for (const token of tokensOf(heading[1])) sections.add(token);
-      }
-
-      const fence = FENCE.exec(line);
-      if (!fence) continue;
-      if (inFence) {
-        inFence = false;
-        continue;
-      }
-      inFence = true;
-      const info = fence[1].trim();
-      if (!/^json\b/.test(info) || !/\btool=/.test(info)) continue;
-      const example = EXAMPLE_INFO.exec(info);
-      if (!example) {
-        out.push(`${path}:${lineNo}: the info string "${info}" must be exactly "json tool=logseq_<name>"`);
-        continue;
-      }
-      // Find the closing fence of this block.
-      const body: string[] = [];
-      let j = i + 1;
-      while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) body.push(lines[j++]);
-      if (j >= lines.length) {
-        out.push(`${path}:${lineNo}: the ${example[1]} example has no closing fence`);
-        continue;
-      }
-      const [token] = tokensOf(example[1]);
-      const tool = token && known.get(token);
-      if (!tool) {
-        // A well-formed but unknown name was reported by the token rule when the info string line was scanned.
-        if (!token) out.push(`${path}:${lineNo}: tool=${example[1]} is not a logseq_ tool name`);
-      } else {
-        examples.set(tool.name, (examples.get(tool.name) ?? 0) + 1);
-        out.push(...exampleViolations(path, lineNo, body, tool));
-      }
-      // Skip the body and the closing fence: they are not scanned for fences again, but they are scanned for tokens.
-      for (let k = i + 1; k <= j; k++) {
-        for (const t of tokensOf(lines[k])) {
-          if (!known.has(t)) out.push(`${path}:${k + 1}: "${t}" is not a tool in tool-list.json`);
-        }
-      }
-      i = j;
-      inFence = false;
-    }
-  }
-
-  for (const tool of tools) {
-    if (!sections.has(tool.name) && !options.missingSectionAllowances.includes(tool.name)) {
-      out.push(`${options.referencePath}: no section heading for ${tool.name}`);
-    }
-    if (sections.has(tool.name) && options.missingSectionAllowances.includes(tool.name)) {
-      out.push(`${options.referencePath}: ${tool.name} now has a heading, so delete it from MISSING_SECTION_ALLOWANCES`);
-    }
-    const count = examples.get(tool.name) ?? 0;
-    if (count < options.minExamples) {
-      out.push(`${tool.name} has ${count} "json tool=${tool.name}" examples, the minimum is ${options.minExamples}`);
-    }
-  }
-  for (const name of options.missingSectionAllowances) {
-    if (!known.has(name)) out.push(`MISSING_SECTION_ALLOWANCES names "${name}", which is not a tool in tool-list.json`);
-  }
-  return out;
-}
-
-function markdownFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) return markdownFiles(full);
-    return entry.name.endsWith('.md') ? [full] : [];
-  });
-}
+const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph_info'];
 
 describe('the skills name only real tools (#486)', () => {
   const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];
@@ -230,14 +53,14 @@ describe('the skills name only real tools (#486)', () => {
     .sort()
     .map(full => ({ path: relative(SKILLS_DIR, full), text: readFileSync(full, 'utf-8') }));
   const real: CheckOptions = {
-    referencePath: TOOL_REFERENCE_PATH,
+    referencePaths: TOOL_REFERENCE_PATHS,
     minExamples: MIN_EXAMPLES_PER_TOOL,
     missingSectionAllowances: MISSING_SECTION_ALLOWANCES,
   };
 
   it('finds the skill files, the tool reference and the recorded tools', () => {
     expect(files.length).toBeGreaterThan(0);
-    expect(files.map(f => f.path)).toContain(TOOL_REFERENCE_PATH);
+    for (const p of TOOL_REFERENCE_PATHS) expect(files.map(f => f.path)).toContain(p);
     expect(tools.length).toBeGreaterThan(0);
   });
 
@@ -271,7 +94,7 @@ describe('the skills guard can fail (#486 self-test)', () => {
     },
     { name: 'logseq_get_other', inputSchema: { type: 'object', properties: {} } },
   ];
-  const options: CheckOptions = { referencePath: 'ref.md', minExamples: 0, missingSectionAllowances: [] };
+  const options: CheckOptions = { referencePaths: ['ref.md'], minExamples: 0, missingSectionAllowances: [] };
   const reference = '### logseq_get_thing\n\n### logseq_get_other\n';
   const example = (json: string, info = 'json tool=logseq_get_thing'): string => '```' + info + '\n' + json + '\n```\n';
   const run = (text: string, opts: Partial<CheckOptions> = {}) =>
