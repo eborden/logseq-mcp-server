@@ -143,9 +143,15 @@ export type CheckOptions = {
 export type DocOptions = {
   /** Tokens that match `logseq_[a-z0-9_]+` and are not tools (a wheel name, a glob), each with the reason. */
   nonToolTokens: Readonly<Record<string, string>>;
-  /** A line holding this text may name a tool that no longer exists: a "was `x` before v2" note. */
+  /**
+   * The keyword of the history comment, `<!-- <keyword> logseq_old_name -->`. The comment names the tool names it
+   * excuses on its own line (a "was `x` before v2" note) and nothing else, so a typo next to it is still caught.
+   */
   historyMarker: string;
 };
+
+const markerPattern = (keyword: string): RegExp =>
+  new RegExp(`<!--\\s*${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}((?:\\s+[A-Za-z0-9_]+)*)\\s*-->`);
 
 type Scan = { out: string[]; examples: Map<string, number>; sections: Set<string>; usedNonTool: Set<string> };
 
@@ -159,20 +165,29 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
   for (const { path, text } of files) {
     // A file saved with CRLF endings would leave a `\r` on every line, which defeats the fence and heading patterns.
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
-    // Unknown names on one line. A non-tool token is skipped (and counted as used); a history marker excuses the rest
-    // of the line, and a marker on a line with nothing to excuse is itself an error, so a stale one cannot linger.
+    // Unknown names on one line. A non-tool token is skipped (and counted as used). A history comment names the unknown
+    // tool names it excuses; only those are skipped. A comment with no name, a name that is a real tool and a name that
+    // is not on the line (outside the comment) are errors, so a stale marker cannot linger.
     const checkTokens = (line: string, lineNo: number): void => {
+      const marker = doc ? markerPattern(doc.historyMarker).exec(line) : null;
+      const named = marker ? marker[1].split(/\s+/).filter(n => n !== '') : [];
       const bad: string[] = [];
-      for (const token of tokensOf(line)) {
+      for (const token of tokensOf(marker ? line.replace(marker[0], '') : line)) {
         if (known.has(token)) continue;
         if (doc && token in doc.nonToolTokens) usedNonTool.add(token);
         else bad.push(token);
       }
-      if (doc && line.includes(doc.historyMarker)) {
-        if (bad.length === 0) out.push(`${path}:${lineNo}: "${doc.historyMarker}" is on a line that names no unknown tool, so remove it`);
-        return;
+      if (doc && marker) {
+        const comment = `<!-- ${doc.historyMarker} logseq_old_name -->`;
+        if (named.length === 0) out.push(`${path}:${lineNo}: the history comment must name the tool names it excuses, as ${comment}`);
+        for (const name of named) {
+          if (known.has(name)) out.push(`${path}:${lineNo}: "${name}" is a tool in tool-list.json, so remove it from the history comment`);
+          else if (!bad.includes(name)) out.push(`${path}:${lineNo}: "${name}" is not named on this line, so remove it from the history comment`);
+        }
       }
-      for (const token of bad) out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json`);
+      for (const token of bad) {
+        if (!named.includes(token)) out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json`);
+      }
     };
     let open: Fence | null = null;
     for (let i = 0; i < lines.length; i++) {
