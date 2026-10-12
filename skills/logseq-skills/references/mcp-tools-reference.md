@@ -185,34 +185,41 @@ logseq_query_by_property("scheduled", "*")  # All scheduled items
 
 ---
 
-### logseq_list_pages
+### logseq_find_pages
 
-List non-journal pages, A-Z, to discover graph vocabulary. Each page carries its aliases. A large graph's list comes in pages.
+Find non-journal pages, A-Z, to discover graph vocabulary, to check which names exist, or to find pages by a page property. Each page carries its aliases. A large graph's list comes in pages. The filters AND together.
 
 **Parameters:**
-- `name_contains` (optional): Filter pages whose name or alias contains this text (case-insensitive). The page comes back whole, with all its aliases, so searching an alias finds its page
+- `text` (optional): Filter pages whose name or alias contains this text (case-insensitive). The page comes back whole, with all its aliases, so searching an alias finds its page
+- `names` (optional): 1 to 50 page names or aliases, each matched exactly (ignoring case), in one call whatever the number. Each name is answered with its page, or with `null` and the closest names. Journals are not pages of this tool
+- `property` and `value` (optional, together): Keep the pages whose page-level property holds the value. The key is as stored (`created-by`) or camelCase (`createdBy`); the value is an exact string (a number or boolean as its text: `3`, `true`); a multi-value property matches on any one of its values. Block properties are not matched (use `query_by_property`)
 - `limit` (optional): Maximum pages per call (default: 200, max: 1000). Aliases take no slots
 - `offset` (optional): Matching pages to skip, in name order, to fetch the next page (default: 0)
 
 A server that doesn't page the list ignores `limit` and `offset` and returns every page.
 
 **Returns:**
+- `names`: present only when `names` was sent. One entry per name, in the order sent: `{ name, page }` with the page's own name, or `page: null` with `suggestions` (the closest page names) for a name no page has, or `candidates` (and `candidateCount` past ten) when several pages declare that alias. It answers against every non-journal page, whatever the other filters keep, so a name whose page another filter dropped still shows its page
 - `pages`: Array of `{ name, aliases? }` sorted by `name`. `aliases` is the page's other names (original casing, sorted) and is left off when there are none. An alias is not a page of its own and is never listed alone, so a name declared by two pages shows under both
 - `total`: Count of all matching pages (aliases not counted), including any not returned in this call
-- `hasMore`, `warnings`: present only when something is missing. `pages_truncated` (with `hasMore: true`) means the list was cut. Its message says the rest can be paged through with `offset`, and `howToFetchAll` leads with the `offset` of the next page ("Set offset to 200 for the next page."), then offers raising `limit` as the alternative (with the large-result note when that raise passes about 800 pages, near the host's limit), so follow the offset. `pages_unavailable` (with `pages: []`, `total: 0`, `hasMore: false`) means LogSeq sent no page list: the list is unknown, not empty
+- `hasMore`, `warnings`: present only when something is missing. `pages_truncated` (with `hasMore: true`) means the list was cut. Its message says the rest can be paged through with `offset`, and `howToFetchAll` leads with the `offset` of the next page ("Set offset to 200 for the next page."), then offers raising `limit` as the alternative (with the large-result note when that raise passes about 800 pages, near the host's limit), so follow the offset. `pages_unavailable` (with `pages: []`, `total: 0`, `hasMore: false`) means LogSeq sent no page list: the list is unknown, not empty, and no name is answered
 
-**Context cost:** ~6-10 tokens per page: ~1.5-2k tokens for a 200-page call, ~6-10k for a 1000-page call. Use `name_contains` when you only need a few
+**Context cost:** ~6-10 tokens per page: ~1.5-2k tokens for a 200-page call, ~6-10k for a 1000-page call. Use `text`, `names` or `property` when you only need a few
 
 **Use when:**
 - Starting a new conversation about the user's knowledge graph
 - Search queries are returning empty results (vocabulary mismatch)
 - User asks "what pages do I have about X?"
 - You need to discover what topics/concepts exist before searching
+- You need to know which of several names exist (`names`)
+- You need the pages that carry a page property (`property` and `value`), such as `vendor:: acme`
 
 **Example:**
 ```
-logseq_list_pages(limit=1000)  # First 1000 non-journal pages; while hasMore, repeat with the offset the warning names
-logseq_list_pages(name_contains="project")  # Filter to pages containing "project"
+logseq_find_pages(limit=1000)  # First 1000 non-journal pages; while hasMore, repeat with the offset the warning names
+logseq_find_pages(text="project")  # Filter to pages containing "project"
+logseq_find_pages(names=["Alice", "Bob", "Dave"])  # Which of these names are pages? Each is answered with its page or null
+logseq_find_pages(property="status", value="active")  # Pages whose page property status is active
 ```
 
 **Why critical:** Prevents wasted searches for compound phrases that don't match the graph's actual vocabulary. Call this FIRST when you don't know what pages exist.
@@ -504,7 +511,7 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 
 | Use Case | Best Tool(s) |
 |----------|-------------|
-| "What pages do I have?" | `list_pages` |
+| "What pages do I have?" | `find_pages` |
 | "What do I know about X?" | `build_context` or `get_context_for_query` |
 | "Show me everything connected to X" | `get_concept_network` + `get_backlinks` |
 | "How did X evolve over time?" | `get_concept_evolution` |
@@ -601,7 +608,7 @@ query_by_property (for precise matches)
 | `get_concept_evolution` | `max_entries` (100, 500) | `entries_truncated` | the result object itself; `totals.mentions` only with a cut | oldest first, undated mentions last |
 | `query_by_date_range` | `max_blocks` (200, 1000) | `blocks_truncated` | the result object itself; `totals.blocks`, `totals.days` | oldest day first |
 
-The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `list_pages` with its `offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 backlink references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `search_blocks` and `query_by_property` scale the block estimate when a hit comes back larger: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `build_context`, `get_concept_evolution` and `search_by_relationship` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved.
+The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `find_pages` with its `offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 backlink references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `search_blocks` and `query_by_property` scale the block estimate when a hit comes back larger: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `build_context`, `get_concept_evolution` and `search_by_relationship` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved.
 
 **Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). On short one-line blocks, `query_by_property` reaches that near `limit=300`, `search_blocks` near `limit=330`, `search_by_relationship` near `limit=200` (rounded down) and `get_backlinks` near 250 linking blocks across all pages. These are floors: real blocks are larger. A `limit` at the maximum is usually too big to be shown, so narrow the query or lower the cap rather than raising it.
 

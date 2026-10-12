@@ -19,11 +19,11 @@ LogSeq matches `[[X]]` to a page by name, **case-insensitively but not fuzzily**
 
 ### Which pages exist
 
-`logseq_list_pages` is the authority. The filesystem is not.
+`logseq_find_pages` is the authority. The filesystem is not.
 
 A page that is referenced but never given content exists in LogSeq's database with **no file on disk**. One real graph carries 621 pages against 149 page files, so more than three quarters of its pages are file-less. Deciding a page does not exist because `pages/<Title>.md` is missing will wrongly skip most of the graph's vocabulary, and the error is invisible: it looks like a conservative decision not to link.
 
-Page through `list_pages` until you hold every page: `limit: 1000`, then the `offset` the warning names while `hasMore` is true. Stop on `pages_unavailable`, and restart once if `total` changes. Step 2 of the workflow has the details. Read the entries in context and use the page names and each page's `aliases` as the candidate set. An alias isn't a page of its own, so it appears only under the page that declares it, and under every page that declares it.
+Page through `find_pages` until you hold every page: `limit: 1000`, then the `offset` the warning names while `hasMore` is true. Stop on `pages_unavailable`, and restart once if `total` changes. Step 2 of the workflow has the details. Read the entries in context and use the page names and each page's `aliases` as the candidate set. An alias isn't a page of its own, so it appears only under the page that declares it, and under every page that declares it.
 
 ### Substring bracketing
 
@@ -152,7 +152,7 @@ It checks that stripping every `[[` and `]]` from both texts leaves them identic
 
 The first check is the load-bearing one. It proves mechanically that the pass added brackets and changed nothing else, capitalisation included, which is what distinguishes bracketing the text as written from substituting a page's spelling for the note's. Keep a copy of the file from before the edit so the gate has the before text.
 
-The last check closes the gap the first leaves: stripping brackets from both sides means un-bracketing a ref the note already had changes nothing the first check can see. Never remove a pre-existing ref to make the gate pass. An unresolved ref the note already had is a lookup problem: confirm it with `logseq_list_pages(name_contains=...)`, leave it, and report it.
+The last check closes the gap the first leaves: stripping brackets from both sides means un-bracketing a ref the note already had changes nothing the first check can see. Never remove a pre-existing ref to make the gate pass. An unresolved ref the note already had is a lookup problem: confirm it with `logseq_find_pages(text=...)`, leave it, and report it.
 
 `ok` is false on any violation. Fix the edit and re-run rather than explaining the failure away.
 

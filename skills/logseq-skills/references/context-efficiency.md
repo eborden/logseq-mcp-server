@@ -17,11 +17,11 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 ### 2. Discover Vocabulary Before Guessing
 
 If you don't know what pages exist in the user's graph:
-→ **Call `logseq_list_pages(limit=1000)` FIRST** before searching. While `hasMore` is true, call again with the `offset` the warning names. With a term in mind, `name_contains` is much cheaper
+→ **Call `logseq_find_pages(limit=1000)` FIRST** before searching. While `hasMore` is true, call again with the `offset` the warning names. With a term in mind, `text` is much cheaper, and `names` checks several exact names in one call
 → Review page names, and each page's aliases, to understand the vocabulary
 → Then search using terms that actually exist
 
-**Red Flag:** About to search for a compound phrase like "engineering experiment"? Check if those pages exist first with `list_pages`.
+**Red Flag:** About to search for a compound phrase like "engineering experiment"? Check if those pages exist first with `find_pages`.
 
 ### 3. Clarify Recency Before Querying
 
@@ -84,7 +84,7 @@ What to do:
 ```
 Do you know what pages exist in the graph?
   │
-  ├─ NO → logseq_list_pages(limit=1000) first (follow offset while hasMore)
+  ├─ NO → logseq_find_pages(limit=1000) first (follow offset while hasMore)
   │        → Then continue with search using known vocabulary
   │
   └─ YES → [Continue below]
@@ -118,7 +118,7 @@ Does the question have an EXPLICIT timeframe?
 | Multiple parallel overlapping searches | 2-3x waste | Single targeted search | 1x |
 | `build_context` + `search_blocks` + `get_backlinks` | 15-25k | `build_context` alone | 5-8k |
 | "Backup" searches "just in case" | +5-10k each | Expand ONLY if needed | 0 |
-| Searching for compound phrases blindly | wasted turns | `list_pages` → targeted search | 1 extra call |
+| Searching for compound phrases blindly | wasted turns | `find_pages` → targeted search | 1 extra call |
 
 ## Common Rationalizations (Don't Fall For These)
 
@@ -137,6 +137,6 @@ Does the question have an EXPLICIT timeframe?
 | "this week" / explicit time | `query_by_date_range` | search_term filter | No |
 | "the X that Y sent" | - | - | YES - about recency |
 | "what do I know about X" | `build_context` | max_blocks=20 | No |
-| "what pages do I have" | `list_pages` | name_contains filter | No |
-| searching blind | `list_pages` | - | No - call first |
+| "what pages do I have" | `find_pages` | text filter | No |
+| searching blind | `find_pages` | - | No - call first |
 | "find X" (general) | `search_blocks` | limit=5 | Maybe |
