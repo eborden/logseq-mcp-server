@@ -28,10 +28,10 @@ const questionsPath = join(root, 'tests', 'fixtures', 'routing-eval', 'questions
 const questions = parseQuestions(JSON.parse(readFileSync(questionsPath, 'utf8')));
 
 describe('tests/fixtures/routing-eval/questions.json', () => {
-  it('holds 33 to 40 questions, at least 3 of every type', () => {
-    // 11 intents x 3, plus 3 for page-names (#514) and the boundary questions (#511)
+  it('holds 33 to 45 questions, at least 3 of every type', () => {
+    // 11 intents x 3 = 33, plus 3 for page-names (#514), 3 boundary questions (#511) and a fourth topic question (explore-topic-4, #514) = 40. The cap is a cost bound: 45 questions x 3 runs is 135 sessions, about $1.90, under the $3 default --max-total-usd
     expect(questions.length).toBeGreaterThanOrEqual(33);
-    expect(questions.length).toBeLessThanOrEqual(40);
+    expect(questions.length).toBeLessThanOrEqual(45);
     for (const type of TOOL_TYPES) {
       expect(questions.filter(question => question.expected_type === type).length, type).toBeGreaterThanOrEqual(3);
     }
