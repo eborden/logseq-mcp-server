@@ -82,8 +82,8 @@ describe('the skills guard can fail (#486 self-test)', () => {
         type: 'object',
         required: ['thing_name'],
         properties: {
-          thing_name: { type: 'string' },
-          depth: { type: 'integer' },
+          thing_name: { type: 'string', minLength: 1, maxLength: 10 },
+          depth: { type: 'integer', minimum: 1, maximum: 5, default: 2, description: 'Depth', format: 'uint64' },
           ratio: { type: 'number' },
           verbose: { type: 'boolean' },
           format: { type: 'string', enum: ['json', 'markdown'] },
@@ -208,6 +208,26 @@ describe('the skills guard can fail (#486 self-test)', () => {
       'logseq_get_thing has 1 "json tool=logseq_get_thing" examples, the minimum is 2',
       'logseq_get_other has 0 "json tool=logseq_get_other" examples, the minimum is 2',
     ]);
+  });
+
+  it('flags a number below the minimum or above the maximum, and a string outside its length bounds', () => {
+    expect(run(example('{"thing_name": "a", "depth": 0}'))).toEqual([
+      'skill.md:2: the logseq_get_thing argument "depth" is wrong: 0 is below the minimum of 1',
+    ]);
+    expect(run(example('{"thing_name": "a", "depth": 6}'))).toEqual([
+      'skill.md:2: the logseq_get_thing argument "depth" is wrong: 6 is above the maximum of 5',
+    ]);
+    expect(run(example('{"thing_name": "a very long name"}'))[0]).toContain('above the maxLength of 10');
+    expect(run(example('{"thing_name": ""}'))[0]).toContain('below the minLength of 1');
+    expect(run(example('{"thing_name": "a", "depth": 1}'))).toEqual([]);
+  });
+
+  it('reports a constraint keyword it does not know instead of passing it, and ignores the descriptive ones', () => {
+    expect(schemaMismatch('a', { type: 'string', pattern: '^a$' })).toBe(
+      'the schema uses "pattern", which this guard cannot check',
+    );
+    expect(schemaMismatch('a', { type: 'string', multipleOf: 2, items: {} })).toContain('"multipleOf", "items"');
+    expect(schemaMismatch(1, { type: 'integer', title: 'T', description: 'd', default: 1, format: 'uint64', $schema: 's' })).toBe(null);
   });
 
   it('reports a schema it cannot check instead of passing it', () => {
