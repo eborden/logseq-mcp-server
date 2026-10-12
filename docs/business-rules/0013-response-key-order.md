@@ -37,7 +37,7 @@ test: `rust/src/tools/get_context_for_query/mod.rs` (the order of a query result
 test: `rust/src/tools/get_concept_network/mod.rs` (the order of a network)
 test: `rust/src/tools/get_concept_evolution/mod.rs` (the order of an evolution result, its summary and a timeline entry)
 test: `rust/src/tools/list_pages/mod.rs` (the order of a page list)
-test: `rust/src/tools/get_current_context/mod.rs` (the order of the current context)
+test: `rust/src/tools/get_current/mod.rs` (the order of the current context)
 test: `rust/src/tools/check_links/mod.rs` (the order of the check result and its nested records)
 test: `rust/src/resolve_refs/mod.rs` (the order of a `resolvedRefs` entry)
 none-yet: #299 (a later wave gives each tool a typed output whose declaration order is its wire order, and pins that order with a unit test per tool)
@@ -49,3 +49,4 @@ reviewer: A new key in a tool result goes in the position of its category, and a
 |---|---|---|
 | 2026-10-08 | Introduced. | #378 |
 | 2026-10-08 | Enforcement: unit tests pin the key order of the first tools' typed outputs (additive; the `none-yet` line stays for the other tools). | #398 |
+| 2026-10-12 | Mechanical enforcement: the `test:` path of the current context follows the rename of `logseq_get_current_context` to `logseq_get_current` (`rust/src/tools/get_current/mod.rs`). Same test; statement and paragraphs unchanged. | #489 |
