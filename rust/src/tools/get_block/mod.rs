@@ -34,13 +34,13 @@ const DESCRIPTION: &str = "Get one block by UUID, optionally with its children. 
 **Can't find:** blocks by text (logseq_search_blocks) or by numeric id. For a whole page use logseq_get_page.";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
-const ALIASES: ParamAliases = &[("block_uuid", &["uuid"])];
+const ALIASES: ParamAliases = &[("uuid", &["block_uuid"])];
 
 /// The block tool's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     /// UUID of the block to retrieve
-    pub block_uuid: String,
+    pub uuid: String,
     /// Whether to include child blocks
     #[serde(default)]
     pub include_children: bool,
@@ -62,7 +62,7 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let block = get_block(client, &args.block_uuid, args.include_children, args.resolve_refs).await?;
+    let block = get_block(client, &args.uuid, args.include_children, args.resolve_refs).await?;
     if args.format == Some(OutputFormat::Markdown) {
         return Ok(success_result(vec![ContentBlock::text(with_footer(render_block(&block), &FooterMeta::of_result(&block, &[])))]));
     }
@@ -70,9 +70,9 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
 }
 
 /// `BlockNotFoundError`, which shows the uuid as the caller wrote it.
-fn not_found(block_uuid: &str) -> ToolError {
+fn not_found(uuid: &str) -> ToolError {
     ToolError::Failed(format!(
-        "Block not found: \"{block_uuid}\"\n\nTip: Block UUIDs come from search results or page queries. Verify the UUID is correct."
+        "Block not found: \"{uuid}\"\n\nTip: Block UUIDs come from search results or page queries. Verify the UUID is correct."
     ))
 }
 
@@ -83,13 +83,13 @@ fn not_found(block_uuid: &str) -> ToolError {
 /// annotated and `hasMore` and `warnings` are added (at most 2 extra Datalog queries).
 ///
 /// Fails with a "Block not found" error when LogSeq answers `null`.
-pub async fn get_block(client: &LogseqClient, block_uuid: &str, include_children: bool, resolve_refs: bool) -> Result<Value, ToolError> {
-    let mut call_args = vec![Value::from(block_uuid)];
+pub async fn get_block(client: &LogseqClient, uuid: &str, include_children: bool, resolve_refs: bool) -> Result<Value, ToolError> {
+    let mut call_args = vec![Value::from(uuid)];
     if include_children {
         call_args.push(serde_json::json!({ "includeChildren": true }));
     }
     let answer = client.call_api(wire::METHOD, &call_args).await?;
-    let Some(block) = wire::block(&answer)? else { return Err(not_found(block_uuid)) };
+    let Some(block) = wire::block(&answer)? else { return Err(not_found(uuid)) };
 
     if !resolve_refs {
         return Ok(block);
@@ -116,12 +116,12 @@ mod tests {
         let pinned = json!({
             "type": "object",
             "properties": {
-                "block_uuid": {"type": "string", "description": "UUID of the block to retrieve"},
+                "uuid": {"type": "string", "description": "UUID of the block to retrieve"},
                 "include_children": {"type": "boolean", "default": false, "description": "Whether to include child blocks"},
                 "resolve_refs": {"type": "boolean", "default": false, "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)"},
                 "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact"},
             },
-            "required": ["block_uuid"],
+            "required": ["uuid"],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
@@ -138,25 +138,25 @@ mod tests {
     }
 
     #[test]
-    fn the_arguments_are_read_in_schema_order_and_the_uuid_alias_is_folded() {
+    fn the_arguments_are_read_in_schema_order_and_the_block_uuid_alias_is_folded() {
         let args = |value: Value| value.as_object().cloned();
-        let folded = resolve_param_aliases(ALIASES, args(json!({"uuid": "u1", "include_children": true}))).unwrap();
+        let folded = resolve_param_aliases(ALIASES, args(json!({"block_uuid": "u1", "include_children": true}))).unwrap();
         let read = parse_args::<Args>(folded.as_ref()).unwrap();
-        assert_eq!((read.block_uuid.as_str(), read.include_children, read.resolve_refs), ("u1", true, false));
+        assert_eq!((read.uuid.as_str(), read.include_children, read.resolve_refs), ("u1", true, false));
         // the first bad argument in schema order is the one reported
-        let error = parse_args::<Args>(args(json!({"block_uuid": 5, "resolve_refs": "yes"})).as_ref()).unwrap_err();
-        assert!(error.to_string().starts_with("Invalid parameter 'block_uuid': 5"), "{error}");
-        let error = parse_args::<Args>(args(json!({"block_uuid": "u", "resolve_refs": "yes", "format": "xml"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"uuid": 5, "resolve_refs": "yes"})).as_ref()).unwrap_err();
+        assert!(error.to_string().starts_with("Invalid parameter 'uuid': 5"), "{error}");
+        let error = parse_args::<Args>(args(json!({"uuid": "u", "resolve_refs": "yes", "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'resolve_refs': \"yes\""), "{error}");
         let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
-        assert!(error.to_string().starts_with("Invalid parameter 'block_uuid': missing"), "{error}");
+        assert!(error.to_string().starts_with("Invalid parameter 'uuid': missing"), "{error}");
     }
 
     #[test]
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
-        let base = json!({"block_uuid": "u1"});
-        sweep::<Args>(json!({}), "block_uuid", Takes::Text, true);
+        let base = json!({"uuid": "u1"});
+        sweep::<Args>(json!({}), "uuid", Takes::Text, true);
         sweep::<Args>(base.clone(), "include_children", Takes::Flag, false);
         sweep::<Args>(base.clone(), "resolve_refs", Takes::Flag, false);
         sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);

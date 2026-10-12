@@ -168,7 +168,7 @@ fn resolve_from_rows(name: &str, rows: &[ResolverRow]) -> Option<Resolution> {
 
 /// The advice every `*_unavailable` message ends with. No parameter fetches what LogSeq did not
 /// answer, so it is the only next step.
-pub const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+pub const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph to check which graph is open.";
 
 /// What a `null` answer to a page lookup is (BR-0011, #301): an error that says LogSeq gave no
 /// answer. It is not "not found", so it carries no closest names and costs no further call.

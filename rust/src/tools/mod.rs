@@ -16,10 +16,9 @@ pub mod get_block;
 pub mod get_concept_evolution;
 pub mod get_concept_network;
 pub mod get_context_for_query;
-pub mod get_current_context;
-pub mod get_graph_info;
+pub mod get_current;
+pub mod get_graph;
 pub mod get_page;
-pub mod get_page_outline;
 pub mod list_pages;
 pub mod query_by_date_range;
 pub mod query_by_property;
@@ -36,10 +35,9 @@ pub fn list() -> Vec<Tool> {
         get_concept_evolution::definition(),
         get_concept_network::definition(),
         get_context_for_query::definition(),
-        get_current_context::definition(),
-        get_graph_info::definition(),
+        get_current::definition(),
+        get_graph::definition(),
         get_page::definition(),
-        get_page_outline::definition(),
         list_pages::definition(),
         query_by_date_range::definition(),
         query_by_property::definition(),
@@ -64,10 +62,9 @@ pub async fn call(
         get_concept_evolution::NAME => Some(get_concept_evolution::call(client, tips_enabled, arguments).await),
         get_concept_network::NAME => Some(get_concept_network::call(client, tips_enabled, arguments).await),
         get_context_for_query::NAME => Some(get_context_for_query::call(client, tips_enabled, arguments).await),
-        get_current_context::NAME => Some(get_current_context::call(client, tips_enabled, arguments).await),
-        get_graph_info::NAME => Some(get_graph_info::call(client, tips_enabled, arguments).await),
+        get_current::NAME => Some(get_current::call(client, tips_enabled, arguments).await),
+        get_graph::NAME => Some(get_graph::call(client, tips_enabled, arguments).await),
         get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),
-        get_page_outline::NAME => Some(get_page_outline::call(client, tips_enabled, arguments).await),
         list_pages::NAME => Some(list_pages::call(client, tips_enabled, arguments).await),
         query_by_date_range::NAME => Some(query_by_date_range::call(client, tips_enabled, clock, arguments).await),
         query_by_property::NAME => Some(query_by_property::call(client, tips_enabled, arguments).await),

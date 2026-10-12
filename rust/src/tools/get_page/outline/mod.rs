@@ -1,6 +1,6 @@
-//! `logseq_get_page_outline`: a page's
-//! top-level blocks with a first-line snippet and a child count each, so a model can choose what
-//! to read with `logseq_get_block` instead of loading a long page whole.
+//! The `detail: "outline"` of `logseq_get_page`: a page's top-level blocks with a first-line snippet and a child
+//! count each, so a model can choose what to read with `logseq_get_block` instead of loading a long page whole.
+//! It was the tool `logseq_get_page_outline` before the v2 rename (ADR-0037, #489), and its result is unchanged.
 //!
 //! Calls: 2 for an exact name, an alias or an ISO date (the page resolver, then one Datalog query
 //! for the blocks). A namespace-leaf name adds the resolver's leaf query; a missing page adds the
@@ -16,63 +16,38 @@ mod wire;
 
 use std::collections::HashMap;
 
-use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use rmcp::model::{CallToolResult, ContentBlock};
+use serde::Serialize;
 
-use crate::args::parse_args;
 use crate::block_tree::order_siblings;
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
 use crate::meta::{ResultMeta, ResultWarning};
-use crate::params::{ParamAliases, resolve_param_aliases};
+use crate::output_format::ListFormat;
 use crate::resolve::require_page;
 use crate::snippet::Snippet;
-use crate::output_format::ListFormat;
 use crate::tips::tips_value;
-use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
+use crate::tool::{result_value, success_result};
 
 use self::tips::{TipBlock, outline_tips};
 use self::wire::OutlineBlock;
 
-pub const NAME: &str = "logseq_get_page_outline";
-
-/// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "List a page's top-level blocks: uuid, the first line (80 characters) and the number of children. Cheaper than logseq_get_page for a long page.\n\n\
-**Use when:** you need a page's shape before reading parts of it. Read the blocks you pick with logseq_get_block.\n\
-**Can't find:** nested blocks below the first level, or block text past the first line (logseq_get_block, logseq_get_page).";
-
-/// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
-const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
-
-/// The outline's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct Args {
-    /// Page name, alias, or ISO date (2025-01-01) for a journal
-    pub page_name: String,
-    /// json (default), or toon text: a list's keys once, not on every row
-    pub format: Option<ListFormat>,
-}
-
-/// The tool as `tools/list` shows it.
-pub fn definition() -> Tool {
-    Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
-        .with_title("Get Page Outline")
-        .with_annotations(read_only_annotations("Get Page Outline"))
-}
-
-/// A call: aliases folded, arguments parsed (`page_name` is required), the tool, then its tip.
-pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let args = parse_args::<Args>(arguments.as_ref())?;
-    let outline = get_page_outline(client, &args.page_name).await?;
-    let mut content = vec![ContentBlock::text(ListFormat::text(args.format, &result_value(&outline))?)];
+/// The outline of a page as a tool result: the outline, then its tip. `format` is the outline's own (`json`, the
+/// default, or `toon`), and the tip is written in the same one.
+pub async fn outline_result(
+    client: &LogseqClient,
+    tips_enabled: bool,
+    page: &str,
+    format: Option<ListFormat>,
+) -> Result<CallToolResult, ToolError> {
+    let outline = get_page_outline(client, page).await?;
+    let mut content = vec![ContentBlock::text(ListFormat::text(format, &result_value(&outline))?)];
     if tips_enabled {
         let blocks: Vec<TipBlock<'_>> =
             outline.blocks.iter().map(|block| TipBlock { uuid: &block.uuid, child_count: block.child_count }).collect();
         if let Some(tips) = tips_value(&outline_tips(&blocks)) {
-            content.push(ContentBlock::text(ListFormat::text(args.format, &tips)?));
+            content.push(ContentBlock::text(ListFormat::text(format, &tips)?));
         }
     }
     Ok(success_result(content))
@@ -151,7 +126,7 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
             "outline_truncated",
             format!(
                 "Showing the first {} of {} top-level blocks. \
-                 The outline has no way to page; read the rest with logseq_get_page and include_children.",
+                 The outline has no way to page; read the rest with logseq_get_page and detail \"full\".",
                 shown.len(),
                 total
             ),
@@ -175,7 +150,7 @@ fn blocks_unavailable() -> ResultWarning {
         "outline_unavailable",
         "LogSeq returned no answer when looking up the blocks of this page (possibly no graph open or a re-index in progress), \
          so the empty outline may not mean the page has no blocks. \
-         Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+         Retry in a moment, or call logseq_get_graph to check which graph is open."
             .to_owned(),
     )
 }
@@ -220,13 +195,7 @@ pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::testing::{Takes, sweep};
     use serde_json::{Value, json};
-
-    #[test]
-    fn page_name_is_a_required_string() {
-        sweep::<Args>(json!({}), "page_name", Takes::Text, true);
-    }
 
     fn rows(blocks: Vec<Value>) -> Vec<Option<OutlineBlock>> {
         let answer = Value::Array(blocks.into_iter().map(|b| json!([b])).collect());
@@ -330,7 +299,7 @@ mod tests {
         assert_eq!(meta.warnings[0].code, "outline_truncated");
         assert_eq!(
             meta.warnings[0].message,
-            "Showing the first 200 of 201 top-level blocks. The outline has no way to page; read the rest with logseq_get_page and include_children."
+            "Showing the first 200 of 201 top-level blocks. The outline has no way to page; read the rest with logseq_get_page and detail \"full\"."
         );
     }
 
@@ -350,32 +319,6 @@ mod tests {
         assert_eq!(warning.how_to_fetch_all, None);
         // No way to fetch more, so `hasMore` is false (BR-0006)
         assert!(!ResultMeta::new(vec![warning], &[("blocks", 0)]).has_more);
-    }
-
-    #[test]
-    fn the_outline_schema_means_what_the_pinned_one_means() {
-        use crate::tool::testing::{meaning, schema_of};
-        // `inputSchema` of logseq_get_page_outline in the ADR-0016 snapshot
-        let pinned = json!({
-            "type": "object",
-            "properties": {
-                "page_name": {"type": "string", "description": "Page name, alias, or ISO date (2025-01-01) for a journal"},
-                "format": {"type": "string", "enum": ["json", "toon"], "description": "json (default), or toon text: a list's keys once, not on every row"},
-            },
-            "required": ["page_name"],
-        });
-        assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
-    }
-
-    #[test]
-    fn the_outline_tool_is_read_only_and_titled_as_pinned() {
-        let tool = definition();
-        assert_eq!(tool.name, NAME);
-        assert_eq!(tool.title.as_deref(), Some("Get Page Outline"));
-        assert_eq!(
-            serde_json::to_value(&tool.annotations).unwrap(),
-            json!({"title": "Get Page Outline", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
-        );
     }
 
     #[test]

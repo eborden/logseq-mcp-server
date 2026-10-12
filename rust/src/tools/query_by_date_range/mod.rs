@@ -196,7 +196,7 @@ async fn fetch_journals(client: &LogseqClient, query: crate::edn::Query) -> Resu
 
 /// No `howToFetchAll` on either warning: no parameter fetches what LogSeq did not answer (like
 /// `pages_unavailable`, #64), so `hasMore` is unaffected. The retry advice is in the message.
-const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph to check which graph is open.";
 
 fn journals_unavailable() -> ResultWarning {
     ResultWarning::new(

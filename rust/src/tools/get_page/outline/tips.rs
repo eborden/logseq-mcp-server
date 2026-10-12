@@ -18,7 +18,7 @@ pub fn outline_tips(blocks: &[TipBlock<'_>]) -> Vec<String> {
     if let Some(uuid) = pick.and_then(|block| non_empty(block.uuid)) {
         tips.push(format!(
             "To read a block and its children: {}.",
-            suggest_call("logseq_get_block", &json!({"block_uuid": uuid, "include_children": true}))
+            suggest_call("logseq_get_block", &json!({"uuid": uuid, "include_children": true}))
         ));
     }
     tips.truncate(MAX_TIPS);
@@ -37,7 +37,7 @@ mod tests {
         let blocks = [TipBlock { uuid: UUID_A, child_count: 0 }, TipBlock { uuid: UUID_B, child_count: 3 }];
         assert_eq!(
             outline_tips(&blocks),
-            [format!("To read a block and its children: logseq_get_block {{\"block_uuid\":\"{UUID_B}\",\"include_children\":true}}.")]
+            [format!("To read a block and its children: logseq_get_block {{\"uuid\":\"{UUID_B}\",\"include_children\":true}}.")]
         );
         assert!(outline_tips(&blocks[..1])[0].contains(UUID_A));
     }

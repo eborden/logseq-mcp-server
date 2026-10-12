@@ -11,7 +11,7 @@ pub fn list_pages_tips(name_contains: Option<&str>, first_page: Option<&str>) ->
     if let (Some(_), Some(first)) = (name_contains.and_then(non_empty), first_page.and_then(non_empty)) {
         tips.push(format!(
             "To open the first match: {}.",
-            suggest_call("logseq_get_page", &json!({"page_name": first, "include_children": true}))
+            suggest_call("logseq_get_page", &json!({"page": first, "detail": "full"}))
         ));
     }
     tips.truncate(MAX_TIPS);
@@ -26,7 +26,7 @@ mod tests {
     fn a_filtered_list_suggests_opening_its_first_page() {
         assert_eq!(
             list_pages_tips(Some("atl"), Some("Project Atlas")),
-            [r#"To open the first match: logseq_get_page {"page_name":"Project Atlas","include_children":true}."#]
+            [r#"To open the first match: logseq_get_page {"page":"Project Atlas","detail":"full"}."#]
         );
     }
 

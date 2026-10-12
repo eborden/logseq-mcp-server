@@ -405,7 +405,7 @@ async fn a_failed_connection_is_the_error_even_when_the_other_topic_is_not_found
     assert!(error.to_string().starts_with("Cannot connect to LogSeq at"), "{error}");
 }
 
-const RETRY: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+const RETRY: &str = "Retry in a moment, or call logseq_get_graph to check which graph is open.";
 
 /// A search whose relationship query answers `answer`, and everything else as a real empty answer.
 async fn search_with_query_answer(relationship_type: RelationshipType, answer: Value) -> Value {

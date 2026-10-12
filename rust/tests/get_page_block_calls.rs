@@ -43,7 +43,7 @@ fn arguments(value: Value) -> Option<rmcp::model::JsonObject> {
 async fn a_block_costs_one_call_and_is_returned_as_sent() {
     let sent = json!({"id": 5, "uuid": uuid(5), "content": "Kickoff", "children": [["uuid", uuid(6)]], "propertiesOrder": [], "extra": {"2": 1, "b": 2, "1": 3}});
     let logseq = mock_logseq(vec![sent.clone()]).await;
-    let result = get_block::call(&client(&logseq), true, arguments(json!({"block_uuid": uuid(5)}))).await.unwrap();
+    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5)}))).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.Editor.getBlock"]);
     assert_eq!(args_of(&logseq, 0), [json!(uuid(5))]);
@@ -94,7 +94,7 @@ async fn resolve_refs_on_a_block_with_a_ref_costs_one_more_query_per_level() {
 #[tokio::test]
 async fn a_bad_argument_is_refused_before_any_call() {
     let logseq = mock_logseq(vec![]).await;
-    let error = get_block::call(&client(&logseq), true, arguments(json!({"block_uuid": uuid(5), "format": "xml"}))).await.unwrap_err();
+    let error = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "format": "xml"}))).await.unwrap_err();
     assert!(error.to_string().starts_with("Invalid parameter 'format': \"xml\""), "{error}");
     assert!(methods(&logseq).is_empty());
 }
@@ -103,7 +103,7 @@ async fn a_bad_argument_is_refused_before_any_call() {
 async fn a_block_as_markdown_costs_the_same_call_and_is_one_text_block_with_no_tips() {
     let sent = json!({"id": 5, "uuid": uuid(5), "content": "Kickoff\nsecond line", "children": [{"id": 6, "uuid": uuid(6), "content": "Child"}]});
     let logseq = mock_logseq(vec![sent]).await;
-    let result = get_block::call(&client(&logseq), true, arguments(json!({"block_uuid": uuid(5), "include_children": true, "format": "markdown"}))).await.unwrap();
+    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "include_children": true, "format": "markdown"}))).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.Editor.getBlock"]);
     assert_eq!(args_of(&logseq, 0), [json!(uuid(5)), json!({"includeChildren": true})]);
     assert_eq!(text_of(&result, 0), format!("# Block (({}))\n\n- Kickoff\n  second line\n\t- Child\n", uuid(5)));
@@ -113,7 +113,7 @@ async fn a_block_as_markdown_costs_the_same_call_and_is_one_text_block_with_no_t
 #[tokio::test]
 async fn a_missing_block_is_the_same_error_in_markdown() {
     let logseq = mock_logseq(vec![Value::Null]).await;
-    let error = get_block::call(&client(&logseq), true, arguments(json!({"block_uuid": "nope", "format": "markdown"}))).await.unwrap_err();
+    let error = get_block::call(&client(&logseq), true, arguments(json!({"uuid": "nope", "format": "markdown"}))).await.unwrap_err();
     assert!(error.to_string().starts_with("Block not found: \"nope\""), "{error}");
     assert_eq!(methods(&logseq).len(), 1);
 }
@@ -130,7 +130,7 @@ async fn an_answer_that_is_not_a_block_is_a_response_error() {
 #[tokio::test]
 async fn the_exact_name_of_a_page_with_a_file_costs_one_call_and_no_resolver() {
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page_name": "  Project Atlas "}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "  Project Atlas "}))).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.Editor.getPage"]);
     // the name is trimmed, and kept in the caller's casing
@@ -142,18 +142,18 @@ async fn the_exact_name_of_a_page_with_a_file_costs_one_call_and_no_resolver() {
     // the page was read without its blocks, so the first tip offers them
     assert_eq!(
         text_of(&result, 1),
-        r#"{"meta":{"tips":["For its blocks: logseq_get_page {\"page_name\":\"Project Atlas\",\"include_children\":true}.","For what links here: logseq_get_backlinks {\"page_name\":\"Project Atlas\"}."]}}"#
+        r#"{"meta":{"tips":["For its blocks: logseq_get_page {\"page\":\"Project Atlas\",\"detail\":\"full\"}.","For what links here: logseq_get_backlinks {\"page_name\":\"Project Atlas\"}."]}}"#
     );
 }
 
 #[tokio::test]
 async fn tips_can_be_turned_off_and_a_page_read_with_its_blocks_offers_only_the_links() {
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
-    let result = get_page::call(&client(&logseq), false, arguments(json!({"page_name": "Project Atlas"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas"}))).await.unwrap();
     assert_eq!(serde_json::to_value(&result).unwrap()["content"].as_array().unwrap().len(), 1);
 
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), json!([editor_block(11, "First")])]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "include_children": true}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
     assert_eq!(text_of(&result, 1), r#"{"meta":{"tips":["For what links here: logseq_get_backlinks {\"page_name\":\"Project Atlas\"}."]}}"#);
 }
 
@@ -196,7 +196,7 @@ async fn a_null_block_tree_is_a_warning_and_not_a_page_with_no_blocks() {
     assert_eq!(page["hasMore"], false);
     assert_eq!(page["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["page_blocks_unavailable"]);
 
-    // Without `include_children` no tree is asked for, so there is nothing to warn about
+    // Without detail "full" no tree is asked for, so there is nothing to warn about
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
     let page = get_page::get_page(&client(&logseq), "Project Atlas", false, false).await.unwrap();
     assert!(page.get("warnings").is_none());
@@ -307,7 +307,7 @@ async fn resolve_refs_annotates_the_blocks_and_adds_the_meta_even_when_nothing_h
     assert!(page["children"][1].get("resolvedContent").is_none());
     assert!(page.to_string().ends_with(r#""hasMore":false,"warnings":[]}"#));
 
-    // without include_children there are no blocks to look at: no query, and the meta all the same
+    // without detail "full" there are no blocks to look at: no query, and the meta all the same
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
     let page = get_page::get_page(&client(&logseq), "Project Atlas", false, true).await.unwrap();
     assert_eq!(methods(&logseq).len(), 1);
@@ -328,7 +328,7 @@ async fn a_page_as_markdown_costs_the_same_calls_and_carries_its_tips_in_the_foo
         json!([editor_block(11, "First"), json!({"id": 12, "uuid": uuid(12), "content": "Second", "page": {"id": 100}, "children": [editor_block(13, "Nested")]})]),
     ])
     .await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page_name": "Project Atlas", "include_children": true, "format": "markdown"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "full", "format": "markdown"}))).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.Editor.getPage", "logseq.Editor.getPageBlocksTree"]);
     assert_eq!(
         text_of(&result, 0),
@@ -341,7 +341,7 @@ async fn a_page_as_markdown_costs_the_same_calls_and_carries_its_tips_in_the_foo
 #[tokio::test]
 async fn a_page_as_markdown_without_blocks_or_tips_is_only_its_title() {
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
-    let result = get_page::call(&client(&logseq), false, arguments(json!({"page_name": "Project Atlas", "format": "markdown"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas", "format": "markdown"}))).await.unwrap();
     assert_eq!(methods(&logseq).len(), 1);
     assert_eq!(text_of(&result, 0), "# Project Atlas\n");
 }
@@ -355,7 +355,7 @@ async fn a_page_as_markdown_shows_the_refs_it_resolved_and_the_warnings_of_the_f
         json!([target]),
     ])
     .await;
-    let args = json!({"page_name": "Project Atlas", "include_children": true, "resolve_refs": true, "format": "markdown"});
+    let args = json!({"page": "Project Atlas", "detail": "full", "resolve_refs": true, "format": "markdown"});
     let result = get_page::call(&client(&logseq), false, arguments(args)).await.unwrap();
     assert_eq!(methods(&logseq).len(), 3);
     assert_eq!(text_of(&result, 0), format!("# Project Atlas\n\n- see (({}))\n  [resolved] see Bob owns it\n", uuid(7)));
@@ -369,6 +369,6 @@ async fn a_page_reached_by_an_alias_says_so_in_markdown() {
         editor_page(10, "project atlas", "Project Atlas", true),
     ])
     .await;
-    let result = get_page::call(&client(&logseq), false, arguments(json!({"page_name": "atlas", "format": "markdown"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "atlas", "format": "markdown"}))).await.unwrap();
     assert_eq!(text_of(&result, 0), "# Project Atlas\n\n(resolved from \"atlas\", matched by alias)\n");
 }

@@ -178,7 +178,7 @@ fn assert_backlinks_unavailable(outcome: &Outcome, extra_meta: &str) {
     assert!(outcome.results.is_empty());
     let meta = serde_json::to_string(outcome.meta.as_ref().expect("a warning needs a meta")).unwrap();
     assert!(meta.starts_with(r#"{"hasMore":false,"warnings":[{"code":"backlinks_unavailable","message":"LogSeq returned no answer when looking up the pages that link to \"Atlas\" "#), "{meta}");
-    assert!(meta.ends_with(&format!(r#"Retry in a moment, or call logseq_get_graph_info to check which graph is open."}}]{extra_meta}}}"#)), "{meta}");
+    assert!(meta.ends_with(&format!(r#"Retry in a moment, or call logseq_get_graph to check which graph is open."}}]{extra_meta}}}"#)), "{meta}");
     assert!(!meta.contains("howToFetchAll") && !meta.contains("totals"), "{meta}");
 }
 
@@ -219,7 +219,7 @@ async fn a_null_answer_to_the_alias_lookup_warns_and_the_editor_call_reads_the_p
         concat!(
             r#"{"hasMore":false,"warnings":[{"code":"alias_lookup_unavailable","message":"LogSeq returned no answer when looking up the aliases of \"Atlas\" "#,
             r#"(possibly no graph open or a re-index in progress), so references written under its other names may be missing. "#,
-            r#"This does not mean it has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}]}"#
+            r#"This does not mean it has no aliases. Retry in a moment, or call logseq_get_graph to check which graph is open."}]}"#
         )
     );
 }
