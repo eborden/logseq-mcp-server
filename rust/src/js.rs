@@ -18,7 +18,7 @@ pub fn trim_end(value: &str) -> &str {
 
 /// A number as `String(n)` or a template literal writes it (ECMAScript `Number::toString`).
 ///
-/// This is not parity code. `Scalar::to_js_string` in `args.rs` uses it to spell a `query_by_property`
+/// This is not parity code. `Scalar::to_js_string` in `args.rs` uses it to spell a `find_blocks` property
 /// value the way LogSeq stored it: LogSeq is ClojureScript, so its `(str ?v)` writes a number as
 /// JavaScript does (`1e+21`, `0.000001`, `3` for `3.0`), and a value spelled any other way would match
 /// nothing. Nothing else calls it: results, Markdown property values and sort keys use serde's spelling.

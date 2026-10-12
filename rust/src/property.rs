@@ -1,12 +1,13 @@
 //! A property key, and what it means to match a property by value: shared by the tools that filter by property
-//! (`logseq_query_by_property` over blocks, `logseq_find_pages` over pages, #490), so both say the same thing.
+//! (`logseq_find_blocks` over blocks, `logseq_find_pages` over pages, #490, #491), so both say the same thing.
 //!
-//! The rules (the description of `logseq_query_by_property` states them to the model):
+//! The rules (the descriptions of `logseq_find_blocks` and `logseq_find_pages` state them to the model):
 //! - the key is the one LogSeq stores (`created-at`) or its camelCase spelling (`createdAt`, which is how the
 //!   Editor API sends it), whatever the case, with `_` read as `-`;
 //! - the value is an exact string, and a number or boolean is the text JavaScript writes for it (`3`, `true`);
 //! - a multi-value property (a set) matches when any one of its values equals the value.
 
+use crate::args::Scalar;
 use crate::errors::InvalidParameter;
 use crate::js;
 use crate::wire::{Properties, PropertyValue};
@@ -63,6 +64,38 @@ impl PropertyKey {
     }
 }
 
+/// The property filter, checked: a key LogSeq can store and the value as the text it is matched by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyFilter {
+    pub key: PropertyKey,
+    pub value: String,
+}
+
+/// `property` and `value` go together. Both or neither is a filter; one alone is refused before any LogSeq call,
+/// naming the one that is missing. A key LogSeq can't store is refused the same way (the arguments are checked in the
+/// order the schema lists them, so a bad `property` is reported before a missing `value`).
+pub fn property_filter(property: Option<&str>, value: Option<&Scalar>) -> Result<Option<PropertyFilter>, InvalidParameter> {
+    match (property, value) {
+        (None, None) => Ok(None),
+        (Some(property), Some(value)) => Ok(Some(PropertyFilter { key: PropertyKey::parse(property, "property")?, value: value.to_js_string() })),
+        (Some(property), None) => {
+            PropertyKey::parse(property, "property")?;
+            Err(InvalidParameter {
+                param: "value".to_owned(),
+                value: "missing".to_owned(),
+                expected: "the value to match (property and value go together)".to_owned(),
+                example: Some("value: \"active\"".to_owned()),
+            })
+        }
+        (None, Some(_)) => Err(InvalidParameter {
+            param: "property".to_owned(),
+            value: "missing".to_owned(),
+            expected: "the property to match value against (property and value go together)".to_owned(),
+            example: Some("property: \"status\"".to_owned()),
+        }),
+    }
+}
+
 /// The key as LogSeq stores it: kebab-case, lowercase, `_` as `-`.
 fn stored_spelling(name: &str) -> String {
     kebab_case(name).replace('_', "-").to_ascii_lowercase()
@@ -89,7 +122,7 @@ fn kebab_case(name: &str) -> String {
     out
 }
 
-/// Whether a stored property value matches `wanted`, as the Datalog of `query_by_property` decides it: a scalar when its
+/// Whether a stored property value matches `wanted`, as the Datalog of `find_blocks` decides it: a scalar when its
 /// text is `wanted` (a number as JavaScript writes it), a set when one of its strings is.
 pub(crate) fn value_matches(value: &PropertyValue, wanted: &str) -> bool {
     match value {

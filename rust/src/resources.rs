@@ -49,7 +49,7 @@ pub fn list() -> Vec<Resource> {
 
 /// The tools in the order the guide lists them
 /// (`tools/list` has its own order). A test checks it names every tool once.
-const GUIDE_TOOL_ORDER: [&str; 15] = [
+const GUIDE_TOOL_ORDER: [&str; 14] = [
     "logseq_find_pages",
     "logseq_get_current",
     "logseq_get_graph",
@@ -57,7 +57,6 @@ const GUIDE_TOOL_ORDER: [&str; 15] = [
     "logseq_get_block",
     "logseq_get_backlinks",
     "logseq_find_blocks",
-    "logseq_query_by_property",
     "logseq_query_by_date_range",
     "logseq_build_context",
     "logseq_get_context_for_query",
@@ -290,6 +289,6 @@ mod tests {
             "\n\n## Resources\n\n- logseq://guide: this guide\n- logseq://page/{name}: one page as text (URL-encode the name; aliases and ISO dates work)\n"
         ));
         // each tool is one line: the description's first line only
-        assert_eq!(guide.matches("\n- logseq_").count(), 15);
+        assert_eq!(guide.matches("\n- logseq_").count(), 14);
     }
 }
