@@ -112,7 +112,7 @@ impl fmt::Display for PageNotFound {
         };
         write!(
             f,
-            "No page {}.{closest} Try logseq_search_blocks to find it by content, or logseq_find_pages (text) to browse names.",
+            "No page {}.{closest} Try logseq_find_blocks to find it by content, or logseq_find_pages (text) to browse names.",
             json_string(&self.page_name)
         )
     }
@@ -221,13 +221,13 @@ mod tests {
         let error = PageNotFound { page_name: "Alce \"x\"".into(), suggestions: vec!["Alice".into(), "Alice Notes".into()] };
         assert_eq!(
             error.to_string(),
-            "No page \"Alce \\\"x\\\"\". Closest: Alice, Alice Notes. Try logseq_search_blocks to find it by content, \
+            "No page \"Alce \\\"x\\\"\". Closest: Alice, Alice Notes. Try logseq_find_blocks to find it by content, \
              or logseq_find_pages (text) to browse names."
         );
         let none = PageNotFound { page_name: "zzz".into(), suggestions: vec![] };
         assert_eq!(
             none.to_string(),
-            "No page \"zzz\". Try logseq_search_blocks to find it by content, or logseq_find_pages (text) to browse names."
+            "No page \"zzz\". Try logseq_find_blocks to find it by content, or logseq_find_pages (text) to browse names."
         );
     }
 

@@ -78,7 +78,7 @@ async fn a_name_nothing_matches_is_resource_not_found_with_the_tool_s_message() 
     assert_eq!(error.code.0, -32002);
     assert_eq!(
         error.message,
-        "No page \"Atlas\". Closest: Project Atlas. Try logseq_search_blocks to find it by content, or logseq_find_pages (text) to browse names."
+        "No page \"Atlas\". Closest: Project Atlas. Try logseq_find_blocks to find it by content, or logseq_find_pages (text) to browse names."
     );
     assert_eq!(error.data, Some(json!({"uri": "logseq://page/Atlas"})));
 }

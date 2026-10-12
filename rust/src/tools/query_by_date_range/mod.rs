@@ -65,7 +65,7 @@ pub const NAME: &str = "logseq_query_by_date_range";
 const DESCRIPTION: &str = "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.\n\n\
 **Use when:** \"what did I do last week?\" or catching up. summary.topConcepts shows what a period was about.\n\
 **Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n\
-**Alternatives:** logseq_get_concept_evolution, logseq_search_blocks.";
+**Alternatives:** logseq_get_concept_evolution, logseq_find_blocks.";
 
 /// Longest first-line snippet of the outline, in characters (code points), ellipsis included.
 const SNIPPET_LENGTH: usize = 80;

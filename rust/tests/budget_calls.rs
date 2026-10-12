@@ -8,7 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
-use logseq_mcp_server::tools::{get_backlinks, get_concept_network, search_blocks};
+use logseq_mcp_server::tools::{find_blocks, get_backlinks, get_concept_network};
 use serde_json::{Value, json};
 
 const DATALOG: &str = "logseq.DB.datascriptQuery";
@@ -121,7 +121,7 @@ fn page_row() -> Value {
 async fn a_search_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_extra_call() {
     let small: Vec<Value> = (1..=20).map(|id| hit(id, 100)).collect();
     let logseq = mock_logseq(vec![json!(small)]).await;
-    let result = search_blocks::call(&client(&logseq), true, arguments(json!({"query": "importer"}))).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), true, arguments(json!({"text": "importer"}))).await.unwrap();
     let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();
     assert_eq!(meta["meta"]["warnings"], json!([]));
     assert_eq!(serde_json::from_str::<Vec<Value>>(&text_of(&result, 0)).unwrap().len(), 20);
@@ -129,7 +129,7 @@ async fn a_search_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_e
     // 100 hits of 600 characters: ~70,000 characters, at the default limit of 100
     let big: Vec<Value> = (1..=100).map(|id| hit(id, 600)).collect();
     let logseq = mock_logseq(vec![json!(big)]).await;
-    let result = search_blocks::call(&client(&logseq), true, arguments(json!({"query": "importer"}))).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), true, arguments(json!({"text": "importer"}))).await.unwrap();
     // the cut reads no more than the search does
     assert_eq!(methods(&logseq), [DATALOG]);
     let (results, meta) = (text_of(&result, 0), text_of(&result, 1));
@@ -153,7 +153,7 @@ async fn a_search_cut_by_its_limit_and_its_size_offers_no_larger_limit() {
     // the same place, so no warning offers it
     let big: Vec<Value> = (1..=300).map(|id| hit(id, 600)).collect();
     let logseq = mock_logseq(vec![json!(big)]).await;
-    let result = search_blocks::call(&client(&logseq), true, arguments(json!({"query": "importer", "limit": 200}))).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), true, arguments(json!({"text": "importer", "limit": 200}))).await.unwrap();
     let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();
     let warnings = meta["meta"]["warnings"].as_array().unwrap();
     assert_eq!(warnings.iter().map(|warning| warning["code"].as_str().unwrap()).collect::<Vec<_>>(), ["result_size_truncated"]);
@@ -175,8 +175,8 @@ async fn the_raise_a_limit_warning_offers_returns_exactly_that_many_hits_and_one
         let many = many.clone();
         async move {
             let logseq = mock_logseq(vec![json!(many)]).await;
-            let args = limit.map_or(json!({"query": "importer"}), |limit| json!({"query": "importer", "limit": limit}));
-            let result = search_blocks::call(&client(&logseq), true, arguments(args)).await.unwrap();
+            let args = limit.map_or(json!({"text": "importer"}), |limit| json!({"text": "importer", "limit": limit}));
+            let result = find_blocks::call(&client(&logseq), true, arguments(args)).await.unwrap();
             assert_eq!(methods(&logseq), [DATALOG]);
             let hits = serde_json::from_str::<Vec<Value>>(&text_of(&result, 0)).unwrap().len();
             (hits, search_meta(&result))
@@ -206,10 +206,10 @@ async fn the_raise_a_limit_warning_offers_returns_exactly_that_many_hits_and_one
 async fn a_search_with_context_is_cut_to_the_budget_and_the_page_lookup_stays_one_call() {
     let big: Vec<Value> = (1..=100).map(|id| hit(id, 300)).collect();
     let logseq = mock_logseq(vec![json!(big), json!([page_row()])]).await;
-    let result = search_blocks::call(
+    let result = find_blocks::call(
         &client(&logseq),
         true,
-        arguments(json!({"query": "importer", "include_context": true, "slim_results": false})),
+        arguments(json!({"text": "importer", "include_context": true, "slim_results": false})),
     )
     .await
     .unwrap();
@@ -229,14 +229,14 @@ async fn a_search_with_context_is_cut_to_the_budget_and_the_page_lookup_stays_on
 async fn a_single_search_hit_over_the_budget_comes_back_alone_and_the_first_of_many_says_so() {
     // one hit of 40,000 characters: nothing to cut, so it is returned whole with no warning
     let logseq = mock_logseq(vec![json!([hit(1, 40_000)])]).await;
-    let result = search_blocks::call(&client(&logseq), false, arguments(json!({"query": "importer"}))).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), false, arguments(json!({"text": "importer"}))).await.unwrap();
     assert_eq!(serde_json::from_str::<Vec<Value>>(&text_of(&result, 0)).unwrap().len(), 1);
     let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();
     assert_eq!(meta["meta"]["warnings"], json!([]));
 
     // the newest of three is 40,000 characters: it is kept alone, and the warning says that even it is over
     let logseq = mock_logseq(vec![json!([hit(3, 40_000), hit(2, 10), hit(1, 10)])]).await;
-    let result = search_blocks::call(&client(&logseq), false, arguments(json!({"query": "importer"}))).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), false, arguments(json!({"text": "importer"}))).await.unwrap();
     let kept: Vec<Value> = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert_eq!(kept.len(), 1);
     let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();

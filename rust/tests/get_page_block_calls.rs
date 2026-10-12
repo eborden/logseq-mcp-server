@@ -287,7 +287,7 @@ async fn a_page_that_vanishes_between_the_two_lookups_is_not_found_without_sugge
     let error = get_page::get_page(&client(&logseq), "atlas", false, false).await.unwrap_err();
     assert_eq!(
         error.to_string(),
-        "No page \"atlas\". Try logseq_search_blocks to find it by content, or logseq_find_pages (text) to browse names."
+        "No page \"atlas\". Try logseq_find_blocks to find it by content, or logseq_find_pages (text) to browse names."
     );
     assert_eq!(methods(&logseq).len(), 3);
 }

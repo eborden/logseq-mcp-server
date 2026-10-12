@@ -50,7 +50,7 @@ const NARROWER: &str = "No other parameter narrows this query.";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.\n\n\
 **Matching:** key as stored (created-at) or camelCase; values are exact strings (\"42\", \"true\"); a multi-value property matches if any one value equals it. Flat list with page name, no children.\n\
-**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_search_blocks.";
+**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_find_blocks.";
 
 fn default_limit() -> u64 {
     DEFAULT_PROPERTY_LIMIT

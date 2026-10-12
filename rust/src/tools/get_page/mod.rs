@@ -54,7 +54,7 @@ pub const NAME: &str = "logseq_get_page";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n\
 **Use when:** you know the page name.\n\
-**Can't find:** pages by keyword (logseq_search_blocks, logseq_find_pages) or what links here (logseq_get_backlinks).\n\
+**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages) or what links here (logseq_get_backlinks).\n\
 **Alternatives:** logseq_build_context adds related pages and references.";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.

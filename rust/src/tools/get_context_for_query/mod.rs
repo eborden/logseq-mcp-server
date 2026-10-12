@@ -36,7 +36,7 @@ use crate::refs;
 use crate::resolve::RETRY_ADVICE;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::{Caps, TopicContext, TopicContextOutput, build_context_for_topic};
-use crate::tools::search_blocks::{find_blocks, full_blocks_with_context, hit_pages_unavailable};
+use crate::tools::find_blocks::{blocks_containing, full_blocks_with_context, hit_pages_unavailable};
 use crate::truncation::{CappedTruncation, capped_truncation_warning};
 
 pub const NAME: &str = "logseq_get_context_for_query";
@@ -406,7 +406,7 @@ pub async fn get_context_for_query(
             let searched = keywords.iter().fold(&keywords[0], |longest, keyword| if keyword.chars().count() > longest.chars().count() { keyword } else { longest });
             // A `null` answer is no answer, not "no matches" (BR-0011, #338): `searchResults` stays `[]`, and a
             // warning says LogSeq did not answer, so the empty list is not read as a search that found nothing.
-            let found = find_blocks(client, searched).await?;
+            let found = blocks_containing(client, searched).await?;
             if found.is_none() {
                 warnings.push(search_unavailable(&keywords));
             }
