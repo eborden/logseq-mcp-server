@@ -24,4 +24,4 @@ The recorded `tools/list` test fails unless every tool sets `readOnlyHint: true`
 | 2026-10-05 | Introduced as read-only annotations on every tool. | #28 |
 | 2026-10-05 | Restated as a hard rule and a re-runnable-calls principle in the foundations doc. | #38 |
 | 2026-10-08 | Mechanical enforcement: the annotation tests of the TypeScript server are replaced by the guard over the recorded tool list and the Rust server's own test. Statement unchanged. The Rust test of the live list now checks every annotation, not only `readOnlyHint`. | #370 |
-| 2026-10-12 | The tool name in the Statement follows the rename of `logseq_get_current_context` to `logseq_get_current` (ADR-0037). Nothing else changed. | #489 |
+| 2026-10-12 | The tool name in the Statement follows the rename of `logseq_get_current_context` to `logseq_get_current` (ADR-0037). Nothing else changed. | #517 |

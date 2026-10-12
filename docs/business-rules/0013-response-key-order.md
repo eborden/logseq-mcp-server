@@ -49,4 +49,4 @@ reviewer: A new key in a tool result goes in the position of its category, and a
 |---|---|---|
 | 2026-10-08 | Introduced. | #378 |
 | 2026-10-08 | Enforcement: unit tests pin the key order of the first tools' typed outputs (additive; the `none-yet` line stays for the other tools). | #398 |
-| 2026-10-12 | Mechanical enforcement: the `test:` path of the current context follows the rename of `logseq_get_current_context` to `logseq_get_current` (`rust/src/tools/get_current/mod.rs`). Same test; statement and paragraphs unchanged. | #489 |
+| 2026-10-12 | Mechanical enforcement: the `test:` path of the current context follows the rename of `logseq_get_current_context` to `logseq_get_current` (`rust/src/tools/get_current/mod.rs`). Same test; statement and paragraphs unchanged. | #517 |
