@@ -27,12 +27,12 @@ use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::meta::{ResultMeta, ResultWarning};
+use crate::property::PropertyKey;
 use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, blocks_inline_max, capped_truncation_warning};
 
-use self::queries::PropertyKey;
 use self::tips::property_tips;
 
 pub const NAME: &str = "logseq_query_by_property";
@@ -165,7 +165,7 @@ pub async fn query_by_property_with_meta(
     limit: u64,
 ) -> Result<PropertyResults, ToolError> {
     // A key LogSeq can't have is refused before any call
-    let key = PropertyKey::parse(property_key)?;
+    let key = PropertyKey::parse(property_key, "property_key")?;
     let query = queries::blocks_by_property(&key, &property_value.to_js_string());
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
     let Some(pulled) = wire::blocks(&answer)? else {
