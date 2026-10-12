@@ -32,7 +32,7 @@ use crate::js;
 use crate::meta::ResultWarning;
 use crate::order;
 use crate::output_format::ListFormat;
-use crate::property::{PropertyKey, has_property};
+use crate::property::{PropertyFilter, has_property};
 use crate::resolve::MAX_SUGGESTIONS;
 use crate::tips::{non_empty, tips_value};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
@@ -245,35 +245,9 @@ fn nest_aliases<'a>(pages: &[&'a ListedEntity]) -> Vec<Entry<'a>> {
     entries
 }
 
-/// The property filter, checked: a key LogSeq can store and the value as the text it is matched by.
-struct PropertyFilter {
-    key: PropertyKey,
-    value: String,
-}
-
-/// `property` and `value` go together. Both or neither is a filter; one alone is refused before any LogSeq call,
-/// naming the one that is missing. A key LogSeq can't store is refused the same way (the arguments are checked in the
-/// order the schema lists them, so a bad `property` is reported before a missing `value`).
+/// `property` and `value` go together ([`crate::property::property_filter`]).
 fn property_filter(args: &Args) -> Result<Option<PropertyFilter>, InvalidParameter> {
-    match (args.property.as_deref(), args.value.as_ref()) {
-        (None, None) => Ok(None),
-        (Some(property), Some(value)) => Ok(Some(PropertyFilter { key: PropertyKey::parse(property, "property")?, value: value.to_js_string() })),
-        (Some(property), None) => {
-            PropertyKey::parse(property, "property")?;
-            Err(InvalidParameter {
-                param: "value".to_owned(),
-                value: "missing".to_owned(),
-                expected: "the value to match (property and value go together)".to_owned(),
-                example: Some("value: \"active\"".to_owned()),
-            })
-        }
-        (None, Some(_)) => Err(InvalidParameter {
-            param: "property".to_owned(),
-            value: "missing".to_owned(),
-            expected: "the property to match value against (property and value go together)".to_owned(),
-            example: Some("property: \"status\"".to_owned()),
-        }),
-    }
+    crate::property::property_filter(args.property.as_deref(), args.value.as_ref())
 }
 
 /// Which entries each requested name names, and how each name came out. A name matches an entry when it equals the
@@ -624,7 +598,7 @@ mod tests {
     fn a_page_with_the_property_is_a_page_with_a_file_that_carries_it() {
         let atlas = with_properties(entity(1, "Project Atlas", true, &[]), &[("status", text("active"))]);
         let stub = entity(2, "Atlas", false, &[]);
-        let filter = PropertyFilter { key: PropertyKey::parse("status", "property").unwrap(), value: "active".to_owned() };
+        let filter = PropertyFilter { key: crate::property::PropertyKey::parse("status", "property").unwrap(), value: "active".to_owned() };
         let has = |page: &ListedEntity| page.properties.as_ref().is_some_and(|properties| has_property(properties, &filter.key, &filter.value));
         assert!(has(&atlas));
         assert!(!has(&stub), "a page with no properties has none");

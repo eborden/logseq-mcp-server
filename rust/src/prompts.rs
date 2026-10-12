@@ -374,7 +374,7 @@ fn build_prioritize_tasks(args: &Arguments, _today: CalendarDate) -> Result<Stri
         String::new(),
         "Steps:".to_owned(),
         r#"1. logseq_find_blocks for "TODO" and for "DOING" (limit 20 each)."#.to_owned(),
-        r#"2. logseq_query_by_property with property_key "priority" and property_value "high", and again with property_key "status" and property_value "doing"."#.to_owned(),
+        r#"2. logseq_find_blocks with property "priority" and value "high", and again with property "status" and value "doing"."#.to_owned(),
         match &focus {
             Some(f) => format!("3. Keep only the tasks tied to {f} (check with logseq_build_context if a task is unclear)."),
             None => "3. Check unclear tasks with logseq_build_context before ranking them.".to_owned(),

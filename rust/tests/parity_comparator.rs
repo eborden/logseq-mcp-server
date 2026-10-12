@@ -357,7 +357,7 @@ fn quirky(tools: &[Value]) -> Vec<Value> {
 #[test]
 fn the_recorded_tool_list_has_every_tool_and_equals_itself() {
     let tools = load_tool_list();
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 14);
     assert_eq!(compare_tool_lists(&tools, &tools.clone()), Vec::<String>::new());
 }
 

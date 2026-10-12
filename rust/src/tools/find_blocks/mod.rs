@@ -1,11 +1,12 @@
-//! `logseq_find_blocks`: a case-insensitive,
-//! literal substring search over block content, newest first.
+//! `logseq_find_blocks`: the blocks that match every filter given, newest first. `text` is a case-insensitive,
+//! literal substring of the block's content, and `property` with `value` an exact property value (#491; the two tools
+//! it replaces, `search_blocks` and `query_by_property`, each had one of them).
 //!
-//! Calls: 1 (the search query), or 2 with `include_context` (one batched lookup of the pages the
+//! Calls: 1 (the search query, whatever the filters), or 2 with `include_context` (one batched lookup of the pages the
 //! returned blocks sit on, and none when no block has a page id; a `null` answer to it is a
 //! `context_unavailable` warning, not blocks with no context, BR-0011). The match runs inside LogSeq
-//! (`re-pattern` / `re-find` over the text with its metacharacters escaped), results are sorted
-//! here, newest first (highest block id), and cut to `limit`, since Datalog here has no `:limit`.
+//! (`re-pattern` / `re-find` over the text with its metacharacters escaped; `:block/properties` for the property),
+//! results are sorted here, newest first (highest block id), and cut to `limit`, since Datalog here has no `:limit`.
 //!
 //! `call` then cuts the hits to the character budget (#506, `crate::budget`), the oldest first, and says so with a
 //! `result_size_truncated` warning that takes the place of the `limit` warning. The warning of a `limit` cut offers a
@@ -13,7 +14,7 @@
 //! without `include_context`) or as an upper bound (`include_context`, whose pages are read for the hits kept only).
 //! `find_blocks_with_meta`, the library function, applies no budget.
 //!
-//! This directory holds everything only the search uses: its queries (`queries.rs`), the answers it
+//! This directory holds everything only the finder uses: its query (`queries.rs`), the answers it
 //! reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside it: slim
 //! output, entity fields, the truncation warnings and the tool helpers.
 
@@ -28,60 +29,115 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::parse_args;
+use crate::args::{Scalar, parse_args};
 use crate::budget::{BUDGET_CHARS, Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
-use crate::errors::ToolError;
+use crate::errors::{InvalidParameter, ToolError};
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::pages_by_ids::pages_by_ids;
+use crate::property::{PropertyFilter, property_filter};
 use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
 use crate::truncation::{CappedTruncation, SizeCut, blocks_inline_max, capped_truncation_warning, size_truncation_warning};
 
-use self::tips::search_tips;
+use self::queries::Match;
+use self::tips::find_tips;
 
 pub const NAME: &str = "logseq_find_blocks";
 
 /// Results returned when `limit` is absent.
-pub const DEFAULT_SEARCH_LIMIT: u64 = 100;
+pub const DEFAULT_FIND_LIMIT: u64 = 100;
 
 /// Most results one call returns (#61). A larger `limit` is clamped to it. The library function reports a cut at the
 /// maximum by a `results_truncated` warning with no `howToFetchAll`; through `call`, 500 hits are always past the
 /// character budget (a slim hit is at least ~60 characters), so the size cut (`result_size_truncated`) takes that
 /// place (#506).
-pub const MAX_SEARCH_LIMIT: u64 = 500;
+pub const MAX_FIND_LIMIT: u64 = 500;
 
 /// The code of the warning for a result cut at `limit`.
 const COUNT_CUT: &str = "results_truncated";
 
 /// How to reach matches past the maximum: no parameter fetches them.
-const NARROWER: &str = "Narrow the text to see the rest.";
+const NARROWER: &str = "Narrow the filters to see the rest.";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find blocks whose content contains text (case-insensitive, literal substring), newest first, capped by limit (max 500). Check hasMore and warnings.\n\n\
-**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the text).\n\
-**Next:** logseq_build_context on a result's page.";
+const DESCRIPTION: &str = "Find blocks, newest first. Filters AND, at least one: text (case-insensitive substring); property + value (exact; any one value of a multi-value property). Capped by limit (max 500): check hasMore and warnings.\n\n\
+**Can't find:** synonyms or stems, partial or ranged values, link structure (logseq_search_by_relationship), or over 500 matches in one call.";
+
+fn default_limit() -> u64 {
+    DEFAULT_FIND_LIMIT
+}
 
 fn default_slim_results() -> bool {
     DEFAULT_SLIM_RESULTS
 }
 
-/// The search's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
+/// The finder's arguments. Unknown fields are ignored, as in every tool (see `input_schema`). That one filter at
+/// least is given, and that `property` and `value` go together, is checked by [`Filters::parse`] before any call.
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Text to find in block content (case-insensitive, literal)
-    pub text: String,
+    pub text: Option<String>,
+    /// Block property to match (letters, digits, "-" and "_"; createdAt and created-at are equivalent). Needs value
+    pub property: Option<String>,
+    /// Exact value of the property. A multi-value property matches if any one value equals it. Needs property
+    #[serde(default)]
+    #[schemars(with = "Scalar")]
+    pub value: Option<Scalar>,
     /// Maximum number of results to return (default: 100, max: 500)
-    pub limit: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
     /// Include semantic context (page, references, tags)
     #[serde(default)]
     pub include_context: bool,
     /// Slim blocks (default). false returns full entities
     #[serde(default = "default_slim_results")]
     pub slim_results: bool,
+}
+
+/// The filters of a call, checked: at least one, so a call never lists every block in the graph by accident.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Filters {
+    /// The text to find. An empty `text` is no filter
+    pub text: Option<String>,
+    pub property: Option<PropertyFilter>,
+}
+
+impl Filters {
+    /// The filters the arguments name. A `property` without a `value` (or the reverse), or a key LogSeq can't store, is
+    /// an `InvalidParameter`; so is a call with no filter at all. Refused before any LogSeq call.
+    pub fn parse(text: Option<&str>, property: Option<&str>, value: Option<&Scalar>) -> Result<Filters, InvalidParameter> {
+        let property = property_filter(property, value)?;
+        let text = text.filter(|text| !text.is_empty()).map(str::to_owned);
+        if text.is_none() && property.is_none() {
+            return Err(InvalidParameter {
+                param: "filters".to_owned(),
+                value: "none given".to_owned(),
+                expected: "At least one of: text, or property with value".to_owned(),
+                example: Some("text: \"importer\", or property: \"status\" with value: \"doing\"".to_owned()),
+            });
+        }
+        Ok(Filters { text, property })
+    }
+
+    fn matching(&self) -> Match<'_> {
+        Match { text: self.text.as_deref(), property: self.property.as_ref() }
+    }
+
+    /// What the blocks are said to be when the search was not answered: "contain "x"", "have the property "k"" or both.
+    fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(text) = &self.text {
+            parts.push(format!("contain {}", json!(text)));
+        }
+        if let Some(filter) = &self.property {
+            parts.push(format!("have the property {}", json!(filter.key.as_str())));
+        }
+        parts.join(" and ")
+    }
 }
 
 /// The tool as `tools/list` shows it.
@@ -95,8 +151,10 @@ pub fn definition() -> Tool {
 /// the two content blocks the call sends, so the library function the search is read through stays uncut.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let searched = search(client, &args.text, args.limit, args.include_context, args.slim_results).await?.with_raise(tips_enabled, &args.text);
-    let (results, meta) = fit_to_budget(&searched, tips_enabled, &args.text);
+    let filters = Filters::parse(args.text.as_deref(), args.property.as_deref(), args.value.as_ref())?;
+    let text = filters.text.as_deref();
+    let searched = search(client, &filters, args.limit, args.include_context, args.slim_results).await?.with_raise(tips_enabled, text);
+    let (results, meta) = fit_to_budget(&searched, tips_enabled, text);
     Ok(success_result(vec![ContentBlock::text(results), ContentBlock::text(meta)]))
 }
 
@@ -119,9 +177,10 @@ struct Searched {
     slim_results: bool,
     /// LogSeq answered `null` to the page lookup of `include_context`
     context_missing: bool,
-    /// LogSeq answered `null` to the search itself: the query it was asked, for the warning (BR-0011)
+    /// LogSeq answered `null` to the search itself: what the blocks were asked to be ([`Filters::describe`]), for the
+    /// warning (BR-0011)
     unavailable_for: Option<String>,
-    /// When `limit` cut the hits: every hit the search could return (up to [`MAX_SEARCH_LIMIT`]) as a result without
+    /// When `limit` cut the hits: every hit the search could return (up to [`MAX_FIND_LIMIT`]) as a result without
     /// `context`, which the raise advice measures. Empty when `limit` cut nothing.
     plain: Vec<Value>,
     /// What the warning of a `limit` cut says about raising it, once measured ([`Searched::with_raise`])
@@ -146,8 +205,8 @@ impl Searched {
     /// the hits against every match, so it replaces the count cap's warning: that one would offer a larger `limit`,
     /// which returns the same first hits cut the same way (BR-0006).
     fn warnings(&self, cut: Option<SizeCutTo>) -> Vec<ResultWarning> {
-        if let Some(query) = &self.unavailable_for {
-            return vec![search_unavailable(query)];
+        if let Some(asked) = &self.unavailable_for {
+            return vec![search_unavailable(asked)];
         }
         let shown = cut.map_or(self.results.len(), |cut| cut.kept);
         let mut warnings = Vec::new();
@@ -179,7 +238,7 @@ impl Searched {
                 shown,
                 total,
                 param: "limit",
-                max: MAX_SEARCH_LIMIT as usize,
+                max: MAX_FIND_LIMIT as usize,
                 narrower: NARROWER,
                 requested: Some(self.limit),
                 code: "results_truncated",
@@ -213,7 +272,7 @@ impl Searched {
     /// The raise `limit` can honestly offer, measured on the hits already read: the most hits (up to the maximum)
     /// whose result, as `call` would send it, fits the budget. Exact for hits without `context`; with `include_context`
     /// the hits are measured without it, so the count is an upper bound. Only a `limit` cut has one.
-    fn with_raise(mut self, tips_enabled: bool, query: &str) -> Searched {
+    fn with_raise(mut self, tips_enabled: bool, text: Option<&str>) -> Searched {
         let kept = self.results.len();
         if self.total <= kept || self.plain.is_empty() {
             return self;
@@ -230,7 +289,7 @@ impl Searched {
             plain: Vec::new(),
             raise: Raise::Unchecked,
         };
-        let most = probe.fitting(tips_enabled, query);
+        let most = probe.fitting(tips_enabled, text);
         self.raise = if most <= kept {
             Raise::NoMore
         } else if most >= reachable && !self.include_context {
@@ -242,15 +301,15 @@ impl Searched {
     }
 
     /// The length of the result holding the first `kept` hits (all of them when `kept` is the number of hits).
-    fn size_with(&self, tips_enabled: bool, query: &str, kept: usize) -> usize {
-        let (results, meta) = self.texts(tips_enabled, query, (kept < self.results.len()).then_some(SizeCutTo { kept, oversize: false }));
+    fn size_with(&self, tips_enabled: bool, text: Option<&str>, kept: usize) -> usize {
+        let (results, meta) = self.texts(tips_enabled, text, (kept < self.results.len()).then_some(SizeCutTo { kept, oversize: false }));
         size(&results) + size(&meta)
     }
 
     /// The most hits whose result fits the budget (at least the first one, and all of them when they fit).
-    fn fitting(&self, tips_enabled: bool, query: &str) -> usize {
+    fn fitting(&self, tips_enabled: bool, text: Option<&str>) -> usize {
         let total = self.results.len();
-        match fit(total, 1, |kept| self.size_with(tips_enabled, query, kept)) {
+        match fit(total, 1, |kept| self.size_with(tips_enabled, text, kept)) {
             Fit::Whole => total,
             Fit::Cut { kept, .. } => kept,
         }
@@ -279,10 +338,10 @@ impl Searched {
 
     /// The two content blocks of the call with the first `cut.kept` hits, all of them without a cut: the results,
     /// then the meta with its tips. The tips read the hits that are sent.
-    fn texts(&self, tips_enabled: bool, query: &str, cut: Option<SizeCutTo>) -> (String, String) {
+    fn texts(&self, tips_enabled: bool, text: Option<&str>, cut: Option<SizeCutTo>) -> (String, String) {
         let sent = &self.results[..cut.map_or(self.results.len(), |cut| cut.kept)];
         // No tip for a search LogSeq did not answer: "No match" would say what the warning says it can't
-        let tips = if tips_enabled && self.unavailable_for.is_none() { search_tips(query, sent, Some(self.total)) } else { Vec::new() };
+        let tips = if tips_enabled && self.unavailable_for.is_none() { find_tips(text, sent, Some(self.total)) } else { Vec::new() };
         let mut meta = serde_json::to_value(self.meta(cut)).expect("a result meta serializes");
         if !tips.is_empty() {
             meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
@@ -294,10 +353,10 @@ impl Searched {
 /// The two content blocks as they are when their text fits the character budget, else with the first hits that do.
 /// The unit is a hit: it is never cut inside its text (BR-0007), so a first hit over the budget comes back alone,
 /// and the warning says so. The budget counts both blocks, the tips included.
-fn fit_to_budget(searched: &Searched, tips_enabled: bool, query: &str) -> (String, String) {
+fn fit_to_budget(searched: &Searched, tips_enabled: bool, text: Option<&str>) -> (String, String) {
     let total = searched.results.len();
-    let texts = |cut: Option<SizeCutTo>| searched.texts(tips_enabled, query, cut);
-    match fit(total, 1, |kept| searched.size_with(tips_enabled, query, kept)) {
+    let texts = |cut: Option<SizeCutTo>| searched.texts(tips_enabled, text, cut);
+    match fit(total, 1, |kept| searched.size_with(tips_enabled, text, kept)) {
         Fit::Whole => texts(None),
         Fit::Cut { kept, oversize } => texts(Some(SizeCutTo { kept, oversize })),
     }
@@ -357,14 +416,13 @@ const SEARCH_UNAVAILABLE: &str = "search_unavailable";
 
 /// The search was not answered: `results` is `[]`, but not because nothing matches. No parameter fetches what LogSeq did
 /// not answer, so the warning carries no `howToFetchAll` and `hasMore` stays false (BR-0011). The retry advice is in the
-/// message.
-fn search_unavailable(query: &str) -> ResultWarning {
+/// message. `asked` is what the blocks were asked to be ([`Filters::describe`]).
+fn search_unavailable(asked: &str) -> ResultWarning {
     ResultWarning::new(
         SEARCH_UNAVAILABLE,
         format!(
-            "LogSeq returned no answer when looking up blocks that contain {} (possibly no graph open or a re-index in progress), \
-             so the empty list may not mean nothing matches. {RETRY_ADVICE}",
-            json!(query)
+            "LogSeq returned no answer when looking up blocks that {asked} (possibly no graph open or a re-index in progress), \
+             so the empty list may not mean nothing matches. {RETRY_ADVICE}"
         ),
     )
 }
@@ -471,16 +529,21 @@ fn full_result(block: &Value, context: Option<&Context>) -> Value {
     result
 }
 
-/// The blocks whose content holds `query`, newest first (highest block id first) and not cut, or
-/// `None` when LogSeq answers `null`. One call. `get_context_for_query`'s keyword search reads these
-/// itself and does the cutting.
-pub async fn blocks_containing(client: &LogseqClient, query: &str) -> Result<Option<Vec<Value>>, ToolError> {
-    let search = queries::search_blocks(query);
+/// The blocks that match `filters`, newest first (highest block id first) and not cut, or `None` when LogSeq
+/// answers `null`. One call.
+async fn find(client: &LogseqClient, filters: &Filters) -> Result<Option<Vec<Value>>, ToolError> {
+    let search = queries::find_blocks(&filters.matching());
     let answer = client.execute_datalog_query(&search.text, &search.inputs).await?;
-    let Some(mut matches) = wire::hits(&answer)? else { return Ok(None) };
+    let Some(mut matches) = wire::hits(&answer, filters.text.is_some())? else { return Ok(None) };
     // Ids are unique, and a sort that keeps ties in order
     matches.sort_by_key(|block| std::cmp::Reverse(block_id(block)));
     Ok(Some(matches))
+}
+
+/// The blocks whose content holds `text`, newest first and not cut, or `None` when LogSeq answers `null`. One call.
+/// `get_context_for_query`'s keyword search reads these itself and does the cutting.
+pub async fn blocks_containing(client: &LogseqClient, text: &str) -> Result<Option<Vec<Value>>, ToolError> {
+    find(client, &Filters { text: Some(text.to_owned()), property: None }).await
 }
 
 /// `blocks` as full results with `context` (page, references, tags) added from one batched page
@@ -491,35 +554,34 @@ pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>)
     Ok((blocks.iter().zip(&contexts).map(|(block, context)| full_result(block, context.as_ref())).collect(), unavailable))
 }
 
-/// Search blocks for `query`: the results and their meta (`totals.matches` is the number of
+/// Find the blocks that match `filters`: the results and their meta (`totals.matches` is the number of
 /// matching blocks before `limit`, and a `results_truncated` warning says what `limit` to use to get
 /// them all). When LogSeq answers `null` the results are `[]` and the meta carries a `search_unavailable`
 /// warning, with no `totals.matches` since none is known (BR-0011, #415); no matches is an empty `results` and no
 /// warning.
 ///
-/// `limit` (default 100) is clamped to [`MAX_SEARCH_LIMIT`]. The warning never suggests a value above
+/// `limit` is clamped to [`MAX_FIND_LIMIT`]. The warning never suggests a value above
 /// it, and a cut at the maximum carries no `howToFetchAll`, so `hasMore` is false there (BR-0006). This is the
 /// search before the character budget, which only [`call`] applies (#506): a result of this function can be longer
 /// than the budget, and its `limit` warning does not account for that. Through `call` a cut at the maximum is always
 /// a size cut, and a `limit` warning offers only a raise the budget allows.
 pub async fn find_blocks_with_meta(
     client: &LogseqClient,
-    query: &str,
-    limit: Option<u64>,
+    filters: &Filters,
+    limit: u64,
     include_context: bool,
     slim_results: bool,
 ) -> Result<SearchResults, ToolError> {
-    let searched = search(client, query, limit, include_context, slim_results).await?;
+    let searched = search(client, filters, limit, include_context, slim_results).await?;
     let meta = searched.meta(None);
     Ok(SearchResults { results: searched.results, meta })
 }
 
 /// The search of [`find_blocks_with_meta`], before the warnings are worded and the character budget applied
 /// (only [`call`] applies it, #506). API calls: 1, or 2 with `include_context`.
-async fn search(client: &LogseqClient, query: &str, limit: Option<u64>, include_context: bool, slim_results: bool) -> Result<Searched, ToolError> {
-    let limit = limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
+async fn search(client: &LogseqClient, filters: &Filters, limit: u64, include_context: bool, slim_results: bool) -> Result<Searched, ToolError> {
     // Newest first (highest block id first)
-    let Some(mut matches) = blocks_containing(client, query).await? else {
+    let Some(mut matches) = find(client, filters).await? else {
         return Ok(Searched {
             results: Vec::new(),
             total: 0,
@@ -527,15 +589,15 @@ async fn search(client: &LogseqClient, query: &str, limit: Option<u64>, include_
             include_context,
             slim_results,
             context_missing: false,
-            unavailable_for: Some(query.to_owned()),
+            unavailable_for: Some(filters.describe()),
             plain: Vec::new(),
             raise: Raise::Unchecked,
         });
     };
     let total = matches.len();
-    let kept = limit.min(MAX_SEARCH_LIMIT) as usize;
+    let kept = limit.min(MAX_FIND_LIMIT) as usize;
     // The hits `limit` leaves out, up to the maximum, for the raise advice to measure (no call: they are in hand)
-    let beyond: Vec<Value> = if total > kept { matches[kept..total.min(MAX_SEARCH_LIMIT as usize)].to_vec() } else { Vec::new() };
+    let beyond: Vec<Value> = if total > kept { matches[kept..total.min(MAX_FIND_LIMIT as usize)].to_vec() } else { Vec::new() };
     matches.truncate(kept);
 
     // Page context only for the blocks kept, so the lookup never covers cut ones
@@ -628,29 +690,29 @@ mod tests {
 
     #[test]
     fn an_empty_search_and_a_result_under_the_budget_are_sent_as_the_search_made_them() {
-        let empty = fit_to_budget(&searched(Vec::new(), 0), true, "x");
+        let empty = fit_to_budget(&searched(Vec::new(), 0), true, Some("x"));
         assert_eq!(empty.0, "[]");
         assert_eq!(meta_of(&empty), json!({"hasMore": false, "warnings": [], "totals": {"matches": 0}, "tips": [empty_tip()]}));
         let small = searched(vec![hit(10), hit(20)], 2);
-        assert_eq!(fit_to_budget(&small, false, "x"), small.texts(false, "x", None));
-        assert_eq!(small.texts(false, "x", None).1, r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":2}}}"#);
+        assert_eq!(fit_to_budget(&small, false, Some("x")), small.texts(false, Some("x"), None));
+        assert_eq!(small.texts(false, Some("x"), None).1, r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":2}}}"#);
     }
 
     fn empty_tip() -> String {
-        search_tips("x", &[], Some(0))[0].clone()
+        find_tips(Some("x"), &[], Some(0))[0].clone()
     }
 
     #[test]
     fn a_result_exactly_at_the_budget_is_untouched_and_one_character_over_is_cut() {
-        let frame = chars(&searched(vec![hit(10), hit(10), hit(0)], 3).texts(false, "x", None));
+        let frame = chars(&searched(vec![hit(10), hit(10), hit(0)], 3).texts(false, Some("x"), None));
         let exact = searched(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame)], 3);
-        let texts = fit_to_budget(&exact, false, "x");
+        let texts = fit_to_budget(&exact, false, Some("x"));
         assert_eq!(chars(&texts), BUDGET_CHARS);
-        assert_eq!(texts, exact.texts(false, "x", None));
+        assert_eq!(texts, exact.texts(false, Some("x"), None));
         assert_eq!(meta_of(&texts)["warnings"], json!([]));
 
         let over = searched(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame + 1)], 3);
-        let texts = fit_to_budget(&over, false, "x");
+        let texts = fit_to_budget(&over, false, Some("x"));
         assert!(chars(&texts) <= BUDGET_CHARS);
         assert_eq!(serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len(), 2);
         assert_eq!(meta_of(&texts)["warnings"][0]["code"], "result_size_truncated");
@@ -660,12 +722,12 @@ mod tests {
     fn a_cut_keeps_the_most_hits_that_fit_with_its_warning_and_the_newest_first() {
         let hits: Vec<Value> = (0..400).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(200)})).collect();
         let found = searched(hits, 400);
-        let texts = fit_to_budget(&found, false, "x");
+        let texts = fit_to_budget(&found, false, Some("x"));
         assert!(chars(&texts) <= BUDGET_CHARS);
         let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
         assert!(kept > 1 && kept < 400);
         // one more hit would not have fit
-        let one_more = found.texts(false, "x", Some(SizeCutTo { kept: kept + 1, oversize: false }));
+        let one_more = found.texts(false, Some("x"), Some(SizeCutTo { kept: kept + 1, oversize: false }));
         assert!(chars(&one_more) > BUDGET_CHARS);
         let meta = meta_of(&texts);
         assert_eq!(meta["hasMore"], false);
@@ -680,11 +742,11 @@ mod tests {
 
     #[test]
     fn a_single_hit_over_the_budget_is_returned_alone_and_the_first_of_many_says_so() {
-        let one = fit_to_budget(&searched(vec![hit(40_000)], 1), false, "x");
+        let one = fit_to_budget(&searched(vec![hit(40_000)], 1), false, Some("x"));
         assert_eq!(serde_json::from_str::<Vec<Value>>(&one.0).unwrap().len(), 1);
         assert_eq!(meta_of(&one)["warnings"], json!([]));
 
-        let first_over = fit_to_budget(&searched(vec![hit(40_000), hit(5), hit(5)], 3), false, "x");
+        let first_over = fit_to_budget(&searched(vec![hit(40_000), hit(5), hit(5)], 3), false, Some("x"));
         assert_eq!(serde_json::from_str::<Vec<Value>>(&first_over.0).unwrap().len(), 1);
         let meta = meta_of(&first_over);
         assert_eq!(meta["warnings"][0]["code"], "result_size_truncated");
@@ -700,7 +762,7 @@ mod tests {
         let limit_only = found.meta(None);
         assert_eq!(limit_only.warnings[0].code, "results_truncated");
         assert!(limit_only.has_more, "a limit cut below the maximum offers a raise");
-        let texts = fit_to_budget(&found, false, "x");
+        let texts = fit_to_budget(&found, false, Some("x"));
         let meta = meta_of(&texts);
         let codes: Vec<&str> = meta["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect();
         assert_eq!(codes, ["result_size_truncated"]);
@@ -716,7 +778,7 @@ mod tests {
         found.context_missing = true;
         let whole = found.meta(None);
         assert!(whole.warnings[0].message.contains("the 200 result block(s)"));
-        let texts = fit_to_budget(&found, false, "x");
+        let texts = fit_to_budget(&found, false, Some("x"));
         let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
         assert!(kept < 200);
         let meta = meta_of(&texts);
@@ -728,20 +790,20 @@ mod tests {
     fn the_budget_counts_the_tips_and_a_tip_reads_the_hits_that_are_sent() {
         let hits: Vec<Value> = (0..400).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(200), "pageName": if n < 100 { "Old Page" } else { "Other Page" }})).collect();
         let found = searched(hits, 400);
-        let texts = fit_to_budget(&found, true, "x");
+        let texts = fit_to_budget(&found, true, Some("x"));
         assert!(chars(&texts) <= BUDGET_CHARS);
         let meta = meta_of(&texts);
         assert_eq!(meta["tips"].as_array().unwrap().len(), 1);
         // it matches what the tip tool says of the hits that are sent
         let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap();
-        assert_eq!(meta["tips"][0], json!(search_tips("x", &kept, Some(400))[0]));
+        assert_eq!(meta["tips"][0], json!(find_tips(Some("x"), &kept, Some(400))[0]));
     }
 
     #[test]
     fn a_search_that_found_nothing_to_read_keeps_its_unavailable_warning_and_no_total() {
         let mut found = searched(Vec::new(), 0);
         found.unavailable_for = Some("x".into());
-        let texts = fit_to_budget(&found, true, "x");
+        let texts = fit_to_budget(&found, true, Some("x"));
         assert_eq!(texts.0, "[]");
         let meta = meta_of(&texts);
         assert_eq!(meta["warnings"][0]["code"], "search_unavailable");
@@ -771,7 +833,7 @@ mod tests {
     }
 
     fn count_warning_of(found: Searched) -> ResultWarning {
-        let found = found.with_raise(false, "x");
+        let found = found.with_raise(false, Some("x"));
         let shown = found.results.len();
         found.count_warning(shown)
     }
@@ -790,14 +852,14 @@ mod tests {
     #[test]
     fn a_raise_past_the_budget_offers_only_what_fits() {
         // 200 hits of 300 characters (~65,000): 30 are kept, and raising to 200 would be cut to the most that fit
-        let found = limited(30, 200, 200, 300).with_raise(false, "x");
+        let found = limited(30, 200, 200, 300).with_raise(false, Some("x"));
         let Raise::Offer { limit, exact: true } = found.raise else { panic!("{:?}", found.raise) };
         assert!(limit > 30 && limit < 200, "{limit}");
         // that many fit and one more does not, as the call would send them
         let raised = Searched { results: found.plain[..limit].to_vec(), ..limited(limit, 200, 200, 300) };
-        assert!(raised.size_with(false, "x", limit) <= BUDGET_CHARS);
+        assert!(raised.size_with(false, Some("x"), limit) <= BUDGET_CHARS);
         let more = Searched { results: found.plain[..limit + 1].to_vec(), ..limited(limit + 1, 200, 200, 300) };
-        assert!(more.size_with(false, "x", limit + 1) > BUDGET_CHARS);
+        assert!(more.size_with(false, Some("x"), limit + 1) > BUDGET_CHARS);
         let warning = found.count_warning(30);
         assert_eq!(warning.code, "results_truncated");
         assert_eq!(warning.message, "Showing 30 of 200 matching blocks.");
@@ -810,8 +872,8 @@ mod tests {
     fn when_no_larger_limit_fits_the_warning_offers_none_and_has_more_is_false() {
         // 95 hits of 300 characters are ~30,000 characters: 95 are kept and no `limit` returns more
         let found = limited(95, 300, 300, 300);
-        assert!(found.size_with(false, "x", 95) > BUDGET_CHARS - 600, "the kept hits are near the budget");
-        let found = found.with_raise(false, "x");
+        assert!(found.size_with(false, Some("x"), 95) > BUDGET_CHARS - 600, "the kept hits are near the budget");
+        let found = found.with_raise(false, Some("x"));
         let shown = found.results.len();
         let warning = found.count_warning(shown);
         assert_eq!(found.raise, Raise::NoMore, "{warning:?}");
@@ -826,7 +888,7 @@ mod tests {
         let warning = count_warning_of(limited(100, 500, 700, 200));
         assert!(!warning.how_to_fetch_all.clone().unwrap_or_default().contains("500"), "{warning:?}");
         assert!(!warning.message.contains("get 500"));
-        let found = limited(100, 500, 700, 200).with_raise(false, "x");
+        let found = limited(100, 500, 700, 200).with_raise(false, Some("x"));
         assert!(matches!(found.raise, Raise::Offer { limit, .. } if limit > 100 && limit < 500), "{:?}", found.raise);
     }
 
@@ -835,7 +897,7 @@ mod tests {
         // 30 small hits would fit without context, but context is read for the hits kept only: "up to", never "all"
         let mut found = limited(10, 30, 30, 100);
         found.include_context = true;
-        let found = found.with_raise(false, "x");
+        let found = found.with_raise(false, Some("x"));
         assert_eq!(found.raise, Raise::Offer { limit: 30, exact: false });
         let how = found.count_warning(10).how_to_fetch_all.unwrap();
         assert!(how.starts_with("Set limit to 30 to get up to 30 of 30."), "{how}");
@@ -844,12 +906,12 @@ mod tests {
         // hits that don't fit even without context never will with it
         let mut full = limited(95, 300, 300, 300);
         full.include_context = true;
-        assert_eq!(full.with_raise(false, "x").raise, Raise::NoMore);
+        assert_eq!(full.with_raise(false, Some("x")).raise, Raise::NoMore);
     }
 
     #[test]
     fn a_search_with_no_limit_cut_has_no_raise_to_measure() {
-        let found = searched(vec![hit(5), hit(5)], 2).with_raise(true, "x");
+        let found = searched(vec![hit(5), hit(5)], 2).with_raise(true, Some("x"));
         assert_eq!(found.raise, Raise::Unchecked);
         assert!(found.meta(None).warnings.is_empty());
     }
@@ -858,17 +920,17 @@ mod tests {
     fn the_budget_counts_characters_not_bytes_through_this_tool() {
         // hits of "é" (2 bytes each): exactly the budget in characters, well over it in bytes
         let accented = |length: usize| json!({"uuid": "u", "content": "é".repeat(length)});
-        let frame = chars(&searched(vec![accented(10), accented(10), accented(0)], 3).texts(false, "x", None));
+        let frame = chars(&searched(vec![accented(10), accented(10), accented(0)], 3).texts(false, Some("x"), None));
         let exact = searched(vec![accented(10), accented(10), accented(BUDGET_CHARS - frame)], 3);
-        let texts = fit_to_budget(&exact, false, "x");
+        let texts = fit_to_budget(&exact, false, Some("x"));
         assert_eq!(chars(&texts), BUDGET_CHARS);
         assert!(texts.0.len() + texts.1.len() > BUDGET_CHARS + 15_000, "{} bytes", texts.0.len() + texts.1.len());
-        assert_eq!(texts, exact.texts(false, "x", None), "at the budget in characters, so untouched");
+        assert_eq!(texts, exact.texts(false, Some("x"), None), "at the budget in characters, so untouched");
         assert_eq!(meta_of(&texts)["warnings"], json!([]));
 
         // one more character is a cut, and what is kept is at most the budget in characters
         let over = searched(vec![accented(10), accented(10), accented(BUDGET_CHARS - frame + 1)], 3);
-        let texts = fit_to_budget(&over, false, "x");
+        let texts = fit_to_budget(&over, false, Some("x"));
         assert!(chars(&texts) <= BUDGET_CHARS);
         assert_eq!(serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len(), 2);
         assert_eq!(meta_of(&texts)["warnings"][0]["code"], "result_size_truncated");
@@ -881,11 +943,13 @@ mod tests {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "Text to find in block content (case-insensitive, literal)"},
-                "limit": {"type": "integer", "minimum": 0, "description": "Maximum number of results to return (default: 100, max: 500)"},
+                "property": {"type": "string", "description": "Block property to match (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent). Needs value"},
+                "value": {"anyOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}], "description": "Exact value of the property. A multi-value property matches if any one value equals it. Needs property"},
+                "limit": {"type": "integer", "minimum": 0, "default": 100, "description": "Maximum number of results to return (default: 100, max: 500)"},
                 "include_context": {"type": "boolean", "default": false, "description": "Include semantic context (page, references, tags)"},
                 "slim_results": {"type": "boolean", "default": true, "description": "Slim blocks (default). false returns full entities"},
             },
-            "required": ["text"],
+            "required": [],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
@@ -903,13 +967,18 @@ mod tests {
 
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
-        let only_text = json!({"text": "x"});
-        let defaults = parse_args::<Args>(only_text.as_object()).unwrap();
-        assert_eq!(defaults, Args { text: "x".into(), limit: None, include_context: false, slim_results: true });
-        assert_eq!(serde_json::from_value::<Args>(only_text).unwrap(), defaults);
+        let defaults = parse_args::<Args>(None).unwrap();
+        assert_eq!(defaults, Args { text: None, property: None, value: None, limit: 100, include_context: false, slim_results: true });
+        assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
+        let with_text = json!({"text": "x", "property": "status", "value": 3});
+        let args = parse_args::<Args>(with_text.as_object()).unwrap();
+        assert_eq!(args, Args { text: Some("x".into()), property: Some("status".into()), value: Some(Scalar::Number(3.0)), ..defaults });
         // the first argument in schema order that is wrong is the one reported
-        let bad = json!({"slim_results": 0, "limit": "a"});
-        assert_eq!(parse_args::<Args>(bad.as_object()).unwrap_err().to_string(), "Invalid parameter 'text': missing\n\nExpected: a string (required)\nExample: text: \"...\"");
+        let bad = json!({"slim_results": 0, "limit": "a", "value": []});
+        assert_eq!(
+            parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
+            "Invalid parameter 'value': []\n\nExpected: a string, a number or a boolean, not an array\nExample: value: \"...\""
+        );
         let bad = json!({"text": "x", "slim_results": 0, "limit": "a"});
         assert_eq!(
             parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
@@ -921,9 +990,54 @@ mod tests {
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
         let base = json!({"text": "x"});
-        sweep::<Args>(json!({}), "text", Takes::Text, true);
+        sweep::<Args>(json!({}), "text", Takes::Text, false);
+        sweep::<Args>(json!({}), "property", Takes::Text, false);
+        sweep::<Args>(json!({}), "value", Takes::Scalar, false);
         sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
         sweep::<Args>(base.clone(), "include_context", Takes::Flag, false);
         sweep::<Args>(base, "slim_results", Takes::Flag, false);
+    }
+
+    fn filters(text: Option<&str>, property: Option<&str>, value: Option<Scalar>) -> Result<Filters, String> {
+        Filters::parse(text, property, value.as_ref()).map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_call_with_no_filter_is_refused_and_says_what_a_filter_is() {
+        let refusal = "Invalid parameter 'filters': none given\n\nExpected: At least one of: text, or property with value\n\
+                       Example: text: \"importer\", or property: \"status\" with value: \"doing\"";
+        assert_eq!(filters(None, None, None).unwrap_err(), refusal);
+        // an empty text is no filter, whatever else the call has
+        assert_eq!(filters(Some(""), None, None).unwrap_err(), refusal);
+        // white space is text: a block can hold exactly that
+        assert_eq!(filters(Some(" "), None, None).unwrap().text.as_deref(), Some(" "));
+    }
+
+    #[test]
+    fn property_and_value_go_together_and_each_filter_stands_alone() {
+        let only_text = filters(Some("x"), None, None).unwrap();
+        assert_eq!((only_text.text.as_deref(), only_text.property.is_none()), (Some("x"), true));
+        let only_property = filters(None, Some("createdAt"), Some(Scalar::Text("today".into()))).unwrap();
+        let property = only_property.property.unwrap();
+        assert_eq!((only_property.text, property.key.as_str(), property.value.as_str()), (None, "created-at", "today"));
+        let both = filters(Some("x"), Some("status"), Some(Scalar::Flag(true))).unwrap();
+        assert_eq!((both.text.as_deref(), both.property.unwrap().value.as_str()), (Some("x"), "true"));
+        // one alone is refused, naming the one that is missing, and a bad key before a missing value
+        assert!(filters(Some("x"), Some("status"), None).unwrap_err().starts_with("Invalid parameter 'value': missing"));
+        assert!(filters(Some("x"), None, Some(Scalar::Text("a".into()))).unwrap_err().starts_with("Invalid parameter 'property': missing"));
+        assert!(filters(Some("x"), Some("a b"), None).unwrap_err().starts_with("Invalid parameter 'property': a b"));
+    }
+
+    #[test]
+    fn what_was_asked_is_described_in_the_warning_for_a_search_that_got_no_answer() {
+        let text = Filters::parse(Some("a \"b\""), None, None).unwrap();
+        assert_eq!(text.describe(), r#"contain "a \"b\"""#);
+        let property = Filters::parse(None, Some("createdAt"), Some(&Scalar::Text("x".into()))).unwrap();
+        assert_eq!(property.describe(), r#"have the property "created-at""#);
+        let both = Filters::parse(Some("x"), Some("status"), Some(&Scalar::Text("x".into()))).unwrap();
+        assert_eq!(both.describe(), r#"contain "x" and have the property "status""#);
+        // the value is never part of it
+        assert!(!both.describe().contains("doing"));
+        assert!(search_unavailable(&text.describe()).message.starts_with(r#"LogSeq returned no answer when looking up blocks that contain "a \"b\"" (possibly"#));
     }
 }

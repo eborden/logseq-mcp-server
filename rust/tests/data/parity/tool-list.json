@@ -105,33 +105,57 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find blocks whose content contains text (case-insensitive, literal substring), newest first, capped by limit (max 500). Check hasMore and warnings.\n\n**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the text).\n**Next:** logseq_build_context on a result's page.",
+    "description": "Find blocks, newest first. Filters AND, at least one: text (case-insensitive substring); property + value (exact; any one value of a multi-value property). Capped by limit (max 500): check hasMore and warnings.\n\n**Can't find:** synonyms or stems, partial or ranged values, link structure (logseq_search_by_relationship), or over 500 matches in one call.",
     "inputSchema": {
-      "type": "object",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "text": {
           "description": "Text to find in block content (case-insensitive, literal)",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "property": {
+          "description": "Block property to match (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent). Needs value",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "Exact value of the property. A multi-value property matches if any one value equals it. Needs property",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
         },
         "limit": {
           "description": "Maximum number of results to return (default: 100, max: 500)",
           "type": "integer",
-          "minimum": 0
+          "format": "uint64",
+          "minimum": 0,
+          "default": 100
         },
         "include_context": {
           "description": "Include semantic context (page, references, tags)",
-          "default": false,
-          "type": "boolean"
+          "type": "boolean",
+          "default": false
         },
         "slim_results": {
           "description": "Slim blocks (default). false returns full entities",
-          "default": true,
-          "type": "boolean"
+          "type": "boolean",
+          "default": true
         }
       },
-      "required": [
-        "text"
-      ]
+      "type": "object"
     }
   },
   {
@@ -597,56 +621,6 @@
           "minimum": 0
         }
       }
-    }
-  },
-  {
-    "name": "logseq_query_by_property",
-    "title": "Query by Property",
-    "annotations": {
-      "title": "Query by Property",
-      "readOnlyHint": true,
-      "destructiveHint": false,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "description": "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.\n\n**Matching:** key as stored (created-at) or camelCase; values are exact strings (\"42\", \"true\"); a multi-value property matches if any one value equals it. Flat list with page name, no children.\n**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_find_blocks.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "property_key": {
-          "description": "Name of the property to query (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent)",
-          "type": "string"
-        },
-        "property_value": {
-          "description": "Value to match for the property. For multi-value properties, matches if any one value equals it",
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "boolean"
-            }
-          ]
-        },
-        "limit": {
-          "description": "Max blocks to return (default: 100, max: 500)",
-          "default": 100,
-          "type": "integer",
-          "minimum": 0
-        },
-        "slim_results": {
-          "description": "Slim blocks (default). false returns full entities",
-          "default": true,
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "property_key",
-        "property_value"
-      ]
     }
   },
   {
