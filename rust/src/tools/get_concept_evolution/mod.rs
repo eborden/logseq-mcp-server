@@ -20,12 +20,15 @@ mod queries;
 mod timeline;
 mod wire;
 
+use std::collections::HashSet;
+
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::args::parse_args;
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::{PageId, PageName};
 use crate::errors::ToolError;
@@ -36,6 +39,7 @@ use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::resolved_from;
 use crate::tools::get_page::wire as page_wire;
+use crate::truncation::{SizeCut, size_truncation_warning};
 
 use self::queries::{blocks_referencing_page, blocks_referencing_pages};
 use self::timeline::{
@@ -111,7 +115,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let request = Request::from(parse_args::<Args>(arguments.as_ref())?);
     let evolution = get_concept_evolution(client, &request.concept_name, request.options).await?;
-    Ok(success_result(vec![ContentBlock::text(evolution.to_value().to_string())]))
+    Ok(success_result(vec![ContentBlock::text(evolution.fit_to_budget().to_value().to_string())]))
 }
 
 /// What the evolution takes beyond the concept.
@@ -255,6 +259,80 @@ impl ConceptEvolution {
             grouped_timeline: self.grouped_timeline.as_deref().map(GroupedTimeline),
         })
     }
+
+    /// Mentions the timeline holds: the unit the character budget cuts in.
+    fn timeline_mentions(&self) -> usize {
+        self.timeline.iter().map(|(_, blocks)| blocks.len()).sum()
+    }
+
+    /// The first `kept` mentions in timeline order (oldest first, undated last), the grouped timeline cut to
+    /// the same mentions, and a `result_size_truncated` warning (#485). `summary` still counts every mention, and
+    /// `totals.mentions` is how many there were before any cut.
+    fn cut_to_mentions(&self, kept: usize, oversize: bool) -> ConceptEvolution {
+        let mut room = kept;
+        let mut timeline: Vec<(Option<i64>, Vec<Value>)> = Vec::new();
+        for (date, blocks) in &self.timeline {
+            if room == 0 {
+                break;
+            }
+            let taken: Vec<Value> = blocks.iter().take(room).cloned().collect();
+            room -= taken.len();
+            timeline.push((*date, taken));
+        }
+        let kept_ids: HashSet<i64> = timeline.iter().flat_map(|(_, blocks)| blocks).filter_map(block_id).collect();
+        let grouped_timeline = self.grouped_timeline.as_ref().map(|groups| {
+            groups
+                .iter()
+                .map(|(period, blocks)| (period.clone(), blocks.iter().filter(|block| block_id(block).is_some_and(|id| kept_ids.contains(&id))).cloned().collect::<Vec<_>>()))
+                .filter(|(_, blocks)| !blocks.is_empty())
+                .collect()
+        });
+        // A call can read on from the last kept day when a dated mention was dropped. Undated mentions come last and
+        // ignore the dates, so no call reaches them (BR-0006: no `howToFetchAll`, so `hasMore` stays false).
+        let last_date = timeline.last().and_then(|(date, _)| *date);
+        let dated_dropped = self.timeline.iter().any(|(date, _)| date.is_some())
+            && self.timeline.iter().filter(|(date, _)| date.is_some()).map(|(_, blocks)| blocks.len()).sum::<usize>()
+                > timeline.iter().filter(|(date, _)| date.is_some()).map(|(_, blocks)| blocks.len()).sum::<usize>();
+        let how_to_fetch_all = last_date.filter(|_| dated_dropped).map(|date| {
+            format!("Set start_date to {date} (keeping end_date and group_by) to read on; that day repeats its kept mentions. Mentions on non-journal pages ignore the dates.")
+        });
+        let advice = if how_to_fetch_all.is_some() {
+            "Narrower dates give a smaller result. No parameter raises this limit."
+        } else {
+            "Mentions on non-journal pages ignore start_date and end_date, so narrowing the dates can't reach the rest. No parameter raises this limit."
+        };
+        let mut warnings = self.warnings.clone();
+        warnings.push(size_truncation_warning(SizeCut {
+            what: "mentions (oldest first, undated last)",
+            kept,
+            total: self.timeline_mentions(),
+            oversize,
+            advice,
+            how_to_fetch_all,
+        }));
+        ConceptEvolution {
+            warnings,
+            total_mentions_before_cut: Some(self.summary.total_mentions),
+            timeline,
+            grouped_timeline,
+            ..self.clone()
+        }
+    }
+
+    /// The evolution as it is when its text fits the character budget (#485), else cut to the first mentions that do.
+    fn fit_to_budget(self) -> ConceptEvolution {
+        let total = self.timeline_mentions();
+        let size_of = |kept: usize| size(&if kept < total { self.cut_to_mentions(kept, false) } else { self.clone() }.to_value().to_string());
+        match fit(total, 1, size_of) {
+            Fit::Whole => self,
+            Fit::Cut { kept, oversize } => self.cut_to_mentions(kept, oversize),
+        }
+    }
+}
+
+/// A block's `id`, as a whole number.
+fn block_id(block: &Value) -> Option<i64> {
+    block.get("id").and_then(crate::wire::whole_number)
 }
 
 /// The warnings for a `null` answer to one of the three lookups (BR-0011). No `howToFetchAll` on any: no
@@ -585,6 +663,93 @@ mod tests {
         // grouping asked for and nothing to group is an empty object, not an absent key
         let empty = ConceptEvolution { grouped_timeline: Some(vec![]), ..plain };
         assert!(empty.to_value().to_string().contains(r#""groupedTimeline":{}"#));
+    }
+
+    fn long_mention(id: i64, day: Option<i64>, length: usize) -> Value {
+        let mut block = mention(id, day);
+        block["content"] = json!("x".repeat(length));
+        block
+    }
+
+    /// `days` days of `per_day` mentions of `length` characters, then `undated` undated ones, grouped by day.
+    fn long_evolution(days: i64, per_day: i64, undated: i64, length: usize) -> ConceptEvolution {
+        let mut timeline = Vec::new();
+        let mut grouped = Vec::new();
+        let mut id = 0;
+        for day in 0..days {
+            let date = 20250101 + day;
+            let blocks: Vec<Value> = (0..per_day).map(|_| { id += 1; long_mention(id, Some(date), length) }).collect();
+            grouped.push((date.to_string(), blocks.clone()));
+            timeline.push((Some(date), blocks));
+        }
+        if undated > 0 {
+            timeline.push((None, (0..undated).map(|_| { id += 1; long_mention(id, None, length) }).collect()));
+        }
+        ConceptEvolution {
+            concept: "atlas".into(),
+            resolved_from: None,
+            resolved_aliases: None,
+            warnings: vec![],
+            total_mentions_before_cut: None,
+            timeline,
+            grouped_timeline: Some(grouped),
+            summary: Summary { total_mentions: id as usize, earliest: Some(20250101), latest: Some(20250101 + days - 1), journal_mentions: 0, non_journal_mentions: 0 },
+        }
+    }
+
+    #[test]
+    fn an_evolution_that_fits_the_budget_is_untouched() {
+        let small = long_evolution(2, 2, 1, 100);
+        assert_eq!(small.clone().fit_to_budget(), small);
+    }
+
+    #[test]
+    fn an_evolution_over_the_budget_keeps_the_oldest_mentions_and_the_grouped_ones_follow() {
+        // 10 days of 5 mentions of 400 characters, twice over (timeline and grouped): about 40,000
+        let big = long_evolution(10, 5, 0, 400);
+        let fitted = big.clone().fit_to_budget();
+        let text = fitted.to_value().to_string();
+        assert!(size(&text) <= crate::budget::BUDGET_CHARS, "{}", size(&text));
+        let kept = fitted.timeline_mentions();
+        assert!(kept > 5 && kept < 50, "{kept}");
+        // the same mentions are in the grouped timeline: nothing the timeline lost is left there
+        let grouped: usize = fitted.grouped_timeline.as_ref().unwrap().iter().map(|(_, blocks)| blocks.len()).sum();
+        assert_eq!(grouped, kept);
+        // the oldest first, from the front
+        assert_eq!(fitted.timeline[0], big.timeline[0]);
+        // the summary still counts every mention, and totals says how many there were
+        assert_eq!(fitted.summary, big.summary);
+        let value = fitted.to_value();
+        assert_eq!(value["totals"], json!({"mentions": 50}));
+        let warning = &value["warnings"][0];
+        assert_eq!(warning["code"], "result_size_truncated");
+        assert!(warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 50 mentions")));
+        // a dated mention was dropped, so a call can read on from the last kept day
+        assert_eq!(value["hasMore"], true);
+        let last_day = fitted.timeline.last().unwrap().0.unwrap();
+        assert!(warning["howToFetchAll"].as_str().unwrap().starts_with(&format!("Set start_date to {last_day}")));
+        assert_eq!(keys(&value), ["concept", "hasMore", "warnings", "totals", "summary", "timeline", "groupedTimeline"]);
+    }
+
+    #[test]
+    fn when_only_undated_mentions_are_cut_no_call_reads_on() {
+        let big = long_evolution(1, 1, 80, 600);
+        let value = big.fit_to_budget().to_value();
+        assert_eq!(value["warnings"][0]["code"], "result_size_truncated");
+        assert_eq!(value["hasMore"], false);
+        assert!(value["warnings"][0].get("howToFetchAll").is_none());
+        assert!(value["warnings"][0]["message"].as_str().unwrap().contains("ignore start_date and end_date"));
+    }
+
+    #[test]
+    fn a_single_mention_over_the_budget_is_kept_alone() {
+        let big = long_evolution(2, 1, 0, 40_000);
+        let fitted = big.fit_to_budget();
+        assert_eq!(fitted.timeline_mentions(), 1);
+        assert!(fitted.warnings[0].message.contains("an entry is never cut inside its text"));
+        // and a lone mention is never cut
+        let lone = long_evolution(1, 1, 0, 40_000);
+        assert_eq!(lone.clone().fit_to_budget(), lone);
     }
 
     #[test]
