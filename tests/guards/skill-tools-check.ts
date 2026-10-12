@@ -20,7 +20,7 @@ export type SkillFile = { path: string; text: string };
 
 // An optional host prefix (`mcp__logseq__`, `mcp__plugin_logseq_logseq__`) and then the bare tool name. The prefix is
 // matched lazily up to the first `__logseq_`, so it is never read as part of the name.
-const TOOL_TOKEN = /(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z_]+)/g;
+const TOOL_TOKEN = /(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z0-9_]+)/g;
 const HEADING = /^#{1,6}\s+(.*)$/;
 const FENCE = /^\s*```(.*)$/;
 const EXAMPLE_INFO = /^json\s+tool=(\S+)\s*$/;
