@@ -57,7 +57,7 @@ pub const NAME: &str = "logseq_build_context";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n\
 **Use when:** researching or explaining a topic that has a page.\n\
-**Can't find:** topics with no page (use logseq_search_blocks), or anything past the caps (see hasMore and warnings).\n\
+**Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n\
 **Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.

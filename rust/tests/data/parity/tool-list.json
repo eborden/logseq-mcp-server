@@ -9,7 +9,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n**Use when:** researching or explaining a topic that has a page.\n**Can't find:** topics with no page (use logseq_search_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
+    "description": "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n**Use when:** researching or explaining a topic that has a page.\n**Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -96,6 +96,45 @@
     }
   },
   {
+    "name": "logseq_find_blocks",
+    "title": "Find Blocks",
+    "annotations": {
+      "title": "Find Blocks",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Find blocks whose content contains text (case-insensitive, literal substring), newest first, capped by limit (max 500). Check hasMore and warnings.\n\n**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the text).\n**Next:** logseq_build_context on a result's page.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "Text to find in block content (case-insensitive, literal)",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum number of results to return (default: 100, max: 500)",
+          "type": "integer",
+          "minimum": 0
+        },
+        "include_context": {
+          "description": "Include semantic context (page, references, tags)",
+          "default": false,
+          "type": "boolean"
+        },
+        "slim_results": {
+          "description": "Slim blocks (default). false returns full entities",
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
     "name": "logseq_find_pages",
     "title": "Find Pages",
     "annotations": {
@@ -105,7 +144,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property).\n\n**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.",
+    "description": "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property).\n\n**Can't find:** journals (logseq_query_by_date_range), block text (logseq_find_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -185,7 +224,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n**Use when:** \"what links to X?\" or \"where is X used?\"\n**Can't find:** unlinked text mentions (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n**Alternatives:** logseq_build_context for related pages.",
+    "description": "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n**Use when:** \"what links to X?\" or \"where is X used?\"\n**Can't find:** unlinked text mentions (logseq_find_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n**Alternatives:** logseq_build_context for related pages.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -221,7 +260,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.\n\n**Can't find:** blocks by text (logseq_search_blocks) or by numeric id. For a whole page use logseq_get_page.",
+    "description": "Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.\n\n**Can't find:** blocks by text (logseq_find_blocks) or by numeric id. For a whole page use logseq_get_page.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -263,7 +302,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.\n\n**Use when:** \"how has X evolved?\" or \"what's the history of Y?\"\n**Can't find:** unlinked plain-text mentions (logseq_search_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n**Alternatives:** logseq_query_by_date_range for plain journal queries.",
+    "description": "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.\n\n**Use when:** \"how has X evolved?\" or \"what's the history of Y?\"\n**Can't find:** unlinked plain-text mentions (logseq_find_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n**Alternatives:** logseq_query_by_date_range for plain journal queries.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -448,7 +487,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_search_blocks, logseq_find_pages) or what links here (logseq_get_backlinks).\n**Alternatives:** logseq_build_context adds related pages and references.",
+    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages) or what links here (logseq_get_backlinks).\n**Alternatives:** logseq_build_context adds related pages and references.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -495,7 +534,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.\n\n**Use when:** \"what did I do last week?\" or catching up. summary.topConcepts shows what a period was about.\n**Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n**Alternatives:** logseq_get_concept_evolution, logseq_search_blocks.",
+    "description": "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.\n\n**Use when:** \"what did I do last week?\" or catching up. summary.topConcepts shows what a period was about.\n**Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n**Alternatives:** logseq_get_concept_evolution, logseq_find_blocks.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -570,7 +609,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.\n\n**Matching:** key as stored (created-at) or camelCase; values are exact strings (\"42\", \"true\"); a multi-value property matches if any one value equals it. Flat list with page name, no children.\n**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_search_blocks.",
+    "description": "Find blocks whose property equals a value (e.g. status::done). Capped by limit (max 500): check meta.\n\n**Matching:** key as stored (created-at) or camelCase; values are exact strings (\"42\", \"true\"); a multi-value property matches if any one value equals it. Flat list with page name, no children.\n**Can't find:** partial values, ranges, or over 500 matches. For text use logseq_find_blocks.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -611,45 +650,6 @@
     }
   },
   {
-    "name": "logseq_search_blocks",
-    "title": "Search Blocks",
-    "annotations": {
-      "title": "Search Blocks",
-      "readOnlyHint": true,
-      "destructiveHint": false,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "description": "Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.\n\n**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).\n**Next:** logseq_build_context on a result's page.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "query": {
-          "description": "Text to search for in block content",
-          "type": "string"
-        },
-        "limit": {
-          "description": "Maximum number of results to return (default: 100, max: 500)",
-          "type": "integer",
-          "minimum": 0
-        },
-        "include_context": {
-          "description": "Include semantic context (page, references, tags)",
-          "default": false,
-          "type": "boolean"
-        },
-        "slim_results": {
-          "description": "Slim blocks (default). false returns full entities",
-          "default": true,
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "query"
-      ]
-    }
-  },
-  {
     "name": "logseq_search_by_relationship",
     "title": "Search by Relationship",
     "annotations": {
@@ -659,7 +659,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n**Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.\n**Alternatives:** logseq_search_blocks (keywords), logseq_get_concept_network (overview).",
+    "description": "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n**Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.\n**Alternatives:** logseq_find_blocks (keywords), logseq_get_concept_network (overview).",
     "inputSchema": {
       "type": "object",
       "properties": {

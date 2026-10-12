@@ -45,7 +45,7 @@ pub const NAME: &str = "logseq_get_backlinks";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n\
 **Use when:** \"what links to X?\" or \"where is X used?\"\n\
-**Can't find:** unlinked text mentions (logseq_search_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n\
+**Can't find:** unlinked text mentions (logseq_find_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n\
 **Alternatives:** logseq_build_context for related pages.";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
@@ -170,7 +170,7 @@ fn fit_to_budget(results: Vec<Backlink>, meta: Option<Map<String, Value>>, tips:
             total: total_blocks,
             oversize,
             advice: &format!(
-                "They are on the first {} of {total_pages} source pages. Read a source page on its own with logseq_get_page, or search its blocks with logseq_search_blocks. No parameter raises this limit.",
+                "They are on the first {} of {total_pages} source pages. Read a source page on its own with logseq_get_page, or search its blocks with logseq_find_blocks. No parameter raises this limit.",
                 kept.len()
             ),
             how_to_fetch_all: None,
@@ -322,7 +322,7 @@ pub fn cap_backlinks(fetched: Vec<Backlink>, target: &str, max_pages: u64, max_b
     let mut warnings = Vec::new();
     if kept_count < ranked.len() {
         let narrower = format!(
-            "logseq_search_blocks with query \"[[{target}]]\" lists the blocks that write the link that way, on every page (not #tags or alias spellings)."
+            "logseq_find_blocks with text \"[[{target}]]\" lists the blocks that write the link that way, on every page (not #tags or alias spellings)."
         );
         let mut warning = capped_truncation_warning(CappedTruncation {
             what: "source pages, ranked by linking blocks (most first, ties by page name)",

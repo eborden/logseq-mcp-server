@@ -47,7 +47,7 @@ pub const NAME: &str = "logseq_search_by_relationship";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n\
 **Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.\n\
-**Alternatives:** logseq_search_blocks (keywords), logseq_get_concept_network (overview).";
+**Alternatives:** logseq_find_blocks (keywords), logseq_get_concept_network (overview).";
 
 /// Hops `connected-within` walks when `max_distance` is absent.
 pub const DEFAULT_MAX_DISTANCE: u64 = 2;

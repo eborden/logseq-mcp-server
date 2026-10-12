@@ -31,7 +31,7 @@ pub const NAME: &str = "logseq_get_block";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.\n\n\
-**Can't find:** blocks by text (logseq_search_blocks) or by numeric id. For a whole page use logseq_get_page.";
+**Can't find:** blocks by text (logseq_find_blocks) or by numeric id. For a whole page use logseq_get_page.";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("uuid", &["block_uuid"])];

@@ -55,7 +55,7 @@ pub const NAME: &str = "logseq_get_concept_evolution";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.\n\n\
 **Use when:** \"how has X evolved?\" or \"what's the history of Y?\"\n\
-**Can't find:** unlinked plain-text mentions (logseq_search_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n\
+**Can't find:** unlinked plain-text mentions (logseq_find_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n\
 **Alternatives:** logseq_query_by_date_range for plain journal queries.";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.

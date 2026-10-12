@@ -56,7 +56,7 @@ const GUIDE_TOOL_ORDER: [&str; 15] = [
     "logseq_get_page",
     "logseq_get_block",
     "logseq_get_backlinks",
-    "logseq_search_blocks",
+    "logseq_find_blocks",
     "logseq_query_by_property",
     "logseq_query_by_date_range",
     "logseq_build_context",

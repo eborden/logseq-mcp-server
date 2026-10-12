@@ -1,4 +1,4 @@
-//! `logseq_search_blocks`: a case-insensitive,
+//! `logseq_find_blocks`: a case-insensitive,
 //! literal substring search over block content, newest first.
 //!
 //! Calls: 1 (the search query), or 2 with `include_context` (one batched lookup of the pages the
@@ -11,7 +11,7 @@
 //! `result_size_truncated` warning that takes the place of the `limit` warning. The warning of a `limit` cut offers a
 //! raise only when the raised result fits the budget, which the hits already read show exactly (slim, or full
 //! without `include_context`) or as an upper bound (`include_context`, whose pages are read for the hits kept only).
-//! `search_blocks_with_meta`, the library function, applies no budget.
+//! `find_blocks_with_meta`, the library function, applies no budget.
 //!
 //! This directory holds everything only the search uses: its queries (`queries.rs`), the answers it
 //! reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside it: slim
@@ -43,7 +43,7 @@ use crate::truncation::{CappedTruncation, SizeCut, blocks_inline_max, capped_tru
 
 use self::tips::search_tips;
 
-pub const NAME: &str = "logseq_search_blocks";
+pub const NAME: &str = "logseq_find_blocks";
 
 /// Results returned when `limit` is absent.
 pub const DEFAULT_SEARCH_LIMIT: u64 = 100;
@@ -58,11 +58,11 @@ pub const MAX_SEARCH_LIMIT: u64 = 500;
 const COUNT_CUT: &str = "results_truncated";
 
 /// How to reach matches past the maximum: no parameter fetches them.
-const NARROWER: &str = "Narrow the query to see the rest.";
+const NARROWER: &str = "Narrow the text to see the rest.";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Case-insensitive literal substring search over block content, newest first, capped by limit (max 500). Check hasMore and warnings.\n\n\
-**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the query).\n\
+const DESCRIPTION: &str = "Find blocks whose content contains text (case-insensitive, literal substring), newest first, capped by limit (max 500). Check hasMore and warnings.\n\n\
+**Can't find:** synonyms, stems or related words (try variants), blocks by property (logseq_query_by_property), link structure (logseq_search_by_relationship), or over 500 matches in one call (narrow the text).\n\
 **Next:** logseq_build_context on a result's page.";
 
 fn default_slim_results() -> bool {
@@ -72,8 +72,8 @@ fn default_slim_results() -> bool {
 /// The search's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
-    /// Text to search for in block content
-    pub query: String,
+    /// Text to find in block content (case-insensitive, literal)
+    pub text: String,
     /// Maximum number of results to return (default: 100, max: 500)
     pub limit: Option<u64>,
     /// Include semantic context (page, references, tags)
@@ -87,16 +87,16 @@ pub struct Args {
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
-        .with_title("Search Blocks")
-        .with_annotations(read_only_annotations("Search Blocks"))
+        .with_title("Find Blocks")
+        .with_annotations(read_only_annotations("Find Blocks"))
 }
 
 /// A call: arguments read, the search, then its meta and tips. The character budget (#506, #485) is applied here, to
 /// the two content blocks the call sends, so the library function the search is read through stays uncut.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let searched = search(client, &args.query, args.limit, args.include_context, args.slim_results).await?.with_raise(tips_enabled, &args.query);
-    let (results, meta) = fit_to_budget(&searched, tips_enabled, &args.query);
+    let searched = search(client, &args.text, args.limit, args.include_context, args.slim_results).await?.with_raise(tips_enabled, &args.text);
+    let (results, meta) = fit_to_budget(&searched, tips_enabled, &args.text);
     Ok(success_result(vec![ContentBlock::text(results), ContentBlock::text(meta)]))
 }
 
@@ -265,7 +265,7 @@ impl Searched {
             (true, false) => " include_context: false and slim_results: true make each hit smaller.",
             (false, true) => "",
         };
-        format!("The oldest matches are the ones left out (newest first). Narrow the query to see the rest.{richer} No parameter raises this limit.")
+        format!("The oldest matches are the ones left out (newest first). Narrow the text to see the rest.{richer} No parameter raises this limit.")
     }
 
     /// The meta of the result holding the first `cut.kept` hits (all of them without a cut).
@@ -474,7 +474,7 @@ fn full_result(block: &Value, context: Option<&Context>) -> Value {
 /// The blocks whose content holds `query`, newest first (highest block id first) and not cut, or
 /// `None` when LogSeq answers `null`. One call. `get_context_for_query`'s keyword search reads these
 /// itself and does the cutting.
-pub async fn find_blocks(client: &LogseqClient, query: &str) -> Result<Option<Vec<Value>>, ToolError> {
+pub async fn blocks_containing(client: &LogseqClient, query: &str) -> Result<Option<Vec<Value>>, ToolError> {
     let search = queries::search_blocks(query);
     let answer = client.execute_datalog_query(&search.text, &search.inputs).await?;
     let Some(mut matches) = wire::hits(&answer)? else { return Ok(None) };
@@ -502,7 +502,7 @@ pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>)
 /// search before the character budget, which only [`call`] applies (#506): a result of this function can be longer
 /// than the budget, and its `limit` warning does not account for that. Through `call` a cut at the maximum is always
 /// a size cut, and a `limit` warning offers only a raise the budget allows.
-pub async fn search_blocks_with_meta(
+pub async fn find_blocks_with_meta(
     client: &LogseqClient,
     query: &str,
     limit: Option<u64>,
@@ -514,12 +514,12 @@ pub async fn search_blocks_with_meta(
     Ok(SearchResults { results: searched.results, meta })
 }
 
-/// The search of [`search_blocks_with_meta`], before the warnings are worded and the character budget applied
+/// The search of [`find_blocks_with_meta`], before the warnings are worded and the character budget applied
 /// (only [`call`] applies it, #506). API calls: 1, or 2 with `include_context`.
 async fn search(client: &LogseqClient, query: &str, limit: Option<u64>, include_context: bool, slim_results: bool) -> Result<Searched, ToolError> {
     let limit = limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
     // Newest first (highest block id first)
-    let Some(mut matches) = find_blocks(client, query).await? else {
+    let Some(mut matches) = blocks_containing(client, query).await? else {
         return Ok(Searched {
             results: Vec::new(),
             total: 0,
@@ -754,7 +754,7 @@ mod tests {
         let mut found = searched(Vec::new(), 0);
         assert_eq!(
             found.size_advice(),
-            "The oldest matches are the ones left out (newest first). Narrow the query to see the rest. No parameter raises this limit."
+            "The oldest matches are the ones left out (newest first). Narrow the text to see the rest. No parameter raises this limit."
         );
         found.include_context = true;
         assert!(found.size_advice().contains(" include_context: false makes each hit smaller."));
@@ -876,16 +876,16 @@ mod tests {
 
     #[test]
     fn the_schema_means_what_the_pinned_one_means() {
-        // `inputSchema` of logseq_search_blocks in the ADR-0016 snapshot
+        // `inputSchema` of logseq_find_blocks in the ADR-0016 snapshot
         let pinned = json!({
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Text to search for in block content"},
+                "text": {"type": "string", "description": "Text to find in block content (case-insensitive, literal)"},
                 "limit": {"type": "integer", "minimum": 0, "description": "Maximum number of results to return (default: 100, max: 500)"},
                 "include_context": {"type": "boolean", "default": false, "description": "Include semantic context (page, references, tags)"},
                 "slim_results": {"type": "boolean", "default": true, "description": "Slim blocks (default). false returns full entities"},
             },
-            "required": ["query"],
+            "required": ["text"],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
@@ -894,23 +894,23 @@ mod tests {
     fn the_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
-        assert_eq!(tool.title.as_deref(), Some("Search Blocks"));
+        assert_eq!(tool.title.as_deref(), Some("Find Blocks"));
         assert_eq!(
             serde_json::to_value(&tool.annotations).unwrap(),
-            json!({"title": "Search Blocks", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
+            json!({"title": "Find Blocks", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
         );
     }
 
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
-        let only_query = json!({"query": "x"});
-        let defaults = parse_args::<Args>(only_query.as_object()).unwrap();
-        assert_eq!(defaults, Args { query: "x".into(), limit: None, include_context: false, slim_results: true });
-        assert_eq!(serde_json::from_value::<Args>(only_query).unwrap(), defaults);
+        let only_text = json!({"text": "x"});
+        let defaults = parse_args::<Args>(only_text.as_object()).unwrap();
+        assert_eq!(defaults, Args { text: "x".into(), limit: None, include_context: false, slim_results: true });
+        assert_eq!(serde_json::from_value::<Args>(only_text).unwrap(), defaults);
         // the first argument in schema order that is wrong is the one reported
         let bad = json!({"slim_results": 0, "limit": "a"});
-        assert_eq!(parse_args::<Args>(bad.as_object()).unwrap_err().to_string(), "Invalid parameter 'query': missing\n\nExpected: a string (required)\nExample: query: \"...\"");
-        let bad = json!({"query": "x", "slim_results": 0, "limit": "a"});
+        assert_eq!(parse_args::<Args>(bad.as_object()).unwrap_err().to_string(), "Invalid parameter 'text': missing\n\nExpected: a string (required)\nExample: text: \"...\"");
+        let bad = json!({"text": "x", "slim_results": 0, "limit": "a"});
         assert_eq!(
             parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': \"a\"\n\nExpected: a number, not a string\nExample: limit: 5"
@@ -920,8 +920,8 @@ mod tests {
     #[test]
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
-        let base = json!({"query": "x"});
-        sweep::<Args>(json!({}), "query", Takes::Text, true);
+        let base = json!({"text": "x"});
+        sweep::<Args>(json!({}), "text", Takes::Text, true);
         sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
         sweep::<Args>(base.clone(), "include_context", Takes::Flag, false);
         sweep::<Args>(base, "slim_results", Takes::Flag, false);
