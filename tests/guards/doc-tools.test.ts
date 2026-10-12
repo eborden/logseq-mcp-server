@@ -309,6 +309,14 @@ describe('the bare-name rule can fail (#510 self-test)', () => {
     ]);
   });
 
+  it('judges every BARE_CONTEXTS entry on its own, whatever the order of the entries', () => {
+    const first = 'A `get_widget` (`mod.rs`) long long long text here';
+    const second = '`get_thing` (`x`)';
+    const text = `${first}\n${second}\n`;
+    expect(run(text, { bareContexts: { [first]: 'r', [second]: 'r' } })).toEqual([]);
+    expect(run(text, { bareContexts: { [second]: 'r', [first]: 'r' } })).toEqual([]);
+  });
+
   it('checks nothing bare when no former names are given (the skills guard path)', () => {
     expect(run('`get_widget`\n', { formerToolNames: [] })).toEqual([]);
   });
