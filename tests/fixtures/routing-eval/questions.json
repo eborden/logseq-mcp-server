@@ -159,7 +159,7 @@
       "intent": "how-two-pages-connect",
       "expected_type": "explore",
       "question": "How are Alice and project cascade connected in my notes?",
-      "v1_tools": ["logseq_get_concept_network"],
+      "v1_tools": ["logseq_get_concept_network", "logseq_search_by_relationship"],
       "v2_tools": ["logseq_explore_network"]
     },
     {
@@ -167,7 +167,7 @@
       "intent": "how-two-pages-connect",
       "expected_type": "explore",
       "question": "Is there any path from project borealis to Bob, and how many steps is it?",
-      "v1_tools": ["logseq_get_concept_network"],
+      "v1_tools": ["logseq_get_concept_network", "logseq_search_by_relationship"],
       "v2_tools": ["logseq_explore_network"]
     },
     {

@@ -50,6 +50,15 @@ export function toolType(tool: string): ToolType | undefined {
   return V1_TOOL_TYPES[tool] ?? V2_TOOL_TYPES[tool];
 }
 
+/**
+ * The type of one call. Almost every tool is one type, but v1's `search_by_relationship` has a mode that is `explore`
+ * work: `connected-within` finds how two pages connect (v2 moves it to `explore_network`), while its other modes find blocks.
+ */
+export function callType(tool: string, args: unknown): ToolType | undefined {
+  if (tool === 'logseq_search_by_relationship' && isRecord(args) && args.relationship_type === 'connected-within') return 'explore';
+  return toolType(tool);
+}
+
 /** A tool name without the MCP prefix, or undefined when the name is not one of the eval server's tools. */
 export function logseqToolName(mcpName: string): string | undefined {
   return mcpName.startsWith(MCP_TOOL_PREFIX) ? mcpName.slice(MCP_TOOL_PREFIX.length) : undefined;
@@ -90,8 +99,8 @@ function stringList(value: unknown, where: string): string[] {
 
 /**
  * Parse the question file at the boundary (foundations 4.2). Beyond the shape, it holds the file to its own rules:
- * unique ids, and every acceptable tool a tool of that surface whose type is the question's `expected_type`, so a
- * tool-correct first call is always a type-correct one.
+ * unique ids, and every acceptable tool a tool of that surface whose type is the question's `expected_type` (or, for
+ * `search_by_relationship`, whose `connected-within` mode is), so a tool-correct first call is always a type-correct one.
  * @throws Error naming the question and the rule it breaks
  */
 export function parseQuestions(raw: unknown): Question[] {
@@ -114,7 +123,8 @@ export function parseQuestions(raw: unknown): Question[] {
       for (const tool of tools) {
         const type = SURFACE_TOOL_TYPES[surface][tool];
         if (type === undefined) throw new Error(`Question "${id}" lists ${tool}, which is not a ${surface} tool`);
-        if (type !== expectedType) throw new Error(`Question "${id}" lists ${tool} (${type}) but expects ${expectedType}`);
+        const modeOk = tool === 'logseq_search_by_relationship' && expectedType === 'explore';
+        if (type !== expectedType && !modeOk) throw new Error(`Question "${id}" lists ${tool} (${type}) but expects ${expectedType}`);
       }
     }
     return { id, intent, expected_type: expectedType as ToolType, question, v1_tools: v1, v2_tools: v2 };
@@ -264,10 +274,10 @@ export function aggregate(surface: Surface, questions: readonly Question[], reco
     const question = byId.get(record.questionId);
     if (!question) throw new Error(`A session ran question "${record.questionId}", which is not in the question file`);
     const first = record.calls[0];
-    const firstType = first ? toolType(first.tool) : undefined;
+    const firstType = first ? callType(first.tool, first.arguments) : undefined;
     const acceptable = surface === 'v1' ? question.v1_tools : question.v2_tools;
     const typeOk = firstType === question.expected_type;
-    const toolOk = first !== undefined && acceptable.includes(first.tool);
+    const toolOk = typeOk && first !== undefined && acceptable.includes(first.tool);
     const none = first === undefined;
     const entry =
       intents.get(question.intent) ??

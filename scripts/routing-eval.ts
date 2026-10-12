@@ -58,6 +58,7 @@ interface Options {
   maxBudgetUsd: number;
   surface: Surface | undefined;
   dryRun: boolean;
+  rescore: string | undefined;
 }
 
 const USAGE = `Usage: npx tsx scripts/routing-eval.ts [options]
@@ -72,6 +73,7 @@ const USAGE = `Usage: npx tsx scripts/routing-eval.ts [options]
   --max-budget-usd <x>   per session, passed to claude (default 0.5)
   --surface v1|v2        which acceptable-tool list to score against (default: read from the server's tool list)
   --binary <path>        the server binary (default: ${RUST_BINARY_ENV}, else rust/target/debug/logseq-mcp-server)
+  --rescore <file>       print the aggregates of an earlier --out file against the current questions; calls no model
   --dry-run              check the question file and print the plan; start nothing`;
 
 function positiveInt(flag: string, value: string | undefined, max: number): number {
@@ -93,6 +95,7 @@ function parseOptions(argv: string[]): Options {
     maxBudgetUsd: 0.5,
     surface: undefined,
     dryRun: false,
+    rescore: undefined,
   };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
@@ -140,6 +143,9 @@ function parseOptions(argv: string[]): Options {
       }
       case '--binary':
         process.env[RUST_BINARY_ENV] = value();
+        break;
+      case '--rescore':
+        options.rescore = value();
         break;
       case '--dry-run':
         options.dryRun = true;
@@ -322,6 +328,18 @@ async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   const questions = await loadQuestions(options.questions, options.only);
   if (questions.length === 0) throw new Error('No question selected');
+  if (options.rescore) {
+    const saved: unknown = JSON.parse(await readFile(options.rescore, 'utf8'));
+    const file = saved as { surface?: unknown; models?: unknown; sessions?: unknown };
+    if (!file || (file.surface !== 'v1' && file.surface !== 'v2') || !Array.isArray(file.sessions) || !Array.isArray(file.models)) {
+      throw new Error('--rescore wants a file written by --out');
+    }
+    const kept = new Set(questions.map(question => question.id));
+    const records = (file.sessions as SessionRecord[]).filter(record => kept.has(record.questionId));
+    const runs = Math.max(1, ...records.map(record => record.run));
+    printAggregates(aggregate(options.surface ?? file.surface, questions, records), { ...options, runs }, new Set(file.models.map(String)), questions.length);
+    return;
+  }
   const sessions = questions.length * options.runs;
   console.log(
     `${questions.length} questions x ${options.runs} runs = ${sessions} sessions on model ${options.model}, ` +
