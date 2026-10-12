@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "Questions for scripts/routing-eval.ts (#487). Every page, name and block named here is made up and lives in tests/fixtures/graph/ (see tests/fixtures/README.md). expected_type is the tool type a good first call has: get (the caller names the one thing), find (the caller has criteria and wants a list), explore (the caller has a starting point and wants what surrounds it), check (the caller is about to write). v1_tools and v2_tools are the tools that count as the right first call on each surface; the script maps a tool to its type itself, so a tool outside the list can still be type-correct. find-boundary-1 sits on the line ADR-0037 draws: its answer is a list of hits, so the expected type is find, and a first call that maps what surrounds the page is the confusion the ADR says reopens the verbs. No question uses a tool's own verb (search, find, open, fetch, check, verify, list, read).",
+  "about": "Questions for scripts/routing-eval.ts (#487). Every page, name and block named here is made up and lives in tests/fixtures/graph/ (see tests/fixtures/README.md). expected_type is the tool type a good first call has: get (the caller names the one thing), find (the caller has criteria and wants a list), explore (the caller has a starting point and wants what surrounds it), check (the caller is about to write). v1_tools and v2_tools are the tools that count as the right first call on each surface; the script maps a tool to its type itself, so a tool outside the list can still be type-correct. The questions marked ground_truth (find-boundary-1, explore-boundary-1, explore-boundary-2) sit on the line ADR-0037 draws between find and explore: the answer to find-boundary-1 is a list of hits, so its expected type is find, and a first call that maps what surrounds the page is the confusion the ADR says reopens the verbs; the other two read like a find but ask what something is or how it connects, so they are explore. A ground-truth question accepts exactly one type, and tests/guards/routing-eval.test.ts fails if that widens. Every intent in #487's list has at least 3 questions (#511). No question uses a tool's own verb (search, find, open, fetch, check, verify, list, read).",
   "questions": [
     {
       "id": "get-page-1",
@@ -66,6 +66,18 @@
       ]
     },
     {
+      "id": "get-block-3",
+      "intent": "block-by-uuid",
+      "expected_type": "get",
+      "question": "What text sits in block 0088f1a0-0000-4000-8000-000000000003?",
+      "v1_tools": [
+        "logseq_get_block"
+      ],
+      "v2_tools": [
+        "logseq_get_block"
+      ]
+    },
+    {
       "id": "get-current-1",
       "intent": "this-page",
       "expected_type": "get",
@@ -82,6 +94,18 @@
       "intent": "this-page",
       "expected_type": "get",
       "question": "Which block am I editing at the moment, and what is selected?",
+      "v1_tools": [
+        "logseq_get_current_context"
+      ],
+      "v2_tools": [
+        "logseq_get_current"
+      ]
+    },
+    {
+      "id": "get-current-3",
+      "intent": "this-page",
+      "expected_type": "get",
+      "question": "Which page am I on right now in LogSeq?",
       "v1_tools": [
         "logseq_get_current_context"
       ],
@@ -187,6 +211,18 @@
       ]
     },
     {
+      "id": "find-links-3",
+      "intent": "blocks-linking-two-pages",
+      "expected_type": "find",
+      "question": "Where do Alice and Bob show up in the same block?",
+      "v1_tools": [
+        "logseq_search_by_relationship"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
+    },
+    {
       "id": "find-pages-1",
       "intent": "page-names",
       "expected_type": "find",
@@ -208,7 +244,41 @@
       ],
       "v2_tools": [
         "logseq_find_blocks"
-      ]
+      ],
+      "ground_truth": true,
+      "ground_truth_reason": "ADR-0037's boundary test: the answer is a list of hits, so it is find. A first call that maps what surrounds the page is the confusion the ADR says reopens the verbs."
+    },
+    {
+      "id": "explore-boundary-1",
+      "intent": "find-vs-explore-boundary",
+      "expected_type": "explore",
+      "question": "Where does Bob fit in with project atlas?",
+      "v1_tools": [
+        "logseq_build_context",
+        "logseq_get_context_for_query",
+        "logseq_get_concept_network"
+      ],
+      "v2_tools": [
+        "logseq_explore_context",
+        "logseq_explore_network"
+      ],
+      "ground_truth": true,
+      "ground_truth_reason": "ADR-0037's boundary test: the answer is what something is or how it connects, not a list of hits, so it is explore. A first call that lists matching blocks is the reverse confusion."
+    },
+    {
+      "id": "explore-boundary-2",
+      "intent": "find-vs-explore-boundary",
+      "expected_type": "explore",
+      "question": "Where does project borealis stand, going by my notes?",
+      "v1_tools": [
+        "logseq_build_context",
+        "logseq_get_context_for_query"
+      ],
+      "v2_tools": [
+        "logseq_explore_context"
+      ],
+      "ground_truth": true,
+      "ground_truth_reason": "ADR-0037's boundary test: the answer is what something is or how it connects, not a list of hits, so it is explore. A first call that lists matching blocks is the reverse confusion."
     },
     {
       "id": "explore-topic-1",
@@ -277,6 +347,19 @@
       ]
     },
     {
+      "id": "explore-connect-3",
+      "intent": "how-two-pages-connect",
+      "expected_type": "explore",
+      "question": "What ties Bob to project borealis in my notes?",
+      "v1_tools": [
+        "logseq_get_concept_network",
+        "logseq_search_by_relationship"
+      ],
+      "v2_tools": [
+        "logseq_explore_network"
+      ]
+    },
+    {
       "id": "explore-evolution-1",
       "intent": "change-over-time",
       "expected_type": "explore",
@@ -293,6 +376,18 @@
       "intent": "change-over-time",
       "expected_type": "explore",
       "question": "How has weekly review shown up in my notes, week by week?",
+      "v1_tools": [
+        "logseq_get_concept_evolution"
+      ],
+      "v2_tools": [
+        "logseq_explore_timeline"
+      ]
+    },
+    {
+      "id": "explore-evolution-3",
+      "intent": "change-over-time",
+      "expected_type": "explore",
+      "question": "How has the way I write about project borealis changed between January and February 2025?",
       "v1_tools": [
         "logseq_get_concept_evolution"
       ],
