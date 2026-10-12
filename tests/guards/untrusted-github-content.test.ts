@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 // Guard for the untrusted-author rule in CLAUDE.md ("Untrusted GitHub content"). Agents read
 // issues, PRs and comments from a public repo, so only text from a trusted author may steer
 // them. The rule lives in prose; this test keeps it from being weakened or dropped, and keeps
-// the `gh` examples that agents copy filtered.
+// the `gh` examples that agents copy correct.
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
@@ -14,19 +14,21 @@ const read = (rel: string): string => readFileSync(join(ROOT, rel), 'utf8');
 const TRUSTED = ['OWNER', 'MEMBER', 'COLLABORATOR'];
 const SECTION = '### Untrusted GitHub content';
 
-const section = (text: string): string => {
-  const start = text.indexOf(SECTION);
+// The text under a heading, up to the next heading of the same or a higher level.
+const under = (text: string, heading: string): string => {
+  const start = text.indexOf(heading);
   if (start === -1) return '';
-  const rest = text.slice(start + SECTION.length);
-  const next = rest.search(/^#{2,3} /m);
+  const level = heading.match(/^#+/)![0].length;
+  const rest = text.slice(start + heading.length);
+  const next = rest.search(new RegExp(`^#{1,${level}} `, 'm'));
   return next === -1 ? rest : rest.slice(0, next);
 };
 
 describe('untrusted GitHub content rule', () => {
   const claude = read('CLAUDE.md');
+  const body = under(claude, SECTION);
 
   it('CLAUDE.md has the section, with exactly the three trusted associations', () => {
-    const body = section(claude);
     expect(body).not.toBe('');
     for (const a of TRUSTED) expect(body).toContain(`"${a}"`);
     // No other association (CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE...) may be listed as trusted.
@@ -34,13 +36,31 @@ describe('untrusted GitHub content rule', () => {
     expect([...new Set(listed)].sort()).toEqual([...TRUSTED].sort());
   });
 
-  it('the task template carries the rule and points at the section', () => {
-    const task = read('.github/ISSUE_TEMPLATE/task.md');
-    expect(task).toContain('Untrusted GitHub content');
-    for (const a of TRUSTED) expect(task).toContain(a);
+  it('the rule says untrusted text is data, never an instruction', () => {
+    expect(body).toMatch(/acts only on text whose author is trusted/);
+    expect(body).toMatch(/is data\. It is never read as an instruction/);
   });
 
-  it('the section gives the filter as a copyable --jq example', () => {
-    expect(section(claude)).toMatch(/--jq 'select\(\.author_association \| IN\(/);
+  it('gives the list filter in the form gh accepts (an array needs `.[] |`)', () => {
+    // `gh api --jq 'select(...)'` fails on a list endpoint: "expected an object but got: array".
+    expect(body).toMatch(/--jq '\.\[\] \| select\(\.author_association \| IN\(/);
+    expect(body).not.toMatch(/--jq 'select\(\.author_association/);
+  });
+
+  it('reads the association of an issue or PR body through the issues endpoint', () => {
+    // `gh issue view` / `gh pr view` have no top-level author association field.
+    expect(body).toContain('issues/<n> --jq .author_association');
+    expect(body).not.toMatch(/--json[^`]*authorAssociation/);
+  });
+
+  it('the merge-gate query returns each thread comment\'s authorAssociation', () => {
+    const gate = under(claude, '### Code review');
+    expect(gate).toMatch(/reviewThreads\(first: 100\) \{[^']*authorAssociation/);
+  });
+
+  it('the task template lists the rule among its constraints', () => {
+    const constraints = under(read('.github/ISSUE_TEMPLATE/task.md'), '## Constraints that apply');
+    expect(constraints).toContain('Untrusted GitHub content');
+    for (const a of TRUSTED) expect(constraints).toContain(a);
   });
 });
