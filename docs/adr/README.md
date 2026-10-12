@@ -53,6 +53,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0034-golden-results-are-the-contract](0034-golden-results-are-the-contract.md) | Make the recorded golden results the contract, compared by meaning, with LogSeq calls held to a bounded count | accepted |
 | [0035-native-binary-release-on-github-releases](0035-native-binary-release-on-github-releases.md) | Release the Rust server as native binaries on GitHub Releases, started by one thin launcher | accepted |
 | [0036-pypi-wheels-from-the-release-binaries](0036-pypi-wheels-from-the-release-binaries.md) | Publish the release binaries to PyPI as platform wheels built from the GitHub Release | accepted |
+| [0037-tool-taxonomy-get-find-explore-check](0037-tool-taxonomy-get-find-explore-check.md) | Name tools by four types (get, find, explore, check) with one parameter vocabulary, in a v2.0.0 hard cut | proposed |
 
 ## File naming rule
 
