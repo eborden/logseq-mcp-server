@@ -19,7 +19,7 @@ Options considered:
 | Option | Pros | Cons / cost |
 |---|---|---|
 | Keep v1 names; fix only parameter aliases, instructions and size limits | No contract break | The noise stays, and overlapping tools keep competing for the same questions |
-| Rename and merge in one major release (v2.0.0), a hard cut | One clean surface; the tool list is expected to shrink; skills and server move together in one plugin | Breaks v1 callers. The maintainer confirms there are none yet (v1.0.0 shipped 2026-10-10) |
+| Rename and merge in one major release (v2.0.0), a hard cut | One clean surface; the tool list is expected to shrink; skills and server move together in one plugin | Breaks v1 callers. The maintainer knows of no external callers (statement of 2026-10-12; v1.0.0 shipped 2026-10-10). The in-repo callers (skills, prompts, instructions, tests, scripts) are migrated in step with each rename |
 | v2 names alongside v1, with a deprecation window | Old callers keep working | Doubles the tool list past the [ADR-0016 (tool-list-size-guardrails)](0016-tool-list-size-guardrails.md) budget (19,383 of 19,700 characters used today), and the model has twice as many tools to choose from |
 
 ## Decision
