@@ -91,5 +91,5 @@ Date: 2026-10-12
 
 ## Mechanical enforcement
 
-- none-yet: #488 (a guard over the recorded `tools/list`: name pattern, description verb, no v1 parameter names; a v1 allowlist that shrinks to empty as each rename lands)
+- test: `tests/guards/tool-taxonomy.test.ts` (over the recorded `tools/list`: name pattern, description verb, no v1 parameter names; `V1_TOOL_ALLOWANCES` exempts the v1 tools and shrinks to empty as each rename lands, #488)
 - reviewer: a new tool fits exactly one type and uses the shared parameter vocabulary
