@@ -20,7 +20,11 @@ export const TYPE_VERBS: Record<string, string> = {
 /** `logseq_<type>_<object>`, the object being one or more lowercase words. */
 export const NAME_PATTERN = /^logseq_(get|find|explore|check)_[a-z]+(_[a-z]+)*$/;
 
-/** The v1 names for a concept that v2 gives one shared name (ADR-0037, "One parameter vocabulary"). */
+/**
+ * The v1 names for a concept that v2 gives one shared name (ADR-0037, "One parameter vocabulary"), and the three
+ * guesses a model made from those names (`topic`, `concept`, `property_name`). ADR-0037 gives them no alias (BR-0008),
+ * so none may appear in a schema.
+ */
 export const V1_PARAMETER_NAMES = [
   'page_name',
   'topic_name',
@@ -33,6 +37,9 @@ export const V1_PARAMETER_NAMES = [
   'property_value',
   'query',
   'search_term',
+  'topic',
+  'concept',
+  'property_name',
 ];
 
 /**
