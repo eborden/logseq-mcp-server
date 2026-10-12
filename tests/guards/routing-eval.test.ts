@@ -28,17 +28,18 @@ const questionsPath = join(root, 'tests', 'fixtures', 'routing-eval', 'questions
 const questions = parseQuestions(JSON.parse(readFileSync(questionsPath, 'utf8')));
 
 describe('tests/fixtures/routing-eval/questions.json', () => {
-  it('holds 24 to 30 questions, at least 3 of every type', () => {
-    expect(questions.length).toBeGreaterThanOrEqual(24);
-    expect(questions.length).toBeLessThanOrEqual(30);
+  it('holds 33 to 40 questions, at least 3 of every type', () => {
+    // 11 intents x 3, plus the boundary questions and the page-names question (#511)
+    expect(questions.length).toBeGreaterThanOrEqual(33);
+    expect(questions.length).toBeLessThanOrEqual(40);
     for (const type of TOOL_TYPES) {
       expect(questions.filter(question => question.expected_type === type).length, type).toBeGreaterThanOrEqual(3);
     }
   });
 
-  it('covers each kind of question the issue lists', () => {
-    const intents = new Set(questions.map(question => question.intent));
-    for (const intent of [
+  it('holds at least 3 questions for every intent #487 lists', () => {
+    // The minimum is per intent, not per type (#511). These are the 11 intents of #487's "Cover every type" list.
+    const listed = [
       'page-by-name',
       'block-by-uuid',
       'this-page',
@@ -50,11 +51,51 @@ describe('tests/fixtures/routing-eval/questions.json', () => {
       'change-over-time',
       'what-happened-in-a-period',
       'proposed-link-pass',
-      'page-names',
-      'find-vs-explore-boundary',
-    ]) {
-      expect(intents.has(intent), intent).toBe(true);
+    ];
+    expect(listed).toHaveLength(11);
+    for (const intent of listed) {
+      expect(questions.filter(question => question.intent === intent).length, intent).toBeGreaterThanOrEqual(3);
     }
+  });
+
+  it('covers the two intents beyond #487\'s list', () => {
+    const intents = new Set(questions.map(question => question.intent));
+    for (const intent of ['page-names', 'find-vs-explore-boundary']) expect(intents.has(intent), intent).toBe(true);
+  });
+
+  it('keeps the ground-truth questions exactly as ADR-0037 settles them, each accepting one type only', () => {
+    // The pin: widening a question's accepted types, changing its expected type, or dropping the mark fails here (#511).
+    // find-boundary-1 is a list of hits (find). The two explore ones read like a find but ask what something is or how it connects.
+    const pinned: Record<string, ToolType> = { 'find-boundary-1': 'find', 'explore-boundary-1': 'explore', 'explore-boundary-2': 'explore' };
+    const marked = questions.filter(question => question.ground_truth === true);
+    expect(marked.map(question => question.id).sort()).toEqual(Object.keys(pinned).sort());
+    for (const question of marked) {
+      expect(question.expected_type, question.id).toBe(pinned[question.id]);
+      expect(question.ground_truth_reason, question.id).toContain('ADR-0037');
+      expect(question.intent, question.id).toBe('find-vs-explore-boundary');
+      for (const [surface, tools] of [['v1', question.v1_tools], ['v2', question.v2_tools]] as const) {
+        for (const tool of tools) {
+          // No tool of another type, and none typed by mode (search_by_relationship), so the accepted type is exactly one
+          expect(SURFACE_TOOL_TYPES[surface][tool], `${question.id} ${tool}`).toBe(pinned[question.id]);
+          expect(tool, question.id).not.toBe('logseq_search_by_relationship');
+        }
+      }
+    }
+  });
+
+  it('rejects a ground-truth question that widens its accepted types or leaves out its reason', () => {
+    const base = { id: 'q', intent: 'i', expected_type: 'find', question: 'Q?', v1_tools: ['logseq_search_blocks'], v2_tools: ['logseq_find_blocks'], ground_truth: true, ground_truth_reason: 'ADR-0037' };
+    const parse = (extra: Record<string, unknown>) => parseQuestions({ version: 1, questions: [{ ...base, ...extra }] });
+    expect(() => parse({})).not.toThrow();
+    expect(() => parse({ v1_tools: ['logseq_search_blocks', 'logseq_build_context'] })).toThrow('expects find');
+    expect(() => parse({ v2_tools: ['logseq_explore_context'] })).toThrow('expects find');
+    expect(() => parse({ ground_truth_reason: undefined })).toThrow('ground_truth_reason');
+    expect(() => parse({ ground_truth: undefined })).toThrow('not marked ground_truth');
+    expect(() => parse({ ground_truth: false })).toThrow('true or absent');
+    // The mode-typed tool is explore work only in one mode, so an ordinary question may list it and a ground-truth one may not
+    const explore = { ...base, expected_type: 'explore', v1_tools: ['logseq_search_by_relationship'], v2_tools: ['logseq_explore_network'] };
+    expect(() => parseQuestions({ version: 1, questions: [{ ...explore, ground_truth: undefined, ground_truth_reason: undefined }] })).not.toThrow();
+    expect(() => parseQuestions({ version: 1, questions: [explore] })).toThrow('expects explore');
   });
 
   it('asks in the user\'s words, never with a tool\'s own verb', () => {
