@@ -112,7 +112,7 @@ impl fmt::Display for PageNotFound {
         };
         write!(
             f,
-            "No page {}.{closest} Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.",
+            "No page {}.{closest} Try logseq_search_blocks to find it by content, or logseq_find_pages (text) to browse names.",
             json_string(&self.page_name)
         )
     }
@@ -172,7 +172,7 @@ impl AmbiguousPage {
         (self.total_candidates > self.candidates.len()).then(|| {
             format!(
                 "Showing {} of {}, the most this lists; the rest can't be fetched in one call. \
-                 To narrow it down, call logseq_list_pages with name_contains set to part of the page name you mean, \
+                 To narrow it down, call logseq_find_pages with text set to part of the page name you mean, \
                  or use its full namespaced name.",
                 self.candidates.len(),
                 self.total_candidates
@@ -222,12 +222,12 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "No page \"Alce \\\"x\\\"\". Closest: Alice, Alice Notes. Try logseq_search_blocks to find it by content, \
-             or logseq_list_pages (name_contains) to browse names."
+             or logseq_find_pages (text) to browse names."
         );
         let none = PageNotFound { page_name: "zzz".into(), suggestions: vec![] };
         assert_eq!(
             none.to_string(),
-            "No page \"zzz\". Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names."
+            "No page \"zzz\". Try logseq_search_blocks to find it by content, or logseq_find_pages (text) to browse names."
         );
     }
 
@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "\"x\" matches 12 pages: \"A\" (r) and 11 more. Showing 1 of 12, the most this lists; the rest can't be fetched in one call. \
-             To narrow it down, call logseq_list_pages with name_contains set to part of the page name you mean, or use its full namespaced name. \
+             To narrow it down, call logseq_find_pages with text set to part of the page name you mean, or use its full namespaced name. \
              Repeat the call with the exact name of one of them."
         );
     }

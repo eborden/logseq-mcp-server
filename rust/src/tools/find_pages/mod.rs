@@ -1,11 +1,11 @@
-//! `logseq_list_pages`: the non-journal pages in name
-//! order, each with the other names it goes by (`alias::`), filtered by `name_contains`.
+//! `logseq_find_pages`: the non-journal pages in name
+//! order, each with the other names it goes by (`alias::`), filtered by `text`.
 //!
 //! Calls: 1 (`logseq.Editor.getAllPages`), whatever the filter, `limit`, `offset` or number of
 //! aliases. The `alias` ids and `file` ride on every page entity, so the alias groups are folded
 //! here (#171), and the window is cut here.
 //!
-//! This directory holds everything only the list uses: the answer it reads (`wire.rs`) and its tip
+//! This directory holds everything only the finder uses: the answer it reads (`wire.rs`) and its tip
 //! (`tips.rs`).
 
 mod tips;
@@ -29,32 +29,32 @@ use crate::tips::tips_value;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, capped_truncation_warning};
 
-use self::tips::list_pages_tips;
+use self::tips::find_pages_tips;
 use self::wire::ListedEntity;
 
-pub const NAME: &str = "logseq_list_pages";
+pub const NAME: &str = "logseq_find_pages";
 
 /// Pages returned when `limit` is absent (#61).
-pub const DEFAULT_LIST_PAGES_LIMIT: u64 = 200;
+pub const DEFAULT_FIND_PAGES_LIMIT: u64 = 200;
 /// Most pages one call returns. A larger `limit` is clamped to it, and `offset` reaches the pages
 /// past it, so a cut at the maximum still has a `howToFetchAll`.
-pub const MAX_LIST_PAGES_LIMIT: u64 = 1000;
+pub const MAX_FIND_PAGES_LIMIT: u64 = 1000;
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "List non-journal pages as { name, aliases? }, filtered by name_contains (substring of name or alias). Aliases nest under pages.\n\n\
+const DESCRIPTION: &str = "Find non-journal pages as { name, aliases? }, filtered by text (substring of name or alias). Aliases nest under pages.\n\n\
 **Use when:** unsure which pages exist or what the user calls something.\n\
 **Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.\n\
 **Next:** logseq_get_page.";
 
 fn default_limit() -> u64 {
-    DEFAULT_LIST_PAGES_LIMIT
+    DEFAULT_FIND_PAGES_LIMIT
 }
 
 /// The list's arguments. Unknown fields are ignored, as in every tool (see `input_schema`).
 #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
 pub struct Args {
     /// Filter pages whose name or alias contains this text (case-insensitive)
-    pub name_contains: Option<String>,
+    pub text: Option<String>,
     /// Max pages (default: 200, max: 1000)
     #[serde(default = "default_limit")]
     pub limit: u64,
@@ -68,18 +68,18 @@ pub struct Args {
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
-        .with_title("List Pages")
-        .with_annotations(read_only_annotations("List Pages"))
+        .with_title("Find Pages")
+        .with_annotations(read_only_annotations("Find Pages"))
 }
 
 /// A call: arguments read, the list, then its tip.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let result = list_pages(client, &args).await?;
+    let result = find_pages(client, &args).await?;
     let mut content = vec![ContentBlock::text(ListFormat::text(args.format, &result.to_value())?)];
     if tips_enabled {
         let first = result.pages.first().map(|page| page.name.as_str());
-        if let Some(tips) = tips_value(&list_pages_tips(args.name_contains.as_deref(), first)) {
+        if let Some(tips) = tips_value(&find_pages_tips(args.text.as_deref(), first)) {
             content.push(ContentBlock::text(ListFormat::text(args.format, &tips)?));
         }
     }
@@ -99,7 +99,7 @@ pub struct ListedPage {
 /// cut the list. A result that holds every matching page from `offset` on, including a genuinely
 /// empty graph, carries neither.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListPagesResult {
+pub struct FindPagesResult {
     pub pages: Vec<ListedPage>,
     /// Every matching canonical page, before `offset` and `limit`. An alias is not a page of its own
     pub total: usize,
@@ -117,17 +117,17 @@ struct Completeness<'a> {
 /// A result as written, in BR-0013's order: how many pages there were (`total`), then `hasMore` and `warnings` when
 /// a warning applies, then the `pages`.
 #[derive(Serialize)]
-struct ListPagesOutput<'a> {
+struct FindPagesOutput<'a> {
     total: usize,
     #[serde(flatten)]
     completeness: Option<Completeness<'a>>,
     pages: &'a [ListedPage],
 }
 
-impl ListPagesResult {
+impl FindPagesResult {
     /// The result in BR-0013's key order.
     pub fn to_value(&self) -> Value {
-        result_value(&ListPagesOutput {
+        result_value(&FindPagesOutput {
             total: self.total,
             completeness: self.warning.as_ref().map(|warning| Completeness { has_more: warning.how_to_fetch_all.is_some(), warnings: [warning] }),
             pages: &self.pages,
@@ -199,14 +199,14 @@ fn nest_aliases<'a>(pages: &[&'a ListedEntity]) -> Vec<Entry<'a>> {
 }
 
 /// Non-journal pages in name order, `offset` pages in, at most `limit` of them (#61). Each page
-/// carries its aliases, which use no `limit` slots (#171). `name_contains` matches the page's name
+/// carries its aliases, which use no `limit` slots (#171). `text` matches the page's name
 /// or any alias, and returns the page with all its aliases. `total` counts every matching page,
 /// whatever `offset` and `limit` are. When pages remain after the ones returned, a `pages_truncated`
 /// warning says how to get them: raise `limit` when that fits under the maximum, and set `offset`
 /// to the next page in any case, so `hasMore` is true.
-pub async fn list_pages(client: &LogseqClient, args: &Args) -> Result<ListPagesResult, ToolError> {
+pub async fn find_pages(client: &LogseqClient, args: &Args) -> Result<FindPagesResult, ToolError> {
     let requested = args.limit;
-    let limit = requested.min(MAX_LIST_PAGES_LIMIT) as usize;
+    let limit = requested.min(MAX_FIND_PAGES_LIMIT) as usize;
     let offset = usize::try_from(args.offset).unwrap_or(usize::MAX);
 
     let answer = client.call_api(wire::METHOD, &[]).await?;
@@ -215,7 +215,7 @@ pub async fn list_pages(client: &LogseqClient, args: &Args) -> Result<ListPagesR
     // passing for "none". `hasMore` stays false: no parameter fetches a page list that does not
     // exist, so the warning has no `howToFetchAll` (the retry advice is in the message).
     let Some(all_pages) = wire::pages(&answer)? else {
-        return Ok(ListPagesResult {
+        return Ok(FindPagesResult {
             pages: Vec::new(),
             total: 0,
             warning: Some(ResultWarning::new(
@@ -233,7 +233,7 @@ pub async fn list_pages(client: &LogseqClient, args: &Args) -> Result<ListPagesR
     let mut entries = nest_aliases(&pages);
 
     // Filter by name if specified (case-insensitive): the page's own name or any alias
-    if let Some(wanted) = args.name_contains.as_deref().filter(|text| !text.is_empty()) {
+    if let Some(wanted) = args.text.as_deref().filter(|text| !text.is_empty()) {
         let lower = wanted.to_lowercase();
         entries.retain(|entry| {
             entry.page.name.to_lowercase().contains(&lower) || entry.aliases.iter().any(|alias| alias.name.to_lowercase().contains(&lower))
@@ -252,10 +252,10 @@ pub async fn list_pages(client: &LogseqClient, args: &Args) -> Result<ListPagesR
     let total = listed.len();
     let pages: Vec<ListedPage> = listed.into_iter().skip(offset).take(limit).collect();
     if offset.saturating_add(pages.len()) >= total {
-        return Ok(ListPagesResult { pages, total, warning: None });
+        return Ok(FindPagesResult { pages, total, warning: None });
     }
     let warning = pages_truncated(pages.len(), total, offset, requested);
-    Ok(ListPagesResult { pages, total, warning: Some(warning) })
+    Ok(FindPagesResult { pages, total, warning: Some(warning) })
 }
 
 /// The `pages_truncated` warning for `shown` pages from `offset` of `total`. Counted from `offset`,
@@ -268,8 +268,8 @@ fn pages_truncated(shown: usize, total: usize, offset: usize, requested: u64) ->
         shown,
         total: total - offset,
         param: "limit",
-        max: MAX_LIST_PAGES_LIMIT as usize,
-        narrower: "Narrow name_contains to see the rest.",
+        max: MAX_FIND_PAGES_LIMIT as usize,
+        narrower: "Narrow text to see the rest.",
         requested: Some(requested),
         code: "pages_truncated",
         inline_max: Some(INLINE_PAGES),
@@ -294,10 +294,10 @@ mod tests {
         }
     }
 
-    fn listed(entities: &[ListedEntity], name_contains: Option<&str>) -> Vec<(String, Vec<String>)> {
+    fn listed(entities: &[ListedEntity], text: Option<&str>) -> Vec<(String, Vec<String>)> {
         let pages: Vec<&ListedEntity> = entities.iter().collect();
         let mut entries = nest_aliases(&pages);
-        if let Some(wanted) = name_contains {
+        if let Some(wanted) = text {
             let lower = wanted.to_lowercase();
             entries.retain(|e| e.page.name.contains(&lower) || e.aliases.iter().any(|a| a.name.contains(&lower)));
         }
@@ -358,14 +358,14 @@ mod tests {
 
     #[test]
     fn the_total_and_the_warning_come_before_the_pages() {
-        let plain = ListPagesResult {
+        let plain = FindPagesResult {
             pages: vec![ListedPage { name: "Alice".into(), aliases: vec!["Al".into()] }, ListedPage { name: "Bob".into(), aliases: vec![] }],
             total: 2,
             warning: None,
         };
         assert_eq!(plain.to_value().to_string(), r#"{"total":2,"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}]}"#);
         assert_eq!(keys(&plain.to_value()), ["total", "pages"]);
-        let cut = ListPagesResult {
+        let cut = FindPagesResult {
             pages: vec![],
             total: 3,
             warning: Some(ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }),
@@ -376,7 +376,7 @@ mod tests {
         );
         assert_eq!(keys(&cut.to_value()), ["total", "hasMore", "warnings", "pages"]);
         // a warning with no way to fetch more says so
-        let no_more = ListPagesResult { warning: Some(ResultWarning::new("c", "m".into())), ..cut };
+        let no_more = FindPagesResult { warning: Some(ResultWarning::new("c", "m".into())), ..cut };
         assert_eq!(no_more.to_value()["hasMore"], false);
     }
 
@@ -400,11 +400,11 @@ mod tests {
 
     #[test]
     fn the_schema_means_what_the_pinned_one_means() {
-        // `inputSchema` of logseq_list_pages in the ADR-0016 snapshot
+        // `inputSchema` of logseq_find_pages in the ADR-0016 snapshot
         let pinned = json!({
             "type": "object",
             "properties": {
-                "name_contains": {"type": "string", "description": "Filter pages whose name or alias contains this text (case-insensitive)"},
+                "text": {"type": "string", "description": "Filter pages whose name or alias contains this text (case-insensitive)"},
                 "limit": {"type": "integer", "minimum": 0, "default": 200, "description": "Max pages (default: 200, max: 1000)"},
                 "offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Pages to skip, in name order; shifts if the graph changes"},
                 "format": {"type": "string", "enum": ["json", "toon"], "description": "json (default), or toon text: a list's keys once, not on every row"},
@@ -418,17 +418,17 @@ mod tests {
     fn the_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
-        assert_eq!(tool.title.as_deref(), Some("List Pages"));
+        assert_eq!(tool.title.as_deref(), Some("Find Pages"));
         assert_eq!(
             serde_json::to_value(&tool.annotations).unwrap(),
-            json!({"title": "List Pages", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
+            json!({"title": "Find Pages", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
         );
     }
 
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let defaults = parse_args::<Args>(None).unwrap();
-        assert_eq!(defaults, Args { name_contains: None, limit: 200, offset: 0, format: None });
+        assert_eq!(defaults, Args { text: None, limit: 200, offset: 0, format: None });
         assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
         let bad = json!({"limit": 2.5, "offset": -1});
         assert_eq!(
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
-        sweep::<Args>(json!({}), "name_contains", Takes::Text, false);
+        sweep::<Args>(json!({}), "text", Takes::Text, false);
         sweep::<Args>(json!({}), "limit", Takes::Count(0), false);
         sweep::<Args>(json!({}), "offset", Takes::Count(0), false);
     }

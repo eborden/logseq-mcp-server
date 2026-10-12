@@ -481,7 +481,7 @@ fn a_property_named_format_and_a_null_on_a_required_property_still_count() {
     assert_eq!(with_format.len(), 6, "{with_format:?}");
     for name in with_format {
         let words = match name {
-            "logseq_list_pages" => r#"["json","toon"]"#,
+            "logseq_find_pages" => r#"["json","toon"]"#,
             "logseq_get_page" => r#"["json","markdown","toon"]"#,
             _ => r#"["json","markdown"]"#,
         };

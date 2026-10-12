@@ -11,6 +11,7 @@ use crate::errors::ToolError;
 
 pub mod build_context;
 pub mod check_links;
+pub mod find_pages;
 pub mod get_backlinks;
 pub mod get_block;
 pub mod get_concept_evolution;
@@ -19,7 +20,6 @@ pub mod get_context_for_query;
 pub mod get_current;
 pub mod get_graph;
 pub mod get_page;
-pub mod list_pages;
 pub mod query_by_date_range;
 pub mod query_by_property;
 pub mod search_blocks;
@@ -30,6 +30,7 @@ pub fn list() -> Vec<Tool> {
     vec![
         build_context::definition(),
         check_links::definition(),
+        find_pages::definition(),
         get_backlinks::definition(),
         get_block::definition(),
         get_concept_evolution::definition(),
@@ -38,7 +39,6 @@ pub fn list() -> Vec<Tool> {
         get_current::definition(),
         get_graph::definition(),
         get_page::definition(),
-        list_pages::definition(),
         query_by_date_range::definition(),
         query_by_property::definition(),
         search_blocks::definition(),
@@ -57,6 +57,7 @@ pub async fn call(
     match name {
         build_context::NAME => Some(build_context::call(client, tips_enabled, arguments).await),
         check_links::NAME => Some(check_links::call(client, tips_enabled, arguments).await),
+        find_pages::NAME => Some(find_pages::call(client, tips_enabled, arguments).await),
         get_backlinks::NAME => Some(get_backlinks::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
         get_concept_evolution::NAME => Some(get_concept_evolution::call(client, tips_enabled, arguments).await),
@@ -65,7 +66,6 @@ pub async fn call(
         get_current::NAME => Some(get_current::call(client, tips_enabled, arguments).await),
         get_graph::NAME => Some(get_graph::call(client, tips_enabled, arguments).await),
         get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),
-        list_pages::NAME => Some(list_pages::call(client, tips_enabled, arguments).await),
         query_by_date_range::NAME => Some(query_by_date_range::call(client, tips_enabled, clock, arguments).await),
         query_by_property::NAME => Some(query_by_property::call(client, tips_enabled, arguments).await),
         search_blocks::NAME => Some(search_blocks::call(client, tips_enabled, arguments).await),
