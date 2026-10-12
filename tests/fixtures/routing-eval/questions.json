@@ -295,11 +295,10 @@
       "id": "explore-topic-2",
       "intent": "topic",
       "expected_type": "explore",
-      "question": "Give me everything I have written about Bob, and what links to him.",
+      "question": "Give me everything I have written about Bob.",
       "v1_tools": [
         "logseq_build_context",
-        "logseq_get_context_for_query",
-        "logseq_get_backlinks"
+        "logseq_get_context_for_query"
       ],
       "v2_tools": [
         "logseq_explore_context"
@@ -313,6 +312,19 @@
       "v1_tools": [
         "logseq_build_context",
         "logseq_get_context_for_query"
+      ],
+      "v2_tools": [
+        "logseq_explore_context"
+      ]
+    },
+    {
+      "id": "explore-topic-4",
+      "intent": "topic",
+      "expected_type": "explore",
+      "question": "What links to Bob?",
+      "v1_tools": [
+        "logseq_get_backlinks",
+        "logseq_build_context"
       ],
       "v2_tools": [
         "logseq_explore_context"
