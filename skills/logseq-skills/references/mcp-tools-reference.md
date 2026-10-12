@@ -52,16 +52,17 @@ logseq_search_blocks("Nancy budget", 5)
 
 ### logseq_get_page
 
-Get complete page content with all properties and blocks.
+Get a page by name with its properties. Its blocks come only with `detail` `full`.
 
 **Parameters:**
-- `page` (required): Name of the page (case-insensitive)
-- `detail` (optional): `page` (default), `full` (adds the nested child blocks) or `outline` (see below)
-- `format` (optional): `json` (default) or `markdown`; with `detail` `outline`, `json` or `toon`. Markdown is plain text: page properties as `key:: value` lines, then blocks as tab-indented `- ` bullets with `((uuid))` refs kept, then a short footer for warnings and tips. About 80% smaller than JSON on a long page.
+- `page` (required): Name of the page (case-insensitive), an alias, or an ISO date (`2025-01-01`) for a journal
+- `detail` (optional): `page` (default: the page and its properties, no blocks), `full` (adds the nested child blocks) or `outline` (see below)
+- `resolve_refs` (optional): Add `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s (depth 2; default: false). Refused with `detail` `outline`, which has no block bodies
+- `format` (optional): `json` (default) or `markdown`; with `detail` `outline`, `json` or `toon`. Any other combination is refused with an error that names the valid ones. Markdown is plain text: page properties as `key:: value` lines, then blocks as tab-indented `- ` bullets with `((uuid))` refs kept, then a short footer for warnings and tips. About 80% smaller than JSON on a long page.
 
 **Use when:**
 - Deep dive into specific page
-- Need full page structure
+- Need full page structure (`detail` `full`)
 - Following up after search
 
 **For a long page:** call `logseq_get_page` with `detail` `outline` first, then `logseq_get_block` on the blocks you pick.
