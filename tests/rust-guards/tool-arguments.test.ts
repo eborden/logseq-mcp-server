@@ -15,6 +15,7 @@ type Schema = {
   enum?: unknown[];
   anyOf?: Array<{ type?: string }>;
   minimum?: number;
+  minItems?: number;
 };
 
 /** The one type a schema names, an optional parameter's `["number", "null"]` being a number. */
@@ -36,6 +37,9 @@ function sampleFor(name: string, schema: Schema): unknown {
       return 1;
     case 'boolean':
       return true;
+    case 'array':
+      // a list of strings, as long as its minimum
+      return Array.from({ length: schema.minItems ?? 0 }, () => 'Alice');
     default:
       throw new Error(`No right sample for parameter ${name} of kind ${JSON.stringify(schema)}: add one to tests/rust-guards/tool-arguments.test.ts`);
   }
@@ -49,6 +53,7 @@ function wrongFor(name: string, schema: Schema): unknown {
     case 'integer':
     case 'number':
     case 'boolean':
+    case 'array':
       return 'not that';
     default:
       throw new Error(`No wrong sample for parameter ${name} of kind ${JSON.stringify(schema)}: add one to tests/rust-guards/tool-arguments.test.ts`);

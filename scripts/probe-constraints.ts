@@ -522,13 +522,14 @@ async function probeFindPagesNull(
 }
 
 // ---------------------------------------------------------------------------
-// find_pages nests aliases from getAllPages (#171)
+// find_pages nests aliases and matches page properties from getAllPages (#171, #490)
 //
 // `find_pages` reads `alias` (ids of the linked pages) and `file` off each
-// `getAllPages` entity, in `nestAliases` (src/tools/list-pages.ts). If a LogSeq
-// upgrade dropped or renamed either key, nothing would fail: every alias would
-// stay a top-level page, as before #171, and a graph with no aliases looks the
-// same, so the tool cannot warn. This probe is the check. Each count of entities
+// `getAllPages` entity, in `nestAliases` (rust/src/tools/find_pages/mod.rs), and
+// `properties` for its `property` and `value` filter. If a LogSeq upgrade
+// dropped or renamed a key, nothing would fail: every alias would stay a
+// top-level page, as before #171, and the property filter would find no page;
+// a graph with no aliases looks the same, so the tool cannot warn. This probe is the check. Each count of entities
 // carrying a key must equal the Datalog count of pages with that attribute.
 // A mismatch, above all 0 against a non-zero count, means `find_pages` is not
 // nesting. A graph with no alias links reports 0 = 0, which proves nothing about
@@ -540,7 +541,7 @@ async function probeFindPagesNesting(
   client: LogseqClient,
   dq: (q: string, ...inputs: unknown[]) => Promise<Outcome>
 ) {
-  console.log('\n== find_pages alias nesting reads alias and file from getAllPages (#171)');
+  console.log('\n== find_pages reads alias, file and properties from getAllPages (#171, #490)');
 
   let pages: any[];
   try {
@@ -550,12 +551,12 @@ async function probeFindPagesNesting(
     return;
   }
 
-  for (const [key, attribute] of [['alias', ':block/alias'], ['file', ':block/file']] as const) {
+  for (const [key, attribute] of [['alias', ':block/alias'], ['file', ':block/file'], ['properties', ':block/properties']] as const) {
     const withKey = pages.filter(p => p && typeof p === 'object' && key in p).length;
     const datalog = await dq(`[:find ?p :where [?p :block/name] [?p ${attribute} ?v]]`);
     const expected = datalog.ok ? datalog.rows : undefined;
     const verdict =
-      expected === undefined ? 'ERROR (the Datalog count failed)' : withKey === expected ? 'PASS' : 'FAIL (find_pages does not nest)';
+      expected === undefined ? 'ERROR (the Datalog count failed)' : withKey === expected ? 'PASS' : 'FAIL (find_pages does not read it)';
     console.log(`${`getAllPages entities with ${key} / Datalog pages with ${attribute}`.padEnd(58)} ${withKey} / ${expected ?? '?'}  ${verdict}`);
   }
 }

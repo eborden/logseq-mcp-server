@@ -105,7 +105,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find non-journal pages as { name, aliases? }, filtered by text (substring of name or alias). Aliases nest under pages.\n\n**Use when:** unsure which pages exist or what the user calls something.\n**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.\n**Next:** logseq_get_page.",
+    "description": "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property).\n\n**Can't find:** journals (logseq_query_by_date_range), block text (logseq_search_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -114,6 +114,39 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "names": {
+          "description": "Page names or aliases to look up exactly, ignoring case (1 to 50)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 50
+        },
+        "property": {
+          "description": "Page property to match (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent). Needs value",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "Exact value of the property. A multi-value property matches if any one value equals it. Needs property",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
           ]
         },
         "limit": {

@@ -328,11 +328,21 @@ export async function getCurrentContext(client: LogseqClient): Promise<Json> {
 
 export async function findPages(
   client: LogseqClient,
-  options?: { text?: string; limit?: number; offset?: number }
+  options?: {
+    text?: string;
+    names?: string[];
+    property?: string;
+    value?: string | number | boolean;
+    limit?: number;
+    offset?: number;
+  }
 ): Promise<Json> {
   return (
     await callTool(client, 'logseq_find_pages', {
       text: options?.text,
+      names: options?.names,
+      property: options?.property,
+      value: options?.value,
       limit: options?.limit,
       offset: options?.offset,
     })
