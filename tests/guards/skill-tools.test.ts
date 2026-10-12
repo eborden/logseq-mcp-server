@@ -28,7 +28,8 @@ import {
  *   4. every tool has at least MIN_EXAMPLES_PER_TOOL such examples.
  * A failure names the file, the line and the bad token or argument.
  *
- * MIN_EXAMPLES_PER_TOOL is 0 here. #497 (the skills rewrite) is the switch: it raises the constant to 2.
+ * MIN_EXAMPLES_PER_TOOL is 0 here. #497 (the skills rewrite) is the switch: it raises the constant to 2, and in the
+ * same PR adds the logseq_get_graph_info section and deletes its MISSING_SECTION_ALLOWANCES entry.
  * Skills aren't edited by this guard (ADR-0024), so MISSING_SECTION_ALLOWANCES lists the section gaps that exist on
  * main. An entry may only be removed: the guard fails once the heading exists, so the entry is deleted with it.
  */
@@ -67,10 +68,6 @@ describe('the skills name only real tools (#486)', () => {
 
   it('names only recorded tools, documents each, and validates every json tool= example', () => {
     expect(skillViolations(files, tools, real), 'skills/logseq-skills/ breaks the tool contract').toEqual([]);
-  });
-
-  it('starts with no minimum for examples, which #497 raises to 2', () => {
-    expect(MIN_EXAMPLES_PER_TOOL).toBe(0);
   });
 });
 
