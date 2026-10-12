@@ -34,7 +34,7 @@ Note the scope you were given. A block ref means that block and its descendants,
 ### Step 2: Discover the Graph's Vocabulary
 
 ```
-logseq_list_pages(limit=1000)
+logseq_find_pages(limit=1000)
 ```
 
 Every page together is the candidate set, and on a large graph that takes more than one call. Each entry is `{ name, aliases? }`: `name` is the page, and `aliases` holds its other names (an `alias::` on the page), left off when it has none. An alias is never listed as a page of its own, so a term equal to one is a candidate for the page that lists it, and `total` counts pages, not aliases. Read the entries from each result as it arrives and keep them in context. Don't save a result to a file.
@@ -138,7 +138,7 @@ logseq_check_links(before="<text of /tmp/link-baseline-<name>>", after="<text of
 
 Fix a failure in what you added and run the gate again. A `refs_unchecked` warning means LogSeq gave no answer for the refs, so `refs` wasn't checked (the other three were). Call the gate once more. If the warning comes back, stop and tell the requester the refs couldn't be checked. Don't report the pass as done.
 
-**Never remove a ref the note already had.** `refsPreserved` fails if you do, so it can't be the way to a pass. If `refs.unresolved` names a term the before text already linked, the pass didn't cause it. It's a lookup problem, not an edit to undo. Confirm the page with `logseq_list_pages(name_contains="<term>")`, leave the ref as it was, and report the failure and what the lookup found. This is the only failure you report with `ok: false`: every other check passes, and each unresolved term was already linked the same number of times before. If you added a copy of that term, remove your copy.
+**Never remove a ref the note already had.** `refsPreserved` fails if you do, so it can't be the way to a pass. If `refs.unresolved` names a term the before text already linked, the pass didn't cause it. It's a lookup problem, not an edit to undo. Confirm the page with `logseq_find_pages(text="<term>")`, leave the ref as it was, and report the failure and what the lookup found. This is the only failure you report with `ok: false`: every other check passes, and each unresolved term was already linked the same number of times before. If you added a copy of that term, remove your copy.
 
 The most common way to trip it is inserting a word so a ref reads naturally. Wanting to link a page called `Ledger Service` from prose that says `the ledger`, and writing `the [[Ledger Service]]`, adds two words the note never said. Bracket what is there or skip it.
 
