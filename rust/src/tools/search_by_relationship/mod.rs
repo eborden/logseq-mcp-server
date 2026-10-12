@@ -31,6 +31,7 @@ use serde_json::{Map, Value, json};
 
 use crate::args::parse_args;
 use crate::block_budget::{Budget, count_blocks, take_blocks};
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::{PageId, PageName};
 use crate::errors::{MatchedBy, ToolError};
@@ -39,7 +40,7 @@ use crate::meta::ResultWarning;
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_sets};
 use crate::resolve::{ResolvedPage, require_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
-use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning};
+use crate::truncation::{CappedTruncation, INLINE_BLOCKS, SizeCut, capped_truncation_warning, size_truncation_warning};
 
 pub const NAME: &str = "logseq_search_by_relationship";
 
@@ -136,8 +137,47 @@ pub fn definition() -> Tool {
 /// A call: arguments read, then the search.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let result = search_by_relationship(client, &args).await?;
+    let result = fit_to_budget(search_by_relationship(client, &args).await?);
     Ok(success_result(vec![ContentBlock::text(result.to_string())]))
+}
+
+/// The result cut to its first `kept` blocks (nested ones counted, in document order, as `limit` counts them),
+/// with the `result_size_truncated` warning, `hasMore` worked out again and `totals.blocks` set when `limit` had
+/// not set it (#485). Every key keeps its place.
+fn cut_results(result: &Value, kept: usize, total: usize, oversize: bool) -> Value {
+    let blocks = result.get("results").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    let mut budget = Budget::new(kept);
+    let first = take_blocks(blocks, &mut budget);
+    let mut warnings = result.get("warnings").and_then(Value::as_array).cloned().unwrap_or_default();
+    let warning = size_truncation_warning(SizeCut {
+        what: "blocks of the results (nested ones counted)",
+        kept,
+        total,
+        oversize,
+        advice: "Read a block in full with logseq_get_block, or ask about narrower topics. No parameter raises this limit.",
+        how_to_fetch_all: None,
+    });
+    warnings.push(serde_json::to_value(warning).expect("warnings serialize"));
+    let has_more = warnings.iter().any(|warning| warning.get("howToFetchAll").is_some());
+    let mut cut = result.clone();
+    cut["results"] = Value::Array(first);
+    cut["hasMore"] = json!(has_more);
+    cut["warnings"] = Value::Array(warnings);
+    if cut.get("totals").is_none() {
+        cut["totals"] = json!({ "blocks": total });
+    }
+    cut
+}
+
+/// The result as it is when its text fits the character budget (#485), else cut to the first blocks that do. A
+/// block is never cut inside its text, so a first block over the budget comes back alone (BR-0007).
+fn fit_to_budget(result: Value) -> Value {
+    let total = result.get("results").and_then(Value::as_array).map_or(0, |blocks| count_blocks(blocks));
+    let size_of = |kept: usize| size(&if kept < total { cut_results(&result, kept, total, false) } else { result.clone() }.to_string());
+    match fit(total, 1, size_of) {
+        Fit::Whole => result,
+        Fit::Cut { kept, oversize } => cut_results(&result, kept, total, oversize),
+    }
 }
 
 /// The connection to LogSeq failed (not running, timeout, rejected token).
@@ -573,6 +613,78 @@ mod tests {
 
     fn ids(blocks: &[Value]) -> Vec<i64> {
         blocks.iter().flat_map(|b| std::iter::once(b["id"].as_i64().unwrap()).chain(ids(b["children"].as_array().unwrap()))).collect()
+    }
+
+    fn text_block(id: i64, length: usize, children: Vec<Value>) -> Value {
+        json!({"id": id, "content": "x".repeat(length), "children": children})
+    }
+
+    /// A result as the tool builds it, `results` before `hasMore`
+    fn result_of(results: Vec<Value>, warnings: Value, totals: Option<Value>) -> Value {
+        let mut result = json!({
+            "query": {"topicA": "a", "topicB": "b", "relationshipType": "references"},
+            "relationshipType": "references",
+            "results": results,
+            "hasMore": warnings.as_array().unwrap().iter().any(|warning| warning.get("howToFetchAll").is_some()),
+            "warnings": warnings,
+        });
+        if let Some(totals) = totals {
+            result["totals"] = totals;
+        }
+        result
+    }
+
+    fn key_order(value: &Value) -> Vec<&str> {
+        value.as_object().unwrap().keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn a_result_that_fits_the_budget_is_untouched() {
+        let result = result_of((1..=5).map(|id| text_block(id, 200, vec![])).collect(), json!([]), None);
+        assert_eq!(fit_to_budget(result.clone()), result);
+    }
+
+    #[test]
+    fn a_result_over_the_budget_keeps_the_first_blocks_in_document_order_and_says_what_was_cut() {
+        // 60 blocks of 700 characters, the first with 3 children: about 42,000 characters
+        let mut blocks: Vec<Value> = (1..=60).map(|id| text_block(id, 700, vec![])).collect();
+        blocks[0] = text_block(1, 700, (101..=103).map(|id| text_block(id, 700, vec![])).collect());
+        let result = result_of(blocks, json!([]), None);
+        let fitted = fit_to_budget(result.clone());
+        assert!(size(&fitted.to_string()) <= crate::budget::BUDGET_CHARS);
+        let kept = count_blocks(fitted["results"].as_array().unwrap());
+        assert!(kept > 30 && kept < 63, "{kept}");
+        assert_eq!(fitted["totals"], json!({"blocks": 63}));
+        assert_eq!(fitted["hasMore"], false);
+        assert_eq!(fitted["warnings"][0]["code"], "result_size_truncated");
+        assert!(fitted["warnings"][0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 63 blocks")));
+        // the first block keeps its children, in document order, and the keys keep their places
+        assert_eq!(ids(&fitted["results"].as_array().unwrap()[..1]), [1, 101, 102, 103]);
+        assert_eq!(key_order(&fitted), ["query", "relationshipType", "results", "hasMore", "warnings", "totals"]);
+    }
+
+    #[test]
+    fn the_limits_own_warning_and_totals_stay_and_has_more_follows_all_the_warnings() {
+        let earlier = json!([{"code": "results_truncated", "message": "m", "howToFetchAll": "Set limit to 90"}]);
+        let result = result_of((1..=60).map(|id| text_block(id, 700, vec![])).collect(), earlier, Some(json!({"blocks": 90})));
+        let fitted = fit_to_budget(result);
+        assert_eq!(fitted["totals"], json!({"blocks": 90}));
+        assert_eq!(fitted["hasMore"], true);
+        assert_eq!(fitted["warnings"].as_array().unwrap().len(), 2);
+        assert_eq!(fitted["warnings"][1]["code"], "result_size_truncated");
+    }
+
+    #[test]
+    fn a_single_block_over_the_budget_is_returned_alone_and_a_lone_one_is_not_cut() {
+        let result = result_of(vec![text_block(1, 40_000, vec![]), text_block(2, 10, vec![])], json!([]), None);
+        let fitted = fit_to_budget(result);
+        assert_eq!(fitted["results"].as_array().unwrap().len(), 1);
+        assert_eq!(fitted["results"][0]["content"].as_str().unwrap().len(), 40_000);
+        assert!(fitted["warnings"][0]["message"].as_str().unwrap().contains("an entry is never cut inside its text"));
+        let lone = result_of(vec![text_block(1, 40_000, vec![])], json!([]), None);
+        assert_eq!(fit_to_budget(lone.clone()), lone);
+        let empty = result_of(vec![], json!([]), None);
+        assert_eq!(fit_to_budget(empty.clone()), empty);
     }
 
     #[test]
