@@ -8,7 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
-use logseq_mcp_server::tools::{get_backlinks, get_concept_network};
+use logseq_mcp_server::tools::{get_backlinks, get_concept_network, search_blocks};
 use serde_json::{Value, json};
 
 const DATALOG: &str = "logseq.DB.datascriptQuery";
@@ -106,4 +106,101 @@ async fn backlinks_over_the_budget_are_cut_from_the_last_block_and_the_meta_bloc
     assert!(kept.len() < 6);
     let counts: Vec<usize> = kept.iter().map(|tuple| tuple[1].as_array().unwrap().len()).collect();
     assert!(counts[..counts.len() - 1].iter().all(|&count| count == 5), "{counts:?}");
+}
+
+/// A search row: one block of `length` characters of text, newest when `id` is highest, on page 5.
+fn hit(id: i64, length: usize) -> Value {
+    json!([{"id": id, "uuid": uuid(id), "content": format!("mentions the importer {}", "x".repeat(length)), "page": {"id": 5, "name": "alice", "original-name": "Alice"}}])
+}
+
+fn page_row() -> Value {
+    json!([{"id": 5, "name": "alice", "original-name": "Alice"}])
+}
+
+#[tokio::test]
+async fn a_search_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_extra_call() {
+    let small: Vec<Value> = (1..=20).map(|id| hit(id, 100)).collect();
+    let logseq = mock_logseq(vec![json!(small)]).await;
+    let result = search_blocks::call(&client(&logseq), true, arguments(json!({"query": "importer"}))).await.unwrap();
+    let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();
+    assert_eq!(meta["meta"]["warnings"], json!([]));
+    assert_eq!(serde_json::from_str::<Vec<Value>>(&text_of(&result, 0)).unwrap().len(), 20);
+
+    // 100 hits of 600 characters: ~70,000 characters, at the default limit of 100
+    let big: Vec<Value> = (1..=100).map(|id| hit(id, 600)).collect();
+    let logseq = mock_logseq(vec![json!(big)]).await;
+    let result = search_blocks::call(&client(&logseq), true, arguments(json!({"query": "importer"}))).await.unwrap();
+    // the cut reads no more than the search does
+    assert_eq!(methods(&logseq), [DATALOG]);
+    let (results, meta) = (text_of(&result, 0), text_of(&result, 1));
+    assert!(size(&results) + size(&meta) <= BUDGET_CHARS, "{}", size(&results) + size(&meta));
+    let kept: Vec<Value> = serde_json::from_str(&results).unwrap();
+    assert!(kept.len() > 1 && kept.len() < 100, "{}", kept.len());
+    // the newest hits stay, and a hit is whole
+    assert_eq!(kept[0]["uuid"], uuid(100));
+    let meta: Value = serde_json::from_str(&meta).unwrap();
+    let warnings = meta["meta"]["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["code"], "result_size_truncated");
+    assert!(warnings[0].get("howToFetchAll").is_none());
+    assert_eq!(meta["meta"]["hasMore"], false);
+    assert_eq!(meta["meta"]["totals"], json!({"matches": 100}));
+}
+
+#[tokio::test]
+async fn a_search_cut_by_its_limit_and_its_size_offers_no_larger_limit() {
+    // 300 matches and a limit of 200, then a size cut: raising `limit` would return the same first hits cut at
+    // the same place, so no warning offers it
+    let big: Vec<Value> = (1..=300).map(|id| hit(id, 600)).collect();
+    let logseq = mock_logseq(vec![json!(big)]).await;
+    let result = search_blocks::call(&client(&logseq), true, arguments(json!({"query": "importer", "limit": 200}))).await.unwrap();
+    let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();
+    let warnings = meta["meta"]["warnings"].as_array().unwrap();
+    assert_eq!(warnings.iter().map(|warning| warning["code"].as_str().unwrap()).collect::<Vec<_>>(), ["result_size_truncated"]);
+    assert!(warnings[0]["message"].as_str().unwrap().contains(" of 300 matching blocks"), "{}", warnings[0]["message"]);
+    assert_eq!(meta["meta"]["hasMore"], false);
+    assert_eq!(meta["meta"]["totals"]["matches"], 300);
+}
+
+#[tokio::test]
+async fn a_search_with_context_is_cut_to_the_budget_and_the_page_lookup_stays_one_call() {
+    let big: Vec<Value> = (1..=100).map(|id| hit(id, 300)).collect();
+    let logseq = mock_logseq(vec![json!(big), json!([page_row()])]).await;
+    let result = search_blocks::call(
+        &client(&logseq),
+        true,
+        arguments(json!({"query": "importer", "include_context": true, "slim_results": false})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG]);
+    let (results, meta) = (text_of(&result, 0), text_of(&result, 1));
+    assert!(size(&results) + size(&meta) <= BUDGET_CHARS, "{}", size(&results) + size(&meta));
+    let kept: Vec<Value> = serde_json::from_str(&results).unwrap();
+    assert!(kept.len() < 100 && kept.iter().all(|hit| hit["context"]["page"]["originalName"] == "Alice"));
+    let meta: Value = serde_json::from_str(&meta).unwrap();
+    let warning = &meta["meta"]["warnings"][0];
+    assert_eq!(warning["code"], "result_size_truncated");
+    // the advice names the settings that make a hit smaller
+    assert!(warning["message"].as_str().unwrap().contains("include_context: false and slim_results: true make each hit smaller"));
+}
+
+#[tokio::test]
+async fn a_single_search_hit_over_the_budget_comes_back_alone_and_the_first_of_many_says_so() {
+    // one hit of 40,000 characters: nothing to cut, so it is returned whole with no warning
+    let logseq = mock_logseq(vec![json!([hit(1, 40_000)])]).await;
+    let result = search_blocks::call(&client(&logseq), false, arguments(json!({"query": "importer"}))).await.unwrap();
+    assert_eq!(serde_json::from_str::<Vec<Value>>(&text_of(&result, 0)).unwrap().len(), 1);
+    let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();
+    assert_eq!(meta["meta"]["warnings"], json!([]));
+
+    // the newest of three is 40,000 characters: it is kept alone, and the warning says that even it is over
+    let logseq = mock_logseq(vec![json!([hit(3, 40_000), hit(2, 10), hit(1, 10)])]).await;
+    let result = search_blocks::call(&client(&logseq), false, arguments(json!({"query": "importer"}))).await.unwrap();
+    let kept: Vec<Value> = serde_json::from_str(&text_of(&result, 0)).unwrap();
+    assert_eq!(kept.len(), 1);
+    let meta: Value = serde_json::from_str(&text_of(&result, 1)).unwrap();
+    let message = meta["meta"]["warnings"][0]["message"].as_str().unwrap();
+    assert!(message.starts_with("Showing 1 of 3 matching blocks"), "{message}");
+    assert!(message.contains("Even those are over that size"), "{message}");
 }

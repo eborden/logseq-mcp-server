@@ -23,6 +23,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::args::parse_args;
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
@@ -32,7 +33,7 @@ use crate::pages_by_ids::pages_by_ids;
 use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
-use crate::truncation::{CappedTruncation, blocks_inline_max, capped_truncation_warning};
+use crate::truncation::{CappedTruncation, SizeCut, blocks_inline_max, capped_truncation_warning, size_truncation_warning};
 
 use self::tips::search_tips;
 
@@ -79,19 +80,126 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Search Blocks"))
 }
 
-/// A call: arguments read, the search, then its meta and tips.
+/// A call: arguments read, the search, then its meta and tips. The character budget (#506, #485) is applied here, to
+/// the two content blocks the call sends, so the library function the search is read through stays uncut.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let found = search_blocks_with_meta(client, &args.query, args.limit, args.include_context, args.slim_results).await?;
-    let mut content = vec![ContentBlock::text(Value::Array(found.results.clone()).to_string())];
-    // No tip for a search LogSeq did not answer: "No match" would say what the warning says it can't
-    let tips = if tips_enabled && !found.is_unavailable() { search_tips(&args.query, &found.results, found.matches()) } else { Vec::new() };
-    let mut meta = serde_json::to_value(&found.meta).expect("a result meta serializes");
-    if !tips.is_empty() {
-        meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
+    let searched = search(client, &args.query, args.limit, args.include_context, args.slim_results).await?;
+    let (results, meta) = fit_to_budget(&searched, tips_enabled, &args.query);
+    Ok(success_result(vec![ContentBlock::text(results), ContentBlock::text(meta)]))
+}
+
+/// A cut by the character budget: how many hits were kept, and whether even those are over it (BR-0007).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SizeCutTo {
+    kept: usize,
+    oversize: bool,
+}
+
+/// What the search read, before anything is said about it: the hits kept by `limit`, as results, and what the
+/// warnings need.
+struct Searched {
+    /// Slim blocks, or full ones with `slim_results: false`, already cut to `limit`
+    results: Vec<Value>,
+    /// Matching blocks before `limit`
+    total: usize,
+    limit: u64,
+    include_context: bool,
+    slim_results: bool,
+    /// LogSeq answered `null` to the page lookup of `include_context`
+    context_missing: bool,
+    /// LogSeq answered `null` to the search itself: the query it was asked, for the warning (BR-0011)
+    unavailable_for: Option<String>,
+}
+
+impl Searched {
+    /// The warnings of the result holding the first `cut.kept` hits, or all of them without a cut. A size cut counts
+    /// the hits against every match, so it replaces the count cap's warning: that one would offer a larger `limit`,
+    /// which returns the same first hits cut the same way (BR-0006).
+    fn warnings(&self, cut: Option<SizeCutTo>) -> Vec<ResultWarning> {
+        if let Some(query) = &self.unavailable_for {
+            return vec![search_unavailable(query)];
+        }
+        let shown = cut.map_or(self.results.len(), |cut| cut.kept);
+        let mut warnings = Vec::new();
+        match cut {
+            Some(SizeCutTo { kept, oversize }) => warnings.push(size_truncation_warning(SizeCut {
+                what: "matching blocks",
+                kept,
+                total: self.total,
+                oversize,
+                advice: &self.size_advice(),
+                how_to_fetch_all: None,
+            })),
+            None if self.total > self.results.len() => warnings.push(capped_truncation_warning(CappedTruncation {
+                what: "matching blocks",
+                shown,
+                total: self.total,
+                param: "limit",
+                max: MAX_SEARCH_LIMIT as usize,
+                narrower: NARROWER,
+                requested: Some(self.limit),
+                code: "results_truncated",
+                inline_max: Some(blocks_inline_max(self.include_context, self.slim_results)),
+                paging: None,
+            })),
+            None => {}
+        }
+        if self.context_missing {
+            warnings.push(context_unavailable(shown));
+        }
+        warnings
     }
-    content.push(ContentBlock::text(json!({ "meta": meta }).to_string()));
-    Ok(success_result(content))
+
+    /// What a reader can do about a result cut for its size. No parameter raises the budget or reads on, so the
+    /// first thing is a narrower query; richer hits are bigger ones, so the settings that make them are named.
+    fn size_advice(&self) -> String {
+        let richer = match (self.include_context, self.slim_results) {
+            (true, true) => " include_context: false makes each hit smaller.",
+            (false, false) => " slim_results: true makes each hit smaller.",
+            (true, false) => " include_context: false and slim_results: true make each hit smaller.",
+            (false, true) => "",
+        };
+        format!("Narrow the query to see the rest.{richer} No parameter raises this limit.")
+    }
+
+    /// The meta of the result holding the first `cut.kept` hits (all of them without a cut).
+    fn meta(&self, cut: Option<SizeCutTo>) -> ResultMeta {
+        let warnings = self.warnings(cut);
+        match self.unavailable_for {
+            Some(_) => ResultMeta::new(warnings, &[]),
+            None => ResultMeta::new(warnings, &[("matches", self.total)]),
+        }
+    }
+
+    /// The two content blocks of the call with the first `cut.kept` hits, all of them without a cut: the results,
+    /// then the meta with its tips. The tips read the hits that are sent.
+    fn texts(&self, tips_enabled: bool, query: &str, cut: Option<SizeCutTo>) -> (String, String) {
+        let sent = &self.results[..cut.map_or(self.results.len(), |cut| cut.kept)];
+        // No tip for a search LogSeq did not answer: "No match" would say what the warning says it can't
+        let tips = if tips_enabled && self.unavailable_for.is_none() { search_tips(query, sent, Some(self.total)) } else { Vec::new() };
+        let mut meta = serde_json::to_value(self.meta(cut)).expect("a result meta serializes");
+        if !tips.is_empty() {
+            meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
+        }
+        (serde_json::to_string(sent).expect("results serialize"), json!({ "meta": meta }).to_string())
+    }
+}
+
+/// The two content blocks as they are when their text fits the character budget, else with the first hits that do.
+/// The unit is a hit: it is never cut inside its text (BR-0007), so a first hit over the budget comes back alone,
+/// and the warning says so. The budget counts both blocks, the tips included.
+fn fit_to_budget(searched: &Searched, tips_enabled: bool, query: &str) -> (String, String) {
+    let total = searched.results.len();
+    let texts = |cut: Option<SizeCutTo>| searched.texts(tips_enabled, query, cut);
+    let size_of = |kept: usize| {
+        let (results, meta) = texts((kept < total).then_some(SizeCutTo { kept, oversize: false }));
+        size(&results) + size(&meta)
+    };
+    match fit(total, 1, size_of) {
+        Fit::Whole => texts(None),
+        Fit::Cut { kept, oversize } => texts(Some(SizeCutTo { kept, oversize })),
+    }
 }
 
 /// The hits of a search and what to say about them.
@@ -297,10 +405,26 @@ pub async fn search_blocks_with_meta(
     include_context: bool,
     slim_results: bool,
 ) -> Result<SearchResults, ToolError> {
+    let searched = search(client, query, limit, include_context, slim_results).await?;
+    let meta = searched.meta(None);
+    Ok(SearchResults { results: searched.results, meta })
+}
+
+/// The search of [`search_blocks_with_meta`], before the warnings are worded and the character budget applied
+/// (only [`call`] applies it, #506). API calls: 1, or 2 with `include_context`.
+async fn search(client: &LogseqClient, query: &str, limit: Option<u64>, include_context: bool, slim_results: bool) -> Result<Searched, ToolError> {
     let limit = limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
     // Newest first (highest block id first)
     let Some(mut matches) = find_blocks(client, query).await? else {
-        return Ok(SearchResults { results: Vec::new(), meta: ResultMeta::new(vec![search_unavailable(query)], &[]) });
+        return Ok(Searched {
+            results: Vec::new(),
+            total: 0,
+            limit,
+            include_context,
+            slim_results,
+            context_missing: false,
+            unavailable_for: Some(query.to_owned()),
+        });
     };
     let total = matches.len();
     matches.truncate(limit.min(MAX_SEARCH_LIMIT) as usize);
@@ -308,38 +432,18 @@ pub async fn search_blocks_with_meta(
     // Page context only for the blocks kept, so the lookup never covers cut ones
     let (contexts, context_missing) = if include_context { with_page_context(client, &matches).await? } else { (matches.iter().map(|_| None).collect(), false) };
 
-    let mut warnings: Vec<ResultWarning> = (total > matches.len())
-        .then(|| {
-            capped_truncation_warning(CappedTruncation {
-                what: "matching blocks",
-                shown: matches.len(),
-                total,
-                param: "limit",
-                max: MAX_SEARCH_LIMIT as usize,
-                narrower: NARROWER,
-                requested: Some(limit),
-                code: "results_truncated",
-                inline_max: Some(blocks_inline_max(include_context, slim_results)),
-                paging: None,
-            })
-        })
-        .into_iter()
-        .collect();
-    if context_missing {
-        warnings.push(context_unavailable(matches.len()));
-    }
-    let meta = ResultMeta::new(warnings, &[("matches", total)]);
     let results = matches
         .iter()
         .zip(&contexts)
         .map(|(block, context)| if slim_results { slim_result(block, context.as_ref()) } else { full_result(block, context.as_ref()) })
         .collect();
-    Ok(SearchResults { results, meta })
+    Ok(Searched { results, total, limit, include_context, slim_results, context_missing, unavailable_for: None })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::budget::BUDGET_CHARS;
     use crate::tool::testing::{meaning, schema_of};
 
     #[test]
@@ -389,6 +493,158 @@ mod tests {
             slim_result(&block(1, "hi [[Bob]]"), Some(&context())).to_string(),
             r#"{"uuid":"u1","content":"hi [[Bob]]","pageName":"Alice","pageRefs":["Bob"],"context":{"page":{"name":"alice","originalName":"Alice"},"references":["Bob"]}}"#
         );
+    }
+
+    fn searched(results: Vec<Value>, total: usize) -> Searched {
+        Searched { results, total, limit: 100, include_context: false, slim_results: true, context_missing: false, unavailable_for: None }
+    }
+
+    /// A slim hit whose content is `length` characters.
+    fn hit(length: usize) -> Value {
+        json!({"uuid": "u", "content": "x".repeat(length)})
+    }
+
+    fn chars(texts: &(String, String)) -> usize {
+        size(&texts.0) + size(&texts.1)
+    }
+
+    fn meta_of(texts: &(String, String)) -> Value {
+        serde_json::from_str::<Value>(&texts.1).unwrap()["meta"].clone()
+    }
+
+    #[test]
+    fn an_empty_search_and_a_result_under_the_budget_are_sent_as_the_search_made_them() {
+        let empty = fit_to_budget(&searched(Vec::new(), 0), true, "x");
+        assert_eq!(empty.0, "[]");
+        assert_eq!(meta_of(&empty), json!({"hasMore": false, "warnings": [], "totals": {"matches": 0}, "tips": [empty_tip()]}));
+        let small = searched(vec![hit(10), hit(20)], 2);
+        assert_eq!(fit_to_budget(&small, false, "x"), small.texts(false, "x", None));
+        assert_eq!(small.texts(false, "x", None).1, r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":2}}}"#);
+    }
+
+    fn empty_tip() -> String {
+        search_tips("x", &[], Some(0))[0].clone()
+    }
+
+    #[test]
+    fn a_result_exactly_at_the_budget_is_untouched_and_one_character_over_is_cut() {
+        let frame = chars(&searched(vec![hit(10), hit(10), hit(0)], 3).texts(false, "x", None));
+        let exact = searched(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame)], 3);
+        let texts = fit_to_budget(&exact, false, "x");
+        assert_eq!(chars(&texts), BUDGET_CHARS);
+        assert_eq!(texts, exact.texts(false, "x", None));
+        assert_eq!(meta_of(&texts)["warnings"], json!([]));
+
+        let over = searched(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame + 1)], 3);
+        let texts = fit_to_budget(&over, false, "x");
+        assert!(chars(&texts) <= BUDGET_CHARS);
+        assert_eq!(serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len(), 2);
+        assert_eq!(meta_of(&texts)["warnings"][0]["code"], "result_size_truncated");
+    }
+
+    #[test]
+    fn a_cut_keeps_the_most_hits_that_fit_with_its_warning_and_the_newest_first() {
+        let hits: Vec<Value> = (0..400).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(200)})).collect();
+        let found = searched(hits, 400);
+        let texts = fit_to_budget(&found, false, "x");
+        assert!(chars(&texts) <= BUDGET_CHARS);
+        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
+        assert!(kept > 1 && kept < 400);
+        // one more hit would not have fit
+        let one_more = found.texts(false, "x", Some(SizeCutTo { kept: kept + 1, oversize: false }));
+        assert!(chars(&one_more) > BUDGET_CHARS);
+        let meta = meta_of(&texts);
+        assert_eq!(meta["hasMore"], false);
+        assert_eq!(meta["totals"], json!({"matches": 400}));
+        let message = meta["warnings"][0]["message"].as_str().unwrap();
+        assert!(message.starts_with(&format!("Showing {kept} of 400 matching blocks: the result was cut to fit 30000 characters")), "{message}");
+        assert!(meta["warnings"][0].get("howToFetchAll").is_none());
+        assert!(!message.contains("Even those"));
+        // the hits are the first ones, whole
+        assert_eq!(serde_json::from_str::<Vec<Value>>(&texts.0).unwrap(), found.results[..kept]);
+    }
+
+    #[test]
+    fn a_single_hit_over_the_budget_is_returned_alone_and_the_first_of_many_says_so() {
+        let one = fit_to_budget(&searched(vec![hit(40_000)], 1), false, "x");
+        assert_eq!(serde_json::from_str::<Vec<Value>>(&one.0).unwrap().len(), 1);
+        assert_eq!(meta_of(&one)["warnings"], json!([]));
+
+        let first_over = fit_to_budget(&searched(vec![hit(40_000), hit(5), hit(5)], 3), false, "x");
+        assert_eq!(serde_json::from_str::<Vec<Value>>(&first_over.0).unwrap().len(), 1);
+        let meta = meta_of(&first_over);
+        assert_eq!(meta["warnings"][0]["code"], "result_size_truncated");
+        assert!(meta["warnings"][0]["message"].as_str().unwrap().contains("Showing 1 of 3 matching blocks"));
+        assert!(meta["warnings"][0]["message"].as_str().unwrap().contains("Even those are over that size"));
+    }
+
+    #[test]
+    fn a_size_cut_replaces_the_limit_warning_that_would_offer_a_larger_limit() {
+        // 300 matches, `limit` kept 200 of 100 characters each (a limit cut that offers a raise), and the size
+        // cuts that to fewer: no larger `limit` returns more, so the only warning is the size one (BR-0006)
+        let found = searched((0..200).map(|_| hit(200)).collect(), 300);
+        let limit_only = found.meta(None);
+        assert_eq!(limit_only.warnings[0].code, "results_truncated");
+        assert!(limit_only.has_more, "a limit cut below the maximum offers a raise");
+        let texts = fit_to_budget(&found, false, "x");
+        let meta = meta_of(&texts);
+        let codes: Vec<&str> = meta["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect();
+        assert_eq!(codes, ["result_size_truncated"]);
+        assert_eq!(meta["hasMore"], false);
+        assert_eq!(meta["totals"]["matches"], 300);
+        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
+        assert!(meta["warnings"][0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 300 matching blocks")));
+    }
+
+    #[test]
+    fn a_missing_context_warning_counts_the_hits_that_are_sent() {
+        let mut found = searched((0..200).map(|_| hit(300)).collect(), 200);
+        found.context_missing = true;
+        let whole = found.meta(None);
+        assert!(whole.warnings[0].message.contains("the 200 result block(s)"));
+        let texts = fit_to_budget(&found, false, "x");
+        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
+        assert!(kept < 200);
+        let meta = meta_of(&texts);
+        assert_eq!(meta["warnings"][1]["code"], "context_unavailable");
+        assert!(meta["warnings"][1]["message"].as_str().unwrap().contains(&format!("the {kept} result block(s)")));
+    }
+
+    #[test]
+    fn the_budget_counts_the_tips_and_a_tip_reads_the_hits_that_are_sent() {
+        let hits: Vec<Value> = (0..400).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(200), "pageName": if n < 100 { "Old Page" } else { "Other Page" }})).collect();
+        let found = searched(hits, 400);
+        let texts = fit_to_budget(&found, true, "x");
+        assert!(chars(&texts) <= BUDGET_CHARS);
+        let meta = meta_of(&texts);
+        assert_eq!(meta["tips"].as_array().unwrap().len(), 1);
+        // it matches what the tip tool says of the hits that are sent
+        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap();
+        assert_eq!(meta["tips"][0], json!(search_tips("x", &kept, Some(400))[0]));
+    }
+
+    #[test]
+    fn a_search_that_found_nothing_to_read_keeps_its_unavailable_warning_and_no_total() {
+        let mut found = searched(Vec::new(), 0);
+        found.unavailable_for = Some("x".into());
+        let texts = fit_to_budget(&found, true, "x");
+        assert_eq!(texts.0, "[]");
+        let meta = meta_of(&texts);
+        assert_eq!(meta["warnings"][0]["code"], "search_unavailable");
+        assert_eq!(meta["totals"], json!({}));
+        assert!(meta.get("tips").is_none());
+    }
+
+    #[test]
+    fn the_advice_names_what_makes_a_hit_smaller_only_when_the_search_asked_for_more() {
+        let mut found = searched(Vec::new(), 0);
+        assert_eq!(found.size_advice(), "Narrow the query to see the rest. No parameter raises this limit.");
+        found.include_context = true;
+        assert!(found.size_advice().contains(" include_context: false makes each hit smaller."));
+        found.slim_results = false;
+        assert!(found.size_advice().contains(" include_context: false and slim_results: true make each hit smaller."));
+        found.include_context = false;
+        assert!(found.size_advice().contains(" slim_results: true makes each hit smaller."));
     }
 
     #[test]
