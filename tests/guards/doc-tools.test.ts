@@ -18,11 +18,15 @@ import { docViolations, type DocOptions, type RecordedTool } from './skill-tools
  *      error, not a skip).
  * A failure names the file, the line and the bad token or argument.
  *
- * History marker. A passage that names a tool on purpose because the tool is gone (a "was `logseq_x` before v2" note)
- * ends its line with the HTML comment `<!-- guard:history -->`. The comment is invisible in rendered Markdown. It
- * excuses every unknown tool name on its own line and nothing else: known names are still checked, and a JSON example
- * under it is still validated. A marker on a line that names no unknown tool is an error, so a marker does not outlive
- * the note it excuses (the rename that makes the name real again removes it).
+ * History marker. A passage that names a tool on purpose because the tool is gone says "was", as in "was
+ * `logseq_x` before v2". Such a line carries the HTML comment `<!-- guard:history logseq_x -->` (anywhere on the line,
+ * invisible when rendered). The comment names the unknown tool names it excuses, and the guard skips exactly those on
+ * that line: any other unknown name on the line, such as a typo of a live tool, is still an error. A comment with no
+ * name, a name that is a real tool, and a name that is not on the line outside the comment are errors too, so a
+ * marker does not outlive the note it excuses. Because of that last rule the comment cannot be quoted literally in a
+ * live doc; this header is the only place it is documented. Rename authors: when the sentence is about the current
+ * tool (rust/README.md and CLAUDE.md name `logseq_get_page_outline` in sentences about it today), update the name to
+ * the new one. Add the comment only when the sentence says "was" and the old name is the point.
  *
  * Not checked, on purpose: CHANGELOG.md, docs/adr/ and docs/business-rules/ are history (ADRs are immutable once
  * accepted), so they are not in the list. Prose claims such as a tool count ("16 tools") or an API call count are a
@@ -36,8 +40,8 @@ const TOOL_LIST_FILE = new URL('rust/tests/data/parity/tool-list.json', ROOT);
 /** The live docs that name tools, relative to the repo root. A new live doc is one more line here. */
 const LIVE_DOCS: readonly string[] = ['README.md', 'rust/README.md', 'CLAUDE.md'];
 
-/** The comment that excuses the unknown tool names on its line. Documented in the header above. */
-const HISTORY_MARKER = '<!-- guard:history -->';
+/** The keyword of the comment that excuses the unknown tool names it lists. Documented in the header above. */
+const HISTORY_MARKER = 'guard:history';
 
 /** Tokens that match `logseq_[a-z0-9_]+` and are not tools. The reason sits on each entry. */
 const NON_TOOL_TOKENS: Readonly<Record<string, string>> = {
@@ -93,26 +97,42 @@ describe('the live-docs guard can fail (#503 self-test)', () => {
     expect(run('Intro.\nCall `logseq_get_widget` here.\n')).toEqual(['doc.md:2: "logseq_get_widget" is not a tool in tool-list.json']);
   });
 
-  it('flags an unmarked history mention, and lets the marker excuse it', () => {
+  const mark = (...names: string[]): string => `<!-- ${HISTORY_MARKER} ${names.join(' ')} -->`;
+
+  it('flags an unmarked history mention, and lets a marker that names it excuse it', () => {
     const note = 'It was `logseq_get_widget` before v2.';
     expect(run(note + '\n')).toEqual(['doc.md:1: "logseq_get_widget" is not a tool in tool-list.json']);
-    expect(run(`${note} ${HISTORY_MARKER}\n`)).toEqual([]);
+    expect(run(`${note} ${mark('logseq_get_widget')}\n`)).toEqual([]);
+    expect(run(`${mark('logseq_get_widget')} ${note}\n`)).toEqual([]);
+  });
+
+  it('excuses only the names the marker lists, so a typo on the same line is still caught', () => {
+    const text = `Typo \`logseq_get_pgae\`, was \`logseq_old\`. ${mark('logseq_old')}\n`;
+    expect(run(text)).toEqual(['doc.md:1: "logseq_get_pgae" is not a tool in tool-list.json']);
+    expect(run(`Was \`logseq_a\` and \`logseq_b\`. ${mark('logseq_a', 'logseq_b')}\n`)).toEqual([]);
   });
 
   it('keeps the marker to its own line', () => {
-    const text = `It was \`logseq_get_widget\` before v2. ${HISTORY_MARKER}\nNow it is \`logseq_get_gadget\`.\n`;
+    const text = `It was \`logseq_get_widget\` before v2. ${mark('logseq_get_widget')}\nNow it is \`logseq_get_gadget\`.\n`;
     expect(run(text)).toEqual(['doc.md:2: "logseq_get_gadget" is not a tool in tool-list.json']);
   });
 
-  it('fails a marker on a line that names no unknown tool, so a stale marker cannot stay', () => {
-    expect(run(`Now it is \`logseq_get_thing\`. ${HISTORY_MARKER}\n`)).toEqual([
-      `doc.md:1: "${HISTORY_MARKER}" is on a line that names no unknown tool, so remove it`,
+  it('fails a stale marker: no name, a real tool, or a name that is not on the line', () => {
+    expect(run(`Was \`logseq_old\`. <!-- ${HISTORY_MARKER} -->\n`)).toEqual([
+      'doc.md:1: the history comment must name the tool names it excuses, as <!-- guard:history logseq_old_name -->',
+      'doc.md:1: "logseq_old" is not a tool in tool-list.json',
     ]);
-    expect(run(`Nothing to excuse. ${HISTORY_MARKER}\n`)).toHaveLength(1);
+    expect(run(`Now \`logseq_get_thing\`. ${mark('logseq_get_thing')}\n`)).toEqual([
+      'doc.md:1: "logseq_get_thing" is a tool in tool-list.json, so remove it from the history comment',
+    ]);
+    // The name appears only inside the comment, so nothing on the line needs excusing.
+    expect(run(`Nothing to excuse. ${mark('logseq_old')}\n`)).toEqual([
+      'doc.md:1: "logseq_old" is not named on this line, so remove it from the history comment',
+    ]);
   });
 
   it('does not let the marker excuse a bad example under it', () => {
-    const text = `A note on logseq_get_widget. ${HISTORY_MARKER}\n` + example('{"depth": 0}');
+    const text = `A note on logseq_get_widget. ${mark('logseq_get_widget')}\n` + example('{"depth": 0}');
     expect(run(text)).toEqual([
       'doc.md:2: the logseq_get_thing example is missing the required argument "thing_name"',
       'doc.md:3: the logseq_get_thing argument "depth" is wrong: 0 is below the minimum of 1',
