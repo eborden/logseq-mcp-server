@@ -26,8 +26,8 @@ pub use self::link_targets::{LinkTargetResolutions, link_key, resolve_link_targe
 pub use self::wire::PulledPage;
 use self::wire::ResolverRow;
 
-/// How many "did you mean" names a not-found message carries.
-const MAX_SUGGESTIONS: usize = 3;
+/// How many "did you mean" names a not-found message carries, and a name the page finder cannot place.
+pub const MAX_SUGGESTIONS: usize = 3;
 
 /// The method the closest-name search reads every page name with.
 const GET_ALL_PAGES: &str = "logseq.Editor.getAllPages";

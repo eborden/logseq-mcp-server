@@ -117,6 +117,25 @@ The page holds the word "test" for `search_blocks`.
 With `:property-pages/enabled?`, every property key that is not built in (`status`, `effort`,
 `created-by` and so on, but not `alias`, `tags` or `id`) is also a page with no file.
 
+#### Page properties, for `find_pages` (#490)
+
+`getAllPages` carries a page's own (page-level) properties, and `find_pages` filters by them with `property` and
+`value`. A property of a block, such as `status:: testing` or `effort:: 3` on a block of `property types`, is not on
+the page and finds nothing. The page-level properties the integration tests (`find-pages-filters.test.ts`) rely on:
+
+| Page | Page properties | Found by |
+|---|---|---|
+| `alice`, `bob` | `role` (`designer`, `engineer`) | `role` = `designer` finds `Alice` |
+| `project atlas` | `alias` (`atlas`), `type` (`project`), `status` (`active`), `owner` (`[[Alice]]`, a set) | `status` = `active` finds it and `project cascade`; `owner` = `Alice` finds it |
+| `project borealis` | `alias` (`roadmap`), `type`, `status` (`planning`) | `type` = `project` finds all three project pages |
+| `project cascade` | `alias` (`roadmap`), `type`, `status` (`active`), `tags` (`planning`, a set) | `tags` = `planning` finds it |
+| `property types` | `type` (`reference`), `category` (`[[test data]]`, a set), `created-by` (`Alice`, camelCase `createdBy` on the entity) | `created-by`, `createdBy` or `CREATED_BY` = `Alice` finds it; `category` = `test data` finds it |
+| `logseq-mcp-fixture-sentinel` | `fixture-version` (the number `1`) | `fixture-version` = `1` or `"1"` finds it |
+
+`names` answers against the same pages: `alice`, `carol` and `archive` are pages (the last two have no file), `atlas`
+is the alias of `project atlas`, `roadmap` is declared by two pages and so names no one page, and `dave` has no page
+and no closest name (the routing eval's `find-pages-2` depends on it, so it must stay absent).
+
 ### Journals, tasks, tags and nesting
 
 | Journal | File | Has |

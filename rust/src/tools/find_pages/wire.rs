@@ -1,15 +1,15 @@
-//! What `logseq.Editor.getAllPages` answers, for the fields the page list reads.
+//! What `logseq.Editor.getAllPages` answers, for the fields the page finder reads.
 
 use serde_json::Value;
 
 use crate::entity::shape::EditorPage;
-use crate::wire::{ResponseError, parse};
+use crate::wire::{Properties, ResponseError, parse};
 
 /// The method the answer comes from, as a response error names it.
 pub const METHOD: &str = "logseq.Editor.getAllPages";
 
-/// A page as the list reads it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A page as the finder reads it.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListedEntity {
     pub id: i64,
     /// `:block/name`, lowercase
@@ -22,6 +22,8 @@ pub struct ListedEntity {
     pub written: bool,
     /// The ids in `alias`. A link with no `id` points at nothing and is left out.
     pub alias_ids: Vec<i64>,
+    /// The page-level properties, which a page with none leaves out
+    pub properties: Option<Properties>,
 }
 
 impl From<EditorPage> for ListedEntity {
@@ -36,6 +38,7 @@ impl From<EditorPage> for ListedEntity {
             journal: page.is_journal.or(page.journal).unwrap_or(false),
             written: page.file.is_some(),
             alias_ids: page.alias.unwrap_or_default().into_iter().filter_map(|link| link.id).collect(),
+            properties: page.properties,
         }
     }
 }
@@ -48,6 +51,7 @@ pub fn pages(answer: &Value) -> Result<Option<Vec<ListedEntity>>, ResponseError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::PropertyValue;
     use serde_json::json;
 
     fn problem(answer: Value) -> String {
@@ -64,12 +68,42 @@ mod tests {
         let pages = pages(&answer).unwrap().unwrap();
         assert_eq!(
             pages[0],
-            ListedEntity { id: 1, name: "alice".into(), display_name: "Alice".into(), journal: false, written: true, alias_ids: vec![2] }
+            ListedEntity { id: 1, name: "alice".into(), display_name: "Alice".into(), journal: false, written: true, alias_ids: vec![2], properties: None }
         );
         assert_eq!(
             pages[1],
-            ListedEntity { id: 2, name: "al".into(), display_name: "al".into(), journal: true, written: false, alias_ids: vec![] }
+            ListedEntity { id: 2, name: "al".into(), display_name: "al".into(), journal: true, written: false, alias_ids: vec![], properties: None }
         );
+    }
+
+    #[test]
+    fn the_properties_of_a_page_are_read_by_kind_and_a_value_of_no_kind_is_read_too() {
+        let answer = json!([{"id": 1, "name": "a", "properties": {
+            "status": "active", "effort": 3, "ratio": 0.75, "reviewed": true,
+            "owner": ["Alice", 4, null, ["x"], {"y": 1}, "Bob"], "note": null, "nested": {"a": [1]}
+        }}]);
+        let page = pages(&answer).unwrap().unwrap().remove(0);
+        assert_eq!(
+            page.properties,
+            Some(Properties(vec![
+                ("status".to_owned(), PropertyValue::Text("active".to_owned())),
+                ("effort".to_owned(), PropertyValue::Number(3.0)),
+                ("ratio".to_owned(), PropertyValue::Number(0.75)),
+                ("reviewed".to_owned(), PropertyValue::Flag(true)),
+                ("owner".to_owned(), PropertyValue::Set(vec!["Alice".to_owned(), "Bob".to_owned()])),
+                ("note".to_owned(), PropertyValue::Other),
+                ("nested".to_owned(), PropertyValue::Other),
+            ]))
+        );
+        // a page with no properties has none, and an empty map is a page with none to match
+        assert_eq!(pages(&json!([{"id": 1, "name": "a"}])).unwrap().unwrap()[0].properties, None);
+        assert_eq!(pages(&json!([{"id": 1, "name": "a", "properties": {}}])).unwrap().unwrap()[0].properties, Some(Properties(vec![])));
+    }
+
+    #[test]
+    fn properties_that_are_no_object_are_an_error_that_never_shows_a_key() {
+        assert_eq!(problem(json!([{"id": 1, "name": "a", "properties": []}])), "answer[0].properties: expected an object, got a list");
+        assert_eq!(problem(json!([{"id": 1, "name": "a", "properties": null}])), "answer[0].properties: expected an object, got null");
     }
 
     #[test]

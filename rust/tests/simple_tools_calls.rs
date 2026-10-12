@@ -67,7 +67,7 @@ fn methods(logseq: &MockLogseq) -> Vec<String> {
 }
 
 fn find_args(text: Option<&str>, limit: u64, offset: u64) -> find_pages::Args {
-    find_pages::Args { text: text.map(str::to_owned), limit, offset, format: None }
+    find_pages::Args { text: text.map(str::to_owned), names: None, property: None, value: None, limit, offset, format: None }
 }
 
 fn block(id: i64, content: &str, page: i64) -> Value {
