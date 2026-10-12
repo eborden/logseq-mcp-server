@@ -63,6 +63,9 @@ Dropped on purpose:
 
 - `page`: any page-name input, resolved by `require_page` ([BR-0010 (page-names-resolved-via-resolver)](../business-rules/0010-page-names-resolved-via-resolver.md)). On `find_blocks` it scopes the search to that page. `to` names a second page.
 - `uuid` for a block. `text` for a case-insensitive literal match. `links_to` for a list of pages a block must link to. `property` + `value` for properties.
+- `names`: a filter on `find_pages`, a list of page names. A page matches when its name or one of its aliases equals a listed name, ignoring case. It is exact where `text` is a substring match (`text` replaces v1's `name_contains`), and both narrow the same flat list, so the answer is still a `find` result. `names` is new capability. How a name with no page is reported is left to #490, and it must follow BR-0006.
+- `detail`: on `get_page` only, how much of the one page comes back. `outline` is today's `get_page_outline` result, `page` is today's `get_page` result, and `full` adds what `page` leaves out (#489 defines it). It never changes which thing is returned, so the tool stays a `get`.
+- `to`: on `explore_network` only, optional. Without it the tool walks outward from `page`. With it the tool finds how `page` connects to the second page, which is v1's `connected-within` mode.
 - Period: `start_date` + `end_date`, `last_n` or `preset` (exactly one), shared by `find_blocks` and `explore_timeline`.
 - `limit` + `offset` page the main list of every `find` tool.
 
