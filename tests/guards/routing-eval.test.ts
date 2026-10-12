@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   aggregate,
+  callType,
   detectSurface,
   isSchemaError,
   logseqToolName,
@@ -103,6 +104,13 @@ describe('tool types', () => {
     expect(toolType('logseq_nope')).toBeUndefined();
   });
 
+  it('types search_by_relationship by its mode: connected-within is explore work, the others find blocks', () => {
+    expect(callType('logseq_search_by_relationship', { topic_a: 'a', topic_b: 'b', relationship_type: 'connected-within' })).toBe('explore');
+    expect(callType('logseq_search_by_relationship', { topic_a: 'a', topic_b: 'b', relationship_type: 'references' })).toBe('find');
+    expect(callType('logseq_search_by_relationship', null)).toBe('find');
+    expect(callType('logseq_get_page', { relationship_type: 'connected-within' })).toBe('get');
+  });
+
   it('reads the surface from the marker tools, and asks for a flag on a mix', () => {
     expect(detectSurface(['logseq_search_blocks', 'logseq_get_page'])).toBe('v1');
     expect(detectSurface(['logseq_find_blocks', 'logseq_get_page'])).toBe('v2');
@@ -190,6 +198,20 @@ describe('aggregate', () => {
     expect(aggregate('v2', sample, records).toolCorrect).toEqual({ count: 1, of: 1 });
     expect(aggregate('v1', sample, records).toolCorrect).toEqual({ count: 0, of: 1 });
     expect(aggregate('v1', sample, records).typeCorrect).toEqual({ count: 1, of: 1 });
+  });
+
+  it('scores a connected-within call as explore, so it answers a how-do-they-connect question', () => {
+    const connect: Question[] = [
+      { id: 'c', intent: 'connect', expected_type: 'explore', question: 'Q', v1_tools: ['logseq_get_concept_network', 'logseq_search_by_relationship'], v2_tools: ['logseq_explore_network'] },
+    ];
+    const within = { tool: 'logseq_search_by_relationship', arguments: { relationship_type: 'connected-within' }, isError: false, schemaError: false };
+    const references = { ...within, arguments: { relationship_type: 'references' } };
+    const result = aggregate('v1', connect, [
+      { questionId: 'c', run: 1, status: 'ok', calls: [within] },
+      { questionId: 'c', run: 2, status: 'ok', calls: [references] },
+    ]);
+    expect(result.typeCorrect).toEqual({ count: 1, of: 2 });
+    expect(result.toolCorrect).toEqual({ count: 1, of: 2 });
   });
 
   it('refuses a session of a question it does not know', () => {
