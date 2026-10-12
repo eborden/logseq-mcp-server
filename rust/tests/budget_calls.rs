@@ -162,6 +162,46 @@ async fn a_search_cut_by_its_limit_and_its_size_offers_no_larger_limit() {
     assert_eq!(meta["meta"]["totals"]["matches"], 300);
 }
 
+/// The warning codes and `howToFetchAll` of the meta block of a search result
+fn search_meta(result: &rmcp::model::CallToolResult) -> Value {
+    serde_json::from_str::<Value>(&text_of(result, 1)).unwrap()["meta"].clone()
+}
+
+#[tokio::test]
+async fn the_raise_a_limit_warning_offers_returns_exactly_that_many_hits_and_one_more_is_cut() {
+    // 300 matches of ~270 characters each: the default limit of 100 fits the budget, a raise to every match does not
+    let many: Vec<Value> = (1..=300).map(|id| hit(id, 150)).collect();
+    let run = |limit: Option<u64>| {
+        let many = many.clone();
+        async move {
+            let logseq = mock_logseq(vec![json!(many)]).await;
+            let args = limit.map_or(json!({"query": "importer"}), |limit| json!({"query": "importer", "limit": limit}));
+            let result = search_blocks::call(&client(&logseq), true, arguments(args)).await.unwrap();
+            assert_eq!(methods(&logseq), [DATALOG]);
+            let hits = serde_json::from_str::<Vec<Value>>(&text_of(&result, 0)).unwrap().len();
+            (hits, search_meta(&result))
+        }
+    };
+    let (hits, meta) = run(None).await;
+    assert_eq!(hits, 100);
+    let warning = &meta["warnings"][0];
+    assert_eq!(warning["code"], "results_truncated");
+    assert_eq!(meta["hasMore"], true);
+    let how = warning["howToFetchAll"].as_str().unwrap();
+    let offered: usize = how.strip_prefix("Set limit to ").unwrap().split(' ').next().unwrap().parse().unwrap();
+    assert!(offered > 100 && offered < 300, "{how}");
+    assert!(!how.contains("get all"), "{how}");
+
+    // the offered limit returns that many hits with no size cut, and one more is cut to the offered count
+    let (hits, meta) = run(Some(offered as u64)).await;
+    assert_eq!(hits, offered);
+    assert!(meta["warnings"].as_array().unwrap().iter().all(|warning| warning["code"] != "result_size_truncated"), "{meta}");
+    let (hits, meta) = run(Some(offered as u64 + 1)).await;
+    assert_eq!(hits, offered);
+    assert_eq!(meta["warnings"][0]["code"], "result_size_truncated");
+    assert_eq!(meta["hasMore"], false);
+}
+
 #[tokio::test]
 async fn a_search_with_context_is_cut_to_the_budget_and_the_page_lookup_stays_one_call() {
     let big: Vec<Value> = (1..=100).map(|id| hit(id, 300)).collect();
