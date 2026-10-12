@@ -1,12 +1,14 @@
 //! `max_blocks` (#61): keeping the first blocks across the days of a result, and the
-//! `blocks_truncated` warning that says where the cut fell and how to read on (#187).
+//! `blocks_truncated` warning that says where the cut fell and how to read on (#187), and the character budget
+//! (#485) that cuts the same way, in blocks, until the text fits.
 
 use serde_json::Value;
 
 use super::Entry;
 use crate::block_budget::{Budget, count_blocks, take_blocks};
+use crate::budget::{Fit, fit, size};
 use crate::meta::ResultWarning;
-use crate::truncation::LARGE_RESULT_NOTE;
+use crate::truncation::{LARGE_RESULT_NOTE, SizeCut, size_truncation_warning};
 
 /// Blocks kept when `max_blocks` is absent (#61).
 pub const DEFAULT_DATE_RANGE_MAX_BLOCKS: u64 = 200;
@@ -230,6 +232,77 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
     ResultWarning { code: "blocks_truncated".to_owned(), message, how_to_fetch_all }
 }
 
+/// The `result_size_truncated` warning for a result cut to `kept` blocks of the `cut.total` it held (#485). Like
+/// [`blocks_truncated`] it names the day to read on from, since a call from a day reads whole days after the cut;
+/// unlike it, no `max_blocks` raise is offered, because the budget is in characters and a larger cap only brings
+/// the same cut back. A day that alone fills the budget can't be read whole by any call, so then the way on is
+/// the days after it, or a `search_term` to read it in pieces.
+fn size_truncated(cut: &BlockCut, kept: usize, oversize: bool, options: &TruncationOptions) -> ResultWarning {
+    let TruncationOptions { newest_first, start, end, .. } = *options;
+    let direction = if newest_first { "older" } else { "later" };
+    let from = |day: i64| {
+        if newest_first {
+            format!("start_date {start}, end_date {day}")
+        } else {
+            format!("start_date {day}, the same end_date ({end})")
+        }
+    };
+    let (advice, how_to_fetch_all) = match (cut.ends_at, cut.next_day) {
+        // Cut between days: the days after it are whole days a call can read
+        (Some(_), Some(next)) if !cut.split_day => (
+            "No parameter raises this limit.".to_owned(),
+            Some(format!("Call again with {} to read the {direction} days, or add a search_term.", from(next))),
+        ),
+        // Cut inside a day after earlier days: a call from it repeats its kept blocks and reads the rest of it
+        (Some(ends_at), _) if cut.split_day && cut.kept_before > 0 => (
+            "No parameter raises this limit.".to_owned(),
+            Some(format!(
+                "Call again with {} to read on (day {ends_at} repeats its kept blocks), or add a search_term.",
+                from(ends_at)
+            )),
+        ),
+        // The first day alone fills the budget: a call from it would cut it the same way
+        (Some(ends_at), Some(next)) => (
+            format!("Day {ends_at} alone fills this limit, so no call reads it whole: add a search_term to read it in pieces."),
+            Some(format!("Call again with {} to read the {direction} days.", from(next))),
+        ),
+        (Some(ends_at), None) => (
+            format!("Day {ends_at} alone fills this limit, so no call reads it whole: add a search_term to read it in pieces."),
+            None,
+        ),
+        // Nothing kept can't happen (a cut keeps a block), but say nothing false if it does
+        (None, _) => ("Add a search_term to narrow it.".to_owned(), None),
+    };
+    size_truncation_warning(SizeCut { what: "blocks", kept, total: cut.total, oversize, advice: &advice, how_to_fetch_all })
+}
+
+/// The text of the result, as it is when it fits the character budget (#485), else with the first blocks that do:
+/// `write` makes the text for some entries, the warnings and the `totals` (blocks, days), and the cut is the one
+/// `max_blocks` makes, so it falls where a smaller `max_blocks` would put it. `entries` are the ones the count cap
+/// kept, resolved refs and all, and `totals` are the count cap's, or made here when only the budget cut.
+pub fn write_within_budget(
+    entries: &[Entry],
+    warnings: &[ResultWarning],
+    totals: Option<(usize, usize)>,
+    options: &TruncationOptions,
+    write: impl Fn(&[Entry], &[ResultWarning], Option<(usize, usize)>) -> String,
+) -> String {
+    let nested = options.nested;
+    let total: usize = entries.iter().map(|entry| listed_blocks(&entry.blocks, nested)).sum();
+    let text_for = |kept: usize, oversize: bool| match cap_entries(entries, kept, nested) {
+        None => write(entries, warnings, totals),
+        Some(cut) => {
+            let mut warned = warnings.to_vec();
+            warned.push(size_truncated(&cut, kept, oversize, options));
+            write(&cut.entries, &warned, totals.or(Some((total, entries.len()))))
+        }
+    };
+    match fit(total, 1, |kept| size(&text_for(kept, false))) {
+        Fit::Whole => write(entries, warnings, totals),
+        Fit::Cut { kept, oversize } => text_for(kept, oversize),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,5 +487,89 @@ mod tests {
             blocks_truncated(&cut, 0, &options(true)).how_to_fetch_all.unwrap(),
             format!("Set max_blocks to 1000 (the maximum) to get 1000 of 1001. Narrow the dates or last_n, or add a search_term. {LARGE_RESULT_NOTE}")
         );
+    }
+
+    /// A top-level block of `length` characters, with `children` leaves under it
+    fn text_block(id: i64, length: usize) -> Value {
+        json!({"id": id, "content": "x".repeat(length), "children": []})
+    }
+
+    /// The result as a test writes it: its entries' blocks and the warnings, so the text is as long as they are.
+    fn write(entries: &[Entry], warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> String {
+        let blocks: Vec<&Vec<Value>> = entries.iter().map(|entry| &entry.blocks).collect();
+        json!({"entries": blocks, "warnings": warnings, "totals": totals}).to_string()
+    }
+
+    fn fitted(entries: &[Entry], warnings: &[ResultWarning], totals: Option<(usize, usize)>, nested: bool) -> String {
+        write_within_budget(entries, warnings, totals, &options(nested), write)
+    }
+
+    #[test]
+    fn a_result_that_fits_the_budget_is_written_as_it_is() {
+        let entries = [entry(20250101, vec![text_block(1, 100)]), entry(20250102, vec![text_block(2, 100)])];
+        assert_eq!(fitted(&entries, &[], None, true), write(&entries, &[], None));
+    }
+
+    #[test]
+    fn a_result_over_the_budget_is_cut_between_days_and_says_where_to_read_on() {
+        // 20 days of 2 blocks of 1,000 characters: 40,000 characters of text
+        let entries: Vec<Entry> = (1..=20).map(|day| entry(20250100 + day, vec![text_block(day * 10, 1000), text_block(day * 10 + 1, 1000)])).collect();
+        let text = fitted(&entries, &[], None, true);
+        assert!(size(&text) <= crate::budget::BUDGET_CHARS, "{}", size(&text));
+        let value: Value = serde_json::from_str(&text).unwrap();
+        let kept: usize = value["entries"].as_array().unwrap().iter().map(|day| day.as_array().unwrap().len()).sum();
+        assert!(kept > 20 && kept < 40, "{kept}");
+        let warning = &value["warnings"][0];
+        assert_eq!(warning["code"], "result_size_truncated");
+        assert!(warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 40 blocks")), "{warning}");
+        // the day the cut fell in repeats its kept blocks when it was split, else the next day is the one to read from
+        assert!(warning["howToFetchAll"].as_str().unwrap().starts_with("Call again with start_date 202501"), "{warning}");
+        // totals are (blocks, days) before the cut
+        assert_eq!(value["totals"], json!([40, 20]));
+        // it is the most that fits: one more block would be over
+        let cut = cap_entries(&entries, kept + 1, true).unwrap();
+        let warned = [size_truncated(&cut, kept + 1, false, &options(true))];
+        assert!(size(&write(&cut.entries, &warned, Some((40, 20)))) > crate::budget::BUDGET_CHARS);
+    }
+
+    #[test]
+    fn the_count_caps_totals_and_warnings_stay_when_the_budget_cuts_further() {
+        let entries: Vec<Entry> = (1..=20).map(|day| entry(20250100 + day, vec![text_block(day, 3000)])).collect();
+        let earlier = ResultWarning::new("blocks_truncated", "earlier".to_owned());
+        let value: Value = serde_json::from_str(&fitted(&entries, &[earlier], Some((500, 90)), true)).unwrap();
+        assert_eq!(value["warnings"][0]["code"], "blocks_truncated");
+        assert_eq!(value["warnings"][1]["code"], "result_size_truncated");
+        assert_eq!(value["totals"], json!([500, 90]));
+    }
+
+    #[test]
+    fn a_first_day_over_the_budget_is_kept_with_its_first_block_and_the_days_after_it_are_offered() {
+        let entries = [entry(20250101, vec![text_block(1, 40_000), text_block(2, 10)]), entry(20250102, vec![text_block(3, 10)])];
+        let value: Value = serde_json::from_str(&fitted(&entries, &[], None, true)).unwrap();
+        assert_eq!(value["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(value["entries"][0].as_array().unwrap().len(), 1);
+        let warning = &value["warnings"][0];
+        assert!(warning["message"].as_str().unwrap().contains("an entry is never cut inside its text"), "{warning}");
+        assert!(warning["message"].as_str().unwrap().contains("Day 20250101 alone fills this limit"), "{warning}");
+        assert_eq!(warning["howToFetchAll"], "Call again with start_date 20250102, the same end_date (20250110) to read the later days.");
+    }
+
+    #[test]
+    fn newest_first_reads_on_with_older_days_and_a_lone_oversized_block_is_not_cut() {
+        let entries = [entry(20250105, vec![text_block(1, 20_000)]), entry(20250104, vec![text_block(2, 20_000)])];
+        let newest = TruncationOptions { nested: true, newest_first: true, start: 20250101, end: 20250110, requested: 5 };
+        let value: Value = serde_json::from_str(&write_within_budget(&entries, &[], None, &newest, write)).unwrap();
+        assert_eq!(value["warnings"][0]["howToFetchAll"], "Call again with start_date 20250101, end_date 20250104 to read the older days, or add a search_term.");
+        let lone = [entry(20250105, vec![text_block(1, 40_000)])];
+        assert_eq!(fitted(&lone, &[], None, true), write(&lone, &[], None));
+    }
+
+    #[test]
+    fn the_outline_is_cut_by_top_level_blocks() {
+        let entries = [entry(20250101, (0..400).map(|id| text_block(id, 100)).collect())];
+        let value: Value = serde_json::from_str(&fitted(&entries, &[], None, false)).unwrap();
+        let kept = value["entries"][0].as_array().unwrap().len();
+        assert!(kept > 100 && kept < 400, "{kept}");
+        assert!(value["warnings"][0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 400 blocks")));
     }
 }

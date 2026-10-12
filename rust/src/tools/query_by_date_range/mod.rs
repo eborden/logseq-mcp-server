@@ -51,7 +51,7 @@ use crate::snippet::{first_chars, first_non_blank_line};
 use crate::tips::tips_content;
 use crate::tool::{input_schema, read_only_annotations, success_result};
 
-use self::cap::{BlockCut, MAX_DATE_RANGE_BLOCKS, TruncationOptions, blocks_truncated, cap_entries};
+use self::cap::{BlockCut, MAX_DATE_RANGE_BLOCKS, TruncationOptions, blocks_truncated, cap_entries, write_within_budget};
 use self::search::BlockMatcher;
 use self::selection::{Resolved, Selection, resolve_selection};
 use self::tips::date_range_tips;
@@ -410,38 +410,11 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
     if let Some(names) = alias_set.as_ref().and_then(AliasSet::resolved_aliases) {
         alias_parts.push(("resolvedAliases", Value::from(names)));
     }
-    // The meta comes only with something to say, so output below the cap is unchanged
-    let cut_meta = if warnings.is_empty() { Vec::new() } else { meta_parts(&warnings, totals) };
-
-    let page_name = |entry: &Entry| page_display_name(Some(&entry.page));
-    let mut parts: Vec<(&str, Value)> = vec![("dateRange", date_range)];
-
-    if !args.include_content {
-        let entries_value: Vec<Value> = entries
-            .iter()
-            .map(|entry| {
-                let snippets: Vec<Value> = entry.blocks.iter().map(|block| Value::String(snippet_of(block))).collect();
-                object_of(vec![
-                    ("date", Value::from(entry.date)),
-                    ("pageName", Value::from(page_name(entry))),
-                    ("blockCount", Value::from(count_blocks(&entry.blocks))),
-                    ("snippets", Value::Array(snippets)),
-                ])
-            })
-            .collect();
-        parts.push(("entries", Value::Array(entries_value)));
-        parts.push(("summary", summary));
-        parts.extend(alias_parts);
-        parts.extend(cut_meta);
-        return Ok(JournalsResult { json: object_of(parts).to_string(), top_concept });
-    }
-
     // Opt-in (#18): resolve once over every returned block, whatever the number of days. Only the
     // kept blocks: each block resolves on its own, so their output is the same, and the batched
     // queries never carry the refs of blocks that were cut.
     let mut entries = entries;
-    let mut meta = cut_meta;
-    if args.resolve_refs {
+    if args.include_content && args.resolve_refs {
         let roots: Vec<Value> = entries.iter().flat_map(|entry| entry.blocks.iter().cloned()).collect();
         let resolved = resolve_block_refs(client, &roots).await?;
         let mut offset = 0;
@@ -451,31 +424,54 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
             offset += len;
         }
         warnings.extend(resolved.warnings);
-        meta = meta_parts(&warnings, totals);
     }
 
-    let entries_value: Vec<Value> = entries
-        .iter()
-        .map(|entry| {
-            let mut map = Map::new();
-            map.insert("date".to_owned(), Value::from(entry.date));
-            if args.slim_results {
-                map.insert("pageName".to_owned(), Value::from(page_name(entry)));
-                // The entry names the page, so its blocks don't repeat it (#42)
-                let blocks = entry.blocks.iter().filter_map(Value::as_object).map(|block| Value::Object(to_slim_block(block, "")));
-                map.insert("blocks".to_owned(), Value::Array(blocks.collect()));
-            } else {
-                map.insert("page".to_owned(), entry.page.clone());
-                map.insert("blocks".to_owned(), Value::Array(entry.blocks.clone()));
-            }
-            Value::Object(map)
-        })
-        .collect();
-    parts.push(("entries", Value::Array(entries_value)));
-    parts.push(("summary", summary));
-    parts.extend(alias_parts);
-    parts.extend(meta);
-    Ok(JournalsResult { json: object_of(parts).to_string(), top_concept })
+    // The text of the result for some entries and warnings, which the character budget measures (#485). The meta
+    // comes only with something to say, so output below the cap is unchanged; resolving refs always brings it.
+    let always_meta = args.include_content && args.resolve_refs;
+    let page_name = |entry: &Entry| page_display_name(Some(&entry.page));
+    let write = |entries: &[Entry], warnings: &[ResultWarning], totals: Option<(usize, usize)>| -> String {
+        let entries_value: Vec<Value> = entries
+            .iter()
+            .map(|entry| {
+                if !args.include_content {
+                    let snippets: Vec<Value> = entry.blocks.iter().map(|block| Value::String(snippet_of(block))).collect();
+                    return object_of(vec![
+                        ("date", Value::from(entry.date)),
+                        ("pageName", Value::from(page_name(entry))),
+                        ("blockCount", Value::from(count_blocks(&entry.blocks))),
+                        ("snippets", Value::Array(snippets)),
+                    ]);
+                }
+                let mut map = Map::new();
+                map.insert("date".to_owned(), Value::from(entry.date));
+                if args.slim_results {
+                    map.insert("pageName".to_owned(), Value::from(page_name(entry)));
+                    // The entry names the page, so its blocks don't repeat it (#42)
+                    let blocks = entry.blocks.iter().filter_map(Value::as_object).map(|block| Value::Object(to_slim_block(block, "")));
+                    map.insert("blocks".to_owned(), Value::Array(blocks.collect()));
+                } else {
+                    map.insert("page".to_owned(), entry.page.clone());
+                    map.insert("blocks".to_owned(), Value::Array(entry.blocks.clone()));
+                }
+                Value::Object(map)
+            })
+            .collect();
+        let mut parts: Vec<(&str, Value)> = vec![("dateRange", date_range.clone()), ("entries", Value::Array(entries_value)), ("summary", summary.clone())];
+        parts.extend(alias_parts.iter().cloned());
+        if always_meta || !warnings.is_empty() {
+            parts.extend(meta_parts(warnings, totals));
+        }
+        object_of(parts).to_string()
+    };
+    let json = write_within_budget(
+        &entries,
+        &warnings,
+        totals,
+        &TruncationOptions { nested: args.include_content, newest_first, start: range_start, end: range_end, requested: args.max_blocks },
+        write,
+    );
+    Ok(JournalsResult { json, top_concept })
 }
 
 #[cfg(test)]
