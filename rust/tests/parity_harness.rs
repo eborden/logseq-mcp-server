@@ -309,7 +309,7 @@ fn a_run_ends_at_the_case_after_which_the_server_stopped_answering() {
     assert!(!report.failures.iter().any(|f| f.starts_with("[t: second]")), "{:?}", report.failures);
 }
 
-/// A server with one tool, `late_calls`, that makes three LogSeq Editor calls as `get_current_context` does and
+/// A server with one tool, `late_calls`, that makes three LogSeq Editor calls as `get_current` does and
 /// returns its result as soon as the first answer is in. The other two are sent 50 ms later, so they reach the
 /// stub after the result. It is the case a run has to wait for before it reads the stub's call log (#340).
 fn late_calls_server(config_path: &Path) -> Server {

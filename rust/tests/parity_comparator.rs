@@ -357,7 +357,7 @@ fn quirky(tools: &[Value]) -> Vec<Value> {
 #[test]
 fn the_recorded_tool_list_has_every_tool_and_equals_itself() {
     let tools = load_tool_list();
-    assert_eq!(tools.len(), 16);
+    assert_eq!(tools.len(), 15);
     assert_eq!(compare_tool_lists(&tools, &tools.clone()), Vec::<String>::new());
 }
 
@@ -408,7 +408,7 @@ fn a_changed_bound_type_enum_value_required_field_or_description_fails_with_its_
     let changed: Vec<(&str, Vec<Value>, &str)> = vec![
         ("bound", with_schema(&tools, "logseq_check_links", |s| s["properties"]["after"]["maxLength"] = json!(50001)), "logseq_check_links.inputSchema.properties.after.maxLength: expected 50000, got 50001"),
         ("type", with_schema(&tools, "logseq_build_context", |s| s["properties"]["max_blocks"]["type"] = json!("number")), "logseq_build_context.inputSchema.properties.max_blocks.type: expected \"integer\", got \"number\""),
-        ("enum value", with_schema(&tools, "logseq_get_page", |s| s["properties"]["format"]["enum"] = json!(["json", "md"])), "logseq_get_page.inputSchema.properties.format.enum[1]: expected \"markdown\", got \"md\""),
+        ("enum value", with_schema(&tools, "logseq_get_block", |s| s["properties"]["format"]["enum"] = json!(["json", "md"])), "logseq_get_block.inputSchema.properties.format.enum[1]: expected \"markdown\", got \"md\""),
         ("required field", with_schema(&tools, "logseq_build_context", |s| s["required"] = json!([])), "logseq_build_context.inputSchema.required: expected [\"topic_name\"], got []"),
         ("parameter description", with_schema(&tools, "logseq_build_context", |s| {
             let text = s["properties"]["max_blocks"]["description"].as_str().unwrap().to_owned();
@@ -424,12 +424,12 @@ fn a_changed_bound_type_enum_value_required_field_or_description_fails_with_its_
         assert!(failures[0].contains(line), "{what}: {failures:?}");
     }
     // Enum values are compared in order: the same values swapped is a difference
-    let swapped = with_schema(&tools, "logseq_get_page", |s| s["properties"]["format"]["enum"] = json!(["markdown", "json"]));
+    let swapped = with_schema(&tools, "logseq_get_block", |s| s["properties"]["format"]["enum"] = json!(["markdown", "json"]));
     assert_eq!(
         compare_tool_lists(&tools, &swapped),
         vec![
-            "logseq_get_page.inputSchema.properties.format.enum[0]: expected \"json\", got \"markdown\"".to_owned(),
-            "logseq_get_page.inputSchema.properties.format.enum[1]: expected \"markdown\", got \"json\"".to_owned()
+            "logseq_get_block.inputSchema.properties.format.enum[0]: expected \"json\", got \"markdown\"".to_owned(),
+            "logseq_get_block.inputSchema.properties.format.enum[1]: expected \"markdown\", got \"json\"".to_owned()
         ]
     );
     // A change is still caught when the schema is in the quirky form
@@ -470,17 +470,21 @@ fn a_missing_renamed_or_retitled_tool_and_changed_annotations_fail() {
 #[test]
 fn a_property_named_format_and_a_null_on_a_required_property_still_count() {
     let tools = load_tool_list();
-    let no_format = with_schema(&tools, "logseq_get_page", |s| drop(s["properties"].as_object_mut().unwrap().remove("format")));
+    let no_format = with_schema(&tools, "logseq_get_block", |s| drop(s["properties"].as_object_mut().unwrap().remove("format")));
     let failures = compare_tool_lists(&tools, &no_format);
     assert_eq!(failures.len(), 1, "{failures:?}");
-    assert!(failures[0].starts_with("logseq_get_page.inputSchema.properties.format: expected {") && failures[0].ends_with(", got nothing"), "{failures:?}");
+    assert!(failures[0].starts_with("logseq_get_block.inputSchema.properties.format: expected {") && failures[0].ends_with(", got nothing"), "{failures:?}");
     assert!(failures[0].contains(r#""enum":["json","markdown"]"#), "{failures:?}");
     // The tools with a `format` parameter: its enum and description still count
     let with_format: Vec<&str> = tools.iter().filter(|t| t["inputSchema"]["properties"].get("format").is_some()).map(|t| t["name"].as_str().unwrap()).collect();
-    // Five render Markdown; the flat-list tools take `toon` instead (BR-0014)
-    assert_eq!(with_format.len(), 7, "{with_format:?}");
+    // Five render Markdown, and the page tool also takes `toon` for its outline; the flat-list tool takes `toon` instead (BR-0014)
+    assert_eq!(with_format.len(), 6, "{with_format:?}");
     for name in with_format {
-        let words = if ["logseq_get_page_outline", "logseq_list_pages"].contains(&name) { r#"["json","toon"]"# } else { r#"["json","markdown"]"# };
+        let words = match name {
+            "logseq_list_pages" => r#"["json","toon"]"#,
+            "logseq_get_page" => r#"["json","markdown","toon"]"#,
+            _ => r#"["json","markdown"]"#,
+        };
         let enum_changed = with_schema(&tools, name, |s| s["properties"]["format"]["enum"] = json!(["json"]));
         assert_eq!(compare_tool_lists(&tools, &enum_changed), vec![format!("{name}.inputSchema.properties.format.enum: expected {words}, got [\"json\"]")], "{name}");
         let described = quirky(&with_schema(&tools, name, |s| s["properties"]["format"]["description"] = json!("other")));
