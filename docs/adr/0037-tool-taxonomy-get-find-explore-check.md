@@ -26,6 +26,8 @@ Options considered:
 
 We rename and merge the tools in v2.0.0 as a hard cut, with no deprecation window (maintainer decision, 2026-10-12).
 
+This ADR is the "explicit decision" that ADR-0020 and BR-0004 require. Each rename PR (#489 to #495) cites ADR-0037 as that decision, so a reviewer checks the `tool-list.json` diff against this ADR's surface table instead of against the additive-only `reviewer:` lines of ADR-0020 and BR-0004. The "migration note" is the v2.0.0 release note (#499), which lists every v1 name, what replaced it and what was dropped.
+
 **Four tool types.** A type is chosen by what the caller already has, not by subject:
 
 | Type | When | Returns |
