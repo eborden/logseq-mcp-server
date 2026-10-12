@@ -28,6 +28,8 @@ export type SkillFile = { path: string; text: string };
 // matched lazily up to the first `__logseq_`, so it is never read as part of the name.
 const TOOL_TOKEN = /(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z0-9_]+)/g;
 const HEADING = /^#{1,6}\s+(.*)$/;
+// A section heading is exactly the tool name, in backticks or not, with or without a host prefix.
+const SECTION_HEADING = /^`?(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z0-9_]+)`?$/;
 const FENCE = /^\s*```(.*)$/;
 const EXAMPLE_INFO = /^json\s+tool=(\S+)\s*$/;
 
@@ -153,7 +155,10 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
 
       if (options.referencePaths.includes(path) && !inFence) {
         const heading = HEADING.exec(line);
-        if (heading) for (const token of tokensOf(heading[1])) sections.add(token);
+        if (heading) {
+          const section = SECTION_HEADING.exec(heading[1].trim());
+          if (section) sections.add(section[1]);
+        }
       }
 
       const fence = FENCE.exec(line);

@@ -20,7 +20,7 @@ import {
  * move in the same PR. Over every .md file under skills/logseq-skills/:
  *   1. every `logseq_[a-z0-9_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
  *      `logseq_x`;
- *   2. every recorded tool has a section heading in the tool reference (TOOL_REFERENCE_PATHS);
+ *   2. every recorded tool has a section heading in the tool reference (TOOL_REFERENCE_PATHS), the heading text being exactly the tool name;
  *   3. every fenced block whose info string is `json tool=logseq_<name>` parses as a JSON object of arguments and
  *      validates against that tool's inputSchema: required properties present, no property outside `properties`,
  *      and primitive types and enums matched. The validator is hand-rolled (foundations 4.11, no new dependency);
@@ -129,6 +129,20 @@ describe('the skills guard can fail (#486 self-test)', () => {
   it('flags a tool with no section heading, and a heading only in prose', () => {
     const files = [{ path: 'ref.md', text: '### logseq_get_thing\n\nlogseq_get_other is described later.\n' }];
     expect(skillViolations(files, tools, options)).toEqual(['ref.md: no section heading for logseq_get_other']);
+  });
+
+  it('counts only a heading that is exactly the tool name, in backticks or host-prefixed', () => {
+    const prose = '### logseq_get_thing\n\n## Tool Selection: when to avoid logseq_get_other\n';
+    expect(skillViolations([{ path: 'ref.md', text: prose }], tools, options)).toEqual([
+      'ref.md: no section heading for logseq_get_other',
+    ]);
+    const forms = '# `logseq_get_thing`\n\n#### mcp__plugin_logseq_logseq__logseq_get_other  \n';
+    expect(skillViolations([{ path: 'ref.md', text: forms }], tools, options)).toEqual([]);
+  });
+
+  it('does not let an incidental heading expire an allowance', () => {
+    const files = [{ path: 'ref.md', text: '### logseq_get_thing\n## Why to skip logseq_get_other\n' }];
+    expect(skillViolations(files, tools, { ...options, missingSectionAllowances: ['logseq_get_other'] })).toEqual([]);
   });
 
   it('does not take a heading inside a code fence for a section', () => {
