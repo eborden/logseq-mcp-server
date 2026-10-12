@@ -21,9 +21,10 @@ import {
  *   1. every `logseq_[a-z0-9_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
  *      `logseq_x`;
  *   2. every recorded tool has a section heading in the tool reference (TOOL_REFERENCE_PATHS), the heading text being exactly the tool name;
- *   3. every fenced block whose info string is `json tool=logseq_<name>` parses as a JSON object of arguments and
- *      validates against that tool's inputSchema: required properties present, no property outside `properties`,
- *      and primitive types and enums matched. The validator is hand-rolled (foundations 4.11, no new dependency);
+ *   3. every fenced block (``` or ~~~) whose info string is `json tool=logseq_<name>` parses as a JSON object and
+ *      validates against that tool's inputSchema (a fence that says `tool=` any other way is an error, not a skip):
+ *      required properties present, no property outside `properties`,
+ *      and primitive types, enums, bounds and lengths matched, with any other schema keyword reported. The validator is hand-rolled (foundations 4.11, no new dependency);
  *   4. every tool has at least MIN_EXAMPLES_PER_TOOL such examples.
  * A failure names the file, the line and the bad token or argument.
  *
@@ -218,6 +219,35 @@ describe('the skills guard can fail (#486 self-test)', () => {
     expect(run(example('{}', 'json tool=logseq_get_widget'))).toEqual([
       'skill.md:1: "logseq_get_widget" is not a tool in tool-list.json',
     ]);
+  });
+
+  it('treats a fence that is meant as an example but tagged slightly wrong as an error, not a skip', () => {
+    const bad = '{"thing_name": "a", "topic": "x"}';
+    for (const info of [
+      'JSON tool=logseq_get_thing',
+      'jsonc tool=logseq_get_thing',
+      'tool=logseq_get_thing json',
+      'json tools=logseq_get_thing',
+      'text tool=logseq_get_thing',
+      'json logseq_get_thing',
+    ]) {
+      expect(run(example(bad, info)), info).toEqual([
+        `skill.md:1: the info string "${info}" must be exactly "json tool=logseq_<name>"`,
+      ]);
+    }
+  });
+
+  it('tracks tilde fences and longer backtick fences, for examples, closings and headings', () => {
+    const bad = '{"thing_name": "a", "topic": "x"}';
+    const tilde = '~~~json tool=logseq_get_thing\n' + bad + '\n~~~\n';
+    expect(run(tilde)).toEqual(['skill.md:2: the logseq_get_thing example has an argument "topic" that is not in its inputSchema']);
+    // A four-backtick fence holds a three-backtick line without closing, so the heading after it is still inside.
+    const outer = [{ path: 'ref.md', text: '### logseq_get_thing\n````md\n```\n### logseq_get_other\n````\n' }];
+    expect(skillViolations(outer, tools, options)).toEqual(['ref.md: no section heading for logseq_get_other']);
+    // A heading inside a tilde fence is not a section.
+    const files = [{ path: 'ref.md', text: '### logseq_get_thing\n~~~\n### logseq_get_other\n~~~\n' }];
+    expect(skillViolations(files, tools, options)).toEqual(['ref.md: no section heading for logseq_get_other']);
+    expect(run('~~~json tool=logseq_get_thing\n{"thing_name": "a"}\n~~~\n')).toEqual([]);
   });
 
   it('does not treat an untagged json block as an example', () => {

@@ -30,7 +30,13 @@ const TOOL_TOKEN = /(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z0-9_]+)/g;
 const HEADING = /^#{1,6}\s+(.*)$/;
 // A section heading is exactly the tool name, in backticks or not, with or without a host prefix.
 const SECTION_HEADING = /^`?(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z0-9_]+)`?$/;
-const FENCE = /^\s*```(.*)$/;
+// An opening fence is three or more backticks or tildes; it closes on the same character, at least as long, and bare.
+const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
+type Fence = { char: string; length: number };
+const closes = (line: string, open: Fence): boolean => {
+  const m = /^\s*(`{3,}|~{3,})\s*$/.exec(line);
+  return m !== null && m[1][0] === open.char && m[1].length >= open.length;
+};
 const EXAMPLE_INFO = /^json\s+tool=(\S+)\s*$/;
 
 const tokensOf = (line: string): string[] => [...line.matchAll(TOOL_TOKEN)].map(m => m[1]);
@@ -142,7 +148,7 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
 
   for (const { path, text } of files) {
     const lines = text.split('\n');
-    let inFence = false;
+    let open: Fence | null = null;
     for (let i = 0; i < lines.length; i++) {
       const lineNo = i + 1;
       const line = lines[i];
@@ -153,7 +159,7 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
         }
       }
 
-      if (options.referencePaths.includes(path) && !inFence) {
+      if (options.referencePaths.includes(path) && open === null) {
         const heading = HEADING.exec(line);
         if (heading) {
           const section = SECTION_HEADING.exec(heading[1].trim());
@@ -161,15 +167,17 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
         }
       }
 
-      const fence = FENCE.exec(line);
-      if (!fence) continue;
-      if (inFence) {
-        inFence = false;
+      if (open !== null) {
+        if (closes(line, open)) open = null;
         continue;
       }
-      inFence = true;
-      const info = fence[1].trim();
-      if (!/^json\b/.test(info) || !/\btool=/.test(info)) continue;
+      const fence = FENCE.exec(line);
+      if (!fence) continue;
+      open = { char: fence[1][0], length: fence[1].length };
+      const info = fence[2].trim();
+      // Any fence that says `tool=` or `tools=` (any case, any language), or starts with json and names a tool, is an attempt at an example: it has to be
+      // written exactly, or it would be skipped without a word.
+      if (!/tools?=/i.test(info) && !(/^json/i.test(info) && tokensOf(info).length > 0)) continue;
       const example = EXAMPLE_INFO.exec(info);
       if (!example) {
         out.push(`${path}:${lineNo}: the info string "${info}" must be exactly "json tool=logseq_<name>"`);
@@ -178,7 +186,7 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
       // Find the closing fence of this block.
       const body: string[] = [];
       let j = i + 1;
-      while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) body.push(lines[j++]);
+      while (j < lines.length && !closes(lines[j], open)) body.push(lines[j++]);
       if (j >= lines.length) {
         out.push(`${path}:${lineNo}: the ${example[1]} example has no closing fence`);
         continue;
@@ -199,7 +207,7 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
         }
       }
       i = j;
-      inFence = false;
+      open = null;
     }
   }
 
