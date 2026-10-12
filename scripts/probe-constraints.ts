@@ -396,8 +396,8 @@ async function main() {
   const got = await client.callAPI<any>('logseq.Editor.getBlock', [blk[0][0]]);
   console.log(`${'getBlock page / parent shape'.padEnd(58)} page=${JSON.stringify(got?.page)} parent=${JSON.stringify(got?.parent)}`);
 
-  await probeListPagesNull(client, dq);
-  await probeListPagesNesting(client, dq);
+  await probeFindPagesNull(client, dq);
+  await probeFindPagesNesting(client, dq);
 }
 
 main().catch((e) => {
@@ -406,9 +406,9 @@ main().catch((e) => {
 });
 
 // ---------------------------------------------------------------------------
-// list_pages and a null getAllPages (#64, part of #58)
+// find_pages and a null getAllPages (#64, part of #58)
 //
-// `list_pages` returns `{ pages: [], total: 0 }` when `logseq.Editor.getAllPages`
+// `find_pages` returns `{ pages: [], total: 0 }` when `logseq.Editor.getAllPages`
 // returns null (src/tools/list-pages.ts, pinned by a unit test). If null can
 // mean "no graph open" or "mid re-index" instead of "empty graph", that reports
 // a failure as "none". These probes record what the live, healthy graph returns
@@ -467,11 +467,11 @@ main().catch((e) => {
 //   error. If null is indistinguishable from an empty graph, only a warning
 //   is honest.
 // ---------------------------------------------------------------------------
-async function probeListPagesNull(
+async function probeFindPagesNull(
   client: LogseqClient,
   dq: (q: string, ...inputs: unknown[]) => Promise<Outcome>
 ) {
-  console.log('\n== list_pages and a null getAllPages (#64)');
+  console.log('\n== find_pages and a null getAllPages (#64)');
 
   const describeCall = async (method: string, args: unknown[] = []) => {
     try {
@@ -522,25 +522,25 @@ async function probeListPagesNull(
 }
 
 // ---------------------------------------------------------------------------
-// list_pages nests aliases from getAllPages (#171)
+// find_pages nests aliases from getAllPages (#171)
 //
-// `list_pages` reads `alias` (ids of the linked pages) and `file` off each
+// `find_pages` reads `alias` (ids of the linked pages) and `file` off each
 // `getAllPages` entity, in `nestAliases` (src/tools/list-pages.ts). If a LogSeq
 // upgrade dropped or renamed either key, nothing would fail: every alias would
 // stay a top-level page, as before #171, and a graph with no aliases looks the
 // same, so the tool cannot warn. This probe is the check. Each count of entities
 // carrying a key must equal the Datalog count of pages with that attribute.
-// A mismatch, above all 0 against a non-zero count, means `list_pages` is not
+// A mismatch, above all 0 against a non-zero count, means `find_pages` is not
 // nesting. A graph with no alias links reports 0 = 0, which proves nothing about
 // `alias`: run it on a graph that has aliases (the fixture does).
 //
 // Read-only. Prints counts and pass/fail only, never names.
 //
-async function probeListPagesNesting(
+async function probeFindPagesNesting(
   client: LogseqClient,
   dq: (q: string, ...inputs: unknown[]) => Promise<Outcome>
 ) {
-  console.log('\n== list_pages alias nesting reads alias and file from getAllPages (#171)');
+  console.log('\n== find_pages alias nesting reads alias and file from getAllPages (#171)');
 
   let pages: any[];
   try {
@@ -555,7 +555,7 @@ async function probeListPagesNesting(
     const datalog = await dq(`[:find ?p :where [?p :block/name] [?p ${attribute} ?v]]`);
     const expected = datalog.ok ? datalog.rows : undefined;
     const verdict =
-      expected === undefined ? 'ERROR (the Datalog count failed)' : withKey === expected ? 'PASS' : 'FAIL (list_pages does not nest)';
+      expected === undefined ? 'ERROR (the Datalog count failed)' : withKey === expected ? 'PASS' : 'FAIL (find_pages does not nest)';
     console.log(`${`getAllPages entities with ${key} / Datalog pages with ${attribute}`.padEnd(58)} ${withKey} / ${expected ?? '?'}  ${verdict}`);
   }
 }

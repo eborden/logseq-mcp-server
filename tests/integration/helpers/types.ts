@@ -56,7 +56,7 @@ export interface TopConcept {
 export type DateRangeResult = Json;
 export type ConceptNetworkResult = Json;
 
-export interface ListPagesResult {
+export interface FindPagesResult {
   pages: Array<{ name: string; aliases?: string[] }>;
   total: number;
   hasMore?: boolean;

@@ -4,7 +4,7 @@ import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import { searchBlocksWithMeta } from './helpers/tools.js';
 import {
   DEFAULT_DATE_RANGE_MAX_BLOCKS,
-  DEFAULT_LIST_PAGES_LIMIT,
+  DEFAULT_FIND_PAGES_LIMIT,
   DEFAULT_MAX_BLOCKS_PER_PAGE,
   DEFAULT_MAX_ENTRIES,
   DEFAULT_MAX_PAGES,
@@ -15,7 +15,7 @@ import {
   MAX_BLOCKS_PER_PAGE,
   MAX_DATE_RANGE_BLOCKS,
   MAX_ENTRIES,
-  MAX_LIST_PAGES_LIMIT,
+  MAX_FIND_PAGES_LIMIT,
   MAX_PAGES,
   MAX_PROPERTY_LIMIT,
   MAX_RELATIONSHIP_LIMIT,
@@ -41,7 +41,7 @@ import { connectMcp } from './helpers/server-under-test.js';
  * search_blocks' maximum of 500, so through MCP only the cut below the maximum
  * and the clamp can be seen; the cut at the maximum is the parity cases' (#356 dropped the integration test that
  * lowered the maximum, which only a direct call to the TypeScript function could do). The keyword `neighbour` matches 190 blocks (the hub fixture), past
- * get_context_for_query's maximum of 100. list_pages needs more than 200
+ * get_context_for_query's maximum of 100. find_pages needs more than 200
  * non-journal pages, which the hub fixture's pages supply. Assertions on page
  * names compare booleans or counts, so a failure prints no names from the graph.
  * get_concept_evolution's maximum of 500 mentions is out of reach: the hub page has
@@ -236,14 +236,14 @@ describe('result caps (#61)', () => {
     });
   });
 
-  describe('logseq_list_pages limit and offset (default 200, max 1000)', () => {
+  describe('logseq_find_pages limit and offset (default 200, max 1000)', () => {
     interface ListBody extends Partial<Meta> {
       pages: Array<{ name: string; aliases?: string[] }>;
       total: number;
     }
 
     async function list(args: Record<string, unknown>): Promise<ListBody> {
-      return JSON.parse((await call('logseq_list_pages', args)).content[0].text) as ListBody;
+      return JSON.parse((await call('logseq_find_pages', args)).content[0].text) as ListBody;
     }
 
     /** Same names in the same order. Compared as a boolean so a failure prints no page names. */
@@ -254,42 +254,42 @@ describe('result caps (#61)', () => {
       expect(first.warnings?.map(w => w.code) ?? [], 'a page list is available').not.toContain('pages_unavailable');
       expect(
         first.total,
-        `The graph has ${first.total} non-journal pages, no more than the default of ${DEFAULT_LIST_PAGES_LIMIT}, ` +
+        `The graph has ${first.total} non-journal pages, no more than the default of ${DEFAULT_FIND_PAGES_LIMIT}, ` +
           'so the cap was never tested. Use a graph with more pages; see tests/integration/setup.md'
-      ).toBeGreaterThan(DEFAULT_LIST_PAGES_LIMIT);
+      ).toBeGreaterThan(DEFAULT_FIND_PAGES_LIMIT);
 
       // The default: 200 pages, the cut reported, and the next offset named
-      expect(first.pages.length).toBe(DEFAULT_LIST_PAGES_LIMIT);
+      expect(first.pages.length).toBe(DEFAULT_FIND_PAGES_LIMIT);
       expect(first.hasMore).toBe(true);
       expect(first.warnings!.map(w => w.code)).toEqual(['pages_truncated']);
-      expect(first.warnings![0].howToFetchAll).toContain(`offset to ${DEFAULT_LIST_PAGES_LIMIT} for the next page`);
-      expectNoSuggestionPast(first as Meta, 'limit', MAX_LIST_PAGES_LIMIT);
+      expect(first.warnings![0].howToFetchAll).toContain(`offset to ${DEFAULT_FIND_PAGES_LIMIT} for the next page`);
+      expectNoSuggestionPast(first as Meta, 'limit', MAX_FIND_PAGES_LIMIT);
 
       // At and above the maximum: never more than 1000, and the same pages either way
-      const atMax = await list({ limit: MAX_LIST_PAGES_LIMIT });
+      const atMax = await list({ limit: MAX_FIND_PAGES_LIMIT });
       const above = await list({ limit: 5000 });
       for (const [label, body] of [['limit 1000', atMax], ['limit 5000', above]] as const) {
-        expect(body.pages.length, label).toBe(Math.min(MAX_LIST_PAGES_LIMIT, first.total));
+        expect(body.pages.length, label).toBe(Math.min(MAX_FIND_PAGES_LIMIT, first.total));
         expect(body.total, `${label}: total counts every page`).toBe(first.total);
-        if (first.total > MAX_LIST_PAGES_LIMIT) {
-          expectNoSuggestionPast(body as Meta, 'limit', MAX_LIST_PAGES_LIMIT);
+        if (first.total > MAX_FIND_PAGES_LIMIT) {
+          expectNoSuggestionPast(body as Meta, 'limit', MAX_FIND_PAGES_LIMIT);
           // Cut at the maximum: the next offset still fetches the rest
           expect(body.hasMore, label).toBe(true);
-          expect(body.warnings![0].message, label).toContain(`maximum of ${MAX_LIST_PAGES_LIMIT}`);
-          expect(body.warnings![0].howToFetchAll, label).toBe(`Set offset to ${MAX_LIST_PAGES_LIMIT} for the next page.`);
+          expect(body.warnings![0].message, label).toContain(`maximum of ${MAX_FIND_PAGES_LIMIT}`);
+          expect(body.warnings![0].howToFetchAll, label).toBe(`Set offset to ${MAX_FIND_PAGES_LIMIT} for the next page.`);
         } else {
           expect(body.hasMore, label).toBeUndefined();
           expect(body.warnings, label).toBeUndefined();
         }
       }
       expect(same(above.pages, atMax.pages), 'limit 5000 returns the pages limit 1000 does').toBe(true);
-      expect(same(first.pages, atMax.pages.slice(0, DEFAULT_LIST_PAGES_LIMIT)), 'the default page is the first 200').toBe(true);
+      expect(same(first.pages, atMax.pages.slice(0, DEFAULT_FIND_PAGES_LIMIT)), 'the default page is the first 200').toBe(true);
 
       // Following each warning's offset visits every page once, and the last page has no warning
       const seen: string[] = [];
       let offset = 0;
       for (let calls = 0; calls < 50; calls++) {
-        const body = await list({ limit: MAX_LIST_PAGES_LIMIT, offset });
+        const body = await list({ limit: MAX_FIND_PAGES_LIMIT, offset });
         expect(body.total, `offset ${offset}: total counts every page`).toBe(first.total);
         seen.push(...body.pages.map(page => page.name));
         if (!body.hasMore) {

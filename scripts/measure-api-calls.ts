@@ -114,7 +114,7 @@ async function main() {
     ['search_by_relationship references', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'references' }],
     ['search_by_relationship references (same topic twice)', 'logseq_search_by_relationship', { topic_a: subject, topic_b: subject, relationship_type: 'references' }],
     ['search_by_relationship connected-within', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 }],
-    ['list_pages', 'logseq_list_pages', { limit: 50 }],
+    ['find_pages', 'logseq_find_pages', { limit: 50 }],
     ['get_graph', 'logseq_get_graph', {}],
     ['get_page (not found)', 'logseq_get_page', { page: 'no such page 41 probe' }],
     // Real pages, an alias when the graph has one, and a made-up term, all in one text
