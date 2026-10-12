@@ -297,7 +297,8 @@ describe('result caps (#61)', () => {
 
     it('never returns more than the cap, reports every cut, and clamps to the same mentions', async () => {
       const atMax = await evolve(MAX_ENTRIES);
-      const total = mentions(atMax.body);
+      // The summary counts every mention found, whatever the timeline kept
+      const total = atMax.body.summary.totalMentions;
       expect(
         total,
         `The hub page has ${total} mentions, not more than the default of ${DEFAULT_MAX_ENTRIES}, ` +
@@ -305,30 +306,43 @@ describe('result caps (#61)', () => {
       ).toBeGreaterThan(DEFAULT_MAX_ENTRIES);
       expect(total, 'the fixture must stay under the maximum for this test to see every mention').toBeLessThan(MAX_ENTRIES);
 
-      // At the maximum nothing is cut, so there is no meta at all
-      expect(atMax.body.summary.totalMentions).toBe(total);
-      expect(atMax.body.warnings).toBeUndefined();
-      expect(atMax.body.hasMore).toBeUndefined();
+      // At the maximum the count cap cuts nothing. The hub's mentions run past the 30,000-character budget (#485), so
+      // the one cut is the size cut, which says so alone and keeps the count of what there was
+      const fitting = mentions(atMax.body);
+      expect(fitting, 'the budget keeps some mentions and not all').toBeGreaterThan(0);
+      expect(fitting).toBeLessThan(total);
+      expect(atMax.body.warnings!.map(w => w.code)).toEqual(['result_size_truncated']);
+      expect(atMax.body.totals).toEqual({ mentions: total });
+      expect(atMax.text.length, 'the budget is in characters').toBeLessThanOrEqual(30000);
 
       // A value above the maximum is clamped to it, not rejected
       expect((await evolve(5000)).text).toBe(atMax.text);
 
+      // A cap the budget does not reach (the whole result fits) returns exactly that many and reports only the cap.
+      // A larger one is cut by the count cap first, then by the budget, and reports both.
       for (const max of [undefined, 1, 50, DEFAULT_MAX_ENTRIES, 101, total - 1]) {
         const { body } = await evolve(max);
         const label = `max_entries ${max ?? 'default'}`;
         const effective = Math.min(max ?? DEFAULT_MAX_ENTRIES, MAX_ENTRIES);
-        expect(mentions(body), label).toBe(effective);
-        expect(mentions(body), label).toBeLessThanOrEqual(MAX_ENTRIES);
+        const kept = mentions(body);
+        expect(kept, label).toBeLessThanOrEqual(effective);
+        expect(kept, label).toBeLessThanOrEqual(MAX_ENTRIES);
+        if (effective <= fitting - 5) {
+          expect(kept, label).toBe(effective);
+          expect(body.warnings!.map(w => w.code), label).toEqual(['entries_truncated']);
+        } else {
+          expect(kept, label).toBeLessThan(effective);
+          expect(body.warnings!.map(w => w.code), label).toEqual(['entries_truncated', 'result_size_truncated']);
+        }
         expect(body.summary.totalMentions, `${label}: the summary counts every mention`).toBe(total);
         expect(body.totals, label).toEqual({ mentions: total });
-        expect(body.warnings!.map(w => w.code), label).toEqual(['entries_truncated']);
-        // Below the maximum the warning says which value gets the rest, and it is within the maximum
+        // Below the maximum the count cap's warning says which value gets the rest, and it is within the maximum
         expect(body.hasMore, label).toBe(true);
         expect(body.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_entries to ${total}\\b`));
         expectNoSuggestionPast(body as Meta, 'max_entries', MAX_ENTRIES);
       }
 
-      // At the cap exactly, nothing is cut
+      // At the cap exactly, the count cap cuts nothing
       const exact = await evolve(total);
       expect(exact.text).toBe(atMax.text);
     });
