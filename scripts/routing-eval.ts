@@ -3,7 +3,7 @@
  *
  * Usage:
  *   npx tsx scripts/logseq-instance.ts start
- *   npx tsx scripts/routing-eval.ts [--runs 3] [--model sonnet] [--only get,find-keyword-1] [--out <file>]
+ *   npx tsx scripts/routing-eval.ts [--runs 3] [--only get,find-keyword-1] [--out .logseq-instance/routing-v1.json]
  *   npx tsx scripts/logseq-instance.ts stop
  *   npx tsx scripts/routing-eval.ts --dry-run     # checks the question file and prints the plan; calls no model
  *
@@ -14,23 +14,25 @@
  * per question. It never prints what a tool returned.
  *
  * It costs tokens: one session per question and run, each bounded by --max-calls, --timeout-ms and
- * --max-budget-usd. It stays local like the integration suite (tests/integration/setup.md, "Routing eval").
+ * --max-budget-usd, and the run by --max-total-usd. It stays local like the integration suite
+ * (tests/integration/setup.md, "Routing eval").
  *
  * It never contacts the personal LogSeq: the config is LOGSEQ_MCP_CONFIG or this worktree's
- * .logseq-instance/config.json, a config on port 12315 is refused before any network call, and the graph must be
+ * .logseq-instance/config.json, a config on port 12315 is refused before any model call, and the graph must be
  * the fixture (#90). Raw output of a real run stays out of the repo and off GitHub beyond the aggregates (BR-0001).
+ *
+ * The pure parts are in scripts/lib/routing-eval*.ts, which tests/guards/routing-eval.test.ts runs.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import { loadConfig, LogseqClient } from './lib/logseq-api.js';
 import { RUST_BINARY_ENV, requireRustBinary, rustBinaryPath } from './lib/rust-binary.js';
 import {
   aggregate,
   detectSurface,
-  MCP_TOOL_PREFIX,
   parseQuestions,
   percent,
   SessionTrace,
@@ -41,176 +43,20 @@ import {
   type SessionStatus,
   type Surface,
 } from './lib/routing-eval.js';
+import { assertOutPathSafe, claudeArgs, hostEnv, parseOptions, prepareHarness, USAGE, type Harness, type Options } from './lib/routing-eval-host.js';
+import { parseSavedRun, reconcile, SAVED_RUN_VERSION, scoringHash, textHash } from './lib/routing-eval-saved.js';
 import { requireFixtureGraph } from '../tests/integration/helpers/fixture-graph.js';
 import { assertNotPersonalLogseq, resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
 
-const QUESTIONS_PATH = new URL('../tests/fixtures/routing-eval/questions.json', import.meta.url);
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_QUESTIONS = join(repoRoot, 'tests', 'fixtures', 'routing-eval', 'questions.json');
 
-interface Options {
-  runs: number;
-  model: string;
-  only: string[];
-  out: string | undefined;
-  questions: URL | string;
-  concurrency: number;
-  timeoutMs: number;
-  maxCalls: number;
-  maxBudgetUsd: number;
-  surface: Surface | undefined;
-  dryRun: boolean;
-  rescore: string | undefined;
-}
-
-const USAGE = `Usage: npx tsx scripts/routing-eval.ts [options]
-  --runs <n>             sessions per question (default 3)
-  --model <id|alias>     the model of every session (default sonnet); the id the host reports is printed
-  --only <list>          comma-separated question ids or types (get, find, explore, check)
-  --out <file>           write each session's calls and arguments as JSON (local only: never commit or post it)
-  --questions <file>     another question file (default tests/fixtures/routing-eval/questions.json)
-  --concurrency <n>      sessions at a time (default 2)
-  --timeout-ms <ms>      per session (default 120000)
-  --max-calls <n>        stop a session after n logseq calls (default 6)
-  --max-budget-usd <x>   per session, passed to claude (default 0.5)
-  --surface v1|v2        which acceptable-tool list to score against (default: read from the server's tool list)
-  --binary <path>        the server binary (default: ${RUST_BINARY_ENV}, else rust/target/debug/logseq-mcp-server)
-  --rescore <file>       print the aggregates of an earlier --out file against the current questions; calls no model
-  --dry-run              check the question file and print the plan; start nothing`;
-
-function positiveInt(flag: string, value: string | undefined, max: number): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) throw new Error(`${flag} must be a whole number from 1 to ${max} (got ${JSON.stringify(value)})`);
-  return parsed;
-}
-
-function parseOptions(argv: string[]): Options {
-  const options: Options = {
-    runs: 3,
-    model: 'sonnet',
-    only: [],
-    out: undefined,
-    questions: QUESTIONS_PATH,
-    concurrency: 2,
-    timeoutMs: 120_000,
-    maxCalls: 6,
-    maxBudgetUsd: 0.5,
-    surface: undefined,
-    dryRun: false,
-    rescore: undefined,
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const flag = argv[i];
-    const value = (): string => {
-      const next = argv[++i];
-      if (next === undefined) throw new Error(`${flag} needs a value\n${USAGE}`);
-      return next;
-    };
-    switch (flag) {
-      case '--runs':
-        options.runs = positiveInt(flag, value(), 20);
-        break;
-      case '--model':
-        options.model = value();
-        break;
-      case '--only':
-        options.only = value().split(',').map(part => part.trim()).filter(Boolean);
-        break;
-      case '--out':
-        options.out = value();
-        break;
-      case '--questions':
-        options.questions = value();
-        break;
-      case '--concurrency':
-        options.concurrency = positiveInt(flag, value(), 4);
-        break;
-      case '--timeout-ms':
-        options.timeoutMs = positiveInt(flag, value(), 900_000);
-        break;
-      case '--max-calls':
-        options.maxCalls = positiveInt(flag, value(), 30);
-        break;
-      case '--max-budget-usd': {
-        const budget = Number(value());
-        if (!Number.isFinite(budget) || budget <= 0 || budget > 10) throw new Error('--max-budget-usd must be a number above 0 and at most 10');
-        options.maxBudgetUsd = budget;
-        break;
-      }
-      case '--surface': {
-        const surface = value();
-        if (surface !== 'v1' && surface !== 'v2') throw new Error('--surface must be v1 or v2');
-        options.surface = surface;
-        break;
-      }
-      case '--binary':
-        process.env[RUST_BINARY_ENV] = value();
-        break;
-      case '--rescore':
-        options.rescore = value();
-        break;
-      case '--dry-run':
-        options.dryRun = true;
-        break;
-      case '-h':
-      case '--help':
-        console.log(USAGE);
-        process.exit(0);
-        break;
-      default:
-        throw new Error(`Unknown option ${flag}\n${USAGE}`);
-    }
-  }
-  return options;
-}
-
-async function loadQuestions(source: URL | string, only: readonly string[]): Promise<Question[]> {
-  const all = parseQuestions(JSON.parse(await readFile(source, 'utf8')));
-  if (only.length === 0) return all;
+function select(all: readonly Question[], only: readonly string[]): Question[] {
+  if (only.length === 0) return [...all];
   const known = new Set<string>([...all.map(question => question.id), ...TOOL_TYPES]);
   const unknown = only.filter(name => !known.has(name));
   if (unknown.length > 0) throw new Error(`--only names no question id or type: ${unknown.join(', ')}`);
-  const picked = all.filter(question => only.includes(question.id) || only.includes(question.expected_type));
-  return picked;
-}
-
-interface Harness {
-  dir: string;
-  mcpConfigPath: string;
-  cwd: string;
-  /** The model host's environment: the caller's, without the server settings, and with memory and CLAUDE.md files off */
-  env: Record<string, string>;
-}
-
-/**
- * The temp files of a run. The server gets a config of its own, which holds the fixture instance's token (random per
- * `start`), in a 0600 file deleted at the end, and a home directory of its own, so it has no `~/.logseq-mcp/config.json`
- * to fall back on (BR-0001). The host runs from an empty directory so no project file reaches the model.
- */
-async function prepareHarness(config: { apiUrl: string; authToken: string }): Promise<Harness> {
-  const dir = await mkdtemp(join(tmpdir(), 'logseq-routing-eval-'));
-  const home = join(dir, 'server-home');
-  const cwd = join(dir, 'cwd');
-  await mkdir(home, { recursive: true });
-  await mkdir(cwd, { recursive: true });
-  const serverConfigPath = join(dir, 'server-config.json');
-  await writeFile(serverConfigPath, JSON.stringify({ apiUrl: config.apiUrl, authToken: config.authToken }), { mode: 0o600 });
-  const mcpConfigPath = join(dir, 'mcp.json');
-  const serverEnv: Record<string, string> = {
-    LOGSEQ_MCP_CONFIG: serverConfigPath,
-    LOGSEQ_MCP_TIPS: 'on',
-    HOME: home,
-    USERPROFILE: home,
-    XDG_CONFIG_HOME: join(home, '.config'),
-  };
-  if (process.platform === 'darwin') serverEnv.CFFIXED_USER_HOME = home;
-  await writeFile(mcpConfigPath, JSON.stringify({ mcpServers: { logseq: { command: rustBinaryPath(), args: [], env: serverEnv } } }), { mode: 0o600 });
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
-  delete env.LOGSEQ_MCP_CONFIG;
-  delete env.LOGSEQ_MCP_TIPS;
-  delete env.LOGSEQ_MCP_NOW;
-  env.CLAUDE_CODE_DISABLE_CLAUDE_MDS = '1';
-  env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
-  return { dir, mcpConfigPath, cwd, env };
+  return all.filter(question => only.includes(question.id) || only.includes(question.expected_type));
 }
 
 interface SessionResult {
@@ -232,26 +78,10 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 }
 
 /** One headless session: the question on stdin, the stream-json events on stdout. */
-function runSession(question: Question, run: number, options: Options, harness: Harness): Promise<SessionResult> {
-  const args = [
-    '-p',
-    '--output-format', 'stream-json',
-    '--verbose',
-    '--model', options.model,
-    '--mcp-config', harness.mcpConfigPath,
-    '--strict-mcp-config',
-    // Only this server's tools: no built-in tool, skill, user setting or plugin to answer or to steer with
-    '--tools', '',
-    '--disable-slash-commands',
-    '--setting-sources', '',
-    '--no-session-persistence',
-    '--allowedTools', MCP_TOOL_PREFIX.replace(/__$/, ''),
-    '--permission-mode', 'dontAsk',
-    '--max-budget-usd', String(options.maxBudgetUsd),
-  ];
+function runSession(question: Question, run: number, options: Options, harness: Harness, env: Record<string, string>): Promise<SessionResult> {
   return new Promise(resolve => {
     const trace = new SessionTrace();
-    const child = spawn('claude', args, { cwd: harness.cwd, env: harness.env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    const child = spawn('claude', claudeArgs(options, harness.mcpConfigPath), { cwd: harness.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     children.add(child);
     let stderr = '';
     let stopped: SessionStatus | undefined;
@@ -271,37 +101,48 @@ function runSession(question: Question, run: number, options: Options, harness: 
     });
     child.stdin.on('error', () => undefined);
     child.stdin.end(question.question);
-    child.on('error', error => {
+    const done = (status: SessionStatus, failure?: string): void => {
       clearTimeout(timer);
       children.delete(child);
-      resolve({ record: { questionId: question.id, run, status: 'failed', calls: [] }, model: undefined, toolNames: [], failure: error.message });
-    });
-    child.on('close', code => {
-      clearTimeout(timer);
-      children.delete(child);
-      let status: SessionStatus = stopped ?? 'ok';
-      let failure: string | undefined;
-      if (!stopped && (code !== 0 || trace.resultIsError === true) && trace.calls.length === 0) {
-        status = 'failed';
-        failure = `claude exited with ${code}: ${stderr.trim().split('\n')[0]?.slice(0, 200) ?? ''}`;
-      }
       resolve({
-        record: { questionId: question.id, run, status, calls: trace.calls, costUsd: trace.costUsd },
+        record: { questionId: question.id, run, status, calls: status === 'failed' ? [] : trace.calls, costUsd: trace.costUsd },
         model: trace.model,
         toolNames: trace.toolNames,
         failure,
       });
+    };
+    child.on('error', error => done('failed', error.message));
+    child.on('close', code => {
+      // The server never attached (the init event lists no logseq tool): the harness broke, not the model's choice
+      if (trace.toolNames.length === 0) {
+        done('failed', stopped ? `${stopped} before the server attached` : `the server never attached (claude exited ${code}): ${stderr.trim().split('\n')[0]?.slice(0, 200) ?? ''}`);
+      } else if (!stopped && (code !== 0 || trace.resultIsError === true) && trace.calls.length === 0) {
+        done('failed', `claude exited ${code}: ${stderr.trim().split('\n')[0]?.slice(0, 200) ?? ''}`);
+      } else {
+        done(stopped ?? 'ok');
+      }
     });
   });
 }
 
-function printAggregates(a: Aggregates, options: Options, models: Set<string>, questionCount: number): void {
+interface RunInfo {
+  planned: number;
+  runs: number;
+  stoppedEarly: boolean;
+  models: Set<string>;
+  questionCount: number;
+}
+
+function printAggregates(a: Aggregates, options: Options, info: RunInfo): void {
   const line = (label: string, value: string) => console.log(`${label.padEnd(26)}${value}`);
   console.log('\nRouting eval');
   line('surface', a.surface);
-  line('model', [...models].join(', ') || 'unknown');
-  line('questions x runs', `${questionCount} x ${options.runs}`);
-  line('sessions counted', `${a.sessions} (${a.failed} failed and left out, ${a.timedOut} timed out, ${a.capped} stopped at ${options.maxCalls} calls)`);
+  line('model', [...info.models].join(', ') || 'unknown');
+  line('questions x runs', `${info.questionCount} x ${info.runs}`);
+  line('sessions counted', `${a.sessions} of ${info.planned} planned (${a.failed} failed and left out, ${a.timedOut} timed out, ${a.capped} stopped at ${options.maxCalls} calls)`);
+  if (a.failed > 0 || info.stoppedEarly || a.sessions < info.planned) {
+    console.log('INCOMPLETE: the rates below are over the counted sessions only. Do not post this as a baseline; fix the cause and re-run.');
+  }
   line('type-correct', `${percent(a.typeCorrect)} (${a.typeCorrect.count}/${a.typeCorrect.of})`);
   line('tool-correct', `${percent(a.toolCorrect)} (${a.toolCorrect.count}/${a.toolCorrect.of})`);
   line('no logseq call', `${percent(a.noCall)} (${a.noCall.count}/${a.noCall.of})`);
@@ -324,27 +165,53 @@ function printAggregates(a: Aggregates, options: Options, models: Set<string>, q
   }
 }
 
+async function rescore(options: Options, selected: Question[], all: Question[], file: string): Promise<void> {
+  const saved = parseSavedRun(JSON.parse(await readFile(file, 'utf8')));
+  const reconciled = reconcile(saved, selected, all, options.only.length > 0);
+  if (reconciled.scoringChanged) {
+    console.log('NOTE: the scoring lists or expected types differ from the ones this run was scored with. This is a rescore under the current lists.');
+  } else {
+    console.log('The scoring lists and expected types are the ones this run was scored with.');
+  }
+  if (reconciled.unanswered.length > 0) {
+    console.log(`NOT SCORED: no saved session for ${reconciled.unanswered.length} question(s): ${reconciled.unanswered.join(', ')}`);
+    process.exitCode = 1;
+  }
+  const runs = Math.max(1, ...reconciled.sessions.map(session => session.run));
+  const surface = options.surface ?? saved.surface;
+  const result = aggregate(surface, selected, reconciled.sessions);
+  const planned = options.only.length > 0 ? reconciled.sessions.length : saved.planned;
+  printAggregates(result, options, { planned, runs, stoppedEarly: saved.stoppedEarly, models: new Set(saved.models), questionCount: selected.length });
+  if (saved.stoppedEarly || result.failed > 0) process.exitCode = 1;
+}
+
+/** `git check-ignore -q` exits 0 for an ignored path and 1 for one that is not */
+function gitIgnores(absolute: string): boolean {
+  try {
+    execFileSync('git', ['-C', repoRoot, 'check-ignore', '-q', absolute], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
-  const questions = await loadQuestions(options.questions, options.only);
-  if (questions.length === 0) throw new Error('No question selected');
-  if (options.rescore) {
-    const saved: unknown = JSON.parse(await readFile(options.rescore, 'utf8'));
-    const file = saved as { surface?: unknown; models?: unknown; sessions?: unknown };
-    if (!file || (file.surface !== 'v1' && file.surface !== 'v2') || !Array.isArray(file.sessions) || !Array.isArray(file.models)) {
-      throw new Error('--rescore wants a file written by --out');
-    }
-    const kept = new Set(questions.map(question => question.id));
-    const records = (file.sessions as SessionRecord[]).filter(record => kept.has(record.questionId));
-    const runs = Math.max(1, ...records.map(record => record.run));
-    printAggregates(aggregate(options.surface ?? file.surface, questions, records), { ...options, runs }, new Set(file.models.map(String)), questions.length);
+  if (options.help) {
+    console.log(USAGE);
     return;
   }
-  const sessions = questions.length * options.runs;
+  const all = parseQuestions(JSON.parse(await readFile(options.questions ?? DEFAULT_QUESTIONS, 'utf8')));
+  const questions = select(all, options.only);
+  if (questions.length === 0) throw new Error('No question selected');
+  if (options.out) assertOutPathSafe(options.out, repoRoot, gitIgnores);
+  if (options.rescore) return rescore(options, questions, all, options.rescore);
+
+  const planned = questions.length * options.runs;
   console.log(
-    `${questions.length} questions x ${options.runs} runs = ${sessions} sessions on model ${options.model}, ` +
-      `each at most ${options.maxCalls} logseq calls, ${options.timeoutMs / 1000}s and $${options.maxBudgetUsd} ` +
-      `(an upper bound of $${(sessions * options.maxBudgetUsd).toFixed(2)})`
+    `${questions.length} questions x ${options.runs} runs = ${planned} sessions on model ${options.model}, each at most ` +
+      `${options.maxCalls} logseq calls, ${options.timeoutMs / 1000}s and $${options.maxBudgetUsd}; the run stops starting ` +
+      `sessions at $${options.maxTotalUsd} in all (worst case $${Math.min(planned * options.maxBudgetUsd, options.maxTotalUsd + options.concurrency * options.maxBudgetUsd).toFixed(2)})`
   );
   if (options.dryRun) {
     for (const question of questions) console.log(`  ${question.id.padEnd(20)}${question.expected_type.padEnd(9)}${question.intent}`);
@@ -357,9 +224,11 @@ async function main(): Promise<void> {
   const config = await loadConfig(configPath);
   assertNotPersonalLogseq(config.apiUrl);
   await requireFixtureGraph(new LogseqClient(config));
+  if (options.binary) process.env[RUST_BINARY_ENV] = options.binary;
   requireRustBinary();
 
-  const harness = await prepareHarness(config);
+  const harness = await prepareHarness(config, rustBinaryPath());
+  const env = hostEnv(process.env);
   const onSignal = () => {
     for (const child of children) killGroup(child, 'SIGTERM');
     void rm(harness.dir, { recursive: true, force: true }).finally(() => process.exit(130));
@@ -371,16 +240,17 @@ async function main(): Promise<void> {
   const models = new Set<string>();
   const surfaces = new Set<Surface>();
   const failures: string[] = [];
+  let spent = 0;
+  let stoppedEarly = false;
   try {
     const queue: Array<{ question: Question; run: number }> = [];
     for (let run = 1; run <= options.runs; run++) for (const question of questions) queue.push({ question, run });
     let next = 0;
     let done = 0;
-    let aborted = false;
     const worker = async (): Promise<void> => {
-      while (!aborted && next < queue.length) {
+      while (!stoppedEarly && next < queue.length) {
         const { question, run } = queue[next++];
-        const result = await runSession(question, run, options, harness);
+        const result = await runSession(question, run, options, harness, env);
         records.push(result.record);
         if (result.model) models.add(result.model);
         if (result.toolNames.length > 0 && !options.surface) {
@@ -391,10 +261,12 @@ async function main(): Promise<void> {
           }
         }
         if (result.failure) failures.push(`${question.id} run ${run}: ${result.failure}`);
+        spent += result.record.costUsd ?? 0;
         done++;
-        process.stderr.write(`\r${done}/${queue.length} sessions`);
-        // Three failed sessions and no good one: the host or the server is broken, so stop spending
-        if (failures.length >= 3 && !records.some(record => record.status !== 'failed')) aborted = true;
+        process.stderr.write(`\r${done}/${queue.length} sessions, $${spent.toFixed(2)}`);
+        // The spend cap, and three failed sessions with no good one (the host or the server is broken): stop starting sessions
+        if (spent >= options.maxTotalUsd) stoppedEarly = true;
+        if (failures.length >= 3 && !records.some(record => record.status !== 'failed')) stoppedEarly = true;
       }
     };
     await Promise.all(Array.from({ length: Math.min(options.concurrency, queue.length) }, worker));
@@ -402,18 +274,21 @@ async function main(): Promise<void> {
   } finally {
     await rm(harness.dir, { recursive: true, force: true });
   }
+  stoppedEarly = stoppedEarly && records.length < planned;
 
   for (const failure of new Set(failures)) console.error(`failed: ${failure}`);
   const surface = options.surface ?? [...surfaces][0];
   if (!surface) throw new Error('No session reported the tool list, so the surface is unknown. Pass --surface v1 or --surface v2.');
   if (surfaces.size > 1) throw new Error('The sessions saw both a v1 and a v2 tool list. Pass --surface to score one.');
   const aggregates = aggregate(surface, questions, records);
-  printAggregates(aggregates, options, models, questions.length);
+  printAggregates(aggregates, options, { planned, runs: options.runs, stoppedEarly, models, questionCount: questions.length });
+  if (stoppedEarly) console.log(`STOPPED EARLY: ${records.length} of ${planned} sessions ran (spent $${spent.toFixed(2)} against --max-total-usd ${options.maxTotalUsd}, or the host kept failing).`);
   if (options.out) {
-    await writeFile(options.out, JSON.stringify({ surface, models: [...models], aggregates, sessions: records }, null, 2), { mode: 0o600 });
+    const saved = { version: SAVED_RUN_VERSION, surface, models: [...models], textHash: textHash(all), scoringHash: scoringHash(all), planned, stoppedEarly, aggregates, sessions: records };
+    await writeFile(options.out, JSON.stringify(saved, null, 2), { mode: 0o600 });
     console.log(`\nWrote ${options.out}. It holds the arguments the model sent: keep it local, never commit or post it.`);
   }
-  if (aggregates.failed > 0) process.exitCode = 1;
+  if (aggregates.failed > 0 || stoppedEarly) process.exitCode = 1;
 }
 
 main().catch(error => {
