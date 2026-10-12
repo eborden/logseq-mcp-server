@@ -339,7 +339,7 @@ impl TopicContext {
         let mut warnings = self.warnings.clone();
         let more = if compact { "Read a block in full with logseq_get_block." } else { "Set compact to true for short snippets, or read a block with logseq_get_block." };
         warnings.push(size_truncation_warning(SizeCut {
-            what: "blocks, references and related pages, in that order",
+            what: "entries (blocks, then references, then related pages)",
             kept,
             total: self.direct_blocks.len() + self.references.len() + self.related_pages.len(),
             oversize,
