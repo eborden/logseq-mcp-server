@@ -19,7 +19,7 @@ Options considered:
 | Option | Pros | Cons / cost |
 |---|---|---|
 | Keep v1 names; fix only parameter aliases, instructions and size limits | No contract break | The noise stays, and overlapping tools keep competing for the same questions |
-| Rename and merge in one major release (v2.0.0), a hard cut | One clean surface; the tool list shrinks; skills and server move together in one plugin | Breaks v1 callers. The maintainer confirms there are none yet (v1.0.0 shipped 2026-10-10) |
+| Rename and merge in one major release (v2.0.0), a hard cut | One clean surface; the tool list is expected to shrink; skills and server move together in one plugin | Breaks v1 callers. The maintainer confirms there are none yet (v1.0.0 shipped 2026-10-10) |
 | v2 names alongside v1, with a deprecation window | Old callers keep working | Doubles the tool list past the [ADR-0016 (tool-list-size-guardrails)](0016-tool-list-size-guardrails.md) budget (19,383 of 19,700 characters used today), and the model has twice as many tools to choose from |
 
 ## Decision
@@ -75,7 +75,7 @@ A future tool must fit exactly one of the four types, or it needs a new ADR.
 
 ## Consequences
 
-- Easier: the tool list gets smaller and shrinks against the ADR-0016 budget (#499 lowers it). A model can choose a type before it chooses a tool. Skills, instructions and descriptions share one vocabulary.
+- Easier: the tool list is expected to shrink against the ADR-0016 budget, but nothing has measured it yet. Merging 16 tools into 10 moves parameters onto fewer tools (`find_blocks` alone carries about a dozen), so the serialized list may shrink less than the tool count suggests. Each rename PR must fit ADR-0016's 400-character description cap, with no allowance, and the current budget without raising it, even though a merged tool needs its verb opener, its modes and its "Can't find" line (ADR-0015) in that cap. #499 sets the new budget from the measured v2 size and gives the ADR-0016 justification in its PR. A model can choose a type before it chooses a tool. Skills, instructions and descriptions share one vocabulary.
 - Harder: every v1 caller breaks once. Every parity group file, call ceiling and recorded `tools/list` entry is renamed, so each merge PR is a golden change that needs the maintainer's `golden-change` label.
 - Touches: `rust/src/tools/*`, `rust/src/tools/mod.rs`, `rust/src/instructions.rs`, `rust/src/prompts.rs`, `rust/tests/data/parity/*`, the guards, the integration helpers, the measure and smoke scripts, the skills and CLAUDE.md.
 - The renames land one at a time in the order set by #500, because each edits the same shared files. Until the last one merges, `main` holds a mix of v1 and v2 names, so no release is cut part-way through.
