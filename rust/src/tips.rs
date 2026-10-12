@@ -153,8 +153,8 @@ mod tests {
     #[test]
     fn a_call_is_the_tool_and_its_arguments_as_json() {
         assert_eq!(
-            suggest_call("logseq_get_block", &json!({"block_uuid": "u", "include_children": true})),
-            r#"logseq_get_block {"block_uuid":"u","include_children":true}"#
+            suggest_call("logseq_get_block", &json!({"uuid": "u", "include_children": true})),
+            r#"logseq_get_block {"uuid":"u","include_children":true}"#
         );
     }
 

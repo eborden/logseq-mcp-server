@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 const ALLOWED: [(&str, &str); 5] = [
     ("src/args.rs", "reads the arguments a client sent, never a LogSeq answer (ADR-0004 is about the answer); its one visitor builds no error text"),
     ("src/resolve/wire.rs", "hand-written row visitors whose only error is `invalid_length`, which the deserializer turns into fixed text"),
-    ("src/tools/get_page_outline/wire.rs", "`TryFrom` with `type Error = &'static str`, and a `custom(\"...\")` with a literal"),
+    ("src/tools/get_page/outline/wire.rs", "`TryFrom` with `type Error = &'static str`, and a `custom(\"...\")` with a literal"),
     ("src/wire.rs", "hand-written visitors (`Id`, `Number`, `Object`) whose errors are `invalid_value` with a literal, which the deserializer turns into fixed text"),
     ("src/wire/deserializer.rs", "defines `custom`, the one place a message is kept as given (`Problem::Other`), and says that only fixed text may be passed"),
 ];
@@ -188,7 +188,7 @@ fn the_deserializer_says_the_rule_where_custom_is_defined() {
 
 #[test]
 fn the_text_a_listed_type_gives_is_a_literal() {
-    let outline = code(&root().join("src/tools/get_page_outline/wire.rs"));
+    let outline = code(&root().join("src/tools/get_page/outline/wire.rs"));
     assert!(outline.contains("type Error = &'static str;"), "the outline's try_from must fail with a &'static str");
     for (at, _) in outline.match_indices("custom(") {
         assert!(outline[at + "custom(".len()..].starts_with('"'), "custom must be given a string literal");

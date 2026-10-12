@@ -305,7 +305,7 @@ mod tests {
             warning.message,
             "LogSeq returned no answer when looking up the aliases of \"Atlas\" (possibly no graph open or a re-index in \
              progress), so references written under its other names may be missing. \
-             This does not mean it has no aliases. Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+             This does not mean it has no aliases. Retry in a moment, or call logseq_get_graph to check which graph is open."
         );
         assert_eq!(warning.how_to_fetch_all, None);
         // the set is the page alone, so no names are reported as covered

@@ -380,7 +380,7 @@ fn page_blocks_truncated(affected: &[&Backlink], cap: usize, requested: u64, kep
         if n == 1 { "page" } else { "pages" },
         named.join(", ")
     );
-    let read_whole = "logseq_get_page with include_children reads a source page whole.";
+    let read_whole = "logseq_get_page with detail \"full\" reads a source page whole.";
     let largest = affected.iter().map(|backlink| backlink.blocks.len()).max().unwrap_or(0);
 
     if cap >= MAX_BLOCKS_PER_PAGE as usize {
@@ -662,7 +662,7 @@ mod tests {
         assert_eq!(
             warning.message,
             "Showing the first 50 linking blocks of 1 source page with more: \"A\" (60). max_blocks_per_page is capped at its maximum of 50 (500 was asked for), \
-             so the rest can't be fetched in one call. logseq_get_page with include_children reads a source page whole."
+             so the rest can't be fetched in one call. logseq_get_page with detail \"full\" reads a source page whole."
         );
     }
 
@@ -672,7 +672,7 @@ mod tests {
         let capped = cap_backlinks((0..5).map(|i| source(i + 1, &format!("p{i}"), 60)).collect(), "t", 20, 10);
         let how = capped.warnings[0].how_to_fetch_all.clone().unwrap();
         assert!(how.starts_with("Set max_blocks_per_page to 50 (the maximum) to get 50 per page. A result this large may be saved to a file"), "{how}");
-        assert!(how.ends_with("logseq_get_page with include_children reads a source page whole."));
+        assert!(how.ends_with("logseq_get_page with detail \"full\" reads a source page whole."));
     }
 
     #[test]

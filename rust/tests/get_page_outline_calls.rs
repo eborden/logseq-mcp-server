@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::tools::get_page_outline::get_page_outline;
+use logseq_mcp_server::tools::get_page::outline::get_page_outline;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -207,7 +207,7 @@ async fn an_unreadable_answer_is_an_error() {
     assert!(error.to_string().contains("[0][0]: a block needs an id"));
 }
 
-const RESOLVER_UNAVAILABLE: &str = "LogSeq returned no answer when looking up the page \"bob\" (possibly no graph open or a re-index in progress), so it can't tell whether the page exists. Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+const RESOLVER_UNAVAILABLE: &str = "LogSeq returned no answer when looking up the page \"bob\" (possibly no graph open or a re-index in progress), so it can't tell whether the page exists. Retry in a moment, or call logseq_get_graph to check which graph is open.";
 
 // BR-0011, #301: a `null` answer from the resolver is an error that stops at once. It is not "no rows", so
 // it makes no leaf query and no suggestion lookup, and it never says the page is missing.

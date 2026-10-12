@@ -126,7 +126,7 @@ impl ServerHandler for LogseqServer {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::tools::get_page_outline;
+    use crate::tools::get_page;
     use rmcp::ServiceExt;
     use serde_json::json;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -247,9 +247,9 @@ mod tests {
         .await;
         let tools = responses[1]["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), tools::list().len());
-        let outline = tools.iter().find(|tool| tool["name"] == get_page_outline::NAME).expect("the outline tool is listed");
-        let ours = tools::list().into_iter().find(|tool| tool.name == get_page_outline::NAME).unwrap();
-        assert_eq!(outline["inputSchema"], serde_json::to_value(&ours).unwrap()["inputSchema"]);
+        let page = tools.iter().find(|tool| tool["name"] == get_page::NAME).expect("the page tool is listed");
+        let ours = tools::list().into_iter().find(|tool| tool.name == get_page::NAME).unwrap();
+        assert_eq!(page["inputSchema"], serde_json::to_value(&ours).unwrap()["inputSchema"]);
         for tool in tools {
             let name = tool["name"].as_str().unwrap();
             let annotations = &tool["annotations"];
@@ -258,7 +258,7 @@ mod tests {
             assert_eq!(annotations["readOnlyHint"], true, "{name}");
             assert_eq!(annotations["destructiveHint"], false, "{name}");
             assert_eq!(annotations["openWorldHint"], false, "{name}");
-            assert_eq!(annotations["idempotentHint"], name != "logseq_get_current_context", "{name}");
+            assert_eq!(annotations["idempotentHint"], name != "logseq_get_current", "{name}");
             assert!(tool["title"].as_str().is_some_and(|title| !title.is_empty()), "{name} has a title");
             assert_eq!(tool["title"], annotations["title"], "{name}: the title and the annotation's title agree");
         }
@@ -270,13 +270,13 @@ mod tests {
         let responses = exchange(&api_url, &[
             initialize(),
             serde_json::from_str(INITIALIZED).unwrap(),
-            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": get_page_outline::NAME, "arguments": {"page_name": "Alice"}}}),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": get_page::NAME, "arguments": {"page": "Alice"}}}),
             json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "logseq_nope", "arguments": {}}}),
         ])
         .await;
-        let outline = &responses[1]["result"];
-        assert_eq!(outline["isError"], true);
-        let text: Value = serde_json::from_str(outline["content"][0]["text"].as_str().unwrap()).unwrap();
+        let failed = &responses[1]["result"];
+        assert_eq!(failed["isError"], true);
+        let text: Value = serde_json::from_str(failed["content"][0]["text"].as_str().unwrap()).unwrap();
         assert!(text["error"].as_str().unwrap().starts_with(&format!("Cannot connect to LogSeq at {api_url}")), "{text}");
         let unknown = &responses[2]["result"];
         assert_eq!(unknown["isError"], true);

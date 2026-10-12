@@ -11,7 +11,7 @@ pub fn page_tips(result: &Value, page_name: &str, include_children: bool) -> Vec
     let Some(page) = shown else { return Vec::new() };
     let mut tips = Vec::new();
     if !include_children {
-        tips.push(format!("For its blocks: {}.", suggest_call("logseq_get_page", &json!({"page_name": page, "include_children": true}))));
+        tips.push(format!("For its blocks: {}.", suggest_call("logseq_get_page", &json!({"page": page, "detail": "full"}))));
     }
     tips.push(format!("For what links here: {}.", suggest_call("logseq_get_backlinks", &json!({"page_name": page}))));
     tips.truncate(MAX_TIPS);
@@ -28,7 +28,7 @@ mod tests {
         assert_eq!(
             page_tips(&result, "atlas", false),
             [
-                r#"For its blocks: logseq_get_page {"page_name":"Project Atlas","include_children":true}."#,
+                r#"For its blocks: logseq_get_page {"page":"Project Atlas","detail":"full"}."#,
                 r#"For what links here: logseq_get_backlinks {"page_name":"Project Atlas"}."#,
             ]
         );

@@ -1,4 +1,4 @@
-//! `logseq_get_current_context`: what the user
+//! `logseq_get_current`: what the user
 //! is looking at in LogSeq right now: the open page, the block being edited and any selected blocks.
 //!
 //! Calls: 3 Editor calls made at once (`getCurrentPage`, `getCurrentBlock`, `getSelectedBlocks`),
@@ -31,7 +31,7 @@ use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 
-pub const NAME: &str = "logseq_get_current_context";
+pub const NAME: &str = "logseq_get_current";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n\
@@ -55,7 +55,7 @@ pub fn definition() -> Tool {
 
 /// A call: the context LogSeq is showing, as JSON.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let context = get_current_context(client).await?;
+    let context = get_current(client).await?;
     Ok(success_result(vec![ContentBlock::text(context.into_value().to_string())]))
 }
 
@@ -96,7 +96,7 @@ fn page_names_unavailable(no_page_known: bool) -> ResultWarning {
         "page_names_unavailable",
         format!(
             "LogSeq returned no answer when looking up the pages of the focused or selected blocks (possibly no graph open or a re-index in \
-             progress), so {consequence}. This does not mean no page is open. Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+             progress), so {consequence}. This does not mean no page is open. Retry in a moment, or call logseq_get_graph to check which graph is open."
         ),
     )
 }
@@ -131,7 +131,7 @@ fn with_fetched_children(block: &Map<String, Value>) -> Map<String, Value> {
 /// Get the page, focused block and selected blocks the user currently has open.
 ///
 /// API calls: 3 Editor calls, plus 1 Datalog query only when a block's page is not already known.
-pub async fn get_current_context(client: &LogseqClient) -> Result<CurrentContext, ToolError> {
+pub async fn get_current(client: &LogseqClient) -> Result<CurrentContext, ToolError> {
     // All three calls are always made, and `join!` lets all three finish, so the errors are raised in a
     // fixed order (page, block, selection). With two answers wrong at once the first in that order is
     // reported, and the parity cases never have two.

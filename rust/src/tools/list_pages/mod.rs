@@ -222,7 +222,7 @@ pub async fn list_pages(client: &LogseqClient, args: &Args) -> Result<ListPagesR
                 "pages_unavailable",
                 "LogSeq returned no page list (possibly no graph open or a re-index in progress), \
                  so the empty list may not mean the graph is empty. \
-                 Retry in a moment, or call logseq_get_graph_info to check which graph is open."
+                 Retry in a moment, or call logseq_get_graph to check which graph is open."
                     .to_owned(),
             )),
         });

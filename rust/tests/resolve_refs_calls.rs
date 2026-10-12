@@ -228,7 +228,7 @@ async fn a_block_embed_is_cut_at_the_embed_limit_and_says_how_to_fetch_the_rest(
     assert_eq!(resolved.warnings[0].message, format!("Embed of block {} shows 2 of 4 blocks.", uuid(2)));
     assert_eq!(
         resolved.warnings[0].how_to_fetch_all.as_deref(),
-        Some(format!("Call logseq_get_block with block_uuid \"{}\" and include_children true.", uuid(2)).as_str())
+        Some(format!("Call logseq_get_block with uuid \"{}\" and include_children true.", uuid(2)).as_str())
     );
 }
 

@@ -1,4 +1,4 @@
-//! The LogSeq traffic of `logseq_get_graph_info`, `logseq_list_pages`, `logseq_search_blocks` and `logseq_query_by_property`
+//! The LogSeq traffic of `logseq_get_graph`, `logseq_list_pages`, `logseq_search_blocks` and `logseq_query_by_property`
 //! against a mock LogSeq on a local port: how many calls each makes, with which inputs. The call
 //! counts are those in `CLAUDE.md` ("Current Implementation Status"); the parity harness
 //! (`parity.rs`) checks the same calls and the result bytes against the recorded results.
@@ -10,7 +10,7 @@ use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
 use logseq_mcp_server::args::Scalar;
-use logseq_mcp_server::tools::{get_graph_info, list_pages, query_by_property, search_blocks};
+use logseq_mcp_server::tools::{get_graph, list_pages, query_by_property, search_blocks};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -77,7 +77,7 @@ fn block(id: i64, content: &str, page: i64) -> Value {
 #[tokio::test]
 async fn the_graph_info_costs_one_call_with_no_arguments() {
     let logseq = mock_logseq(vec![json!({"name": "example", "path": "/tmp/example", "url": "logseq_local_/tmp/example"})]).await;
-    let graph = get_graph_info::get_graph_info(&client(&logseq)).await.unwrap();
+    let graph = get_graph::get_graph(&client(&logseq)).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.App.getCurrentGraph"]);
     assert_eq!(logseq.seen.lock().unwrap()[0]["args"], json!([]));
@@ -87,7 +87,7 @@ async fn the_graph_info_costs_one_call_with_no_arguments() {
 #[tokio::test]
 async fn no_graph_is_an_error_and_not_an_empty_result() {
     let logseq = mock_logseq(vec![json!(null)]).await;
-    let error = get_graph_info::get_graph_info(&client(&logseq)).await.unwrap_err();
+    let error = get_graph::get_graph(&client(&logseq)).await.unwrap_err();
     assert!(matches!(&error, ToolError::Failed(message) if message == "Failed to retrieve graph information"), "{error}");
 }
 
@@ -212,7 +212,7 @@ async fn a_null_answer_to_the_search_is_written_as_an_empty_list_and_a_warning_w
     assert_eq!(content[0]["text"], "[]");
     assert_eq!(
         content[1]["text"],
-        r#"{"meta":{"hasMore":false,"warnings":[{"code":"search_unavailable","message":"LogSeq returned no answer when looking up blocks that contain \"x\\\"y\" (possibly no graph open or a re-index in progress), so the empty list may not mean nothing matches. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}],"totals":{}}}"#
+        r#"{"meta":{"hasMore":false,"warnings":[{"code":"search_unavailable","message":"LogSeq returned no answer when looking up blocks that contain \"x\\\"y\" (possibly no graph open or a re-index in progress), so the empty list may not mean nothing matches. Retry in a moment, or call logseq_get_graph to check which graph is open."}],"totals":{}}}"#
     );
 
     // a real `[]` has no warning, and gets its usual "No match" tip
@@ -287,7 +287,7 @@ async fn a_null_answer_to_the_property_query_is_written_as_an_empty_list_and_a_w
     assert_eq!(content[0]["text"], "[]");
     assert_eq!(
         content[1]["text"],
-        r#"{"meta":{"hasMore":false,"warnings":[{"code":"property_query_unavailable","message":"LogSeq returned no answer when looking up blocks with the property \"status\" (possibly no graph open or a re-index in progress), so the empty list may not mean nothing matches. Retry in a moment, or call logseq_get_graph_info to check which graph is open."}],"totals":{}}}"#
+        r#"{"meta":{"hasMore":false,"warnings":[{"code":"property_query_unavailable","message":"LogSeq returned no answer when looking up blocks with the property \"status\" (possibly no graph open or a re-index in progress), so the empty list may not mean nothing matches. Retry in a moment, or call logseq_get_graph to check which graph is open."}],"totals":{}}}"#
     );
 
     // a real `[]` is the empty list alone

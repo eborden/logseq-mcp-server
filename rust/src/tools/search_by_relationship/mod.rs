@@ -370,7 +370,7 @@ async fn fetch_tree(client: &LogseqClient, name: &str) -> Result<Option<Vec<Valu
 
 /// No `howToFetchAll` on the warnings below: no parameter fetches what LogSeq did not answer (like
 /// `pages_unavailable`, #64), so `hasMore` is unaffected. The retry advice is in the message.
-const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph_info to check which graph is open.";
+const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph to check which graph is open.";
 
 /// What the query of a relationship type looks for, for the warning.
 fn relationship_sought(relationship_type: RelationshipType, topic_a: &str, topic_b: &str) -> String {

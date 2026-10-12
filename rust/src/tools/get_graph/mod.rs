@@ -1,4 +1,4 @@
-//! `logseq_get_graph_info`: which graph LogSeq has
+//! `logseq_get_graph`: which graph LogSeq has
 //! open, as it says so itself.
 //!
 //! Calls: 1 (`logseq.App.getCurrentGraph`). The answer is the result as it came, so a key LogSeq
@@ -14,7 +14,7 @@ use crate::client::LogseqClient;
 use crate::errors::ToolError;
 use crate::tool::{input_schema, read_only_annotations, success_result};
 
-pub const NAME: &str = "logseq_get_graph_info";
+pub const NAME: &str = "logseq_get_graph";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get the connected graph's name and filesystem path.\n\n\
@@ -34,7 +34,7 @@ pub fn definition() -> Tool {
 
 /// A call: the graph LogSeq reports, as JSON.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let graph = get_graph_info(client).await?;
+    let graph = get_graph(client).await?;
     Ok(success_result(vec![ContentBlock::text(graph.to_string())]))
 }
 
@@ -42,7 +42,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option
 ///
 /// Fails with [`ToolError::Failed`] when LogSeq answers `null`, which is no graph open rather than
 /// a graph with no fields.
-pub async fn get_graph_info(client: &LogseqClient) -> Result<serde_json::Value, ToolError> {
+pub async fn get_graph(client: &LogseqClient) -> Result<serde_json::Value, ToolError> {
     let answer = client.call_api(wire::METHOD, &[]).await?;
     match wire::graph_info(&answer)? {
         Some(graph) => Ok(graph.clone()),

@@ -367,7 +367,7 @@ impl<'a> Renderer<'a> {
                 format!(
                     "LogSeq returned no answer when looking up {} reference(s) (possibly no graph open or a re-index in progress), \
                      so they were not resolved and are left as written with status \"unavailable\". This does not mean they are missing. \
-                     Retry in a moment, or call logseq_get_graph_info to check which graph is open.",
+                     Retry in a moment, or call logseq_get_graph to check which graph is open.",
                     self.unavailable_refs.len()
                 ),
             ));
@@ -439,7 +439,7 @@ impl<'a> Renderer<'a> {
                 text.push_str(&self.truncation_note(
                     EmbedCut {
                         key: path_key,
-                        fetch: format!("Call logseq_get_page with page_name \"{name}\" and include_children true."),
+                        fetch: format!("Call logseq_get_page with page \"{name}\" and detail \"full\"."),
                         what: format!("page \"{name}\""),
                         unit: "top-level blocks",
                     },
@@ -464,7 +464,7 @@ impl<'a> Renderer<'a> {
                         key: path_key,
                         what: format!("block {}", token.key),
                         unit: "blocks",
-                        fetch: format!("Call logseq_get_block with block_uuid \"{}\" and include_children true.", token.key),
+                        fetch: format!("Call logseq_get_block with uuid \"{}\" and include_children true.", token.key),
                     },
                     shown.len(),
                     members.len(),
