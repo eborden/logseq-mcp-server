@@ -1,0 +1,387 @@
+import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'fs';
+import { join, relative } from 'path';
+import { fileURLToPath } from 'url';
+
+/**
+ * The skills name only real tools, and their JSON examples validate against the tool's inputSchema (#486, part of #500).
+ *
+ * The server instructions (rust/src/instructions.rs) and the prompts (rust/src/prompts.rs) have tests that fail on a
+ * tool name that doesn't exist. The skills in skills/logseq-skills/ had none, and their examples were positional
+ * pseudo-calls that hide the parameter names, which are what models get wrong. The recorded tool list,
+ * rust/tests/data/parity/tool-list.json, is the contract, so each rename of the v2 plan fails here until the skills
+ * move in the same PR. Over every .md file under skills/logseq-skills/:
+ *   1. every `logseq_[a-z_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
+ *      `logseq_x`;
+ *   2. every recorded tool has a section heading in the tool reference (TOOL_REFERENCE_PATH);
+ *   3. every fenced block whose info string is `json tool=logseq_<name>` parses as a JSON object of arguments and
+ *      validates against that tool's inputSchema: required properties present, no property outside `properties`,
+ *      and primitive types and enums matched. The validator is hand-rolled (foundations 4.11, no new dependency);
+ *   4. every tool has at least MIN_EXAMPLES_PER_TOOL such examples.
+ * A failure names the file, the line and the bad token or argument.
+ *
+ * MIN_EXAMPLES_PER_TOOL is 0 here. #497 (the skills rewrite) is the switch: it raises the constant to 2.
+ * Skills aren't edited by this guard (ADR-0024), so MISSING_SECTION_ALLOWANCES lists the section gaps that exist on
+ * main. An entry may only be removed: the guard fails once the heading exists, so the entry is deleted with it.
+ */
+
+const SKILLS_DIR = fileURLToPath(new URL('../../skills/logseq-skills', import.meta.url));
+const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
+
+/** The skill's tool reference, relative to SKILLS_DIR. A constant so #497 can split the file by type. */
+export const TOOL_REFERENCE_PATH = 'references/mcp-tools-reference.md';
+
+/** The minimum number of `json tool=<name>` examples per tool. 0 until #497 raises it to 2. */
+export const MIN_EXAMPLES_PER_TOOL = 0;
+
+/**
+ * Tools the tool reference has no heading for on main (it notes `logseq_get_graph_info` in prose only). Skill edits
+ * are out of scope for #486 (ADR-0024); the section lands with the skills rewrite (#497), which deletes this entry.
+ */
+export const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph_info'];
+
+type Schema = {
+  type?: string | string[];
+  enum?: unknown[];
+  anyOf?: Schema[];
+  properties?: Record<string, Schema>;
+  required?: string[];
+};
+type RecordedTool = { name: string; inputSchema?: Schema };
+type SkillFile = { path: string; text: string };
+
+// An optional host prefix (`mcp__logseq__`, `mcp__plugin_logseq_logseq__`) and then the bare tool name. The prefix is
+// matched lazily up to the first `__logseq_`, so it is never read as part of the name.
+const TOOL_TOKEN = /(?:mcp__[A-Za-z0-9_-]+?__)?(logseq_[a-z_]+)/g;
+const HEADING = /^#{1,6}\s+(.*)$/;
+const FENCE = /^\s*```(.*)$/;
+const EXAMPLE_INFO = /^json\s+tool=(\S+)\s*$/;
+
+const tokensOf = (line: string): string[] => [...line.matchAll(TOOL_TOKEN)].map(m => m[1]);
+
+/** Why `value` doesn't match `schema`, or null. Supports what the recorded schemas use; anything else is reported. */
+export function schemaMismatch(value: unknown, schema: Schema): string | null {
+  if (schema.anyOf) {
+    const reasons = schema.anyOf.map(s => schemaMismatch(value, s));
+    return reasons.some(r => r === null) ? null : `matches none of the allowed types (${reasons.join('; ')})`;
+  }
+  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  if (types.length === 0) return 'the schema has no type, which this guard cannot check';
+  const typeOk = types.some(t => {
+    switch (t) {
+      case 'string':
+        return typeof value === 'string';
+      case 'integer':
+        return typeof value === 'number' && Number.isInteger(value);
+      case 'number':
+        return typeof value === 'number';
+      case 'boolean':
+        return typeof value === 'boolean';
+      case 'null':
+        return value === null;
+      default:
+        return false;
+    }
+  });
+  if (!types.every(t => ['string', 'integer', 'number', 'boolean', 'null'].includes(t))) {
+    return `the schema type ${JSON.stringify(schema.type)} is not a primitive, which this guard cannot check`;
+  }
+  if (!typeOk) return `expected ${types.join(' or ')}, got ${value === null ? 'null' : typeof value}`;
+  if (schema.enum && !schema.enum.includes(value)) {
+    return `${JSON.stringify(value)} is not one of ${schema.enum.map(v => JSON.stringify(v)).join(', ')}`;
+  }
+  return null;
+}
+
+/** Violations for one `json tool=<name>` example. `line` is the line of the opening fence. */
+function exampleViolations(file: string, line: number, body: string[], tool: RecordedTool): string[] {
+  const where = (key?: string): string => {
+    const offset = key === undefined ? -1 : body.findIndex(l => l.includes(JSON.stringify(key)));
+    return `${file}:${offset === -1 ? line : line + 1 + offset}`;
+  };
+  let args: unknown;
+  try {
+    args = JSON.parse(body.join('\n'));
+  } catch (e) {
+    return [`${where()}: the ${tool.name} example is not valid JSON (${(e as Error).message})`];
+  }
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) {
+    return [`${where()}: the ${tool.name} example must be a JSON object of arguments`];
+  }
+  const schema = tool.inputSchema ?? {};
+  const properties = schema.properties ?? {};
+  const out: string[] = [];
+  for (const key of schema.required ?? []) {
+    if (!(key in args)) out.push(`${where()}: the ${tool.name} example is missing the required argument "${key}"`);
+  }
+  for (const [key, value] of Object.entries(args)) {
+    if (!(key in properties)) {
+      out.push(`${where(key)}: the ${tool.name} example has an argument "${key}" that is not in its inputSchema`);
+      continue;
+    }
+    const why = schemaMismatch(value, properties[key]);
+    if (why) out.push(`${where(key)}: the ${tool.name} argument "${key}" is wrong: ${why}`);
+  }
+  return out;
+}
+
+export type CheckOptions = {
+  referencePath: string;
+  minExamples: number;
+  missingSectionAllowances: readonly string[];
+};
+
+/** Every violation of the four rules over `files`, each as `file:line: message`. Empty when the skills are clean. */
+export function skillViolations(files: SkillFile[], tools: RecordedTool[], options: CheckOptions): string[] {
+  const known = new Map(tools.map(t => [t.name, t]));
+  const out: string[] = [];
+  const examples = new Map<string, number>();
+  const sections = new Set<string>();
+
+  for (const { path, text } of files) {
+    const lines = text.split('\n');
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+      const lineNo = i + 1;
+      const line = lines[i];
+
+      for (const token of tokensOf(line)) {
+        if (!known.has(token)) {
+          out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json`);
+        }
+      }
+
+      if (path === options.referencePath && !inFence) {
+        const heading = HEADING.exec(line);
+        if (heading) for (const token of tokensOf(heading[1])) sections.add(token);
+      }
+
+      const fence = FENCE.exec(line);
+      if (!fence) continue;
+      if (inFence) {
+        inFence = false;
+        continue;
+      }
+      inFence = true;
+      const info = fence[1].trim();
+      if (!/^json\b/.test(info) || !/\btool=/.test(info)) continue;
+      const example = EXAMPLE_INFO.exec(info);
+      if (!example) {
+        out.push(`${path}:${lineNo}: the info string "${info}" must be exactly "json tool=logseq_<name>"`);
+        continue;
+      }
+      // Find the closing fence of this block.
+      const body: string[] = [];
+      let j = i + 1;
+      while (j < lines.length && !/^\s*```\s*$/.test(lines[j])) body.push(lines[j++]);
+      if (j >= lines.length) {
+        out.push(`${path}:${lineNo}: the ${example[1]} example has no closing fence`);
+        continue;
+      }
+      const [token] = tokensOf(example[1]);
+      const tool = token && known.get(token);
+      if (!tool) {
+        // A well-formed but unknown name was reported by the token rule when the info string line was scanned.
+        if (!token) out.push(`${path}:${lineNo}: tool=${example[1]} is not a logseq_ tool name`);
+      } else {
+        examples.set(tool.name, (examples.get(tool.name) ?? 0) + 1);
+        out.push(...exampleViolations(path, lineNo, body, tool));
+      }
+      // Skip the body and the closing fence: they are not scanned for fences again, but they are scanned for tokens.
+      for (let k = i + 1; k <= j; k++) {
+        for (const t of tokensOf(lines[k])) {
+          if (!known.has(t)) out.push(`${path}:${k + 1}: "${t}" is not a tool in tool-list.json`);
+        }
+      }
+      i = j;
+      inFence = false;
+    }
+  }
+
+  for (const tool of tools) {
+    if (!sections.has(tool.name) && !options.missingSectionAllowances.includes(tool.name)) {
+      out.push(`${options.referencePath}: no section heading for ${tool.name}`);
+    }
+    if (sections.has(tool.name) && options.missingSectionAllowances.includes(tool.name)) {
+      out.push(`${options.referencePath}: ${tool.name} now has a heading, so delete it from MISSING_SECTION_ALLOWANCES`);
+    }
+    const count = examples.get(tool.name) ?? 0;
+    if (count < options.minExamples) {
+      out.push(`${tool.name} has ${count} "json tool=${tool.name}" examples, the minimum is ${options.minExamples}`);
+    }
+  }
+  for (const name of options.missingSectionAllowances) {
+    if (!known.has(name)) out.push(`MISSING_SECTION_ALLOWANCES names "${name}", which is not a tool in tool-list.json`);
+  }
+  return out;
+}
+
+function markdownFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return markdownFiles(full);
+    return entry.name.endsWith('.md') ? [full] : [];
+  });
+}
+
+describe('the skills name only real tools (#486)', () => {
+  const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];
+  const files = markdownFiles(SKILLS_DIR)
+    .sort()
+    .map(full => ({ path: relative(SKILLS_DIR, full), text: readFileSync(full, 'utf-8') }));
+  const real: CheckOptions = {
+    referencePath: TOOL_REFERENCE_PATH,
+    minExamples: MIN_EXAMPLES_PER_TOOL,
+    missingSectionAllowances: MISSING_SECTION_ALLOWANCES,
+  };
+
+  it('finds the skill files, the tool reference and the recorded tools', () => {
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.map(f => f.path)).toContain(TOOL_REFERENCE_PATH);
+    expect(tools.length).toBeGreaterThan(0);
+  });
+
+  it('names only recorded tools, documents each, and validates every json tool= example', () => {
+    expect(skillViolations(files, tools, real), 'skills/logseq-skills/ breaks the tool contract').toEqual([]);
+  });
+
+  it('starts with no minimum for examples, which #497 raises to 2', () => {
+    expect(MIN_EXAMPLES_PER_TOOL).toBe(0);
+  });
+});
+
+// Each rule must be able to fail, or the guard above proves nothing. These run the same checker over made-up skills.
+describe('the skills guard can fail (#486 self-test)', () => {
+  const tools: RecordedTool[] = [
+    {
+      name: 'logseq_get_thing',
+      inputSchema: {
+        type: 'object',
+        required: ['thing_name'],
+        properties: {
+          thing_name: { type: 'string' },
+          depth: { type: 'integer' },
+          ratio: { type: 'number' },
+          verbose: { type: 'boolean' },
+          format: { type: 'string', enum: ['json', 'markdown'] },
+          filter: { type: ['string', 'null'] },
+          value: { anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }] },
+        },
+      },
+    },
+    { name: 'logseq_get_other', inputSchema: { type: 'object', properties: {} } },
+  ];
+  const options: CheckOptions = { referencePath: 'ref.md', minExamples: 0, missingSectionAllowances: [] };
+  const reference = '### logseq_get_thing\n\n### logseq_get_other\n';
+  const example = (json: string, info = 'json tool=logseq_get_thing'): string => '```' + info + '\n' + json + '\n```\n';
+  const run = (text: string, opts: Partial<CheckOptions> = {}) =>
+    skillViolations([{ path: 'ref.md', text: reference }, { path: 'skill.md', text }], tools, { ...options, ...opts });
+
+  it('passes a clean skill, including a nullable, an anyOf, an enum and a host-prefixed name', () => {
+    const text =
+      'Call `mcp__plugin_logseq_logseq__logseq_get_thing` or `logseq_get_other`.\n\n' +
+      example('{"thing_name": "Alice", "depth": 2, "ratio": 0.5, "verbose": true, "format": "json", "filter": null, "value": 3}');
+    expect(run(text)).toEqual([]);
+  });
+
+  it('flags an unknown tool name with its file and line', () => {
+    expect(run('Intro.\nUse `logseq_get_widget` here.\n')).toEqual([
+      'skill.md:2: "logseq_get_widget" is not a tool in tool-list.json',
+    ]);
+  });
+
+  it('flags an unknown host-prefixed tool name as its bare name', () => {
+    expect(run('`mcp__logseq__logseq_get_widget`\n')).toEqual([
+      'skill.md:1: "logseq_get_widget" is not a tool in tool-list.json',
+    ]);
+  });
+
+  it('flags a tool with no section heading, and a heading only in prose', () => {
+    const files = [{ path: 'ref.md', text: '### logseq_get_thing\n\nlogseq_get_other is described later.\n' }];
+    expect(skillViolations(files, tools, options)).toEqual(['ref.md: no section heading for logseq_get_other']);
+  });
+
+  it('does not take a heading inside a code fence for a section', () => {
+    const files = [{ path: 'ref.md', text: '### logseq_get_thing\n```\n### logseq_get_other\n```\n' }];
+    expect(skillViolations(files, tools, options)).toEqual(['ref.md: no section heading for logseq_get_other']);
+  });
+
+  it('lets an allowed section gap pass, and fails once the heading exists or the name is not a tool', () => {
+    const gap = [{ path: 'ref.md', text: '### logseq_get_thing\n' }];
+    const allow = { ...options, missingSectionAllowances: ['logseq_get_other'] };
+    expect(skillViolations(gap, tools, allow)).toEqual([]);
+    expect(skillViolations([{ path: 'ref.md', text: reference }], tools, allow)).toEqual([
+      'ref.md: logseq_get_other now has a heading, so delete it from MISSING_SECTION_ALLOWANCES',
+    ]);
+    expect(skillViolations(gap, tools, { ...allow, missingSectionAllowances: ['logseq_get_other', 'logseq_gone'] })).toEqual([
+      'MISSING_SECTION_ALLOWANCES names "logseq_gone", which is not a tool in tool-list.json',
+    ]);
+  });
+
+  it('flags an example with a missing required argument', () => {
+    expect(run('Text\n' + example('{"depth": 2}'))).toEqual([
+      'skill.md:2: the logseq_get_thing example is missing the required argument "thing_name"',
+    ]);
+  });
+
+  it('flags an example with an argument outside the inputSchema, on the line that has it', () => {
+    expect(run(example('{\n  "thing_name": "Alice",\n  "topic": "x"\n}'))).toEqual([
+      'skill.md:4: the logseq_get_thing example has an argument "topic" that is not in its inputSchema',
+    ]);
+  });
+
+  it('flags a wrong type, a fractional integer and a value outside an enum', () => {
+    expect(run(example('{"thing_name": 5}'))).toEqual([
+      'skill.md:2: the logseq_get_thing argument "thing_name" is wrong: expected string, got number',
+    ]);
+    expect(run(example('{"thing_name": "a", "depth": 1.5}'))).toEqual([
+      'skill.md:2: the logseq_get_thing argument "depth" is wrong: expected integer, got number',
+    ]);
+    expect(run(example('{"thing_name": "a", "format": "toon"}'))).toEqual([
+      'skill.md:2: the logseq_get_thing argument "format" is wrong: "toon" is not one of "json", "markdown"',
+    ]);
+  });
+
+  it('flags a value that matches none of an anyOf, and null where the type is not nullable', () => {
+    expect(run(example('{"thing_name": "a", "value": null}'))[0]).toContain('matches none of the allowed types');
+    expect(run(example('{"thing_name": "a", "depth": null}'))).toEqual([
+      'skill.md:2: the logseq_get_thing argument "depth" is wrong: expected integer, got null',
+    ]);
+  });
+
+  it('flags JSON that does not parse, and JSON that is not an object', () => {
+    expect(run(example('{"thing_name": '))[0]).toMatch(/^skill\.md:1: the logseq_get_thing example is not valid JSON/);
+    expect(run(example('["Alice"]'))).toEqual(['skill.md:1: the logseq_get_thing example must be a JSON object of arguments']);
+  });
+
+  it('flags an info string that names no tool, a non-tool name, an unclosed block and an unknown tool', () => {
+    expect(run(example('{}', 'json tool='))).toEqual([
+      'skill.md:1: the info string "json tool=" must be exactly "json tool=logseq_<name>"',
+    ]);
+    expect(run(example('{}', 'json tool=get_thing'))).toEqual(['skill.md:1: tool=get_thing is not a logseq_ tool name']);
+    expect(run('```json tool=logseq_get_thing\n{"thing_name": "a"}\n')).toEqual([
+      'skill.md:1: the logseq_get_thing example has no closing fence',
+    ]);
+    expect(run(example('{}', 'json tool=logseq_get_widget'))).toEqual([
+      'skill.md:1: "logseq_get_widget" is not a tool in tool-list.json',
+    ]);
+  });
+
+  it('does not treat an untagged json block as an example', () => {
+    expect(run('```json\n{"anything": true}\n```\n')).toEqual([]);
+  });
+
+  it('enforces the minimum number of examples per tool', () => {
+    const one = example('{"thing_name": "a"}');
+    expect(run(one, { minExamples: 1 })).toEqual(['logseq_get_other has 0 "json tool=logseq_get_other" examples, the minimum is 1']);
+    expect(run(one, { minExamples: 2 })).toEqual([
+      'logseq_get_thing has 1 "json tool=logseq_get_thing" examples, the minimum is 2',
+      'logseq_get_other has 0 "json tool=logseq_get_other" examples, the minimum is 2',
+    ]);
+  });
+
+  it('reports a schema it cannot check instead of passing it', () => {
+    expect(schemaMismatch(1, {})).toContain('cannot check');
+    expect(schemaMismatch([], { type: 'array' })).toContain('cannot check');
+  });
+});
