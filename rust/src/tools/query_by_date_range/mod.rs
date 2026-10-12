@@ -412,7 +412,8 @@ pub async fn query_journals(client: &LogseqClient, args: &Args, today: CalendarD
     }
     // Opt-in (#18): resolve once over every returned block, whatever the number of days. Only the
     // kept blocks: each block resolves on its own, so their output is the same, and the batched
-    // queries never carry the refs of blocks that were cut.
+    // queries never carry the refs of blocks the `max_blocks` cap cut. The character budget (#485) cuts after
+    // this, on the resolved text, so they may carry refs of blocks it then drops: the same calls as before.
     let mut entries = entries;
     if args.include_content && args.resolve_refs {
         let roots: Vec<Value> = entries.iter().flat_map(|entry| entry.blocks.iter().cloned()).collect();
