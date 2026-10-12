@@ -18,7 +18,7 @@ Generate a monthly summary by compressing the month's weekly summaries into mont
 | Gist label | `- **Month**: ...` |
 | Lookback | Previous 1-2 `Monthly *` pages |
 
-`<graph>` is the graph root; get it from `logseq_get_graph_info` (Step 0). Never hardcode it.
+`<graph>` is the graph root; get it from `logseq_get_graph` (Step 0). Never hardcode it.
 
 ## What Makes Monthly Different
 
@@ -40,7 +40,7 @@ Two further consequences of the altitude shift:
 The journals are also files in `<graph>/journals/`, and reading files needs no setup, so a run drifts into `cat`, `head` and `cut` over them. Don't. The files lack what the query rolls up (`summary.topConcepts`, `totals`), and a file cut short with `head` or `cut` loses the end of a day without saying so. That is where meeting outcomes and hand-offs sit, and a monthly built on a cut file can get a trajectory wrong.
 
 1. If the `logseq_*` tools are deferred (listed by name, schema not loaded) or missing from your tool list, load them now with your host's tool search. One search call is the whole cost.
-2. Call `logseq_get_graph_info`. Its `path` is `<graph>`. Take the path from nowhere else, including a note, an earlier session or a CLAUDE.md.
+2. Call `logseq_get_graph`. Its `path` is `<graph>`. Take the path from nowhere else, including a note, an earlier session or a CLAUDE.md.
 3. Run Step 3's month-shape query as soon as Step 1 has the month's dates, before Step 2 and before Step 3 reads the weeklies. No shell command that lists or reads `<graph>` (`ls`, `cat`, `head`, `grep`) comes before that query has returned. The `date` command in Step 1 is fine.
 
 A journal file is a fallback for a tool call that has failed, never for a tool you hadn't loaded. See "Reading the Period" in the reference.

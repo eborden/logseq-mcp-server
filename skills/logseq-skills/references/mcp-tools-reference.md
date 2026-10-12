@@ -1,19 +1,19 @@
 # LogSeq MCP Tools Reference
 
-Complete documentation for the LogSeq MCP tools organized by category. The server has 16 tools; `logseq_get_graph_info` (graph name and path) is the one not covered below.
+Complete documentation for the LogSeq MCP tools organized by category. The server has 15 tools; `logseq_get_graph` (graph name and path) is the one not covered below.
 
 ## Tool Categories Overview
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
-| Basic Tools | 7 tools | Core search, retrieval, and property queries |
+| Basic Tools | 6 tools | Core search, retrieval, and property queries |
 | Graph Traversal | 1 tool | Network visualization and relationship discovery |
 | Semantic Search | 1 tool | Topic-based relationship queries |
 | Context Building | 3 tools | Comprehensive multi-source context aggregation, and what the user is looking at |
 | Temporal Query | 2 tools | Time-based analysis and journal queries |
 | Linking | 1 tool | Checking a `[[link]]` pass before it is reported done |
 
-## Basic Tools (7 tools)
+## Basic Tools (6 tools)
 
 ### logseq_search_blocks
 
@@ -55,49 +55,41 @@ logseq_search_blocks("Nancy budget", 5)
 Get complete page content with all properties and blocks.
 
 **Parameters:**
-- `page_name` (required): Name of the page (case-insensitive)
-- `include_children` (optional): Include nested child blocks (default: true)
-- `format` (optional): `json` (default) or `markdown`. Markdown is plain text: page properties as `key:: value` lines, then blocks as tab-indented `- ` bullets with `((uuid))` refs kept, then a short footer for warnings and tips. About 80% smaller than JSON on a long page.
+- `page` (required): Name of the page (case-insensitive)
+- `detail` (optional): `page` (default), `full` (adds the nested child blocks) or `outline` (see below)
+- `format` (optional): `json` (default) or `markdown`; with `detail` `outline`, `json` or `toon`. Markdown is plain text: page properties as `key:: value` lines, then blocks as tab-indented `- ` bullets with `((uuid))` refs kept, then a short footer for warnings and tips. About 80% smaller than JSON on a long page.
 
 **Use when:**
 - Deep dive into specific page
 - Need full page structure
 - Following up after search
 
-**For a long page:** call `logseq_get_page_outline` first, then `logseq_get_block` on the blocks you pick.
+**For a long page:** call `logseq_get_page` with `detail` `outline` first, then `logseq_get_block` on the blocks you pick.
 
 **Example:**
 ```
 logseq_get_page("React")
-logseq_get_page("Project Alpha", include_children=true)
+logseq_get_page("Project Alpha", detail="full")
 ```
 
----
-
-### logseq_get_page_outline
-
-List a page's top-level blocks without their bodies: the shape of the page, to choose from.
-
-**Parameters:**
-- `page_name` (required): Page name, alias, or ISO date (`2025-01-01`) for a journal
+**`detail` `outline`:** lists a page's top-level blocks without their bodies: the shape of the page, to choose from.
 
 **Returns:** `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`. `snippet` is the first line, cut to 80 characters. `childCount` counts direct children only. Capped at 200 top-level blocks; a longer page gets an `outline_truncated` warning that names `logseq_get_page` for the rest.
 
-**Cost:** 2 Datalog calls however long the page is. About 98% smaller than `get_page` with children on a long page.
+**Cost:** 2 Datalog calls however long the page is. About 98% smaller than `get_page` with `detail` `full` on a long page.
 
 **Use when:**
 - A page is long and you need only parts of it
 - Deciding which blocks to read
 
-**Next:** `logseq_get_block(block_uuid, include_children=true)` on the blocks you picked.
+**Next:** `logseq_get_block(uuid, include_children=true)` on the blocks you picked.
 
 **Example:**
 ```
-logseq_get_page_outline("Project Alpha")  # → logseq_get_block(blocks[2].uuid, include_children=true)
+logseq_get_page("Project Alpha", detail="outline")  # → logseq_get_block(blocks[2].uuid, include_children=true)
 ```
 
 ---
-
 ### logseq_get_backlinks
 
 Find the pages that reference a specific page, with the blocks that do. Capped: the result can be a cut list.
@@ -137,7 +129,7 @@ logseq_get_backlinks("Machine Learning")
 Get specific block by UUID with optional children.
 
 **Parameters:**
-- `block_uuid` (required): UUID of the block
+- `uuid` (required): UUID of the block
 - `include_children` (optional): Include nested child blocks (default: true)
 - `format` (optional): `json` (default) or `markdown`, a `# Block ((uuid))` heading and the block with its children as bullets
 
@@ -373,7 +365,7 @@ logseq_get_context_for_query("Show me notes on #react and #typescript")
 
 ---
 
-### logseq_get_current_context
+### logseq_get_current
 
 Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.
 
@@ -387,7 +379,7 @@ Get what the user is looking at in LogSeq right now: the open page, the block be
 
 **Example:**
 ```
-logseq_get_current_context()  # → then logseq_build_context(page.originalName)
+logseq_get_current()  # → then logseq_build_context(page.originalName)
 ```
 
 ---
@@ -531,7 +523,7 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 - `query_by_date_range` (journal entries by date)
 
 **Deep dives:**
-- `get_page` with `includeChildren=true` (full page content)
+- `get_page` with `detail="full"` (full page content)
 - `build_context` (comprehensive topic context)
 
 **Discovering connections:**
@@ -646,9 +638,9 @@ All temporal queries use **YYYYMMDD format:**
 
 ## Summary
 
-16 MCP tools. The 15 below are organized into 6 categories; `logseq_get_graph_info` (graph name and path) is the 16th:
+15 MCP tools. The 14 below are organized into 6 categories; `logseq_get_graph` (graph name and path) is the 15th:
 
-1. **Basic Tools (7)** - Core search, retrieval, page outline, property queries
+1. **Basic Tools (6)** - Core search, retrieval, property queries
 2. **Graph Traversal (1)** - Network visualization
 3. **Semantic Search (1)** - Relationship-based queries
 4. **Context Building (3)** - Comprehensive aggregation and current UI context

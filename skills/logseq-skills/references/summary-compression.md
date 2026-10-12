@@ -99,7 +99,7 @@ A journal page's title comes from the graph's `:journal/page-title-format`, so e
 
 **Find the format once per run, before writing the Tags line:**
 
-1. Read `<graph>/logseq/config.edn` (`<graph>` from `logseq_get_graph_info`, Step 0) and find the `:journal/page-title-format` key, for example `:journal/page-title-format "yyyy-MM-dd"`. Read only that file and that key. Skip commented lines (anything from a `;` to the end of the line, such as `;; :journal/page-title-format "..."`): a commented example is not the graph's setting, so use the uncommented key, and go to step 2 if only commented ones exist.
+1. Read `<graph>/logseq/config.edn` (`<graph>` from `logseq_get_graph`, Step 0) and find the `:journal/page-title-format` key, for example `:journal/page-title-format "yyyy-MM-dd"`. Read only that file and that key. Skip commented lines (anything from a `;` to the end of the line, such as `;; :journal/page-title-format "..."`): a commented example is not the graph's setting, so use the uncommented key, and go to step 2 if only commented ones exist.
 2. If the file has no such key, use LogSeq's default, `MMM do, yyyy`.
 3. If the file cannot be read (missing, no permission, no file access in this host), ask the user for the format, or for one journal page's title to copy. Don't guess.
 
@@ -121,7 +121,7 @@ A format with a slash, as in `EEE, MM/dd/yyyy` above, also has a cost: LogSeq re
 
 ## Reading the Period: Query First, Files Only After a Failure
 
-Build every summary from `logseq_query_by_date_range`, after loading the tools and calling `logseq_get_graph_info` (Step 0 of the sub-skill). A journal file is a fallback for a tool call that has actually failed: you made the call and it returned an error, or the server wouldn't connect. These are not failures: the tool is deferred and needs a search to load, a search took a call, or files looked easier. Load the tool.
+Build every summary from `logseq_query_by_date_range`, after loading the tools and calling `logseq_get_graph` (Step 0 of the sub-skill). A journal file is a fallback for a tool call that has actually failed: you made the call and it returned an error, or the server wouldn't connect. These are not failures: the tool is deferred and needs a search to load, a search took a call, or files looked easier. Load the tool.
 
 One read is allowed besides the query: the single `:journal/page-title-format` key in `<graph>/logseq/config.edn`, for the day-link format (see "Journal Day Links"). It is a config file, not a journal, and it can come after the period query. It is not a licence to open `journals/` or `pages/`.
 

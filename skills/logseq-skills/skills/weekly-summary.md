@@ -18,7 +18,7 @@ Generate a weekly summary from journal entries, compressed to salient signals an
 | Gist label | `- **Week**: ...` |
 | Lookback | Previous 2-3 `Weekly *` pages |
 
-`<graph>` is the graph root; get it from `logseq_get_graph_info` (Step 0). Never hardcode it.
+`<graph>` is the graph root; get it from `logseq_get_graph` (Step 0). Never hardcode it.
 
 ## Workflow
 
@@ -27,7 +27,7 @@ Generate a weekly summary from journal entries, compressed to salient signals an
 The journals are also files in `<graph>/journals/`, and reading files needs no setup, so a run drifts into `cat`, `head` and `grep` over them. Don't. The files lack what the query rolls up (`summary.topConcepts`, `totals`), and a file cut short with `head` or `cut` loses the end of a day without saying so, which is where meeting outcomes and hand-offs sit.
 
 1. If the `logseq_*` tools are deferred (listed by name, schema not loaded) or missing from your tool list, load them now with your host's tool search. One search call is the whole cost.
-2. Call `logseq_get_graph_info`. Its `path` is `<graph>`. Take the path from nowhere else, including a note, an earlier session or a CLAUDE.md.
+2. Call `logseq_get_graph`. Its `path` is `<graph>`. Take the path from nowhere else, including a note, an earlier session or a CLAUDE.md.
 3. Run Step 4's period query as soon as Step 1 has the dates, before Steps 2 and 3. No shell command that lists or reads `<graph>` (`ls`, `cat`, `head`, `grep`) comes before that query has returned. The `date` command in Step 1 is fine.
 
 A journal file is a fallback for a tool call that has failed, never for a tool you hadn't loaded. See "Reading the Period" in the reference.
