@@ -287,27 +287,14 @@ impl ConceptEvolution {
                 .filter(|(_, blocks)| !blocks.is_empty())
                 .collect()
         });
-        // A call can read on from the last kept day when a dated mention was dropped. Undated mentions come last and
-        // ignore the dates, so no call reaches them (BR-0006: no `howToFetchAll`, so `hasMore` stays false).
-        let last_date = timeline.last().and_then(|(date, _)| *date);
-        let dated_dropped = self.timeline.iter().any(|(date, _)| date.is_some())
-            && self.timeline.iter().filter(|(date, _)| date.is_some()).map(|(_, blocks)| blocks.len()).sum::<usize>()
-                > timeline.iter().filter(|(date, _)| date.is_some()).map(|(_, blocks)| blocks.len()).sum::<usize>();
-        let how_to_fetch_all = last_date.filter(|_| dated_dropped).map(|date| {
-            format!("Set start_date to {date} (keeping end_date and group_by) to read on; that day repeats its kept mentions. Mentions on non-journal pages ignore the dates.")
-        });
-        let advice = if how_to_fetch_all.is_some() {
-            "Narrower dates give a smaller result. No parameter raises this limit."
-        } else {
-            "Mentions on non-journal pages ignore start_date and end_date, so narrowing the dates can't reach the rest. No parameter raises this limit."
-        };
+        let (advice, how_to_fetch_all) = self.read_on(&timeline);
         let mut warnings = self.warnings.clone();
         warnings.push(size_truncation_warning(SizeCut {
             what: "mentions (oldest first, undated last)",
             kept,
             total: self.timeline_mentions(),
             oversize,
-            advice,
+            advice: &advice,
             how_to_fetch_all,
         }));
         ConceptEvolution {
@@ -316,6 +303,50 @@ impl ConceptEvolution {
             timeline,
             grouped_timeline,
             ..self.clone()
+        }
+    }
+
+    /// What the caller can do about a cut, and the call that reads on when there is one (BR-0006: `howToFetchAll`
+    /// only where a call returns something new, since it is what makes `hasMore` true). `start_date` reads the days
+    /// from that day on, so it names:
+    /// - the next dated day, when the last kept day is whole, or is the first day (a call from the first day would
+    ///   return the same first mentions, cut at the same place);
+    /// - the last kept day, when the cut fell inside a later day: that day repeats its kept mentions;
+    /// - nothing, when no dated mention was dropped, or only the rest of the first day was: undated mentions come last
+    ///   and ignore the dates, and one day's mentions can't be narrowed by dates.
+    fn read_on(&self, kept: &[(Option<i64>, Vec<Value>)]) -> (String, Option<String>) {
+        let undated = "Mentions on non-journal pages ignore start_date and end_date, so narrowing the dates can't reach the rest. No parameter raises this limit.";
+        let Some(((Some(last_date), taken), original)) = kept.last().zip(self.timeline.get(kept.len().wrapping_sub(1))).map(|(k, (_, o))| (k, o)) else {
+            return (undated.to_owned(), None);
+        };
+        let split = taken.len() < original.len();
+        let first_day = self.timeline.first().and_then(|(date, _)| *date);
+        let next_day = self.timeline[kept.len()..].iter().find_map(|(date, _)| *date);
+        let keep_dates = "(keeping end_date and group_by)";
+        let tail = "Mentions on non-journal pages ignore the dates.";
+        let (start, repeats) = match (split, first_day == Some(*last_date), next_day) {
+            // Cut inside a later day: a call from it repeats its kept mentions and reads the rest of it
+            (true, false, _) => (Some(*last_date), true),
+            // Cut inside the first day: a call from it would cut at the same place, so read past it
+            (true, true, next) => (next, false),
+            // Whole days kept, a dated day dropped: read from the next one
+            (false, _, next) => (next, false),
+        };
+        match start {
+            Some(day) if repeats => (
+                "Narrower dates give a smaller result. No parameter raises this limit.".to_owned(),
+                Some(format!("Set start_date to {day} {keep_dates} to read on; that day repeats its kept mentions. {tail}")),
+            ),
+            Some(day) => (
+                if split {
+                    format!("Day {last_date} alone fills this limit, so no date range reads it whole. No parameter raises this limit.")
+                } else {
+                    "Narrower dates give a smaller result. No parameter raises this limit.".to_owned()
+                },
+                Some(format!("Set start_date to {day} {keep_dates} to read the later days. {tail}")),
+            ),
+            None if split => (format!("Day {last_date} alone fills this limit, so no date range reads it whole. No parameter raises this limit."), None),
+            None => (undated.to_owned(), None),
         }
     }
 
@@ -724,11 +755,68 @@ mod tests {
         let warning = &value["warnings"][0];
         assert_eq!(warning["code"], "result_size_truncated");
         assert!(warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 50 mentions")));
-        // a dated mention was dropped, so a call can read on from the last kept day
+        // a dated mention was dropped, so a call can read on (which day is in the tests of `read_on` below)
         assert_eq!(value["hasMore"], true);
-        let last_day = fitted.timeline.last().unwrap().0.unwrap();
-        assert!(warning["howToFetchAll"].as_str().unwrap().starts_with(&format!("Set start_date to {last_day}")));
+        assert!(warning["howToFetchAll"].as_str().unwrap().starts_with("Set start_date to 2025"));
         assert_eq!(keys(&value), ["concept", "hasMore", "warnings", "totals", "summary", "timeline", "groupedTimeline"]);
+    }
+
+    fn how_to_fetch_all(evolution: &ConceptEvolution, kept: usize) -> Option<String> {
+        evolution.cut_to_mentions(kept, false).warnings.last().unwrap().how_to_fetch_all.clone()
+    }
+
+    #[test]
+    fn a_cut_inside_a_later_day_reads_on_from_that_day_and_says_it_repeats_its_kept_mentions() {
+        // 3 days of 3 mentions: the first 4 are day 1 and one of day 2
+        let evolution = long_evolution(3, 3, 0, 10);
+        let how = how_to_fetch_all(&evolution, 4).unwrap();
+        assert!(how.starts_with("Set start_date to 20250102 (keeping end_date and group_by) to read on; that day repeats its kept mentions."), "{how}");
+    }
+
+    #[test]
+    fn a_cut_between_days_reads_on_from_the_next_day_not_the_last_one_shown() {
+        let evolution = long_evolution(3, 3, 0, 10);
+        // day 1 whole: from day 1 would return the same mentions, so the next day is named
+        let how = how_to_fetch_all(&evolution, 3).unwrap();
+        assert!(how.starts_with("Set start_date to 20250102 (keeping end_date and group_by) to read the later days."), "{how}");
+        // two days whole
+        assert!(how_to_fetch_all(&evolution, 6).unwrap().starts_with("Set start_date to 20250103 "));
+    }
+
+    #[test]
+    fn a_cut_inside_the_first_day_never_names_a_call_that_returns_the_same_mentions() {
+        let evolution = long_evolution(3, 3, 0, 10);
+        // 2 of the first day's 3: a call from day 1 is the same result, so it names day 2, and says why
+        let warning = evolution.cut_to_mentions(2, false).warnings.pop().unwrap();
+        assert!(warning.how_to_fetch_all.unwrap().starts_with("Set start_date to 20250102 "));
+        assert!(warning.message.contains("Day 20250101 alone fills this limit"), "{}", warning.message);
+        // with no later day there is no call that reads on: no `howToFetchAll`, so `hasMore` is false
+        let only_day = long_evolution(1, 3, 0, 10);
+        let cut = only_day.cut_to_mentions(2, false);
+        assert!(cut.warnings.last().unwrap().how_to_fetch_all.is_none());
+        assert!(!cut.to_value()["hasMore"].as_bool().unwrap());
+        assert!(cut.warnings.last().unwrap().message.contains("Day 20250101 alone fills this limit"));
+    }
+
+    #[test]
+    fn a_first_mention_over_the_budget_with_a_later_day_reads_on_from_the_later_day() {
+        let big = long_evolution(2, 1, 0, 40_000);
+        let fitted = big.fit_to_budget();
+        assert_eq!(fitted.timeline_mentions(), 1);
+        let warning = fitted.warnings.last().unwrap();
+        assert!(warning.message.contains("an entry is never cut inside its text"));
+        assert!(warning.how_to_fetch_all.as_deref().unwrap().starts_with("Set start_date to 20250102 "), "{warning:?}");
+        // three mentions on the first day, the first alone over the budget: the day is split, so past it
+        let crowded = long_evolution(2, 3, 0, 40_000).fit_to_budget();
+        assert!(crowded.warnings.last().unwrap().how_to_fetch_all.as_deref().unwrap().starts_with("Set start_date to 20250102 "));
+    }
+
+    #[test]
+    fn when_only_undated_mentions_are_left_no_call_reads_on() {
+        // one whole dated day, then undated mentions: the dates can't reach them
+        let evolution = long_evolution(1, 3, 4, 10);
+        assert_eq!(how_to_fetch_all(&evolution, 3), None);
+        assert_eq!(how_to_fetch_all(&evolution, 5), None);
     }
 
     #[test]
