@@ -177,8 +177,9 @@ type Scan = {
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // A former tool name is a whole word: not inside a longer identifier and not part of a path (`src/tools/get_page/`).
-const bareNamePattern = (names: readonly string[]): RegExp | null =>
-  names.length === 0 ? null : new RegExp(`(?<![A-Za-z0-9_/])(${[...names].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|')})(?![A-Za-z0-9_/])`, 'g');
+// `flags` is 'g' to walk every match; a test() on a global regex keeps lastIndex between calls, so a one-shot check passes ''.
+const bareNamePattern = (names: readonly string[], flags: string): RegExp | null =>
+  names.length === 0 ? null : new RegExp(`(?<![A-Za-z0-9_/])(${[...names].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|')})(?![A-Za-z0-9_/])`, flags);
 
 /** Every file's token, info-string and example violations, plus what the skill-only rules count (sections, examples). */
 function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePaths: readonly string[], doc?: DocOptions): Scan {
@@ -187,7 +188,7 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
   const sections = new Set<string>();
   const usedNonTool = new Set<string>();
   const usedContexts = new Set<string>();
-  const bareName = doc ? bareNamePattern(doc.formerToolNames) : null;
+  const bareName = doc ? bareNamePattern(doc.formerToolNames, 'g') : null;
   // A name is a tool when it is recorded as written (`logseq_x`) or, bare, with the prefix added.
   const isTool = (name: string): boolean => known.has(name) || known.has(`logseq_${name}`);
 
@@ -327,9 +328,9 @@ export function docViolations(files: SkillFile[], tools: RecordedTool[], options
     if (known.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which is a tool in tool-list.json, so delete it`);
     else if (!usedNonTool.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which no live doc uses, so delete it`);
   }
-  const bareName = bareNamePattern(options.formerToolNames);
+  const holdsName = bareNamePattern(options.formerToolNames, '');
   for (const context of Object.keys(options.bareContexts)) {
-    if (!bareName || !bareName.test(context)) out.push(`BARE_CONTEXTS names "${context}", which holds no former tool name, so delete it`);
+    if (!holdsName || !holdsName.test(context)) out.push(`BARE_CONTEXTS names "${context}", which holds no former tool name, so delete it`);
     else if (!usedContexts.has(context)) out.push(`BARE_CONTEXTS names "${context}", which no live doc uses, so delete it`);
   }
   return out;
