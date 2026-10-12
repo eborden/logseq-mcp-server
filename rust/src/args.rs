@@ -6,8 +6,11 @@
 //! - The arguments are checked in the order the struct declares its fields, a required one that
 //!   was not sent included, so the first wrong one in that order is the one reported.
 //! - The limits an argument has are the ones its schema advertises: a count is at least the schema's
-//!   `minimum` (0 for an unsigned type), and a string is at most `maxLength` characters. They are
-//!   written once, as `#[schemars(range(min = 1))]` or `#[schemars(length(max = N))]` on the field.
+//!   `minimum` (0 for an unsigned type), a string is at most `maxLength` characters, and a list of
+//!   strings has between `minItems` and `maxItems` of them. They are written once, as
+//!   `#[schemars(range(min = 1))]` or `#[schemars(length(max = N))]` on the field.
+//! - A list is a JSON array of strings (`Vec<String>`), and nothing else is a list: a lone string
+//!   is not a one-element list, and an element that is no string refuses the whole argument.
 //! - Every refusal is worded in this file and nowhere else. A value of the wrong kind is worded from
 //!   the parameter's own entry in the tool's schema (a string, a number, true or false, one of the
 //!   words), which is why a tool's `Args` must be `JsonSchema` too.
@@ -18,7 +21,7 @@ use std::fmt;
 use rmcp::model::JsonObject;
 use schemars::JsonSchema;
 use serde::de::value::StrDeserializer;
-use serde::de::{self, DeserializeOwned, DeserializeSeed, Deserializer, IntoDeserializer, MapAccess, Unexpected, Visitor};
+use serde::de::{self, DeserializeOwned, DeserializeSeed, Deserializer, IntoDeserializer, MapAccess, SeqAccess, Unexpected, Visitor};
 use serde::{Deserialize, forward_to_deserialize_any};
 use serde_json::{Number, Value};
 
@@ -239,6 +242,8 @@ enum Kind {
     Scalar,
     /// One of these words
     Choice(Vec<String>),
+    /// A list of strings
+    List,
 }
 
 impl Kind {
@@ -261,6 +266,7 @@ impl Kind {
         match types.as_slice() {
             ["integer"] | ["number"] => Kind::Number,
             ["boolean"] => Kind::Flag,
+            ["array"] => Kind::List,
             [_, _, ..] => Kind::Scalar,
             _ => Kind::Text,
         }
@@ -273,6 +279,7 @@ impl Kind {
             Kind::Number => ("a number".to_owned(), true),
             Kind::Flag => ("true or false".to_owned(), true),
             Kind::Scalar => ("a string, a number or a boolean".to_owned(), true),
+            Kind::List => ("a list of strings".to_owned(), true),
             Kind::Choice(words) => (format!("one of {}", words.iter().map(|word| Value::from(word.as_str()).to_string()).collect::<Vec<_>>().join(", ")), false),
         };
         match got {
@@ -287,6 +294,7 @@ impl Kind {
             Kind::Text | Kind::Scalar => "\"...\"".to_owned(),
             Kind::Number => "5".to_owned(),
             Kind::Flag => "true".to_owned(),
+            Kind::List => "[\"...\"]".to_owned(),
             Kind::Choice(words) => words.last().map_or_else(String::new, |word| Value::from(word.as_str()).to_string()),
         }
     }
@@ -313,12 +321,22 @@ struct Limits {
     max_chars: Option<usize>,
     /// A date that must be a `YYYYMMDD` day, as a [`YyyyMmDd`] says
     day_format: bool,
+    /// A list has at least this many elements (`minItems`)
+    min_items: usize,
+    /// A list has at most this many elements (`maxItems`)
+    max_items: Option<usize>,
 }
 
 impl Limits {
     fn of(property: Option<&Value>) -> Limits {
         let number = |key: &str| property.and_then(|property| property.get(key)).and_then(|limit| limit.as_u64().or_else(|| limit.as_f64().map(|limit| limit as u64)));
-        Limits { min: number("minimum").unwrap_or(0), max_chars: number("maxLength").map(|limit| limit as usize), day_format: false }
+        Limits {
+            min: number("minimum").unwrap_or(0),
+            max_chars: number("maxLength").map(|limit| limit as usize),
+            day_format: false,
+            min_items: number("minItems").map_or(0, |limit| limit as usize),
+            max_items: number("maxItems").map(|limit| limit as usize),
+        }
     }
 }
 
@@ -446,6 +464,21 @@ impl<'de> Argument<'de> {
         }
     }
 
+    /// A list of strings, with between the schema's `minItems` and `maxItems` elements. A value that is no array
+    /// is the wrong kind, and so is an element that is no string, which refuses the list as a whole (the message
+    /// shows what was sent, not which element).
+    fn list<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, ArgError> {
+        let Value::Array(items) = self.value else { return Err(ArgError::new(Why::Mismatch)) };
+        let items_of = |count: usize| format!("{count} item{}", if count == 1 { "" } else { "s" });
+        if items.len() < self.limits.min_items {
+            return Err(ArgError::refused(format!("at least {}", items_of(self.limits.min_items)), Some(LIST_EXAMPLE)));
+        }
+        if let Some(max) = self.limits.max_items.filter(|max| items.len() > *max) {
+            return Err(ArgError::refused(format!("at most {}", items_of(max)), Some(LIST_EXAMPLE)));
+        }
+        visitor.visit_seq(Elements { items: items.iter() })
+    }
+
     fn any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, ArgError> {
         match self.value {
             Value::Null => visitor.visit_unit(),
@@ -458,6 +491,26 @@ impl<'de> Argument<'de> {
             },
             Value::Array(_) | Value::Object(_) => Err(ArgError::new(Why::Mismatch)),
         }
+    }
+}
+
+/// The example a refused list gives, after the parameter's name.
+const LIST_EXAMPLE: &str = "[\"...\"]";
+
+/// The elements of a list argument, each read as the string it must be.
+struct Elements<'de> {
+    items: std::slice::Iter<'de, Value>,
+}
+
+impl<'de> SeqAccess<'de> for Elements<'de> {
+    type Error = ArgError;
+
+    fn next_element_seed<T: DeserializeSeed<'de>>(&mut self, seed: T) -> Result<Option<T::Value>, ArgError> {
+        let Some(value) = self.items.next() else { return Ok(None) };
+        seed.deserialize(Argument { value, limits: Limits::default() }).map(Some).map_err(|error| match error.why {
+            Why::Mismatch => ArgError::refused("a list of strings, and every element is a string", Some(LIST_EXAMPLE)),
+            _ => error,
+        })
     }
 }
 
@@ -495,6 +548,10 @@ impl<'de> Deserializer<'de> for Argument<'de> {
         visitor.visit_newtype_struct(Argument { value: self.value, limits })
     }
 
+    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, ArgError> {
+        self.list(visitor)
+    }
+
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, ArgError> {
         if self.value.is_null() { visitor.visit_none() } else { visitor.visit_some(self) }
     }
@@ -512,7 +569,7 @@ impl<'de> Deserializer<'de> for Argument<'de> {
     }
 
     forward_to_deserialize_any! {
-        bool i128 u128 f32 f64 char bytes byte_buf unit unit_struct seq tuple tuple_struct map
+        bool i128 u128 f32 f64 char bytes byte_buf unit unit_struct tuple tuple_struct map
         struct identifier ignored_any
     }
 }
@@ -550,6 +607,8 @@ pub(crate) mod testing {
         /// A `YYYYMMDD` day ([`YyyyMmDd`])
         Date,
         Scalar,
+        /// A list of strings, from one element up to this many
+        List(usize),
     }
 
     fn message(param: &str, shown: &str, expected: &str, example: Option<&str>) -> String {
@@ -597,6 +656,20 @@ pub(crate) mod testing {
                 );
                 taken.extend([json!(""), json!("a"), json!(3), json!(2.5), json!(true)]);
                 message(param, "missing", "a string, a number or a boolean (required)", Some("\"...\""))
+            }
+            Takes::List(max) => {
+                let example = "[\"...\"]";
+                for value in [json!(5), json!(true), json!({"a": 1}), json!("a")] {
+                    refused.push((value.clone(), message(param, &value.to_string(), &format!("a list of strings, not {}", kind_of(&value)), Some(example))));
+                }
+                for value in [json!([5]), json!(["a", true]), json!([["a"]]), json!([null])] {
+                    refused.push((value.clone(), message(param, &value.to_string(), "a list of strings, and every element is a string", Some(example))));
+                }
+                refused.push((json!([]), message(param, "[]", "at least 1 item", Some(example))));
+                let too_many = json!(vec!["a"; max + 1]);
+                refused.push((too_many.clone(), message(param, &too_many.to_string(), &format!("at most {max} items"), Some(example))));
+                taken.extend([json!(["Alice"]), json!(vec!["a"; max]), json!(["", "a"])]);
+                message(param, "missing", "a list of strings (required)", Some(example))
             }
             Takes::Flag => {
                 refuse_kinds(Value::is_boolean, &|kind| format!("true or false, not {kind}"), "true");
@@ -686,6 +759,8 @@ mod tests {
         day: Option<i64>,
         #[schemars(with = "Option<f64>")]
         dated: Option<YyyyMmDd>,
+        #[schemars(length(min = 1, max = 3))]
+        names: Option<Vec<String>>,
         #[serde(default)]
         flag: bool,
         format: Option<Kind2>,
@@ -742,6 +817,7 @@ mod tests {
                 last: None,
                 day: None,
                 dated: None,
+                names: None,
                 flag: false,
                 format: None,
                 note: None,
@@ -908,6 +984,33 @@ mod tests {
         assert_eq!(sample(json!({"short": "ab\u{1F600}"})).unwrap().short, "ab\u{1F600}");
         assert_eq!(sample(json!({"short": "abc\u{1F600}"})).unwrap_err(), message("short", "\"abc\u{1F600}\"", "at most 3 characters", None));
         assert_eq!(sample(json!({"short": 5})).unwrap_err(), message("short", "5", "a string, not a number", Some("\"...\"")));
+    }
+
+    #[test]
+    fn a_list_is_an_array_of_strings_from_its_minimum_to_its_maximum_size() {
+        let bad = |extra: Value| sample(extra).unwrap_err();
+        let example = Some("[\"...\"]");
+        assert_eq!(sample(json!({"names": ["Alice"]})).unwrap().names, Some(vec!["Alice".to_owned()]));
+        assert_eq!(sample(json!({"names": ["a", "", "a"]})).unwrap().names, Some(vec!["a".to_owned(), String::new(), "a".to_owned()]));
+        assert_eq!(sample(json!({"names": null})).unwrap().names, None);
+        // not a list: a lone string is not a one-element list
+        assert_eq!(bad(json!({"names": "Alice"})), message("names", "\"Alice\"", "a list of strings, not a string", example));
+        assert_eq!(bad(json!({"names": 5})), message("names", "5", "a list of strings, not a number", example));
+        assert_eq!(bad(json!({"names": {"a": 1}})), message("names", "{\"a\":1}", "a list of strings, not an object", example));
+        // an element that is no string refuses the whole list, and the message shows the whole list
+        assert_eq!(bad(json!({"names": ["a", 5]})), message("names", "[\"a\",5]", "a list of strings, and every element is a string", example));
+        assert_eq!(bad(json!({"names": [null]})), message("names", "[null]", "a list of strings, and every element is a string", example));
+        assert_eq!(bad(json!({"names": [["a"]]})), message("names", "[[\"a\"]]", "a list of strings, and every element is a string", example));
+        // the size limits of the schema, counted in elements
+        assert_eq!(bad(json!({"names": []})), message("names", "[]", "at least 1 item", example));
+        assert_eq!(bad(json!({"names": ["a", "b", "c", "d"]})), message("names", "[\"a\",\"b\",\"c\",\"d\"]", "at most 3 items", example));
+        assert_eq!(sample(json!({"names": ["a", "b", "c"]})).unwrap().names.map(|names| names.len()), Some(3));
+    }
+
+    #[test]
+    fn a_list_is_swept_like_every_other_kind() {
+        use super::testing::{Takes, sweep};
+        sweep::<Sample>(json!({"name": "Alice", "short": "abc", "kind": "plain", "value": 1}), "names", Takes::List(3), false);
     }
 
     #[test]
