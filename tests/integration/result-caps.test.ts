@@ -742,7 +742,7 @@ describe('result caps (#61)', () => {
     // for the crowded topic, and the alias-sets and semantic-search suites for the others.
     const CASES: Array<{ label: string; args: Record<string, unknown>; aliased?: boolean; nested?: boolean }> = [
       { label: 'references', args: { topic_a: 'busy source', topic_b: 'popular topic', relationship_type: 'references' } },
-      { label: 'referenced-by', args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'referenced-by' } },
+      { label: 'referenced-by', args: { topic_a: 'bob', topic_b: 'project atlas', relationship_type: 'referenced-by' }, aliased: true },
       { label: 'in-pages-linking-to', args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'in-pages-linking-to' } },
       {
         label: 'connected-within',
