@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::args::parse_args;
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::compact::compact_topic_context;
 use crate::edn::PageName;
@@ -47,7 +48,7 @@ use crate::resolve::{RETRY_ADVICE, ResolvedPage, require_page};
 use crate::resolve_refs::resolve_block_refs;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::get_backlinks::{block_rows, fetch_backlinks};
-use crate::truncation::{INLINE_BLOCKS, INLINE_REFERENCES, INLINE_RELATED_PAGES, truncation_warning};
+use crate::truncation::{INLINE_BLOCKS, INLINE_REFERENCES, INLINE_RELATED_PAGES, SizeCut, size_truncation_warning, truncation_warning};
 
 use self::queries::{get_blocks_on_pages, get_page_blocks};
 
@@ -156,13 +157,17 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
                 .to_owned(),
         ));
     }
-    let result = context.to_value(true);
-    if request.format == Some(OutputFormat::Markdown) {
-        let body = render_topic_context(&result, ContextRenderOptions { compact: request.compact, ..Default::default() });
-        return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
-    }
-    let shown = if request.compact { compact_topic_context(&result) } else { result };
-    Ok(success_result(vec![ContentBlock::text(shown.to_string())]))
+    // The text the call sends, which the character budget measures (#485)
+    let render = |context: &TopicContext| -> String {
+        let result = context.to_value(true);
+        if request.format == Some(OutputFormat::Markdown) {
+            let body = render_topic_context(&result, ContextRenderOptions { compact: request.compact, ..Default::default() });
+            return with_footer(body, &FooterMeta::of_result(&result, &[]));
+        }
+        if request.compact { compact_topic_context(&result).to_string() } else { result.to_string() }
+    };
+    let context = context.fit_to_budget(&render, request.compact);
+    Ok(success_result(vec![ContentBlock::text(render(&context))]))
 }
 
 /// What building a context takes beyond the topic.
@@ -318,6 +323,50 @@ impl TopicContext {
             related_pages: self.related_pages.iter().map(|page| RelatedPage { page, relationship_type: "inbound" }).collect(),
             references: &self.references,
             temporal_context: self.temporal_context,
+        }
+    }
+}
+
+impl TopicContext {
+    /// The blocks, then the references, then the related pages, cut to the first `kept` of them in that order
+    /// (#485): the page's own blocks are the answer, the references come next, and the related pages, which are
+    /// names the references mostly repeat, go first. `summary` counts what is returned and `totals` what there was
+    /// before the caps; the warning says what is left.
+    fn cut_to(&self, kept: usize, oversize: bool, compact: bool) -> TopicContext {
+        let blocks = kept.min(self.direct_blocks.len());
+        let references = (kept - blocks).min(self.references.len());
+        let related = (kept - blocks - references).min(self.related_pages.len());
+        let mut warnings = self.warnings.clone();
+        let more = if compact { "Read a block in full with logseq_get_block." } else { "Set compact to true for short snippets, or read a block with logseq_get_block." };
+        warnings.push(size_truncation_warning(SizeCut {
+            what: "blocks, references and related pages, in that order",
+            kept,
+            total: self.direct_blocks.len() + self.references.len() + self.related_pages.len(),
+            oversize,
+            advice: &format!(
+                "That is {blocks} of {} blocks, {references} of {} references and {related} of {} related pages. {more} No parameter raises this limit.",
+                self.direct_blocks.len(),
+                self.references.len(),
+                self.related_pages.len()
+            ),
+            how_to_fetch_all: None,
+        }));
+        TopicContext {
+            direct_blocks: self.direct_blocks[..blocks].to_vec(),
+            references: self.references[..references].to_vec(),
+            related_pages: self.related_pages[..related].to_vec(),
+            warnings,
+            ..self.clone()
+        }
+    }
+
+    /// The context as it is when its text fits the character budget (#485), else cut to the first entries that do.
+    fn fit_to_budget(self, render: &impl Fn(&TopicContext) -> String, compact: bool) -> TopicContext {
+        let total = self.direct_blocks.len() + self.references.len() + self.related_pages.len();
+        let size_of = |kept: usize| size(&render(&if kept < total { self.cut_to(kept, false, compact) } else { self.clone() }));
+        match fit(total, 1, size_of) {
+            Fit::Whole => self,
+            Fit::Cut { kept, oversize } => self.cut_to(kept, oversize, compact),
         }
     }
 }
@@ -527,6 +576,87 @@ mod tests {
             "required": ["topic_name"],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
+    }
+
+    fn context_of(blocks: usize, references: usize, related: usize, length: usize) -> TopicContext {
+        let text = "x".repeat(length);
+        TopicContext {
+            topic: "atlas".into(),
+            resolved_from: None,
+            resolved_aliases: None,
+            main_page: json!({"id": 1, "name": "atlas"}),
+            direct_blocks: (0..blocks as i64).map(|id| json!({"id": 100 + id, "content": text})).collect(),
+            related_pages: (0..related as i64).map(|id| json!({"id": 500 + id, "name": format!("page {id}")})).collect(),
+            references: (0..references as i64)
+                .map(|id| Reference { block: json!({"id": 900 + id, "content": text}), source_page: json!({"id": 2000 + id}) })
+                .collect(),
+            temporal_context: None,
+            warnings: vec![],
+            totals: Totals { blocks: blocks + 5, related_pages: related, references },
+        }
+    }
+
+    fn json_of(context: &TopicContext) -> String {
+        context.to_value(true).to_string()
+    }
+
+    #[test]
+    fn a_context_that_fits_the_budget_is_returned_as_it_is() {
+        let context = context_of(5, 5, 5, 200);
+        assert_eq!(context.clone().fit_to_budget(&json_of, false), context);
+    }
+
+    #[test]
+    fn a_context_over_the_budget_drops_related_pages_then_references_then_blocks() {
+        // 30 blocks and 30 references of 600 characters: 36,000 of text, and 20 related pages
+        let context = context_of(30, 30, 20, 600);
+        let fitted = context.clone().fit_to_budget(&json_of, false);
+        assert!(size(&json_of(&fitted)) <= crate::budget::BUDGET_CHARS);
+        // every block is kept before a reference, and every reference before a related page
+        assert_eq!(fitted.direct_blocks.len(), 30);
+        assert!(fitted.references.len() < 30 && fitted.references.len() > 0);
+        assert!(fitted.related_pages.is_empty());
+        // `summary` counts what is returned, `totals` what there was before the caps
+        let value = fitted.to_value(true);
+        assert_eq!(value["summary"]["totalReferences"], json!(fitted.references.len()));
+        assert_eq!(value["totals"], json!({"blocks": 35, "relatedPages": 20, "references": 30}));
+        assert_eq!(value["hasMore"], false);
+        assert_eq!(value["warnings"][0]["code"], "result_size_truncated");
+        // one more entry would not fit
+        let kept = fitted.direct_blocks.len() + fitted.references.len();
+        assert!(size(&json_of(&context.cut_to(kept + 1, false, false))) > crate::budget::BUDGET_CHARS);
+    }
+
+    #[test]
+    fn a_block_over_the_budget_is_kept_alone_and_never_cut() {
+        let context = context_of(2, 0, 0, 40_000);
+        let fitted = context.fit_to_budget(&json_of, false);
+        assert_eq!(fitted.direct_blocks.len(), 1);
+        assert_eq!(fitted.direct_blocks[0]["content"].as_str().unwrap().len(), 40_000);
+        assert!(fitted.warnings[0].message.contains("an entry is never cut inside its text"));
+        // a context with a single entry, however large, is not cut
+        let lone = context_of(1, 0, 0, 40_000);
+        assert_eq!(lone.clone().fit_to_budget(&json_of, false), lone);
+        // and an empty one has nothing to cut
+        let empty = context_of(0, 0, 0, 0);
+        assert_eq!(empty.clone().fit_to_budget(&json_of, true), empty);
+    }
+
+    #[test]
+    fn the_budget_measures_the_markdown_and_the_compact_text_the_call_sends() {
+        let context = context_of(30, 30, 0, 600);
+        let markdown = |context: &TopicContext| {
+            let result = context.to_value(true);
+            with_footer(render_topic_context(&result, ContextRenderOptions::default()), &FooterMeta::of_result(&result, &[]))
+        };
+        let fitted = context.clone().fit_to_budget(&markdown, false);
+        assert!(size(&markdown(&fitted)) <= crate::budget::BUDGET_CHARS);
+        assert!(fitted.direct_blocks.len() + fitted.references.len() < 60);
+        // the footer carries the warning
+        assert!(markdown(&fitted).contains("result_size_truncated"));
+        // compact text is short enough for the same context to fit whole
+        let compact = |context: &TopicContext| compact_topic_context(&context.to_value(true)).to_string();
+        assert_eq!(context.clone().fit_to_budget(&compact, true), context);
     }
 
     #[test]
