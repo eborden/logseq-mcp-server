@@ -29,7 +29,7 @@
 use std::fmt;
 
 use serde::Deserialize;
-use serde::de::{self, DeserializeOwned, Deserializer, IgnoredAny, MapAccess, Unexpected, Visitor};
+use serde::de::{self, DeserializeOwned, Deserializer, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor};
 use serde_json::Value;
 
 mod deserializer;
@@ -246,6 +246,157 @@ impl<'de> Visitor<'de> for ObjectVisitor {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Object, A::Error> {
         while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
         Ok(Object)
+    }
+}
+
+/// The properties of a page as the Editor API sends them (`getAllPages`, `getPage`): an object whose keys are the
+/// user's own property names, in camelCase, and whose values this server reads only to match a property by value.
+/// Nothing here fails on a value, whatever it holds: a kind of value no property filter can match is
+/// [`PropertyValue::Other`], and a key never appears in an error (ADR-0004).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct Properties(pub(crate) Vec<(String, PropertyValue)>);
+
+/// What a property holds, in the kinds the property filter tells apart (the kinds LogSeq's `:block/properties`
+/// holds: a scalar, or a set).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PropertyValue {
+    Text(String),
+    Number(f64),
+    Flag(bool),
+    /// A multi-value property, or a page reference: the elements that are strings. An element that is no string is
+    /// left out, since a string value never equals one.
+    Set(Vec<String>),
+    /// `null`, an object, or anything else a property filter can't match
+    Other,
+}
+
+impl<'de> Deserialize<'de> for Properties {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Properties, D::Error> {
+        deserializer.deserialize_map(PropertiesVisitor)
+    }
+}
+
+struct PropertiesVisitor;
+
+impl<'de> Visitor<'de> for PropertiesVisitor {
+    type Value = Properties;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("an object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Properties, A::Error> {
+        let mut entries = Vec::with_capacity(map.size_hint().unwrap_or(0));
+        while let Some((key, value)) = map.next_entry::<String, PropertyValue>()? {
+            entries.push((key, value));
+        }
+        Ok(Properties(entries))
+    }
+}
+
+impl<'de> Deserialize<'de> for PropertyValue {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<PropertyValue, D::Error> {
+        deserializer.deserialize_any(PropertyValueVisitor)
+    }
+}
+
+struct PropertyValueVisitor;
+
+impl<'de> Visitor<'de> for PropertyValueVisitor {
+    type Value = PropertyValue;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a property value")
+    }
+
+    fn visit_str<E: de::Error>(self, text: &str) -> Result<PropertyValue, E> {
+        Ok(PropertyValue::Text(text.to_owned()))
+    }
+
+    fn visit_u64<E: de::Error>(self, number: u64) -> Result<PropertyValue, E> {
+        Ok(PropertyValue::Number(number as f64))
+    }
+
+    fn visit_i64<E: de::Error>(self, number: i64) -> Result<PropertyValue, E> {
+        Ok(PropertyValue::Number(number as f64))
+    }
+
+    fn visit_f64<E: de::Error>(self, number: f64) -> Result<PropertyValue, E> {
+        Ok(PropertyValue::Number(number))
+    }
+
+    fn visit_bool<E: de::Error>(self, flag: bool) -> Result<PropertyValue, E> {
+        Ok(PropertyValue::Flag(flag))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<PropertyValue, E> {
+        Ok(PropertyValue::Other)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<PropertyValue, A::Error> {
+        let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        while let Some(Element(item)) = seq.next_element::<Element>()? {
+            items.extend(item);
+        }
+        Ok(PropertyValue::Set(items))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<PropertyValue, A::Error> {
+        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(PropertyValue::Other)
+    }
+}
+
+/// One element of a set: its text when it is a string, and nothing of any other kind.
+struct Element(Option<String>);
+
+impl<'de> Deserialize<'de> for Element {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Element, D::Error> {
+        deserializer.deserialize_any(ElementVisitor)
+    }
+}
+
+struct ElementVisitor;
+
+impl<'de> Visitor<'de> for ElementVisitor {
+    type Value = Element;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a property value")
+    }
+
+    fn visit_str<E: de::Error>(self, text: &str) -> Result<Element, E> {
+        Ok(Element(Some(text.to_owned())))
+    }
+
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Element, E> {
+        Ok(Element(None))
+    }
+
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Element, E> {
+        Ok(Element(None))
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Element, E> {
+        Ok(Element(None))
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Element, E> {
+        Ok(Element(None))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Element, E> {
+        Ok(Element(None))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Element, A::Error> {
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(Element(None))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Element, A::Error> {
+        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(Element(None))
     }
 }
 

@@ -16,7 +16,7 @@
 
 use serde::Deserialize;
 
-use crate::wire::{EntityRef, Id, Number, Object};
+use crate::wire::{EntityRef, Id, Number, Object, Properties};
 
 /// A page nested in a block (`:block/page`) or listed among its `refs`, in either spelling. Only what
 /// [`super::page_display_name`], [`super::journal_flag`], [`super::journal_day_of`] and the id readers take
@@ -69,7 +69,8 @@ pub(crate) struct EditorPage {
     /// The page is backed by a file: it wrote its own `alias::` line, rather than being a stub
     pub(crate) file: Option<EntityRef>,
     pub(crate) alias: Option<Vec<EntityRef>>,
-    properties: Option<Object>,
+    /// The page's properties, read by the page-property filter of the page finder
+    pub(crate) properties: Option<Properties>,
     #[serde(rename = "journalDay")]
     journal_day: Option<Number>,
 }
