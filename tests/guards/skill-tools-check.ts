@@ -176,10 +176,27 @@ type Scan = {
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// A former tool name is a whole word: not inside a longer identifier and not part of a path (`src/tools/get_page/`).
+// A former tool name is a whole word, not inside a longer identifier. One that touches a `/` is read by `inPath` below.
 // `flags` is 'g' to walk every match; a test() on a global regex keeps lastIndex between calls, so a one-shot check passes ''.
 const bareNamePattern = (names: readonly string[], flags: string): RegExp | null =>
-  names.length === 0 ? null : new RegExp(`(?<![A-Za-z0-9_/])(${[...names].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|')})(?![A-Za-z0-9_/])`, flags);
+  names.length === 0 ? null : new RegExp(`(?<![A-Za-z0-9_])(${[...names].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|')})(?![A-Za-z0-9_])`, flags);
+
+/**
+ * Whether the name at `index` in `text` is part of a path or a directory name (`src/tools/get_page/`, `get_page/`),
+ * which the rename of a tool does not have to touch. A name that touches no `/` is never a path. One that does is a
+ * path unless the run around it is only former tool names (`get_page/get_block`, a pair written with a slash), which
+ * is prose and is checked.
+ */
+function inPath(text: string, index: number, length: number, former: ReadonlySet<string>): boolean {
+  if (text[index - 1] !== '/' && text[index + length] !== '/') return false;
+  const stop = /[\s`'",;()|[\]{}]/;
+  let from = index;
+  while (from > 0 && !stop.test(text[from - 1])) from--;
+  let to = index + length;
+  while (to < text.length && !stop.test(text[to])) to++;
+  const segments = text.slice(from, to).replace(/[.:!?]+$/, '').split('/').filter(part => part !== '');
+  return !(segments.length >= 2 && segments.every(part => former.has(part)));
+}
 
 /** Every file's token, info-string and example violations, plus what the skill-only rules count (sections, examples). */
 function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePaths: readonly string[], doc?: DocOptions): Scan {
@@ -189,6 +206,7 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
   const usedNonTool = new Set<string>();
   const usedContexts = new Set<string>();
   const bareName = doc ? bareNamePattern(doc.formerToolNames, 'g') : null;
+  const former = new Set(doc?.formerToolNames ?? []);
   // A name is a tool when it is recorded as written (`logseq_x`) or, bare, with the prefix added.
   const isTool = (name: string): boolean => known.has(name) || known.has(`logseq_${name}`);
 
@@ -218,7 +236,7 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
           }
         }
         for (const m of rest.matchAll(bareName)) {
-          if (!isTool(m[1])) bad.push(m[1]);
+          if (!isTool(m[1]) && !inPath(rest, m.index, m[1].length, former)) bad.push(m[1]);
         }
       }
       if (doc && marker) {

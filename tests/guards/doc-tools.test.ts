@@ -272,6 +272,14 @@ describe('the bare-name rule can fail (#510 self-test)', () => {
     expect(run('See `rust/src/tools/get_widget/mod.rs` and get_widget/.\n')).toEqual([]);
   });
 
+  it('skips a directory name, and checks a pair of names written with a slash', () => {
+    expect(run('Dirs: `get_widget/` and `get_widget_outline/` (#1).\n')).toEqual([]);
+    expect(run('`get_widget/get_thing`\n')).toEqual([stale(1, 'get_widget')]);
+    expect(run('Use get_thing/get_widget, or get_widget/get_widget_outline.\n')).toEqual([stale(1, 'get_widget'), stale(1, 'get_widget_outline')]);
+    // Anything else in the run makes it a path.
+    expect(run('`tools/get_widget/get_thing` and `get_widget/mod.rs`\n')).toEqual([]);
+  });
+
   it('ignores a name that is not a former tool name', () => {
     expect(run('`get_gadget` and `query_things`.\n')).toEqual([]);
   });
