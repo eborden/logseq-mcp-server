@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::args::parse_args;
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::ToolError;
@@ -47,6 +48,7 @@ use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
+use crate::truncation::{SizeCut, size_truncation_warning};
 use crate::tools::build_context::resolved_from;
 
 use self::graph::{Edge, EdgeOutput, Links, Node, Nodes, build_edges, relabel_depths};
@@ -149,12 +151,47 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         ..request.options
     };
     let network = get_concept_network(client, &request.concept_name, request.max_depth.min(MAX_DEPTH_LIMIT), options).await?;
-    let result = network.to_value();
-    if request.format == Some(OutputFormat::Markdown) {
-        let body = render_network(&result);
-        return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
+    // The text the call sends, which the character budget measures (#485)
+    let markdown = request.format == Some(OutputFormat::Markdown);
+    let render = |network: &ConceptNetwork| -> String {
+        let result = network.to_value();
+        if markdown { with_footer(render_network(&result), &FooterMeta::of_result(&result, &[])) } else { result.to_string() }
+    };
+    let network = fit_to_budget(network, &render);
+    Ok(success_result(vec![ContentBlock::text(render(&network))]))
+}
+
+/// The network cut to its `kept` pages nearest the root (the deepest go first, and the earlier admitted
+/// first among equals), with the links among them, as `truncated`, and with the `result_size_truncated` warning (#485).
+/// Pages keep the order they had. The root is at depth 0, so it is always kept.
+fn cut_to_pages(network: &ConceptNetwork, kept: usize, oversize: bool) -> ConceptNetwork {
+    let mut by_depth: Vec<usize> = (0..network.nodes.len()).collect();
+    by_depth.sort_by_key(|&at| network.nodes[at].depth);
+    let keep: HashSet<usize> = by_depth.into_iter().take(kept).collect();
+    let nodes: Vec<Node> = network.nodes.iter().enumerate().filter(|(at, _)| keep.contains(at)).map(|(_, node)| node.clone()).collect();
+    let ids: HashSet<i64> = nodes.iter().map(|node| node.id).collect();
+    let edges = network.edges.iter().filter(|edge| ids.contains(&edge.from) && ids.contains(&edge.to)).cloned().collect();
+    let mut warnings = network.warnings.clone();
+    warnings.push(size_truncation_warning(SizeCut {
+        what: "pages",
+        kept,
+        total: network.nodes.len(),
+        oversize,
+        advice: "Start from a more specific page, or lower max_depth, to see a smaller network. No parameter raises this limit.",
+        how_to_fetch_all: None,
+    }));
+    ConceptNetwork { nodes, edges, truncated: true, warnings, ..network.clone() }
+}
+
+/// The network as it is when its text fits the character budget, else cut to the pages that do (#485).
+fn fit_to_budget(network: ConceptNetwork, render: &impl Fn(&ConceptNetwork) -> String) -> ConceptNetwork {
+    let total = network.nodes.len();
+    // The root is the answer, so it is the one page a cut always keeps
+    let cut_size = |kept: usize| size(&render(&if kept < total { cut_to_pages(&network, kept, false) } else { network.clone() }));
+    match fit(total, 1, cut_size) {
+        Fit::Whole => network,
+        Fit::Cut { kept, oversize } => cut_to_pages(&network, kept, oversize),
     }
-    Ok(success_result(vec![ContentBlock::text(result.to_string())]))
 }
 
 /// What the network walk takes beyond the root and the depth.
@@ -553,6 +590,67 @@ mod tests {
         };
         assert!(!network.has_more());
         assert_eq!(network.to_value()["truncated"], false);
+    }
+
+    fn star(pages: usize, name_length: usize) -> ConceptNetwork {
+        // a root, `pages - 1` neighbours at depth 1 and a second-level page behind the first neighbour
+        let mut nodes = vec![Node { id: 1, name: "Atlas".into(), depth: 0 }];
+        let mut edges = Vec::new();
+        for id in 2..=pages as i64 {
+            nodes.push(Node { id, name: "x".repeat(name_length), depth: 1 });
+            edges.push(Edge { from: 1, to: id, outbound: 1, inbound: 0 });
+        }
+        nodes.insert(2, Node { id: 900, name: "deep".into(), depth: 2 });
+        edges.push(Edge { from: 2, to: 900, outbound: 1, inbound: 0 });
+        ConceptNetwork {
+            concept: "Atlas".into(),
+            resolved_from: None,
+            resolved_aliases: None,
+            nodes,
+            edges,
+            truncated: false,
+            warnings: vec![],
+        }
+    }
+
+    #[test]
+    fn a_cut_drops_the_deepest_pages_first_with_their_links_and_says_so() {
+        let network = star(5, 3);
+        let cut = cut_to_pages(&network, 4, false);
+        // 6 pages: the root, 4 neighbours and the page behind the first one; the deep page goes first
+        assert_eq!(cut.nodes.iter().map(|node| node.id).collect::<Vec<_>>(), [1, 2, 3, 4]);
+        assert!(cut.edges.iter().all(|edge| edge.from != 900 && edge.to != 900));
+        assert_eq!(cut.edges.len(), 3);
+        assert!(cut.truncated);
+        let warning = cut.warnings.last().unwrap();
+        assert_eq!(warning.code, "result_size_truncated");
+        assert!(warning.message.starts_with("Showing 4 of 6 pages"), "{}", warning.message);
+        assert!(!cut.has_more(), "no parameter fetches the rest");
+        // the key order of the result is unchanged
+        assert_eq!(keys(&cut.to_value()), ["concept", "truncated", "hasMore", "warnings", "nodes", "edges"]);
+    }
+
+    #[test]
+    fn a_network_that_fits_is_returned_as_it_is() {
+        let network = star(5, 3);
+        let render = |network: &ConceptNetwork| network.to_value().to_string();
+        assert_eq!(fit_to_budget(network.clone(), &render), network);
+    }
+
+    #[test]
+    fn a_network_over_the_budget_is_cut_to_fit_and_the_root_is_always_kept() {
+        let network = star(400, 100);
+        let render = |network: &ConceptNetwork| network.to_value().to_string();
+        assert!(size(&render(&network)) > crate::budget::BUDGET_CHARS);
+        let fitted = fit_to_budget(network.clone(), &render);
+        assert!(size(&render(&fitted)) <= crate::budget::BUDGET_CHARS);
+        assert!(fitted.nodes.len() < network.nodes.len());
+        assert_eq!(fitted.nodes[0].id, 1);
+        assert!(fitted.nodes.iter().all(|node| node.id != 900), "the deep page is the first to go");
+        assert!(fitted.truncated);
+        // one more page would not have fit
+        let one_more = size(&render(&cut_to_pages(&network, fitted.nodes.len() + 1, false)));
+        assert!(one_more > crate::budget::BUDGET_CHARS);
     }
 
     #[test]
