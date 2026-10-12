@@ -82,8 +82,8 @@ describe('the launcher starting the server (ADR-0035)', () => {
     expect(client.getServerVersion()).toMatchObject({ name: 'logseq-mcp-server', version: pkg.version });
   });
 
-  it('answers tools/list with the 16 tools', async () => {
-    expect((await client.listTools()).tools).toHaveLength(16);
+  it('answers tools/list with the 15 tools', async () => {
+    expect((await client.listTools()).tools).toHaveLength(15);
   });
 
   // The launcher must be replaced by the server (`exec`), not wait beside it: ADR-0035's footprint (about 2 MB resident)
