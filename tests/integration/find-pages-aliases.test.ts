@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { listPages } from './helpers/tools.js';
-import { MAX_LIST_PAGES_LIMIT } from './helpers/caps.js';
-import type { ListPagesResult, PageEntity } from './helpers/types.js';
+import { findPages } from './helpers/tools.js';
+import { MAX_FIND_PAGES_LIMIT } from './helpers/caps.js';
+import type { FindPagesResult, PageEntity } from './helpers/types.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 
 /**
- * Aliases nested in logseq_list_pages (#171), against the fixture graph.
+ * Aliases nested in logseq_find_pages (#171), against the fixture graph.
  *
  * Read-only. The fixture has two alias groups (tests/fixtures/README.md, "Page resolution and
  * aliases"): `project atlas` declares `alias:: atlas`, which no other page declares, and
@@ -15,14 +15,14 @@ import { connectFixture, recordCalls } from './helpers/fixture-client.js';
  * LogSeq makes a stub page, with no file, for each alias name.
  */
 
-describe('logseq_list_pages nests aliases (#171), against the fixture graph', () => {
+describe('logseq_find_pages nests aliases (#171), against the fixture graph', () => {
   let client: LogseqClient;
   let calls: string[];
-  let all: ListPagesResult;
+  let all: FindPagesResult;
   let nonJournalPages: number;
 
-  const names = (result: ListPagesResult) => result.pages.map(page => page.name);
-  const entry = (result: ListPagesResult, name: string) => result.pages.find(page => page.name === name);
+  const names = (result: FindPagesResult) => result.pages.map(page => page.name);
+  const entry = (result: FindPagesResult, name: string) => result.pages.find(page => page.name === name);
 
   beforeAll(async () => {
     ({ client } = await connectFixture());
@@ -30,7 +30,7 @@ describe('logseq_list_pages nests aliases (#171), against the fixture graph', ()
     const everyPage = (await client.callAPI<PageEntity[] | null>('logseq.Editor.getAllPages')) ?? [];
     nonJournalPages = everyPage.filter(page => !(page.journal || page['journal?'])).length;
     ({ calls } = recordCalls(client));
-    all = await listPages(client, { limit: MAX_LIST_PAGES_LIMIT });
+    all = await findPages(client, { limit: MAX_FIND_PAGES_LIMIT });
   });
 
   it('nests the alias under the page that declares it, and lists it nowhere else', () => {
@@ -58,7 +58,7 @@ describe('logseq_list_pages nests aliases (#171), against the fixture graph', ()
   });
 
   it('counts canonical pages: every non-journal page except the two alias stubs', () => {
-    expect(nonJournalPages, 'the unfiltered list fits under the maximum').toBeLessThanOrEqual(MAX_LIST_PAGES_LIMIT);
+    expect(nonJournalPages, 'the unfiltered list fits under the maximum').toBeLessThanOrEqual(MAX_FIND_PAGES_LIMIT);
     expect(all.total).toBe(nonJournalPages - 2);
     expect(all.pages).toHaveLength(all.total);
     expect(all.hasMore).toBeUndefined();
@@ -76,16 +76,16 @@ describe('logseq_list_pages nests aliases (#171), against the fixture graph', ()
     expect(listed).toEqual([...listed].sort(byName));
   });
 
-  it('name_contains on an alias returns the page that declares it, with its alias list', async () => {
-    const result = await listPages(client, { nameContains: 'ATLAS' });
+  it('text on an alias returns the page that declares it, with its alias list', async () => {
+    const result = await findPages(client, { text: 'ATLAS' });
 
     expect(entry(result, 'project atlas')).toEqual({ name: 'project atlas', aliases: ['atlas'] });
     expect(result.pages.every(page => page.name.toLowerCase().includes('atlas') || page.aliases?.includes('atlas'))).toBe(true);
     expect(result.total).toBe(result.pages.length);
   });
 
-  it('name_contains on an ambiguous alias returns both pages that declare it', async () => {
-    const result = await listPages(client, { nameContains: 'roadmap' });
+  it('text on an ambiguous alias returns both pages that declare it', async () => {
+    const result = await findPages(client, { text: 'roadmap' });
 
     expect(result).toEqual({
       pages: [
@@ -98,22 +98,22 @@ describe('logseq_list_pages nests aliases (#171), against the fixture graph', ()
 
   it('limit takes pages, not aliases, and offset continues at the next page', async () => {
     const start = names(all).indexOf('project atlas');
-    const window = await listPages(client, { limit: 1, offset: start });
+    const window = await findPages(client, { limit: 1, offset: start });
 
     expect(window.pages).toEqual([{ name: 'project atlas', aliases: ['atlas'] }]);
     expect(window.total).toBe(all.total);
     expect(window.hasMore).toBe(true);
     expect(window.warnings?.map(warning => warning.code)).toEqual(['pages_truncated']);
-    expect((await listPages(client, { limit: 1, offset: start + 1 })).pages[0]).toEqual(all.pages[start + 1]);
+    expect((await findPages(client, { limit: 1, offset: start + 1 })).pages[0]).toEqual(all.pages[start + 1]);
   });
 
   it('makes one API call, with or without a filter', async () => {
     calls.length = 0;
-    await listPages(client, { limit: MAX_LIST_PAGES_LIMIT });
+    await findPages(client, { limit: MAX_FIND_PAGES_LIMIT });
     expect(calls).toEqual(['logseq.Editor.getAllPages']);
 
     calls.length = 0;
-    await listPages(client, { nameContains: 'roadmap' });
+    await findPages(client, { text: 'roadmap' });
     expect(calls).toEqual(['logseq.Editor.getAllPages']);
   });
 });

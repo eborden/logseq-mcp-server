@@ -10,8 +10,8 @@ export const MAX_SEARCH_LIMIT = 500;
 export const DEFAULT_MAX_SEARCH_RESULTS = 20;
 export const MAX_SEARCH_RESULTS = 100;
 
-export const DEFAULT_LIST_PAGES_LIMIT = 200;
-export const MAX_LIST_PAGES_LIMIT = 1000;
+export const DEFAULT_FIND_PAGES_LIMIT = 200;
+export const MAX_FIND_PAGES_LIMIT = 1000;
 
 export const DEFAULT_MAX_ENTRIES = 100;
 export const MAX_ENTRIES = 500;

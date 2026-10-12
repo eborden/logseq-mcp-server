@@ -106,7 +106,7 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
     it('reports a page that does not exist as an error that points at the list tool', async () => {
       const result = (await mcp.callTool({ name: 'logseq_get_page', arguments: { page: 'no such page 43 probe', detail: 'outline' } })) as ToolResult;
       expect(result.isError).toBe(true);
-      expect(JSON.parse(result.content[0].text).error).toContain('logseq_list_pages');
+      expect(JSON.parse(result.content[0].text).error).toContain('logseq_find_pages');
     });
   });
 

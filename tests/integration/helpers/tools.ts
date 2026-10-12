@@ -326,13 +326,13 @@ export async function getCurrentContext(client: LogseqClient): Promise<Json> {
   return (await callTool(client, 'logseq_get_current', {})).value;
 }
 
-export async function listPages(
+export async function findPages(
   client: LogseqClient,
-  options?: { nameContains?: string; limit?: number; offset?: number }
+  options?: { text?: string; limit?: number; offset?: number }
 ): Promise<Json> {
   return (
-    await callTool(client, 'logseq_list_pages', {
-      name_contains: options?.nameContains,
+    await callTool(client, 'logseq_find_pages', {
+      text: options?.text,
       limit: options?.limit,
       offset: options?.offset,
     })

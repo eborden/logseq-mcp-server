@@ -53,7 +53,7 @@ const dateRangeOf = (result: Record<string, unknown>): { start?: unknown; end?: 
 const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_get_graph', args: {} },
   { name: 'logseq_get_current', args: {} },
-  { name: 'logseq_list_pages', args: { name_contains: 'project', limit: 10 } },
+  { name: 'logseq_find_pages', args: { text: 'project', limit: 10 } },
   { name: 'logseq_get_page', args: { page: 'project atlas', detail: 'full' } },
   { name: 'logseq_get_page', label: 'outline', args: { page: 'project atlas', detail: 'outline' } },
   { name: 'logseq_get_block', args: { uuid: '0088f1a0-0000-4000-8000-000000000001' } },
