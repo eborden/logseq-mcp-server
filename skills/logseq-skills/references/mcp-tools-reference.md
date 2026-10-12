@@ -191,7 +191,7 @@ Find non-journal pages, A-Z, to discover graph vocabulary, to check which names 
 
 **Parameters:**
 - `text` (optional): Filter pages whose name or alias contains this text (case-insensitive). The page comes back whole, with all its aliases, so searching an alias finds its page
-- `names` (optional): 1 to 50 page names or aliases, each matched exactly (ignoring case), in one call whatever the number. Each name is answered with its page, or with `null` and the closest names. Journals are not pages of this tool
+- `names` (optional): 1 to 50 page names or aliases, each matched exactly (ignoring case), in one call whatever the number. Each name is answered with its page, or with `null` and the closest names. `null` means no page with that exact name or alias: a namespace leaf (`meetings` for `project/meetings`) or an ISO date answers `null` here, though `logseq_get_page` resolves it. Journals are not pages of this tool
 - `property` and `value` (optional, together): Keep the pages whose page-level property holds the value. The key is as stored (`created-by`) or camelCase (`createdBy`); the value is an exact string (a number or boolean as its text: `3`, `true`); a multi-value property matches on any one of its values. Block properties are not matched (use `query_by_property`)
 - `limit` (optional): Maximum pages per call (default: 200, max: 1000). Aliases take no slots
 - `offset` (optional): Matching pages to skip, in name order, to fetch the next page (default: 0)
