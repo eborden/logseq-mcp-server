@@ -172,6 +172,15 @@ describe('the skills guard can fail (#486 self-test)', () => {
     ]);
   });
 
+  it('blames the line where the argument is a key, not an earlier value that equals it', () => {
+    expect(run(example('{\n  "thing_name": "format",\n  "format": "xml"\n}'))).toEqual([
+      'skill.md:4: the logseq_get_thing argument "format" is wrong: "xml" is not one of "json", "markdown"',
+    ]);
+    expect(run(example('{"thing_name": "format", "format": "xml"}'))).toEqual([
+      'skill.md:2: the logseq_get_thing argument "format" is wrong: "xml" is not one of "json", "markdown"',
+    ]);
+  });
+
   it('flags a value that matches none of an anyOf, and null where the type is not nullable', () => {
     expect(run(example('{"thing_name": "a", "value": null}'))[0]).toContain('matches none of the allowed types');
     expect(run(example('{"thing_name": "a", "depth": null}'))).toEqual([

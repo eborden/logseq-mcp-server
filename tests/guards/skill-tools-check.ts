@@ -89,7 +89,13 @@ export function schemaMismatch(value: unknown, schema: Schema): string | null {
 /** Violations for one `json tool=<name>` example. `line` is the line of the opening fence. */
 function exampleViolations(file: string, line: number, body: string[], tool: RecordedTool): string[] {
   const where = (key?: string): string => {
-    const offset = key === undefined ? -1 : body.findIndex(l => l.includes(JSON.stringify(key)));
+    // The line where `key` is a key: at the start of a line (after an optional opening brace), so an earlier value that
+    // equals it is not blamed. A one-line body has no such line, so it falls back to a `"key":` anywhere.
+    const quoted = JSON.stringify(key ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const atLineStart = new RegExp(`^\\s*\\{?\\s*${quoted}\\s*:`);
+    const anywhere = new RegExp(`${quoted}\\s*:`);
+    const found = (re: RegExp): number => body.findIndex(l => re.test(l));
+    const offset = key === undefined ? -1 : found(atLineStart) !== -1 ? found(atLineStart) : found(anywhere);
     return `${file}:${offset === -1 ? line : line + 1 + offset}`;
   };
   let args: unknown;
