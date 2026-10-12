@@ -29,7 +29,7 @@ const questions = parseQuestions(JSON.parse(readFileSync(questionsPath, 'utf8'))
 
 describe('tests/fixtures/routing-eval/questions.json', () => {
   it('holds 33 to 40 questions, at least 3 of every type', () => {
-    // 11 intents x 3, plus the boundary questions and the page-names question (#511)
+    // 11 intents x 3, plus 3 for page-names (#514) and the boundary questions (#511)
     expect(questions.length).toBeGreaterThanOrEqual(33);
     expect(questions.length).toBeLessThanOrEqual(40);
     for (const type of TOOL_TYPES) {
@@ -59,10 +59,11 @@ describe('tests/fixtures/routing-eval/questions.json', () => {
   });
 
   it('covers the intents beyond #487\'s list, each with one expected type so a report row can show it', () => {
-    // The 3-question minimum is #487's 11 intents only. page-names is one question; the boundary intents are split by
-    // direction (#511 review), so a find miss and an explore hit don't pool into one row.
-    const counts: Record<string, number> = { 'page-names': 1, 'find-boundary': 1, 'explore-boundary': 2 };
+    // The boundary intents are split by direction (#511 review), so a find miss and an explore hit don't pool into one row.
+    const counts: Record<string, number> = { 'find-boundary': 1, 'explore-boundary': 2 };
     for (const [intent, count] of Object.entries(counts)) expect(questions.filter(question => question.intent === intent).length, intent).toBe(count);
+    // page-names is outside #487's list of 11 but gets the same minimum (#514): a fuzzy name, an exact check across names, a property ask
+    expect(questions.filter(question => question.intent === 'page-names').length, 'page-names').toBeGreaterThanOrEqual(3);
     for (const intent of new Set(questions.map(question => question.intent))) {
       expect(new Set(questions.filter(question => question.intent === intent).map(question => question.expected_type)).size, `${intent} mixes expected types`).toBe(1);
     }
