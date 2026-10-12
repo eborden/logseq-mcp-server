@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "about": "Questions for scripts/routing-eval.ts (#487). Every page, name and block named here is made up and lives in tests/fixtures/graph/ (see tests/fixtures/README.md). expected_type is the tool type a good first call has: get (the caller names the one thing), find (the caller has criteria and wants a list), explore (the caller has a starting point and wants what surrounds it), check (the caller is about to write). v1_tools and v2_tools are the tools that count as the right first call on each surface; the script maps a tool to its type itself, so a tool outside the list can still be type-correct. The questions marked ground_truth (find-boundary-1, explore-boundary-1, explore-boundary-2) sit on the line ADR-0037 draws between find and explore: the answer to find-boundary-1 is a list of hits, so its expected type is find, and a first call that maps what surrounds the page is the confusion the ADR says reopens the verbs; the other two read like a find but ask what something is or how it connects, so they are explore. A ground-truth question accepts exactly one type, and tests/guards/routing-eval.test.ts fails if that widens. Every intent in #487's list has at least 3 questions (#511). No question uses a tool's own verb (search, find, open, fetch, check, verify, list, read).",
+  "about": "Questions for scripts/routing-eval.ts (#487). Every page, name and block named here is made up and lives in tests/fixtures/graph/ (see tests/fixtures/README.md). expected_type is the tool type a good first call has: get (the caller names the one thing), find (the caller has criteria and wants a list), explore (the caller has a starting point and wants what surrounds it), check (the caller is about to write). v1_tools and v2_tools are the tools that count as the right first call on each surface; the script maps a tool to its type itself, so a tool outside the list can still be type-correct. The questions marked ground_truth (find-boundary-1, explore-boundary-1, explore-boundary-2) sit on the line ADR-0037 draws between find and explore: the answer to find-boundary-1 is a list of hits, so its expected type is find, and a first call that maps what surrounds the page is the confusion the ADR says reopens the verbs; the other two read like a find but ask where something stands or what part it plays, so they are explore. Their intents are find-boundary and explore-boundary, so a report row has one expected type. A ground-truth question accepts exactly one type, and tests/guards/routing-eval.test.ts fails if that widens. Every intent in #487's list has at least 3 questions (#511). No question uses a tool's own verb (search, find, open, fetch, check, verify, list, read).",
   "questions": [
     {
       "id": "get-page-1",
@@ -236,7 +236,7 @@
     },
     {
       "id": "find-boundary-1",
-      "intent": "find-vs-explore-boundary",
+      "intent": "find-boundary",
       "expected_type": "find",
       "question": "Where does project atlas come up in my notes?",
       "v1_tools": [
@@ -246,28 +246,26 @@
         "logseq_find_blocks"
       ],
       "ground_truth": true,
-      "ground_truth_reason": "ADR-0037's boundary test: the answer is a list of hits, so it is find. A first call that maps what surrounds the page is the confusion the ADR says reopens the verbs."
+      "ground_truth_reason": "ADR-0037's boundary test: the answer is a list of hits (every place project atlas is mentioned), so it is find. A first call that maps what surrounds the page is the confusion the ADR says reopens the verbs."
     },
     {
       "id": "explore-boundary-1",
-      "intent": "find-vs-explore-boundary",
+      "intent": "explore-boundary",
       "expected_type": "explore",
-      "question": "Where does Bob fit in with project atlas?",
+      "question": "Where does Bob stand on project atlas?",
       "v1_tools": [
         "logseq_build_context",
-        "logseq_get_context_for_query",
-        "logseq_get_concept_network"
+        "logseq_get_context_for_query"
       ],
       "v2_tools": [
-        "logseq_explore_context",
-        "logseq_explore_network"
+        "logseq_explore_context"
       ],
       "ground_truth": true,
-      "ground_truth_reason": "ADR-0037's boundary test: the answer is what something is or how it connects, not a list of hits, so it is explore. A first call that lists matching blocks is the reverse confusion."
+      "ground_truth_reason": "ADR-0037's boundary test: the answer is what Bob's part in project atlas is (his role and the work he is tied to), a summary of what surrounds the two pages, not a list of blocks that mention both. A first call that lists matching blocks is the reverse confusion."
     },
     {
       "id": "explore-boundary-2",
-      "intent": "find-vs-explore-boundary",
+      "intent": "explore-boundary",
       "expected_type": "explore",
       "question": "Where does project borealis stand, going by my notes?",
       "v1_tools": [
@@ -278,7 +276,7 @@
         "logseq_explore_context"
       ],
       "ground_truth": true,
-      "ground_truth_reason": "ADR-0037's boundary test: the answer is what something is or how it connects, not a list of hits, so it is explore. A first call that lists matching blocks is the reverse confusion."
+      "ground_truth_reason": "ADR-0037's boundary test: the answer is where project borealis stands (its status, its plans and what the notes say about it), a summary of what the page is, not a list of blocks that mention it. A first call that lists matching blocks is the reverse confusion."
     },
     {
       "id": "explore-topic-1",

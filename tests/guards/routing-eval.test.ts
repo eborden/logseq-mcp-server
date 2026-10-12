@@ -58,25 +58,36 @@ describe('tests/fixtures/routing-eval/questions.json', () => {
     }
   });
 
-  it('covers the two intents beyond #487\'s list', () => {
-    const intents = new Set(questions.map(question => question.intent));
-    for (const intent of ['page-names', 'find-vs-explore-boundary']) expect(intents.has(intent), intent).toBe(true);
+  it('covers the intents beyond #487\'s list, each with one expected type so a report row can show it', () => {
+    // The 3-question minimum is #487's 11 intents only. page-names is one question; the boundary intents are split by
+    // direction (#511 review), so a find miss and an explore hit don't pool into one row.
+    const counts: Record<string, number> = { 'page-names': 1, 'find-boundary': 1, 'explore-boundary': 2 };
+    for (const [intent, count] of Object.entries(counts)) expect(questions.filter(question => question.intent === intent).length, intent).toBe(count);
+    for (const intent of new Set(questions.map(question => question.intent))) {
+      expect(new Set(questions.filter(question => question.intent === intent).map(question => question.expected_type)).size, `${intent} mixes expected types`).toBe(1);
+    }
   });
 
   it('keeps the ground-truth questions exactly as ADR-0037 settles them, each accepting one type only', () => {
     // The pin: widening a question's accepted types, changing its expected type, or dropping the mark fails here (#511).
     // find-boundary-1 is a list of hits (find). The two explore ones read like a find but ask what something is or how it connects.
-    const pinned: Record<string, ToolType> = { 'find-boundary-1': 'find', 'explore-boundary-1': 'explore', 'explore-boundary-2': 'explore' };
+    // The wording is pinned too: a reworded ground-truth question is a different question, so it takes an edit here and a new baseline run.
+    const pinned: Record<string, { type: ToolType; intent: string; text: string }> = {
+      'find-boundary-1': { type: 'find', intent: 'find-boundary', text: 'Where does project atlas come up in my notes?' },
+      'explore-boundary-1': { type: 'explore', intent: 'explore-boundary', text: 'Where does Bob stand on project atlas?' },
+      'explore-boundary-2': { type: 'explore', intent: 'explore-boundary', text: 'Where does project borealis stand, going by my notes?' },
+    };
     const marked = questions.filter(question => question.ground_truth === true);
     expect(marked.map(question => question.id).sort()).toEqual(Object.keys(pinned).sort());
     for (const question of marked) {
-      expect(question.expected_type, question.id).toBe(pinned[question.id]);
+      expect(question.expected_type, question.id).toBe(pinned[question.id].type);
+      expect(question.question, question.id).toBe(pinned[question.id].text);
       expect(question.ground_truth_reason, question.id).toContain('ADR-0037');
-      expect(question.intent, question.id).toBe('find-vs-explore-boundary');
+      expect(question.intent, question.id).toBe(pinned[question.id].intent);
       for (const [surface, tools] of [['v1', question.v1_tools], ['v2', question.v2_tools]] as const) {
         for (const tool of tools) {
           // No tool of another type, and none typed by mode (search_by_relationship), so the accepted type is exactly one
-          expect(SURFACE_TOOL_TYPES[surface][tool], `${question.id} ${tool}`).toBe(pinned[question.id]);
+          expect(SURFACE_TOOL_TYPES[surface][tool], `${question.id} ${tool}`).toBe(pinned[question.id].type);
           expect(tool, question.id).not.toBe('logseq_search_by_relationship');
         }
       }
