@@ -30,5 +30,11 @@
   "prompts: monthly_summary for the month in progress, by name",
   "prompts: monthly_summary with a blank argument is this month",
   "prompts: monthly_summary for a month that has not started",
-  "prompts: monthly_summary for a month of next year"
+  "prompts: monthly_summary for a month of next year",
+  "period: a preset with text",
+  "period: last_n counts calendar days back from today, today included",
+  "period: last_n of one is today",
+  "period: text, property and a period together",
+  "period: full hits",
+  "period: null answer to the search"
 ]

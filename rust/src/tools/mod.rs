@@ -55,7 +55,7 @@ pub async fn call(
     match name {
         build_context::NAME => Some(build_context::call(client, tips_enabled, arguments).await),
         check_links::NAME => Some(check_links::call(client, tips_enabled, arguments).await),
-        find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, arguments).await),
+        find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, arguments).await),
         find_pages::NAME => Some(find_pages::call(client, tips_enabled, arguments).await),
         get_backlinks::NAME => Some(get_backlinks::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),

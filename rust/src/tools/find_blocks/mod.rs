@@ -1,6 +1,7 @@
 //! `logseq_find_blocks`: the blocks that match every filter given, newest first. `text` is a case-insensitive,
-//! literal substring of the block's content, and `property` with `value` an exact property value (#491; the two tools
-//! it replaces, `search_blocks` and `query_by_property`, each had one of them).
+//! literal substring of the block's content, `property` with `value` an exact property value, and a period
+//! (`start_date` with `end_date`, `last_n` or `preset`) limits the search to the blocks on the journal pages of those
+//! days (#491; the two tools it replaces, `search_blocks` and `query_by_property`, each had one of the first two).
 //!
 //! Calls: 1 (the search query, whatever the filters), or 2 with `include_context` (one batched lookup of the pages the
 //! returned blocks sit on, and none when no block has a page id; a `null` answer to it is a
@@ -18,6 +19,7 @@
 //! reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside it: slim
 //! output, entity fields, the truncation warnings and the tool helpers.
 
+mod period;
 mod queries;
 mod tips;
 mod wire;
@@ -29,9 +31,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use crate::args::{Scalar, parse_args};
+use crate::args::{Scalar, YyyyMmDd, parse_args};
 use crate::budget::{BUDGET_CHARS, Fit, fit, size};
 use crate::client::LogseqClient;
+use crate::dates::{CalendarDate, Clock, DatePreset};
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::{InvalidParameter, ToolError};
@@ -41,10 +44,12 @@ use crate::property::{PropertyFilter, property_filter};
 use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tools::query_by_date_range::selection::Selection;
 use crate::truncation::{CappedTruncation, SizeCut, blocks_inline_max, capped_truncation_warning, size_truncation_warning};
 
+use self::period::{Period, resolve_period};
 use self::queries::Match;
-use self::tips::find_tips;
+use self::tips::{Others, find_tips};
 
 pub const NAME: &str = "logseq_find_blocks";
 
@@ -64,8 +69,8 @@ const COUNT_CUT: &str = "results_truncated";
 const NARROWER: &str = "Narrow the filters to see the rest.";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find blocks, newest first. Filters AND, at least one: text (case-insensitive substring); property + value (exact; any one value of a multi-value property). Capped by limit (max 500): check hasMore and warnings.\n\n\
-**Can't find:** synonyms or stems, partial or ranged values, link structure (logseq_search_by_relationship), or over 500 matches in one call.";
+const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); property + value (exact; any one value of a multi-value property); period on journals (start_date + end_date, last_n days or preset). Capped by limit (max 500): check hasMore and warnings.\n\n\
+**Can't find:** synonyms or stems, ranged values, link structure (logseq_search_by_relationship), or over 500 matches.";
 
 fn default_limit() -> u64 {
     DEFAULT_FIND_LIMIT
@@ -87,6 +92,17 @@ pub struct Args {
     #[serde(default)]
     #[schemars(with = "Scalar")]
     pub value: Option<Scalar>,
+    /// Start date in YYYYMMDD format (e.g., 20251115). Needs end_date
+    #[schemars(with = "Option<f64>")]
+    pub start_date: Option<YyyyMmDd>,
+    /// End date in YYYYMMDD format (e.g., 20251120). Needs start_date
+    #[schemars(with = "Option<f64>")]
+    pub end_date: Option<YyyyMmDd>,
+    /// Only blocks on journal pages in the last N calendar days, today included (whole number, 1+)
+    #[schemars(range(min = 1))]
+    pub last_n: Option<u64>,
+    /// Named period in local time; weeks run Monday to Sunday
+    pub preset: Option<DatePreset>,
     /// Maximum number of results to return (default: 100, max: 500)
     #[serde(default = "default_limit")]
     pub limit: u64,
@@ -98,36 +114,66 @@ pub struct Args {
     pub slim_results: bool,
 }
 
+/// A count a `u32` holds: a larger one is as good as the largest, since `last_n` only ever counts back that many days.
+fn saturate(count: u64) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
 /// The filters of a call, checked: at least one, so a call never lists every block in the graph by accident.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filters {
     /// The text to find. An empty `text` is no filter
     pub text: Option<String>,
     pub property: Option<PropertyFilter>,
+    /// The days whose journal pages the blocks must be on
+    pub period: Option<Period>,
 }
 
 impl Filters {
-    /// The filters the arguments name. A `property` without a `value` (or the reverse), or a key LogSeq can't store, is
-    /// an `InvalidParameter`; so is a call with no filter at all. Refused before any LogSeq call.
+    /// The filters the arguments name, with `today` as the day a `last_n` or a preset counts from. A `property` without
+    /// a `value` (or the reverse), a key LogSeq can't store, a period chosen in no way or in several, and a call with
+    /// no filter at all are an `InvalidParameter`, refused before any LogSeq call.
+    pub fn from_args(args: &Args, today: CalendarDate) -> Result<Filters, InvalidParameter> {
+        let property = property_filter(args.property.as_deref(), args.value.as_ref())?;
+        let selection = Selection {
+            start_date: args.start_date.map(|day| day.0),
+            end_date: args.end_date.map(|day| day.0),
+            last_n: args.last_n.map(saturate),
+            preset: args.preset,
+        };
+        Filters::assemble(args.text.as_deref(), property, resolve_period(selection, today)?)
+    }
+
+    /// The filters of a search with no period, from the arguments that name them ([`Filters::from_args`] checks the
+    /// same things for a call).
     pub fn parse(text: Option<&str>, property: Option<&str>, value: Option<&Scalar>) -> Result<Filters, InvalidParameter> {
-        let property = property_filter(property, value)?;
+        Filters::assemble(text, property_filter(property, value)?, None)
+    }
+
+    fn assemble(text: Option<&str>, property: Option<PropertyFilter>, period: Option<Period>) -> Result<Filters, InvalidParameter> {
         let text = text.filter(|text| !text.is_empty()).map(str::to_owned);
-        if text.is_none() && property.is_none() {
+        if text.is_none() && property.is_none() && period.is_none() {
             return Err(InvalidParameter {
                 param: "filters".to_owned(),
                 value: "none given".to_owned(),
-                expected: "At least one of: text, or property with value".to_owned(),
-                example: Some("text: \"importer\", or property: \"status\" with value: \"doing\"".to_owned()),
+                expected: "At least one of: text, property with value, or a period (start_date with end_date, last_n or preset)".to_owned(),
+                example: Some("text: \"importer\", or property: \"status\" with value: \"doing\", or last_n: 7".to_owned()),
             });
         }
-        Ok(Filters { text, property })
+        Ok(Filters { text, property, period })
+    }
+
+    /// The filters besides `text`, as the tip for a miss names them.
+    fn others(&self) -> Others {
+        Others { property: self.property.is_some(), period: self.period.is_some() }
     }
 
     fn matching(&self) -> Match<'_> {
-        Match { text: self.text.as_deref(), property: self.property.as_ref() }
+        Match { text: self.text.as_deref(), property: self.property.as_ref(), period: self.period }
     }
 
-    /// What the blocks are said to be when the search was not answered: "contain "x"", "have the property "k"" or both.
+    /// What the blocks are said to be when the search was not answered: "contain "x"", "have the property "k"", "sit on
+    /// journal pages from 20250101 to 20250107", or the ones that were asked for, joined by "and".
     fn describe(&self) -> String {
         let mut parts = Vec::new();
         if let Some(text) = &self.text {
@@ -135,6 +181,9 @@ impl Filters {
         }
         if let Some(filter) = &self.property {
             parts.push(format!("have the property {}", json!(filter.key.as_str())));
+        }
+        if let Some(period) = &self.period {
+            parts.push(format!("sit on journal pages from {} to {}", period.start, period.end));
         }
         parts.join(" and ")
     }
@@ -149,9 +198,9 @@ pub fn definition() -> Tool {
 
 /// A call: arguments read, the search, then its meta and tips. The character budget (#506, #485) is applied here, to
 /// the two content blocks the call sends, so the library function the search is read through stays uncut.
-pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
+pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let filters = Filters::parse(args.text.as_deref(), args.property.as_deref(), args.value.as_ref())?;
+    let filters = Filters::from_args(&args, clock.today())?;
     let text = filters.text.as_deref();
     let searched = search(client, &filters, args.limit, args.include_context, args.slim_results).await?.with_raise(tips_enabled, text);
     let (results, meta) = fit_to_budget(&searched, tips_enabled, text);
@@ -183,6 +232,8 @@ struct Searched {
     /// When `limit` cut the hits: every hit the search could return (up to [`MAX_FIND_LIMIT`]) as a result without
     /// `context`, which the raise advice measures. Empty when `limit` cut nothing.
     plain: Vec<Value>,
+    /// The filters besides `text`, for the tip of a miss
+    others: Others,
     /// What the warning of a `limit` cut says about raising it, once measured ([`Searched::with_raise`])
     raise: Raise,
 }
@@ -287,6 +338,7 @@ impl Searched {
             context_missing: false,
             unavailable_for: None,
             plain: Vec::new(),
+            others: self.others,
             raise: Raise::Unchecked,
         };
         let most = probe.fitting(tips_enabled, text);
@@ -341,7 +393,7 @@ impl Searched {
     fn texts(&self, tips_enabled: bool, text: Option<&str>, cut: Option<SizeCutTo>) -> (String, String) {
         let sent = &self.results[..cut.map_or(self.results.len(), |cut| cut.kept)];
         // No tip for a search LogSeq did not answer: "No match" would say what the warning says it can't
-        let tips = if tips_enabled && self.unavailable_for.is_none() { find_tips(text, sent, Some(self.total)) } else { Vec::new() };
+        let tips = if tips_enabled && self.unavailable_for.is_none() { find_tips(text, self.others, sent, Some(self.total)) } else { Vec::new() };
         let mut meta = serde_json::to_value(self.meta(cut)).expect("a result meta serializes");
         if !tips.is_empty() {
             meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
@@ -543,7 +595,7 @@ async fn find(client: &LogseqClient, filters: &Filters) -> Result<Option<Vec<Val
 /// The blocks whose content holds `text`, newest first and not cut, or `None` when LogSeq answers `null`. One call.
 /// `get_context_for_query`'s keyword search reads these itself and does the cutting.
 pub async fn blocks_containing(client: &LogseqClient, text: &str) -> Result<Option<Vec<Value>>, ToolError> {
-    find(client, &Filters { text: Some(text.to_owned()), property: None }).await
+    find(client, &Filters { text: Some(text.to_owned()), property: None, period: None }).await
 }
 
 /// `blocks` as full results with `context` (page, references, tags) added from one batched page
@@ -591,6 +643,7 @@ async fn search(client: &LogseqClient, filters: &Filters, limit: u64, include_co
             context_missing: false,
             unavailable_for: Some(filters.describe()),
             plain: Vec::new(),
+            others: filters.others(),
             raise: Raise::Unchecked,
         });
     };
@@ -613,7 +666,7 @@ async fn search(client: &LogseqClient, filters: &Filters, limit: u64, include_co
     } else {
         matches.iter().chain(&beyond).map(|block| if slim_results { slim_result(block, None) } else { full_result(block, None) }).collect()
     };
-    Ok(Searched { results, total, limit, include_context, slim_results, context_missing, unavailable_for: None, plain, raise: Raise::Unchecked })
+    Ok(Searched { results, total, limit, include_context, slim_results, context_missing, unavailable_for: None, plain, others: filters.others(), raise: Raise::Unchecked })
 }
 
 #[cfg(test)]
@@ -672,7 +725,7 @@ mod tests {
     }
 
     fn searched(results: Vec<Value>, total: usize) -> Searched {
-        Searched { results, total, limit: 100, include_context: false, slim_results: true, context_missing: false, unavailable_for: None, plain: Vec::new(), raise: Raise::Unchecked }
+        Searched { results, total, limit: 100, include_context: false, slim_results: true, context_missing: false, unavailable_for: None, plain: Vec::new(), others: Others::default(), raise: Raise::Unchecked }
     }
 
     /// A slim hit whose content is `length` characters.
@@ -699,7 +752,7 @@ mod tests {
     }
 
     fn empty_tip() -> String {
-        find_tips(Some("x"), &[], Some(0))[0].clone()
+        find_tips(Some("x"), Others::default(), &[], Some(0))[0].clone()
     }
 
     #[test]
@@ -796,7 +849,7 @@ mod tests {
         assert_eq!(meta["tips"].as_array().unwrap().len(), 1);
         // it matches what the tip tool says of the hits that are sent
         let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap();
-        assert_eq!(meta["tips"][0], json!(find_tips(Some("x"), &kept, Some(400))[0]));
+        assert_eq!(meta["tips"][0], json!(find_tips(Some("x"), Others::default(), &kept, Some(400))[0]));
     }
 
     #[test]
@@ -945,6 +998,14 @@ mod tests {
                 "text": {"type": "string", "description": "Text to find in block content (case-insensitive, literal)"},
                 "property": {"type": "string", "description": "Block property to match (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent). Needs value"},
                 "value": {"anyOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}], "description": "Exact value of the property. A multi-value property matches if any one value equals it. Needs property"},
+                "start_date": {"type": "number", "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date"},
+                "end_date": {"type": "number", "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date"},
+                "last_n": {"type": "integer", "minimum": 1, "description": "Only blocks on journal pages in the last N calendar days, today included (whole number, 1+)"},
+                "preset": {
+                    "type": "string",
+                    "enum": ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"],
+                    "description": "Named period in local time; weeks run Monday to Sunday"
+                },
                 "limit": {"type": "integer", "minimum": 0, "default": 100, "description": "Maximum number of results to return (default: 100, max: 500)"},
                 "include_context": {"type": "boolean", "default": false, "description": "Include semantic context (page, references, tags)"},
                 "slim_results": {"type": "boolean", "default": true, "description": "Slim blocks (default). false returns full entities"},
@@ -968,12 +1029,32 @@ mod tests {
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let defaults = parse_args::<Args>(None).unwrap();
-        assert_eq!(defaults, Args { text: None, property: None, value: None, limit: 100, include_context: false, slim_results: true });
+        assert_eq!(
+            defaults,
+            Args {
+                text: None,
+                property: None,
+                value: None,
+                start_date: None,
+                end_date: None,
+                last_n: None,
+                preset: None,
+                limit: 100,
+                include_context: false,
+                slim_results: true
+            }
+        );
         assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
         let with_text = json!({"text": "x", "property": "status", "value": 3});
         let args = parse_args::<Args>(with_text.as_object()).unwrap();
         assert_eq!(args, Args { text: Some("x".into()), property: Some("status".into()), value: Some(Scalar::Number(3.0)), ..defaults });
         // the first argument in schema order that is wrong is the one reported
+        let with_period = json!({"start_date": 20250101, "end_date": 20250107.0, "last_n": 3, "preset": "last_week"});
+        let args = parse_args::<Args>(with_period.as_object()).unwrap();
+        assert_eq!(
+            (args.start_date, args.end_date, args.last_n, args.preset),
+            (Some(YyyyMmDd(20_250_101)), Some(YyyyMmDd(20_250_107)), Some(3), Some(DatePreset::LastWeek))
+        );
         let bad = json!({"slim_results": 0, "limit": "a", "value": []});
         assert_eq!(
             parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
@@ -993,20 +1074,35 @@ mod tests {
         sweep::<Args>(json!({}), "text", Takes::Text, false);
         sweep::<Args>(json!({}), "property", Takes::Text, false);
         sweep::<Args>(json!({}), "value", Takes::Scalar, false);
+        sweep::<Args>(base.clone(), "start_date", Takes::Date, false);
+        sweep::<Args>(base.clone(), "end_date", Takes::Date, false);
+        sweep::<Args>(base.clone(), "last_n", Takes::Count(1), false);
+        sweep::<Args>(base.clone(), "preset", Takes::Words(&DATE_PRESET_WORDS), false);
         sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
         sweep::<Args>(base.clone(), "include_context", Takes::Flag, false);
         sweep::<Args>(base, "slim_results", Takes::Flag, false);
     }
 
+    /// The words `preset` takes, as the schema lists them.
+    const DATE_PRESET_WORDS: [&str; 8] = ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"];
+
     fn filters(text: Option<&str>, property: Option<&str>, value: Option<Scalar>) -> Result<Filters, String> {
         Filters::parse(text, property, value.as_ref()).map_err(|error| error.to_string())
     }
 
+    /// The filters of a call whose arguments are `arguments`, on 2025-03-12.
+    fn from_arguments(arguments: Value) -> Result<Filters, String> {
+        let args = parse_args::<Args>(arguments.as_object()).map_err(|error| error.to_string())?;
+        Filters::from_args(&args, CalendarDate { year: 2025, month: 3, day: 12 }).map_err(|error| error.to_string())
+    }
+
     #[test]
     fn a_call_with_no_filter_is_refused_and_says_what_a_filter_is() {
-        let refusal = "Invalid parameter 'filters': none given\n\nExpected: At least one of: text, or property with value\n\
-                       Example: text: \"importer\", or property: \"status\" with value: \"doing\"";
+        let refusal = "Invalid parameter 'filters': none given\n\nExpected: At least one of: text, property with value, or a period (start_date with end_date, last_n or preset)\n\
+                       Example: text: \"importer\", or property: \"status\" with value: \"doing\", or last_n: 7";
         assert_eq!(filters(None, None, None).unwrap_err(), refusal);
+        assert_eq!(from_arguments(json!({"limit": 3})).unwrap_err(), refusal);
+        assert_eq!(from_arguments(json!({"text": ""})).unwrap_err(), refusal);
         // an empty text is no filter, whatever else the call has
         assert_eq!(filters(Some(""), None, None).unwrap_err(), refusal);
         // white space is text: a block can hold exactly that
@@ -1029,6 +1125,30 @@ mod tests {
     }
 
     #[test]
+    fn a_period_is_a_filter_of_its_own_and_stands_beside_the_others() {
+        let only = from_arguments(json!({"preset": "last_week"})).unwrap();
+        assert_eq!((only.text, only.property, only.period), (None, None, Some(Period { start: 20250303, end: 20250309 })));
+        let all = from_arguments(json!({"text": "x", "property": "status", "value": "doing", "last_n": 7})).unwrap();
+        assert_eq!(all.period, Some(Period { start: 20250306, end: 20250312 }));
+        assert!(all.text.is_some() && all.property.is_some());
+        // no period is none, not a default one
+        assert_eq!(from_arguments(json!({"text": "x"})).unwrap().period, None);
+        // choosing it no way, or two ways, or by half, is the date range tool's refusal, before a bad property is looked at
+        assert!(from_arguments(json!({"text": "x", "last_n": 7, "preset": "today"})).unwrap_err().contains("last_n and preset"));
+        assert!(from_arguments(json!({"text": "x", "end_date": 20250101})).unwrap_err().starts_with("Invalid parameter 'start_date': missing"));
+        assert!(from_arguments(json!({"property": "a b", "value": "x", "preset": "nope"})).unwrap_err().contains("'preset'"));
+        assert!(from_arguments(json!({"property": "a b", "value": "x", "last_n": 7})).unwrap_err().starts_with("Invalid parameter 'property': a b"));
+    }
+
+    #[test]
+    fn a_last_n_too_large_for_a_count_is_as_good_as_the_largest() {
+        let args = parse_args::<Args>(json!({"last_n": 9007199254740991_u64}).as_object()).unwrap();
+        assert_eq!(saturate(args.last_n.unwrap()), u32::MAX);
+        let filters = Filters::from_args(&args, CalendarDate { year: 2025, month: 3, day: 12 }).unwrap();
+        assert_eq!(filters.period.unwrap().end, 20250312);
+    }
+
+    #[test]
     fn what_was_asked_is_described_in_the_warning_for_a_search_that_got_no_answer() {
         let text = Filters::parse(Some("a \"b\""), None, None).unwrap();
         assert_eq!(text.describe(), r#"contain "a \"b\"""#);
@@ -1038,6 +1158,8 @@ mod tests {
         assert_eq!(both.describe(), r#"contain "x" and have the property "status""#);
         // the value is never part of it
         assert!(!both.describe().contains("doing"));
+        let period = from_arguments(json!({"text": "x", "start_date": 20250101, "end_date": 20250107})).unwrap();
+        assert_eq!(period.describe(), r#"contain "x" and sit on journal pages from 20250101 to 20250107"#);
         assert!(search_unavailable(&text.describe()).message.starts_with(r#"LogSeq returned no answer when looking up blocks that contain "a \"b\"" (possibly"#));
     }
 }
