@@ -66,7 +66,7 @@ Dropped on purpose:
 - Period: `start_date` + `end_date`, `last_n` or `preset` (exactly one), shared by `find_blocks` and `explore_timeline`.
 - `limit` + `offset` page the main list of every `find` tool.
 
-**Aliases ([BR-0008 (param-aliases-best-effort)](../business-rules/0008-param-aliases-best-effort.md)):** `name` and `page_name` for `page`, and `block_uuid` for `uuid`. There are no `topic`, `concept` or `property_name` aliases: those guesses came from words in the v1 names and descriptions, which v2 removes. An alias is added later only if the re-scan in #500's exit criteria shows a specific wrong guess.
+**Aliases ([BR-0008 (param-aliases-best-effort)](../business-rules/0008-param-aliases-best-effort.md)):** BR-0008 allows an alias only where the canonical parameter stays `required`, so only four tools carry them, the ones where `page` or `uuid` is required: `get_page`, `explore_context` and `explore_network` take `name` and `page_name` for `page`, and `get_block` takes `block_uuid` for `uuid`. `find_blocks` and `explore_timeline` take none, because `page` is an optional filter there, and neither does `to`. `get_block` flips today's pair: v1 has `block_uuid` canonical with `uuid` as the alias, and v2 makes `uuid` canonical and `block_uuid` the alias. This needs no change to BR-0008. There are no `topic`, `concept` or `property_name` aliases: those guesses came from words in the v1 names and descriptions, which v2 removes. An alias is added later only if the re-scan in #500's exit criteria shows a specific wrong guess.
 
 A future tool must fit exactly one of the four types, or it needs a new ADR.
 
