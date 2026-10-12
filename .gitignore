@@ -22,6 +22,9 @@ measure-*.json
 measure-*.md
 measure-*.csv
 measure-*.tsv
+# Saved sessions of scripts/routing-eval.ts --out: they hold the arguments a model sent (#487)
+routing-eval-*.json
+routing-eval-*.txt
 # tests/guards/repo-hygiene.test.ts fails if a file matching these is tracked or a pattern is dropped.
 # These patterns are case-sensitive; the test's tracked-file check is not.
 

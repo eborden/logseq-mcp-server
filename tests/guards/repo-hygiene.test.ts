@@ -84,9 +84,15 @@ const RAW_OUTPUT_RULES: RawOutputRule[] = [
       ...DUMP_EXTENSIONS.map(ext => `scripts/measure-results.${ext}`),
     ],
   },
+  {
+    // Saved sessions of scripts/routing-eval.ts --out (#487): the arguments a model sent.
+    name: 'routing-eval-* (.json, .txt)',
+    matches: b => /^routing-eval-.*\.(json|txt)$/.test(b),
+    samples: ['routing-eval-v1.json', 'routing-eval-baseline.txt', 'scripts/routing-eval-run.json', '.logseq-instance/routing-eval-v1.json'],
+  },
 ];
 
-const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
+const basename =(path: string) => path.slice(path.lastIndexOf('/') + 1);
 
 /** Paths that look like raw test, probe or measure output, with the rule each one breaks. */
 function findRawOutputFiles(paths: string[]): { path: string; rule: string }[] {
