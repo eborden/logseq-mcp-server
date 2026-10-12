@@ -40,13 +40,14 @@ import { docViolations, type DocOptions, type RecordedTool } from './skill-tools
  *
  * Paths are skipped. A name touching a `/` is part of a path unless the run around it is only former tool names, so
  * `src/tools/get_page/mod.rs` and the directory names `get_page/` are skipped, and a pair written `get_page/get_block`
- * is checked. That has a cost: the directory list in the rust/README.md file map (the row for `src/tools/<tool>/`,
- * all 14 names written `name/`) is NOT checked, so it goes stale without a failure when a rename PR renames a tool's
- * directory. The rename PR updates it by hand.
+ * is checked. That has a cost: two kinds of mention are NOT checked, so they go stale without a failure when a rename
+ * PR renames a tool's directory. One is the directory list in the rust/README.md file map (the row for
+ * `src/tools/<tool>/`, 14 names written `name/`). The other is the `rust/src/tools/<name>/...` paths in CLAUDE.md (10
+ * names). The rename PR updates both by hand.
  *
  * A bare name that is no tool reference, such as the Rust function of the same name, goes in BARE_CONTEXTS as the text
- * around it with its reason. Measured on the live docs before this check: 135 bare uses, 24 in paths (the directory
- * list above), 1 that is no tool reference (the Rust function in CLAUDE.md), the rest tool references.
+ * around it with its reason. Measured on the live docs before this check: 135 bare uses, 24 in paths (the 14 and the
+ * 10 above), 1 that is no tool reference (the Rust function in CLAUDE.md), the rest tool references.
  *
  * What a green run does NOT mean: that the docs are right about a tool. It means each name is real. The guard does not
  * read a tool's description in a table row, prose counts such as "16 tools", API call counts, or a name that was
