@@ -2,6 +2,7 @@
 //! how many were shown, how many there were, and what to do about the rest. The words are held byte for
 //! byte by the recorded results (ADR-0034).
 
+use crate::budget::{BUDGET_CHARS, SIZE_TRUNCATED_CODE};
 use crate::meta::ResultWarning;
 
 /// Said wherever a warning suggests a call whose result may be large. The server can't know the
@@ -141,9 +142,62 @@ pub fn capped_truncation_warning(c: CappedTruncation<'_>) -> ResultWarning {
     }
 }
 
+/// `SizeCut`: the arguments of [`size_truncation_warning`].
+pub struct SizeCut<'a> {
+    /// What the list holds, plural: "pages"
+    pub what: &'a str,
+    /// Entries kept
+    pub kept: usize,
+    /// Entries there were before the cut
+    pub total: usize,
+    /// The first entries kept were over the budget on their own and were returned whole (BR-0007)
+    pub oversize: bool,
+    /// What the caller can do to see less, or other, material: a parameter to lower, a tool to call
+    pub advice: &'a str,
+    /// A way to get the rest, only when a parameter can fetch it (BR-0006). Its presence makes `hasMore` true.
+    pub how_to_fetch_all: Option<String>,
+}
+
+/// The `result_size_truncated` warning (#485): the result was cut to fit [`BUDGET_CHARS`] characters, after
+/// the count caps had been applied. No parameter raises the budget, so `how_to_fetch_all` is there only when a
+/// call can read on from where the cut fell (a date, a page of results), and `hasMore` is false otherwise.
+pub fn size_truncation_warning(cut: SizeCut<'_>) -> ResultWarning {
+    let SizeCut { what, kept, total, oversize, advice, how_to_fetch_all } = cut;
+    let alone = if oversize { " Even those are over that size: an entry is never cut inside its text." } else { "" };
+    ResultWarning {
+        code: SIZE_TRUNCATED_CODE.to_owned(),
+        message: format!(
+            "Showing {kept} of {total} {what}: the result was cut to fit {BUDGET_CHARS} characters, since a larger one may be saved to a file by the host instead of shown.{alone} {advice}"
+        ),
+        how_to_fetch_all,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_size_cut_names_the_budget_and_has_more_only_when_a_call_reads_on() {
+        let cut = SizeCut { what: "pages", kept: 40, total: 90, oversize: false, advice: "Lower max_depth.", how_to_fetch_all: None };
+        let warning = size_truncation_warning(cut);
+        assert_eq!(warning.code, "result_size_truncated");
+        assert_eq!(
+            warning.message,
+            "Showing 40 of 90 pages: the result was cut to fit 30000 characters, since a larger one may be saved to a file by the host instead of shown. Lower max_depth."
+        );
+        assert_eq!(warning.how_to_fetch_all, None);
+        let alone = size_truncation_warning(SizeCut {
+            what: "pages",
+            kept: 1,
+            total: 2,
+            oversize: true,
+            advice: "Read it with logseq_get_block.",
+            how_to_fetch_all: Some("Call again with start_date 20250102.".to_owned()),
+        });
+        assert!(alone.message.contains("Even those are over that size: an entry is never cut inside its text. Read it"), "{}", alone.message);
+        assert_eq!(alone.how_to_fetch_all.as_deref(), Some("Call again with start_date 20250102."));
+    }
 
     fn base() -> CappedTruncation<'static> {
         CappedTruncation {

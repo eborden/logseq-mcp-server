@@ -12,6 +12,7 @@
 
 pub mod args;
 pub mod block_budget;
+pub mod budget;
 pub mod block_tree;
 pub mod client;
 pub mod compact;
