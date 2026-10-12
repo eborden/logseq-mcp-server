@@ -45,7 +45,7 @@ const ROOT = new URL('../../', import.meta.url);
 const TOOL_LIST_FILE = new URL('rust/tests/data/parity/tool-list.json', ROOT);
 
 /** The live docs that name tools, relative to the repo root. A new live doc is one more line here. */
-const LIVE_DOCS: readonly string[] = ['README.md', 'rust/README.md', 'CLAUDE.md'];
+const LIVE_DOCS: readonly string[] = ['README.md', 'rust/README.md', 'CLAUDE.md', 'docs/architecture-foundations.md'];
 
 /** The keyword of the comment that excuses the unknown tool names it lists. Documented in the header above. */
 const HISTORY_MARKER = 'guard:history';
@@ -71,6 +71,12 @@ describe('the live docs name only real tools (#503)', () => {
   it('finds the live docs and the recorded tools', () => {
     for (const path of LIVE_DOCS) expect(read(path).text.length, path).toBeGreaterThan(0);
     expect(tools.length).toBeGreaterThan(0);
+  });
+
+  it('has something to check: the docs name at least one recorded tool, and every allowlisted token is in a doc', () => {
+    const text = LIVE_DOCS.map(read).map(f => f.text).join('\n');
+    expect(tools.some(t => text.includes(t.name))).toBe(true);
+    for (const token of Object.keys(NON_TOOL_TOKENS)) expect(text, token).toContain(token);
   });
 
   it('names only recorded tools and validates every json tool= example', () => {
