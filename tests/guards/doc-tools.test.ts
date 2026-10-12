@@ -29,15 +29,24 @@ import { docViolations, type DocOptions, type RecordedTool } from './skill-tools
  * the new one. Add the comment only when the sentence says "was" and the old name is the point.
  *
  * Bare names (#510). Most of the docs name tools without the prefix: the tool tables in README.md, its `Use: name(...)`
- * lines, the status table and prose of CLAUDE.md, the file map of rust/README.md. A rename (#489 to #495) leaves each of
- * those stale, so a bare token that equals a first-version tool name (FORMER_TOOL_NAMES, whole word, not part of a path
- * such as `src/tools/<name>/`) must be a tool in the recorded list with the prefix added, or sit on a line whose history
- * comment names it (`<!-- guard:history get_old_name -->`, the bare name). A rename PR updates the bare names in step, or
- * the guard fails on the old one. Bare names of tools that were never in FORMER_TOOL_NAMES are not checked: a tool that
- * is added and later renamed needs its old name appended to the list by the PR that renames it (the list never shrinks).
+ * lines, the status table and prose of CLAUDE.md, the prose of rust/README.md. A rename (#489 to #495) leaves each of
+ * those stale, so a bare token that equals a first-version tool name (FORMER_TOOL_NAMES, whole word) must be a tool in
+ * the recorded list with the prefix added, or sit on a line whose history comment names it
+ * (`<!-- guard:history get_old_name -->`, the bare name). A rename PR updates the bare names in step, or the guard fails
+ * on the old one. A line that holds both forms, such as "was `get_old_name` (`logseq_old_name`)", needs both names in
+ * the comment, since each is its own unknown token. Bare names of tools that were never in FORMER_TOOL_NAMES are not
+ * checked, and a marker that names one says so: a tool that is added and later renamed needs its old name appended to
+ * the list by the PR that renames it (the list never shrinks).
+ *
+ * Paths are skipped. A name touching a `/` is part of a path unless the run around it is only former tool names, so
+ * `src/tools/get_page/mod.rs` and the directory names `get_page/` are skipped, and a pair written `get_page/get_block`
+ * is checked. That has a cost: the directory list in the rust/README.md file map (the row for `src/tools/<tool>/`,
+ * all 14 names written `name/`) is NOT checked, so it goes stale without a failure when a rename PR renames a tool's
+ * directory. The rename PR updates it by hand.
+ *
  * A bare name that is no tool reference, such as the Rust function of the same name, goes in BARE_CONTEXTS as the text
- * around it with its reason. Measured on the live docs before this check: 135 bare uses, 24 inside paths (skipped by
- * construction), 1 that is no tool reference (the Rust function in CLAUDE.md), the rest tool references.
+ * around it with its reason. Measured on the live docs before this check: 135 bare uses, 24 in paths (the directory
+ * list above), 1 that is no tool reference (the Rust function in CLAUDE.md), the rest tool references.
  *
  * What a green run does NOT mean: that the docs are right about a tool. It means each name is real. The guard does not
  * read a tool's description in a table row, prose counts such as "16 tools", API call counts, or a name that was
@@ -294,6 +303,19 @@ describe('the bare-name rule can fail (#510 self-test)', () => {
     expect(run(`${note} ${mark('get_widget')}\n`)).toEqual([]);
     expect(run(`${note} \`get_widget_outline\` too. ${mark('get_widget')}\n`)).toEqual([stale(1, 'get_widget_outline')]);
     expect(run(`${note} ${mark('get_widget')}\nStill \`get_widget\` here.\n`)).toEqual([stale(2, 'get_widget')]);
+  });
+
+  it('needs both names on a line that holds the bare and the prefixed form', () => {
+    const text = (names: string[]) => `Was \`get_widget\` (\`logseq_get_widget\`). ${mark(...names)}\n`;
+    expect(run(text(['get_widget', 'logseq_get_widget']))).toEqual([]);
+    expect(run(text(['get_widget']))).toEqual(['doc.md:1: "logseq_get_widget" is not a tool in tool-list.json']);
+    expect(run(text(['logseq_get_widget']))).toEqual([stale(1, 'get_widget')]);
+  });
+
+  it('says so when a comment names a bare name that FORMER_TOOL_NAMES lacks', () => {
+    expect(run(`Was \`get_gadget\`. ${mark('get_gadget')}\n`)).toEqual([
+      'doc.md:1: "get_gadget" is not in FORMER_TOOL_NAMES, so the guard never reads it bare; name it with the logseq_ prefix or add it to the list',
+    ]);
   });
 
   it('fails a history comment on a bare name that is a tool, or that is not on the line', () => {
