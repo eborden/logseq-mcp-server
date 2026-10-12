@@ -1,238 +1,376 @@
 {
   "version": 1,
-  "about": "Questions for scripts/routing-eval.ts (#487). Every page, name and block named here is made up and lives in tests/fixtures/graph/ (see tests/fixtures/README.md). expected_type is the tool type a good first call has: get (the caller names the one thing), find (the caller has criteria and wants a list), explore (the caller has a starting point and wants what surrounds it), check (the caller is about to write). v1_tools and v2_tools are the tools that count as the right first call on each surface; the script maps a tool to its type itself, so a tool outside the list can still be type-correct.",
+  "about": "Questions for scripts/routing-eval.ts (#487). Every page, name and block named here is made up and lives in tests/fixtures/graph/ (see tests/fixtures/README.md). expected_type is the tool type a good first call has: get (the caller names the one thing), find (the caller has criteria and wants a list), explore (the caller has a starting point and wants what surrounds it), check (the caller is about to write). v1_tools and v2_tools are the tools that count as the right first call on each surface; the script maps a tool to its type itself, so a tool outside the list can still be type-correct. find-boundary-1 sits on the line ADR-0037 draws: its answer is a list of hits, so the expected type is find, and a first call that maps what surrounds the page is the confusion the ADR says reopens the verbs. No question uses a tool's own verb (search, find, open, fetch, check, verify, list, read).",
   "questions": [
     {
       "id": "get-page-1",
       "intent": "page-by-name",
       "expected_type": "get",
-      "question": "Open my page called project atlas and tell me what the goals for the first release are.",
-      "v1_tools": ["logseq_get_page", "logseq_get_page_outline"],
-      "v2_tools": ["logseq_get_page"]
+      "question": "What does my project atlas page say about the goals for the first release?",
+      "v1_tools": [
+        "logseq_get_page",
+        "logseq_get_page_outline"
+      ],
+      "v2_tools": [
+        "logseq_get_page"
+      ]
     },
     {
       "id": "get-page-2",
       "intent": "page-by-name",
       "expected_type": "get",
       "question": "What does my page for Alice say?",
-      "v1_tools": ["logseq_get_page", "logseq_get_page_outline"],
-      "v2_tools": ["logseq_get_page"]
+      "v1_tools": [
+        "logseq_get_page",
+        "logseq_get_page_outline"
+      ],
+      "v2_tools": [
+        "logseq_get_page"
+      ]
     },
     {
       "id": "get-page-3",
       "intent": "page-by-name",
       "expected_type": "get",
-      "question": "Read the page named project cascade and list the tasks on it that are still open.",
-      "v1_tools": ["logseq_get_page", "logseq_get_page_outline"],
-      "v2_tools": ["logseq_get_page"]
+      "question": "Which tasks are still undone on the project cascade page?",
+      "v1_tools": [
+        "logseq_get_page",
+        "logseq_get_page_outline"
+      ],
+      "v2_tools": [
+        "logseq_get_page"
+      ]
     },
     {
       "id": "get-block-1",
       "intent": "block-by-uuid",
       "expected_type": "get",
       "question": "What does the block with the id 0088f1a0-0000-4000-8000-000000000001 say?",
-      "v1_tools": ["logseq_get_block"],
-      "v2_tools": ["logseq_get_block"]
+      "v1_tools": [
+        "logseq_get_block"
+      ],
+      "v2_tools": [
+        "logseq_get_block"
+      ]
     },
     {
       "id": "get-block-2",
       "intent": "block-by-uuid",
       "expected_type": "get",
-      "question": "Fetch block 0088f1a0-0000-4000-8000-000000000002 and show me its children too.",
-      "v1_tools": ["logseq_get_block"],
-      "v2_tools": ["logseq_get_block"]
+      "question": "I need the text of block 0088f1a0-0000-4000-8000-000000000002 and everything nested under it.",
+      "v1_tools": [
+        "logseq_get_block"
+      ],
+      "v2_tools": [
+        "logseq_get_block"
+      ]
     },
     {
       "id": "get-current-1",
       "intent": "this-page",
       "expected_type": "get",
-      "question": "Summarize the page I have open in LogSeq right now.",
-      "v1_tools": ["logseq_get_current_context"],
-      "v2_tools": ["logseq_get_current"]
+      "question": "Summarize the page I'm looking at in LogSeq right now.",
+      "v1_tools": [
+        "logseq_get_current_context"
+      ],
+      "v2_tools": [
+        "logseq_get_current"
+      ]
     },
     {
       "id": "get-current-2",
       "intent": "this-page",
       "expected_type": "get",
       "question": "Which block am I editing at the moment, and what is selected?",
-      "v1_tools": ["logseq_get_current_context"],
-      "v2_tools": ["logseq_get_current"]
+      "v1_tools": [
+        "logseq_get_current_context"
+      ],
+      "v2_tools": [
+        "logseq_get_current"
+      ]
     },
     {
       "id": "find-keyword-1",
       "intent": "keyword",
       "expected_type": "find",
       "question": "Which of my notes mention the word importer?",
-      "v1_tools": ["logseq_search_blocks"],
-      "v2_tools": ["logseq_find_blocks"]
+      "v1_tools": [
+        "logseq_search_blocks"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-keyword-2",
       "intent": "keyword",
       "expected_type": "find",
-      "question": "Search my notes for the phrase floor plans and show me the blocks.",
-      "v1_tools": ["logseq_search_blocks"],
-      "v2_tools": ["logseq_find_blocks"]
+      "question": "Which blocks mention floor plans?",
+      "v1_tools": [
+        "logseq_search_blocks"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-keyword-3",
       "intent": "keyword",
       "expected_type": "find",
-      "question": "Find every block that talks about the printer.",
-      "v1_tools": ["logseq_search_blocks"],
-      "v2_tools": ["logseq_find_blocks"]
+      "question": "Which blocks talk about the printer?",
+      "v1_tools": [
+        "logseq_search_blocks"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-property-1",
       "intent": "property-value",
       "expected_type": "find",
       "question": "Which blocks have their status property set to testing?",
-      "v1_tools": ["logseq_query_by_property"],
-      "v2_tools": ["logseq_find_blocks"]
+      "v1_tools": [
+        "logseq_query_by_property"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-property-2",
       "intent": "property-value",
       "expected_type": "find",
-      "question": "List the blocks where reviewed is true.",
-      "v1_tools": ["logseq_query_by_property"],
-      "v2_tools": ["logseq_find_blocks"]
+      "question": "Which blocks have reviewed set to true?",
+      "v1_tools": [
+        "logseq_query_by_property"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-property-3",
       "intent": "property-value",
       "expected_type": "find",
       "question": "Which things have the property type set to project?",
-      "v1_tools": ["logseq_query_by_property"],
-      "v2_tools": ["logseq_find_pages", "logseq_find_blocks"]
+      "v1_tools": [
+        "logseq_query_by_property"
+      ],
+      "v2_tools": [
+        "logseq_find_pages",
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-links-1",
       "intent": "blocks-linking-two-pages",
       "expected_type": "find",
       "question": "Which blocks link to both project atlas and Bob?",
-      "v1_tools": ["logseq_search_by_relationship"],
-      "v2_tools": ["logseq_find_blocks"]
+      "v1_tools": [
+        "logseq_search_by_relationship"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-links-2",
       "intent": "blocks-linking-two-pages",
       "expected_type": "find",
-      "question": "Show me the blocks that mention Alice and project cascade together.",
-      "v1_tools": ["logseq_search_by_relationship"],
-      "v2_tools": ["logseq_find_blocks"]
+      "question": "Which blocks mention Alice and project cascade together?",
+      "v1_tools": [
+        "logseq_search_by_relationship"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "find-pages-1",
       "intent": "page-names",
       "expected_type": "find",
       "question": "Is there a page with borealis in its name? I don't remember what it is called exactly.",
-      "v1_tools": ["logseq_list_pages"],
-      "v2_tools": ["logseq_find_pages"]
+      "v1_tools": [
+        "logseq_list_pages"
+      ],
+      "v2_tools": [
+        "logseq_find_pages"
+      ]
+    },
+    {
+      "id": "find-boundary-1",
+      "intent": "find-vs-explore-boundary",
+      "expected_type": "find",
+      "question": "Where does project atlas come up in my notes?",
+      "v1_tools": [
+        "logseq_search_blocks"
+      ],
+      "v2_tools": [
+        "logseq_find_blocks"
+      ]
     },
     {
       "id": "explore-topic-1",
       "intent": "topic",
       "expected_type": "explore",
       "question": "What do I know about project atlas?",
-      "v1_tools": ["logseq_build_context", "logseq_get_context_for_query"],
-      "v2_tools": ["logseq_explore_context"]
+      "v1_tools": [
+        "logseq_build_context",
+        "logseq_get_context_for_query"
+      ],
+      "v2_tools": [
+        "logseq_explore_context"
+      ]
     },
     {
       "id": "explore-topic-2",
       "intent": "topic",
       "expected_type": "explore",
       "question": "Give me everything I have written about Bob, and what links to him.",
-      "v1_tools": ["logseq_build_context", "logseq_get_context_for_query", "logseq_get_backlinks"],
-      "v2_tools": ["logseq_explore_context"]
+      "v1_tools": [
+        "logseq_build_context",
+        "logseq_get_context_for_query",
+        "logseq_get_backlinks"
+      ],
+      "v2_tools": [
+        "logseq_explore_context"
+      ]
     },
     {
       "id": "explore-topic-3",
       "intent": "topic",
       "expected_type": "explore",
       "question": "Brief me on project cascade before my meeting.",
-      "v1_tools": ["logseq_build_context", "logseq_get_context_for_query"],
-      "v2_tools": ["logseq_explore_context"]
+      "v1_tools": [
+        "logseq_build_context",
+        "logseq_get_context_for_query"
+      ],
+      "v2_tools": [
+        "logseq_explore_context"
+      ]
     },
     {
       "id": "explore-connect-1",
       "intent": "how-two-pages-connect",
       "expected_type": "explore",
       "question": "How are Alice and project cascade connected in my notes?",
-      "v1_tools": ["logseq_get_concept_network", "logseq_search_by_relationship"],
-      "v2_tools": ["logseq_explore_network"]
+      "v1_tools": [
+        "logseq_get_concept_network",
+        "logseq_search_by_relationship"
+      ],
+      "v2_tools": [
+        "logseq_explore_network"
+      ]
     },
     {
       "id": "explore-connect-2",
       "intent": "how-two-pages-connect",
       "expected_type": "explore",
       "question": "Is there any path from project borealis to Bob, and how many steps is it?",
-      "v1_tools": ["logseq_get_concept_network", "logseq_search_by_relationship"],
-      "v2_tools": ["logseq_explore_network"]
+      "v1_tools": [
+        "logseq_get_concept_network",
+        "logseq_search_by_relationship"
+      ],
+      "v2_tools": [
+        "logseq_explore_network"
+      ]
     },
     {
       "id": "explore-evolution-1",
       "intent": "change-over-time",
       "expected_type": "explore",
       "question": "How has project atlas come up in my notes over time, from December 2024 to February 2025?",
-      "v1_tools": ["logseq_get_concept_evolution"],
-      "v2_tools": ["logseq_explore_timeline"]
+      "v1_tools": [
+        "logseq_get_concept_evolution"
+      ],
+      "v2_tools": [
+        "logseq_explore_timeline"
+      ]
     },
     {
       "id": "explore-evolution-2",
       "intent": "change-over-time",
       "expected_type": "explore",
-      "question": "Show me how weekly review has shown up in my notes, week by week.",
-      "v1_tools": ["logseq_get_concept_evolution"],
-      "v2_tools": ["logseq_explore_timeline"]
+      "question": "How has weekly review shown up in my notes, week by week?",
+      "v1_tools": [
+        "logseq_get_concept_evolution"
+      ],
+      "v2_tools": [
+        "logseq_explore_timeline"
+      ]
     },
     {
       "id": "explore-period-1",
       "intent": "what-happened-in-a-period",
       "expected_type": "explore",
       "question": "What did I write in my journal between January 6 and January 10, 2025?",
-      "v1_tools": ["logseq_query_by_date_range"],
-      "v2_tools": ["logseq_explore_timeline"]
+      "v1_tools": [
+        "logseq_query_by_date_range"
+      ],
+      "v2_tools": [
+        "logseq_explore_timeline"
+      ]
     },
     {
       "id": "explore-period-2",
       "intent": "what-happened-in-a-period",
       "expected_type": "explore",
-      "question": "Summarize what happened in my journals during all of January 2025.",
-      "v1_tools": ["logseq_query_by_date_range"],
-      "v2_tools": ["logseq_explore_timeline"]
+      "question": "What happened in my journals during all of January 2025?",
+      "v1_tools": [
+        "logseq_query_by_date_range"
+      ],
+      "v2_tools": [
+        "logseq_explore_timeline"
+      ]
     },
     {
       "id": "explore-period-3",
       "intent": "what-happened-in-a-period",
       "expected_type": "explore",
       "question": "What was going on between December 31, 2024 and January 8, 2025?",
-      "v1_tools": ["logseq_query_by_date_range"],
-      "v2_tools": ["logseq_explore_timeline"]
+      "v1_tools": [
+        "logseq_query_by_date_range"
+      ],
+      "v2_tools": [
+        "logseq_explore_timeline"
+      ]
     },
     {
       "id": "check-links-1",
       "intent": "proposed-link-pass",
       "expected_type": "check",
-      "question": "I want to add links to a note before I save it. Check this edit for me.\n\nBefore: Bob builds the importer for project atlas.\nAfter: [[Bob]] builds the importer for [[project atlas]].",
-      "v1_tools": ["logseq_check_links"],
-      "v2_tools": ["logseq_check_links"]
+      "question": "I'm about to save this edit that adds links to a note. Is it safe to apply?\n\nBefore: Bob builds the importer for project atlas.\nAfter: [[Bob]] builds the importer for [[project atlas]].",
+      "v1_tools": [
+        "logseq_check_links"
+      ],
+      "v2_tools": [
+        "logseq_check_links"
+      ]
     },
     {
       "id": "check-links-2",
       "intent": "proposed-link-pass",
       "expected_type": "check",
       "question": "I linked some names in a block. Did I break anything, and do those pages exist?\n\nBefore: Alice works with Bob on the room names for the atlas demo.\nAfter: [[Alice]] works with [[Bob]] on the room names for the [[atlas demo]].",
-      "v1_tools": ["logseq_check_links"],
-      "v2_tools": ["logseq_check_links"]
+      "v1_tools": [
+        "logseq_check_links"
+      ],
+      "v2_tools": [
+        "logseq_check_links"
+      ]
     },
     {
       "id": "check-links-3",
       "intent": "proposed-link-pass",
       "expected_type": "check",
-      "question": "Verify this link pass is safe to apply.\n\nBefore: Freeze scope, write the release notes, tell Bob. See ((0088f1a0-0000-4000-8000-000000000001)).\nAfter: Freeze scope, write the [[release notes]], tell [[Bob]]. See ((0088f1a0-0000-4000-8000-000000000001)).",
-      "v1_tools": ["logseq_check_links"],
-      "v2_tools": ["logseq_check_links"]
+      "question": "Is this link pass safe to apply?\n\nBefore: Freeze scope, write the release notes, tell Bob. See ((0088f1a0-0000-4000-8000-000000000001)).\nAfter: Freeze scope, write the [[release notes]], tell [[Bob]]. See ((0088f1a0-0000-4000-8000-000000000001)).",
+      "v1_tools": [
+        "logseq_check_links"
+      ],
+      "v2_tools": [
+        "logseq_check_links"
+      ]
     }
   ]
 }
