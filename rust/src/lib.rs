@@ -35,6 +35,7 @@ pub mod output_format;
 pub mod pages_by_ids;
 pub mod params;
 pub mod prompts;
+pub mod property;
 pub mod refs;
 pub mod resolve;
 pub mod resolve_refs;
