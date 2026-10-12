@@ -132,15 +132,29 @@ describe('result caps (#61)', () => {
       ).toBeLessThan(MAX_SEARCH_LIMIT);
     });
 
-    it('the default cuts below the maximum and says which limit gets the rest', async () => {
+    it('the default cuts below the maximum and offers the raise that fits the character budget, which returns that many hits', async () => {
       const { results, meta } = await search();
 
       expect(results).toHaveLength(DEFAULT_SEARCH_LIMIT);
       expect(meta.totals).toEqual({ matches });
-      expect(meta.hasMore).toBe(true);
       expect(meta.warnings.map(w => w.code)).toEqual(['results_truncated']);
-      expect(meta.warnings[0].howToFetchAll).toMatch(new RegExp(`^Set limit to ${matches}\\b`));
+      // Every match is ~60,000 characters (#506), so "get all" would be cut: the raise offered is the most that fits,
+      // and hasMore is true because a parameter really fetches that many
+      const fitting = (await search(MAX_SEARCH_LIMIT)).results.length;
+      expect(fitting).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+      expect(fitting).toBeLessThan(matches);
+      expect(meta.hasMore).toBe(true);
+      expect(meta.warnings[0].howToFetchAll).toMatch(new RegExp(`^Set limit to ${fitting} to get ${fitting} of ${matches}\\.`));
+      expect(meta.warnings[0].howToFetchAll).not.toMatch(/get all/);
       expectNoSuggestionPast(meta, 'limit', MAX_SEARCH_LIMIT);
+
+      // Following it returns that many hits with no size cut, and the next limit up is cut back to the same count
+      const raised = await search(fitting);
+      expect(raised.results).toHaveLength(fitting);
+      expect(raised.meta.warnings.map(w => w.code)).not.toContain('result_size_truncated');
+      const beyond = await search(fitting + 1);
+      expect(beyond.results).toHaveLength(fitting);
+      expect(beyond.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
     });
 
     it('the maximum asks for every match, the character budget cuts it, and a limit above it clamps to the same blocks', async () => {
@@ -148,10 +162,13 @@ describe('result caps (#61)', () => {
       const above = await search(1000);
 
       // The count cap cuts nothing here (matches < 500). Every match is ~60,000 characters, past the budget (#506),
-      // so the one cut is the size cut: it says so alone, names the total, and offers no larger limit
-      expect(atMax.results.length, 'the budget keeps some matches and not all').toBeGreaterThan(0);
+      // so the one cut is the size cut: it says so alone, names the total, and offers no larger limit (hasMore false
+      // pairs with no howToFetchAll)
+      const sent = [...atMax.text].length + [...atMax.metaText].length;
+      expect(sent, 'the budget is in characters').toBeLessThanOrEqual(30000);
+      // ...and it keeps what fits: a regression that over-cuts keeps far fewer than the ~160 hits of 30,000 characters
+      expect(sent, 'the cut keeps the most hits that fit').toBeGreaterThanOrEqual(29000);
       expect(atMax.results.length).toBeLessThan(matches);
-      expect([...atMax.text].length + [...atMax.metaText].length, 'the budget is in characters').toBeLessThanOrEqual(30000);
       expect(atMax.meta).toMatchObject({ hasMore: false, totals: { matches } });
       expect(atMax.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
       expect(atMax.meta.warnings[0].howToFetchAll).toBeUndefined();
