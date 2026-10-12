@@ -123,7 +123,7 @@ Use this skill when:
 - Read `references/summary-compression.md` for the shared compression philosophy and formatting
 - Read the matching sub-skill for cadence specifics: `skills/weekly-summary.md` or `skills/monthly-summary.md`
 - Optionally read `references/mcp-tools-reference.md` for tool syntax
-- **Query before files.** Step 0 of each sub-skill loads the LogSeq tools (search for them if they're deferred), calls `logseq_get_graph_info`, and runs the period query before any shell command that reads the graph. The journals are also files on disk, but they are the fallback for a tool call that has failed, never a shortcut past loading the tools
+- **Query before files.** Step 0 of each sub-skill loads the LogSeq tools (search for them if they're deferred), calls `logseq_get_graph`, and runs the period query before any shell command that reads the graph. The journals are also files on disk, but they are the fallback for a tool call that has failed, never a shortcut past loading the tools
 - The open-items `grep` over `journals/` checks marker state only. It doesn't replace the period query
 - Adding a new granularity (quarterly, annual) means adding one sub-skill; the compression rules are inherited from the reference
 

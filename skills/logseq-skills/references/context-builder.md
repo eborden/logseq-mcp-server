@@ -13,7 +13,7 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 **4-Phase Approach:**
 
 1. **Search** → `logseq_search_blocks(topic, limit=15)` - cast wide net
-2. **Retrieve** → `logseq_get_page(relevant_pages, includeChildren=true)` - get full content
+2. **Retrieve** → `logseq_get_page(relevant_pages, detail="full")` - get full content
 3. **Discover** → `logseq_get_backlinks(key_pages)` - find connections
 4. **Synthesize** → Present organized findings with sources
 
@@ -22,7 +22,7 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 User: "What do I know about React hooks?"
 
 1. logseq_search_blocks("React hooks", 15)
-2. logseq_get_page("React", includeChildren=true)
+2. logseq_get_page("React", detail="full")
 3. logseq_get_backlinks("React")
 4. Synthesize: "You have detailed notes in [[React]] covering useState/useEffect.
    Referenced in [[Project Alpha]] and [[Interview Notes]]. Gap: error boundary hooks."
@@ -123,7 +123,7 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
    - Single call replaces multiple queries
 
 2. **Manual Context** (if build_context not available):
-   - Get full page: `logseq_get_page(name, includeChildren=true)`
+   - Get full page: `logseq_get_page(name, detail="full")`
    - Get connections: `logseq_get_backlinks(name)`
    - Extract linked pages from content
 

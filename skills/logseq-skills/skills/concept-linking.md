@@ -24,7 +24,7 @@ Add `[[refs]]` to existing notes for concepts that already have pages, without c
 For a block ref, fetch it with children:
 
 ```
-logseq_get_block(block_uuid="<uuid>", include_children=true)
+logseq_get_block(uuid="<uuid>", include_children=true)
 ```
 
 For a page, use `logseq_get_page`. For a date range, `logseq_query_by_date_range` (slim blocks by default).
@@ -52,7 +52,7 @@ Do not guess at page names, and do not assume a concept has a page because it pl
 Find the graph root, then the file:
 
 ```
-logseq_get_graph_info()
+logseq_get_graph()
 ```
 
 Journals live at `<graph>/journals/YYYY_MM_DD.md` and pages at `<graph>/pages/<Title>.md`. Never hardcode a path; different graphs sit in different places.
