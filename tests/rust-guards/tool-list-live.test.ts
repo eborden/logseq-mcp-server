@@ -28,8 +28,8 @@ describe('the live tools/list (ADR-0016)', () => {
     await live?.close();
   });
 
-  it('lists 16 tools', () => {
-    expect(tools).toHaveLength(16);
+  it('lists 15 tools', () => {
+    expect(tools).toHaveLength(15);
   });
 
   it('stays within the token budget, measured on what the server sends', () => {

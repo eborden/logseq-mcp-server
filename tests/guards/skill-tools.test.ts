@@ -29,7 +29,7 @@ import {
  * A failure names the file, the line and the bad token or argument.
  *
  * MIN_EXAMPLES_PER_TOOL is 0 here. #497 (the skills rewrite) is the switch: it raises the constant to 2, and in the
- * same PR adds the logseq_get_graph_info section and deletes its MISSING_SECTION_ALLOWANCES entry.
+ * same PR adds the logseq_get_graph section and deletes its MISSING_SECTION_ALLOWANCES entry.
  * Skills aren't edited by this guard (ADR-0024), so MISSING_SECTION_ALLOWANCES lists the section gaps that exist on
  * main. An entry may only be removed: the guard fails once the heading exists, so the entry is deleted with it.
  */
@@ -44,10 +44,10 @@ const TOOL_REFERENCE_PATHS: readonly string[] = ['references/mcp-tools-reference
 const MIN_EXAMPLES_PER_TOOL = 0;
 
 /**
- * Tools the tool reference has no heading for on main (it notes `logseq_get_graph_info` in prose only). Skill edits
+ * Tools the tool reference has no heading for on main (it notes `logseq_get_graph` in prose only). Skill edits
  * are out of scope for #486 (ADR-0024); the section lands with the skills rewrite (#497), which deletes this entry.
  */
-const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph_info'];
+const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph'];
 
 describe('the skills name only real tools (#486)', () => {
   const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];

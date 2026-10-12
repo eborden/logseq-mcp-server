@@ -37,9 +37,9 @@ type RecordedTool = {
 const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];
 
 describe('tools/list guardrails', () => {
-  it('lists the 16 tools, once each, with the logseq_ prefix', () => {
-    expect(tools).toHaveLength(16);
-    expect(new Set(tools.map(t => t.name)).size).toBe(16);
+  it('lists the 15 tools, once each, with the logseq_ prefix', () => {
+    expect(tools).toHaveLength(15);
+    expect(new Set(tools.map(t => t.name)).size).toBe(15);
     for (const tool of tools) expect(tool.name, tool.name).toMatch(/^logseq_[a-z_]+$/);
   });
 

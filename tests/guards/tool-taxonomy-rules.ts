@@ -46,18 +46,15 @@ export const V1_PARAMETER_NAMES = [
  * The v1 tools that break a rule, exempt until their rename lands (#489 to #495). A rename PR deletes the entry of each
  * tool it renames or merges away, and of each tool it leaves conforming (`get_page` and `get_block` keep their names):
  * an entry whose name is gone from the recorded list, or whose tool already passes every rule, fails the guard. The
- * three v1 tools that conform today (`check_links`, `get_current_context`, `get_graph_info`) have no entry, so the
+ * tools that conform (`check_links`, and since #489 `get_page`, `get_block`, `get_current` and `get_graph`) have no entry, so the
  * rules run on them now. The plan (#500) is done when this is empty and the constant is gone.
  */
 export const V1_TOOL_ALLOWANCES: readonly string[] = [
   'logseq_build_context',
   'logseq_get_backlinks',
-  'logseq_get_block',
   'logseq_get_concept_evolution',
   'logseq_get_concept_network',
   'logseq_get_context_for_query',
-  'logseq_get_page',
-  'logseq_get_page_outline',
   'logseq_list_pages',
   'logseq_query_by_date_range',
   'logseq_query_by_property',

@@ -5,10 +5,10 @@
  */
 
 /**
- * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 18,763 across 16 tools, but that
+ * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 18,377 across 15 tools (#489), but that
  * is not what a client receives: the Rust server spells its schemas its own way (`format: "uint32"` on every count and
- * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 19,383. So the real payload
- * has about 317 characters of headroom under this budget, not the 937 the recorded list leaves.
+ * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 18,809. So the real payload
+ * has about 891 characters of headroom under this budget, not the 1,323 the recorded list leaves.
  *
  * The history of the number is in the version of `src/tool-list.test.ts` at commit `35fa2dd3`: it was set when the list
  * was about 16,000 characters and raised once to 19,700 for the #61 caps.
@@ -34,7 +34,7 @@ export const DESCRIPTION_CAP = 400;
 export const DESCRIPTION_ALLOWANCES: Record<string, number> = {};
 
 /** Tools that read what the person has open in LogSeq: read-only, but their answer changes between calls. */
-export const NON_IDEMPOTENT = ['logseq_get_current_context'];
+export const NON_IDEMPOTENT = ['logseq_get_current'];
 
 /**
  * The parameter aliases of the tools that take them (BR-0008): each tool's canonical parameter, and the other names the
@@ -45,9 +45,8 @@ export const NON_IDEMPOTENT = ['logseq_get_current_context'];
 export const PARAM_ALIASES: Record<string, { canonical: string; aliases: string[] }> = {
   logseq_build_context: { canonical: 'topic_name', aliases: ['name', 'page', 'page_name'] },
   logseq_get_backlinks: { canonical: 'page_name', aliases: ['name', 'page'] },
-  logseq_get_block: { canonical: 'block_uuid', aliases: ['uuid'] },
+  logseq_get_block: { canonical: 'uuid', aliases: ['block_uuid'] },
   logseq_get_concept_evolution: { canonical: 'concept_name', aliases: ['name', 'page', 'page_name'] },
   logseq_get_concept_network: { canonical: 'concept_name', aliases: ['name', 'page', 'page_name'] },
-  logseq_get_page: { canonical: 'page_name', aliases: ['name', 'page'] },
-  logseq_get_page_outline: { canonical: 'page_name', aliases: ['name', 'page'] },
+  logseq_get_page: { canonical: 'page', aliases: ['name', 'page_name'] },
 };
