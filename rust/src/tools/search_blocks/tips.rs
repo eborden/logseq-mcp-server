@@ -22,7 +22,7 @@ pub fn search_tips(query: &str, results: &[Value], matches: Option<usize>) -> Ve
         tips.push(format!(
             "No match. Search is literal (no synonyms): try a shorter or different word{}",
             match word {
-                Some(word) => format!(", or {}.", suggest_call("logseq_list_pages", &json!({"name_contains": word}))),
+                Some(word) => format!(", or {}.", suggest_call("logseq_find_pages", &json!({"text": word}))),
                 None => ".".to_owned(),
             }
         ));
@@ -68,7 +68,7 @@ mod tests {
     fn a_miss_suggests_a_shorter_word_and_a_page_name_search() {
         assert_eq!(
             search_tips("  importer rows ", &[], Some(0)),
-            [r#"No match. Search is literal (no synonyms): try a shorter or different word, or logseq_list_pages {"name_contains":"importer"}."#]
+            [r#"No match. Search is literal (no synonyms): try a shorter or different word, or logseq_find_pages {"text":"importer"}."#]
         );
         assert_eq!(
             search_tips("   ", &[], None),

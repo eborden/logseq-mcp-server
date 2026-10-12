@@ -19,7 +19,7 @@ pub const NAME: &str = "logseq_get_graph";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get the connected graph's name and filesystem path.\n\n\
 **Use when:** confirming which graph is attached or debugging paths.\n\
-**Can't find:** anything about content. See logseq_list_pages and logseq_build_context.";
+**Can't find:** anything about content. See logseq_find_pages and logseq_build_context.";
 
 /// The tool takes no arguments, and whatever is sent is ignored.
 #[derive(Debug, Deserialize, JsonSchema)]

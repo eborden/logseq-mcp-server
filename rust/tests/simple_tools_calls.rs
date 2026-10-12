@@ -1,4 +1,4 @@
-//! The LogSeq traffic of `logseq_get_graph`, `logseq_list_pages`, `logseq_search_blocks` and `logseq_query_by_property`
+//! The LogSeq traffic of `logseq_get_graph`, `logseq_find_pages`, `logseq_search_blocks` and `logseq_query_by_property`
 //! against a mock LogSeq on a local port: how many calls each makes, with which inputs. The call
 //! counts are those in `CLAUDE.md` ("Current Implementation Status"); the parity harness
 //! (`parity.rs`) checks the same calls and the result bytes against the recorded results.
@@ -10,7 +10,7 @@ use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::errors::ToolError;
 use logseq_mcp_server::args::Scalar;
-use logseq_mcp_server::tools::{get_graph, list_pages, query_by_property, search_blocks};
+use logseq_mcp_server::tools::{find_pages, get_graph, query_by_property, search_blocks};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -66,8 +66,8 @@ fn methods(logseq: &MockLogseq) -> Vec<String> {
     logseq.seen.lock().unwrap().iter().map(|call| call["method"].as_str().unwrap().to_owned()).collect()
 }
 
-fn list_args(name_contains: Option<&str>, limit: u64, offset: u64) -> list_pages::Args {
-    list_pages::Args { name_contains: name_contains.map(str::to_owned), limit, offset, format: None }
+fn find_args(text: Option<&str>, limit: u64, offset: u64) -> find_pages::Args {
+    find_pages::Args { text: text.map(str::to_owned), limit, offset, format: None }
 }
 
 fn block(id: i64, content: &str, page: i64) -> Value {
@@ -99,9 +99,9 @@ async fn the_page_list_costs_one_call_whatever_the_filter_the_window_or_the_alia
         {"id": 3, "name": "ali", "originalName": "Ali", "alias": [{"id": 1}]},
         {"id": 4, "name": "bob", "originalName": "Bob", "file": {"id": 10}}
     ]);
-    for args in [list_args(None, 200, 0), list_args(Some("ali"), 1, 0), list_args(None, 1, 1), list_args(None, 0, 0)] {
+    for args in [find_args(None, 200, 0), find_args(Some("ali"), 1, 0), find_args(None, 1, 1), find_args(None, 0, 0)] {
         let logseq = mock_logseq(vec![pages.clone()]).await;
-        list_pages::list_pages(&client(&logseq), &args).await.unwrap();
+        find_pages::find_pages(&client(&logseq), &args).await.unwrap();
         assert_eq!(methods(&logseq), ["logseq.Editor.getAllPages"], "{args:?}");
         assert_eq!(logseq.seen.lock().unwrap()[0]["args"], json!([]));
     }
@@ -110,7 +110,7 @@ async fn the_page_list_costs_one_call_whatever_the_filter_the_window_or_the_alia
 #[tokio::test]
 async fn a_null_page_list_is_not_an_empty_one() {
     let logseq = mock_logseq(vec![json!(null)]).await;
-    let result = list_pages::list_pages(&client(&logseq), &list_args(None, 200, 0)).await.unwrap();
+    let result = find_pages::find_pages(&client(&logseq), &find_args(None, 200, 0)).await.unwrap();
     assert!(result.pages.is_empty());
     assert_eq!(result.warning.unwrap().code, "pages_unavailable");
 }
@@ -222,7 +222,7 @@ async fn a_null_answer_to_the_search_is_written_as_an_empty_list_and_a_warning_w
     assert_eq!(content[0]["text"], "[]");
     assert_eq!(
         content[1]["text"],
-        r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":0},"tips":["No match. Search is literal (no synonyms): try a shorter or different word, or logseq_list_pages {\"name_contains\":\"x\"}."]}}"#
+        r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":0},"tips":["No match. Search is literal (no synonyms): try a shorter or different word, or logseq_find_pages {\"text\":\"x\"}."]}}"#
     );
 }
 

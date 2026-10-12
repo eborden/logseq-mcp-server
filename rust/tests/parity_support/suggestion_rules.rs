@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 use super::cases::Case;
 
 /// The fixed sentence that closes every page-not-found message (`PageNotFoundError`).
-pub const GUIDANCE: &str = "Try logseq_search_blocks to find it by content, or logseq_list_pages (name_contains) to browse names.";
+pub const GUIDANCE: &str = "Try logseq_search_blocks to find it by content, or logseq_find_pages (text) to browse names.";
 
 const LIST_START: &str = " Closest: ";
 

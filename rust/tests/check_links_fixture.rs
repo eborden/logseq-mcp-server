@@ -124,7 +124,7 @@ fn link_target_rows(pages: &[StubPage]) -> Value {
 }
 
 /// The fixture's graph: the titles of `pages.txt`, plus the one alias its pages declare. `pages.txt` lists pages as
-/// `logseq_list_pages` names them (#171), so an alias is not a line of its own: `Priya` has `alias:: Priya Raghavan`.
+/// `logseq_find_pages` names them (#171), so an alias is not a line of its own: `Priya` has `alias:: Priya Raghavan`.
 fn fixture_graph() -> Vec<StubPage> {
     // `pages.txt` is read at run time, but a `&'static str` name wants a leak: the test process is short
     fixture("pages.txt")

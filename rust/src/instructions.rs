@@ -9,7 +9,7 @@ Start with:
 - "what do I know about X": logseq_build_context (one topic) or logseq_get_context_for_query (a question)
 - keywords: logseq_search_blocks
 - journals and "last week": logseq_query_by_date_range
-- unsure of a page name: logseq_list_pages
+- unsure of a page name: logseq_find_pages
 - "this page": logseq_get_current
 - a long page: logseq_get_page with detail "outline", then logseq_get_block on the uuids you pick
 

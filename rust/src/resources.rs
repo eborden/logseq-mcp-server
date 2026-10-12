@@ -50,7 +50,7 @@ pub fn list() -> Vec<Resource> {
 /// The tools in the order the guide lists them
 /// (`tools/list` has its own order). A test checks it names every tool once.
 const GUIDE_TOOL_ORDER: [&str; 15] = [
-    "logseq_list_pages",
+    "logseq_find_pages",
     "logseq_get_current",
     "logseq_get_graph",
     "logseq_get_page",
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn the_guide_has_the_instructions_and_an_index_of_tools_prompts_and_resources() {
         let guide = build_guide();
-        assert!(guide.starts_with(&format!("# LogSeq MCP guide\n\n{SERVER_INSTRUCTIONS}\n\n## Tools\n\n- logseq_list_pages: List non-journal pages")));
+        assert!(guide.starts_with(&format!("# LogSeq MCP guide\n\n{SERVER_INSTRUCTIONS}\n\n## Tools\n\n- logseq_find_pages: Find non-journal pages")));
         assert!(guide.contains("\n- logseq_check_links: Check a [[link]] pass."));
         assert!(guide.contains("\n\n## Prompts\n\n- weekly_summary: Summarize a Monday-to-Friday week"));
         assert!(guide.ends_with(

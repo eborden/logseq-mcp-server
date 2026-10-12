@@ -27,10 +27,10 @@ describe('tool taxonomy (ADR-0037)', () => {
   });
 
   it('has no entry for a v1 tool that already conforms, so the rules run on it now', () => {
-    for (const name of ['logseq_check_links', 'logseq_get_page', 'logseq_get_block', 'logseq_get_current', 'logseq_get_graph']) {
+    for (const name of ['logseq_check_links', 'logseq_find_pages', 'logseq_get_page', 'logseq_get_block', 'logseq_get_current', 'logseq_get_graph']) {
       expect(V1_TOOL_ALLOWANCES, name).not.toContain(name);
     }
-    expect(V1_TOOL_ALLOWANCES).toHaveLength(10);
+    expect(V1_TOOL_ALLOWANCES).toHaveLength(9);
   });
 
   it('lists each allowance once', () => {
@@ -114,11 +114,11 @@ describe('each taxonomy rule can fail', () => {
 
   it('exempts an allowlisted tool from the name, description and parameter rules', () => {
     const v1: TaxonomyTool = {
-      name: 'logseq_list_pages',
-      description: 'List pages.',
-      inputSchema: { properties: { name_contains: {} } },
+      name: 'logseq_search_blocks',
+      description: 'Search blocks.',
+      inputSchema: { properties: { query: {} } },
     };
     expect(violations(v1)).not.toEqual([]);
-    expect(violations(v1, ['logseq_list_pages'])).toEqual([]);
+    expect(violations(v1, ['logseq_search_blocks'])).toEqual([]);
   });
 });

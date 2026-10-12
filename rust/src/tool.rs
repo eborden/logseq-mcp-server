@@ -206,7 +206,7 @@ mod tests {
     }
 
     /// One field of each kind the tools take, modelled on the recorded `tool-list` golden
-    /// (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
+    /// (`logseq_get_page`, `logseq_find_pages`, `logseq_get_concept_network`).
     #[derive(Debug, Deserialize, JsonSchema, PartialEq)]
     struct SampleArgs {
         /// The page to read.
@@ -225,7 +225,7 @@ mod tests {
 
 
     /// The recorded schema for fields of each kind in [`SampleArgs`]
-    /// (`logseq_get_page`, `logseq_list_pages`, `logseq_get_concept_network`).
+    /// (`logseq_get_page`, `logseq_find_pages`, `logseq_get_concept_network`).
     fn pinned_sample_schema() -> Value {
         json!({
             "type": "object",

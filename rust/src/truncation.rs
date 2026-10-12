@@ -19,7 +19,7 @@ pub const INLINE_REFERENCES: usize = 150;
 pub const INLINE_RELATED_PAGES: usize = 500;
 /// Concept network nodes, each with its edges.
 pub const INLINE_NETWORK_NODES: usize = 200;
-/// Listed pages (`list_pages`), counting aliased entries at about twice a plain one.
+/// Listed pages (`find_pages`), counting aliased entries at about twice a plain one.
 pub const INLINE_PAGES: usize = 800;
 
 /// The inline maximum for a list of blocks that may come back with

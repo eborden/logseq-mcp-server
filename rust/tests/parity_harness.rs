@@ -421,7 +421,7 @@ fn call_with(response: Value) -> Canned {
 }
 
 fn two_calls() -> Case {
-    Case { steps: vec![vec![call_with(json!([{"name": "first"}]))], vec![call_with(json!([{"name": "second"}]))]], ..plain_case("two calls", "logseq_list_pages", Request::Tool) }
+    Case { steps: vec![vec![call_with(json!([{"name": "first"}]))], vec![call_with(json!([{"name": "second"}]))]], ..plain_case("two calls", "logseq_find_pages", Request::Tool) }
 }
 
 fn last_answer(case: &Case) -> &Value {
