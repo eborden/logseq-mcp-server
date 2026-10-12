@@ -372,3 +372,121 @@ async fn a_page_reached_by_an_alias_says_so_in_markdown() {
     let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "atlas", "format": "markdown"}))).await.unwrap();
     assert_eq!(text_of(&result, 0), "# Project Atlas\n\n(resolved from \"atlas\", matched by alias)\n");
 }
+
+// ---- logseq_get_page with detail "outline" (ADR-0037, #489)
+
+fn outline_block(id: i64, parent: i64, left: i64, content: &str) -> Value {
+    json!([{"id": id, "uuid": uuid(id), "content": content, "left": {"id": left}, "parent": {"id": parent}}])
+}
+
+#[tokio::test]
+async fn detail_outline_goes_to_the_resolver_and_one_blocks_query_and_never_to_the_editor_page_call() {
+    let logseq = mock_logseq(vec![
+        json!([[pulled_page(10, "project atlas", "Project Atlas", true), "name"]]),
+        json!([outline_block(102, 10, 101, "Second"), outline_block(101, 10, 10, "First"), outline_block(201, 101, 101, "Child")]),
+    ])
+    .await;
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();
+
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery"]);
+    assert_eq!(
+        text_of(&result, 0),
+        format!(
+            r#"{{"page":"Project Atlas","blocks":[{{"uuid":"{}","snippet":"First","childCount":1}},{{"uuid":"{}","snippet":"Second","childCount":0}}],"hasMore":false,"warnings":[],"totals":{{"blocks":2}}}}"#,
+            uuid(101),
+            uuid(102)
+        )
+    );
+    // the tip names the v2 parameters of the tool it points at
+    assert_eq!(
+        text_of(&result, 1),
+        format!(r#"{{"meta":{{"tips":["To read a block and its children: logseq_get_block {{\"uuid\":\"{}\",\"include_children\":true}}."]}}}}"#, uuid(101))
+    );
+}
+
+#[tokio::test]
+async fn an_outline_in_toon_writes_the_result_and_its_tip_in_toon() {
+    let logseq = mock_logseq(vec![
+        json!([[pulled_page(10, "project atlas", "Project Atlas", true), "name"]]),
+        json!([outline_block(101, 10, 10, "First")]),
+    ])
+    .await;
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline", "format": "toon"}))).await.unwrap();
+    assert!(text_of(&result, 0).starts_with("page: Project Atlas\n"), "{}", text_of(&result, 0));
+    assert!(!text_of(&result, 1).starts_with('{'), "{}", text_of(&result, 1));
+}
+
+#[tokio::test]
+async fn a_format_or_resolve_refs_the_detail_cannot_take_is_refused_before_any_call() {
+    for (args, message) in [
+        (json!({"page": "Atlas", "detail": "outline", "format": "markdown"}), "Invalid parameter 'format': \"markdown\""),
+        (json!({"page": "Atlas", "format": "toon"}), "Invalid parameter 'format': \"toon\""),
+        (json!({"page": "Atlas", "detail": "full", "format": "toon"}), "Invalid parameter 'format': \"toon\""),
+        (json!({"page": "Atlas", "detail": "outline", "resolve_refs": true}), "Invalid parameter 'resolve_refs': true"),
+        (json!({"page": "Atlas", "detail": "everything"}), "Invalid parameter 'detail': \"everything\""),
+    ] {
+        let logseq = mock_logseq(vec![]).await;
+        let error = get_page::call(&client(&logseq), true, arguments(args.clone())).await.unwrap_err();
+        assert!(matches!(error, ToolError::InvalidParameter(_)), "{args}: {error}");
+        assert!(error.to_string().starts_with(message), "{args}: {error}");
+        assert!(methods(&logseq).is_empty(), "{args}: no LogSeq call");
+    }
+}
+
+#[tokio::test]
+async fn the_refusal_of_a_combination_names_the_valid_formats_and_a_way_out() {
+    let logseq = mock_logseq(vec![]).await;
+    let error = get_page::call(&client(&logseq), true, arguments(json!({"page": "Atlas", "detail": "outline", "resolve_refs": true}))).await.unwrap_err();
+    assert!(error.to_string().contains("detail \"full\""), "{error}");
+    let error = get_page::call(&client(&logseq), true, arguments(json!({"page": "Atlas", "format": "toon"}))).await.unwrap_err();
+    assert!(error.to_string().contains("json or markdown"), "{error}");
+}
+
+#[tokio::test]
+async fn an_outline_of_a_page_with_no_blocks_is_an_empty_list_and_an_unreadable_answer_is_an_error() {
+    let logseq = mock_logseq(vec![json!([[pulled_page(10, "bob", "Bob", true), "name"]]), json!([])]).await;
+    let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "bob", "detail": "outline"}))).await.unwrap();
+    assert_eq!(text_of(&result, 0), r#"{"page":"Bob","blocks":[],"hasMore":false,"warnings":[],"totals":{"blocks":0}}"#);
+
+    let logseq = mock_logseq(vec![json!([[pulled_page(10, "bob", "Bob", true), "name"]]), json!([[{"uuid": "u"}]])]).await;
+    let error = get_page::call(&client(&logseq), false, arguments(json!({"page": "bob", "detail": "outline"}))).await.unwrap_err();
+    assert!(matches!(error, ToolError::Response(_)), "{error}");
+}
+
+#[tokio::test]
+async fn an_outline_cut_at_the_cap_says_how_to_read_the_rest_with_the_v2_parameters() {
+    let mut rows: Vec<Value> = Vec::new();
+    for i in 0..201 {
+        rows.push(outline_block(1000 + i, 10, if i == 0 { 10 } else { 1000 + i - 1 }, "entry"));
+    }
+    let logseq = mock_logseq(vec![json!([[pulled_page(10, "bob", "Bob", true), "name"]]), Value::Array(rows)]).await;
+    let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "bob", "detail": "outline"}))).await.unwrap();
+    let value: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
+    assert_eq!(value["blocks"].as_array().unwrap().len(), 200);
+    assert_eq!(value["hasMore"], json!(false));
+    assert_eq!(value["warnings"][0]["code"], "outline_truncated");
+    assert!(value["warnings"][0]["message"].as_str().unwrap().ends_with("read the rest with logseq_get_page and detail \"full\"."));
+}
+
+#[tokio::test]
+async fn an_infrastructure_error_on_an_outline_reaches_the_caller() {
+    // nothing listens on this port
+    let dead = logseq_mcp_server::client::LogseqClient::new(&logseq_mcp_server::config::Config {
+        api_url: "http://127.0.0.1:9".into(),
+        auth_token: "t".into(),
+        timeout_ms: Some(2000),
+        tips: None,
+    });
+    let error = get_page::call(&dead, false, arguments(json!({"page": "bob", "detail": "outline"}))).await.unwrap_err();
+    assert!(matches!(error, ToolError::Logseq(_)), "{error}");
+}
+
+#[tokio::test]
+async fn the_v1_page_name_is_an_alias_and_include_children_is_gone() {
+    // `page_name` and `name` are aliases of `page`; `include_children` is not a parameter any more, so the page
+    // comes without its blocks and without a second call
+    let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true)]).await;
+    let result = get_page::call(&client(&logseq), false, arguments(json!({"page_name": "Project Atlas", "include_children": true}))).await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.Editor.getPage"]);
+    assert!(!text_of(&result, 0).contains("children"));
+}
