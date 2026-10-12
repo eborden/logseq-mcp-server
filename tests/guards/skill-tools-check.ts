@@ -245,7 +245,14 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
         if (named.length === 0) out.push(`${path}:${lineNo}: the history comment must name the tool names it excuses, as ${comment}`);
         for (const name of named) {
           if (isTool(name)) out.push(`${path}:${lineNo}: "${name}" is a tool in tool-list.json, so remove it from the history comment`);
-          else if (!bad.includes(name)) out.push(`${path}:${lineNo}: "${name}" is not named on this line, so remove it from the history comment`);
+          else if (!bad.includes(name)) {
+            // A bare name outside the former list is never read bare, so the line cannot name it. Say that, not "not on the line".
+            out.push(
+              !name.startsWith('logseq_') && !doc.formerToolNames.includes(name)
+                ? `${path}:${lineNo}: "${name}" is not in FORMER_TOOL_NAMES, so the guard never reads it bare; name it with the logseq_ prefix or add it to the list`
+                : `${path}:${lineNo}: "${name}" is not named on this line, so remove it from the history comment`,
+            );
+          }
         }
       }
       for (const token of bad) {
