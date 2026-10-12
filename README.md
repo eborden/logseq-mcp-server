@@ -21,7 +21,7 @@ Provides 15 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 
    To load the config from another file, set the environment variable `LOGSEQ_MCP_CONFIG` to its absolute path. A relative path stops the server at startup with a configuration error. The integration tests use it to run against a per-worktree LogSeq instance (`tests/integration/setup.md`).
 
-   Tips are on by default: six tools (`search_blocks`, `get_page`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `list_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
+   Tips are on by default: six tools (`search_blocks`, `get_page`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `find_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
 
    Some tools also accept `name`, `page` (and `page_name` or `block_uuid` where it fits) in place of their canonical parameter (`page`, `page_name`, `topic_name`, `concept_name`, `uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
 4. Connect it to your MCP client (next section). The server is a Rust binary. Run it with `uvx`, which needs [uv](https://docs.astral.sh/uv/), or build it from a clone, which needs the Rust toolchain that `rust/rust-toolchain.toml` pins (rustup reads it). Node is only for the repo's tooling and tests.
@@ -123,7 +123,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 | `get_backlinks` | Find all references to a page |
 | `get_block` | Get specific block by UUID |
 | `query_by_property` | Find blocks by property key/value |
-| `list_pages` | List non-journal pages as `{ name, aliases? }`, optionally filtered by name or alias |
+| `find_pages` | Find non-journal pages as `{ name, aliases? }`, filtered by `text` (a substring of a name or alias), exact `names` (up to 50, each answered with its page or `null` and the closest names) and a page property (`property` with `value`) |
 
 ### Graph Traversal (1)
 | Tool | Purpose |
