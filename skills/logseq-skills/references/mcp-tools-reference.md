@@ -130,7 +130,8 @@ Get specific block by UUID with optional children.
 
 **Parameters:**
 - `uuid` (required): UUID of the block
-- `include_children` (optional): Include nested child blocks (default: true)
+- `include_children` (optional): Include nested child blocks (default: **false**; without it the children come as unfetched references)
+- `resolve_refs` (optional): Add `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s (depth 2; default: false)
 - `format` (optional): `json` (default) or `markdown`, a `# Block ((uuid))` heading and the block with its children as bullets
 
 **Use when:**
