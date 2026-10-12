@@ -84,6 +84,12 @@ export interface Question {
   v1_tools: string[];
   /** Tools that count as the right first call on the v2 surface */
   v2_tools: string[];
+  /**
+   * Set on a question whose expected type is settled by ADR-0037's boundary test, not left to taste (#511). Such a
+   * question never accepts a tool of another type, and says why in `ground_truth_reason`.
+   */
+  ground_truth?: true;
+  ground_truth_reason?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -119,15 +125,29 @@ export function parseQuestions(raw: unknown): Question[] {
     if (!TOOL_TYPES.includes(expectedType as ToolType)) throw new Error(`Question "${id}" has expected_type ${JSON.stringify(expectedType)}, not one of ${TOOL_TYPES.join(', ')}`);
     const v1 = stringList(entry.v1_tools, `Question "${id}" v1_tools`);
     const v2 = stringList(entry.v2_tools, `Question "${id}" v2_tools`);
+    const groundTruth = entry.ground_truth;
+    if (groundTruth !== undefined && groundTruth !== true) throw new Error(`Question "${id}" has ground_truth ${JSON.stringify(groundTruth)}; it is true or absent`);
+    const reason = entry.ground_truth_reason;
+    if (groundTruth === true && (typeof reason !== 'string' || reason.trim() === '')) throw new Error(`Question "${id}" is ground truth but gives no ground_truth_reason`);
+    if (groundTruth === undefined && reason !== undefined) throw new Error(`Question "${id}" has a ground_truth_reason but is not marked ground_truth`);
     for (const [surface, tools] of [['v1', v1], ['v2', v2]] as const) {
       for (const tool of tools) {
         const type = SURFACE_TOOL_TYPES[surface][tool];
         if (type === undefined) throw new Error(`Question "${id}" lists ${tool}, which is not a ${surface} tool`);
-        const modeOk = tool === 'logseq_search_by_relationship' && expectedType === 'explore';
+        // search_by_relationship is typed by mode (callType), so a ground-truth question, whose accepted type is exactly one, can't list it
+        const modeOk = tool === 'logseq_search_by_relationship' && expectedType === 'explore' && groundTruth !== true;
         if (type !== expectedType && !modeOk) throw new Error(`Question "${id}" lists ${tool} (${type}) but expects ${expectedType}`);
       }
     }
-    return { id, intent, expected_type: expectedType as ToolType, question, v1_tools: v1, v2_tools: v2 };
+    return {
+      id,
+      intent,
+      expected_type: expectedType as ToolType,
+      question,
+      v1_tools: v1,
+      v2_tools: v2,
+      ...(groundTruth === true ? { ground_truth: true as const, ground_truth_reason: reason as string } : {}),
+    };
   });
 }
 
