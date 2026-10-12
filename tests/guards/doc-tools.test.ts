@@ -28,10 +28,17 @@ import { docViolations, type DocOptions, type RecordedTool } from './skill-tools
  * tool (rust/README.md and CLAUDE.md name `logseq_get_page_outline` in sentences about it today), update the name to
  * the new one. Add the comment only when the sentence says "was" and the old name is the point.
  *
+ * What a green run does NOT mean: that the docs match the tool list. The guard reads only `logseq_`-prefixed names,
+ * and most of the docs name tools without the prefix: the tool tables in README.md, its `Use: build_context(...)`
+ * examples and the bare names in CLAUDE.md, including its status table. A rename leaves all of those stale with this
+ * guard green. Checking them (the first column of the tool tables and the `Use: name(` lines, against the recorded
+ * names with the prefix added) is tracked in a follow-up issue under #500.
+ *
  * Not checked, on purpose: CHANGELOG.md, docs/adr/ and docs/business-rules/ are history (ADRs are immutable once
  * accepted), so they are not in the list. Prose claims such as a tool count ("16 tools") or an API call count are a
- * separate drift this guard doesn't read. A bare tool name without the `logseq_` prefix (the status table in CLAUDE.md
- * writes `get_page`) matches no pattern, so it is not caught either.
+ * separate drift this guard doesn't read.
+ *
+ * docs/architecture-foundations.md is in the list: it names `logseq_search_blocks` as its example and is not history.
  */
 
 const ROOT = new URL('../../', import.meta.url);
