@@ -114,6 +114,7 @@ describe('result caps (#61)', () => {
       expect(result.content, `limit ${limit ?? 'default'}: results block plus meta block`).toHaveLength(2);
       return {
         text: result.content[0].text,
+        metaText: result.content[1].text,
         results: JSON.parse(result.content[0].text) as unknown[],
         meta: (JSON.parse(result.content[1].text) as { meta: Meta }).meta,
       };
@@ -142,12 +143,19 @@ describe('result caps (#61)', () => {
       expectNoSuggestionPast(meta, 'limit', MAX_SEARCH_LIMIT);
     });
 
-    it('the maximum returns every match, and a limit above it clamps to the same blocks', async () => {
+    it('the maximum asks for every match, the character budget cuts it, and a limit above it clamps to the same blocks', async () => {
       const atMax = await search(MAX_SEARCH_LIMIT);
       const above = await search(1000);
 
-      expect(atMax.results).toHaveLength(matches);
-      expect(atMax.meta).toMatchObject({ hasMore: false, warnings: [], totals: { matches } });
+      // The count cap cuts nothing here (matches < 500). Every match is ~60,000 characters, past the budget (#506),
+      // so the one cut is the size cut: it says so alone, names the total, and offers no larger limit
+      expect(atMax.results.length, 'the budget keeps some matches and not all').toBeGreaterThan(0);
+      expect(atMax.results.length).toBeLessThan(matches);
+      expect([...atMax.text].length + [...atMax.metaText].length, 'the budget is in characters').toBeLessThanOrEqual(30000);
+      expect(atMax.meta).toMatchObject({ hasMore: false, totals: { matches } });
+      expect(atMax.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
+      expect(atMax.meta.warnings[0].howToFetchAll).toBeUndefined();
+      expect(atMax.meta.warnings[0].message).toMatch(new RegExp(`^Showing ${atMax.results.length} of ${matches} matching blocks`));
       expect(above.text).toBe(atMax.text);
       expect(above.meta).toEqual(atMax.meta);
     });
