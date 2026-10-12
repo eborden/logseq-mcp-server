@@ -18,7 +18,7 @@ import {
  * pseudo-calls that hide the parameter names, which are what models get wrong. The recorded tool list,
  * rust/tests/data/parity/tool-list.json, is the contract, so each rename of the v2 plan fails here until the skills
  * move in the same PR. Over every .md file under skills/logseq-skills/:
- *   1. every `logseq_[a-z_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
+ *   1. every `logseq_[a-z0-9_]+` token names a recorded tool. Host-prefixed forms (`mcp__<server>__logseq_x`) count as
  *      `logseq_x`;
  *   2. every recorded tool has a section heading in the tool reference (TOOL_REFERENCE_PATHS);
  *   3. every fenced block whose info string is `json tool=logseq_<name>` parses as a JSON object of arguments and
@@ -116,6 +116,13 @@ describe('the skills guard can fail (#486 self-test)', () => {
   it('flags an unknown host-prefixed tool name as its bare name', () => {
     expect(run('`mcp__logseq__logseq_get_widget`\n')).toEqual([
       'skill.md:1: "logseq_get_widget" is not a tool in tool-list.json',
+    ]);
+  });
+
+  it('reads a digit as part of a tool name, so a half-matched name is flagged whole', () => {
+    expect(run('`logseq_get_thing2` and `logseq_get_thing_v2`\n')).toEqual([
+      'skill.md:1: "logseq_get_thing2" is not a tool in tool-list.json',
+      'skill.md:1: "logseq_get_thing_v2" is not a tool in tool-list.json',
     ]);
   });
 
