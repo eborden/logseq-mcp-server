@@ -129,6 +129,17 @@ describe('tests/fixtures/routing-eval/questions.json', () => {
     }
   });
 
+  it('keeps Dave out of the fixture graph, since find-pages-2 asks which of four names are missing', () => {
+    // Carol is a file-less stub that other pages link to; Dave must have no page, link, alias or mention (#514)
+    const names = ['pages', 'journals'].flatMap(dir => readdirSync(join(root, 'tests', 'fixtures', 'graph', dir)));
+    expect(names.filter(name => /dave/i.test(name))).toEqual([]);
+    const graph = ['pages', 'journals']
+      .flatMap(dir => readdirSync(join(root, 'tests', 'fixtures', 'graph', dir)).map(name => readFileSync(join(root, 'tests', 'fixtures', 'graph', dir, name), 'utf8')))
+      .join('\n');
+    expect(graph).not.toMatch(/dave/i);
+    expect(questions.find(question => question.id === 'find-pages-2')?.question).toMatch(/\bDave\b/);
+  });
+
   it('lists, for each question, tools of its own type on both surfaces', () => {
     // parseQuestions throws for a tool that is not on the surface or has another type; this pins that it does
     const base = { id: 'q', intent: 'i', expected_type: 'get', question: 'Q?', v1_tools: ['logseq_get_page'], v2_tools: ['logseq_get_page'] };
