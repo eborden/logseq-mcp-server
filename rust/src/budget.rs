@@ -33,8 +33,10 @@ pub fn size(text: &str) -> usize {
 pub enum Fit {
     /// The result fits as it is, or has too few entries to cut: send it untouched, with no warning.
     Whole,
-    /// Keep the first `kept` entries and add the warning. `oversize` is true when even those are over the
-    /// budget: the first `min_kept` entries are the least a cut keeps, and they were returned whole.
+    /// Keep the first `kept` entries and add the warning. `oversize` is true when even the first `min_kept`
+    /// entries, the least a cut keeps, are over the budget. That can be those entries alone, or the rest of the
+    /// result around them (the page, the properties, the warnings); the cut can't tell which, so the warning says
+    /// neither. Entries are returned whole either way.
     Cut { kept: usize, oversize: bool },
 }
 

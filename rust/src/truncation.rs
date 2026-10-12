@@ -150,7 +150,7 @@ pub struct SizeCut<'a> {
     pub kept: usize,
     /// Entries there were before the cut
     pub total: usize,
-    /// The first entries kept were over the budget on their own and were returned whole (BR-0007)
+    /// The first entries kept are over the budget, on their own or with the result around them, and were returned whole (BR-0007)
     pub oversize: bool,
     /// What the caller can do to see less, or other, material: a parameter to lower, a tool to call
     pub advice: &'a str,
@@ -163,7 +163,7 @@ pub struct SizeCut<'a> {
 /// call can read on from where the cut fell (a date, a page of results), and `hasMore` is false otherwise.
 pub fn size_truncation_warning(cut: SizeCut<'_>) -> ResultWarning {
     let SizeCut { what, kept, total, oversize, advice, how_to_fetch_all } = cut;
-    let alone = if oversize { " Even those are over that size: an entry is never cut inside its text." } else { "" };
+    let alone = if oversize { " Even those are over that size, whether from the entry or from the result around it: an entry is never cut inside its text." } else { "" };
     ResultWarning {
         code: SIZE_TRUNCATED_CODE.to_owned(),
         message: format!(
@@ -195,7 +195,7 @@ mod tests {
             advice: "Read it with logseq_get_block.",
             how_to_fetch_all: Some("Call again with start_date 20250102.".to_owned()),
         });
-        assert!(alone.message.contains("Even those are over that size: an entry is never cut inside its text. Read it"), "{}", alone.message);
+        assert!(alone.message.contains("Even those are over that size, whether from the entry or from the result around it: an entry is never cut inside its text. Read it"), "{}", alone.message);
         assert_eq!(alone.how_to_fetch_all.as_deref(), Some("Call again with start_date 20250102."));
     }
 
