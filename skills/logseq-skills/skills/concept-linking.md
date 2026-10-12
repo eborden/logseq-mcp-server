@@ -27,7 +27,7 @@ For a block ref, fetch it with children:
 logseq_get_block(uuid="<uuid>", include_children=true)
 ```
 
-For a page, use `logseq_get_page`. For a date range, `logseq_query_by_date_range` (slim blocks by default).
+For a page, use `logseq_get_page` with `detail` `full` (its blocks are left out by default). For a date range, `logseq_query_by_date_range` (slim blocks by default).
 
 Note the scope you were given. A block ref means that block and its descendants, not the whole journal day. Linking outside the requested scope is unwanted work and it puts edits somewhere the requester is not looking.
 
