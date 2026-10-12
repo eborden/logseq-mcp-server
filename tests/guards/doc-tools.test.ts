@@ -28,11 +28,20 @@ import { docViolations, type DocOptions, type RecordedTool } from './skill-tools
  * tool (rust/README.md and CLAUDE.md name `logseq_get_page_outline` in sentences about it today), update the name to
  * the new one. Add the comment only when the sentence says "was" and the old name is the point.
  *
- * What a green run does NOT mean: that the docs match the tool list. The guard reads only `logseq_`-prefixed names,
- * and most of the docs name tools without the prefix: the tool tables in README.md, its `Use: build_context(...)`
- * examples and the bare names in CLAUDE.md, including its status table. A rename leaves all of those stale with this
- * guard green. Checking them (the first column of the tool tables and the `Use: name(` lines, against the recorded
- * names with the prefix added) is tracked in a follow-up issue under #500.
+ * Bare names (#510). Most of the docs name tools without the prefix: the tool tables in README.md, its `Use: name(...)`
+ * lines, the status table and prose of CLAUDE.md, the file map of rust/README.md. A rename (#489 to #495) leaves each of
+ * those stale, so a bare token that equals a first-version tool name (FORMER_TOOL_NAMES, whole word, not part of a path
+ * such as `src/tools/<name>/`) must be a tool in the recorded list with the prefix added, or sit on a line whose history
+ * comment names it (`<!-- guard:history get_old_name -->`, the bare name). A rename PR updates the bare names in step, or
+ * the guard fails on the old one. Bare names of tools that were never in FORMER_TOOL_NAMES are not checked: a tool that
+ * is added and later renamed needs its old name appended to the list by the PR that renames it (the list never shrinks).
+ * A bare name that is no tool reference, such as the Rust function of the same name, goes in BARE_CONTEXTS as the text
+ * around it with its reason. Measured on the live docs before this check: 135 bare uses, 24 inside paths (skipped by
+ * construction), 1 that is no tool reference (the Rust function in CLAUDE.md), the rest tool references.
+ *
+ * What a green run does NOT mean: that the docs are right about a tool. It means each name is real. The guard does not
+ * read a tool's description in a table row, prose counts such as "16 tools", API call counts, or a name that was
+ * never a first-version tool.
  *
  * Not checked, on purpose: CHANGELOG.md, docs/adr/ and docs/business-rules/ are history (ADRs are immutable once
  * accepted), so they are not in the list. Prose claims such as a tool count ("16 tools") or an API call count are a
@@ -62,11 +71,46 @@ const NON_TOOL_TOKENS: Readonly<Record<string, string>> = {
   logseq_logseq__logseq_: 'the README glob `mcp__plugin_logseq_logseq__logseq_*`, read as one token because it ends in `*`; names no tool',
 };
 
+/**
+ * Every tool name of the first version, without the prefix (the 16 tools of `logseq_*` at v1.x). The list is the
+ * guard's memory of what the docs may once have said: once a rename removes a name from the recorded list, a doc that
+ * still says it is stale. It never shrinks. Append the old name of a tool when a later rename removes it.
+ */
+const FORMER_TOOL_NAMES: readonly string[] = [
+  'build_context',
+  'check_links',
+  'get_backlinks',
+  'get_block',
+  'get_concept_evolution',
+  'get_concept_network',
+  'get_context_for_query',
+  'get_current_context',
+  'get_graph_info',
+  'get_page',
+  'get_page_outline',
+  'list_pages',
+  'query_by_date_range',
+  'query_by_property',
+  'search_blocks',
+  'search_by_relationship',
+];
+
+/** Text that holds a former tool name and is not about the tool. The reason sits on each entry. */
+const BARE_CONTEXTS: Readonly<Record<string, string>> = {
+  // CLAUDE.md, "Real implementation" under Pattern 2: the function in `rust/src/tools/get_concept_network/mod.rs`.
+  '`get_concept_network` (`mod.rs`)': 'the Rust function of that name in the tool\'s mod.rs, not the MCP tool',
+};
+
 const read = (path: string) => ({ path, text: readFileSync(fileURLToPath(new URL(path, ROOT)), 'utf-8') });
 
 describe('the live docs name only real tools (#503)', () => {
   const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];
-  const options: DocOptions = { nonToolTokens: NON_TOOL_TOKENS, historyMarker: HISTORY_MARKER };
+  const options: DocOptions = {
+    nonToolTokens: NON_TOOL_TOKENS,
+    historyMarker: HISTORY_MARKER,
+    formerToolNames: FORMER_TOOL_NAMES,
+    bareContexts: BARE_CONTEXTS,
+  };
 
   it('finds the live docs and the recorded tools', () => {
     for (const path of LIVE_DOCS) expect(read(path).text.length, path).toBeGreaterThan(0);
@@ -77,6 +121,14 @@ describe('the live docs name only real tools (#503)', () => {
     const text = LIVE_DOCS.map(read).map(f => f.text).join('\n');
     expect(tools.some(t => text.includes(t.name))).toBe(true);
     for (const token of Object.keys(NON_TOOL_TOKENS)) expect(text, token).toContain(token);
+    for (const context of Object.keys(BARE_CONTEXTS)) expect(text, context).toContain(context);
+  });
+
+  it('keeps FORMER_TOOL_NAMES bare, sorted and without repeats, and the 16 first-version tools are in it', () => {
+    expect(FORMER_TOOL_NAMES).toHaveLength(16);
+    expect(new Set(FORMER_TOOL_NAMES).size).toBe(FORMER_TOOL_NAMES.length);
+    expect([...FORMER_TOOL_NAMES].sort()).toEqual(FORMER_TOOL_NAMES);
+    for (const name of FORMER_TOOL_NAMES) expect(name, name).toMatch(/^[a-z0-9]+(?:_[a-z0-9]+)*$/);
   });
 
   it('names only recorded tools and validates every json tool= example', () => {
@@ -96,7 +148,7 @@ describe('the live-docs guard can fail (#503 self-test)', () => {
       },
     },
   ];
-  const options: DocOptions = { nonToolTokens: {}, historyMarker: HISTORY_MARKER };
+  const options: DocOptions = { nonToolTokens: {}, historyMarker: HISTORY_MARKER, formerToolNames: [], bareContexts: {} };
   const withWheel = { nonToolTokens: { logseq_wheel: 'a made-up non-tool' } };
   const run = (text: string, opts: Partial<DocOptions> = {}) =>
     docViolations([{ path: 'doc.md', text }], tools, { ...options, ...opts });
@@ -181,5 +233,83 @@ describe('the live-docs guard can fail (#503 self-test)', () => {
     expect(run('`logseq_get_thing`\n', { nonToolTokens: { logseq_get_thing: 'wrong' } })).toEqual([
       'NON_TOOL_TOKENS names "logseq_get_thing", which is a tool in tool-list.json, so delete it',
     ]);
+  });
+});
+
+// The bare-name rule (#510), over made-up docs. `get_thing` is a current tool (as `logseq_get_thing`); `get_widget` was
+// a tool before a rename, so a bare `get_widget` is stale.
+describe('the bare-name rule can fail (#510 self-test)', () => {
+  const tools: RecordedTool[] = [{ name: 'logseq_get_thing', inputSchema: { type: 'object', properties: {} } }];
+  const former = ['get_thing', 'get_widget', 'get_widget_outline'];
+  const options: DocOptions = { nonToolTokens: {}, historyMarker: HISTORY_MARKER, formerToolNames: former, bareContexts: {} };
+  const run = (text: string, opts: Partial<DocOptions> = {}) =>
+    docViolations([{ path: 'doc.md', text }], tools, { ...options, ...opts });
+  const mark = (...names: string[]): string => `<!-- ${HISTORY_MARKER} ${names.join(' ')} -->`;
+  const stale = (line: number, name: string): string =>
+    `doc.md:${line}: "${name}" is not a tool in tool-list.json, as logseq_${name} (it is written without the prefix)`;
+
+  it('passes a bare name that is a current tool, in a table, a Use line and prose', () => {
+    const text = '| `get_thing` | Gets a thing |\nUse: get_thing("a")\nSee `get_thing` and logseq_get_thing.\n';
+    expect(run(text)).toEqual([]);
+  });
+
+  it('flags a bare name of a tool the recorded list no longer has, with its line', () => {
+    expect(run('Intro.\n| `get_widget` | Gets a widget |\n')).toEqual([stale(2, 'get_widget')]);
+    expect(run('Use: get_widget("a")\n')).toEqual([stale(1, 'get_widget')]);
+  });
+
+  it('reads a whole word: a longer name is its own token, a prefixed name is checked by the prefixed rule', () => {
+    expect(run('`get_widget_outline` and `get_widget`.\n')).toEqual([stale(1, 'get_widget_outline'), stale(1, 'get_widget')]);
+    expect(run('`logseq_get_widget`.\n')).toEqual(['doc.md:1: "logseq_get_widget" is not a tool in tool-list.json']);
+    expect(run('`get_widgets` and `my_get_widget` and `get_widget2`.\n')).toEqual([]);
+  });
+
+  it('reports a name once per line, however often the line says it', () => {
+    expect(run('`get_widget` then `get_widget` again.\n')).toEqual([stale(1, 'get_widget')]);
+  });
+
+  it('skips a name inside a path', () => {
+    expect(run('See `rust/src/tools/get_widget/mod.rs` and get_widget/.\n')).toEqual([]);
+  });
+
+  it('ignores a name that is not a former tool name', () => {
+    expect(run('`get_gadget` and `query_things`.\n')).toEqual([]);
+  });
+
+  it('lets a history comment that names the bare name excuse it, and only that name', () => {
+    const note = 'It was `get_widget` before v2.';
+    expect(run(`${note} ${mark('get_widget')}\n`)).toEqual([]);
+    expect(run(`${note} \`get_widget_outline\` too. ${mark('get_widget')}\n`)).toEqual([stale(1, 'get_widget_outline')]);
+    expect(run(`${note} ${mark('get_widget')}\nStill \`get_widget\` here.\n`)).toEqual([stale(2, 'get_widget')]);
+  });
+
+  it('fails a history comment on a bare name that is a tool, or that is not on the line', () => {
+    expect(run(`Now \`get_thing\`. ${mark('get_thing')}\n`)).toEqual([
+      'doc.md:1: "get_thing" is a tool in tool-list.json, so remove it from the history comment',
+    ]);
+    expect(run(`Nothing to excuse. ${mark('get_widget')}\n`)).toEqual([
+      'doc.md:1: "get_widget" is not named on this line, so remove it from the history comment',
+    ]);
+  });
+
+  it('skips a reviewed context and still checks the rest of the line', () => {
+    const bareContexts = { '`get_widget` (`mod.rs`)': 'the Rust function, not the tool' };
+    expect(run('The `get_widget` (`mod.rs`) function.\n', { bareContexts })).toEqual([]);
+    expect(run('The `get_widget` (`mod.rs`) function, not `get_widget`.\n', { bareContexts })).toEqual([stale(1, 'get_widget')]);
+    // The same name outside the context is still stale.
+    expect(run('The `get_widget` (`mod.rs`) function.\nAnd `get_widget`.\n', { bareContexts })).toEqual([stale(2, 'get_widget')]);
+  });
+
+  it('fails a BARE_CONTEXTS entry that no doc uses, or that holds no former tool name', () => {
+    expect(run('Nothing.\n', { bareContexts: { '`get_widget` (`mod.rs`)': 'r' } })).toEqual([
+      'BARE_CONTEXTS names "`get_widget` (`mod.rs`)", which no live doc uses, so delete it',
+    ]);
+    expect(run('The `other` (`mod.rs`).\n', { bareContexts: { '`other` (`mod.rs`)': 'r' } })).toEqual([
+      'BARE_CONTEXTS names "`other` (`mod.rs`)", which holds no former tool name, so delete it',
+    ]);
+  });
+
+  it('checks nothing bare when no former names are given (the skills guard path)', () => {
+    expect(run('`get_widget`\n', { formerToolNames: [] })).toEqual([]);
   });
 });
