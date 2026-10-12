@@ -51,9 +51,9 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
     await mcp?.close();
   });
 
-  describe('logseq_get_page_outline', () => {
+  describe('logseq_get_page with detail outline', () => {
     it('lists the top-level blocks of a page with a snippet and a child count each', async () => {
-      const outline = await json('logseq_get_page_outline', { page_name: big });
+      const outline = await json('logseq_get_page', { page: big, detail: 'outline' });
 
       // The property block, then four blocks; "Goals for the first release" has three children
       expect(outline.blocks.map((b: any) => b.childCount)).toEqual([0, 0, 3, 0, 0]);
@@ -70,7 +70,7 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
     });
 
     it('agrees with the Editor API tree: same top-level blocks, same order, same direct child counts', async () => {
-      const outline = await json('logseq_get_page_outline', { page_name: big });
+      const outline = await json('logseq_get_page', { page: big, detail: 'outline' });
       const tree = await logseq.callAPI<any[]>('logseq.Editor.getPageBlocksTree', [big]);
 
       const shown = tree.slice(0, outline.blocks.length);
@@ -82,29 +82,29 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
     it('makes at most 2 API calls for an exact name, an alias and an ISO date', async () => {
       for (const name of [big, aliasStub, isoDay]) {
         const before = apiCalls;
-        await call('logseq_get_page_outline', { page_name: name });
+        await call('logseq_get_page', { page: name, detail: 'outline' });
         expect(apiCalls - before).toBeLessThanOrEqual(2);
       }
     });
 
     it('is much smaller than the page with its children', async () => {
-      const outline = bytes(await call('logseq_get_page_outline', { page_name: big }));
-      const page = bytes(await call('logseq_get_page', { page_name: big, include_children: true }));
+      const outline = bytes(await call('logseq_get_page', { page: big, detail: 'outline' }));
+      const page = bytes(await call('logseq_get_page', { page: big, detail: 'full' }));
       expect(outline).toBeLessThan(page);
     });
 
     it('resolves an alias to the declaring page and an ISO date to a journal, and says so', async () => {
-      const viaAlias = await json('logseq_get_page_outline', { page_name: aliasStub });
+      const viaAlias = await json('logseq_get_page', { page: aliasStub, detail: 'outline' });
       expect(viaAlias.resolvedFrom).toEqual({ name: 'atlas', matchedBy: 'alias', resolvedTo: 'project atlas' });
       expect(viaAlias.blocks).toHaveLength(5);
       // The fixture titles journals "MMM do, yyyy", so an ISO date always goes through the resolver
-      const viaDate = await json('logseq_get_page_outline', { page_name: isoDay });
+      const viaDate = await json('logseq_get_page', { page: isoDay, detail: 'outline' });
       expect(viaDate.resolvedFrom).toEqual({ name: isoDay, matchedBy: 'journal-date', resolvedTo: 'Jan 6th, 2025' });
       expect(viaDate.blocks.map((b: any) => b.childCount)).toEqual([2, 0, 0]);
     });
 
     it('reports a page that does not exist as an error that points at the list tool', async () => {
-      const result = (await mcp.callTool({ name: 'logseq_get_page_outline', arguments: { page_name: 'no such page 43 probe' } })) as ToolResult;
+      const result = (await mcp.callTool({ name: 'logseq_get_page', arguments: { page: 'no such page 43 probe', detail: 'outline' } })) as ToolResult;
       expect(result.isError).toBe(true);
       expect(JSON.parse(result.content[0].text).error).toContain('logseq_list_pages');
     });
@@ -112,7 +112,7 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
 
   describe('format: "markdown"', () => {
     it('get_page returns one plain text block: a title, then top-level bullets', async () => {
-      const result = await call('logseq_get_page', { page_name: big, include_children: true, format: 'markdown' });
+      const result = await call('logseq_get_page', { page: big, detail: 'full', format: 'markdown' });
       const text = result.content[0].text;
       const tree = await logseq.callAPI<any[]>('logseq.Editor.getPageBlocksTree', [big]);
 
@@ -128,8 +128,8 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
     });
 
     it('get_page is smaller than its JSON, which stays the default', async () => {
-      const asJson = await call('logseq_get_page', { page_name: big, include_children: true });
-      const asMarkdown = await call('logseq_get_page', { page_name: big, include_children: true, format: 'markdown' });
+      const asJson = await call('logseq_get_page', { page: big, detail: 'full' });
+      const asMarkdown = await call('logseq_get_page', { page: big, detail: 'full', format: 'markdown' });
 
       expect(() => JSON.parse(asJson.content[0].text)).not.toThrow();
       expect(bytes(asMarkdown)).toBeLessThan(bytes(asJson));
@@ -148,7 +148,7 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
       let notVerbatim = 0;
       let repeatedAsBullet = 0;
       for (const [name, content] of sample) {
-        const text = (await call('logseq_get_page', { page_name: name, include_children: true, format: 'markdown' })).content[0].text;
+        const text = (await call('logseq_get_page', { page: name, detail: 'full', format: 'markdown' })).content[0].text;
         if (!text.includes(String(content).trimEnd())) notVerbatim++;
         if (text.includes(`\n- ${String(content).split('\n')[0]}`)) repeatedAsBullet++;
       }
@@ -179,16 +179,16 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
     });
 
     it('get_block renders a block of the outline', async () => {
-      const outline = await json('logseq_get_page_outline', { page_name: big });
+      const outline = await json('logseq_get_page', { page: big, detail: 'outline' });
       const uuid = outline.blocks[0].uuid;
-      const text = (await call('logseq_get_block', { block_uuid: uuid, include_children: true, format: 'markdown' })).content[0].text;
+      const text = (await call('logseq_get_block', { uuid, include_children: true, format: 'markdown' })).content[0].text;
 
       expect(text.startsWith(`# Block ((${uuid}))`)).toBe(true);
       expect(text.split('\n').some(line => line.startsWith('- '))).toBe(true);
     });
 
     it('rejects an unknown format', async () => {
-      const result = (await mcp.callTool({ name: 'logseq_get_page', arguments: { page_name: big, format: 'html' } })) as ToolResult;
+      const result = (await mcp.callTool({ name: 'logseq_get_page', arguments: { page: big, format: 'html' } })) as ToolResult;
       expect(result.isError).toBe(true);
     });
   });

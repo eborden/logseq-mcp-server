@@ -24,7 +24,7 @@ Delete these comments before you file.
 <!-- Against the fixture instance (`npx tsx scripts/logseq-instance.ts start`) using fixture
 pages from tests/fixtures/README.md, or a made-up page. Give the exact call. -->
 ```json
-{ "tool": "logseq_get_page_outline", "arguments": { "page": "hub central" } }
+{ "tool": "logseq_get_page", "arguments": { "page": "hub central", "detail": "outline" } }
 ```
 Observed:
 ```

@@ -9,7 +9,7 @@
 // never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Every page, block and
 // name is made up, and the output is aggregates only.
 //
-// For each of the 16 tools it calls one representative parity case (the happy path), then a few larger
+// For each of the 15 tools it calls one representative parity case (the happy path), then a few larger
 // made-up cases for the tools that do the most work. Per case and server: `--warmup` untimed calls, then
 // `--iterations` timed ones.
 //
@@ -76,10 +76,9 @@ const REPRESENTATIVE: Array<{ tool: string; name: string }> = [
   { tool: 'logseq_get_concept_evolution', name: 'evolution: exact name, the page and its mentions, undated last' },
   { tool: 'logseq_get_concept_network', name: 'network: exact name, two levels, both directions, journals as leaves' },
   { tool: 'logseq_get_context_for_query', name: 'context_for_query: a link and a tag' },
-  { tool: 'logseq_get_current_context', name: 'current context: a page is open and nothing else' },
-  { tool: 'logseq_get_graph_info', name: 'graph info' },
+  { tool: 'logseq_get_current', name: 'current context: a page is open and nothing else' },
+  { tool: 'logseq_get_graph', name: 'graph info' },
   { tool: 'logseq_get_page', name: 'get_page: exact name with its blocks' },
-  { tool: 'logseq_get_page_outline', name: 'exact name, blocks out of order with children' },
   { tool: 'logseq_list_pages', name: 'every page, aliases nested' },
   { tool: 'logseq_query_by_date_range', name: 'date range: slim by default: days oldest first, trees by the left chain, the top concepts of the period' },
   { tool: 'logseq_query_by_property', name: 'property: slim matches, sorted by page then block' },

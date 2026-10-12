@@ -4,7 +4,7 @@ Turn your LogSeq knowledge graph into an AI-accessible database.
 
 ## What This Does
 
-Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+Provides 15 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
 
 ## Quick Start
 
@@ -21,9 +21,9 @@ Provides 16 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 
    To load the config from another file, set the environment variable `LOGSEQ_MCP_CONFIG` to its absolute path. A relative path stops the server at startup with a configuration error. The integration tests use it to run against a per-worktree LogSeq instance (`tests/integration/setup.md`).
 
-   Tips are on by default: seven tools (`search_blocks`, `get_page`, `get_page_outline`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `list_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
+   Tips are on by default: six tools (`search_blocks`, `get_page`, `get_backlinks`, `query_by_property`, `query_by_date_range`, `list_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
 
-   Some tools also accept `name`, `page` (and `page_name` or `uuid` where it fits) in place of their canonical parameter (`page_name`, `topic_name`, `concept_name`, `block_uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
+   Some tools also accept `name`, `page` (and `page_name` or `block_uuid` where it fits) in place of their canonical parameter (`page`, `page_name`, `topic_name`, `concept_name`, `uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
 4. Connect it to your MCP client (next section). The server is a Rust binary. Run it with `uvx`, which needs [uv](https://docs.astral.sh/uv/), or build it from a clone, which needs the Rust toolchain that `rust/rust-toolchain.toml` pins (rustup reads it). Node is only for the repo's tooling and tests.
 
 ## Install
@@ -113,14 +113,13 @@ A binary you download by hand through a browser is quarantined by macOS, and Gat
 
 Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The skills refer to them by bare name, so either form works.
 
-## 16 Tools at a Glance
+## 15 Tools at a Glance
 
-### Basic Operations (7)
+### Basic Operations (6)
 | Tool | Purpose |
 |------|---------|
 | `search_blocks` | Full-text search with optional semantic context |
-| `get_page` | Retrieve page content with children |
-| `get_page_outline` | Top-level blocks of a page: uuid, first-line snippet, child count |
+| `get_page` | Retrieve a page. `detail`: `page` (default), `full` (with its blocks) or `outline` (top-level blocks: uuid, first-line snippet, child count) |
 | `get_backlinks` | Find all references to a page |
 | `get_block` | Get specific block by UUID |
 | `query_by_property` | Find blocks by property key/value |
@@ -141,7 +140,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 |------|---------|
 | `build_context` | Gather comprehensive topic context in one call |
 | `get_context_for_query` | Parse natural language and build context |
-| `get_current_context` | What the user has open in LogSeq right now |
+| `get_current` | What the user has open in LogSeq right now |
 
 ### Temporal Queries (2)
 | Tool | Purpose |
@@ -152,7 +151,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 ### Graph Information (1)
 | Tool | Purpose |
 |------|---------|
-| `get_graph_info` | Get current LogSeq graph information including filesystem path |
+| `get_graph` | Get current LogSeq graph information including filesystem path |
 
 ### Linking Gate (1)
 | Tool | Purpose |
@@ -161,7 +160,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 
 ### Markdown output and compact results
 
-`get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` take `format: "markdown"` (the default is `"json"`). The result is one plain text block: page properties as `key:: value` lines, blocks as indented `- ` bullets with `((uuid))` refs kept (block uuids are left out, except on keyword search hits and in `compact`), related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. It is roughly 45-80% smaller than the JSON. `build_context` and `get_context_for_query` also take `compact: true`, which swaps block bodies for a first-line snippet plus the block's uuid (it pays off on long blocks, and `resolve_refs` is skipped with a warning). For a long page, `get_page_outline` lists the top-level blocks (uuid, snippet, child count) and `get_block` reads the ones you pick. The `logseq://page/{name}` resource renders through the same code.
+`get_page`, `get_block`, `build_context`, `get_context_for_query` and `get_concept_network` take `format: "markdown"` (the default is `"json"`). The result is one plain text block: page properties as `key:: value` lines, blocks as indented `- ` bullets with `((uuid))` refs kept (block uuids are left out, except on keyword search hits and in `compact`), related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. It is roughly 45-80% smaller than the JSON. `build_context` and `get_context_for_query` also take `compact: true`, which swaps block bodies for a first-line snippet plus the block's uuid (it pays off on long blocks, and `resolve_refs` is skipped with a warning). For a long page, `get_page` with `detail: "outline"` lists the top-level blocks (uuid, snippet, child count) and `get_block` reads the ones you pick. The `logseq://page/{name}` resource renders through the same code.
 
 ## Prompts
 

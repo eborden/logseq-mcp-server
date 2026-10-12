@@ -104,30 +104,30 @@ async function main() {
     ['search_blocks', 'logseq_search_blocks', { query: subject.slice(0, 4), limit: 10 }],
     ['query_by_date_range (7 days)', 'logseq_query_by_date_range', dr],
     ['query_by_property', 'logseq_query_by_property', { property_key: 'type', property_value: 'x' }],
-    ['get_current_context', 'logseq_get_current_context', {}],
+    ['get_current', 'logseq_get_current', {}],
     ['build_context resolve_refs', 'logseq_build_context', { topic_name: subject, resolve_refs: true }],
     ['query_by_date_range 7d resolve_refs', 'logseq_query_by_date_range', { ...dr, resolve_refs: true }],
-    ['get_page', 'logseq_get_page', { page_name: subject, include_children: false }],
-    ['get_page_outline', 'logseq_get_page_outline', { page_name: subject }],
+    ['get_page', 'logseq_get_page', { page: subject }],
+    ['get_page (outline)', 'logseq_get_page', { page: subject, detail: 'outline' }],
     ['get_backlinks', 'logseq_get_backlinks', { page_name: subject }],
     ['get_concept_evolution', 'logseq_get_concept_evolution', { concept_name: subject }],
     ['search_by_relationship references', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'references' }],
     ['search_by_relationship references (same topic twice)', 'logseq_search_by_relationship', { topic_a: subject, topic_b: subject, relationship_type: 'references' }],
     ['search_by_relationship connected-within', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 }],
     ['list_pages', 'logseq_list_pages', { limit: 50 }],
-    ['get_graph_info', 'logseq_get_graph_info', {}],
-    ['get_page (not found)', 'logseq_get_page', { page_name: 'no such page 41 probe', include_children: false }],
+    ['get_graph', 'logseq_get_graph', {}],
+    ['get_page (not found)', 'logseq_get_page', { page: 'no such page 41 probe' }],
     // Real pages, an alias when the graph has one, and a made-up term, all in one text
     ['check_links (4 terms)', 'logseq_check_links', checkLinksArgs()],
     ...(uniqueAlias
       ? ([
           ['build_context (alias)', 'logseq_build_context', { topic_name: uniqueAlias }],
-          ['get_page (alias)', 'logseq_get_page', { page_name: uniqueAlias, include_children: false }],
-          ['get_page_outline (alias)', 'logseq_get_page_outline', { page_name: uniqueAlias }]
+          ['get_page (alias)', 'logseq_get_page', { page: uniqueAlias }],
+          ['get_page (outline, alias)', 'logseq_get_page', { page: uniqueAlias, detail: 'outline' }]
         ] as Case[])
       : []),
     ...(sharedAlias
-      ? ([['get_page (shared alias)', 'logseq_get_page', { page_name: sharedAlias, include_children: false }]] as Case[])
+      ? ([['get_page (shared alias)', 'logseq_get_page', { page: sharedAlias }]] as Case[])
       : []),
     ...(aliased
       ? ([
@@ -143,17 +143,17 @@ async function main() {
       : []),
     ...(isoDay
       ? ([
-          ['get_page (ISO date)', 'logseq_get_page', { page_name: isoDay, include_children: false }],
-          ['get_page_outline (ISO date)', 'logseq_get_page_outline', { page_name: isoDay }],
+          ['get_page (ISO date)', 'logseq_get_page', { page: isoDay }],
+          ['get_page (outline, ISO date)', 'logseq_get_page', { page: isoDay, detail: 'outline' }],
           ['build_context (ISO date)', 'logseq_build_context', { topic_name: isoDay }]
         ] as Case[])
       : []),
     ...(refBlock && refPage
       ? ([
-          ['get_block (ref block)', 'logseq_get_block', { block_uuid: refBlock, include_children: false }],
-          ['get_block resolve_refs', 'logseq_get_block', { block_uuid: refBlock, include_children: false, resolve_refs: true }],
-          ['get_page children', 'logseq_get_page', { page_name: refPage, include_children: true }],
-          ['get_page children resolve_refs', 'logseq_get_page', { page_name: refPage, include_children: true, resolve_refs: true }]
+          ['get_block (ref block)', 'logseq_get_block', { uuid: refBlock, include_children: false }],
+          ['get_block resolve_refs', 'logseq_get_block', { uuid: refBlock, include_children: false, resolve_refs: true }],
+          ['get_page children', 'logseq_get_page', { page: refPage, detail: 'full' }],
+          ['get_page children resolve_refs', 'logseq_get_page', { page: refPage, detail: 'full', resolve_refs: true }]
         ] as Case[])
       : [])
   ];
