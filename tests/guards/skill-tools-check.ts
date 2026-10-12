@@ -148,12 +148,37 @@ export type DocOptions = {
    * excuses on its own line (a "was `x` before v2" note) and nothing else, so a typo next to it is still caught.
    */
   historyMarker: string;
+  /**
+   * Every bare tool name (no `logseq_` prefix) a doc may once have used, as the first-version tools: `get_page`, not
+   * `logseq_get_page`. A token that equals one of them (a whole word, and not part of a path) must be a tool in the recorded
+   * list with the prefix added, or sit on a line whose history comment names it (#510). The list never shrinks, since a
+   * rename removes the old name from the recorded list and that is when a stale mention has to be caught.
+   */
+  formerToolNames: readonly string[];
+  /**
+   * Text that holds a former tool name and is not about the tool (a Rust function of the same name), each with the
+   * reason. The name inside the text is skipped, other text on the line is still checked. An entry no doc uses, or one
+   * with no former tool name in it, is an error.
+   */
+  bareContexts: Readonly<Record<string, string>>;
 };
 
 const markerPattern = (keyword: string): RegExp =>
   new RegExp(`<!--\\s*${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}((?:\\s+[A-Za-z0-9_]+)*)\\s*-->`);
 
-type Scan = { out: string[]; examples: Map<string, number>; sections: Set<string>; usedNonTool: Set<string> };
+type Scan = {
+  out: string[];
+  examples: Map<string, number>;
+  sections: Set<string>;
+  usedNonTool: Set<string>;
+  usedContexts: Set<string>;
+};
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// A former tool name is a whole word: not inside a longer identifier and not part of a path (`src/tools/get_page/`).
+const bareNamePattern = (names: readonly string[]): RegExp | null =>
+  names.length === 0 ? null : new RegExp(`(?<![A-Za-z0-9_/])(${[...names].sort((a, b) => b.length - a.length).map(escapeRegExp).join('|')})(?![A-Za-z0-9_/])`, 'g');
 
 /** Every file's token, info-string and example violations, plus what the skill-only rules count (sections, examples). */
 function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePaths: readonly string[], doc?: DocOptions): Scan {
@@ -161,6 +186,10 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
   const examples = new Map<string, number>();
   const sections = new Set<string>();
   const usedNonTool = new Set<string>();
+  const usedContexts = new Set<string>();
+  const bareName = doc ? bareNamePattern(doc.formerToolNames) : null;
+  // A name is a tool when it is recorded as written (`logseq_x`) or, bare, with the prefix added.
+  const isTool = (name: string): boolean => known.has(name) || known.has(`logseq_${name}`);
 
   for (const { path, text } of files) {
     // A file saved with CRLF endings would leave a `\r` on every line, which defeats the fence and heading patterns.
@@ -172,21 +201,38 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
       const marker = doc ? markerPattern(doc.historyMarker).exec(line) : null;
       const named = marker ? marker[1].split(/\s+/).filter(n => n !== '') : [];
       const bad: string[] = [];
-      for (const token of tokensOf(marker ? line.replace(marker[0], '') : line)) {
+      const body = marker ? line.replace(marker[0], '') : line;
+      for (const token of tokensOf(body)) {
         if (known.has(token)) continue;
         if (doc && token in doc.nonToolTokens) usedNonTool.add(token);
         else bad.push(token);
+      }
+      if (doc && bareName) {
+        // Blank out the prefixed tokens (their bare tail is checked above) and the reviewed contexts, then read the rest.
+        let rest = body.replace(TOOL_TOKEN, m => ' '.repeat(m.length));
+        for (const context of Object.keys(doc.bareContexts)) {
+          if (rest.includes(context)) {
+            usedContexts.add(context);
+            rest = rest.split(context).join(' '.repeat(context.length));
+          }
+        }
+        for (const m of rest.matchAll(bareName)) {
+          if (!isTool(m[1])) bad.push(m[1]);
+        }
       }
       if (doc && marker) {
         const comment = `<!-- ${doc.historyMarker} logseq_old_name -->`;
         if (named.length === 0) out.push(`${path}:${lineNo}: the history comment must name the tool names it excuses, as ${comment}`);
         for (const name of named) {
-          if (known.has(name)) out.push(`${path}:${lineNo}: "${name}" is a tool in tool-list.json, so remove it from the history comment`);
+          if (isTool(name)) out.push(`${path}:${lineNo}: "${name}" is a tool in tool-list.json, so remove it from the history comment`);
           else if (!bad.includes(name)) out.push(`${path}:${lineNo}: "${name}" is not named on this line, so remove it from the history comment`);
         }
       }
-      for (const token of bad) {
-        if (!named.includes(token)) out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json`);
+      for (const token of new Set(bad)) {
+        if (named.includes(token)) continue;
+        // A bare name is read as the tool with the prefix added, so the message says which tool is missing.
+        const how = token.startsWith('logseq_') ? '' : `, as logseq_${token} (it is written without the prefix)`;
+        out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json${how}`);
       }
     };
     let open: Fence | null = null;
@@ -243,7 +289,7 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
       open = null;
     }
   }
-  return { out, examples, sections, usedNonTool };
+  return { out, examples, sections, usedNonTool, usedContexts };
 }
 
 /** Every violation of the four rules over `files`, each as `file:line: message`. Empty when the skills are clean. */
@@ -276,10 +322,15 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
  */
 export function docViolations(files: SkillFile[], tools: RecordedTool[], options: DocOptions): string[] {
   const known = new Map(tools.map(t => [t.name, t]));
-  const { out, usedNonTool } = scan(files, known, [], options);
+  const { out, usedNonTool, usedContexts } = scan(files, known, [], options);
   for (const token of Object.keys(options.nonToolTokens)) {
     if (known.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which is a tool in tool-list.json, so delete it`);
     else if (!usedNonTool.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which no live doc uses, so delete it`);
+  }
+  const bareName = bareNamePattern(options.formerToolNames);
+  for (const context of Object.keys(options.bareContexts)) {
+    if (!bareName || !bareName.test(context)) out.push(`BARE_CONTEXTS names "${context}", which holds no former tool name, so delete it`);
+    else if (!usedContexts.has(context)) out.push(`BARE_CONTEXTS names "${context}", which no live doc uses, so delete it`);
   }
   return out;
 }
