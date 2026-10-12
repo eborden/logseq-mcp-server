@@ -115,6 +115,27 @@ All three are read-only.
 - **`scripts/probe-constraints.ts`** resolves its config like the integration tests: `LOGSEQ_MCP_CONFIG`, else the instance's `.logseq-instance/config.json`, never `~/.logseq-mcp/config.json`. So `npx tsx scripts/probe-constraints.ts` with the instance running probes the fixture, and with neither it stops before any network call. The constraints are properties of LogSeq's Datalog engine and HTTP API, not of a graph's content, and the fixture reproduces every one; row counts (such as constraint 4's) differ from the real-graph numbers in CLAUDE.md. Re-run it after LogSeq upgrades.
 - **`scripts/measure-api-calls.ts` and `scripts/measure-output-size.ts`** read `LOGSEQ_MCP_CONFIG`, else `~/.logseq-mcp/config.json`: **they read the real graph on purpose.** The numbers in CLAUDE.md ("Current Implementation Status") are measured on a real ~2k-page graph, because time and output size depend on scale, so those runs keep the default config. Against the fixture instance they give reproducible call counts (the subject page is `hub central`) that match the table for most tools; use that run to check a change's call count, and the real graph to update the table. Their real-graph output contains real page names: never paste it anywhere (CLAUDE.md, "Privacy").
 
+## Routing eval (#487)
+
+`scripts/routing-eval.ts` asks whether a model picks the right kind of tool for a question. It puts each of the 29 made-up questions in `tests/fixtures/routing-eval/questions.json` (about the fixture's pages, four types: `get`, `find`, `explore`, `check`) to a headless Claude Code session (`claude -p`) that has only this server attached, then records the first `logseq_*` call and the arguments the model sent. It prints aggregates only: the share of sessions whose first call was the right type, the right tool, or no `logseq_*` call at all, the schema errors (the server rejecting the arguments), and calls per question. It never prints what a tool returned.
+
+```bash
+npx tsx scripts/logseq-instance.ts start
+(cd rust && cargo build --release --locked)
+LOGSEQ_MCP_RUST_BIN=$PWD/rust/target/release/logseq-mcp-server npx tsx scripts/routing-eval.ts --runs 3 --model sonnet
+npx tsx scripts/logseq-instance.ts stop
+npx tsx scripts/routing-eval.ts --dry-run          # check the question file and print the plan; calls no model
+npx tsx scripts/routing-eval.ts --only find --runs 1   # one type, or a list of question ids
+```
+
+- **It costs tokens, so it stays local** like the integration suite: there is no CI job. It needs the `claude` CLI signed in, the instance and a built binary (`--binary` or `LOGSEQ_MCP_RUST_BIN`; the default is the debug build). One session per question and run: 29 questions x 3 runs is 87 sessions. Each is bounded by `--max-calls` (6 `logseq_*` calls), `--timeout-ms` (120 s) and `--max-budget-usd` (0.5), and the plan line says the worst case before anything runs. On `sonnet`, a full run (87 sessions) cost about $1.20, about $0.014 a session. It took roughly an hour at `--concurrency 2` on a loaded machine, so run it in the background.
+- **What the model sees:** this server's tool list and `instructions`, nothing else. The host runs from an empty directory with its built-in tools, skills, user settings, plugins, `CLAUDE.md` files and auto-memory switched off, so the result is the tools' and the instructions' doing. The eval doesn't load the `logseq-skills` skill; a run for a skills change (#497) has to add it on purpose.
+- **The surface** (v1 names or v2 names) is read from the server's tool list, and each question lists the acceptable first tools for both. A tool outside the list can still be type-correct: the script maps every tool to its type itself. Pass `--surface` while a branch holds a mix of both.
+- **Fixture only.** It resolves its config like the integration tests (`LOGSEQ_MCP_CONFIG`, else `.logseq-instance/config.json`, never `~/.logseq-mcp/config.json`), refuses port 12315 before any network call, and checks the graph is the fixture. The server it starts gets a temp config and home of its own, deleted at the end.
+- **Rescoring.** `--rescore <file>` prints the aggregates of an earlier `--out` file against the current questions, with no model call, so a change to the question lists or the scoring is checked on the same sessions.
+- **Runs vary.** Treat a baseline as a handful of runs, not a proof (ADR-0024). Compare v1 and v2 on the same model, `--runs` and questions, and name the model the host reports in the line "model" of the output.
+- **`--out <file>`** saves each session's calls and the arguments the model sent. Keep it local: post only the aggregates (BR-0001).
+
 ## Server configuration
 
 What the MCP server, and a LogSeq used without the instance, need:
