@@ -3,7 +3,7 @@ import { join } from 'path';
 
 /**
  * The checker behind tests/guards/skill-tools.test.ts (#486), kept out of the test file so another guard can reuse it
- * (#503 checks the live docs the same way) without importing a test file, which would run that file's describe blocks.
+ * (#503 checks the live docs the same way, through `docViolations`) without importing a test file, which would run that file's describe blocks.
  * No vitest import and no path to the skills: `skillViolations` takes files already read, and the guard that calls it
  * owns the constants (the tool reference, the minimum examples, the allowances).
  */
@@ -139,27 +139,49 @@ export type CheckOptions = {
   missingSectionAllowances: readonly string[];
 };
 
-/** Every violation of the four rules over `files`, each as `file:line: message`. Empty when the skills are clean. */
-export function skillViolations(files: SkillFile[], tools: RecordedTool[], options: CheckOptions): string[] {
-  const known = new Map(tools.map(t => [t.name, t]));
+/** What the live-docs guard (#503) adds to the shared scan. The skills guard passes neither. */
+export type DocOptions = {
+  /** Tokens that match `logseq_[a-z0-9_]+` and are not tools (a wheel name, a glob), each with the reason. */
+  nonToolTokens: Readonly<Record<string, string>>;
+  /** A line holding this text may name a tool that no longer exists: a "was `x` before v2" note. */
+  historyMarker: string;
+};
+
+type Scan = { out: string[]; examples: Map<string, number>; sections: Set<string>; usedNonTool: Set<string> };
+
+/** Every file's token, info-string and example violations, plus what the skill-only rules count (sections, examples). */
+function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePaths: readonly string[], doc?: DocOptions): Scan {
   const out: string[] = [];
   const examples = new Map<string, number>();
   const sections = new Set<string>();
+  const usedNonTool = new Set<string>();
 
   for (const { path, text } of files) {
-    const lines = text.split('\n');
+    // A file saved with CRLF endings would leave a `\r` on every line, which defeats the fence and heading patterns.
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
+    // Unknown names on one line. A non-tool token is skipped (and counted as used); a history marker excuses the rest
+    // of the line, and a marker on a line with nothing to excuse is itself an error, so a stale one cannot linger.
+    const checkTokens = (line: string, lineNo: number): void => {
+      const bad: string[] = [];
+      for (const token of tokensOf(line)) {
+        if (known.has(token)) continue;
+        if (doc && token in doc.nonToolTokens) usedNonTool.add(token);
+        else bad.push(token);
+      }
+      if (doc && line.includes(doc.historyMarker)) {
+        if (bad.length === 0) out.push(`${path}:${lineNo}: "${doc.historyMarker}" is on a line that names no unknown tool, so remove it`);
+        return;
+      }
+      for (const token of bad) out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json`);
+    };
     let open: Fence | null = null;
     for (let i = 0; i < lines.length; i++) {
       const lineNo = i + 1;
       const line = lines[i];
 
-      for (const token of tokensOf(line)) {
-        if (!known.has(token)) {
-          out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json`);
-        }
-      }
+      checkTokens(line, lineNo);
 
-      if (options.referencePaths.includes(path) && open === null) {
+      if (referencePaths.includes(path) && open === null) {
         const heading = HEADING.exec(line);
         if (heading) {
           const section = SECTION_HEADING.exec(heading[1].trim());
@@ -201,15 +223,18 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
         out.push(...exampleViolations(path, lineNo, body, tool));
       }
       // Skip the body and the closing fence: they are not scanned for fences again, but they are scanned for tokens.
-      for (let k = i + 1; k <= j; k++) {
-        for (const t of tokensOf(lines[k])) {
-          if (!known.has(t)) out.push(`${path}:${k + 1}: "${t}" is not a tool in tool-list.json`);
-        }
-      }
+      for (let k = i + 1; k <= j; k++) checkTokens(lines[k], k + 1);
       i = j;
       open = null;
     }
   }
+  return { out, examples, sections, usedNonTool };
+}
+
+/** Every violation of the four rules over `files`, each as `file:line: message`. Empty when the skills are clean. */
+export function skillViolations(files: SkillFile[], tools: RecordedTool[], options: CheckOptions): string[] {
+  const known = new Map(tools.map(t => [t.name, t]));
+  const { out, examples, sections } = scan(files, known, options.referencePaths);
 
   for (const tool of tools) {
     if (!sections.has(tool.name) && !options.missingSectionAllowances.includes(tool.name)) {
@@ -225,6 +250,21 @@ export function skillViolations(files: SkillFile[], tools: RecordedTool[], optio
   }
   for (const name of options.missingSectionAllowances) {
     if (!known.has(name)) out.push(`MISSING_SECTION_ALLOWANCES names "${name}", which is not a tool in tool-list.json`);
+  }
+  return out;
+}
+
+/**
+ * The live-docs rules (#503): the token rule and the example rule of the skills guard, over docs that have no tool
+ * reference (no section or minimum-example rule). A `nonToolTokens` entry that no file uses, or that names a real tool,
+ * is an error, so the list cannot outlive the text it excuses.
+ */
+export function docViolations(files: SkillFile[], tools: RecordedTool[], options: DocOptions): string[] {
+  const known = new Map(tools.map(t => [t.name, t]));
+  const { out, usedNonTool } = scan(files, known, [], options);
+  for (const token of Object.keys(options.nonToolTokens)) {
+    if (known.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which is a tool in tool-list.json, so delete it`);
+    else if (!usedNonTool.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which no live doc uses, so delete it`);
   }
   return out;
 }

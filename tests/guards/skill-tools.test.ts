@@ -247,6 +247,15 @@ describe('the skills guard can fail (#486 self-test)', () => {
     expect(run('~~~json tool=logseq_get_thing\n{"thing_name": "a"}\n~~~\n')).toEqual([]);
   });
 
+  it('reads a file with CRLF line endings like one with LF (a trailing carriage return must not defeat a fence or heading)', () => {
+    const crlf = (text: string): string => text.replace(/\n/g, '\r\n');
+    const bad = '{"thing_name": "a", "topic": "x"}';
+    expect(run(crlf(example(bad)))).toEqual([
+      'skill.md:2: the logseq_get_thing example has an argument "topic" that is not in its inputSchema',
+    ]);
+    expect(skillViolations([{ path: 'ref.md', text: crlf(reference) }], tools, options)).toEqual([]);
+  });
+
   it('does not treat an untagged json block as an example', () => {
     expect(run('```json\n{"anything": true}\n```\n')).toEqual([]);
   });
