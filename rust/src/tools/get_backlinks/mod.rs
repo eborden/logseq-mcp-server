@@ -24,6 +24,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::args::parse_args;
+use crate::budget::{Fit, fit, size};
 use crate::block_tree::{camelize_block, camelize_keys};
 use crate::client::LogseqClient;
 use crate::errors::{MatchedBy, ToolError};
@@ -33,7 +34,7 @@ use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, linked_references_of_pages, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
-use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning, large_result_note};
+use crate::truncation::{CappedTruncation, INLINE_BLOCKS, SizeCut, capped_truncation_warning, large_result_note, size_truncation_warning};
 
 use self::tips::backlink_tips;
 pub use self::wire::{Backlink, block_rows};
@@ -104,13 +105,95 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
 
     let outcome = get_backlinks_with_meta(client, &page_name, max_pages, max_blocks_per_page).await?;
     let has_results = !outcome.results.is_empty();
-    let text = Value::Array(outcome.results.into_iter().map(Backlink::into_value).collect()).to_string();
-    let mut content = vec![ContentBlock::text(text)];
     let tips = if tips_enabled { backlink_tips(&page_name, has_results) } else { Vec::new() };
-    if let Some(meta) = meta_content(outcome.meta, &tips) {
+    // The character budget (#485) measures every block of text the call sends, the tips included
+    let (results, meta) = fit_to_budget(outcome.results, outcome.meta, &tips);
+    let mut content = vec![ContentBlock::text(results_text(&results))];
+    if let Some(meta) = meta_content(meta, &tips) {
         content.push(ContentBlock::text(meta));
     }
     Ok(success_result(content))
+}
+
+/// The first content block: the source pages as the Editor API's `[page, blocks]` tuples.
+fn results_text(results: &[Backlink]) -> String {
+    Value::Array(results.iter().cloned().map(Backlink::into_value).collect()).to_string()
+}
+
+/// The first `blocks` linking blocks, across the source pages in their order: the page the cut falls in
+/// keeps its first blocks, and the pages after it go.
+fn first_blocks(results: &[Backlink], blocks: usize) -> Vec<Backlink> {
+    let mut room = blocks;
+    let mut kept = Vec::new();
+    for backlink in results {
+        if room == 0 {
+            break;
+        }
+        let take = backlink.blocks.len().min(room);
+        room -= take;
+        kept.push(Backlink { page: backlink.page.clone(), blocks: backlink.blocks[..take].to_vec() });
+    }
+    kept
+}
+
+/// `meta` with the size warning added, `hasMore` worked out again and `totals` set when no count cap had set
+/// them, in the order the meta is built in: `hasMore`, `warnings`, `totals`, then the rest.
+fn meta_with_size_cut(meta: Option<Map<String, Value>>, warning: ResultWarning, totals: (usize, usize)) -> Map<String, Value> {
+    let mut rest = meta.unwrap_or_default();
+    let mut warnings = match rest.remove("warnings") {
+        Some(Value::Array(warnings)) => warnings,
+        _ => Vec::new(),
+    };
+    warnings.push(serde_json::to_value(&warning).expect("warnings serialize"));
+    let has_more = warnings.iter().any(|warning| warning.get("howToFetchAll").is_some());
+    rest.remove("hasMore");
+    let totals = rest.remove("totals").unwrap_or_else(|| json!({"pages": totals.0, "blocks": totals.1}));
+    let mut meta = Map::new();
+    meta.insert("hasMore".to_owned(), json!(has_more));
+    meta.insert("warnings".to_owned(), Value::Array(warnings));
+    meta.insert("totals".to_owned(), totals);
+    meta.extend(rest);
+    meta
+}
+
+/// The results and meta as they are when the text fits the character budget (#485), else cut to the first
+/// linking blocks that do, with a `result_size_truncated` warning and the totals. The unit is a linking block,
+/// so a source page is cut only where the budget ends, and a block is never cut inside its text (BR-0007).
+fn fit_to_budget(results: Vec<Backlink>, meta: Option<Map<String, Value>>, tips: &[String]) -> (Vec<Backlink>, Option<Map<String, Value>>) {
+    let total_blocks: usize = results.iter().map(|backlink| backlink.blocks.len()).sum();
+    let total_pages = results.len();
+    let cut = |blocks: usize, oversize: bool| {
+        let kept = first_blocks(&results, blocks);
+        let warning = size_truncation_warning(SizeCut {
+            what: "linking blocks",
+            kept: blocks,
+            total: total_blocks,
+            oversize,
+            advice: &format!(
+                "They are on the first {} of {total_pages} source pages. Read a source page on its own with logseq_get_page, or search its blocks with logseq_search_blocks. No parameter raises this limit.",
+                kept.len()
+            ),
+            how_to_fetch_all: None,
+        });
+        let meta = meta_with_size_cut(meta.clone(), warning, (total_pages, total_blocks));
+        (kept, meta)
+    };
+    let size_of = |blocks: usize| {
+        let (kept, meta) = if blocks < total_blocks {
+            let (kept, meta) = cut(blocks, false);
+            (kept, Some(meta))
+        } else {
+            (results.clone(), meta.clone())
+        };
+        size(&results_text(&kept)) + meta_content(meta, tips).map_or(0, |text| size(&text))
+    };
+    match fit(total_blocks, 1, size_of) {
+        Fit::Whole => (results, meta),
+        Fit::Cut { kept, oversize } => {
+            let (kept, meta) = cut(kept, oversize);
+            (kept, Some(meta))
+        }
+    }
 }
 
 /// The trailing `{"meta": ...}` block, which carries the tips too, or
@@ -655,5 +738,91 @@ mod tests {
             serde_json::to_value(&tool.annotations).unwrap(),
             json!({"title": "Get Backlinks", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
         );
+    }
+
+    fn long_source(id: i64, name: &str, blocks: usize, length: usize) -> Backlink {
+        Backlink {
+            page: json!({"id": id, "name": name}),
+            blocks: (0..blocks as i64).map(|i| json!({"id": id * 1000 + i, "content": "x".repeat(length)})).collect(),
+        }
+    }
+
+    #[test]
+    fn results_that_fit_the_budget_come_back_as_they_are_with_no_meta_added() {
+        let results = vec![long_source(1, "a", 3, 100)];
+        let (kept, meta) = fit_to_budget(results.clone(), None, &[]);
+        assert_eq!((kept, meta), (results, None));
+    }
+
+    #[test]
+    fn results_over_the_budget_keep_the_first_blocks_and_say_what_was_cut() {
+        // 4 pages of 10 blocks of 1,000 characters: about 10,000 characters a page
+        let results: Vec<Backlink> = (1..=4).map(|id| long_source(id, &format!("p{id}"), 10, 1000)).collect();
+        let (kept, meta) = fit_to_budget(results.clone(), None, &[]);
+        let kept_blocks: usize = kept.iter().map(|backlink| backlink.blocks.len()).sum();
+        assert!(kept_blocks < 40 && kept_blocks > 10, "{kept_blocks}");
+        assert!(size(&results_text(&kept)) + size(&meta_content(meta.clone(), &[]).unwrap()) <= crate::budget::BUDGET_CHARS);
+        // whole pages first: only the last page kept is partial
+        assert!(kept[..kept.len() - 1].iter().all(|backlink| backlink.blocks.len() == 10));
+        let meta = meta.unwrap();
+        assert_eq!(meta.keys().collect::<Vec<_>>(), ["hasMore", "warnings", "totals"]);
+        assert_eq!(meta["hasMore"], json!(false));
+        assert_eq!(meta["totals"], json!({"pages": 4, "blocks": 40}));
+        assert_eq!(meta["warnings"][0]["code"], "result_size_truncated");
+        assert!(meta["warnings"][0].get("howToFetchAll").is_none());
+        assert!(meta["warnings"][0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept_blocks} of 40 linking blocks")));
+    }
+
+    #[test]
+    fn a_size_cut_keeps_the_count_caps_totals_and_warnings_and_the_meta_order() {
+        let results: Vec<Backlink> = (1..=3).map(|id| long_source(id, &format!("p{id}"), 20, 600)).collect();
+        let mut meta = Map::new();
+        meta.insert("hasMore".to_owned(), json!(true));
+        meta.insert("warnings".to_owned(), json!([{"code": "pages_truncated", "message": "m", "howToFetchAll": "h"}]));
+        meta.insert("totals".to_owned(), json!({"pages": 9, "blocks": 90}));
+        meta.insert("resolvedAliases".to_owned(), json!(["A"]));
+        let (_, meta) = fit_to_budget(results, Some(meta), &["a tip".to_owned()]);
+        let meta = meta.unwrap();
+        assert_eq!(meta.keys().collect::<Vec<_>>(), ["hasMore", "warnings", "totals", "resolvedAliases"]);
+        // the count cap's own warning, and its fetch-the-rest, stay; the totals are the count cap's
+        assert_eq!(meta["hasMore"], json!(true));
+        assert_eq!(meta["totals"], json!({"pages": 9, "blocks": 90}));
+        assert_eq!(meta["warnings"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_single_block_over_the_budget_is_returned_alone_with_the_warning() {
+        let results = vec![long_source(1, "a", 1, 40_000), long_source(2, "b", 1, 100)];
+        let (kept, meta) = fit_to_budget(results, None, &[]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].blocks[0]["content"].as_str().unwrap().len(), 40_000);
+        let message = meta.unwrap()["warnings"][0]["message"].as_str().unwrap().to_owned();
+        assert!(message.contains("an entry is never cut inside its text"), "{message}");
+        assert!(message.starts_with("Showing 1 of 2 linking blocks"), "{message}");
+    }
+
+    #[test]
+    fn a_lone_oversized_block_and_an_empty_result_are_not_cut() {
+        let one = vec![long_source(1, "a", 1, 40_000)];
+        assert_eq!(fit_to_budget(one.clone(), None, &[]), (one, None));
+        assert_eq!(fit_to_budget(Vec::new(), None, &[]), (Vec::new(), None));
+    }
+
+    #[test]
+    fn a_result_exactly_at_the_budget_is_untouched() {
+        // two blocks whose text adds up to exactly the budget
+        let frame = size(&results_text(&[long_source(1, "a", 2, 0)]));
+        let extra = crate::budget::BUDGET_CHARS - frame;
+        let mut page = long_source(1, "a", 2, extra / 2);
+        page.blocks[1]["content"] = json!("x".repeat(extra - extra / 2));
+        let results = vec![page];
+        assert_eq!(size(&results_text(&results)), crate::budget::BUDGET_CHARS);
+        assert_eq!(fit_to_budget(results.clone(), None, &[]), (results.clone(), None));
+        // one character more and the last block goes
+        let mut over = results;
+        over[0].blocks[1]["content"] = json!("x".repeat(extra - extra / 2 + 1));
+        let (kept, meta) = fit_to_budget(over, None, &[]);
+        assert_eq!(kept[0].blocks.len(), 1);
+        assert!(meta.is_some());
     }
 }
