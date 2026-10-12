@@ -541,7 +541,7 @@ describe('result caps (#61)', () => {
       ]);
       expect(codes(body)).toEqual(['pages_truncated']);
       expect(body.meta!.warnings![0].message).toContain('ranked by linking blocks (most first, ties by page name)');
-      expect(body.meta!.warnings![0].message).toContain('The last page kept has 1 linking block, the first dropped page has 1.');
+      expect(body.meta!.warnings![0].message).toContain('The last page kept has 1 linking block, the first dropped page has 1 linking block.');
     });
 
     it('never returns more pages than max_pages, keeps the same first pages, and reports every cut', async () => {
