@@ -105,7 +105,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find blocks, newest first. Filters AND, at least one: text (case-insensitive substring); property + value (exact; any one value of a multi-value property). Capped by limit (max 500): check hasMore and warnings.\n\n**Can't find:** synonyms or stems, partial or ranged values, link structure (logseq_search_by_relationship), or over 500 matches in one call.",
+    "description": "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); property + value (exact; any one value of a multi-value property); period on journals (start_date + end_date, last_n days or preset). Capped by limit (max 500): check hasMore and warnings.\n\n**Can't find:** synonyms or stems, ranged values, link structure (logseq_search_by_relationship), or over 500 matches.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -135,6 +135,33 @@
             {
               "type": "boolean"
             }
+          ]
+        },
+        "start_date": {
+          "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
+          "type": "number"
+        },
+        "end_date": {
+          "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date",
+          "type": "number"
+        },
+        "last_n": {
+          "description": "Only blocks on journal pages in the last N calendar days, today included (whole number, 1+)",
+          "type": "integer",
+          "minimum": 1
+        },
+        "preset": {
+          "description": "Named period in local time; weeks run Monday to Sunday",
+          "type": "string",
+          "enum": [
+            "today",
+            "yesterday",
+            "this_week",
+            "last_week",
+            "this_month",
+            "last_month",
+            "this_year",
+            "year_to_date"
           ]
         },
         "limit": {

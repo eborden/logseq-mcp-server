@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
+use logseq_mcp_server::dates::Clock;
 use logseq_mcp_server::errors::ToolError;
 use logseq_mcp_server::args::Scalar;
 use logseq_mcp_server::tools::find_blocks::Filters;
@@ -15,6 +16,10 @@ use logseq_mcp_server::tools::{find_blocks, find_pages, get_graph};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+/// 2025-03-12T03:30:00Z, the instant the parity harness reads as now: Tuesday 2025-03-11 in New York, where it also
+/// pins the zone.
+const NOW: Clock = Clock::Fixed(1_741_750_200_000);
 
 /// A LogSeq that answers each request with the next canned body, and records the requests.
 struct MockLogseq {
@@ -215,7 +220,7 @@ async fn a_null_answer_is_an_unavailable_warning_and_no_match_is_an_empty_result
 #[tokio::test]
 async fn a_null_answer_to_the_search_is_written_as_an_empty_list_and_a_warning_with_no_tip() {
     let logseq = mock_logseq(vec![json!(null)]).await;
-    let result = find_blocks::call(&client(&logseq), true, json!({"text": "x\"y"}).as_object().cloned()).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), true, NOW, json!({"text": "x\"y"}).as_object().cloned()).await.unwrap();
     let content = serde_json::to_value(&result).unwrap()["content"].clone();
 
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"], "one call, as for any search");
@@ -228,7 +233,7 @@ async fn a_null_answer_to_the_search_is_written_as_an_empty_list_and_a_warning_w
 
     // a real `[]` has no warning, and gets its usual "No match" tip
     let logseq = mock_logseq(vec![json!([])]).await;
-    let result = find_blocks::call(&client(&logseq), true, json!({"text": "x"}).as_object().cloned()).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), true, NOW, json!({"text": "x"}).as_object().cloned()).await.unwrap();
     let content = serde_json::to_value(&result).unwrap()["content"].clone();
     assert_eq!(content[0]["text"], "[]");
     assert_eq!(
@@ -310,7 +315,7 @@ async fn a_bad_property_key_is_refused_before_any_call_and_a_null_answer_is_an_u
 async fn a_null_answer_to_a_property_search_is_written_as_an_empty_list_and_a_warning() {
     let logseq = mock_logseq(vec![json!(null)]).await;
     let arguments = json!({"property": "status", "value": "doing"}).as_object().cloned();
-    let result = find_blocks::call(&client(&logseq), true, arguments.clone()).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), true, NOW, arguments.clone()).await.unwrap();
     let content = serde_json::to_value(&result).unwrap()["content"].clone();
 
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"], "one call, as for any search");
@@ -321,14 +326,77 @@ async fn a_null_answer_to_a_property_search_is_written_as_an_empty_list_and_a_wa
         r#"{"meta":{"hasMore":false,"warnings":[{"code":"search_unavailable","message":"LogSeq returned no answer when looking up blocks that have the property \"status\" (possibly no graph open or a re-index in progress), so the empty list may not mean nothing matches. Retry in a moment, or call logseq_get_graph to check which graph is open."}],"totals":{}}}"#
     );
 
-    // a real `[]` has no warning, and a tip that says how a property and a period match
+    // a real `[]` has no warning, and a tip that says how a property matches
     let logseq = mock_logseq(vec![json!([])]).await;
-    let result = find_blocks::call(&client(&logseq), true, arguments).await.unwrap();
+    let result = find_blocks::call(&client(&logseq), true, NOW, arguments).await.unwrap();
     let content = serde_json::to_value(&result).unwrap()["content"].clone();
     assert_eq!(content[0]["text"], "[]");
     assert_eq!(
         content[1]["text"],
-        r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":0},"tips":["No match. A property value must equal the stored text, and a period covers journal blocks only: loosen a filter."]}}"#
+        r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":0},"tips":["No match. A property value must equal the stored text: loosen a filter."]}}"#
+    );
+}
+
+// #491: the period is one more clause of the one query, so it costs no call and binds its two bounds as typed numbers
+#[tokio::test]
+async fn a_period_costs_no_call_of_its_own_and_binds_its_days_with_in() {
+    for (arguments, bounds) in [
+        (json!({"text": "x", "start_date": 20250101, "end_date": 20250107}), ("20250101", "20250107")),
+        (json!({"text": "x", "preset": "last_week"}), ("20250303", "20250309")),
+        (json!({"text": "x", "last_n": 7}), ("20250305", "20250311")),
+    ] {
+        let logseq = mock_logseq(vec![json!([block(4, "a match on a journal", 5)])]).await;
+        let result = find_blocks::call(&client(&logseq), true, NOW, arguments.as_object().cloned()).await.unwrap();
+        let content = serde_json::to_value(&result).unwrap()["content"].clone();
+
+        assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"], "{arguments}");
+        let seen = logseq.seen.lock().unwrap();
+        let query = seen[0]["args"][0].as_str().unwrap();
+        assert!(query.contains(":in $ ?start ?end ?pattern :where [?page :block/name] [?page :block/journal-day ?day]"), "{query}");
+        assert!(query.contains("[?b :block/page ?page] [?b :block/content ?c]"), "{query}");
+        assert_eq!(seen[0]["args"].as_array().unwrap()[1..3], [json!(bounds.0), json!(bounds.1)], "{arguments}");
+        assert_eq!(content[0]["text"].as_str().unwrap().matches("\"uuid\"").count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn a_period_alone_is_a_filter_and_two_ways_of_choosing_one_are_refused_before_any_call() {
+    let logseq = mock_logseq(vec![json!([block(4, "a block", 5)])]).await;
+    find_blocks::call(&client(&logseq), true, NOW, json!({"last_n": 1}).as_object().cloned()).await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
+    // today is the 11th in New York, though it is already the 12th in UTC
+    assert_eq!(logseq.seen.lock().unwrap()[0]["args"].as_array().unwrap()[1..], [json!("20250311"), json!("20250311")]);
+
+    for (arguments, said) in [
+        (json!({"text": "x", "last_n": 3, "preset": "today"}), "Invalid parameter 'date selection': last_n and preset"),
+        (json!({"text": "x", "start_date": 20250101}), "Invalid parameter 'end_date': missing"),
+        (json!({"text": "x", "start_date": 20250107, "end_date": 20250101}), "Invalid parameter 'date_range': 20250107 to 20250101"),
+        (json!({"text": "x", "start_date": 20250231, "end_date": 20250301}), "Invalid parameter 'start_date': 20250231"),
+    ] {
+        let logseq = mock_logseq(vec![json!([])]).await;
+        let error = find_blocks::call(&client(&logseq), true, NOW, arguments.as_object().cloned()).await.unwrap_err();
+        assert!(matches!(error, ToolError::InvalidParameter(_)), "{arguments}: {error}");
+        assert!(error.to_string().starts_with(said), "{arguments}: {error}");
+        assert!(methods(&logseq).is_empty(), "{arguments}");
+    }
+}
+
+#[tokio::test]
+async fn a_null_answer_to_a_search_with_a_period_says_which_days_were_asked_for() {
+    let logseq = mock_logseq(vec![json!(null)]).await;
+    let filters = Filters::parse(Some("x"), None, None).unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &filters, 100, false, true).await.unwrap();
+    assert!(found.is_unavailable());
+
+    let logseq = mock_logseq(vec![json!(null)]).await;
+    let result = find_blocks::call(&client(&logseq), true, NOW, json!({"preset": "yesterday"}).as_object().cloned()).await.unwrap();
+    let content = serde_json::to_value(&result).unwrap()["content"].clone();
+    assert_eq!(content[0]["text"], "[]");
+    let meta: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(meta["meta"]["warnings"][0]["code"], "search_unavailable");
+    assert!(
+        meta["meta"]["warnings"][0]["message"].as_str().unwrap().starts_with("LogSeq returned no answer when looking up blocks that sit on journal pages from 20250310 to 20250310 ("),
+        "{meta}"
     );
 }
 
@@ -336,14 +404,14 @@ async fn a_null_answer_to_a_property_search_is_written_as_an_empty_list_and_a_wa
 async fn a_call_with_no_filter_is_refused_before_any_call_whatever_else_it_carries() {
     for arguments in [json!({}), json!({"text": ""}), json!({"limit": 5, "include_context": true}), json!({"text": null, "property": null})] {
         let logseq = mock_logseq(vec![json!([])]).await;
-        let error = find_blocks::call(&client(&logseq), true, arguments.as_object().cloned()).await.unwrap_err();
+        let error = find_blocks::call(&client(&logseq), true, NOW, arguments.as_object().cloned()).await.unwrap_err();
         assert!(matches!(error, ToolError::InvalidParameter(_)), "{arguments}: {error}");
         assert!(error.to_string().starts_with("Invalid parameter 'filters': none given"), "{error}");
         assert!(methods(&logseq).is_empty(), "{arguments}");
     }
     // a value with no property, or the reverse, is refused too, and names the one that is missing
     let logseq = mock_logseq(vec![json!([])]).await;
-    let error = find_blocks::call(&client(&logseq), true, json!({"text": "x", "value": "doing"}).as_object().cloned()).await.unwrap_err();
+    let error = find_blocks::call(&client(&logseq), true, NOW, json!({"text": "x", "value": "doing"}).as_object().cloned()).await.unwrap_err();
     assert!(error.to_string().starts_with("Invalid parameter 'property': missing"), "{error}");
     assert!(methods(&logseq).is_empty());
 }

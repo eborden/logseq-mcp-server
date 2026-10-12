@@ -24,7 +24,7 @@
 mod cap;
 mod queries;
 mod search;
-mod selection;
+pub(crate) mod selection;
 mod tips;
 mod top_concepts;
 mod wire;

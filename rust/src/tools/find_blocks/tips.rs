@@ -8,11 +8,18 @@ use serde_json::{Value, json};
 use crate::js;
 use crate::tips::{Kind, MAX_TIPS, suggest_call, suggest_topic};
 
+/// The filters other than `text` a search had, which the tip for a miss names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Others {
+    pub property: bool,
+    pub period: bool,
+}
+
 /// Tips for a finished search: for a miss, a shorter word and a page-name search (when the search had a `text`) or a
-/// reminder of how the other filters match; otherwise a read of the page or topic most results are on. `matches` is
+/// reminder of how the `others` match; otherwise a read of the page or topic most results are on. `matches` is
 /// `totals.matches`, which tells a real miss from `limit: 0`, which also returns nothing, and from an `offset` past the
 /// last match.
-pub fn find_tips(text: Option<&str>, results: &[Value], matches: Option<usize>) -> Vec<String> {
+pub fn find_tips(text: Option<&str>, others: Others, results: &[Value], matches: Option<usize>) -> Vec<String> {
     let mut tips = Vec::new();
     if results.is_empty() {
         // An empty array is a miss only if nothing matched
@@ -30,7 +37,14 @@ pub fn find_tips(text: Option<&str>, results: &[Value], matches: Option<usize>) 
                     }
                 )
             }
-            None => "No match. A property value must equal the stored text, and a period covers journal blocks only: loosen a filter.".to_owned(),
+            None => format!(
+                "No match. {}: loosen a filter.",
+                match (others.property, others.period) {
+                    (true, true) => "A property value must equal the stored text, and a period covers journal blocks only",
+                    (true, false) => "A property value must equal the stored text",
+                    (false, _) => "A period covers journal blocks only",
+                }
+            ),
         });
     } else {
         tips.push(match suggest_topic(results) {
@@ -73,40 +87,40 @@ mod tests {
     #[test]
     fn a_miss_suggests_a_shorter_word_and_a_page_name_search() {
         assert_eq!(
-            find_tips(Some("  importer rows "), &[], Some(0)),
+            find_tips(Some("  importer rows "), Others::default(), &[], Some(0)),
             [r#"No match. Search is literal (no synonyms): try a shorter or different word, or logseq_find_pages {"text":"importer"}."#]
         );
         assert_eq!(
-            find_tips(Some("   "), &[], None),
+            find_tips(Some("   "), Others::default(), &[], None),
             ["No match. Search is literal (no synonyms): try a shorter or different word."]
         );
         // limit 0 returns nothing but did match
-        assert!(find_tips(Some("x"), &[], Some(4)).is_empty());
+        assert!(find_tips(Some("x"), Others::default(), &[], Some(4)).is_empty());
     }
 
     #[test]
     fn a_miss_with_no_text_says_how_the_other_filters_match_and_has_no_word_to_suggest() {
-        assert_eq!(
-            find_tips(None, &[], Some(0)),
-            ["No match. A property value must equal the stored text, and a period covers journal blocks only: loosen a filter."]
-        );
+        let said = |property: bool, period: bool| find_tips(None, Others { property, period }, &[], Some(0));
+        assert_eq!(said(true, true), ["No match. A property value must equal the stored text, and a period covers journal blocks only: loosen a filter."]);
+        assert_eq!(said(true, false), ["No match. A property value must equal the stored text: loosen a filter."]);
+        assert_eq!(said(false, true), ["No match. A period covers journal blocks only: loosen a filter."]);
         // matches that an offset skipped past are no miss
-        assert!(find_tips(None, &[], Some(4)).is_empty());
+        assert!(find_tips(None, Others::default(), &[], Some(4)).is_empty());
     }
 
     #[test]
     fn the_page_most_hits_are_on_is_suggested_and_a_tie_goes_to_the_first_seen() {
         let hits = [slim("Bob", &[]), slim("Alice", &[]), slim("Alice", &[]), slim("Bob", &[])];
         // slim hits carry no journal flag, so the kind of page is unknown; no tags, so the unknown page wins
-        assert_eq!(find_tips(Some("x"), &hits, Some(4)), [page_tip("Bob")]);
-        assert_eq!(find_tips(Some("x"), &hits[1..3], Some(2)), [page_tip("Alice")]);
+        assert_eq!(find_tips(Some("x"), Others::default(), &hits, Some(4)), [page_tip("Bob")]);
+        assert_eq!(find_tips(Some("x"), Others::default(), &hits[1..3], Some(2)), [page_tip("Alice")]);
     }
 
     #[test]
     fn a_tag_beats_a_page_of_unknown_kind() {
         let hits = [slim("Alice", &["urgent"]), slim("Bob", &["urgent", "later"])];
         assert_eq!(
-            find_tips(Some("x"), &hits, Some(2)),
+            find_tips(Some("x"), Others::default(), &hits, Some(2)),
             [r#"To read the topic most results mention: logseq_build_context {"topic_name":"urgent"}."#]
         );
     }
@@ -115,9 +129,9 @@ mod tests {
     fn a_page_known_not_to_be_a_journal_beats_everything_else() {
         let journal = json!({"uuid": "a", "content": "c", "context": {"page": {"name": "jan 1st, 2025", "originalName": "Jan 1st, 2025", "isJournal": true}, "tags": ["t"]}});
         let plain = json!({"uuid": "b", "content": "c", "context": {"page": {"name": "alice", "originalName": "Alice"}}});
-        assert_eq!(find_tips(Some("x"), &[journal.clone(), journal.clone(), plain], Some(3)), [page_tip("Alice")]);
+        assert_eq!(find_tips(Some("x"), Others::default(), &[journal.clone(), journal.clone(), plain], Some(3)), [page_tip("Alice")]);
         assert_eq!(
-            find_tips(Some("x"), &[journal], Some(1)),
+            find_tips(Some("x"), Others::default(), &[journal], Some(1)),
             [r#"To read the topic most results mention: logseq_build_context {"topic_name":"t"}."#]
         );
     }
@@ -126,7 +140,7 @@ mod tests {
     fn a_full_hit_names_its_page_by_the_original_name_and_counts_as_no_journal() {
         // a full block carries `page: {id, name, original-name}`, and no journal key: the tip reads it as a plain page
         let hit = json!({"id": 1, "uuid": "u", "content": "c", "page": {"id": 2, "name": "alice", "original-name": "Alice"}});
-        assert_eq!(find_tips(Some("x"), &[hit], Some(1)), [page_tip("Alice")]);
+        assert_eq!(find_tips(Some("x"), Others::default(), &[hit], Some(1)), [page_tip("Alice")]);
         assert_eq!(journal_status(&json!({"page": {"id": 2}})), None);
     }
 
@@ -134,7 +148,7 @@ mod tests {
     fn hits_with_no_page_name_say_so() {
         let hit = json!({"id": 1, "uuid": "u", "content": "c", "page": {"id": 2}});
         assert_eq!(
-            find_tips(Some("x"), &[hit], Some(1)),
+            find_tips(Some("x"), Others::default(), &[hit], Some(1)),
             ["Results carry page ids only. Repeat with slim_results: true to get page names, then logseq_build_context on one."]
         );
     }
