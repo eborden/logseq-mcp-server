@@ -22,7 +22,7 @@ Read the names and aliases. A name with no page is a vocabulary miss, so search 
 {"page": "React", "max_blocks": 20}
 ```
 
-Read `directBlocks` for what the page says, then `references` (ranked, with each `sourcePage`) for what the rest of the graph says. Check `warnings` and `totals` before you call the list complete. For more references, call again with the `references_offset` the warning names and `max_blocks` and `max_related_pages` at 0.
+Read `directBlocks` for what the page says, then `references` (ranked, with each `sourcePage`) for what the rest of the graph says. Check `warnings` and `totals` before you call the list complete. For more references, call again with the `references_offset` the warning names and `max_blocks` and `max_related_pages` at 0 (the result then reports those two lists as cut, which you can ignore).
 
 3. If the topic has no page, or the user asked about a phrase, search the words with a small limit.
 

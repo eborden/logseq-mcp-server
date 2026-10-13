@@ -26,7 +26,7 @@ Explore one page in a single call: its blocks, the pages that link to it and the
 | `format` | `json`, `markdown` | `json` | `markdown` shows the blocks as a tree, related pages as links and references grouped by source page, about 75% smaller. Block uuids appear only with `compact` |
 | `compact` | boolean | false | Each block becomes `{ uuid, snippet }` (first line, 80 characters). Read one in full with `logseq_get_block`. It skips `resolve_refs`, with a warning |
 
-**Returns:** `page` (as you wrote it; `resolvedFrom` says when it was an alias, a date or a namespace leaf), the page's properties, `directBlocks`, `relatedPages` (each once, in LogSeq's order, not ranked), `references` (each `{ block, sourcePage }`), `temporalContext` for a journal page, `summary` and `totals` (`blocks`, `relatedPages`, `references`: the real counts before any cap). `hasMore`, `warnings` and `totals` come first.
+**Returns:** `page` (as you wrote it; `resolvedFrom` says when it was an alias, a date or a namespace leaf), `hasMore`, `warnings` and `totals` (`blocks`, `relatedPages`, `references`: the real counts before any cap), then `summary` (with `pageProperties`), `mainPage` (the page entity and its properties), `directBlocks`, `relatedPages` (each `{ page, relationshipType }`, once, in LogSeq's order, not ranked), `references` (each `{ block, sourcePage }`) and `temporalContext`.
 
 **References are ranked** by how many blocks on their source page link the page, most first, ties by lowercase page name. The first one listed is on the page that links the topic most, which answers "what connects to this" without raising anything. A page and its aliases count as one topic. The ranking counts linking blocks, not importance: a blocker can sit on a page with one linking block, so read on with `references_offset` only when the question needs every referrer.
 
@@ -56,7 +56,7 @@ Read the `snippet` of each block and reference, and the `sourcePage` names: rece
 {"page": "project atlas", "max_blocks": 0, "max_related_pages": 0, "references_offset": 20}
 ```
 
-Read the next 20 references. The ranking is the same on every call, so the pages join with nothing repeated. Stop when the question is answered: only a blocker hunt or a count needs every referrer.
+Read the next references. The ranking is the same on every call, so the pages join with nothing repeated. With `max_blocks` and `max_related_pages` at 0 the result still carries `blocks_truncated` and `related_pages_truncated` warnings (and `hasMore: true`) for what you left out on purpose: ignore those two and read `references_truncated`, which is absent on the last page. Stop when the question is answered: only a blocker hunt or a count needs every referrer.
 
 ## logseq_explore_network
 
@@ -90,7 +90,7 @@ Setting `max_nodes`, `max_fanout` or `expand_journals` together with `to` is ref
 {"page": "project atlas", "max_depth": 1, "format": "markdown"}
 ```
 
-Read the lines for the direct neighbours and their link counts: high counts are the closest ties. If `truncated` is true, see `warnings` for the cap that bit. Next call: `logseq_explore_network` again with `max_depth: 2` from the one neighbour you care about, or `logseq_explore_context` on it.
+Read the lines for the direct neighbours and their link counts: high counts are the closest ties. If `truncated` is true, see `warnings` for the cap that bit: a page with more than 15 neighbours hits the `max_fanout` default even at depth 1. Next call: `logseq_explore_network` again with `max_depth: 2` from the one neighbour you care about, or `logseq_explore_context` on it.
 
 **Example 2.** "How do the billing work and the onboarding redesign connect?"
 
@@ -141,7 +141,7 @@ At least one of `page` or a period is required, and a period is exactly one of `
 {"preset": "last_week"}
 ```
 
-Read `summary.topConcepts` first for the themes, then `entries` day by day (oldest first). Check `warnings`: `blocks_truncated` means days are missing from the end, and `howToFetchAll` names the `start_date` to continue from. A day with no journal still appears as an empty entry. Next call: `logseq_explore_context` on a top concept, or the paging call the warning names.
+Read `summary.topConcepts` first for the themes, then `entries` day by day (oldest first). Check `warnings`: `blocks_truncated` means days are missing from the end, and `howToFetchAll` names the `start_date` to continue from. A day with no journal page has no entry, so a missing day is not a day with nothing written. Next call: `logseq_explore_context` on a top concept, or the paging call the warning names.
 
 **Example 2.** "How has my thinking on Rust changed this year?" A page, grouped by month.
 
