@@ -174,18 +174,6 @@ pub fn alias_set_rows(answer: &Value) -> Result<Option<Vec<(i64, PulledPage)>>, 
     Ok(Some(rows.into_iter().zip(items(answer)).map(|((start, member), row)| (start.0, PulledPage::read(member, row.get(1)))).collect()))
 }
 
-/// The answer: `[startPage, member]` per row, the alias group of the page a name
-/// found, both sides pulled.
-pub fn alias_set_by_name_rows(answer: &Value) -> Result<Option<Vec<(PulledPage, PulledPage)>>, ResponseError> {
-    let Some(rows) = parse::<Option<Vec<(shape::PulledPage, shape::PulledPage)>>>(DATALOG_METHOD, answer)? else { return Ok(None) };
-    Ok(Some(
-        rows.into_iter()
-            .zip(items(answer))
-            .map(|((start, member), row)| (PulledPage::read(start, row.get(0)), PulledPage::read(member, row.get(1))))
-            .collect(),
-    ))
-}
-
 /// The answer: `[page]` per row.
 pub fn page_rows(answer: &Value) -> Result<Option<Vec<PulledPage>>, ResponseError> {
     let Some(rows) = parse::<Option<Vec<(shape::PulledPage,)>>>(DATALOG_METHOD, answer)? else { return Ok(None) };
@@ -222,17 +210,7 @@ mod tests {
         assert_eq!(page_rows(&Value::Null).unwrap(), None);
         assert_eq!(page_names(&Value::Null, "m").unwrap(), None);
         assert_eq!(alias_set_rows(&Value::Null).unwrap(), None);
-        assert_eq!(alias_set_by_name_rows(&Value::Null).unwrap(), None);
         assert_eq!(link_target_rows(&Value::Null).unwrap(), None);
-    }
-
-    #[test]
-    fn an_alias_group_by_name_is_rows_of_a_start_page_and_a_member() {
-        let rows = alias_set_by_name_rows(&json!([[{"id": 1, "name": "atlas"}, {"id": 2, "name": "project atlas"}]])).unwrap().unwrap();
-        assert_eq!((rows[0].0.entity_id(), rows[0].1.entity_id()), (Some(1), Some(2)));
-        assert_eq!(alias_set_by_name_rows(&Value::Null).unwrap(), None);
-        assert_eq!(problem(alias_set_by_name_rows(&json!([[{"id": 1}]]))), "answer[0]: the row has fewer cells than this server reads");
-        assert_eq!(problem(alias_set_by_name_rows(&json!([[null, {"id": 1}]]))), "answer[0][0]: expected an object, got null");
     }
 
     #[test]
@@ -293,7 +271,6 @@ mod tests {
     #[test]
     fn a_row_with_too_few_cells_is_an_error_at_the_row() {
         assert_eq!(problem(alias_set_rows(&json!([[]]))), "answer[0]: the row has fewer cells than this server reads");
-        assert_eq!(problem(alias_set_by_name_rows(&json!([[]]))), "answer[0]: the row has fewer cells than this server reads");
         assert_eq!(problem(alias_set_rows(&json!([[1, {"id": 2}], []]))), "answer[1]: the row has fewer cells than this server reads");
         assert_eq!(problem(alias_set_rows(&json!([[1]]))), "answer[0]: the row has fewer cells than this server reads");
         assert_eq!(problem(alias_set_rows(&json!([["x"]]))), "answer[0][0]: expected a whole number, got a string");

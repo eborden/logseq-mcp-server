@@ -7,9 +7,6 @@
 //! reports any one-directional link), so a page whose pulled entity has no `alias` key has no
 //! aliases and needs no query. A page that has some costs one Datalog query, for any number of
 //! pages, two hops, bound with `ground_ids`.
-//!
-//! [`resolve_alias_set_by_name`] is the group of a free-text name, where "not a page" is an ordinary answer
-//! (`query_by_date_range` used it for its `search_term`; no tool does now).
 
 use std::collections::{HashMap, HashSet};
 
@@ -18,7 +15,7 @@ use super::RETRY_ADVICE;
 pub use super::queries::linked_references_of_pages;
 use super::wire::{self, PulledPage};
 use crate::client::LogseqClient;
-use crate::edn::{PageId, PageName};
+use crate::edn::PageId;
 use crate::errors::ToolError;
 use crate::meta::ResultWarning;
 use crate::order;
@@ -204,27 +201,6 @@ pub async fn resolve_alias_set(client: &LogseqClient, page: &PulledPage) -> Resu
     Ok(resolve_alias_sets(client, &[page]).await?.remove(0))
 }
 
-/// The alias set of a page known only by name, or `None` when no page has
-/// that name or it has no aliases. For free text that may or may not be a page name, where "not a page" is an ordinary answer, not an error. One Datalog query.
-/// A `null` answer is not that answer (BR-0011, #318): it is a set with no members, marked
-/// [`AliasSet::unavailable`], so the caller can say the lookup failed.
-pub async fn resolve_alias_set_by_name(client: &LogseqClient, name: &str) -> Result<Option<AliasSet>, ToolError> {
-    let query = queries::alias_set_by_name(&PageName::new(name));
-    let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    let Some(rows) = wire::alias_set_by_name_rows(&answer)? else {
-        return Ok(Some(AliasSet { members: Vec::new(), truncated: false, unavailable: Some(name.to_owned()) }));
-    };
-    Ok(alias_set_of_rows(&rows))
-}
-
-/// What the by-name alias lookup makes of the rows: the first start page that has an id, the
-/// members of every row, and the set they make, or `None` when it holds no more than the start page.
-fn alias_set_of_rows(rows: &[(PulledPage, PulledPage)]) -> Option<AliasSet> {
-    let first = rows.iter().find_map(|(start, _)| AliasMember::of(start))?;
-    let found: Vec<AliasMember> = rows.iter().filter_map(|(_, member)| AliasMember::of(member)).collect();
-    Some(build_set(first, found)).filter(AliasSet::has_aliases)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,21 +212,6 @@ mod tests {
 
     fn page(value: serde_json::Value) -> PulledPage {
         wire::page_rows(&json!([[value]])).unwrap().unwrap().remove(0)
-    }
-
-    #[test]
-    fn a_name_found_by_rows_is_a_set_only_when_it_has_aliases() {
-        let row = |start: serde_json::Value, member: serde_json::Value| (page(start), page(member));
-        let atlas = || json!({"id": 1, "name": "atlas", "original-name": "Atlas"});
-        let rows = [row(atlas(), json!({"id": 2, "name": "project atlas", "original-name": "Project Atlas"})), row(atlas(), atlas())];
-        let set = alias_set_of_rows(&rows).unwrap();
-        assert_eq!(set.members.iter().map(|m| m.id).collect::<Vec<_>>(), [1, 2]);
-        // the page alone (a link from itself) is no group, and no rows is no page
-        assert_eq!(alias_set_of_rows(&[row(atlas(), atlas())]), None);
-        assert_eq!(alias_set_of_rows(&[]), None);
-        // a start page with no id is passed over for the next one
-        let rows = [row(json!({"name": "no id"}), atlas()), row(atlas(), json!({"id": 3, "name": "b"}))];
-        assert_eq!(alias_set_of_rows(&rows).unwrap().members[0].id, 1);
     }
 
     #[test]
