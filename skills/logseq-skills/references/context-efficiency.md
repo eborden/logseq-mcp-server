@@ -16,7 +16,9 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 
 ### 2. Discover Vocabulary Before Guessing
 
-If you don't know what pages exist in the user's graph:
+If the user named the page, don't look it up first: call `logseq_explore_context`, `logseq_get_page` or the tool that answers the question. Names resolve in any case, by alias or by ISO date, and a miss comes back as an error that says where to look.
+
+If you don't know what pages exist in the user's graph, and have no name to start from:
 → **Call `logseq_find_pages` FIRST** before searching. With a term in mind, `text` is much cheaper, and `names` checks several exact names in one call. For the whole list, set `limit` to 1000, and while `hasMore` is true call again with the `offset` the warning names
 → Review page names, and each page's aliases, to understand the vocabulary
 → Then search using terms that actually exist
@@ -84,17 +86,23 @@ What to do:
 ## Decision Flowchart
 
 ```
-Do you know what pages exist in the graph?
+Did the user name a page, a block, or "this page"?
   │
-  ├─ NO → logseq_find_pages first (text, names, or limit 1000 and follow offset while hasMore)
-  │        → Then continue with search using known vocabulary
+  ├─ YES → call the tool that answers the question, with that name. No lookup first
+  │        (get_page, get_block, get_current; explore_context, explore_network or explore_timeline)
   │
-  └─ YES → [Continue below]
+  └─ NO  → Do you know what pages exist in the graph?
+            │
+            ├─ NO → logseq_find_pages first (text, names, or limit 1000 and follow offset while hasMore)
+            │        → Then continue with search using known vocabulary
+            │
+            └─ YES → [Continue below]
 
 Does the question have an EXPLICIT timeframe?
 ("this week", "in November", "today", "recently")
   │
-  ├─ YES → find_blocks(text=keyword, period)
+  ├─ YES → a word in the period: find_blocks(text=keyword, period)
+  │        the period itself ("what happened last week"): explore_timeline(period)
   │        DONE - don't add backup searches
   │
   └─ NO → Is the timeframe AMBIGUOUS?

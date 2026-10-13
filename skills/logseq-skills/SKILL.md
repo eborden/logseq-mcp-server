@@ -116,7 +116,7 @@ A type is chosen by what you already have, and it is the second word of the tool
 | `explore` | A starting point, and you want what surrounds it | `logseq_explore_context`, `logseq_explore_network`, `logseq_explore_timeline` | A structured result for synthesis: what is said about it, how it connects, how it changed |
 | `check` | A change you are about to write | `logseq_check_links` | A verdict. Read-only |
 
-Boundary test: if the answer is a list of hits, use `find`. If it is what something is, how it connects or how it changed, use `explore`.
+Boundary test: if the answer is a list of hits, use `find`. If it is what something is, where it stands, how it connects or how it changed, use `explore`: `find` answers "which blocks", not "what is going on with this".
 
 Every tool is read-only. Load `references/tools/<type>.md` for the parameters and worked examples of a type.
 
@@ -130,9 +130,10 @@ Every tool is read-only. Load `references/tools/<type>.md` for the parameters an
 | How something changed over time, or the history of a decision | `logseq_explore_timeline` with `page` and `group_by` | `context-builder.md`, recipe 3 |
 | How two things connect | `logseq_explore_network` with `page` and `to` | `context-builder.md`, recipe 4 |
 | Who owns something, or which pages or blocks have a property | `logseq_find_pages` with `property` and `value` for page properties, `logseq_find_blocks` for block properties | `context-builder.md`, recipe 7 |
-| A word or phrase, or blocks that link to pages | `logseq_find_blocks` with `text` or `links_to` | `tools/find.md` |
+| A word or phrase, or blocks that link to pages (a list of hits) | `logseq_find_blocks` with `text` or `links_to` | `tools/find.md` |
+| Where something stands, what part it plays, what is written about it | `logseq_explore_context` on the page, not a list of blocks | `tools/explore.md` |
 | What to work on, tasks, stale work | `logseq_find_blocks` for markers and properties | `context-builder.md`, recipes 5 and 6 |
-| Unsure of a page name | `logseq_find_pages` with `text` or `names` | `tools/find.md` |
+| Unsure of a page name (you were given none) | `logseq_find_pages` with `text` or `names` | `tools/find.md` |
 | "This page" or "what I'm looking at" | `logseq_get_current`, then `logseq_explore_context` on its page | `tools/get.md` |
 | A page you can name, or a long one | `logseq_get_page` (`detail` `outline` first for a long one), then `logseq_get_block` | `tools/get.md` |
 | Before writing links into notes | `logseq_check_links` (the gate), after the `skills/concept-linking.md` workflow | `tools/check.md` |
@@ -169,7 +170,7 @@ Every tool is read-only. Load `references/tools/<type>.md` for the parameters an
 4. **Multiple indicators** - Check both markers (TODO) and properties (status::doing)
 5. **Synthesize, don't dump** - Provide context and recommendations, not raw data
 6. **Read-only assistance** - Never modify LogSeq structure without explicit request
-7. **Discover before searching** - Call `logseq_find_pages` when you don't know the graph vocabulary
+7. **Name the page, then call it** - When the question names a page, call the tool that answers it with that name: names resolve in any case, by alias and by ISO date, and a miss comes back as an error that says where to look. Use `logseq_find_pages` only when you have no name, or a call says there is no such page
 8. **Read the warnings** - A result with `warnings` was cut or is partial. Say so before you call a list complete or something missing
 
 **CRITICAL:** Read `references/context-efficiency.md` before making LogSeq queries to avoid context waste.
