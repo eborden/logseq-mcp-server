@@ -198,9 +198,9 @@ describe('result caps (#61)', () => {
       return JSON.parse((await call('logseq_get_context_for_query', args)).content[0].text) as QueryBody;
     }
 
-    /** Hits before the cut: the length when nothing was cut, else the count the warning names. */
+    /** Hits before the cut: the length when nothing was cut, else the count the warning names (a count or a size cut). */
     function totalHits(body: QueryBody): number {
-      const cut = body.warnings.find(w => w.code === 'search_results_truncated');
+      const cut = body.warnings.find(w => w.code === 'search_results_truncated' || w.code === 'result_size_truncated');
       if (!cut) return body.searchResults!.length;
       const match = cut.message.match(/^Showing \d+ of (\d+) keyword hits/);
       expect(match, `search_results_truncated message names the total: ${cut.message}`).not.toBeNull();
@@ -221,20 +221,33 @@ describe('result caps (#61)', () => {
 
         expect(Array.isArray(body.searchResults), label).toBe(true);
         expect(body.searchResults!.length, label).toBeLessThanOrEqual(MAX_SEARCH_RESULTS);
-        expect(body.searchResults!.length, label).toBe(Math.min(effective, total));
         expect(total, label).toBe(190);
         expectNoSuggestionPast(body, 'max_search_results', MAX_SEARCH_RESULTS);
-        expect(body.warnings.map(w => w.code), label).toEqual(['search_results_truncated']);
 
         if (effective === MAX_SEARCH_RESULTS) {
-          // Cut at the maximum: the warning is the signal, and nothing can be raised
+          // 100 of these hits are ~32,000 characters, past the budget (#507): the size cut is the one cut, it says so alone,
+          // and no parameter raises it, so hasMore is false and nothing can be raised
+          const sent = [...JSON.stringify(body)].length;
+          expect(sent, `${label}: the budget is in characters`).toBeLessThanOrEqual(30000);
+          expect(sent, `${label}: the cut keeps the most hits that fit`).toBeGreaterThanOrEqual(29000);
+          expect(body.searchResults!.length, label).toBeLessThan(MAX_SEARCH_RESULTS);
+          expect(body.warnings.map(w => w.code), label).toEqual(['result_size_truncated']);
+          expect(body.warnings[0].message, label).toMatch(new RegExp(`^Showing ${body.searchResults!.length} of 190 keyword hits`));
           expect(body.hasMore, label).toBe(false);
-          expect(body.warnings[0].message).toContain(`maximum of ${MAX_SEARCH_RESULTS}`);
           expect(body.warnings[0].howToFetchAll).toBeUndefined();
         } else {
-          // The default slice, which used to be silent: raising max_search_results gets more
+          // The default slice, which used to be silent: raising max_search_results gets more, up to what fits the budget
+          expect(body.searchResults!.length, label).toBe(Math.min(effective, total));
+          expect(body.warnings.map(w => w.code), label).toEqual(['search_results_truncated']);
           expect(body.hasMore, label).toBe(true);
           expect(body.warnings[0].howToFetchAll).toMatch(/^Set max_search_results to \d+/);
+          // the value it offers is the most that fits, and asking for it comes back whole
+          const offered = Number(body.warnings[0].howToFetchAll!.match(/^Set max_search_results to (\d+)/)![1]);
+          expect(offered, label).toBeGreaterThan(effective);
+          expect(offered, label).toBeLessThan(MAX_SEARCH_RESULTS);
+          const raised = await ask(query!, offered);
+          expect(raised.searchResults!.length, label).toBe(offered);
+          expect(raised.warnings.map(w => w.code), label).toEqual(['search_results_truncated']);
         }
       }
       // Above the maximum the caller gets exactly the hits the maximum gives
