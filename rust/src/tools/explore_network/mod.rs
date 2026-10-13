@@ -223,7 +223,7 @@ fn cut_to_pages(network: &Network, kept: usize, oversize: bool) -> Network {
     }
     // The roll-ups the cut kept are the ones to name, and walking through them would be cut again
     let hubs: Vec<HubPage> = network.hubs.iter().filter(|hub| ids.contains(&hub.id)).cloned().collect();
-    set_hub_warning(&mut warnings, &hubs, false);
+    set_hub_warning(&mut warnings, &hubs, None);
     let advice = if network.with_snippets {
         "Start from a more specific page, or lower max_depth, to see a smaller network. Leaving out with_snippets also shortens each edge. No parameter raises this limit."
     } else {
@@ -241,7 +241,7 @@ fn replace_cap_warning(warnings: &mut [ResultWarning], warning: ResultWarning) {
 }
 
 /// The `hub_pages_not_expanded` warning for `hubs`, in the place of the one the walk wrote (and gone when `hubs` is empty).
-fn set_hub_warning(warnings: &mut Vec<ResultWarning>, hubs: &[HubPage], offer: bool) {
+fn set_hub_warning(warnings: &mut Vec<ResultWarning>, hubs: &[HubPage], offer: Option<usize>) {
     let Some(at) = warnings.iter().position(|existing| existing.code == HUB_CODE) else { return };
     if hubs.is_empty() {
         warnings.remove(at);
@@ -257,8 +257,9 @@ impl Network {
     /// estimate, from the pages that raising brings at least (the dropped ones). A result that is over the budget as it
     /// stands is cut by [`fit_to_budget`], which words the warning itself.
     ///
-    /// The same goes for walking through the roll-up pages (`expand_journals`, #498): it is offered while the pages it
-    /// brings at least (`hub_adds`) fit as well.
+    /// The same goes for walking through the roll-up pages (`expand_journals`, #498): it is offered while the most pages
+    /// it could bring (`hub_adds_most`) fit as well, so that the result of the call it names is not cut. The offer says
+    /// it brings `hub_adds` at least.
     fn raise_only_if_it_fits(mut self, render: &impl Fn(&Network) -> String) -> Network {
         let offers = |code: &str, warnings: &[ResultWarning]| warnings.iter().any(|warning| warning.code == code && warning.how_to_fetch_all.is_some());
         let raises_cap = self.cap_facts.is_some() && offers("network_truncated", &self.warnings);
@@ -275,9 +276,9 @@ impl Network {
         if let Some(facts) = self.cap_facts.filter(|_| raises_cap) {
             replace_cap_warning(&mut self.warnings, network_truncated_warning(facts, Some(fits)));
         }
-        if walks_hubs && self.nodes.len() + self.hub_adds > fits {
+        if walks_hubs && self.nodes.len() + self.hub_adds_most > fits {
             let hubs = self.hubs.clone();
-            set_hub_warning(&mut self.warnings, &hubs, false);
+            set_hub_warning(&mut self.warnings, &hubs, None);
         }
         self
     }
@@ -336,9 +337,12 @@ pub struct Network {
     /// The roll-up pages the walk showed as leaves although a further depth was left, which the
     /// `hub_pages_not_expanded` warning names (#498)
     hubs: Vec<HubPage>,
-    /// The pages walking through `hubs` would bring at least: 0 when it would bring none, or when the walk did not get
-    /// to the end. The warning offers `expand_journals` only when it is more than 0
+    /// The pages walking through `hubs` would bring at least: 0 when it would bring none, when the walk did not get
+    /// to the end, or when a journal page was left as a leaf too (`expand_journals` walks through it as well, and what
+    /// it would bring is not known). The warning offers `expand_journals` only when it is more than 0
     hub_adds: usize,
+    /// The pages walking through `hubs` could bring at most, which the character budget is judged against
+    hub_adds_most: usize,
     /// The first line of one block that makes each edge of the root, by the pair `(from, to)`, when `with_snippets` was
     /// asked (#498)
     snippets: HashMap<(i64, i64), String>,
@@ -448,6 +452,8 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     let mut unavailable_at: Option<i64> = None;
     // The roll-up pages admitted as leaves with a depth left, in the order they joined (#498)
     let mut unexpanded_hubs: Vec<HubPage> = Vec::new();
+    // Journal pages admitted as leaves with a depth left: `expand_journals` would walk through them too (#498)
+    let mut unexpanded_journals = 0usize;
     // The text of one linking block per page the root links or is linked by: from the root's own blocks when it has
     // one, else from the page's (#498). Read at depth 1 only
     let mut outbound_snippets: HashMap<i64, String> = HashMap::new();
@@ -560,8 +566,12 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
                 if leaf && (depth as u64) < max_depth && !truncated {
                     expanded_journal = true;
                 }
-            } else if candidate.is_hub() && (depth as u64) < max_depth {
-                unexpanded_hubs.push(HubPage { id: candidate.id, name: candidate.name.clone(), links: candidate.links });
+            } else if (depth as u64) < max_depth {
+                if candidate.is_hub() {
+                    unexpanded_hubs.push(HubPage { id: candidate.id, name: candidate.name.clone(), links: candidate.links });
+                } else {
+                    unexpanded_journals += 1;
+                }
             }
         }
         frontier = next_frontier;
@@ -589,19 +599,18 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     // Walking through a roll-up brings pages when it links more of them than the network holds (the network holds `kept`
     // pages, the roll-up one of them), a page not yet in it is admitted unless the node budget is full, and a page that
     // was left out by `max_fanout` of another page has a slot of its own under the roll-up. Each roll-up brings at most
-    // `max_fanout`. The walk must also have reached its end, or the depth that would expand them never ran.
+    // `max_fanout`, so a roll-up alone brings at least that many (the most of the roll-ups, each judged alone) and the
+    // roll-ups together at most the sum, never more than the room left. The walk must also have reached its end, or the
+    // depth that would expand them never ran. `expand_journals` walks through the journal leaves too, and what those
+    // bring is not known, so with one left no offer is made: neither bound would cover what the flag adds.
     let room = max_nodes.saturating_sub(kept);
-    let hub_adds = if unavailable_at.is_some() {
-        0
-    } else {
-        unexpanded_hubs
-            .iter()
-            .map(|hub| usize::try_from(hub.links).unwrap_or(0).saturating_sub(kept - 1).min(max_fanout).min(room))
-            .max()
-            .unwrap_or(0)
-    };
+    let covered = unavailable_at.is_none() && unexpanded_journals == 0;
+    let at_least = |hub: &HubPage| usize::try_from(hub.links).unwrap_or(0).saturating_sub(kept - 1).min(max_fanout).min(room);
+    let at_most = |hub: &HubPage| usize::try_from(hub.links).unwrap_or(0).min(max_fanout);
+    let hub_adds = if covered { unexpanded_hubs.iter().map(at_least).max().unwrap_or(0) } else { 0 };
+    let hub_adds_most = if covered { unexpanded_hubs.iter().map(at_most).sum::<usize>().min(room) } else { 0 };
     if !unexpanded_hubs.is_empty() {
-        warnings.push(hub_pages_not_expanded(&unexpanded_hubs, hub_adds > 0));
+        warnings.push(hub_pages_not_expanded(&unexpanded_hubs, (hub_adds > 0).then_some(hub_adds)));
     }
     if let Some(depth) = unavailable_at {
         warnings.push(links_unavailable(depth));
@@ -622,6 +631,7 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
         cap_facts,
         hubs: unexpanded_hubs,
         hub_adds,
+        hub_adds_most,
         snippets,
         with_snippets,
     })
@@ -761,6 +771,7 @@ mod tests {
             cap_facts: None,
             hubs: vec![],
             hub_adds: 0,
+            hub_adds_most: 0,
             snippets: HashMap::new(),
             with_snippets: false,
         };
@@ -790,6 +801,7 @@ mod tests {
             cap_facts: None,
             hubs: vec![],
             hub_adds: 0,
+            hub_adds_most: 0,
             snippets: HashMap::new(),
             with_snippets: false,
         };
@@ -818,6 +830,7 @@ mod tests {
             cap_facts: None,
             hubs: vec![],
             hub_adds: 0,
+            hub_adds_most: 0,
             snippets: HashMap::new(),
             with_snippets: false,
         };
@@ -846,6 +859,7 @@ mod tests {
             cap_facts: None,
             hubs: vec![],
             hub_adds: 0,
+            hub_adds_most: 0,
             snippets: HashMap::new(),
             with_snippets: false,
         }
@@ -972,32 +986,37 @@ mod tests {
     }
 
     /// A star whose neighbours 2 and 3 are roll-ups shown as leaves, with the warning the walk wrote for them
-    fn star_with_roll_ups(pages: usize, name_length: usize, hub_adds: usize) -> Network {
+    fn star_with_roll_ups(pages: usize, name_length: usize, hub_adds: usize, hub_adds_most: usize) -> Network {
         let mut network = star(pages, name_length);
         let hubs = vec![
             HubPage { id: 2, name: "x".repeat(name_length), links: 41 },
             HubPage { id: 3, name: "x".repeat(name_length), links: 52 },
         ];
-        network.warnings = vec![hub_pages_not_expanded(&hubs, hub_adds > 0)];
+        network.warnings = vec![hub_pages_not_expanded(&hubs, (hub_adds > 0).then_some(hub_adds))];
         network.hubs = hubs;
         network.hub_adds = hub_adds;
+        network.hub_adds_most = hub_adds_most;
         network
     }
 
     #[test]
     fn walking_through_the_roll_ups_is_offered_while_the_pages_it_brings_fit_the_budget() {
-        let network = star_with_roll_ups(50, 20, 15);
+        let network = star_with_roll_ups(50, 20, 15, 30);
         let fitted = fit_to_budget(network.clone(), &json_of);
         assert_eq!(fitted, network);
         assert!(fitted.warnings[0].how_to_fetch_all.as_deref().is_some_and(|raise| raise.starts_with("Set expand_journals to true")));
+        assert!(fitted.warnings[0].how_to_fetch_all.as_deref().is_some_and(|raise| raise.contains("adds at least 15 pages")));
         assert!(fitted.has_more());
     }
 
     #[test]
     fn walking_through_the_roll_ups_is_not_offered_when_the_result_it_would_bring_would_not_fit() {
         // 51 pages of about 400 characters fit as they are (about 21,000), the 20 more that expanding brings do not
-        let network = star_with_roll_ups(50, 300, 20);
+        let network = star_with_roll_ups(50, 300, 20, 20);
         assert!(size(&json_of(&network)) < crate::budget::BUDGET_CHARS);
+        // the least it brings may fit while the most does not: the call named must not come back cut, so judge the most
+        let fits_at_least = fit_to_budget(star_with_roll_ups(50, 300, 1, 20), &json_of);
+        assert_eq!(fits_at_least.warnings[0].how_to_fetch_all, None);
         let fitted = fit_to_budget(network, &json_of);
         assert_eq!(fitted.nodes.len(), 51, "nothing is cut: the result fits as it stands");
         let warning = &fitted.warnings[0];
@@ -1010,7 +1029,7 @@ mod tests {
 
     #[test]
     fn a_cut_keeps_the_roll_ups_it_kept_and_offers_no_walk_through_them() {
-        let network = star_with_roll_ups(5, 3, 15);
+        let network = star_with_roll_ups(5, 3, 15, 30);
         // 6 pages: the root, 5 neighbours and the page behind the first one. Keeping 3 drops the deep page and pages 4 and 5
         let cut = cut_to_pages(&network, 3, false);
         assert_eq!(cut.nodes.iter().map(|node| node.id).collect::<Vec<_>>(), [1, 2, 3]);
