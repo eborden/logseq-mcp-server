@@ -179,6 +179,31 @@ pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> S
     format!("{}\n", js::trim_end(&lines.join("\n")))
 }
 
+/// One line per linked pair of `edges`, by the names of `nodes`. `A -> B` means blocks on A reference B, `A <- B`
+/// that blocks on B reference A, and `A <-> B (out/in)` both; the number is the reference count. An edge whose end is not
+/// among the nodes has no line.
+fn link_lines(nodes: &[Value], edges: &[Value]) -> Vec<String> {
+    let name_of = |node: &Value| node.get("name").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let names: HashMap<i64, String> = nodes.iter().filter_map(|node| Some((id_of(Some(node))?, name_of(node)))).collect();
+    let number = |edge: &Value, key: &str| edge.get(key).and_then(Value::as_i64).unwrap_or(0);
+    edges
+        .iter()
+        .filter_map(|edge| {
+            let from = names.get(&number(edge, "from"))?;
+            let to = names.get(&number(edge, "to"))?;
+            let (outbound, inbound) = (number(edge, "outbound"), number(edge, "inbound"));
+            let link = if outbound > 0 && inbound > 0 {
+                format!("<-> [[{to}]] ({outbound}/{inbound})")
+            } else if outbound > 0 {
+                format!("-> [[{to}]] ({outbound})")
+            } else {
+                format!("<- [[{to}]] ({inbound})")
+            };
+            Some(format!("- [[{from}]] {link}"))
+        })
+        .collect()
+}
+
 /// A concept network: the pages grouped by distance from the root, then one line per
 /// linked pair. `A -> B` means blocks on A reference B, `A <- B` that blocks on B reference A, and
 /// `A <-> B (out/in)` both; the number is the reference count. `A` is always the page closer to the
@@ -217,24 +242,7 @@ pub fn render_network(network: &Value) -> String {
         lines.push(String::new());
     }
 
-    let names: HashMap<i64, String> = nodes.iter().filter_map(|node| Some((id_of(Some(node))?, name_of(node)))).collect();
-    let number = |edge: &Value, key: &str| edge.get(key).and_then(Value::as_i64).unwrap_or(0);
-    let links: Vec<String> = array(network, "edges")
-        .iter()
-        .filter_map(|edge| {
-            let from = names.get(&number(edge, "from"))?;
-            let to = names.get(&number(edge, "to"))?;
-            let (outbound, inbound) = (number(edge, "outbound"), number(edge, "inbound"));
-            let link = if outbound > 0 && inbound > 0 {
-                format!("<-> [[{to}]] ({outbound}/{inbound})")
-            } else if outbound > 0 {
-                format!("-> [[{to}]] ({outbound})")
-            } else {
-                format!("<- [[{to}]] ({inbound})")
-            };
-            Some(format!("- [[{from}]] {link}"))
-        })
-        .collect();
+    let links = link_lines(nodes, array(network, "edges"));
     if !links.is_empty() {
         lines.push(format!("## Links ({})", links.len()));
         lines.push(String::new());
@@ -242,6 +250,40 @@ pub fn render_network(network: &Value) -> String {
         lines.push(String::new());
     }
 
+    format!("{}\n", js::trim_end(&lines.join("\n")))
+}
+
+/// The path of `explore_network` with `to`: the pages in order, then one line per link as in a network. Without a path
+/// it says so, and the warnings in the footer say why.
+pub fn render_path(path: &Value) -> String {
+    let nodes = array(path, "nodes");
+    let name_of = |node: &Value| node.get("name").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let asked = |key: &str| path.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let first = nodes.first().map_or_else(|| asked("page"), name_of);
+    let last = nodes.last().map_or_else(|| asked("to"), name_of);
+    let title = match path.get("hops").and_then(Value::as_u64) {
+        Some(1) => format!("# Path: [[{first}]] to [[{last}]] (1 hop)"),
+        Some(hops) => format!("# Path: [[{first}]] to [[{last}]] ({hops} hops)"),
+        None => format!("# Path: [[{first}]] to [[{last}]]"),
+    };
+    let mut lines: Vec<String> = vec![title, String::new()];
+    for key in ["page", "to"] {
+        if let Some(note) = resolved_from_line(path.get("resolvedFrom").and_then(|from| from.get(key))) {
+            lines.push(note);
+            lines.push(String::new());
+        }
+    }
+    if nodes.is_empty() {
+        lines.push("(no path)".to_owned());
+        lines.push(String::new());
+    } else {
+        lines.push(nodes.iter().map(|node| format!("[[{}]]", name_of(node))).collect::<Vec<_>>().join(" -> "));
+        lines.push(String::new());
+        lines.push(format!("## Links ({})", nodes.len() - 1));
+        lines.push(String::new());
+        lines.extend(link_lines(nodes, array(path, "edges")));
+        lines.push(String::new());
+    }
     format!("{}\n", js::trim_end(&lines.join("\n")))
 }
 
@@ -430,5 +472,42 @@ mod tests {
         let nameless = json!({"nodes": [{"depth": 0}], "edges": []});
         assert_eq!(render_network(&nameless), "# Concept network: [[]]\n\n(no linked pages)\n");
         assert_eq!(render_network(&json!({"nodes": [], "edges": []})), "# Concept network: [[]]\n\n(no linked pages)\n");
+    }
+
+    fn path() -> Value {
+        json!({
+            "page": "atlas", "to": "bob", "hops": 2, "hasMore": false, "warnings": [],
+            "resolvedFrom": {"page": {"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"}},
+            "nodes": [
+                {"id": 10, "name": "Project Atlas", "depth": 0},
+                {"id": 30, "name": "Team X", "depth": 1},
+                {"id": 20, "name": "Bob", "depth": 2},
+            ],
+            "edges": [
+                {"from": 10, "to": 30, "type": "reference", "count": 3, "outbound": 2, "inbound": 1},
+                {"from": 30, "to": 20, "type": "backlink", "count": 4, "outbound": 0, "inbound": 4},
+            ],
+        })
+    }
+
+    #[test]
+    fn a_path_is_its_pages_in_order_then_one_line_per_link() {
+        assert_eq!(
+            render_path(&path()),
+            "# Path: [[Project Atlas]] to [[Bob]] (2 hops)\n\n\
+             (resolved from \"atlas\", matched by alias)\n\n\
+             [[Project Atlas]] -> [[Team X]] -> [[Bob]]\n\n\
+             ## Links (2)\n\n\
+             - [[Project Atlas]] <-> [[Team X]] (2/1)\n\
+             - [[Team X]] <- [[Bob]] (4)\n"
+        );
+        let one = json!({"page": "a", "to": "b", "hops": 1, "nodes": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}], "edges": [{"from": 1, "to": 2, "outbound": 1, "inbound": 0}]});
+        assert!(render_path(&one).starts_with("# Path: [[A]] to [[B]] (1 hop)\n"));
+    }
+
+    #[test]
+    fn no_path_is_said_under_the_names_that_were_asked() {
+        assert_eq!(render_path(&json!({"page": "atlas", "to": "bob", "nodes": [], "edges": []})), "# Path: [[atlas]] to [[bob]]\n\n(no path)\n");
+        assert_eq!(render_path(&json!({})), "# Path: [[]] to [[]]\n\n(no path)\n");
     }
 }
