@@ -5,7 +5,7 @@
  *   node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts rust/target/release/logseq-mcp-server
  *
  * It drives the binary over MCP stdio with the SDK client, the way Claude Code does, and calls
- * each of the 12 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
+ * each of the 11 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
  * gets one prompt and lists tools, prompts, resources and resource templates. A few items read the
  * clock (a preset, `last_n`, and the weekly and monthly prompts with no argument) and are checked against
  * today's local date, which a release binary reads from the system: no parity case can check that. It prints one
@@ -23,7 +23,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { connectFixture } from '../tests/integration/helpers/fixture-client.js';
 
-const EXPECTED_TOOLS = 12;
+const EXPECTED_TOOLS = 11;
 
 interface ToolCall {
   name: string;
@@ -62,9 +62,9 @@ const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_find_blocks', label: 'by period, text and offset', args: { text: 'importer', start_date: 20250101, end_date: 20250131, limit: 2, offset: 1 } },
   { name: 'logseq_explore_context', args: { page: 'project atlas' } },
   { name: 'logseq_explore_context', label: 'references from an offset', args: { page: 'Bob', max_references: 1, references_offset: 1 } },
-  { name: 'logseq_get_concept_network', args: { concept_name: 'Alice', max_depth: 2 } },
+  { name: 'logseq_explore_network', args: { page: 'Alice', max_depth: 2 } },
   { name: 'logseq_find_blocks', label: 'by page and links_to', args: { page: 'Alice', links_to: ['Bob'] } },
-  { name: 'logseq_search_by_relationship', args: { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within' } },
+  { name: 'logseq_explore_network', label: 'path to a second page', args: { page: 'Alice', to: 'Bob' } },
   { name: 'logseq_query_by_date_range', args: { start_date: 20250101, end_date: 20250131 } },
   {
     name: 'logseq_query_by_date_range',
