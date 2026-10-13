@@ -5,10 +5,10 @@
  */
 
 /**
- * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 16,430 across 12 tools (#493), but that
+ * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 16,703 across 12 tools (#493), but that
  * is not what a client receives: the Rust server spells its schemas its own way (`format: "uint32"` on every count and
- * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 16,805. So the real payload
- * has about 2,895 characters of headroom under this budget, not the 3,270 the recorded list leaves.
+ * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 17,078. So the real payload
+ * has about 2,622 characters of headroom under this budget, not the 2,997 the recorded list leaves.
  *
  * The history of the number is in the version of `src/tool-list.test.ts` at commit `35fa2dd3`: it was set when the list
  * was about 16,000 characters and raised once to 19,700 for the #61 caps.
