@@ -104,7 +104,8 @@ fn cut_block(block: &Value, kept: usize, total: usize, oversize: bool, markdown:
          find what was left out by its text with logseq_find_blocks."
     } else {
         "The last blocks are left out, and a kept block marked childrenTruncated lost some of its children. No parameter raises this limit: \
-         read such a block on its own with logseq_get_block and include_children, which starts from it, or find a block left out by its text with logseq_find_blocks."
+         a marked block below this one can be read on its own with logseq_get_block and include_children, which starts from it, \
+         but the children this block lost, and any block left out whole, can only be found by their text with logseq_find_blocks."
     };
     let warning = size_truncation_warning(SizeCut {
         what: "blocks (the block and its descendants, in document order)",

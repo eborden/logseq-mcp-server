@@ -153,7 +153,7 @@ Get specific block by UUID with optional children.
 - `resolve_refs` (optional): Add `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s (depth 2; default: false)
 - `format` (optional): `json` (default) or `markdown`, a `# Block ((uuid))` heading and the block with its children as bullets
 
-**A cut subtree:** with `include_children`, a block with a very large subtree is cut to 30,000 characters: the block, then its descendants in document order, whole blocks only, and a kept block that lost children carries `childrenTruncated: true`. The `result_size_truncated` warning has no `howToFetchAll` (no parameter pages a subtree); read a block marked `childrenTruncated` on its own by its uuid, which starts from it. Without `include_children` the result is one block and is never cut.
+**A cut subtree:** with `include_children`, a block with a very large subtree is cut to 30,000 characters: the block, then its descendants in document order, whole blocks only, and a kept block that lost children carries `childrenTruncated: true`. The `result_size_truncated` warning has no `howToFetchAll` (no parameter pages a subtree); a marked block below the one you asked for can be read on its own by its uuid, which starts from it, but the children the block you asked for lost, and any block left out whole, can only be found by their text with `logseq_find_blocks` (reading the same block again returns the same cut). Without `include_children` the result is one block and is never cut.
 
 **Use when:**
 - Have UUID from search results
