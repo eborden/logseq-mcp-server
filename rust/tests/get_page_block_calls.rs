@@ -465,7 +465,7 @@ async fn an_outline_cut_at_the_cap_says_how_to_read_the_rest_with_the_v2_paramet
     assert_eq!(value["blocks"].as_array().unwrap().len(), 200);
     assert_eq!(value["hasMore"], json!(false));
     assert_eq!(value["warnings"][0]["code"], "outline_truncated");
-    assert!(value["warnings"][0]["message"].as_str().unwrap().ends_with("read the rest with logseq_get_page and detail \"full\"."));
+    assert!(value["warnings"][0]["message"].as_str().unwrap().ends_with("so it does not read the rest."));
 }
 
 #[tokio::test]
