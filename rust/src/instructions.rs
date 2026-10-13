@@ -6,7 +6,7 @@
 pub const SERVER_INSTRUCTIONS: &str = r##"Read-only access to a LogSeq graph. Nothing here edits it.
 
 Start with:
-- "what do I know about X": logseq_build_context (one topic) or logseq_get_context_for_query (a question)
+- "what do I know about X": logseq_explore_context (one page; call it once per page, in parallel, for several)
 - keywords: logseq_find_blocks
 - journals and "last week": logseq_query_by_date_range
 - unsure of a page name: logseq_find_pages
@@ -15,7 +15,7 @@ Start with:
 
 Reading results:
 - Page names are case-insensitive. Block uuid is the stable id; numeric id is internal.
-- ((uuid)) in content is a block ref. Fetch it with logseq_get_block, or pass resolve_refs (get_page, get_block, build_context, query_by_date_range) to get resolvedRefs.
+- ((uuid)) in content is a block ref. Fetch it with logseq_get_block, or pass resolve_refs (get_page, get_block, explore_context, query_by_date_range) to get resolvedRefs.
 - A warning means the result was cut or partial. hasMore: true means a parameter can fetch more (howToFetchAll says which); with hasMore: false the warning says why not (narrow the request). Check warnings before saying something doesn't exist.
 - Search is literal (no synonyms) and traversal only follows [[links]] and #tags.
 - A trailing meta block may carry tips for a next call. Ignore them if unhelpful."##;

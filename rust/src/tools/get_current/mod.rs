@@ -39,7 +39,7 @@ pub const NAME: &str = "logseq_get_current";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n\
-**Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_build_context or logseq_get_page.\n\n\
+**Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_explore_context or logseq_get_page.\n\n\
 **Can't find:** anything not open right now. Returns page: null with a message when no page is open.";
 
 /// What the result says when no page is open.

@@ -10,7 +10,7 @@ use crate::tips::{MAX_TIPS, non_empty, suggest_call};
 pub fn date_range_tips(top_concept: Option<&str>) -> Vec<String> {
     let mut tips = Vec::new();
     if let Some(name) = top_concept.and_then(non_empty) {
-        tips.push(format!("To follow the top concept: {}.", suggest_call("logseq_build_context", &json!({"topic_name": name}))));
+        tips.push(format!("To follow the top concept: {}.", suggest_call("logseq_explore_context", &json!({"page": name}))));
     }
     tips.truncate(MAX_TIPS);
     tips
@@ -22,11 +22,11 @@ mod tests {
 
     #[test]
     fn the_top_concept_is_the_tip() {
-        assert_eq!(date_range_tips(Some("Project Atlas")), [r#"To follow the top concept: logseq_build_context {"topic_name":"Project Atlas"}."#]);
+        assert_eq!(date_range_tips(Some("Project Atlas")), [r#"To follow the top concept: logseq_explore_context {"page":"Project Atlas"}."#]);
         // a name with quotes stays a valid call
         assert_eq!(
             date_range_tips(Some("say \"hi\"")),
-            [r#"To follow the top concept: logseq_build_context {"topic_name":"say \"hi\""}."#]
+            [r#"To follow the top concept: logseq_explore_context {"page":"say \"hi\""}."#]
         );
     }
 

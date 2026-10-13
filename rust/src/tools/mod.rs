@@ -9,15 +9,14 @@ use crate::client::LogseqClient;
 use crate::dates::Clock;
 use crate::errors::ToolError;
 
-pub mod build_context;
 pub mod check_links;
+pub mod explore_context;
 pub mod find_blocks;
 pub mod find_pages;
 pub mod get_backlinks;
 pub mod get_block;
 pub mod get_concept_evolution;
 pub mod get_concept_network;
-pub mod get_context_for_query;
 pub mod get_current;
 pub mod get_graph;
 pub mod get_page;
@@ -27,15 +26,14 @@ pub mod search_by_relationship;
 /// Every tool, as `tools/list` shows them.
 pub fn list() -> Vec<Tool> {
     vec![
-        build_context::definition(),
         check_links::definition(),
+        explore_context::definition(),
         find_blocks::definition(),
         find_pages::definition(),
         get_backlinks::definition(),
         get_block::definition(),
         get_concept_evolution::definition(),
         get_concept_network::definition(),
-        get_context_for_query::definition(),
         get_current::definition(),
         get_graph::definition(),
         get_page::definition(),
@@ -53,15 +51,14 @@ pub async fn call(
     arguments: Option<JsonObject>,
 ) -> Option<Result<CallToolResult, ToolError>> {
     match name {
-        build_context::NAME => Some(build_context::call(client, tips_enabled, arguments).await),
         check_links::NAME => Some(check_links::call(client, tips_enabled, arguments).await),
+        explore_context::NAME => Some(explore_context::call(client, tips_enabled, arguments).await),
         find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, arguments).await),
         find_pages::NAME => Some(find_pages::call(client, tips_enabled, arguments).await),
         get_backlinks::NAME => Some(get_backlinks::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
         get_concept_evolution::NAME => Some(get_concept_evolution::call(client, tips_enabled, arguments).await),
         get_concept_network::NAME => Some(get_concept_network::call(client, tips_enabled, arguments).await),
-        get_context_for_query::NAME => Some(get_context_for_query::call(client, tips_enabled, arguments).await),
         get_current::NAME => Some(get_current::call(client, tips_enabled, arguments).await),
         get_graph::NAME => Some(get_graph::call(client, tips_enabled, arguments).await),
         get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),

@@ -1,5 +1,5 @@
 //! Markdown for the context tools (#43), built on
-//! the shared pieces in `crate::markdown`: `build_context` and `get_context_for_query` here, and
+//! the shared pieces in `crate::markdown`: `explore_context` here, and
 //! the concept network (`render_network`, #313). Same conventions: `[[Page]]` links, `- ` bullets,
 //! `((uuid))` refs untouched. Warnings, `hasMore` and tips are not rendered here; the tool adds
 //! them with `with_footer`.
@@ -179,43 +179,6 @@ pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> S
     format!("{}\n", js::trim_end(&lines.join("\n")))
 }
 
-/// Context for a natural-language query: the topics found, each topic's
-/// context one heading level down, and the keyword search results when the query named no topic.
-pub fn render_query_context(context: &Value, compact: bool) -> String {
-    let query = context.get("query").and_then(Value::as_str).unwrap_or_default();
-    let mut lines: Vec<String> = vec![format!("# Context for: {query}"), String::new()];
-    let topics: Vec<&str> = array(context, "extractedTopics").iter().filter_map(Value::as_str).collect();
-    if !topics.is_empty() {
-        let links: Vec<String> = topics.iter().map(|topic| format!("[[{topic}]]")).collect();
-        lines.push(format!("Topics: {}", links.join(", ")));
-        lines.push(String::new());
-    }
-
-    let mut parts = vec![js::trim_end(&lines.join("\n")).to_owned()];
-    let contexts = array(context, "contexts");
-    for topic in contexts {
-        let rendered = render_topic_context(topic, ContextRenderOptions { compact, heading_level: 2 });
-        parts.push(js::trim_end(&rendered).to_owned());
-    }
-
-    if let Some(results) = context.get("searchResults").and_then(Value::as_array) {
-        // Each hit carries its ((uuid)) and page, or it could not be followed up (#80)
-        let alone: Vec<Value> = results.iter().map(alone).collect();
-        let outline = render_outline(&alone, OutlineOptions { compact, show_uuid: true, show_page: true, ..Default::default() });
-        let mut section = vec![heading(2, &format!("Search results ({})", results.len())), String::new()];
-        if outline.lines.is_empty() {
-            section.push("(no matches)".to_owned());
-        } else {
-            section.extend(outline.lines);
-        }
-        parts.push(section.join("\n"));
-    } else if contexts.is_empty() {
-        parts.push("(no results)".to_owned());
-    }
-
-    format!("{}\n", parts.join("\n\n"))
-}
-
 /// A concept network: the pages grouped by distance from the root, then one line per
 /// linked pair. `A -> B` means blocks on A reference B, `A <- B` that blocks on B reference A, and
 /// `A <-> B (out/in)` both; the number is the reference count. `A` is always the page closer to the
@@ -285,8 +248,6 @@ pub fn render_network(network: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const UUID_A: &str = "11111111-1111-4111-8111-111111111111";
 
     /// A flat pulled block: id, parent, left, content.
     fn block(id: i64, page: i64, parent: i64, left: i64, content: &str) -> Value {
@@ -411,16 +372,6 @@ mod tests {
         assert!(render_topic_context(&context, ContextRenderOptions::default()).contains("[[x]] (outbound)"));
     }
 
-    #[test]
-    fn a_query_lists_its_topics_then_each_context_one_level_down() {
-        let query = json!({"query": "what about [[Atlas]]?", "extractedTopics": ["Atlas"], "contexts": [{"topic": "Atlas", "mainPage": {"id": 1, "name": "atlas", "originalName": "Atlas"}, "directBlocks": [block(1, 1, 1, 1, "x")], "relatedPages": [], "references": []}]});
-        assert_eq!(
-            render_query_context(&query, false),
-            "# Context for: what about [[Atlas]]?\n\nTopics: [[Atlas]]\n\n## Atlas\n\n### Blocks (1)\n\n- x\n"
-        );
-        assert_eq!(render_query_context(&json!({"query": "q", "extractedTopics": [], "contexts": []}), false), "# Context for: q\n\n(no results)\n");
-    }
-
     fn network() -> Value {
         json!({
             "concept": "atlas",
@@ -474,25 +425,8 @@ mod tests {
     }
 
     #[test]
-    fn keyword_hits_carry_their_uuid_and_page_and_say_when_there_are_none() {
-        let hit = json!({"id": 1, "uuid": UUID_A, "content": "a hit\nover two lines", "context": {"page": {"id": 5, "name": "alice", "originalName": "Alice"}}});
-        let query = json!({"query": "hit", "extractedTopics": [], "contexts": [], "searchResults": [hit]});
-        assert_eq!(
-            render_query_context(&query, false),
-            format!("# Context for: hit\n\n## Search results (1)\n\n- a hit (({UUID_A})) (in [[Alice]])\n  over two lines\n")
-        );
-        assert_eq!(
-            render_query_context(&query, true),
-            format!("# Context for: hit\n\n## Search results (1)\n\n- a hit (({UUID_A})) (in [[Alice]])\n")
-        );
-        let none = json!({"query": "hit", "extractedTopics": [], "contexts": [], "searchResults": []});
-        assert_eq!(render_query_context(&none, false), "# Context for: hit\n\n## Search results (0)\n\n(no matches)\n");
-    }
-
-    #[test]
-    fn a_missing_query_name_or_concept_writes_nothing_where_javascript_wrote_undefined() {
-        // the server sets all three on every result, so these inputs are not reached
-        assert_eq!(render_query_context(&json!({"extractedTopics": [], "contexts": []}), false), "# Context for:\n\n(no results)\n");
+    fn a_missing_concept_name_writes_nothing_where_javascript_wrote_undefined() {
+        // the server sets it on every result, so these inputs are not reached
         let nameless = json!({"nodes": [{"depth": 0}], "edges": []});
         assert_eq!(render_network(&nameless), "# Concept network: [[]]\n\n(no linked pages)\n");
         assert_eq!(render_network(&json!({"nodes": [], "edges": []})), "# Concept network: [[]]\n\n(no linked pages)\n");

@@ -8,7 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
-use logseq_mcp_server::tools::{check_links, find_pages, get_block, get_context_for_query, get_page};
+use logseq_mcp_server::tools::{check_links, explore_context, find_pages, get_block, get_page};
 use serde_json::{Value, json};
 
 const PAGE: &str = "logseq.Editor.getPage";
@@ -166,11 +166,11 @@ async fn a_pass_under_the_budget_is_unchanged() {
     assert_eq!(value["ok"], true);
 }
 
-// ---- logseq_get_context_for_query
+// ---- logseq_explore_context
 
 const LINKED_REFERENCES: &str = "logseq.Editor.getPageLinkedReferences";
 
-fn topic_page() -> Value {
+fn explored_page() -> Value {
     json!([[{"id": 10, "uuid": uuid(10), "name": "project atlas", "original-name": "Project Atlas", "file": {"id": 5010}}, "name"]])
 }
 
@@ -180,78 +180,38 @@ fn page_block(id: i64, length: usize) -> Value {
 }
 
 #[tokio::test]
-async fn a_topic_over_the_budget_is_cut_in_whole_blocks_and_the_whole_result_is_what_is_measured() {
-    // 10 blocks of 4,000 characters: ~40,000 characters at the topic's own caps
-    let blocks: Vec<Value> = (1..=10).map(|id| page_block(100 + id, 4000)).collect();
-    let logseq = mock_logseq(vec![topic_page(), json!(blocks), json!([])]).await;
-    let result = get_context_for_query::call(&client(&logseq), true, arguments(json!({"query": "about [[Project Atlas]]"}))).await.unwrap();
-    // the cut reads no more than the topic does
+async fn a_page_over_the_budget_is_cut_in_whole_blocks_and_the_text_sent_is_what_is_measured() {
+    // 30 blocks of 4,000 characters: ~120,000 characters, under the default cap of 50 blocks
+    let blocks: Vec<Value> = (1..=30).map(|id| page_block(100 + id, 4000)).collect();
+    let logseq = mock_logseq(vec![explored_page(), json!(blocks), json!([])]).await;
+    let result = explore_context::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas"}))).await.unwrap();
+    // the cut reads no more than the call does
     assert_eq!(methods(&logseq), [DATALOG, DATALOG, LINKED_REFERENCES]);
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     let value: Value = serde_json::from_str(&text).unwrap();
-    let kept = value["contexts"][0]["directBlocks"].as_array().unwrap().len();
-    assert!(kept > 3 && kept < 10, "{kept}");
+    let kept = value["directBlocks"].as_array().unwrap().len();
+    assert!(kept > 3 && kept < 30, "{kept}");
     assert_eq!(value["summary"]["totalBlocks"], kept);
+    assert_eq!(value["totals"]["blocks"], 30);
     let warnings = value["warnings"].as_array().unwrap();
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0]["code"], "result_size_truncated");
-    assert!(warnings[0]["message"].as_str().unwrap().contains(&format!("\"Project Atlas\" {kept} of 10")), "{}", warnings[0]["message"]);
+    assert_eq!(warnings.iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["result_size_truncated"]);
+    assert!(warnings[0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 30 entries")), "{}", warnings[0]["message"]);
     assert_eq!(value["hasMore"], false);
 }
 
 #[tokio::test]
-async fn a_topic_in_markdown_and_compact_is_measured_as_sent() {
+async fn a_page_in_markdown_and_compact_is_measured_as_sent() {
     let blocks: Vec<Value> = (1..=10).map(|id| page_block(100 + id, 4000)).collect();
-    let logseq = mock_logseq(vec![topic_page(), json!(blocks.clone()), json!([])]).await;
-    let result = get_context_for_query::call(&client(&logseq), true, arguments(json!({"query": "about [[Project Atlas]]", "format": "markdown"}))).await.unwrap();
+    let logseq = mock_logseq(vec![explored_page(), json!(blocks.clone()), json!([])]).await;
+    let result = explore_context::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "format": "markdown"}))).await.unwrap();
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     assert!(text.contains("result_size_truncated: Showing "), "{}", &text[text.len().saturating_sub(500)..]);
-    // compact blocks are short, so the same topic fits whole
-    let logseq = mock_logseq(vec![topic_page(), json!(blocks), json!([])]).await;
-    let result = get_context_for_query::call(&client(&logseq), true, arguments(json!({"query": "about [[Project Atlas]]", "compact": true}))).await.unwrap();
+    // compact blocks are short, so the same page fits whole
+    let logseq = mock_logseq(vec![explored_page(), json!(blocks), json!([])]).await;
+    let result = explore_context::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "compact": true}))).await.unwrap();
     assert!(!text_of(&result, 0).contains("result_size_truncated"));
-}
-
-/// A keyword search row: one block of `length` characters of text, newest when `id` is highest.
-fn hit(id: i64, length: usize) -> Value {
-    json!([{"id": id, "uuid": uuid(id), "content": format!("mentions the importer and its retries {}", "x".repeat(length)), "page": {"id": 5, "name": "alice", "original-name": "Alice"}}])
-}
-
-#[tokio::test]
-async fn keyword_hits_over_the_budget_are_cut_and_a_raise_is_offered_only_where_it_fits() {
-    // 100 hits of ~650 characters: ~65,000 at the largest max_search_results
-    let big: Vec<Value> = (1..=100).map(|id| hit(id, 600)).collect();
-    let logseq = mock_logseq(vec![json!(big)]).await;
-    let result = get_context_for_query::call(&client(&logseq), true, arguments(json!({"query": "what does the importer do with retries", "max_search_results": 100}))).await.unwrap();
-    assert_eq!(methods(&logseq), [DATALOG]);
-    let text = text_of(&result, 0);
-    assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
-    let value: Value = serde_json::from_str(&text).unwrap();
-    let kept = value["searchResults"].as_array().unwrap().len();
-    assert!(kept > 20 && kept < 100, "{kept}");
-    assert_eq!(value["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["result_size_truncated"]);
-    assert_eq!(value["hasMore"], false);
-
-    // the default of 20 hits fits, and a raise to all 100 does not: the warning offers only what fits
-    let logseq = mock_logseq(vec![json!(big)]).await;
-    let result = get_context_for_query::call(&client(&logseq), true, arguments(json!({"query": "what does the importer do with retries"}))).await.unwrap();
-    let value: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
-    assert_eq!(value["searchResults"].as_array().unwrap().len(), 20);
-    let warning = &value["warnings"][0];
-    assert_eq!(warning["code"], "search_results_truncated");
-    let how = warning["howToFetchAll"].as_str().unwrap();
-    assert!(how.contains("That is the most that fits") && !how.contains("get all"), "{how}");
-    let offered: usize = how.trim_start_matches("Set max_search_results to ").split(' ').next().unwrap().parse().unwrap();
-    assert!(offered > 20 && offered < 100, "{how}");
-    // and that many come back whole
-    let big: Vec<Value> = (1..=100).map(|id| hit(id, 600)).collect();
-    let logseq = mock_logseq(vec![json!(big)]).await;
-    let result = get_context_for_query::call(&client(&logseq), true, arguments(json!({"query": "what does the importer do with retries", "max_search_results": offered}))).await.unwrap();
-    let value: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
-    assert_eq!(value["searchResults"].as_array().unwrap().len(), offered);
-    assert!(value["warnings"].as_array().unwrap().iter().all(|w| w["code"] != "result_size_truncated"));
 }
 
 // ---- logseq_find_pages

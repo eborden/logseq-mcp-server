@@ -37,7 +37,7 @@ use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{alias_set_warnings, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
-use crate::tools::build_context::resolved_from;
+use crate::tools::explore_context::resolved_from;
 use crate::tools::get_page::wire as page_wire;
 use crate::truncation::{SizeCut, size_truncation_warning};
 

@@ -112,7 +112,7 @@ pub(crate) enum Kind {
     Topic,
 }
 
-/// The topic worth a `build_context` call for a set of hit blocks. Most hits sit on
+/// The topic worth an `explore_context` call for a set of hit blocks. Most hits sit on
 /// journal date pages, which make the least informative next step, so in order:
 /// 1. the page most hits are on, among pages known not to be journals;
 /// 2. the `#tag` or `[[ref]]` most hits mention (slim hits carry no journal flag);
