@@ -402,3 +402,33 @@ async fn a_miss_with_pages_says_how_a_link_matches() {
         "No match. A page covers the blocks written on it and on its aliases, and a link is a [[link]] or a #tag, not plain words, and every links_to page is needed: loosen a filter."
     );
 }
+
+#[tokio::test]
+async fn two_names_of_one_page_say_a_null_alias_lookup_once() {
+    // "al" is an alias of Alice: the page and a link resolve to the same page, so there is one group of names, and its
+    // lookup that LogSeq did not answer is one warning, not two
+    let alice = page(10, "Alice", &[11]);
+    let logseq = mock_logseq(move |request| {
+        if let Some(name) = resolver_name(request) {
+            match name.as_str() {
+                "alice" => json!([[alice, "name"]]),
+                "al" => json!([[alice, "alias"]]),
+                _ => json!([]),
+            }
+        } else if text_of(request).starts_with("[:find ?start") {
+            json!(null)
+        } else {
+            json!([hit(101, "x")])
+        }
+    })
+    .await;
+
+    let (results, meta) = run(&logseq, false, json!({"page": "Alice", "links_to": ["al"]})).await.unwrap();
+
+    assert_eq!(results.len(), 1);
+    let codes: Vec<&str> = meta["warnings"].as_array().unwrap().iter().map(|warning| warning["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["alias_lookup_unavailable"], "{meta}");
+    // both names are still searched: the page, and the link, each by the ids it has
+    assert_eq!(count_resolvers(&logseq), 2);
+    assert!(text_of(&searches(&logseq)[0]).contains("[(ground [10]) [?page ...]] [?b :block/page ?page] [(ground [10]) [?ref0 ...]]"));
+}
