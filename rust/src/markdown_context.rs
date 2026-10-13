@@ -188,7 +188,7 @@ pub fn render_network(network: &Value) -> String {
     let depth_of = |node: &Value| node.get("depth").and_then(Value::as_i64);
     let name_of = |node: &Value| node.get("name").and_then(Value::as_str).unwrap_or_default().to_owned();
     let root = nodes.iter().find(|node| depth_of(node) == Some(0));
-    let title = root.map(name_of).unwrap_or_else(|| network.get("concept").and_then(Value::as_str).unwrap_or_default().to_owned());
+    let title = root.map(name_of).unwrap_or_else(|| network.get("page").and_then(Value::as_str).unwrap_or_default().to_owned());
     let mut lines: Vec<String> = vec![format!("# Concept network: [[{title}]]"), String::new()];
     if let Some(note) = resolved_from_line(network.get("resolvedFrom")) {
         lines.push(note);
@@ -374,7 +374,7 @@ mod tests {
 
     fn network() -> Value {
         json!({
-            "concept": "atlas",
+            "page": "atlas",
             "resolvedFrom": {"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"},
             "nodes": [
                 {"id": 10, "name": "Project Atlas", "depth": 0},
@@ -418,10 +418,10 @@ mod tests {
 
     #[test]
     fn a_network_with_no_neighbours_says_so_and_has_no_links_section() {
-        let alone = json!({"concept": "atlas", "nodes": [{"id": 10, "name": "Atlas", "depth": 0}], "edges": []});
+        let alone = json!({"page": "atlas", "nodes": [{"id": 10, "name": "Atlas", "depth": 0}], "edges": []});
         assert_eq!(render_network(&alone), "# Concept network: [[Atlas]]\n\n(no linked pages)\n");
         // no node at depth 0: the name asked for is the title
-        assert!(render_network(&json!({"concept": "atlas", "nodes": [], "edges": []})).starts_with("# Concept network: [[atlas]]\n"));
+        assert!(render_network(&json!({"page": "atlas", "nodes": [], "edges": []})).starts_with("# Concept network: [[atlas]]\n"));
     }
 
     #[test]
