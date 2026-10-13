@@ -1,6 +1,6 @@
 # LogSeq MCP Tools Reference
 
-Complete documentation for the LogSeq MCP tools organized by category. The server has 12 tools; `logseq_get_graph` (graph name and path) is the one not covered below.
+Complete documentation for the LogSeq MCP tools organized by category. The server has 11 tools; `logseq_get_graph` (graph name and path) is the one not covered below.
 
 ## Tool Categories Overview
 
@@ -553,13 +553,12 @@ All temporal queries use **YYYYMMDD format:**
 
 ## Summary
 
-12 MCP tools. The 11 below are organized into 6 categories; `logseq_get_graph` (graph name and path) is the 12th:
+11 MCP tools. The 10 below are organized into 5 categories; `logseq_get_graph` (graph name and path) is the 11th:
 
 1. **Basic Tools (4)** - Core search (text, property, period), retrieval, page names
-2. **Graph Traversal (1)** - Network visualization
-3. **Semantic Search (1)** - Relationship-based queries
-4. **Context Building (2)** - Comprehensive context for one page and current UI context
-5. **Temporal Query (2)** - Time-based analysis
-6. **Linking (1)** - Checking a link pass
+2. **Graph Exploration (1)** - How a page connects: its network, or the shortest path to a second page
+3. **Context Building (2)** - Comprehensive context for one page and current UI context
+4. **Temporal Query (2)** - Time-based analysis
+5. **Linking (1)** - Checking a link pass
 
 **Key principle:** Start with the high-level tool (`explore_context`) and drill down with specific tools only when needed.
