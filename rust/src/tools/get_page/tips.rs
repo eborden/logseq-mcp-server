@@ -13,7 +13,7 @@ pub fn page_tips(result: &Value, page_name: &str, include_children: bool) -> Vec
     if !include_children {
         tips.push(format!("For its blocks: {}.", suggest_call("logseq_get_page", &json!({"page": page, "detail": "full"}))));
     }
-    tips.push(format!("For what links here: {}.", suggest_call("logseq_get_backlinks", &json!({"page_name": page}))));
+    tips.push(format!("For what links here: {}.", suggest_call("logseq_explore_context", &json!({"page": page}))));
     tips.truncate(MAX_TIPS);
     tips
 }
@@ -29,7 +29,7 @@ mod tests {
             page_tips(&result, "atlas", false),
             [
                 r#"For its blocks: logseq_get_page {"page":"Project Atlas","detail":"full"}."#,
-                r#"For what links here: logseq_get_backlinks {"page_name":"Project Atlas"}."#,
+                r#"For what links here: logseq_explore_context {"page":"Project Atlas"}."#,
             ]
         );
     }
@@ -37,14 +37,14 @@ mod tests {
     #[test]
     fn a_page_read_with_its_blocks_suggests_only_the_links() {
         let tips = page_tips(&json!({"originalName": "Atlas"}), "atlas", true);
-        assert_eq!(tips, [r#"For what links here: logseq_get_backlinks {"page_name":"Atlas"}."#]);
+        assert_eq!(tips, [r#"For what links here: logseq_explore_context {"page":"Atlas"}."#]);
     }
 
     #[test]
     fn the_name_the_caller_gave_stands_in_for_a_missing_or_blank_original_name() {
-        assert!(page_tips(&json!({}), "alice", true)[0].contains(r#"{"page_name":"alice"}"#));
-        assert!(page_tips(&json!({"originalName": "  "}), "alice", true)[0].contains(r#"{"page_name":"alice"}"#));
-        assert!(page_tips(&json!({"originalName": 5}), "alice", true)[0].contains(r#"{"page_name":"alice"}"#));
+        assert!(page_tips(&json!({}), "alice", true)[0].contains(r#"{"page":"alice"}"#));
+        assert!(page_tips(&json!({"originalName": "  "}), "alice", true)[0].contains(r#"{"page":"alice"}"#));
+        assert!(page_tips(&json!({"originalName": 5}), "alice", true)[0].contains(r#"{"page":"alice"}"#));
         // no name to suggest a call with: no tip
         assert!(page_tips(&json!({}), " ", false).is_empty());
     }

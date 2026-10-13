@@ -357,7 +357,7 @@ fn build_what_do_i_know(args: &Arguments, _today: CalendarDate) -> Result<String
         "Steps:".to_owned(),
         format!("1. logseq_explore_context with page {t} for the page, its blocks, related pages and references. If the topic spans several pages, call it once per page, in parallel."),
         format!("2. logseq_find_blocks for {t} (limit 15) for mentions outside the main page. Search is literal, so try one or two spelling variants if it comes back thin."),
-        "3. logseq_get_backlinks on the one or two most relevant pages to find connections.".to_owned(),
+        "3. logseq_explore_context on the one or two most relevant related pages to follow the connections, in parallel.".to_owned(),
         String::new(),
         "Then synthesize, do not dump: the main points, how the notes connect, and gaps. Name the pages each point came from. Say if a result was cut (hasMore, warnings).".to_owned(),
         READ_ONLY_NOTE.to_owned(),

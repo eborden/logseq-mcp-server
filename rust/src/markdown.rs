@@ -380,7 +380,7 @@ impl FooterMeta {
 /// - blocks_truncated: Showing 50 of 80 blocks. Set max_blocks to 80 (or higher) to get all 80.
 /// hasMore: true
 /// Tips:
-/// - logseq_get_backlinks {"page_name":"Alice"}
+/// - logseq_explore_context {"page":"Alice"}
 /// ```
 pub fn render_footer(meta: &FooterMeta) -> String {
     let mut lines: Vec<String> = Vec::new();
@@ -668,8 +668,8 @@ mod tests {
             render_footer(&meta).split('\n').collect::<Vec<_>>(),
             ["---", "Warnings:", "- blocks_truncated: Showing 5 of 9 blocks. Set max_blocks to 9.", "- w", "hasMore: true", "Tips:", "- t"]
         );
-        let tips = FooterMeta { tips: vec![r#"logseq_get_backlinks {"page_name":"Alice"}"#.to_owned()], ..Default::default() };
-        assert_eq!(render_footer(&tips), "---\nTips:\n- logseq_get_backlinks {\"page_name\":\"Alice\"}");
+        let tips = FooterMeta { tips: vec![r#"logseq_explore_context {"page":"Alice"}"#.to_owned()], ..Default::default() };
+        assert_eq!(render_footer(&tips), "---\nTips:\n- logseq_explore_context {\"page\":\"Alice\"}");
     }
 
     #[test]

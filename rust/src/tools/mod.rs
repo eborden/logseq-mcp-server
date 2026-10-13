@@ -13,7 +13,6 @@ pub mod check_links;
 pub mod explore_context;
 pub mod find_blocks;
 pub mod find_pages;
-pub mod get_backlinks;
 pub mod get_block;
 pub mod get_concept_evolution;
 pub mod get_concept_network;
@@ -30,7 +29,6 @@ pub fn list() -> Vec<Tool> {
         explore_context::definition(),
         find_blocks::definition(),
         find_pages::definition(),
-        get_backlinks::definition(),
         get_block::definition(),
         get_concept_evolution::definition(),
         get_concept_network::definition(),
@@ -55,7 +53,6 @@ pub async fn call(
         explore_context::NAME => Some(explore_context::call(client, tips_enabled, arguments).await),
         find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, arguments).await),
         find_pages::NAME => Some(find_pages::call(client, tips_enabled, arguments).await),
-        get_backlinks::NAME => Some(get_backlinks::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
         get_concept_evolution::NAME => Some(get_concept_evolution::call(client, tips_enabled, arguments).await),
         get_concept_network::NAME => Some(get_concept_network::call(client, tips_enabled, arguments).await),

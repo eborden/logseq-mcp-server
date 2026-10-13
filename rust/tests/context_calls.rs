@@ -8,7 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::tools::explore_context::{Caps, explore_page_context};
+use logseq_mcp_server::tools::explore_context::{Caps, TopicContext, explore_page_context};
 use serde_json::{Value, json};
 
 const DATALOG: &str = "logseq.DB.datascriptQuery";
@@ -171,3 +171,97 @@ async fn a_null_answer_to_each_aliased_query_is_the_same_warning() {
     assert_eq!(methods(&logseq).len(), 4);
 }
 
+// ---- the references: most-linking pages first, and paged with `references_offset`
+
+/// The linked references of a page, as the Editor call sends them: bob links once, alice three times, carol twice.
+fn three_sources() -> Value {
+    json!([
+        [source(20, "Bob"), [linking_block(201, 20)]],
+        [source(40, "Alice"), [linking_block(401, 40), linking_block(402, 40), linking_block(403, 40)]],
+        [source(30, "Carol"), [linking_block(301, 30), linking_block(302, 30)]],
+    ])
+}
+
+fn reference_ids(context: &TopicContext) -> Vec<i64> {
+    context.references.iter().map(|reference| reference.block["id"].as_i64().unwrap()).collect()
+}
+
+async fn explored(caps: Caps) -> (TopicContext, usize) {
+    let logseq = mock_logseq(vec![json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]), json!([]), three_sources()]).await;
+    let context = explore_page_context(&client(&logseq), "Project Atlas", caps).await.unwrap();
+    (context, methods(&logseq).len())
+}
+
+#[tokio::test]
+async fn the_references_are_ranked_by_linking_blocks_and_the_related_pages_keep_logseqs_order_at_no_extra_call() {
+    let (context, calls) = explored(Caps::default()).await;
+    // the same 3 calls as before the ranking
+    assert_eq!(calls, 3);
+    // alice (3 blocks), carol (2), bob (1), the blocks of one page together
+    assert_eq!(reference_ids(&context), [401, 402, 403, 301, 302, 201]);
+    // the related pages are as they were: the order the references were sent in
+    assert_eq!(context.related_pages.iter().map(|page| page["originalName"].as_str().unwrap()).collect::<Vec<_>>(), ["Bob", "Alice", "Carol"]);
+    assert_eq!(context.totals.references, 6);
+    assert!(context.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn references_offset_reads_the_same_ranking_further_on_and_the_last_page_has_no_warning() {
+    let page = |offset: u64| Caps { max_references: 2, references_offset: offset, ..Caps::default() };
+    let (first, calls) = explored(page(0)).await;
+    assert_eq!(calls, 3, "paging costs no call");
+    assert_eq!(reference_ids(&first), [401, 402]);
+    let warning = &first.warnings[0];
+    assert_eq!(warning.code, "references_truncated");
+    assert_eq!(warning.message, "Showing 2 of 6 references. Page through the rest with references_offset.");
+    assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set references_offset to 2 for the next page. Or set max_references to 6 (or higher) to get all 6 in one call."));
+    assert!(first.has_more());
+
+    let (second, _) = explored(page(2)).await;
+    assert_eq!(reference_ids(&second), [403, 301]);
+    assert_eq!(second.warnings[0].message, "Showing 2 of 4 references from offset 2. Page through the rest with references_offset.");
+    assert!(second.warnings[0].how_to_fetch_all.as_deref().unwrap().starts_with("Set references_offset to 4 for the next page."));
+
+    let (last, _) = explored(page(4)).await;
+    assert_eq!(reference_ids(&last), [302, 201]);
+    assert!(last.warnings.is_empty() && !last.has_more());
+    // the totals are always the whole ranking
+    assert_eq!(last.totals.references, 6);
+}
+
+#[tokio::test]
+async fn an_offset_at_or_past_the_end_reads_nothing_and_says_nothing_was_cut() {
+    for offset in [6, 7, u64::MAX] {
+        let (context, calls) = explored(Caps { references_offset: offset, ..Caps::default() }).await;
+        assert_eq!(calls, 3);
+        assert!(context.references.is_empty() && context.warnings.is_empty());
+        assert_eq!(context.totals.references, 6);
+    }
+}
+
+#[tokio::test]
+async fn a_cap_of_zero_with_an_offset_offers_the_raise_and_no_page_that_would_not_move() {
+    let (context, _) = explored(Caps { max_references: 0, references_offset: 1, ..Caps::default() }).await;
+    assert!(context.references.is_empty());
+    let warning = &context.warnings[0];
+    assert_eq!(warning.message, "Showing 0 of 5 references from offset 1.");
+    assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_references to 5 (or higher) to get all 5."));
+}
+
+#[tokio::test]
+async fn the_aliased_path_ranks_the_group_the_same_way_in_the_same_calls() {
+    let aliased = |id: i64, page: i64, name: &str| json!([{"id": id, "uuid": uuid(id), "content": "links", "page": {"id": page, "name": name.to_lowercase(), "original-name": name}}]);
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        json!([[10, {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}], [10, {"id": 11, "name": "atlas", "original-name": "Atlas"}]]),
+        json!([]),
+        // by name the pages are Alice then Bob, and Bob links twice
+        json!([aliased(401, 40, "Alice"), aliased(202, 20, "Bob"), aliased(201, 20, "Bob")]),
+    ])
+    .await;
+    let context = explore_page_context(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap();
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG, DATALOG, DATALOG]);
+    // Bob first (2 blocks, in id order), then Alice; the related pages stay in the group's own order, by name
+    assert_eq!(reference_ids(&context), [201, 202, 401]);
+    assert_eq!(context.related_pages.iter().map(|page| page["originalName"].as_str().unwrap()).collect::<Vec<_>>(), ["Alice", "Bob"]);
+}

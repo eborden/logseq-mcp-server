@@ -9,7 +9,7 @@ mod common;
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
 use logseq_mcp_server::dates::Clock;
-use logseq_mcp_server::tools::{find_blocks, get_backlinks, get_concept_network};
+use logseq_mcp_server::tools::{explore_context, find_blocks, get_concept_network};
 use serde_json::{Value, json};
 
 /// 2025-03-12T03:30:00Z, the instant the parity harness reads as now.
@@ -91,25 +91,44 @@ fn linking_block(id: i64, page: i64, length: usize) -> Value {
     json!({"id": id, "uuid": uuid(id), "content": format!("links [[Atlas]] {}", "x".repeat(length)), "page": {"id": page, "name": format!("p{page}"), "originalName": format!("P{page}")}})
 }
 
-#[tokio::test]
-async fn backlinks_over_the_budget_are_cut_from_the_last_block_and_the_meta_block_says_so() {
+/// The linked references of a page: 6 source pages with 5 blocks of `length` characters each, in the order of their ids.
+fn six_sources(length: usize) -> Value {
     let page = |id: i64| json!({"id": id, "name": format!("p{id}"), "originalName": format!("P{id}")});
-    // 6 source pages with 5 blocks of 2,000 characters each: 60,000 characters
-    let linked: Vec<Value> = (1..=6).map(|id| json!([page(id), (0..5).map(|n| linking_block(id * 100 + n, id, 2000)).collect::<Vec<_>>()])).collect();
-    let logseq = mock_logseq(vec![root(), json!(linked)]).await;
-    let result = get_backlinks::call(&client(&logseq), false, arguments(json!({"page_name": "Project Atlas", "max_pages": 100, "max_blocks_per_page": 50}))).await.unwrap();
-    assert_eq!(methods(&logseq), [DATALOG, LINKED_REFERENCES]);
-    let (results, meta) = (text_of(&result, 0), text_of(&result, 1));
-    assert!(size(&results) + size(&meta) <= BUDGET_CHARS, "{}", size(&results) + size(&meta));
-    let meta: Value = serde_json::from_str(&meta).unwrap();
-    assert_eq!(meta["meta"]["warnings"][0]["code"], "result_size_truncated");
-    assert_eq!(meta["meta"]["hasMore"], false);
-    assert_eq!(meta["meta"]["totals"], json!({"pages": 6, "blocks": 30}));
-    // the pages keep their order, and only the page the cut fell in is partial
-    let kept: Vec<Value> = serde_json::from_str(&results).unwrap();
-    assert!(kept.len() < 6);
-    let counts: Vec<usize> = kept.iter().map(|tuple| tuple[1].as_array().unwrap().len()).collect();
-    assert!(counts[..counts.len() - 1].iter().all(|&count| count == 5), "{counts:?}");
+    json!((1..=6).map(|id| json!([page(id), (0..5).map(|n| linking_block(id * 100 + n, id, length)).collect::<Vec<_>>()])).collect::<Vec<_>>())
+}
+
+fn reference_ids(value: &Value) -> Vec<i64> {
+    value["references"].as_array().unwrap().iter().map(|reference| reference["block"]["id"].as_i64().unwrap()).collect()
+}
+
+#[tokio::test]
+async fn references_over_the_budget_are_cut_from_the_last_one_and_the_next_offset_reads_on() {
+    // 30 references of about 2,000 characters: 60,000 characters, with the caps raised past them
+    let logseq = mock_logseq(vec![root(), json!([]), six_sources(2000)]).await;
+    let result = explore_context::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas", "max_references": 100}))).await.unwrap();
+    // the cut reads no more than the call does
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG, LINKED_REFERENCES]);
+    let text = text_of(&result, 0);
+    assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
+    let first: Value = serde_json::from_str(&text).unwrap();
+    let kept = reference_ids(&first);
+    assert!(kept.len() > 5 && kept.len() < 30, "{}", kept.len());
+    assert_eq!(first["totals"]["references"], 30);
+    assert_eq!(first["warnings"][0]["code"], "result_size_truncated");
+    assert_eq!(first["hasMore"], true);
+    let how = first["warnings"][0]["howToFetchAll"].as_str().unwrap();
+    assert!(how.starts_with(&format!("Set references_offset to {} for the next references.", kept.len())), "{how}");
+
+    // the next page starts where the cut fell: the same ranking, read further on, with nothing skipped or repeated
+    let logseq = mock_logseq(vec![root(), json!([]), six_sources(2000)]).await;
+    let next = explore_context::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas", "max_references": 100, "references_offset": kept.len(), "max_blocks": 0}))).await.unwrap();
+    let second: Value = serde_json::from_str(&text_of(&next, 0)).unwrap();
+    let rest = reference_ids(&second);
+    // the six pages link five times each, so the ranking is by name: the ids run in order
+    let all: Vec<i64> = (1..=6).flat_map(|id| (0..5).map(move |n| id * 100 + n)).collect();
+    assert_eq!(kept, all[..kept.len()]);
+    assert_eq!(rest, all[kept.len()..kept.len() + rest.len()]);
+    assert_eq!(second["totals"]["references"], 30);
 }
 
 /// A search row: one block of `length` characters of text, newest when `id` is highest, on page 5.
