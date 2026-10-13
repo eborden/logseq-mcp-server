@@ -5,7 +5,7 @@
  *   node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts rust/target/release/logseq-mcp-server
  *
  * It drives the binary over MCP stdio with the SDK client, the way Claude Code does, and calls
- * each of the 14 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
+ * each of the 12 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
  * gets one prompt and lists tools, prompts, resources and resource templates. A few items read the
  * clock (a preset, `last_n`, and the weekly and monthly prompts with no argument) and are checked against
  * today's local date, which a release binary reads from the system: no parity case can check that. It prints one
@@ -23,7 +23,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { connectFixture } from '../tests/integration/helpers/fixture-client.js';
 
-const EXPECTED_TOOLS = 14;
+const EXPECTED_TOOLS = 12;
 
 interface ToolCall {
   name: string;
@@ -57,12 +57,11 @@ const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_get_page', args: { page: 'project atlas', detail: 'full' } },
   { name: 'logseq_get_page', label: 'outline', args: { page: 'project atlas', detail: 'outline' } },
   { name: 'logseq_get_block', args: { uuid: '0088f1a0-0000-4000-8000-000000000001' } },
-  { name: 'logseq_get_backlinks', args: { page_name: 'Bob' } },
   { name: 'logseq_find_blocks', label: 'by text', args: { text: 'launch checklist', limit: 5 } },
   { name: 'logseq_find_blocks', label: 'by property', args: { property: 'status', value: 'active' } },
   { name: 'logseq_find_blocks', label: 'by period, text and offset', args: { text: 'importer', start_date: 20250101, end_date: 20250131, limit: 2, offset: 1 } },
-  { name: 'logseq_build_context', args: { topic_name: 'project atlas' } },
-  { name: 'logseq_get_context_for_query', args: { query: 'what is in [[project atlas]]?' } },
+  { name: 'logseq_explore_context', args: { page: 'project atlas' } },
+  { name: 'logseq_explore_context', label: 'references from an offset', args: { page: 'Bob', max_references: 1, references_offset: 1 } },
   { name: 'logseq_get_concept_network', args: { concept_name: 'Alice', max_depth: 2 } },
   { name: 'logseq_find_blocks', label: 'by page and links_to', args: { page: 'Alice', links_to: ['Bob'] } },
   { name: 'logseq_search_by_relationship', args: { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within' } },

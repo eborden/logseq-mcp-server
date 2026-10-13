@@ -9,7 +9,7 @@
 // never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Every page, block and
 // name is made up, and the output is aggregates only.
 //
-// For each of the 14 tools it calls one representative parity case (the happy path), then a few larger
+// For each of the 12 tools it calls one representative parity case (the happy path), then a few larger
 // made-up cases for the tools that do the most work. Per case and server: `--warmup` untimed calls, then
 // `--iterations` timed ones.
 //
@@ -69,13 +69,11 @@ async function parityCase(name: string): Promise<{ case: ParityCase; expected: T
 
 /** One happy-path parity case per tool: the name of the case, which is also its label in the report. */
 const REPRESENTATIVE: Array<{ tool: string; name: string }> = [
-  { tool: 'logseq_build_context', name: 'build_context: exact name, blocks in page order, linking pages and blocks as sent' },
   { tool: 'logseq_check_links', name: 'links refs: names, an alias and a padded term in one query' },
-  { tool: 'logseq_get_backlinks', name: 'backlinks: exact name, ranked, entities as sent' },
+  { tool: 'logseq_explore_context', name: 'explore_context: exact name, blocks in page order, linking pages and blocks as sent' },
   { tool: 'logseq_get_block', name: 'get_block: block with children' },
   { tool: 'logseq_get_concept_evolution', name: 'evolution: exact name, the page and its mentions, undated last' },
   { tool: 'logseq_get_concept_network', name: 'network: exact name, two levels, both directions, journals as leaves' },
-  { tool: 'logseq_get_context_for_query', name: 'context_for_query: a link and a tag' },
   { tool: 'logseq_get_current', name: 'current context: a page is open and nothing else' },
   { tool: 'logseq_get_graph', name: 'graph info' },
   { tool: 'logseq_get_page', name: 'get_page: exact name with its blocks' },
