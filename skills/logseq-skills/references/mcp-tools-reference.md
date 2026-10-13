@@ -292,7 +292,9 @@ Get what the user is looking at in LogSeq right now: the open page, the block be
 - The user says "this page", "this block" or "what I'm looking at" without naming it
 - Before `explore_context` or `get_page`, to resolve which page "this" means
 
-**Returns:** `{ page, focusedBlock?, selectedBlocks? }`. When no page is open, `page` is `null` with a message. The result reflects live UI state, so calling it twice can give different answers. A selection of a few hundred blocks (a whole page) is cut to 30,000 characters: the first selected blocks stay, whole, and a `result_size_truncated` warning says "Showing N of M selected blocks" with no `howToFetchAll`. Select fewer blocks, or read the page with `logseq_get_page`.
+**Returns:** `{ hasMore?, warnings?, message?, page, focusedBlock?, selectedBlocks? }`. `hasMore` and `warnings` are present only when something is missing, and come first. `message` is present only when no page is open: `page` is then `null` and `message` says so. The result reflects live UI state, so calling it twice can give different answers. Two warnings exist, and neither has a `howToFetchAll`, so `hasMore` stays false:
+- `page_names_unavailable`: LogSeq gave no answer when the pages of the focused or selected blocks were looked up, so their page names are missing. When `page` is `null` it also means the open page could not be determined, so this is not "no page is open" (there is no `message` then). Retry, or call `logseq_get_graph` to check which graph is open
+- `result_size_truncated`: a selection of a few hundred blocks (a whole page) is cut to 30,000 characters. The first selected blocks stay, whole, and the warning says "Showing N of M selected blocks". Select fewer blocks, or read the page with `logseq_get_page`
 
 **Example:**
 ```
