@@ -180,8 +180,8 @@ pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> S
 }
 
 /// One line per linked pair of `edges`, by the names of `nodes`. `A -> B` means blocks on A reference B, `A <- B`
-/// that blocks on B reference A, and `A <-> B (out/in)` both; the number is the reference count. An edge whose end is not
-/// among the nodes has no line.
+/// that blocks on B reference A, and `A <-> B (out/in)` both; the number is the reference count, and an edge with a
+/// snippet (#498) ends with `: ` and its text. An edge whose end is not among the nodes has no line.
 fn link_lines(nodes: &[Value], edges: &[Value]) -> Vec<String> {
     let name_of = |node: &Value| node.get("name").and_then(Value::as_str).unwrap_or_default().to_owned();
     let names: HashMap<i64, String> = nodes.iter().filter_map(|node| Some((id_of(Some(node))?, name_of(node)))).collect();
@@ -199,7 +199,11 @@ fn link_lines(nodes: &[Value], edges: &[Value]) -> Vec<String> {
             } else {
                 format!("<- [[{to}]] ({inbound})")
             };
-            Some(format!("- [[{from}]] {link}"))
+            // A snippet (`with_snippets`) is the first line of one block that makes the link: why the pair is linked
+            match edge.get("snippet").and_then(Value::as_str).filter(|snippet| !snippet.is_empty()) {
+                Some(snippet) => Some(format!("- [[{from}]] {link}: {snippet}")),
+                None => Some(format!("- [[{from}]] {link}")),
+            }
         })
         .collect()
 }
@@ -456,6 +460,18 @@ mod tests {
              - [[Project Atlas]] -> [[Dave]] (1)\n\
              - [[Bob]] <- [[Carol]] (4)\n"
         );
+    }
+
+    #[test]
+    fn an_edge_with_a_snippet_ends_its_line_with_the_text_and_one_with_none_is_as_before() {
+        let mut with = network();
+        with["edges"][0]["snippet"] = json!("Met Bob at the fair");
+        with["edges"][1]["snippet"] = json!("");
+        let text = render_network(&with);
+        assert!(text.contains("- [[Project Atlas]] <-> [[Bob]] (3/2): Met Bob at the fair\n"), "{text}");
+        // an empty one says nothing, and the line is as it was
+        assert!(text.contains("- [[Project Atlas]] -> [[Dave]] (1)\n"), "{text}");
+        assert!(text.contains("- [[Bob]] <- [[Carol]] (4)\n"), "{text}");
     }
 
     #[test]
