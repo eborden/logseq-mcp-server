@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { exploreContext, findBlocks, findBlocksWithMeta, getConceptEvolution, getConceptNetwork, getPage, getPageOutline, searchByRelationship } from './helpers/tools.js';
+import { exploreContext, exploreNetworkPath, findBlocks, findBlocksWithMeta, getConceptEvolution, exploreNetwork, getPage, getPageOutline } from './helpers/tools.js';
 import { AmbiguousPageError, PageNotFoundError } from './helpers/errors.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 
@@ -150,10 +150,10 @@ describe('page resolution against the fixture graph', () => {
   describe('the tools that changed behaviour in #41', () => {
     const MISSING = 'no such page 41 integration probe';
 
-    it('get_concept_evolution, get_concept_network and explore_context throw guidance for a missing page', async () => {
+    it('get_concept_evolution, explore_network and explore_context throw guidance for a missing page', async () => {
       for (const run of [
         () => getConceptEvolution(client, MISSING),
-        () => getConceptNetwork(client, MISSING, 1),
+        () => exploreNetwork(client, MISSING, 1),
         () => exploreContext(client, MISSING)
       ]) {
         const error = await run().catch(e => e);
@@ -161,9 +161,9 @@ describe('page resolution against the fixture graph', () => {
       }
     });
 
-    it('search_by_relationship throws for a missing topic in either position', async () => {
-      expect(await searchByRelationship(client, MISSING, EXACT, 'connected-within').catch(e => e)).toBeInstanceOf(PageNotFoundError);
-      expect(await searchByRelationship(client, EXACT, MISSING, 'connected-within').catch(e => e)).toBeInstanceOf(PageNotFoundError);
+    it('explore_network with to throws for a missing page in either position', async () => {
+      expect(await exploreNetworkPath(client, MISSING, EXACT).catch(e => e)).toBeInstanceOf(PageNotFoundError);
+      expect(await exploreNetworkPath(client, EXACT, MISSING).catch(e => e)).toBeInstanceOf(PageNotFoundError);
     });
 
     it('find_blocks throws for a missing page, as the page or as any of links_to, and makes no search', async () => {
@@ -176,12 +176,12 @@ describe('page resolution against the fixture graph', () => {
       }
     });
 
-    it('get_concept_evolution, get_concept_network, search_by_relationship and find_blocks return candidates for a shared alias', async () => {
+    it('get_concept_evolution, explore_network (with and without to) and find_blocks return candidates for a shared alias', async () => {
       const errors = [
         await getConceptEvolution(client, SHARED.stub).catch(e => e),
-        await getConceptNetwork(client, SHARED.stub, 1).catch(e => e),
-        await searchByRelationship(client, SHARED.stub, EXACT, 'connected-within').catch(e => e),
-        await searchByRelationship(client, EXACT, SHARED.stub, 'connected-within').catch(e => e),
+        await exploreNetwork(client, SHARED.stub, 1).catch(e => e),
+        await exploreNetworkPath(client, SHARED.stub, EXACT).catch(e => e),
+        await exploreNetworkPath(client, EXACT, SHARED.stub).catch(e => e),
         await findBlocks(client, { page: SHARED.stub }).catch(e => e),
         await findBlocks(client, { linksTo: [EXACT, SHARED.stub] }).catch(e => e)
       ];

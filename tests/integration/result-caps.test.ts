@@ -8,13 +8,11 @@ import {
   DEFAULT_MAX_ENTRIES,
   DEFAULT_MAX_REFERENCES,
   DEFAULT_PROPERTY_LIMIT,
-  DEFAULT_RELATIONSHIP_LIMIT,
   DEFAULT_SEARCH_LIMIT,
   MAX_DATE_RANGE_BLOCKS,
   MAX_ENTRIES,
   MAX_FIND_PAGES_LIMIT,
   MAX_PROPERTY_LIMIT,
-  MAX_RELATIONSHIP_LIMIT,
   MAX_SEARCH_LIMIT,
 } from './helpers/caps.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS } from './helpers/fixture-client.js';
@@ -52,9 +50,6 @@ import { connectMcp } from './helpers/server-under-test.js';
  * too: no property value sits on more than a few fixture blocks, and no pair of fixture pages returns more than a
  * dozen. Through MCP small limits stand in for the default, and the parity cases (`limit at the maximum with
  * matches left`, `pages cut: limit past the maximum`) hold the cut at the maximum.
- * search_by_relationship's default of 50 and maximum of 500 (connected-within, its one type) are out of reach as well:
- * no pair of fixture topics returns more than a dozen results. Small limits stand in for the default through MCP, and
- * the parity case `connected cut: the limit falls inside topic B` and its neighbours hold the cut inside a tree.
  */
 
 interface Meta {
@@ -650,123 +645,5 @@ describe('result caps (#61)', () => {
         expect(body.meta.warnings![0].message, label).toContain(`Showing ${limit} of ${total} matching blocks`);
       }
     });
-  });
-
-  describe('logseq_search_by_relationship limit (default 50, max 500)', () => {
-    // No pair of fixture topics returns more than a dozen results, so the default of 50 and the
-    // maximum of 500 are out of reach. Through MCP small limits see the same code with a smaller
-    // bound, and the clamp shows above the maximum; the cut inside a tree is covered by the parity
-    // cases `connected cut: ...`. The pairs below are the fixture's: see tests/fixtures/README.md
-    // for the pages, and the alias-sets and semantic-search suites for the others.
-    const CASES: Array<{ label: string; args: Record<string, unknown>; aliased?: boolean; nested?: boolean }> = [
-      {
-        label: 'connected-within',
-        args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'connected-within', max_distance: 1 },
-      },
-      {
-        label: 'connected-within, topic A with an alias (#69)',
-        args: { topic_a: 'project atlas', topic_b: 'bob', relationship_type: 'connected-within', max_distance: 1 },
-        aliased: true,
-        // This pair's pages have nested blocks, so the cut can fall inside a subtree (#183)
-        nested: true,
-      },
-    ];
-
-    interface RelationshipBlock {
-      id: number;
-      children?: RelationshipBlock[];
-      childrenTruncated?: boolean;
-    }
-
-    interface RelationshipBody extends Meta {
-      text: string;
-      results: RelationshipBlock[];
-      resolvedAliases?: { topicA?: string[]; topicB?: string[] };
-    }
-
-    async function relationship(args: Record<string, unknown>, limit?: number): Promise<RelationshipBody> {
-      const result = await call('logseq_search_by_relationship', { ...args, ...(limit === undefined ? {} : { limit }) });
-      return { text: result.content[0].text, ...(JSON.parse(result.content[0].text) as Omit<RelationshipBody, 'text'>) };
-    }
-
-    // connected-within returns the two pages' trees and counts every block in them, nested ones too (#183),
-    // so its results are compared in document order, not top-level only. The Datalog types are flat lists.
-    const isTree = (args: Record<string, unknown>) => args.relationship_type === 'connected-within';
-    const flatten = (blocks: RelationshipBlock[]): RelationshipBlock[] =>
-      blocks.flatMap(block => [block, ...flatten(block.children ?? [])]);
-    const unitCount = (body: RelationshipBody, tree: boolean) => (tree ? flatten(body.results) : body.results).length;
-    const resultIds = (body: RelationshipBody, tree: boolean) =>
-      (tree ? flatten(body.results) : body.results).map(block => block.id);
-    const capWarnings = (body: RelationshipBody) => body.warnings.filter(w => w.code === 'results_truncated');
-
-    // A kept block that has fewer children than in the full result must say so, and no other may (#183)
-    // Returns how many blocks carry the mark, so a caller can require that a cut reached one.
-    function expectChildrenTruncatedMarks(full: RelationshipBlock[], kept: RelationshipBlock[], at: string): number {
-      const fullById = new Map(flatten(full).map(block => [block.id, block]));
-      let marks = 0;
-      for (const block of flatten(kept)) {
-        const original = fullById.get(block.id)!;
-        const lostChildren = (block.children?.length ?? 0) < (original.children?.length ?? 0);
-        expect(block.childrenTruncated === true, `${at}: block ${block.id} lost children: ${lostChildren}`).toBe(lostChildren);
-        if (block.childrenTruncated === true) marks += 1;
-      }
-      return marks;
-    }
-
-    it.each(CASES)(
-      'never returns more results than limit, keeps the same first results, and reports every cut: $label',
-      async ({ label, args, aliased, nested }) => {
-        const full = await relationship(args, MAX_RELATIONSHIP_LIMIT);
-        const tree = isTree(args);
-        const total = unitCount(full, tree);
-        expect(total, `${label} needs at least 3 results to see a cut. See tests/fixtures/README.md`).toBeGreaterThanOrEqual(3);
-        expect(total, `${label} must stay under the default cap for the default to return every result`).toBeLessThanOrEqual(
-          DEFAULT_RELATIONSHIP_LIMIT
-        );
-        // Nothing is cut, so the maximum sends no cap warning and no totals
-        expect(capWarnings(full)).toEqual([]);
-        expect(full.totals).toBeUndefined();
-        expect(full.hasMore).toBe(false);
-        if (nested) expect(total, `${label} needs nested blocks. See tests/fixtures/README.md`).toBeGreaterThan(full.results.length);
-        if (aliased) expect(full.resolvedAliases, `${label} needs a topic with aliases`).toBeDefined();
-
-        // The default and a value above the maximum are the full result, byte for byte
-        expect((await relationship(args)).text).toBe(full.text);
-        expect((await relationship(args, 5000)).text).toBe(full.text);
-
-        // A limit that cuts inside a subtree, from the fixture's own tree: keep the first block that has
-        // children and none of them (its position in document order, plus 1). Without it no limit above
-        // need reach a block that lost children, and the mark check would never see a mark.
-        const flat = tree ? flatten(full.results) : [];
-        const firstParent = flat.findIndex(block => (block.children?.length ?? 0) > 0);
-        const insideSubtree = nested && firstParent >= 0 ? [firstParent + 1] : [];
-        if (nested) expect(insideSubtree, `${label} needs a block with children to cut inside`).toHaveLength(1);
-        let marksSeen = 0;
-
-        for (const limit of [0, 1, 2, ...insideSubtree, total - 1, total, total + 1, DEFAULT_RELATIONSHIP_LIMIT]) {
-          const body = await relationship(args, limit);
-          const at = `${label}, limit ${limit}`;
-          expect(unitCount(body, tree), at).toBeLessThanOrEqual(MAX_RELATIONSHIP_LIMIT);
-          expect(unitCount(body, tree), at).toBe(Math.min(limit, total));
-          // The first results of the full list, in its order
-          expect(resultIds(body, tree), at).toEqual(resultIds(full, tree).slice(0, limit));
-          if (tree) marksSeen += expectChildrenTruncatedMarks(full.results, body.results, at);
-          // The alias group is still reported when the result is cut
-          expect(body.resolvedAliases, at).toEqual(full.resolvedAliases);
-
-          if (limit >= total) {
-            expect(body.text, `${at}: nothing is cut, so the result is the full one`).toBe(full.text);
-            continue;
-          }
-          expect(capWarnings(body).length, at).toBe(1);
-          expect(body.totals, at).toEqual({ blocks: total });
-          // Below the maximum the warning says which value gets the rest, and it is within the maximum
-          expect(body.hasMore, at).toBe(true);
-          expect(capWarnings(body)[0].howToFetchAll, at).toBe(`Set limit to ${total} (or higher) to get all ${total}.`);
-          expectNoSuggestionPast(body, 'limit', MAX_RELATIONSHIP_LIMIT);
-        }
-        if (nested) expect(marksSeen, `${label} needs a cut inside a subtree, so a block shows childrenTruncated`).toBeGreaterThan(0);
-      }
-    );
   });
 });

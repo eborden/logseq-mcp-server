@@ -54,7 +54,7 @@ export interface TopConcept {
 }
 
 export type DateRangeResult = Json;
-export type ConceptNetworkResult = Json;
+export type NetworkResult = Json;
 
 /** How one name sent to `logseq_find_pages` came out: its page, or null with the closest names or the candidates. */
 export interface NameAnswer {

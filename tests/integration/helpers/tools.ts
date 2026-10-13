@@ -158,15 +158,16 @@ export async function findBlocks(client: LogseqClient, filters: BlockFilters, pa
   return (await findBlocksWithMeta(client, filters, paging)).results;
 }
 
-export async function getConceptNetwork(
+/** The walk of `logseq_explore_network` without `to`: the pages linked to `page` as nodes and edges. */
+export async function exploreNetwork(
   client: LogseqClient,
-  conceptName: string,
+  page: string,
   maxDepth?: number,
   options: { maxNodes?: number; maxFanout?: number; expandJournals?: boolean } = {}
 ): Promise<Json> {
   return (
-    await callTool(client, 'logseq_get_concept_network', {
-      concept_name: conceptName,
+    await callTool(client, 'logseq_explore_network', {
+      page,
       max_depth: maxDepth,
       max_nodes: options.maxNodes,
       max_fanout: options.maxFanout,
@@ -175,23 +176,9 @@ export async function getConceptNetwork(
   ).value;
 }
 
-export async function searchByRelationship(
-  client: LogseqClient,
-  topicA: string,
-  topicB: string,
-  relationshipType: 'connected-within',
-  maxDistance?: number,
-  options: { limit?: number } = {}
-): Promise<Json> {
-  return (
-    await callTool(client, 'logseq_search_by_relationship', {
-      topic_a: topicA,
-      topic_b: topicB,
-      relationship_type: relationshipType,
-      max_distance: maxDistance,
-      limit: options.limit,
-    })
-  ).value;
+/** `logseq_explore_network` with `to`: the shortest path of links from `page` to `to`, as nodes and edges. */
+export async function exploreNetworkPath(client: LogseqClient, page: string, to: string, maxDepth?: number): Promise<Json> {
+  return (await callTool(client, 'logseq_explore_network', { page, to, max_depth: maxDepth })).value;
 }
 
 /** What `logseq_explore_context` takes beyond the page; each is the tool's parameter in camel case. */

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { exploreContext, findBlocksWithMeta, getConceptEvolution, getConceptNetwork, queryJournals, searchByRelationship } from './helpers/tools.js';
+import { exploreContext, exploreNetworkPath, findBlocksWithMeta, getConceptEvolution, exploreNetwork, queryJournals } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -81,13 +81,11 @@ describe('alias-aware link following against the fixture graph', () => {
     expect(mismatched).toBe(0);
   });
 
-  it('search_by_relationship: connected-within reports a page and its alias as the same topic', async () => {
-    const { result, calls } = await counted(() =>
-      searchByRelationship(client, target.canonical, target.alias, 'connected-within', 2)
-    );
+  it('explore_network with to: a page and its alias are the same page, and no path is walked', async () => {
+    const { result, calls } = await counted(() => exploreNetworkPath(client, target.canonical, target.alias, 2));
 
-    expect(result.results).toEqual([]);
-    expect(result.warnings.map(w => w.code)).toEqual(['same_topic']);
+    expect(result.nodes).toEqual([]);
+    expect(result.warnings.map(w => w.code)).toEqual(['same_page']);
     expect(calls).toBeLessThanOrEqual(3); // resolvers and the alias group, no hop query
   });
 
@@ -114,9 +112,9 @@ describe('alias-aware link following against the fixture graph', () => {
     expect(byAlias.resolvedAliases).toEqual(byName.resolvedAliases);
   });
 
-  it('get_concept_network: either name yields the same network, with the alias folded into the root', async () => {
-    const byName = await getConceptNetwork(client, target.canonical, 1);
-    const byAlias = await getConceptNetwork(client, target.alias, 1);
+  it('explore_network: either name yields the same network, with the alias folded into the root', async () => {
+    const byName = await exploreNetwork(client, target.canonical, 1);
+    const byAlias = await exploreNetwork(client, target.alias, 1);
 
     expect(sameSet(new Set(byName.nodes.map(n => n.id)), new Set(byAlias.nodes.map(n => n.id)))).toBe(true);
     expect(byName.edges).toEqual(byAlias.edges);

@@ -168,10 +168,27 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
       expect(() => JSON.parse(text)).toThrow();
     });
 
-    it('get_concept_network renders too', async () => {
-      const network = (await call('logseq_get_concept_network', { concept_name: hub, max_depth: 1, format: 'markdown' })).content[0].text;
+    it('explore_network renders too', async () => {
+      const network = (await call('logseq_explore_network', { page: hub, max_depth: 1, format: 'markdown' })).content[0].text;
       expect(network.startsWith('# Concept network: [[')).toBe(true);
       expect(network.includes('## Depth 1 (') && network.includes('## Links (')).toBe(true);
+    });
+
+    it('explore_network with to renders the path as a chain and its links', async () => {
+      const path = (await call('logseq_explore_network', { page: 'journal-topic-01', to: hub, max_depth: 2, format: 'markdown' })).content[0].text;
+      expect(path).toBe(
+        '# Path: [[journal-topic-01]] to [[hub central]] (2 hops)\n\n' +
+          '[[journal-topic-01]] -> [[Jun 17th, 2024]] -> [[hub central]]\n\n' +
+          '## Links (2)\n\n' +
+          '- [[journal-topic-01]] <- [[Jun 17th, 2024]] (1)\n' +
+          '- [[Jun 17th, 2024]] -> [[hub central]] (1)\n'
+      );
+    });
+
+    it('explore_network with to refuses the arguments that size the network, and names the first of them', async () => {
+      const result = (await mcp.callTool({ name: 'logseq_explore_network', arguments: { page: 'Alice', to: 'Bob', max_fanout: 5, expand_journals: true } })) as ToolResult;
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Invalid parameter 'max_fanout': 5");
     });
 
     it('get_block renders a block of the outline', async () => {
