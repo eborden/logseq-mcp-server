@@ -443,6 +443,13 @@ fn a_changed_bound_type_enum_value_required_field_or_description_fails_with_its_
     let failures = compare_tool_lists(&tools, &enum_value);
     assert_eq!(failures.len(), 1);
     assert!(failures[0].contains("format.enum[0]: expected \"json\", got \"refs\""), "{failures:?}");
+    // The same inside a required enum, which the quirky form wraps in `allOf` (no recorded tool has one: make one)
+    let required = with_schema(&tools, "logseq_get_block", |s| s["required"] = json!(["uuid", "format"]));
+    let changed = quirky(&with_schema(&required, "logseq_get_block", |s| s["properties"]["format"]["enum"][0] = json!("refs")));
+    assert!(Value::Array(changed.clone()).to_string().contains("\"allOf\""), "the required enum is in the allOf form");
+    let failures = compare_tool_lists(&required, &changed);
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].contains("format.enum[0]: expected \"json\", got \"refs\""), "{failures:?}");
 }
 
 #[test]
