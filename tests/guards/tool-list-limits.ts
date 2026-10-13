@@ -5,10 +5,10 @@
  */
 
 /**
- * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 15,323 across 11 tools (#494), but that
+ * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 14,263 across 10 tools (#495), but that
  * is not what a client receives: the Rust server spells its schemas its own way (`format: "uint32"` on every count and
- * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 15,671. So the real payload
- * has about 4,029 characters of headroom under this budget, not the 4,377 the recorded list leaves.
+ * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 14,539. So the real payload
+ * has about 5,161 characters of headroom under this budget, not the 5,437 the recorded list leaves.
  *
  * The history of the number is in the version of `src/tool-list.test.ts` at commit `35fa2dd3`: it was set when the list
  * was about 16,000 characters and raised once to 19,700 for the #61 caps.
@@ -46,6 +46,5 @@ export const PARAM_ALIASES: Record<string, { canonical: string; aliases: string[
   logseq_explore_context: { canonical: 'page', aliases: ['name', 'page_name'] },
   logseq_explore_network: { canonical: 'page', aliases: ['name', 'page_name'] },
   logseq_get_block: { canonical: 'uuid', aliases: ['block_uuid'] },
-  logseq_get_concept_evolution: { canonical: 'concept_name', aliases: ['name', 'page', 'page_name'] },
   logseq_get_page: { canonical: 'page', aliases: ['name', 'page_name'] },
 };
