@@ -37,6 +37,7 @@ The skeleton (#87) and its content:
 - #88: edge cases (aliases, namespaces, block refs and embeds, properties), journals, tags and tasks (done, see "Edge cases, journals, tags and tasks" below)
 - #89: a hub page with 100+ neighbours (done, see "The hub" below)
 - #61: a topic with a page of 12 linking blocks, for the ranking of the references of `explore_context` (see "The crowded topic" below)
+- #498: roll-up pages for the leaf rule and the snippets of `explore_network`, at, under and over the threshold (see "Roll-up pages" below)
 - #90: `npm run test:integration` runs against this graph only, with exact assertions (done; see `tests/integration/setup.md`)
 
 | Page | Exists to test |
@@ -213,7 +214,7 @@ Expected results, measured against a live instance (#118) with the code at the t
 | depth 2, same caps | 162 nodes (+40 `fringe-*`). The journal is a leaf: its 30 topics are not reached |
 | depth 2, same caps, `expandJournals` true | 192 nodes (+30 `journal-topic-*`) |
 | `explore_network` on `journal-topic-01`, depth 2, defaults | 2 nodes: itself and the journal (a leaf) |
-| same, `expand_journals` true | 17 nodes (the journal, then 15 of its other pages: `max_fanout` 15 bites), `truncated` true. Add `max_fanout` 100 for 32 nodes (the journal, 29 other topics, `hub central`), `truncated` false |
+| same, `expand_journals` true | 17 nodes (the journal, then 15 of its 29 other topics: `max_fanout` 15 bites, and `hub central`, which links 70 pages, is a roll-up and ranks after every topic), `truncated` true. Add `max_fanout` 100 for 32 nodes (the journal, 29 other topics, `hub central`), `truncated` false |
 | `explore_context` on the hub | 50 of 71 blocks, 20 of 66 references, 10 of 61 related pages; totals `blocks` 71, `references` 66, `relatedPages` 61; `hasMore` true with `blocks_truncated`, `references_truncated` and `related_pages_truncated`. The references are a prefix of the full ranking (see "Fixed by ranking") |
 | `explore_context` on the hub, `references_offset` 20, 40 and 60 | the next 20 of the 66 references, then 20, then the last 6: `references_truncated` says "Showing 20 of 46 references from offset 20" and names `references_offset` 40, and the last page has no `references_truncated`. At 66 or more no reference and no warning about them |
 | `get_page` on the hub, with children | 71 children |
@@ -230,8 +231,7 @@ lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count
   `neighbour-in-01..05` (2 blocks that link the hub). Those are the only 15 pages with 2 references and every
   other neighbour has 1, so there is no tie at the cap. Tests may assert these names.
 - **Depends on id order.** Which 34 of the 40 `fringe-*` pages depth 2 admits; which 85 of the 105 one-reference
-  pages the `max_fanout` 100 case keeps; which 15 pages the `journal-topic-01` / `expand_journals` case keeps, and
-  whether `hub central` is among them. For these, assert only the node count, `truncated` and the
+  pages the `max_fanout` 100 case keeps; which 15 of the 29 topics the `journal-topic-01` / `expand_journals` case keeps. For these, assert only the node count, `truncated` and the
   `network_truncated` warning (#90). A test that needs a particular fringe or topic page present must use a case
   where the cap does not bite (the `Infinity` rows).
 - **Fixed by ranking (#178, #493).** `explore_context` ranks its references by the blocks of their source page that link
@@ -264,8 +264,38 @@ written `Row N on [[popular topic]]`, and the target has no file.
 `light source`.
 
 The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
-`find_blocks`' maximum of 500 matches. The fixture holds 494 blocks, 478 of them with an `e` (16 without: 2 older ones and
-these 14). With an `e` in these 14 it would be 492. Keep new fixture blocks without the letter, or change that test.
+`find_blocks`' maximum of 500 matches. The fixture holds 504 blocks, 478 of them with an `e` (26 without: 2 older ones, these 14
+and the 10 of the roll-up pages below). With an `e` in these 24 it would be 502. Keep new fixture blocks without the
+letter, or change that test.
+
+## Roll-up pages (#498)
+
+A roll-up page links to almost everything, like the weekly or monthly summary pages a graph generates, and is no journal.
+`explore_network` treats a page that links **more than 30 pages** (`HUB_LINKS`, `rust/src/tools/explore_network/selection.rs`)
+as a leaf: it ranks after every other page and is not walked through unless `expand_journals` is set. The count is of
+distinct pages the page's blocks link, not of blocks. It is separate from the hub so the hub's depth-1 ranking stays as
+documented. Every name is made up, and the blocks avoid the letter `e` (see "The crowded topic").
+
+| Page | File | Links |
+|---|---|---|
+| `solo topic` | `pages/solo topic.md` | one block that links `solo link 01` .. `12` (12 topical pages, link targets only) |
+| `rollup 29` | `pages/rollup 29.md` | **29 pages**, one under the threshold: `solo topic` in two blocks (`Row A`, `Row B`) and `rollup topic 01` .. `28` in a third |
+| `rollup 30` | `pages/rollup 30.md` | **30 pages**, at the threshold: `solo topic` in two blocks and `rollup topic 01` .. `29` |
+| `rollup 31` | `pages/rollup 31.md` | **31 pages**, one over it: `solo topic` in two blocks and `rollup topic 01` .. `30` |
+| `solo link 01` .. `12`, `rollup topic 01` .. `30` | none | link targets only. `rollup topic 30` is linked by `rollup 31` alone |
+
+Measured with the connected-pages query on an instance (#118, LogSeq 0.10.15): the pages each roll-up links are 29, 30 and
+31, and the ordinary pages of the hub fixture link far fewer (`neighbour-in-NN` 1, `neighbour-out-NN` 3, `neighbour-both-NN` 5),
+while `hub central` links 70. The threshold of 30 sits between them, at twice the default `max_fanout`.
+
+| Call | Result |
+|---|---|
+| `explore_network` on `solo topic`, depth 1, defaults | 16 nodes: the root, `rollup 29`, `rollup 30` (two blocks each: they lead as they did before), the 12 `solo link NN` (one block each, order by id), then `rollup 31` last. `rollup 31` has the same two blocks as the others and used to rank with them. Nothing is dropped; no warning (a roll-up at the last depth has nothing to walk through) |
+| same, `max_fanout` 14 | 15 nodes: `rollup 31` is the page the cap drops, with a `network_truncated` warning only. Before, a `solo link NN` went |
+| depth 2, `max_fanout` 100 | 45 nodes: the 16 above and `rollup topic 01` .. `29`. `rollup 29` and `rollup 30` are walked through, `rollup 31` is not: `rollup topic 30` is absent. A `hub_pages_not_expanded` warning names `rollup 31 (31 pages)` and offers nothing to fetch, since the network already holds more pages than it links |
+| depth 2, `max_fanout` 100, `expand_journals` true | 46 nodes: `rollup topic 30` joins, no warning |
+| `explore_network` on `neighbour-out-01`, depth 2, defaults | `hub central` (70 pages) is a depth-1 leaf, none of the `neighbour-in-NN` that only it reaches is in the result, and `hub_pages_not_expanded` offers `expand_journals`. With `expand_journals` the `neighbour-both-NN` and `neighbour-in-01` .. `05` that link it twice join |
+| `with_snippets` on `solo topic`, depth 2, `max_fanout` 100 | the same nodes, and the same 3 calls. The edges of the root carry a `snippet`: `Row A on [[solo topic]]` for each roll-up, and the root's own block, cut at 80 characters with `...`, for each `solo link NN`. Edges deeper than the root have none |
 
 ## Files LogSeq writes when it opens the folder
 

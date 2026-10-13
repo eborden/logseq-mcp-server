@@ -28,7 +28,7 @@ import { connectMcp } from './helpers/server-under-test.js';
  * rust/src/truncation.rs). They replaced the TypeScript unit tests, which fed 600 matches, 1,100 blocks, 150 pages
  * and 80 blocks.
  *
- * Against the fixture graph. Read-only. Its ~494 blocks (478 of them with the letter e) are fewer than
+ * Against the fixture graph. Read-only. Its ~504 blocks (478 of them with the letter e) are fewer than
  * find_blocks' maximum of 500, so through MCP only the cut below the maximum
  * and the clamp can be seen; the cut at the maximum is the parity cases' (#356 dropped the integration test that
  * lowered the maximum, which only a direct call to the TypeScript function could do). find_pages needs more than 200
@@ -87,7 +87,7 @@ describe('result caps (#61)', () => {
   }
 
   describe('logseq_find_blocks limit (max 500) with a text filter', () => {
-    // "e" is in all but 16 of the fixture's blocks (478 of ~494). The crowded topic's blocks avoid it on
+    // "e" is in all but 26 of the fixture's blocks (478 of ~504). The crowded topic's and the roll-ups' blocks avoid it on
     // purpose to keep this margin: see "The crowded topic" in tests/fixtures/README.md
     const QUERY = 'e';
     let matches: number;
@@ -108,7 +108,7 @@ describe('result caps (#61)', () => {
     beforeAll(async () => {
       const { meta } = await findBlocksWithMeta(client, { text: QUERY }, { limit: 0 });
       matches = meta!.totals!.matches;
-      // Every block bar 16 (the fixture holds ~494): computed, so a new fixture block does not break it
+      // Every block bar 26 (the fixture holds ~504): computed, so a new fixture block does not break it
       expect(matches, 'too few fixture blocks hold the letter e to see the default cut').toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
       expect(
         matches,
