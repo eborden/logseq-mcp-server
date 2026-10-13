@@ -75,6 +75,14 @@ describe('explore_network: roll-up pages stay leaves, and edges can say why', ()
     expect(calls).toBe(3);
   });
 
+  it('a journal that links more than 30 pages is a leaf and no roll-up: no degree row, no warning', async () => {
+    // `jun 17th, 2024` links the hub and 30 topics (31 pages). It is a journal, so the degree branches leave it out
+    const result = await exploreNetwork(client, 'journal-topic-01', 2);
+    expect(result.nodes.map((n: { name: string }) => n.name).sort()).toEqual(['Jun 17th, 2024', 'journal-topic-01']);
+    expect(result.warnings).toEqual([]);
+    expect(result.hasMore).toBe(false);
+  });
+
   it('expand_journals walks through the roll-up too', async () => {
     const result = await exploreNetwork(client, 'solo topic', 2, { maxFanout: 100, expandJournals: true });
     const names: string[] = result.nodes.map((n: { name: string }) => n.name);
@@ -93,6 +101,7 @@ describe('explore_network: roll-up pages stay leaves, and edges can say why', ()
     expect(leaf.warnings.map((w: { code: string }) => w.code)).toEqual(['hub_pages_not_expanded']);
     expect(leaf.warnings[0].message).toContain('hub central (70 pages)');
     expect(leaf.warnings[0].howToFetchAll).toContain('expand_journals');
+    expect(leaf.warnings[0].howToFetchAll).toMatch(/adds at least \d+ pages/);
     expect(leaf.hasMore).toBe(true);
 
     const walked = await exploreNetwork(client, 'neighbour-out-01', 2, { expandJournals: true });
@@ -111,9 +120,9 @@ describe('explore_network: roll-up pages stay leaves, and edges can say why', ()
     const root = result.nodes.find((n: { depth: number }) => n.depth === 0).id;
     const byName = (name: string) => result.nodes.find((n: { name: string }) => n.name === name).id;
     const edgeTo = (name: string) => result.edges.find((e: { from: number; to: number }) => e.from === root && e.to === byName(name));
-    // a roll-up's block that links `solo topic`: the lesser of its two blocks' texts
-    expect(edgeTo('rollup 29').snippet).toBe('Row A on [[solo topic]]');
-    expect(edgeTo('rollup 31').snippet).toBe('Row A on [[solo topic]]');
+    // a roll-up's two blocks that link `solo topic` are the same length, so the greater text breaks the tie
+    expect(edgeTo('rollup 29').snippet).toBe('Row B on [[solo topic]]');
+    expect(edgeTo('rollup 31').snippet).toBe('Row B on [[solo topic]]');
     // the root's own block that links a topical page is a long list of links: cut to 80 characters
     const list = edgeTo('solo link 01').snippet as string;
     expect(list.startsWith('Rows [[solo link 01]] [[solo link 02]]')).toBe(true);
