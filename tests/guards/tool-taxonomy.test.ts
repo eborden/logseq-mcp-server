@@ -27,10 +27,10 @@ describe('tool taxonomy (ADR-0037)', () => {
   });
 
   it('has no entry for a v1 tool that already conforms, so the rules run on it now', () => {
-    for (const name of ['logseq_check_links', 'logseq_find_pages', 'logseq_find_blocks', 'logseq_get_page', 'logseq_get_block', 'logseq_get_current', 'logseq_get_graph']) {
+    for (const name of ['logseq_check_links', 'logseq_explore_context', 'logseq_find_pages', 'logseq_find_blocks', 'logseq_get_page', 'logseq_get_block', 'logseq_get_current', 'logseq_get_graph']) {
       expect(V1_TOOL_ALLOWANCES, name).not.toContain(name);
     }
-    expect(V1_TOOL_ALLOWANCES).toHaveLength(7);
+    expect(V1_TOOL_ALLOWANCES).toHaveLength(4);
   });
 
   it('lists each allowance once', () => {
@@ -90,8 +90,8 @@ describe('each taxonomy rule can fail', () => {
   });
 
   it('fails a stale allowance', () => {
-    expect(taxonomyViolations([conforming], ['logseq_get_backlinks'])).toEqual([
-      expect.stringContaining('V1_TOOL_ALLOWANCES lists logseq_get_backlinks'),
+    expect(taxonomyViolations([conforming], ['logseq_get_concept_network'])).toEqual([
+      expect.stringContaining('V1_TOOL_ALLOWANCES lists logseq_get_concept_network'),
     ]);
   });
 

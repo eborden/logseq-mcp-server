@@ -5,10 +5,10 @@
  */
 
 /**
- * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 19,012 across 14 tools (#492), but that
+ * Budget for `JSON.stringify(tools)`, in characters. The recorded list serializes to 16,430 across 12 tools (#493), but that
  * is not what a client receives: the Rust server spells its schemas its own way (`format: "uint32"` on every count and
- * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 19,455. So the real payload
- * has about 245 characters of headroom under this budget, not the 688 the recorded list leaves.
+ * so on, which the by-meaning comparison drops, ADR-0031), and its live list serializes to 16,805. So the real payload
+ * has about 2,895 characters of headroom under this budget, not the 3,270 the recorded list leaves.
  *
  * The history of the number is in the version of `src/tool-list.test.ts` at commit `35fa2dd3`: it was set when the list
  * was about 16,000 characters and raised once to 19,700 for the #61 caps.
@@ -43,8 +43,7 @@ export const NON_IDEMPOTENT = ['logseq_get_current'];
  * drift from the code.
  */
 export const PARAM_ALIASES: Record<string, { canonical: string; aliases: string[] }> = {
-  logseq_build_context: { canonical: 'topic_name', aliases: ['name', 'page', 'page_name'] },
-  logseq_get_backlinks: { canonical: 'page_name', aliases: ['name', 'page'] },
+  logseq_explore_context: { canonical: 'page', aliases: ['name', 'page_name'] },
   logseq_get_block: { canonical: 'uuid', aliases: ['block_uuid'] },
   logseq_get_concept_evolution: { canonical: 'concept_name', aliases: ['name', 'page', 'page_name'] },
   logseq_get_concept_network: { canonical: 'concept_name', aliases: ['name', 'page', 'page_name'] },
