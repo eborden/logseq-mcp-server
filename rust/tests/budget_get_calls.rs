@@ -8,7 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
-use logseq_mcp_server::tools::get_page;
+use logseq_mcp_server::tools::{get_block, get_page};
 use serde_json::{Value, json};
 
 const PAGE: &str = "logseq.Editor.getPage";
@@ -113,6 +113,47 @@ async fn a_page_without_its_blocks_is_never_cut() {
     let page: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert!(page.get("warnings").is_none());
     assert_eq!(methods(&logseq), [PAGE]);
+}
+
+// ---- logseq_get_block, include_children
+
+#[tokio::test]
+async fn a_block_with_children_over_the_budget_is_cut_and_one_without_is_left_alone() {
+    let subtree = |children: i64| json!({"id": 5, "uuid": uuid(5), "content": "Parent", "page": {"id": 10}, "children": (1..=children).map(|n| block(500 + n, 1000, 0)).collect::<Vec<_>>()});
+    let logseq = mock_logseq(vec![subtree(5)]).await;
+    let small = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "include_children": true}))).await.unwrap();
+    assert!(!text_of(&small, 0).contains("result_size_truncated"));
+
+    // 60 children of 1,000 characters: ~60,000 characters
+    let logseq = mock_logseq(vec![subtree(60)]).await;
+    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "include_children": true}))).await.unwrap();
+    assert_eq!(methods(&logseq), ["logseq.Editor.getBlock"]);
+    let text = text_of(&result, 0);
+    assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
+    let cut: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(cut["childrenTruncated"], true);
+    assert_eq!(cut["hasMore"], false);
+    assert_eq!(cut["warnings"][0]["code"], "result_size_truncated");
+    let kept = cut["children"].as_array().unwrap().len();
+    assert!(kept > 10 && kept < 60, "{kept}");
+
+    // the same block read without its children is one entity, whatever its size: LogSeq sends the children unfetched
+    let mut huge = subtree(0);
+    huge["content"] = json!("x".repeat(40_000));
+    huge["children"] = json!([["uuid", uuid(501)], ["uuid", uuid(502)]]);
+    let logseq = mock_logseq(vec![huge.clone()]).await;
+    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5)}))).await.unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&text_of(&result, 0)).unwrap(), huge);
+}
+
+#[tokio::test]
+async fn a_block_with_children_in_markdown_is_cut_with_the_warning_in_its_footer() {
+    let children: Vec<Value> = (1..=60).map(|n| block(500 + n, 1000, 0)).collect();
+    let logseq = mock_logseq(vec![json!({"id": 5, "uuid": uuid(5), "content": "Parent", "page": {"id": 10}, "children": children})]).await;
+    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "include_children": true, "format": "markdown"}))).await.unwrap();
+    let text = text_of(&result, 0);
+    assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
+    assert!(text.contains("result_size_truncated: Showing "), "{}", &text[text.len().saturating_sub(500)..]);
 }
 
 // ---- logseq_get_page, detail outline
