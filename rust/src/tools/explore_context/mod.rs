@@ -243,7 +243,7 @@ pub struct TemporalContext {
 /// sent, whole (BR-0004).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopicContext {
-    pub topic: String,
+    pub page: String,
     pub resolved_from: Option<Value>,
     pub resolved_aliases: Option<Vec<String>>,
     /// The page as the resolver pulled it
@@ -292,12 +292,12 @@ struct Completeness<'a> {
     totals: Totals,
 }
 
-/// A context as written, in BR-0013's order: what was answered (`topic`, `resolvedFrom`,
+/// A context as written, in BR-0013's order: what was answered (`page`, `resolvedFrom`,
 /// `resolvedAliases`), what must not be missed (`hasMore`, `warnings`, `totals`, then `summary`), then
 /// the data (`mainPage`, `directBlocks`, `relatedPages`, `references`, `temporalContext`).
 #[derive(Serialize)]
 struct TopicContextOutput<'a> {
-    topic: &'a str,
+    page: &'a str,
     #[serde(rename = "resolvedFrom", skip_serializing_if = "Option::is_none")]
     resolved_from: Option<&'a Value>,
     #[serde(rename = "resolvedAliases", skip_serializing_if = "Option::is_none")]
@@ -325,7 +325,7 @@ impl TopicContext {
     /// The context in BR-0013's key order.
     pub fn to_value(&self) -> Value {
         result_value(&TopicContextOutput {
-            topic: &self.topic,
+            page: &self.page,
             resolved_from: self.resolved_from.as_ref(),
             resolved_aliases: self.resolved_aliases.as_deref(),
             completeness: Completeness { has_more: self.has_more(), warnings: &self.warnings, totals: self.totals },
@@ -663,7 +663,7 @@ pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: 
     let temporal_context = caps.include_temporal_context.then(|| temporal_context(&main_page));
 
     Ok(TopicContext {
-        topic: page_name.to_owned(),
+        page: page_name.to_owned(),
         resolved_from: resolved_from(page_name, &resolved),
         resolved_aliases: alias_set.resolved_aliases(),
         main_page,
@@ -711,7 +711,7 @@ mod tests {
     fn context_of(blocks: usize, references: usize, related: usize, length: usize) -> TopicContext {
         let text = "x".repeat(length);
         TopicContext {
-            topic: "atlas".into(),
+            page: "atlas".into(),
             resolved_from: None,
             resolved_aliases: None,
             main_page: json!({"id": 1, "name": "atlas"}),
@@ -1011,7 +1011,7 @@ mod tests {
 
     fn context() -> TopicContext {
         TopicContext {
-            topic: "atlas".into(),
+            page: "atlas".into(),
             resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
             resolved_aliases: Some(vec!["Atlas".into(), "Project Atlas".into()]),
             main_page: json!({"id": 1, "name": "project atlas", "properties": {"type": "project"}}),
@@ -1031,7 +1031,7 @@ mod tests {
         assert_eq!(
             context().to_value().to_string(),
             concat!(
-                r#"{"topic":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
+                r#"{"page":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,
                 r#""hasMore":false,"warnings":[{"code":"w","message":"m"}],"totals":{"blocks":9,"relatedPages":1,"references":1},"#,
                 r#""summary":{"totalBlocks":1,"totalRelatedPages":1,"totalReferences":1,"pageProperties":{"type":"project"}},"#,
@@ -1046,7 +1046,7 @@ mod tests {
     fn the_order_of_a_context_does_not_depend_on_which_optional_keys_are_there() {
         use crate::tool::testing::keys;
         let all = [
-            "topic", "resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages",
+            "page", "resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages",
             "references", "temporalContext",
         ];
         assert_eq!(keys(&context().to_value()), all);
@@ -1054,7 +1054,7 @@ mod tests {
         let bare = TopicContext { resolved_from: None, resolved_aliases: None, temporal_context: None, ..context() };
         assert_eq!(
             keys(&bare.to_value()),
-            ["topic", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages", "references"]
+            ["page", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages", "references"]
         );
     }
 

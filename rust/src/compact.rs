@@ -104,7 +104,7 @@ mod tests {
 
     fn context() -> Value {
         json!({
-            "topic": "atlas",
+            "page": "atlas",
             "mainPage": {"id": 1, "name": "atlas", "original-name": "Atlas", "properties": {"a": "b"}},
             "directBlocks": [{"id": 5, "uuid": "u5", "content": "first\nsecond"}],
             "relatedPages": [{"page": {"id": 2, "name": "bob", "originalName": "Bob", "uuid": "p"}, "relationshipType": "inbound"}],
@@ -121,7 +121,7 @@ mod tests {
         assert_eq!(
             compact_topic_context(&context()).to_string(),
             concat!(
-                r#"{"topic":"atlas","mainPage":{"id":1,"name":"atlas","originalName":"Atlas"},"#,
+                r#"{"page":"atlas","mainPage":{"id":1,"name":"atlas","originalName":"Atlas"},"#,
                 r#""directBlocks":[{"uuid":"u5","snippet":"first"}],"#,
                 r#""relatedPages":[{"page":{"id":2,"name":"bob","originalName":"Bob"},"relationshipType":"inbound"}],"#,
                 r#""references":[{"block":{"uuid":"u6","snippet":"see [[Atlas]]"},"sourcePage":{"id":2,"name":"bob","originalName":"Bob"}}],"#,
