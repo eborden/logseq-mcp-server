@@ -372,7 +372,7 @@ pub async fn explore_timeline(client: &LogseqClient, args: &Args, today: Calenda
     // `last_n` with no page lists the newest days first, so a cap keeps the most recent
     let newest_first = page.is_none() && args.last_n.is_some();
     let found = match (page, period) {
-        (Some(name), period) => mentions::fetch(client, name, period).await?,
+        (Some(name), period) => mentions::fetch(client, name, period, args.top_concepts_limit > 0).await?,
         (None, Some(period)) => journals::fetch(client, period, newest_first).await?,
         (None, None) => unreachable!("a call with neither a page nor a period was refused above"),
     };

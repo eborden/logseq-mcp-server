@@ -326,8 +326,10 @@ async fn what_the_mentions_link_is_rolled_up_without_the_page_or_its_aliases() {
 #[tokio::test]
 async fn with_a_zero_limit_there_is_no_roll_up() {
     let answers = vec![root(), tree(), editor_page(), json!([])];
-    let (result, _) = about_a_page(answers, Args { top_concepts_limit: 0, ..of_page("Project Atlas") }).await;
+    let (result, logseq) = about_a_page(answers, Args { top_concepts_limit: 0, ..of_page("Project Atlas") }).await;
     assert!(result["summary"].get("topConcepts").is_none());
+    // nothing reads the refs, so the mentions query does not pull them
+    assert!(!args_of(&logseq, 3)[0].as_str().unwrap().contains(":block/refs [:db/id"));
 }
 
 #[tokio::test]

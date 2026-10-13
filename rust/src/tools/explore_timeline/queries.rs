@@ -34,17 +34,21 @@ pub fn journal_blocks_in_range(start: i64, end: i64) -> Query {
     }
 }
 
-/// What the mentions query pulls of each block: its page whole, so a mention says where it is, and each ref as the
-/// referenced page's own map (the same fields as the journal blocks), so the roll-up of top concepts needs no further
-/// call.
-const MENTION_PULL: &str = "(pull ?block [:db/id :block/uuid :block/content :block/marker :block/properties :block/format {:block/page [*]} \
-     {:block/refs [:db/id :block/name :block/original-name :block/journal? :block/journal-day]}])";
+/// What the mentions query pulls of each block: its page whole, so a mention says where it is, and, for the roll-up of
+/// top concepts, each ref as the referenced page's own map (the same fields as the journal blocks), so the roll-up needs no
+/// further call. A call with `top_concepts_limit` 0 has no roll-up and leaves the refs out: a hub page's mentions can
+/// run to thousands, each with its refs.
+fn mention_pull(with_refs: bool) -> String {
+    let refs = if with_refs { " {:block/refs [:db/id :block/name :block/original-name :block/journal? :block/journal-day]}" } else { "" };
+    format!("(pull ?block [:db/id :block/uuid :block/content :block/marker :block/properties :block/format {{:block/page [*]}}{refs}])")
+}
 
 /// Every block that references the page named `name` (`[[Topic]]`, `#topic`, `#[[multi word]]` and
 /// uuid-style refs all count, in any casing; plain text that merely contains the name does not).
-pub fn blocks_referencing_page(name: &PageName) -> Query {
+pub fn blocks_referencing_page(name: &PageName, with_refs: bool) -> Query {
+    let pull = mention_pull(with_refs);
     Query {
-        text: format!("[:find {MENTION_PULL} :in $ ?page-name :where [?page :block/name ?page-name] [?block :block/refs ?page]]"),
+        text: format!("[:find {pull} :in $ ?page-name :where [?page :block/name ?page-name] [?block :block/refs ?page]]"),
         inputs: vec![DatalogInput::PageName(name.clone())],
     }
 }
@@ -52,14 +56,15 @@ pub fn blocks_referencing_page(name: &PageName) -> Query {
 /// Every block that references any page of an alias group, plus every block on `own_pages` (the
 /// group's other pages; the page asked about comes from its own block tree). Matching is on
 /// `:block/refs`, and a block that matches twice (it references two names of the group) is one row.
-pub fn blocks_referencing_pages(ref_pages: &[PageId], own_pages: &[PageId]) -> Query {
+pub fn blocks_referencing_pages(ref_pages: &[PageId], own_pages: &[PageId], with_refs: bool) -> Query {
+    let pull = mention_pull(with_refs);
     assert!(!ref_pages.is_empty(), "getBlocksReferencingPages needs at least one page id");
     let ref_branch = format!("{} [?block :block/refs ?ref]", ground_ids(ref_pages, "?ref"));
     let text = if own_pages.is_empty() {
-        format!("[:find {MENTION_PULL} :where {ref_branch}]")
+        format!("[:find {pull} :where {ref_branch}]")
     } else {
         format!(
-            "[:find {MENTION_PULL} :where (or-join [?block] (and {ref_branch}) (and {} [?block :block/page ?own]))]",
+            "[:find {pull} :where (or-join [?block] (and {ref_branch}) (and {} [?block :block/page ?own]))]",
             ground_ids(own_pages, "?own")
         )
     };
@@ -93,7 +98,7 @@ mod tests {
 
     #[test]
     fn a_page_s_mentions_are_asked_for_by_its_lowercased_name_bound_with_in() {
-        let query = blocks_referencing_page(&PageName::new("Project Atlas"));
+        let query = blocks_referencing_page(&PageName::new("Project Atlas"), true);
         assert_eq!(query.inputs, vec![DatalogInput::PageName(PageName::new("project atlas"))]);
         assert_eq!(query.inputs[0].to_edn(), "\"project atlas\"");
         assert!(!query.text.contains("atlas"), "no string is embedded in the text");
@@ -102,16 +107,21 @@ mod tests {
 
     #[test]
     fn a_mention_is_pulled_with_its_page_whole_and_each_ref_as_a_page_map() {
-        let query = blocks_referencing_page(&PageName::new("x"));
+        let query = blocks_referencing_page(&PageName::new("x"), true);
         assert!(query.text.starts_with(
             "[:find (pull ?block [:db/id :block/uuid :block/content :block/marker :block/properties :block/format {:block/page [*]} \
              {:block/refs [:db/id :block/name :block/original-name :block/journal? :block/journal-day]}])"
         ));
+        // with no roll-up there is nothing to read the refs for, so they are not pulled
+        for query in [blocks_referencing_page(&PageName::new("x"), false), blocks_referencing_pages(&[id(10)], &[id(11)], false)] {
+            assert!(query.text.starts_with("[:find (pull ?block [:db/id :block/uuid :block/content :block/marker :block/properties :block/format {:block/page [*]}])"), "{}", query.text);
+            assert!(!query.text.contains(":block/refs [:db/id"), "{}", query.text);
+        }
     }
 
     #[test]
     fn a_group_s_mentions_embed_only_ids_and_add_the_other_pages_own_blocks() {
-        let query = blocks_referencing_pages(&[id(10), id(11)], &[id(11)]);
+        let query = blocks_referencing_pages(&[id(10), id(11)], &[id(11)], true);
         assert!(query.inputs.is_empty());
         assert!(query.text.ends_with(
             ":where (or-join [?block] (and [(ground [10 11]) [?ref ...]] [?block :block/refs ?ref]) \
@@ -121,7 +131,7 @@ mod tests {
 
     #[test]
     fn with_no_other_pages_it_is_the_references_alone() {
-        let query = blocks_referencing_pages(&[id(10)], &[]);
+        let query = blocks_referencing_pages(&[id(10)], &[], true);
         assert!(query.text.ends_with(":where [(ground [10]) [?ref ...]] [?block :block/refs ?ref]]"));
         assert!(!query.text.contains("or-join"));
     }
