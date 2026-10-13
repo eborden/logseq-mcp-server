@@ -60,7 +60,7 @@ against a per-worktree instance (#118, LogSeq 0.10.15).
 | `project borealis`, `project cascade` | `pages/project borealis.md`, `pages/project cascade.md` | **Ambiguous alias**: both say `alias:: roadmap`. `roadmap` resolves as ambiguous with those two candidates (`AmbiguousPageError`) |
 | `project atlas/notes` | `pages/project atlas___notes.md` | **Unique namespace leaf**: `notes` resolves to it (`matchedBy` namespace-leaf). No page or alias is named `notes` |
 | `project atlas/meetings`, `project borealis/meetings` | `pages/project atlas___meetings.md`, `pages/project borealis___meetings.md` | **Ambiguous namespace leaf**: `meetings` under two namespaces, with no page or alias named `meetings`. Resolves as ambiguous with both |
-| `archive` | none | **Exists with no file, blocks, refs or aliases**: the namespace parent of `archive/old plans`. Nothing links it, so `get_concept_evolution` returns an empty timeline |
+| `archive` | none | **Exists with no file, blocks, refs or aliases**: the namespace parent of `archive/old plans`. Nothing links it, so `explore_timeline` with this page returns no entries |
 | `archive/old plans` | `pages/archive___old plans.md` | Makes the `archive` page above |
 | `empty page` | `pages/empty page.md` | **Empty page with a file**: one block with empty content. A file with no bytes is never indexed (the instance waits for it forever), so the file holds a single `-` |
 | `alice`, `bob` | `pages/Alice.md`, `pages/Bob.md` | Pages with a file, a page property (`role`) and **no alias** (the unchanged case in `alias-sets`). The files are capitalized, so `original-name` is `Alice` and `Bob`: lookups by `alice`, `Alice` or `ALICE` all find them |
@@ -150,7 +150,7 @@ and no closest name (the routing eval's `find-pages-2` depends on it, so it must
 | `jan 15th, 2025` | `journals/2025_01_15.md` | A `#meeting` with nested blocks. Also the target of `due-date` and a `SCHEDULED` date |
 | `feb 3rd, 2025` | `journals/2025_02_03.md` | After a gap of almost three weeks, so a January window ends before it |
 
-`query_by_date_range` from 20250101 to 20250131 returns 7 days (Jan 2nd to Jan 15th). Add the Dec 31st
+`explore_timeline` from 20250101 to 20250131 returns 7 days (Jan 2nd to Jan 15th). Add the Dec 31st
 and Feb 3rd days, and the hub's journal below, for wider windows.
 
 | Page | File | Exists to test |
