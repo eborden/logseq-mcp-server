@@ -149,8 +149,7 @@
               "type": "string"
             },
             {
-              "type": "number",
-              "format": "double"
+              "type": "number"
             },
             {
               "type": "boolean"
@@ -159,27 +158,15 @@
         },
         "start_date": {
           "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "double"
+          "type": "number"
         },
         "end_date": {
           "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date",
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "double"
+          "type": "number"
         },
         "last_n": {
           "description": "Only blocks on journal pages in the last N calendar days, today included (whole number, 1+)",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
+          "type": "integer",
           "minimum": 1
         },
         "preset": {
@@ -701,12 +688,7 @@
     },
     "description": "Find whether topic A connects to topic B within max_distance link hops (connected-within, the only type). If so, returns the blocks of both pages. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n**Can't find:** blocks that link to a page (logseq_find_blocks links_to), plain-text relationships, or over 500 results.\n**Alternatives:** logseq_get_concept_network (overview).",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "required": [
-        "topic_a",
-        "topic_b",
-        "relationship_type"
-      ],
+      "type": "object",
       "properties": {
         "topic_a": {
           "description": "Primary topic to search for (page name, alias or ISO date)",
@@ -725,20 +707,22 @@
         },
         "max_distance": {
           "description": "Maximum graph distance for connected-within (default: 2)",
+          "default": 2,
           "type": "integer",
-          "format": "uint64",
-          "minimum": 0,
-          "default": 2
+          "minimum": 0
         },
         "limit": {
           "description": "Max results (default: 50, max: 500). connected-within counts every block of both pages, nested ones too, topic A's first; a block that lost children has childrenTruncated",
+          "default": 50,
           "type": "integer",
-          "format": "uint64",
-          "minimum": 0,
-          "default": 50
+          "minimum": 0
         }
       },
-      "type": "object"
+      "required": [
+        "topic_a",
+        "topic_b",
+        "relationship_type"
+      ]
     }
   }
 ]
