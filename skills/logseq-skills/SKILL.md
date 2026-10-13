@@ -149,7 +149,7 @@ Use this skill when:
 
 ## Tool Categories
 
-**Basic Tools (6):** search_blocks, get_page, get_backlinks, get_block, query_by_property, find_pages
+**Basic Tools (5):** find_blocks, get_page, get_backlinks, get_block, find_pages
 **Graph Traversal (1):** get_concept_network
 **Semantic Search (1):** search_by_relationship
 **Context Building (2):** build_context, get_context_for_query

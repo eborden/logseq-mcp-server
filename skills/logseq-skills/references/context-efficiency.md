@@ -12,7 +12,7 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 - Only increase if results are insufficient
 - Never start with limit > 10 for exploratory queries
 
-**Red Flag:** If you're about to set limit=20 or higher on an exploratory `search_blocks` call, STOP and reconsider. A cap raise that a truncation warning names, for a question that needs every result, is a different case: see the caps table in `mcp-tools-reference.md`.
+**Red Flag:** If you're about to set limit=20 or higher on an exploratory `find_blocks` call, STOP and reconsider. A cap raise that a truncation warning names, for a question that needs every result, is a different case: see the caps table in `mcp-tools-reference.md`.
 
 ### 2. Discover Vocabulary Before Guessing
 
@@ -27,8 +27,8 @@ If you don't know what pages exist in the user's graph:
 
 If time scope is ambiguous (no explicit date/timeframe):
 → **ASK USER:** "Was this recent (last week or so) or could it be from any time?"
-→ If recent: Use `query_by_date_range` with `search_term` filter
-→ If any time: Use `search_blocks` with conservative limits (limit=5-10)
+→ If recent: Use `query_by_date_range` with `search_term` filter, or `find_blocks` with `text` and a period (`preset`, `last_n` or dates) for a flat, newest-first list of the matching blocks
+→ If any time: Use `find_blocks` with conservative limits (limit=5-10)
 
 If user provides explicit timeframe ("this week", "in November", "recently"):
 → Use `query_by_date_range` directly, no need to ask
@@ -51,7 +51,7 @@ If user provides explicit timeframe ("this week", "in November", "recently"):
 ### 6. Trust High-Level Tools
 
 `build_context` replaces manual aggregation chains. Don't follow it with:
-- `search_blocks` (already searched)
+- `find_blocks` (already searched)
 - `get_backlinks` (already included)
 - `get_page` (already retrieved)
 
@@ -100,23 +100,23 @@ Does the question have an EXPLICIT timeframe?
             │
             ├─ YES → ASK USER about recency first
             │        → Recent: query_by_date_range
-            │        → Any time: search_blocks(limit=5)
+            │        → Any time: find_blocks(text, limit=5)
             │
             └─ NO → Is it a "what do I know about X" question?
                       │
                       ├─ YES → build_context(topic, max_blocks=20)
                       │        DONE - trust this tool
                       │
-                      └─ NO → search_blocks(limit=5-10)
+                      └─ NO → find_blocks(text, limit=5-10)
 ```
 
 ## Anti-Patterns
 
 | Anti-Pattern | Token Cost | Better Approach | Token Cost |
 |--------------|------------|-----------------|------------|
-| `search_blocks(limit=30, include_context=true)` | 10-20k | `search_blocks(limit=5)` | 1-2k |
+| `find_blocks(text, limit=30, include_context=true)` | 10-20k | `find_blocks(text, limit=5)` | 1-2k |
 | Multiple parallel overlapping searches | 2-3x waste | Single targeted search | 1x |
-| `build_context` + `search_blocks` + `get_backlinks` | 15-25k | `build_context` alone | 5-8k |
+| `build_context` + `find_blocks` + `get_backlinks` | 15-25k | `build_context` alone | 5-8k |
 | "Backup" searches "just in case" | +5-10k each | Expand ONLY if needed | 0 |
 | Searching for compound phrases blindly | wasted turns | `find_pages` → targeted search | 1 extra call |
 
@@ -139,4 +139,4 @@ Does the question have an EXPLICIT timeframe?
 | "what do I know about X" | `build_context` | max_blocks=20 | No |
 | "what pages do I have" | `find_pages` | text filter | No |
 | searching blind | `find_pages` | - | No - call first |
-| "find X" (general) | `search_blocks` | limit=5 | Maybe |
+| "find X" (general) | `find_blocks` | text, limit=5 | Maybe |
