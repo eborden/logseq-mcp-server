@@ -242,7 +242,8 @@ impl Network {
         if whole > BUDGET_CHARS {
             return self;
         }
-        let fits = BUDGET_CHARS * self.nodes.len() / whole.max(1);
+        // A page past the first hop tends to bring more edges than the pages kept averaged, so the estimate keeps a tenth back
+        let fits = BUDGET_CHARS * self.nodes.len() / whole.max(1) * 9 / 10;
         replace_cap_warning(&mut self.warnings, network_truncated_warning(facts, Some(fits)));
         self
     }
@@ -766,6 +767,23 @@ mod tests {
         assert_eq!(fitted, network);
         assert!(fitted.warnings[0].how_to_fetch_all.as_deref().is_some_and(|raise| raise.starts_with("Set max_nodes to 100")));
         assert!(fitted.has_more());
+    }
+
+    #[test]
+    fn a_raise_that_fits_by_less_than_a_tenth_is_not_offered() {
+        // find a page size where the plain estimate (pages x 30,000 / size) lets the 100 pages of the raise in, by under 10%
+        let (name_length, network) = (100..400)
+            .map(|length| (length, capped_star(50, length, 50)))
+            .find(|(_, network)| {
+                let plain = crate::budget::BUDGET_CHARS * 50 / size(&json_of(network));
+                (100..111).contains(&plain)
+            })
+            .expect("some page size puts the estimate just over 100 pages");
+        let fitted = fit_to_budget(network, &json_of);
+        assert_eq!(fitted.nodes.len(), 50, "{name_length}: nothing is cut, the result fits as it stands");
+        assert_eq!(fitted.warnings[0].how_to_fetch_all, None);
+        assert!(fitted.warnings[0].message.contains("nothing to raise"), "{}", fitted.warnings[0].message);
+        assert!(!fitted.has_more());
     }
 
     #[test]
