@@ -468,6 +468,30 @@ describe('the tool-path rule can fail (#520 self-test)', () => {
     ]);
   });
 
+  it('never excuses a stale file path, whatever name the comment holds', () => {
+    const file = 'rust/src/tools/get_page/wire.rs';
+    const missingFile = `doc.md:1: "${file}" names the file ${file}, which does not exist`;
+    expect(run(`See \`${file}\`. ${mark('wire')}\n`)).toEqual([
+      'doc.md:1: "wire" is not in FORMER_TOOL_NAMES, so the guard never reads it bare; name it with the logseq_ prefix or add it to the list',
+      missingFile,
+    ]);
+    // A stem that is in the list is still no excuse for a file: the file is reported and the comment is stale.
+    expect(run(`See \`${file}\`. ${mark('get_widget')}\n`)).toEqual([
+      'doc.md:1: "get_widget" is not named on this line, so remove it from the history comment',
+      missingFile,
+    ]);
+  });
+
+  it('excuses a missing directory only when its name is in FORMER_TOOL_NAMES', () => {
+    // get_widget is in the list (the excuse works, above); get_gadget is not, so the directory is still reported.
+    expect(run(`It was \`rust/src/tools/get_gadget/\`. ${mark('get_gadget')}\n`)).toEqual([
+      'doc.md:1: "get_gadget" is not in FORMER_TOOL_NAMES, so the guard never reads it bare; name it with the logseq_ prefix or add it to the list',
+      'doc.md:1: "rust/src/tools/get_gadget/" names the directory rust/src/tools/get_gadget/, which does not exist',
+    ]);
+    // Adding the name to the list is what makes the excuse work.
+    expect(run(`It was \`rust/src/tools/get_gadget/\`. ${mark('get_gadget')}\n`, 'doc.md', { formerToolNames: ['get_gadget'] })).toEqual([]);
+  });
+
   it('fails a history comment that names a directory the line does not use', () => {
     expect(run(`See \`rust/src/tools/get_page/\`. ${mark('get_widget')}\n`)).toEqual([
       'doc.md:1: "get_widget" is not named on this line, so remove it from the history comment',
