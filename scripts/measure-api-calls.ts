@@ -115,8 +115,10 @@ async function main() {
     ['get_page (outline)', 'logseq_get_page', { page: subject, detail: 'outline' }],
     ['get_backlinks', 'logseq_get_backlinks', { page_name: subject }],
     ['get_concept_evolution', 'logseq_get_concept_evolution', { concept_name: subject }],
-    ['search_by_relationship references', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'references' }],
-    ['search_by_relationship references (same topic twice)', 'logseq_search_by_relationship', { topic_a: subject, topic_b: subject, relationship_type: 'references' }],
+    ['find_blocks (page + links_to)', 'logseq_find_blocks', { page: subject, links_to: [otherSubject], limit: 10 }],
+    ['find_blocks (page + links_to, same page twice)', 'logseq_find_blocks', { page: subject, links_to: [subject], limit: 10 }],
+    ['find_blocks (links_to, 2 pages)', 'logseq_find_blocks', { links_to: [subject, otherSubject], limit: 10 }],
+    ['find_blocks (page + links_to + text + 7-day period)', 'logseq_find_blocks', { page: subject, links_to: [otherSubject], text: subject.slice(0, 4), ...dr, limit: 10 }],
     ['search_by_relationship connected-within', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 }],
     ['find_pages', 'logseq_find_pages', { limit: 50 }],
     ['find_pages (text)', 'logseq_find_pages', { text: subject.slice(0, 4), limit: 50 }],
@@ -144,7 +146,7 @@ async function main() {
           ['get_concept_evolution (aliased page)', 'logseq_get_concept_evolution', { concept_name: aliased }],
           ['get_concept_network depth=1 (aliased page)', 'logseq_get_concept_network', { concept_name: aliased, max_depth: 1 }],
           ['get_concept_network depth=2 (aliased page)', 'logseq_get_concept_network', { concept_name: aliased, max_depth: 2 }],
-          ['search_by_relationship references (aliased topic)', 'logseq_search_by_relationship', { topic_a: aliased, topic_b: otherSubject, relationship_type: 'references' }],
+          ['find_blocks (page + links_to, aliased page)', 'logseq_find_blocks', { page: aliased, links_to: [otherSubject], limit: 10 }],
           ['search_by_relationship connected-within (aliased topic)', 'logseq_search_by_relationship', { topic_a: aliased, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 }],
           ['query_by_date_range 7d search_term (aliased page)', 'logseq_query_by_date_range', { ...dr, search_term: aliased }]
         ] as Case[])

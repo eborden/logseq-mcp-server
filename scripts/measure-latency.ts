@@ -83,7 +83,8 @@ const REPRESENTATIVE: Array<{ tool: string; name: string }> = [
   { tool: 'logseq_query_by_date_range', name: 'date range: slim by default: days oldest first, trees by the left chain, the top concepts of the period' },
   { tool: 'logseq_find_blocks', name: 'property: slim matches, newest first' },
   { tool: 'logseq_find_blocks', name: 'slim hits, newest first' },
-  { tool: 'logseq_search_by_relationship', name: 'relationship: references, exact names' }
+  { tool: 'logseq_find_blocks', name: 'pages: a page and a link, exact names' },
+  { tool: 'logseq_search_by_relationship', name: 'connected: found at the first hop' }
 ];
 
 /** A case to measure: what to call, what the stub answers, and how to tell the answer is right. */

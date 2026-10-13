@@ -64,7 +64,8 @@ const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_build_context', args: { topic_name: 'project atlas' } },
   { name: 'logseq_get_context_for_query', args: { query: 'what is in [[project atlas]]?' } },
   { name: 'logseq_get_concept_network', args: { concept_name: 'Alice', max_depth: 2 } },
-  { name: 'logseq_search_by_relationship', args: { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'references' } },
+  { name: 'logseq_find_blocks', label: 'by page and links_to', args: { page: 'Alice', links_to: ['Bob'] } },
+  { name: 'logseq_search_by_relationship', args: { topic_a: 'Alice', topic_b: 'Bob', relationship_type: 'connected-within' } },
   { name: 'logseq_query_by_date_range', args: { start_date: 20250101, end_date: 20250131 } },
   {
     name: 'logseq_query_by_date_range',

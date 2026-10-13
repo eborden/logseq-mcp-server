@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { buildContextForTopic, getBacklinks, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, getContextForQuery, getPage, getPageOutline, searchByRelationship } from './helpers/tools.js';
+import { buildContextForTopic, findBlocks, findBlocksWithMeta, getBacklinks, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, getContextForQuery, getPage, getPageOutline, searchByRelationship } from './helpers/tools.js';
 import { AmbiguousPageError, PageNotFoundError } from './helpers/errors.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 
@@ -171,19 +171,29 @@ describe('page resolution against the fixture graph', () => {
       }
     });
 
-    it('search_by_relationship throws for a missing topic in either position, for every relationship type', async () => {
-      for (const type of ['references', 'in-pages-linking-to', 'connected-within'] as const) {
-        expect(await searchByRelationship(client, MISSING, EXACT, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
-        expect(await searchByRelationship(client, EXACT, MISSING, type).catch(e => e)).toBeInstanceOf(PageNotFoundError);
+    it('search_by_relationship throws for a missing topic in either position', async () => {
+      expect(await searchByRelationship(client, MISSING, EXACT, 'connected-within').catch(e => e)).toBeInstanceOf(PageNotFoundError);
+      expect(await searchByRelationship(client, EXACT, MISSING, 'connected-within').catch(e => e)).toBeInstanceOf(PageNotFoundError);
+    });
+
+    it('find_blocks throws for a missing page, as the page or as any of links_to, and makes no search', async () => {
+      for (const filters of [{ page: MISSING }, { links_to: [MISSING] }, { page: EXACT, links_to: [EXACT, MISSING] }]) {
+        const before = calls.length;
+        const error = await findBlocks(client, { page: filters.page, linksTo: filters.links_to }).catch(e => e);
+        expect(error).toBeInstanceOf(PageNotFoundError);
+        // the last call is the closest-names lookup of the missing page: the search, which would follow, was never made
+        expect(calls.slice(before).at(-1)).toBe('logseq.Editor.getAllPages');
       }
     });
 
-    it('get_concept_evolution, get_concept_network and search_by_relationship return candidates for a shared alias', async () => {
+    it('get_concept_evolution, get_concept_network, search_by_relationship and find_blocks return candidates for a shared alias', async () => {
       const errors = [
         await getConceptEvolution(client, SHARED.stub).catch(e => e),
         await getConceptNetwork(client, SHARED.stub, 1).catch(e => e),
-        await searchByRelationship(client, SHARED.stub, EXACT, 'references').catch(e => e),
-        await searchByRelationship(client, EXACT, SHARED.stub, 'references').catch(e => e)
+        await searchByRelationship(client, SHARED.stub, EXACT, 'connected-within').catch(e => e),
+        await searchByRelationship(client, EXACT, SHARED.stub, 'connected-within').catch(e => e),
+        await findBlocks(client, { page: SHARED.stub }).catch(e => e),
+        await findBlocks(client, { linksTo: [EXACT, SHARED.stub] }).catch(e => e)
       ];
       for (const error of errors) {
         expect(error instanceof AmbiguousPageError).toBe(true);
@@ -191,17 +201,17 @@ describe('page resolution against the fixture graph', () => {
       }
     });
 
-    it('get_backlinks, get_concept_evolution and search_by_relationship say which page an alias stood for', async () => {
+    it('get_backlinks, get_concept_evolution and find_blocks say which page an alias stood for', async () => {
       const { meta } = await getBacklinksWithMeta(client, UNIQUE.stub);
       const evolution = await getConceptEvolution(client, UNIQUE.stub);
-      const relationship = await searchByRelationship(client, UNIQUE.stub, EXACT, 'references');
+      const found = await findBlocksWithMeta(client, { page: UNIQUE.stub, linksTo: [EXACT] });
 
       expect(meta?.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
       expect(evolution.resolvedFrom?.matchedBy).toBe('alias');
-      expect(relationship.resolvedFrom?.topicA?.matchedBy).toBe('alias');
-      expect(relationship.resolvedFrom?.topicB).toBeUndefined();
+      // only the page named by its alias was not an exact name: the link to Bob was
+      expect(found.meta?.resolvedFrom).toEqual([{ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source }]);
       // `Let [[Bob]] review the room names` and `... tell [[Bob]].` on project atlas
-      expect(relationship.results).toHaveLength(2);
+      expect(found.results).toHaveLength(2);
     });
 
     it('get_page costs one call for an exact name of a page with a file', async () => {

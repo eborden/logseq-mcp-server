@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { findBlocks, searchByRelationship } from './helpers/tools.js';
+import { findBlocks, findBlocksWithMeta, searchByRelationship } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for search_by_relationship and find_blocks against the fixture graph.
+ * Integration tests for search_by_relationship (`connected-within`) and find_blocks (with `page`, `links_to` and
+ * `include_context`) against the fixture graph.
  *
  * `Alice` and `Bob` link each other; 13 blocks on 10 pages link `Bob`; `archive` has no links at
  * all. Read-only.
@@ -18,23 +19,6 @@ describe('Semantic Search Integration Tests', () => {
   });
 
   describe('logseq_search_by_relationship', () => {
-    it('references: the blocks on topic A that link topic B', async () => {
-      const result = await searchByRelationship(client, 'Alice', 'Bob', 'references');
-
-      expect(result.query).toEqual({ topicA: 'Alice', topicB: 'Bob', relationshipType: 'references' });
-      expect(result.relationshipType).toBe('references');
-      expect(result.results.map(b => b.content)).toEqual(['She works with [[Bob]] on the room names.']);
-      expect(result).toMatchObject({ hasMore: false, warnings: [] });
-    });
-
-    it('in-pages-linking-to: blocks linking topic A, on pages that link topic B', async () => {
-      const result = await searchByRelationship(client, 'alice', 'bob', 'in-pages-linking-to');
-
-      expect(result.relationshipType).toBe('in-pages-linking-to');
-      expect(result.results).toHaveLength(8);
-      expect(result.results.every(b => (b.refs ?? []).length > 0)).toBe(true);
-    });
-
     it('connected-within: adjacent pages return the blocks of both', async () => {
       const result = await searchByRelationship(client, 'Alice', 'Bob', 'connected-within', 1);
 
@@ -48,9 +32,15 @@ describe('Semantic Search Integration Tests', () => {
 
       expect(result.results).toEqual([]);
     });
+
+    it('connected-within: adjacent topics are connected whatever the casing', async () => {
+      const result = await searchByRelationship(client, 'ALICE', 'BOB', 'connected-within', 1);
+
+      expect(result.results).toHaveLength(7);
+    });
   });
 
-  describe('logseq_search_by_relationship casing (issue #7)', () => {
+  describe('logseq_find_blocks with page and links_to (#492)', () => {
     let idB: number;
 
     beforeAll(async () => {
@@ -60,36 +50,63 @@ describe('Semantic Search Integration Tests', () => {
       idB = rows[0][0];
     });
 
-    it('references: every casing of topicB returns the same non-empty result', async () => {
-      const lower = await searchByRelationship(client, 'alice', 'bob', 'references');
-      const upper = await searchByRelationship(client, 'ALICE', 'BOB', 'references');
+    it('the blocks on page A that link page B', async () => {
+      const { results, meta } = await findBlocksWithMeta(client, { page: 'Alice', linksTo: ['Bob'] });
 
-      expect(lower.results).toHaveLength(1);
-      expect(upper.results.map(b => b.id).sort()).toEqual(lower.results.map(b => b.id).sort());
+      expect(results.map(b => b.content)).toEqual(['She works with [[Bob]] on the room names.']);
+      expect(meta).toEqual({ hasMore: false, warnings: [], totals: { matches: 1 } });
     });
 
-    it('references: every returned block actually references topicB', async () => {
-      const result = await searchByRelationship(client, 'alice', 'BOB', 'references');
+    it('every casing of both names returns the same non-empty result', async () => {
+      const lower = await findBlocks(client, { page: 'alice', linksTo: ['bob'] });
+      const upper = await findBlocks(client, { page: 'ALICE', linksTo: ['BOB'] });
 
-      expect(result.results).toHaveLength(1);
-      for (const block of result.results) {
+      expect(lower).toHaveLength(1);
+      expect(upper.map(b => b.id).sort()).toEqual(lower.map(b => b.id).sort());
+    });
+
+    it('every returned block actually references the linked page, as [[a link]] or #a-tag and not as a word', async () => {
+      const results = await findBlocks(client, { linksTo: ['BOB'] }, { limit: 100 });
+
+      // `Bob` is linked by 13 blocks on 10 pages
+      expect(results).toHaveLength(13);
+      for (const block of results) {
         expect((block.refs || []).map((ref: any) => ref.id)).toContain(idB);
       }
     });
 
-    it('in-pages-linking-to: is case-insensitive in both topics', async () => {
-      // Every block that links Bob is on a page that links Bob
-      const lower = await searchByRelationship(client, 'bob', 'bob', 'in-pages-linking-to');
-      const upper = await searchByRelationship(client, 'BOB', 'BOB', 'in-pages-linking-to');
+    it('several pages in links_to are all needed: the blocks that link every one of them', async () => {
+      const bob = await findBlocks(client, { linksTo: ['bob'] }, { limit: 100 });
+      const both = await findBlocks(client, { linksTo: ['bob', 'alice'] }, { limit: 100 });
 
-      expect(lower.results).toHaveLength(13);
-      expect(upper.results.map(b => b.id).sort()).toEqual(lower.results.map(b => b.id).sort());
+      // 3 of the 13 blocks that link Bob also link Alice
+      expect(both.map(b => b.content).sort()).toEqual([
+        'Kickoff for [[project atlas]] with [[Alice]] and [[Bob]] #meeting',
+        'Kickoff with [[Alice]] and [[Bob]] #meeting',
+        'Two page refs, a multi-value set\nparticipants:: [[Alice]], [[Bob]]',
+      ]);
+      const ids = new Set(bob.map(b => b.id));
+      expect(both.every(b => ids.has(b.id))).toBe(true);
+      expect(await findBlocks(client, { linksTo: ['alice', 'bob'] }, { limit: 100 })).toEqual(both);
     });
 
-    it('connected-within: adjacent topics are connected whatever the casing', async () => {
-      const result = await searchByRelationship(client, 'ALICE', 'BOB', 'connected-within', 1);
+    it('plain text is not a link: 16 blocks say bob, and the 13 that link him are among them', async () => {
+      const said = await findBlocks(client, { text: 'bob' }, { limit: 100 });
+      const linked = await findBlocks(client, { linksTo: ['bob'] }, { limit: 100 });
 
-      expect(result.results).toHaveLength(7);
+      expect(said).toHaveLength(16);
+      const ids = new Set(said.map(b => b.id));
+      expect(linked.every(b => ids.has(b.id))).toBe(true);
+      expect(linked).toHaveLength(13);
+    });
+
+    it('the pages narrow a text search too, and a page nobody links to finds nothing', async () => {
+      const room = await findBlocks(client, { text: 'room names', page: 'alice', linksTo: ['bob'] });
+      expect(room.map(b => b.content)).toEqual(['She works with [[Bob]] on the room names.']);
+
+      const none = await findBlocksWithMeta(client, { page: 'archive', linksTo: ['bob'] });
+      expect(none.results).toEqual([]);
+      expect(none.meta).toMatchObject({ hasMore: false, totals: { matches: 0 } });
     });
   });
 
