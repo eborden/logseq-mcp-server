@@ -603,8 +603,6 @@ pub(crate) mod testing {
         Flag,
         /// One of these words
         Words(&'static [&'static str]),
-        /// A day number the tool does not require to be a date: a whole number
-        Whole,
         /// A `YYYYMMDD` day ([`YyyyMmDd`])
         Date,
         Scalar,
@@ -695,14 +693,6 @@ pub(crate) mod testing {
                 }
                 refused.push((json!(9_007_199_254_740_992u64), message(param, "9007199254740992", "at most 9007199254740991", None)));
                 taken.extend([json!(min), json!(min + 1), json!(9_007_199_254_740_991u64), json!(min as f64)]);
-                message(param, "missing", "a number (required)", Some("5"))
-            }
-            Takes::Whole => {
-                refuse_kinds(Value::is_number, &|kind| format!("a number, not {kind}"), "5");
-                refused.push((json!(20251115.5), message(param, "20251115.5", "an integer, not a fraction", Some("20251115"))));
-                refused.push((json!(9_007_199_254_740_992u64), message(param, "9007199254740992", "at most 9007199254740991", None)));
-                refused.push((json!(-9_007_199_254_740_992i64), message(param, "-9007199254740992", "at least -9007199254740991", None)));
-                taken.extend([json!(20251115), json!(20251115.0), json!(0), json!(2), json!(-3)]);
                 message(param, "missing", "a number (required)", Some("5"))
             }
             Takes::Date => {

@@ -6,7 +6,7 @@ use crate::edn::{DatalogInput, DayBound, PageId, Query, ground_ids};
 use crate::escape::escape_regex;
 use crate::property::PropertyFilter;
 
-use super::period::Period;
+use crate::period::Period;
 
 /// What the blocks must satisfy, each filter present only when it was given. They AND together in one query.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

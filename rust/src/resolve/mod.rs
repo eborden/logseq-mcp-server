@@ -4,7 +4,7 @@
 //!
 //! The names of a `[[link]]` pass resolve many at a time in [`link_targets`] (for
 //! `check_links`). The alias groups (#69) are in [`alias`]: those of resolved pages, and that of a
-//! free-text name for a `search_term`.
+//! free-text name.
 //!
 //! The resolver's own queries (`queries.rs`) and wire types (`wire.rs`) live in this directory,
 //! since only it reads them; a tool gets the page it resolved as a [`PulledPage`].

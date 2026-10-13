@@ -32,7 +32,7 @@ pub struct TopConcept {
     pub name: String,
     /// Number of returned blocks (nested ones included) that reference the page
     pub count: usize,
-    /// Number of distinct journal days those blocks are on, so `days <= count`
+    /// Number of distinct journal days those blocks are on (a block with no day adds none), so `days <= count`
     pub days: usize,
 }
 
@@ -79,17 +79,17 @@ struct Tally {
 /// Counts every block in the trees, children included: `count` is the number of blocks referencing
 /// a page, `days` the number of distinct entries (journal days) they sit on.
 ///
-/// `entries` are the returned journal days, each with its block trees; `refs_by_block` is
+/// `entries` are the returned days, each with its block trees (`None` for the entry of the blocks with no journal day); `refs_by_block` is
 /// [`extract_concept_refs`] output keyed by block id.
 pub fn roll_up_top_concepts<'a>(
-    entries: impl IntoIterator<Item = (i64, &'a [Value])>,
+    entries: impl IntoIterator<Item = (Option<i64>, &'a [Value])>,
     refs_by_block: &HashMap<i64, Vec<ConceptRef>>,
     limit: u64,
 ) -> Vec<TopConcept> {
     if limit == 0 {
         return Vec::new();
     }
-    fn visit(blocks: &[Value], date: i64, refs_by_block: &HashMap<i64, Vec<ConceptRef>>, order: &mut Vec<i64>, tally: &mut HashMap<i64, Tally>) {
+    fn visit(blocks: &[Value], date: Option<i64>, refs_by_block: &HashMap<i64, Vec<ConceptRef>>, order: &mut Vec<i64>, tally: &mut HashMap<i64, Tally>) {
         for block in blocks {
             let block_id = block.get("id").and_then(crate::wire::whole_number);
             for concept in block_id.and_then(|id| refs_by_block.get(&id)).into_iter().flatten() {
@@ -98,7 +98,9 @@ pub fn roll_up_top_concepts<'a>(
                     Tally { name: concept.name.clone(), count: 0, days: HashSet::new() }
                 });
                 slot.count += 1;
-                slot.days.insert(date);
+                if let Some(date) = date {
+                    slot.days.insert(date);
+                }
             }
             visit(block.get("children").and_then(Value::as_array).map_or(&[], Vec::as_slice), date, refs_by_block, order, tally);
         }
@@ -177,7 +179,7 @@ mod tests {
         ]);
         let day1 = vec![json!({"id": 1, "children": [{"id": 2, "children": []}]})];
         let day2 = vec![json!({"id": 3, "children": []}), json!({"id": 4, "children": []})];
-        roll_up_top_concepts([(20250101, day1.as_slice()), (20250102, day2.as_slice())], &by_block, limit)
+        roll_up_top_concepts([(Some(20250101), day1.as_slice()), (Some(20250102), day2.as_slice())], &by_block, limit)
     }
 
     fn summary(concepts: &[TopConcept]) -> Vec<(String, usize, usize)> {

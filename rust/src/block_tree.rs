@@ -6,7 +6,7 @@
 //! block says which block is to its `:block/left`, so the order is the chain those links make.
 //!
 //! [`build_block_trees`] rebuilds `getPageBlocksTree`-shaped trees from the flat blocks a Datalog
-//! query pulls, for a tool that reads blocks of many pages in one query (`query_by_date_range`).
+//! query pulls, for a tool that reads blocks of many pages in one query (`explore_timeline`).
 
 use std::collections::{HashMap, HashSet};
 

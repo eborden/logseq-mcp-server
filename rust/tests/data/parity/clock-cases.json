@@ -36,5 +36,7 @@
   "period: last_n of one is today",
   "period: text, property and a period together",
   "period: full hits",
-  "period: null answer to the search"
+  "period: null answer to the search",
+  "evolution: the last N calendar days of a page",
+  "evolution: a preset of a page"
 ]

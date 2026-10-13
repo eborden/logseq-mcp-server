@@ -8,8 +8,8 @@
 //! aliases and needs no query. A page that has some costs one Datalog query, for any number of
 //! pages, two hops, bound with `ground_ids`.
 //!
-//! [`resolve_alias_set_by_name`] is the group of a free-text name (a `search_term`), where "not a
-//! page" is an ordinary answer.
+//! [`resolve_alias_set_by_name`] is the group of a free-text name, where "not a page" is an ordinary answer
+//! (`query_by_date_range` used it for its `search_term`; no tool does now).
 
 use std::collections::{HashMap, HashSet};
 
@@ -205,8 +205,7 @@ pub async fn resolve_alias_set(client: &LogseqClient, page: &PulledPage) -> Resu
 }
 
 /// The alias set of a page known only by name, or `None` when no page has
-/// that name or it has no aliases. For free text that may or may not be a page name (a
-/// `search_term`), where "not a page" is an ordinary answer, not an error. One Datalog query.
+/// that name or it has no aliases. For free text that may or may not be a page name, where "not a page" is an ordinary answer, not an error. One Datalog query.
 /// A `null` answer is not that answer (BR-0011, #318): it is a set with no members, marked
 /// [`AliasSet::unavailable`], so the caller can say the lookup failed.
 pub async fn resolve_alias_set_by_name(client: &LogseqClient, name: &str) -> Result<Option<AliasSet>, ToolError> {

@@ -161,6 +161,90 @@
     }
   },
   {
+    "name": "logseq_explore_timeline",
+    "title": "Explore Timeline",
+    "annotations": {
+      "title": "Explore Timeline",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Explore a page or period over time: blocks by day (group_by week or month), with summary.topConcepts. Give page (its blocks and blocks linking to it), a period (start_date + end_date, last_n days or preset), or both; a period leaves out non-journal pages.\n\n**Can't find:** text matches (logseq_find_blocks), days with no journal, or blocks past max_blocks (see hasMore).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page": {
+          "description": "Page to follow: its blocks and blocks linking to it, under any alias (page name, alias or ISO date)",
+          "type": "string"
+        },
+        "start_date": {
+          "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
+          "type": "number"
+        },
+        "end_date": {
+          "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date",
+          "type": "number"
+        },
+        "last_n": {
+          "description": "The last N calendar days, today included (whole number, 1+)",
+          "type": "integer",
+          "minimum": 1
+        },
+        "preset": {
+          "description": "Named period in local time; weeks run Monday to Sunday",
+          "type": "string",
+          "enum": [
+            "today",
+            "yesterday",
+            "this_week",
+            "last_week",
+            "this_month",
+            "last_month",
+            "this_year",
+            "year_to_date"
+          ]
+        },
+        "group_by": {
+          "description": "Join days into weeks or months (default: one entry per day)",
+          "type": "string",
+          "enum": [
+            "day",
+            "week",
+            "month"
+          ]
+        },
+        "slim_results": {
+          "description": "Slim blocks (default). false returns full entities",
+          "default": true,
+          "type": "boolean"
+        },
+        "include_content": {
+          "description": "false returns only per-day block counts and top-level snippets",
+          "default": true,
+          "type": "boolean"
+        },
+        "top_concepts_limit": {
+          "description": "Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it",
+          "default": 10,
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolve_refs": {
+          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
+          "default": false,
+          "type": "boolean"
+        },
+        "max_blocks": {
+          "description": "Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000",
+          "default": 200,
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  {
     "name": "logseq_find_blocks",
     "title": "Find Blocks",
     "annotations": {
@@ -286,7 +370,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property).\n\n**Can't find:** journals (logseq_query_by_date_range), block text (logseq_find_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.",
+    "description": "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property).\n\n**Can't find:** journals (logseq_explore_timeline), block text (logseq_find_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -399,53 +483,6 @@
     }
   },
   {
-    "name": "logseq_get_concept_evolution",
-    "title": "Get Concept Evolution",
-    "annotations": {
-      "title": "Get Concept Evolution",
-      "readOnlyHint": true,
-      "destructiveHint": false,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "description": "Track a concept over time: blocks on its page and blocks linking to it, grouped by day, week or month, with optional date bounds.\n\n**Use when:** \"how has X evolved?\" or \"what's the history of Y?\"\n**Can't find:** unlinked plain-text mentions (logseq_find_blocks), topics with no page, or dated mentions past 500 (narrow dates).\n**Alternatives:** logseq_query_by_date_range for plain journal queries.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "concept_name": {
-          "description": "Concept to track (page name, alias or ISO date)",
-          "type": "string"
-        },
-        "start_date": {
-          "description": "Optional start date in YYYYMMDD format",
-          "type": "number"
-        },
-        "end_date": {
-          "description": "Optional end date in YYYYMMDD format",
-          "type": "number"
-        },
-        "group_by": {
-          "description": "Optional grouping period",
-          "type": "string",
-          "enum": [
-            "day",
-            "week",
-            "month"
-          ]
-        },
-        "max_entries": {
-          "description": "Max mentions, oldest first (default: 100, max: 500)",
-          "default": 100,
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "concept_name"
-      ]
-    }
-  },
-  {
     "name": "logseq_get_current",
     "title": "Get Current Context",
     "annotations": {
@@ -524,81 +561,6 @@
       "required": [
         "page"
       ]
-    }
-  },
-  {
-    "name": "logseq_query_by_date_range",
-    "title": "Query by Date Range",
-    "annotations": {
-      "title": "Query by Date Range",
-      "readOnlyHint": true,
-      "destructiveHint": false,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "description": "Query journal entries by start_date + end_date, last_n journals, or a preset (give exactly one), with optional search.\n\n**Use when:** \"what did I do last week?\" or catching up. summary.topConcepts shows what a period was about.\n**Can't find:** non-journal pages, days with no journal, or blocks past 200 (max_blocks, max 1000).\n**Alternatives:** logseq_get_concept_evolution, logseq_find_blocks.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "start_date": {
-          "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
-          "type": "number"
-        },
-        "end_date": {
-          "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date",
-          "type": "number"
-        },
-        "last_n": {
-          "description": "The N most recent journals that exist (whole number, 1+), newest first",
-          "type": "integer",
-          "minimum": 1
-        },
-        "preset": {
-          "description": "Named period in local time; weeks run Monday to Sunday",
-          "type": "string",
-          "enum": [
-            "today",
-            "yesterday",
-            "this_week",
-            "last_week",
-            "this_month",
-            "last_month",
-            "this_year",
-            "year_to_date"
-          ]
-        },
-        "search_term": {
-          "description": "Optional search term to filter blocks",
-          "type": "string"
-        },
-        "slim_results": {
-          "description": "Slim blocks (default). false returns full entities",
-          "default": true,
-          "type": "boolean"
-        },
-        "include_content": {
-          "description": "false returns only per-day block counts and top-level snippets",
-          "default": true,
-          "type": "boolean"
-        },
-        "top_concepts_limit": {
-          "description": "Entries in summary.topConcepts, the most-linked pages (default 10). 0 omits it",
-          "default": 10,
-          "type": "integer",
-          "minimum": 0
-        },
-        "resolve_refs": {
-          "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)",
-          "default": false,
-          "type": "boolean"
-        },
-        "max_blocks": {
-          "description": "Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000",
-          "default": 200,
-          "type": "integer",
-          "minimum": 0
-        }
-      }
     }
   }
 ]

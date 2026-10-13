@@ -25,7 +25,6 @@
 //! reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside it: slim
 //! output, entity fields, the truncation warnings and the tool helpers.
 
-mod period;
 mod queries;
 pub mod scope;
 mod tips;
@@ -51,10 +50,9 @@ use crate::property::{PropertyFilter, property_filter};
 use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, success_result};
-use crate::tools::query_by_date_range::selection::Selection;
+use crate::period::{Period, Selection, resolve_period};
 use crate::truncation::{CappedTruncation, Paging, SizeCut, blocks_inline_max, capped_truncation_warning, size_truncation_warning};
 
-use self::period::{Period, resolve_period};
 use self::queries::Match;
 use self::scope::{Notes, Scope, check_names, resolve_scope};
 use self::tips::{Others, find_tips};
