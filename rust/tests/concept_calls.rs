@@ -227,7 +227,25 @@ async fn a_roll_up_ranks_after_the_topical_pages_and_is_a_leaf_that_a_warning_na
     assert!(warning.message.contains("Roll Up (31 pages)"), "{}", warning.message);
     // 4 pages are kept and the roll-up links 31: walking through it brings up to 15 more
     assert!(warning.how_to_fetch_all.as_deref().is_some_and(|how| how.starts_with("Set expand_journals to true")));
+    assert!(warning.how_to_fetch_all.as_deref().is_some_and(|how| how.contains("adds at least 15 pages")), "{:?}", warning.how_to_fetch_all);
     assert!(network.has_more());
+}
+
+#[tokio::test]
+async fn a_journal_is_no_roll_up_however_many_pages_it_links_and_a_journal_leaf_withholds_the_offer() {
+    // the journal links 40 pages and makes no degree row (the query leaves journals out), but a reply that had one is no roll-up either
+    let mut rows = roll_up_rows(HUB_LINKS + 1).as_array().unwrap().clone();
+    rows.push(json!([10, 30, "jan 1st, 2025", "Jan 1st, 2025", true, "inbound", 1]));
+    rows.push(json!([10, 30, "jan 1st, 2025", "Jan 1st, 2025", true, "degree", 40]));
+    let logseq = mock_logseq(vec![root(), json!(rows), json!([])]).await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
+    assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B", "Roll Up", "Jan 1st, 2025"]);
+    // only the roll-up is named
+    assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded"]);
+    let warning = &network.warnings[0];
+    assert!(warning.message.contains("Roll Up (31 pages)") && !warning.message.contains("Jan 1st"), "{}", warning.message);
+    // `expand_journals` would also walk through the journal, which is not counted in what it brings: no offer
+    assert!(warning.how_to_fetch_all.is_none() && !network.has_more());
 }
 
 #[tokio::test]
@@ -312,8 +330,10 @@ async fn a_page_with_aliases_asks_for_the_degrees_in_its_grouped_query_too() {
 }
 
 /// A depth-1 answer with the text of one block in a last cell, as the query that asks for snippets answers it.
+/// The last cell is the key the query ranks the blocks of a pair by, `[prose, length, content]`.
 fn snippet_row(source: i64, connected: i64, name: &str, rel: &str, count: i64, text: &str) -> Value {
-    json!([source, connected, name.to_lowercase(), name, false, rel, count, text])
+    let prose = i32::from(!text.starts_with("[[") && !text.starts_with('#'));
+    json!([source, connected, name.to_lowercase(), name, false, rel, count, [prose, text.chars().count().min(200), text]])
 }
 
 #[tokio::test]
@@ -339,7 +359,7 @@ async fn snippets_come_with_the_first_depth_and_cost_no_call() {
     // one resolver query and one query per depth, as without snippets
     assert_eq!(methods(&logseq).len(), 3);
     let first = args_of(&logseq, 1)[0].as_str().unwrap().to_owned();
-    assert!(first.contains("(min ?content)"), "{first}");
+    assert!(first.contains("(max ?key)"), "{first}");
     // the second depth asks for no text, and its rows have no extra cell
     assert!(!args_of(&logseq, 2)[0].as_str().unwrap().contains("?content"));
     let edges = network.to_value()["edges"].clone();

@@ -17,7 +17,7 @@ pub struct Extras {
 
 /// The start of a query: the cells of a row, the count, and the snippet when it is asked for.
 fn find(extras: Extras, source: &str, count: &str) -> String {
-    let snippet = if extras.snippets { " (min ?content)" } else { "" };
+    let snippet = if extras.snippets { " (max ?key)" } else { "" };
     format!("[:find {source} ?connected ?name ?original-name ?journal ?rel-type ({count} ?block){snippet} ")
 }
 
@@ -25,15 +25,24 @@ fn find(extras: Extras, source: &str, count: &str) -> String {
 /// row's `?block` is a page here, so its distinct count is the number of pages). A page that links nothing makes no
 /// row, which reads as 0 (an `or-join` with `ground nil` would drop the row, constraint 3). Only pages count: a
 /// `((uuid))` ref is a block, and a page's link to itself is no link out. Both directions of the pair are covered, as
-/// they are for the links.
+/// they are for the links. A journal makes no `"degree"` row: it is a leaf already, so its count is never read, and a
+/// journal is the connected page with the most blocks and refs, so leaving it out takes most of the join's work.
 const DEGREE_BRANCHES: &str = " \
-     (and [?b1 :block/page ?source] [?b1 :block/refs ?connected] [?o :block/page ?connected] [?o :block/refs ?block] \
+     (and [?b1 :block/page ?source] [?b1 :block/refs ?connected] (not [?connected :block/journal? true]) \
+     [?o :block/page ?connected] [?o :block/refs ?block] \
      [?block :block/name] [(not= ?block ?connected)] [(ground \"degree\") ?rel-type]) \
-     (and [?b1 :block/refs ?source] [?b1 :block/page ?connected] [?o :block/page ?connected] [?o :block/refs ?block] \
+     (and [?b1 :block/refs ?source] [?b1 :block/page ?connected] (not [?connected :block/journal? true]) \
+     [?o :block/page ?connected] [?o :block/refs ?block] \
      [?block :block/name] [(not= ?block ?connected)] [(ground \"degree\") ?rel-type])";
 
-/// The block's text, for the snippet. A page (the `?block` of a `"degree"` row) has none, and reads as `""`.
-const SNIPPET_CLAUSE: &str = " [(get-else $ ?block :block/content \"\") ?content]";
+/// The block's text, for the snippet, as a key that `max` takes the best of among the blocks of a pair:
+/// `[prose, length, content]`, where `prose` is 0 for a text that starts with a link or a tag (`[[` or `#`) and 1 for
+/// any other, `length` is the content's length up to 200 characters, and `content` breaks a tie. So the block shown is
+/// the longest prose block, up to 200 characters, and a bare link or tag only when the pair has nothing else. A page
+/// (the `?block` of a `"degree"` row) has no text, and reads as `[1, 0, ""]`.
+const SNIPPET_CLAUSE: &str = " [(get-else $ ?block :block/content \"\") ?content] [(count ?content) ?n] [(min ?n 200) ?len] \
+     [(clojure.string/starts-with? ?content \"[[\") ?link] [(clojure.string/starts-with? ?content \"#\") ?tag] \
+     [(or ?link ?tag) ?bare] [(compare ?bare false) ?flag] [(- 1 ?flag) ?prose] [(vector ?prose ?len ?content) ?key]";
 
 /// The pages linked to or from every page of `frontier`, in both directions, one row per page pair
 /// and direction: `[source, connected, name, original-name, journal?, "outbound" | "inbound",
@@ -152,8 +161,22 @@ mod tests {
     #[test]
     fn a_snippet_is_one_more_cell_taken_from_the_linking_block() {
         let query = connected_pages(&[id(10)], BOTH);
-        assert!(query.text.contains("(count-distinct ?block) (min ?content) :where "));
-        assert!(query.text.ends_with("[(get-else $ ?connected :block/journal? false) ?journal] [(get-else $ ?block :block/content \"\") ?content]]"));
+        assert!(query.text.contains("(count-distinct ?block) (max ?key) :where "));
+        assert!(query.text.contains("?journal] [(get-else $ ?block :block/content \"\") ?content] [(count ?content) ?n] [(min ?n 200) ?len] "));
+        // the key ranks the blocks of a pair: prose before a link or a tag, then the longer, then the content
+        assert!(query.text.contains("[(clojure.string/starts-with? ?content \"[[\") ?link] [(clojure.string/starts-with? ?content \"#\") ?tag]"));
+        assert!(query.text.ends_with("[(- 1 ?flag) ?prose] [(vector ?prose ?len ?content) ?key]]"));
+    }
+
+    #[test]
+    fn a_journal_makes_no_degree_row_and_that_is_in_both_branches() {
+        let query = connected_pages(&[id(10)], DEGREE);
+        assert_eq!(query.text.matches("(not [?connected :block/journal? true])").count(), 2);
+        // after the link that binds `?connected`, in each branch
+        assert!(query.text.contains("[?b1 :block/refs ?connected] (not [?connected :block/journal? true])"));
+        assert!(query.text.contains("[?b1 :block/page ?connected] (not [?connected :block/journal? true])"));
+        // the links themselves are as they were: a journal is still a neighbour
+        assert!(!connected_pages(&[id(10)], PLAIN).text.contains("journal? true"));
     }
 
     #[test]
@@ -176,8 +199,8 @@ mod tests {
     #[test]
     fn a_group_takes_the_degree_rows_and_the_snippet_the_same_way() {
         let query = connected_pages_grouped(&[(id(10), id(10))], BOTH);
-        assert!(query.text.starts_with("[:find ?group ?connected ?name ?original-name ?journal ?rel-type (count-distinct ?block) (min ?content) :where "));
+        assert!(query.text.starts_with("[:find ?group ?connected ?name ?original-name ?journal ?rel-type (count-distinct ?block) (max ?key) :where "));
         assert_eq!(query.text.matches("[(ground \"degree\") ?rel-type]").count(), 2);
-        assert!(query.text.ends_with("?journal] [(get-else $ ?block :block/content \"\") ?content]]"));
+        assert!(query.text.ends_with("[(vector ?prose ?len ?content) ?key]]"));
     }
 }

@@ -42,7 +42,12 @@ struct Cells(Id, Id, String, String, bool, Direction, Id);
 
 /// The cells of a row of the query that asks for snippets.
 #[derive(Deserialize)]
-struct SnippetCells(Id, Id, String, String, bool, Direction, Id, String);
+struct SnippetCells(Id, Id, String, String, bool, Direction, Id, Key);
+
+/// The best block of a pair as the query picks it: `[prose, length, content]` (`SNIPPET_CLAUSE` in `queries.rs`). Only
+/// the content is read: the other two are what the query ranked the blocks by.
+#[derive(Deserialize)]
+struct Key(Id, Id, String);
 
 #[derive(Deserialize)]
 enum Direction {
@@ -90,7 +95,7 @@ impl From<Cells> for Plain {
 }
 
 impl From<SnippetCells> for Snippeted {
-    fn from(SnippetCells(source, connected, name, original_name, is_journal, direction, count, snippet): SnippetCells) -> Self {
+    fn from(SnippetCells(source, connected, name, original_name, is_journal, direction, count, Key(_, _, snippet)): SnippetCells) -> Self {
         Snippeted(ConnectedRow {
             source: source.0,
             connected: connected.0,
@@ -147,9 +152,13 @@ mod tests {
 
     #[test]
     fn a_query_that_asked_for_snippets_has_a_text_cell_after_the_count() {
-        let rows = connected_rows_with_snippets(&json!([[10, 20, "bob", "Bob", false, "outbound", 3, "Met Bob"], [10, 20, "bob", "Bob", false, "degree", 4, ""]]))
-            .unwrap()
-            .unwrap();
+        // the cell is the key the query ranked the blocks by: `[prose, length, content]`; the content is the snippet
+        let rows = connected_rows_with_snippets(&json!([
+            [10, 20, "bob", "Bob", false, "outbound", 3, [1, 7, "Met Bob"]],
+            [10, 20, "bob", "Bob", false, "degree", 4, [1, 0, ""]]
+        ]))
+        .unwrap()
+        .unwrap();
         assert_eq!(rows[0].snippet.as_deref(), Some("Met Bob"));
         assert_eq!((rows[1].link, rows[1].snippet.as_deref()), (Link::Degree, Some("")));
         assert_eq!(connected_rows_with_snippets(&json!(null)).unwrap(), None);
@@ -159,12 +168,13 @@ mod tests {
             "answer[0]: the row has fewer cells than this server reads"
         );
         assert_eq!(
-            problem(connected_rows(&json!([[10, 20, "b", "B", false, "outbound", 1, "text"]]))),
+            problem(connected_rows(&json!([[10, 20, "b", "B", false, "outbound", 1, [1, 4, "text"]]]))),
             "answer[0]: the row has more cells than this server reads"
         );
+        // a bare text where the key is, as the old query answered, is a response error and not a snippet
         assert_eq!(
-            problem(connected_rows_with_snippets(&json!([[10, 20, "b", "B", false, "outbound", 1, 5]]))),
-            "answer[0][7]: expected a string, got a number"
+            problem(connected_rows_with_snippets(&json!([[10, 20, "b", "B", false, "outbound", 1, "text"]]))),
+            "answer[0][7]: expected a row, got a string"
         );
     }
 

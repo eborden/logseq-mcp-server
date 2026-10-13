@@ -27,10 +27,11 @@ pub struct HubPage {
 pub const HUB_CODE: &str = "hub_pages_not_expanded";
 
 /// The `hub_pages_not_expanded` warning (#498, BR-0006): the pages of `hubs` are in the result as leaves, so what they
-/// link is not. With `offer`, `expand_journals` is the way to walk through them, and the caller has made sure that
-/// doing so brings more pages and that the result would still fit the character budget; without it the warning says only
-/// how to see one page's links.
-pub fn hub_pages_not_expanded(hubs: &[HubPage], offer: bool) -> ResultWarning {
+/// link is not. With `offer` (the pages walking through them brings at least), `expand_journals` is the way to do it,
+/// and the caller has made sure that doing so brings that many pages and that the result, with as many pages as it could
+/// add at most, would still fit the character budget; without it the warning says only how to see one page's links.
+/// `expand_journals` also walks through journal pages, so the caller offers it only when none were left as leaves.
+pub fn hub_pages_not_expanded(hubs: &[HubPage], offer: Option<usize>) -> ResultWarning {
     const LISTED: usize = 5;
     let listed: Vec<String> = hubs.iter().take(LISTED).map(|hub| format!("{} ({} pages)", hub.name, hub.links)).collect();
     let more = hubs.len().saturating_sub(LISTED);
@@ -56,7 +57,10 @@ pub fn hub_pages_not_expanded(hubs: &[HubPage], offer: bool) -> ResultWarning {
     ResultWarning {
         code: HUB_CODE.to_owned(),
         message,
-        how_to_fetch_all: offer.then(|| format!("Set expand_journals to true to walk through {them} too. It can flood the network.")),
+        how_to_fetch_all: offer.map(|at_least| {
+            let pages = if at_least == 1 { "1 page".to_owned() } else { format!("{at_least} pages") };
+            format!("Set expand_journals to true to walk through {them} too. That adds at least {pages} and can flood the network.")
+        }),
     }
 }
 
@@ -348,19 +352,22 @@ mod tests {
 
     #[test]
     fn one_roll_up_is_named_with_its_links_and_the_way_to_walk_through_it() {
-        let warning = hub_pages_not_expanded(&[hub(1, "Rollup", 41)], true);
+        let warning = hub_pages_not_expanded(&[hub(1, "Rollup", 41)], Some(15));
         assert_eq!(warning.code, "hub_pages_not_expanded");
         assert_eq!(
             warning.message,
             "1 page links more than 30 pages, like a roll-up, so it is shown but its links are not followed: Rollup (41 pages). To see its links, start from it."
         );
-        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set expand_journals to true to walk through it too. It can flood the network."));
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set expand_journals to true to walk through it too. That adds at least 15 pages and can flood the network."));
+        // one page is not "1 pages"
+        let one = hub_pages_not_expanded(&[hub(1, "Rollup", 41)], Some(1));
+        assert!(one.how_to_fetch_all.unwrap().contains("adds at least 1 page and"));
     }
 
     #[test]
     fn several_roll_ups_are_listed_up_to_five_and_counted_after_that() {
         let hubs: Vec<HubPage> = (1..=7).map(|n| hub(n, &format!("Rollup {n}"), 30 + n)).collect();
-        let warning = hub_pages_not_expanded(&hubs, true);
+        let warning = hub_pages_not_expanded(&hubs, Some(2));
         assert_eq!(
             warning.message,
             "7 pages link more than 30 pages each, like roll-ups, so they are shown but their links are not followed: \
@@ -368,13 +375,13 @@ mod tests {
              To see the links of one, start from it."
         );
         assert!(warning.how_to_fetch_all.unwrap().starts_with("Set expand_journals to true to walk through them too."));
-        let two = hub_pages_not_expanded(&hubs[..2], false);
+        let two = hub_pages_not_expanded(&hubs[..2], None);
         assert!(two.message.ends_with("Rollup 1 (31 pages), Rollup 2 (32 pages). To see the links of one, start from it."), "{}", two.message);
     }
 
     #[test]
     fn without_an_offer_there_is_nothing_to_fetch() {
-        assert_eq!(hub_pages_not_expanded(&[hub(1, "Rollup", 41)], false).how_to_fetch_all, None);
+        assert_eq!(hub_pages_not_expanded(&[hub(1, "Rollup", 41)], None).how_to_fetch_all, None);
     }
 
     #[test]
