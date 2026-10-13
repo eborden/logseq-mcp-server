@@ -143,7 +143,8 @@ describe('integration suites reach the tools through the helpers', () => {
   const files = testFiles(integrationDir);
 
   it('finds the helper functions', () => {
-    expect(helperNames.size).toBeGreaterThanOrEqual(19);
+    // 19 until #491 merged searchBlocks and queryByProperty (and their WithMeta forms) into findBlocks and findBlocksWithMeta
+    expect(helperNames.size).toBeGreaterThanOrEqual(17);
     expect(helperNames.has('getPage')).toBe(true);
   });
 
