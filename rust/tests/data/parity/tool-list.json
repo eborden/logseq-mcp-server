@@ -111,7 +111,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Explore how a page connects: pages linked to it as nodes and edges, both directions, up to max_depth hops, one edge per page pair with a reference count. With to, the shortest link path to a second page.\n\n**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, see warnings.\n**Can't find:** unlinked pages, or what pages say (logseq_explore_context).",
+    "description": "Explore how a page connects: linked pages as nodes and edges, both directions, max_depth hops, one edge per pair with a reference count. With to, the shortest link path to a second page.\n\n**Caps:** 50 pages, 15 new per page; journals and roll-ups (over 30 links) rank last, unexpanded. If truncated is true, see warnings.\n**Can't find:** unlinked pages, or what pages say (logseq_explore_context).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -142,7 +142,12 @@
           "minimum": 1
         },
         "expand_journals": {
-          "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network. Not with to",
+          "description": "Expand through journal pages and roll-up pages (pages that link over 30 pages) instead of treating them as leaves (default: false). They link to almost everything, so this can flood the network. Not with to",
+          "default": false,
+          "type": "boolean"
+        },
+        "with_snippets": {
+          "description": "Add to each edge of the root the first line (80 characters) of one block that makes the link (default: false: longer results). Not with to",
           "default": false,
           "type": "boolean"
         },
