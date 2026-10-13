@@ -64,7 +64,7 @@ pub use self::warning::{MAX_FANOUT_LIMIT, MAX_NODES_LIMIT};
 pub const NAME: &str = "logseq_explore_network";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Explore how a page connects: the pages linked to it as nodes and edges, both link directions, up to max_depth hops, one edge per page pair with a reference count. With to, the shortest link path to a second page instead.\n\n\
+const DESCRIPTION: &str = "Explore how a page connects: pages linked to it as nodes and edges, both directions, up to max_depth hops, one edge per page pair with a reference count. With to, the shortest link path to a second page.\n\n\
 **Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, see warnings.\n\
 **Can't find:** unlinked pages, or what pages say (logseq_explore_context).";
 
