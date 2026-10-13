@@ -8,16 +8,16 @@ Each LogSeq query returns structured JSON with metadata. A single search with li
 
 ### 1. Start Narrow, Expand If Needed
 
-- Default: `limit=5`, `include_context=false`
+- Start with `limit=5` and `include_context=false` (the tool's own `limit` default is 100)
 - Only increase if results are insufficient
 - Never start with limit > 10 for exploratory queries
 
-**Red Flag:** If you're about to set limit=20 or higher on an exploratory `find_blocks` call, STOP and reconsider. A cap raise that a truncation warning names, for a question that needs every result, is a different case: see the caps table in `mcp-tools-reference.md`.
+**Red Flag:** If you're about to set limit=20 or higher on an exploratory `find_blocks` call, STOP and reconsider. A cap raise that a truncation warning names, for a question that needs every result, is a different case: see the paging table in `results-and-limits.md`.
 
 ### 2. Discover Vocabulary Before Guessing
 
 If you don't know what pages exist in the user's graph:
-→ **Call `logseq_find_pages(limit=1000)` FIRST** before searching. While `hasMore` is true, call again with the `offset` the warning names. With a term in mind, `text` is much cheaper, and `names` checks several exact names in one call
+→ **Call `logseq_find_pages` FIRST** before searching. With a term in mind, `text` is much cheaper, and `names` checks several exact names in one call. For the whole list, set `limit` to 1000, and while `hasMore` is true call again with the `offset` the warning names
 → Review page names, and each page's aliases, to understand the vocabulary
 → Then search using terms that actually exist
 
@@ -57,9 +57,11 @@ If user provides explicit timeframe ("this week", "in November", "recently"):
 
 Only add follow-up queries if `explore_context` returns insufficient results. For several pages, call it once per page, in parallel, rather than once for all.
 
-### 7. Keep Date-Range Results Small Enough to Be Shown
+#### 7. Keep Date-Range Results Small Enough to Be Shown
 
 A host may not hand a large tool result to the model. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB, with the path. A result that is larger still can come back as an error that names the file. Either way the model gets no `summary`, `totals` or `warnings`, which sit at the end of the JSON, so a cut result looks like a complete one. Reading the file in slices pulls the whole result into context anyway. Other hosts have their own limits, and Claude Code's may be configurable, so plan for the smaller one.
+
+Since the character budget (#485), the server cuts each of these tools to 30,000 characters itself and says so with a `result_size_truncated` warning (`results-and-limits.md`), so a result is shown in whole. The sizes below are the uncut ones: they are why the cap in blocks is the handle to page by, and why 200 leaves room for long blocks.
 
 Measured through Claude Code (October 2026) on made-up journals: a result of about 49,000 characters came back inline, and results of about 54,000 and more were saved to a file. The sizes below are from the same journals (about 100 characters of content per block, child blocks nested, no marker or properties).
 
@@ -84,7 +86,7 @@ What to do:
 ```
 Do you know what pages exist in the graph?
   │
-  ├─ NO → logseq_find_pages(limit=1000) first (follow offset while hasMore)
+  ├─ NO → logseq_find_pages first (text, names, or limit 1000 and follow offset while hasMore)
   │        → Then continue with search using known vocabulary
   │
   └─ YES → [Continue below]
