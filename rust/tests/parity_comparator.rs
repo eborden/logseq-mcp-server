@@ -440,7 +440,7 @@ fn a_changed_bound_type_enum_value_required_field_or_description_fails_with_its_
     let enum_value = quirky(&with_schema(&tools, "logseq_search_by_relationship", |s| s["properties"]["relationship_type"]["enum"][0] = json!("refs")));
     let failures = compare_tool_lists(&tools, &enum_value);
     assert_eq!(failures.len(), 1);
-    assert!(failures[0].contains("relationship_type.enum[0]: expected \"references\", got \"refs\""), "{failures:?}");
+    assert!(failures[0].contains("relationship_type.enum[0]: expected \"connected-within\", got \"refs\""), "{failures:?}");
 }
 
 #[test]

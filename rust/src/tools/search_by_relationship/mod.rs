@@ -1,21 +1,21 @@
-//! `logseq_search_by_relationship`: blocks
-//! tied to topic A by a link to topic B, as `references`, `referenced-by` / `in-pages-linking-to`
-//! (one query each, see below) or `connected-within` N hops (#7), cut to `limit` (#61, #183).
+//! `logseq_search_by_relationship`: whether topic A connects to topic B within N hops (`connected-within`, #7), and
+//! the blocks of both pages when it does, cut to `limit` (#61, #183). It has no other mode: the `references` mode is
+//! `logseq_find_blocks` with `page` and `links_to`, and the `referenced-by` and `in-pages-linking-to` modes are gone
+//! (#492, ADR-0037). The tool itself goes when `explore_network` takes `to` (#494).
 //!
 //! Calls: the page resolver for each topic (1 query for an exact name, an alias or an ISO date; the
 //! two topics run together, and once when both are the same name), then the alias groups (1 query for
-//! both topics, none when neither has an alias link), then the search itself. `references`, `referenced-by` and
-//! `in-pages-linking-to` are 1 query. `connected-within` is O(`max_distance`): 1 query per hop,
+//! both topics, none when neither has an alias link), then the walk. It is O(`max_distance`): 1 query per hop,
 //! seeded with the resolved ids, ending at the first hop that reaches topic B, then the two page
 //! trees (2 `logseq.Editor.getPageBlocksTree` calls) only when a connection was found. Two names of
 //! one page make no hop query and return a `same_topic` warning. The cut is applied after the
 //! queries, so it costs no call.
 //!
 //! A `null` answer is not an empty one (BR-0011, #342). It costs no extra call and adds a warning
-//! with no `howToFetchAll`: `relationship_unavailable` for a relationship query, `hop_unavailable`
-//! (the walk stops at that hop) and `page_blocks_unavailable` for a page tree of a found connection.
+//! with no `howToFetchAll`: `hop_unavailable` (the walk stops at that hop) and `page_blocks_unavailable` for a page
+//! tree of a found connection.
 //!
-//! This directory holds what only this search uses: its queries (`queries.rs`) and the answers it
+//! This directory holds what only this search uses: its hop query (`queries.rs`) and the answers it
 //! reads (`wire.rs`). The alias groups, the page resolver, the block budget and the truncation
 //! warnings are shared. The tool has no tips.
 
@@ -33,7 +33,7 @@ use crate::args::parse_args;
 use crate::block_budget::{Budget, count_blocks, take_blocks};
 use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
-use crate::edn::{PageId, PageName};
+use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
 use crate::js;
 use crate::meta::ResultWarning;
@@ -45,9 +45,9 @@ use crate::truncation::{CappedTruncation, INLINE_BLOCKS, SizeCut, capped_truncat
 pub const NAME: &str = "logseq_search_by_relationship";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find blocks tied to topic A by a link to topic B: references, referenced-by, in-pages-linking-to, or connected-within N hops. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n\
-**Can't find:** plain-text relationships (matching is on [[links]] and #tags, not words), or over 500 results.\n\
-**Alternatives:** logseq_find_blocks (keywords), logseq_get_concept_network (overview).";
+const DESCRIPTION: &str = "Find whether topic A connects to topic B within max_distance link hops (connected-within, the only type). If so, returns the blocks of both pages. Both topics must be pages. Capped by limit (max 500): see warnings.\n\n\
+**Can't find:** blocks that link to a page (logseq_find_blocks links_to), plain-text relationships, or over 500 results.\n\
+**Alternatives:** logseq_get_concept_network (overview).";
 
 /// Hops `connected-within` walks when `max_distance` is absent.
 pub const DEFAULT_MAX_DISTANCE: u64 = 2;
@@ -63,13 +63,9 @@ pub const DEFAULT_RELATIONSHIP_LIMIT: u64 = 50;
 /// `results_truncated` warning with no `howToFetchAll`, and `hasMore` stays false.
 pub const MAX_RELATIONSHIP_LIMIT: u64 = 500;
 
-/// No parameter reaches past the cut: the topics and the type fix the query, and `max_distance`
-/// only decides whether `connected-within` finds a connection, not how many blocks it returns.
+/// No parameter reaches past the cut: the topics fix the pages, and `max_distance` only decides whether the walk
+/// finds a connection, not how many blocks it returns.
 const NARROWER: &str = "No other parameter narrows this query.";
-
-/// What the cut list holds, for the warning. The Datalog types return matching blocks in LogSeq's
-/// order, which is not a ranking. `connected-within` has its own wording.
-const MATCHING_BLOCKS: &str = "matching blocks (the first ones listed, not ranked)";
 
 // `relationship_type`, as the input schema lists it. Inlined into the tool's schema, not referenced
 // from `$defs`: the MCP SDK client drops `$defs`. No doc comment, which would become a `description`
@@ -78,22 +74,15 @@ const MATCHING_BLOCKS: &str = "matching blocks (the first ones listed, not ranke
 #[serde(rename_all = "kebab-case")]
 #[schemars(inline)]
 pub enum RelationshipType {
-    References,
-    ReferencedBy,
-    InPagesLinkingTo,
     ConnectedWithin,
 }
 
 impl RelationshipType {
     pub fn as_str(self) -> &'static str {
         match self {
-            RelationshipType::References => "references",
-            RelationshipType::ReferencedBy => "referenced-by",
-            RelationshipType::InPagesLinkingTo => "in-pages-linking-to",
             RelationshipType::ConnectedWithin => "connected-within",
         }
     }
-
 }
 
 fn default_max_distance() -> u64 {
@@ -117,7 +106,7 @@ pub struct Args {
     pub topic_a: String,
     /// Related topic that defines the relationship (page name, alias or ISO date)
     pub topic_b: String,
-    /// Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)
+    /// Type of relationship: connected-within (topics connected within N hops), the only one. Blocks that link to a page: logseq_find_blocks with links_to
     pub relationship_type: RelationshipType,
     /// Maximum graph distance for connected-within (default: 2)
     #[serde(default = "default_max_distance")]
@@ -240,17 +229,19 @@ struct Capped {
     total_blocks: Option<usize>,
 }
 
-/// The cut after the walk and the queries, so it costs no call. `trees` is each topic's page tree
-/// when a `connected-within` found a connection; `results` is then the two trees together.
-fn cap_results(results: Vec<Value>, trees: Option<(Vec<Value>, Vec<Value>)>, limit: u64) -> Capped {
+/// The cut after the walk, so it costs no call. `trees` is each topic's page tree when the walk found a connection,
+/// and `results` is then the two trees together; with none, there are no results.
+fn cap_results(trees: Option<(Vec<Value>, Vec<Value>)>, limit: u64) -> Capped {
     let cap = result_cap(limit);
     if let Some((tree_a, tree_b)) = trees {
-        // `connected-within` counts every block of the two trees, nested ones too, in document order
-        // (topic A's page, then B's), so the result is bounded however deep the trees run (#183). At
-        // or below the cap `results` goes out as it came, untouched.
+        // The result counts every block of the two trees, nested ones too, in document order
+        // (topic A's page, then B's), so it is bounded however deep the trees run (#183). At
+        // or below the cap it goes out as it came, untouched.
         let (total_a, total_b) = (count_blocks(&tree_a), count_blocks(&tree_b));
         let total = total_a + total_b;
         if total <= cap {
+            let mut results = tree_a;
+            results.extend(tree_b);
             return Capped { results, warning: None, total_blocks: None };
         }
         // One budget over both trees, so the cut falls where one pass over A then B would put it
@@ -274,14 +265,7 @@ fn cap_results(results: Vec<Value>, trees: Option<(Vec<Value>, Vec<Value>)>, lim
         kept.extend(kept_b);
         return Capped { results: kept, warning: Some(warning), total_blocks: Some(total) };
     }
-    if results.len() > cap {
-        let total = results.len();
-        let warning = cut_warning(MATCHING_BLOCKS, cap, total, limit);
-        let mut kept = results;
-        kept.truncate(cap);
-        return Capped { results: kept, warning: Some(warning), total_blocks: Some(total) };
-    }
-    Capped { results, warning: None, total_blocks: None }
+    Capped { results: Vec::new(), warning: None, total_blocks: None }
 }
 
 fn cut_warning(what: &str, shown: usize, total: usize, requested: u64) -> ResultWarning {
@@ -372,27 +356,6 @@ async fn fetch_tree(client: &LogseqClient, name: &str) -> Result<Option<Vec<Valu
 /// `pages_unavailable`, #64), so `hasMore` is unaffected. The retry advice is in the message.
 const RETRY_ADVICE: &str = "Retry in a moment, or call logseq_get_graph to check which graph is open.";
 
-/// What the query of a relationship type looks for, for the warning.
-fn relationship_sought(relationship_type: RelationshipType, topic_a: &str, topic_b: &str) -> String {
-    match relationship_type {
-        RelationshipType::References => format!("the blocks of \"{topic_a}\" that reference \"{topic_b}\""),
-        RelationshipType::InPagesLinkingTo => format!("the blocks that reference \"{topic_a}\" in pages linking to \"{topic_b}\""),
-        RelationshipType::ReferencedBy => format!("the blocks that reference \"{topic_a}\" in pages referenced by \"{topic_b}\""),
-        RelationshipType::ConnectedWithin => unreachable!("connected-within has its own warnings"),
-    }
-}
-
-fn relationship_unavailable(relationship_type: RelationshipType, topic_a: &str, topic_b: &str) -> ResultWarning {
-    ResultWarning::new(
-        "relationship_unavailable",
-        format!(
-            "LogSeq returned no answer when looking up {} (possibly no graph open or a re-index in progress), \
-             so the empty results may not mean nothing matches. {RETRY_ADVICE}",
-            relationship_sought(relationship_type, topic_a, topic_b)
-        ),
-    )
-}
-
 fn frontier_truncated((depth, reached): (u64, usize)) -> ResultWarning {
     ResultWarning::new(
         "frontier_truncated",
@@ -425,22 +388,20 @@ fn page_blocks_unavailable(which: &str, topic: &str) -> ResultWarning {
     )
 }
 
-/// Blocks tied to topic A by a link to topic B. Returns the result as the
-/// JSON the tool prints.
+/// Whether topic A connects to topic B within `max_distance` hops, and the blocks of both pages when it does.
+/// Returns the result as the JSON the tool prints.
 ///
-/// A topic with aliases matches references written under any of its names (`resolvedAliases` says
-/// which): one extra query for both topics together, and none when neither has an alias. Two names of
-/// one page (the same name twice, or a page and its alias) are not a connection: no walk, no results
-/// and a `same_topic` warning. A walk whose hop was cut (500 pages) and found nothing says
-/// `frontier_truncated`: "not connected" may be a false negative, while a found connection is always
-/// real.
+/// Every name of a topic counts as that topic (`resolvedAliases` says which): one alias query for both topics
+/// together, and none when neither has an alias. Two names of one page (the same name twice, or a page and its alias)
+/// are not a connection: no walk, no results and a `same_topic` warning. A walk whose hop was cut (500 pages) and
+/// found nothing says `frontier_truncated`: "not connected" may be a false negative, while a found connection is
+/// always real.
 ///
 /// Fails with [`ToolError::PageNotFound`] (guidance with the closest names) if a topic matches no page,
 /// and [`ToolError::AmbiguousPage`] (with the candidates) if one matches several.
 pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Result<Value, ToolError> {
     let Args { topic_a, topic_b, relationship_type, max_distance, limit } = args;
-    let mut results: Vec<Value> = Vec::new();
-    // Each topic's page tree, for a `connected-within` that found a connection
+    // Each topic's page tree, when the walk found a connection
     let mut trees: Option<(Vec<Value>, Vec<Value>)> = None;
     let mut warnings: Vec<ResultWarning> = Vec::new();
 
@@ -456,118 +417,69 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
     let set_a = sets.remove(0);
     let same_topic_page = resolved_a.page.entity_id() == resolved_b.page.entity_id();
     warnings.extend(alias_set_warnings(&if same_topic_page { vec![&set_a] } else { vec![&set_a, &set_b] }));
-    let any_aliases = set_a.has_aliases() || set_b.has_aliases();
 
-    match relationship_type {
-        // Blocks on topic A's page whose :block/refs include topic B's page. Matching on refs (not content)
-        // is case-insensitive and covers [[link]], #tag, #[[multi word]] and uuid-style refs.
-        RelationshipType::References => {
-            let query = if any_aliases {
-                queries::blocks_on_pages_referencing_ids(&set_a.ids()?, &set_b.ids()?)?
-            } else {
-                queries::blocks_on_page_referencing(&PageName::new(name_a), &PageName::new(name_b))
-            };
-            results = fetch_blocks(client, query).await?.unwrap_or_else(|| {
-                warnings.push(relationship_unavailable(*relationship_type, topic_a, topic_b));
-                Vec::new()
-            });
-        }
-        // Blocks that reference topic A, on pages that also hold a block referencing topic B (inbound: the
-        // pages that link to B).
-        RelationshipType::InPagesLinkingTo => {
-            let query = if any_aliases {
-                queries::blocks_referencing_in_pages_linking_ids(&set_a.ids()?, &set_b.ids()?)?
-            } else {
-                queries::blocks_referencing_in_pages_linking(&PageName::new(name_a), &PageName::new(name_b))
-            };
-            results = fetch_blocks(client, query).await?.unwrap_or_else(|| {
-                warnings.push(relationship_unavailable(*relationship_type, topic_a, topic_b));
-                Vec::new()
-            });
-        }
-        // Blocks that reference topic A, on pages that a block on topic B's page references (outbound: the
-        // pages B links to). `referenced-by` once ran the inbound query here, against the
-        // tool's description (#299, D5); the maintainer approved making it do what the description says.
-        RelationshipType::ReferencedBy => {
-            let query = if any_aliases {
-                queries::blocks_referencing_in_pages_referenced_by_ids(&set_a.ids()?, &set_b.ids()?)?
-            } else {
-                queries::blocks_referencing_in_pages_referenced_by(&PageName::new(name_a), &PageName::new(name_b))
-            };
-            results = fetch_blocks(client, query).await?.unwrap_or_else(|| {
-                warnings.push(relationship_unavailable(*relationship_type, topic_a, topic_b));
-                Vec::new()
-            });
-        }
-        RelationshipType::ConnectedWithin => {
-            // The ids come from the resolved pages and their alias groups, so no further lookups are
-            // needed. Every name of a topic counts as that topic: the walk starts from all of A's names and
-            // ends at any of B's.
-            let id_a = resolved_a.page.entity_id();
-            let id_b = resolved_b.page.entity_id();
-            let seeds: Vec<i64> = match id_a {
-                None => Vec::new(),
-                Some(_) if set_a.has_aliases() => member_ids(&set_a),
-                Some(id) => vec![id],
-            };
+    // The ids come from the resolved pages and their alias groups, so no further lookups are
+    // needed. Every name of a topic counts as that topic: the walk starts from all of A's names and
+    // ends at any of B's.
+    let id_a = resolved_a.page.entity_id();
+    let id_b = resolved_b.page.entity_id();
+    let seeds: Vec<i64> = match id_a {
+        None => Vec::new(),
+        Some(_) if set_a.has_aliases() => member_ids(&set_a),
+        Some(id) => vec![id],
+    };
 
-            if id_b.is_some_and(|id| seeds.contains(&id)) {
-                // Both topics are names of one page (the same name, or a page and its alias). There is
-                // nothing to connect, and a walk would "find" the page again through its own links (the
-                // `alias::` block refs the alias stub), so say so instead of walking.
-                warnings.push(ResultWarning::new(
-                    "same_topic",
-                    format!(
-                        "\"{topic_a}\" and \"{topic_b}\" are names of the same page, so connected-within has nothing to connect. \
-                         Ask about two different pages."
-                    ),
-                ));
-            } else if let (Some(_), Some(id_b)) = (id_a, id_b) {
-                // Any name of B ends the walk, except names B shares with A: the walk starts there, so
-                // reaching them proves nothing. B's own page is never one of them (checked above).
-                let mut targets: HashSet<i64> = HashSet::new();
-                targets.insert(id_b);
-                if set_b.has_aliases() {
-                    targets.extend(member_ids(&set_b));
+    if id_b.is_some_and(|id| seeds.contains(&id)) {
+        // Both topics are names of one page (the same name, or a page and its alias). There is
+        // nothing to connect, and a walk would "find" the page again through its own links (the
+        // `alias::` block refs the alias stub), so say so instead of walking.
+        warnings.push(ResultWarning::new(
+            "same_topic",
+            format!(
+                "\"{topic_a}\" and \"{topic_b}\" are names of the same page, so connected-within has nothing to connect. \
+                 Ask about two different pages."
+            ),
+        ));
+    } else if let (Some(_), Some(id_b)) = (id_a, id_b) {
+        // Any name of B ends the walk, except names B shares with A: the walk starts there, so
+        // reaching them proves nothing. B's own page is never one of them (checked above).
+        let mut targets: HashSet<i64> = HashSet::new();
+        targets.insert(id_b);
+        if set_b.has_aliases() {
+            targets.extend(member_ids(&set_b));
+        }
+        targets.retain(|id| !seeds.contains(id));
+
+        match walk(client, &seeds, &targets, *max_distance).await? {
+            Walk::Connected => {
+                // If connected, return blocks from both topics. A tree LogSeq didn't answer is
+                // missing, not empty: the connection stays reported and a warning says what's absent.
+                let tree_a = fetch_tree(client, name_a).await?;
+                let tree_b = fetch_tree(client, name_b).await?;
+                if tree_a.is_none() {
+                    warnings.push(page_blocks_unavailable("A", topic_a));
                 }
-                targets.retain(|id| !seeds.contains(id));
-
-                match walk(client, &seeds, &targets, *max_distance).await? {
-                    Walk::Connected => {
-                        // If connected, return blocks from both topics. A tree LogSeq didn't answer is
-                        // missing, not empty: the connection stays reported and a warning says what's absent.
-                        let tree_a = fetch_tree(client, name_a).await?;
-                        let tree_b = fetch_tree(client, name_b).await?;
-                        if tree_a.is_none() {
-                            warnings.push(page_blocks_unavailable("A", topic_a));
-                        }
-                        if tree_b.is_none() {
-                            warnings.push(page_blocks_unavailable("B", topic_b));
-                        }
-                        let (tree_a, tree_b) = (tree_a.unwrap_or_default(), tree_b.unwrap_or_default());
-                        results = tree_a.iter().chain(&tree_b).cloned().collect();
-                        trees = Some((tree_a, tree_b));
-                    }
-                    Walk::NotConnected { cut_at } => warnings.extend(cut_at.map(frontier_truncated)),
-                    Walk::Unavailable { hop, cut_at } => {
-                        warnings.extend(cut_at.map(frontier_truncated));
-                        warnings.push(hop_unavailable(hop));
-                    }
+                if tree_b.is_none() {
+                    warnings.push(page_blocks_unavailable("B", topic_b));
                 }
+                trees = Some((tree_a.unwrap_or_default(), tree_b.unwrap_or_default()));
+            }
+            Walk::NotConnected { cut_at } => warnings.extend(cut_at.map(frontier_truncated)),
+            Walk::Unavailable { hop, cut_at } => {
+                warnings.extend(cut_at.map(frontier_truncated));
+                warnings.push(hop_unavailable(hop));
             }
         }
     }
 
-    let capped = cap_results(results, trees, *limit);
+    let capped = cap_results(trees, *limit);
     warnings.extend(capped.warning);
 
     let mut query = Map::new();
     query.insert("topicA".into(), json!(topic_a));
     query.insert("topicB".into(), json!(topic_b));
     query.insert("relationshipType".into(), json!(relationship_type.as_str()));
-    if *relationship_type == RelationshipType::ConnectedWithin {
-        query.insert("maxDistance".into(), json!(max_distance));
-    }
+    query.insert("maxDistance".into(), json!(max_distance));
 
     let mut result = Map::new();
     result.insert("query".into(), Value::Object(query));
@@ -594,13 +506,6 @@ pub async fn search_by_relationship(client: &LogseqClient, args: &Args) -> Resul
         result.insert("totals".into(), json!({ "blocks": total }));
     }
     Ok(Value::Object(result))
-}
-
-/// A query for blocks, run and unwrapped, or `None` when LogSeq gave no answer
-/// (`null`, BR-0011), which is not "nothing matches".
-async fn fetch_blocks(client: &LogseqClient, query: crate::edn::Query) -> Result<Option<Vec<Value>>, ToolError> {
-    let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
-    Ok(wire::block_rows(&answer)?.map(|rows| rows.into_iter().map(Value::Object).collect()))
 }
 
 #[cfg(test)]
@@ -688,34 +593,24 @@ mod tests {
     }
 
     #[test]
-    fn matching_blocks_within_the_limit_come_back_untouched() {
-        let blocks: Vec<Value> = (1..=3).map(|id| block(id, vec![])).collect();
-        let capped = cap_results(blocks.clone(), None, 3);
-        assert_eq!((capped.results, capped.warning, capped.total_blocks), (blocks, None, None));
-    }
-
-    #[test]
-    fn matching_blocks_past_the_limit_are_cut_and_counted() {
-        let blocks: Vec<Value> = (1..=5).map(|id| block(id, vec![])).collect();
-        let capped = cap_results(blocks, None, 2);
-        assert_eq!(ids(&capped.results), [1, 2]);
-        assert_eq!(capped.total_blocks, Some(5));
-        let warning = capped.warning.unwrap();
-        assert_eq!(warning.code, "results_truncated");
-        assert_eq!(warning.message, "Showing 2 of 5 matching blocks (the first ones listed, not ranked).");
-        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set limit to 5 (or higher) to get all 5."));
+    fn no_connection_is_no_results_and_no_cut() {
+        let capped = cap_results(None, 3);
+        assert_eq!((capped.results, capped.warning, capped.total_blocks), (Vec::new(), None, None));
     }
 
     #[test]
     fn a_limit_past_the_maximum_is_the_maximum_and_says_so() {
-        let blocks: Vec<Value> = (1..=501).map(|id| block(id, vec![])).collect();
-        let capped = cap_results(blocks, None, 900);
+        // 300 blocks on each page, nested ones counted: 600 of them, past the 500 a call returns
+        let tree_a: Vec<Value> = (1..=300).map(|id| block(id, vec![])).collect();
+        let tree_b: Vec<Value> = (1001..=1300).map(|id| block(id, vec![])).collect();
+        let capped = cap_results(Some((tree_a, tree_b)), 900);
         assert_eq!(capped.results.len(), 500);
+        assert_eq!(capped.total_blocks, Some(600));
         let warning = capped.warning.unwrap();
         assert_eq!(
             warning.message,
-            "Showing 500 of 501 matching blocks (the first ones listed, not ranked): limit is capped at its maximum of 500 (900 was asked for), \
-             so the rest can't be fetched in one call. No other parameter narrows this query."
+            "Showing 500 of 600 blocks of the two pages, nested ones counted (kept 300 from topic A and 200 from topic B, of 300 and 300; topic A's first, then topic B's): \
+             limit is capped at its maximum of 500 (900 was asked for), so the rest can't be fetched in one call. No other parameter narrows this query."
         );
         assert_eq!(warning.how_to_fetch_all, None);
     }
@@ -724,8 +619,7 @@ mod tests {
     fn two_trees_are_cut_in_document_order_topic_a_first_and_a_cut_parent_says_so() {
         let tree_a = vec![block(1, vec![block(2, vec![]), block(3, vec![])])];
         let tree_b = vec![block(10, vec![]), block(11, vec![])];
-        let all: Vec<Value> = tree_a.iter().chain(&tree_b).cloned().collect();
-        let capped = cap_results(all, Some((tree_a, tree_b)), 2);
+        let capped = cap_results(Some((tree_a, tree_b)), 2);
         assert_eq!(ids(&capped.results), [1, 2]);
         assert_eq!(capped.results[0]["childrenTruncated"], json!(true));
         assert_eq!(capped.total_blocks, Some(5));
@@ -741,15 +635,16 @@ mod tests {
         let tree_a = vec![block(1, vec![block(2, vec![])])];
         let tree_b = vec![block(10, vec![])];
         let all: Vec<Value> = tree_a.iter().chain(&tree_b).cloned().collect();
-        let capped = cap_results(all.clone(), Some((tree_a, tree_b)), 3);
+        let capped = cap_results(Some((tree_a, tree_b)), 3);
         assert_eq!((capped.results, capped.warning, capped.total_blocks), (all, None, None));
     }
 
     #[test]
     fn a_limit_of_zero_keeps_nothing_and_says_how_many_there_were() {
-        let capped = cap_results(vec![block(1, vec![])], None, 0);
+        let capped = cap_results(Some((vec![block(1, vec![])], vec![block(10, vec![])])), 0);
         assert!(capped.results.is_empty());
-        assert_eq!(capped.warning.unwrap().message, "Showing 0 of 1 matching blocks (the first ones listed, not ranked).");
+        assert_eq!(capped.total_blocks, Some(2));
+        assert!(capped.warning.unwrap().message.starts_with("Showing 0 of 2 blocks of the two pages"));
     }
 
     #[test]
@@ -770,8 +665,8 @@ mod tests {
     #[test]
     fn the_arguments_default_and_are_read_in_schema_order() {
         let read = |value: Value| parse_args::<Args>(value.as_object());
-        let args = read(json!({"topic_a": "A", "topic_b": "B", "relationship_type": "references", "max_distance": null})).unwrap();
-        assert_eq!((args.max_distance, args.limit, args.relationship_type), (2, 50, RelationshipType::References));
+        let args = read(json!({"topic_a": "A", "topic_b": "B", "relationship_type": "connected-within", "max_distance": null})).unwrap();
+        assert_eq!((args.max_distance, args.limit, args.relationship_type), (2, 50, RelationshipType::ConnectedWithin));
         // topic_a is read before the others, whatever else is wrong
         assert_eq!(
             read(json!({"topic_b": 1})).unwrap_err().to_string(),
@@ -787,7 +682,7 @@ mod tests {
     #[test]
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
-        let base = json!({"topic_a": "A", "topic_b": "B", "relationship_type": "references"});
+        let base = json!({"topic_a": "A", "topic_b": "B", "relationship_type": "connected-within"});
         let without = |param: &str| {
             let mut base = base.clone();
             base.as_object_mut().unwrap().remove(param);
@@ -795,8 +690,7 @@ mod tests {
         };
         sweep::<Args>(without("topic_a"), "topic_a", Takes::Text, true);
         sweep::<Args>(without("topic_b"), "topic_b", Takes::Text, true);
-        let words = &["references", "referenced-by", "in-pages-linking-to", "connected-within"];
-        sweep::<Args>(without("relationship_type"), "relationship_type", Takes::Words(words), true);
+        sweep::<Args>(without("relationship_type"), "relationship_type", Takes::Words(&["connected-within"]), true);
         sweep::<Args>(base.clone(), "max_distance", Takes::Count(0), false);
         sweep::<Args>(base, "limit", Takes::Count(0), false);
     }
@@ -804,7 +698,7 @@ mod tests {
     #[test]
     fn the_search_schema_means_what_the_pinned_one_means() {
         use crate::tool::testing::{meaning, schema_of};
-        // `inputSchema` of logseq_search_by_relationship in the ADR-0016 snapshot
+        // `inputSchema` of logseq_search_by_relationship in the ADR-0016 snapshot, with the one type left (#492)
         let pinned = json!({
             "type": "object",
             "properties": {
@@ -812,8 +706,8 @@ mod tests {
                 "topic_b": {"type": "string", "description": "Related topic that defines the relationship (page name, alias or ISO date)"},
                 "relationship_type": {
                     "type": "string",
-                    "enum": ["references", "referenced-by", "in-pages-linking-to", "connected-within"],
-                    "description": "Type of relationship: references (blocks about A that reference B), referenced-by (blocks about A in pages referenced by B), in-pages-linking-to (blocks about A in pages linking to B), connected-within (topics connected within N hops)",
+                    "enum": ["connected-within"],
+                    "description": "Type of relationship: connected-within (topics connected within N hops), the only one. Blocks that link to a page: logseq_find_blocks with links_to",
                 },
                 "max_distance": {"type": "integer", "minimum": 0, "default": 2, "description": "Maximum graph distance for connected-within (default: 2)"},
                 "limit": {

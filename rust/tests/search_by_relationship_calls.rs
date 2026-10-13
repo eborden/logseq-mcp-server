@@ -1,4 +1,4 @@
-//! The relationship search's LogSeq traffic against a mock LogSeq on a local port: how many calls
+//! The relationship search's (`connected-within`, its one type since #492) LogSeq traffic against a mock LogSeq on a local port: how many calls
 //! it makes, in which order, with which inputs, and what it answers. The call
 //! counts are those in `CLAUDE.md` ("Current Implementation Status"); the parity harness
 //! (`parity.rs`) checks the same calls and the result bytes against the recorded results.
@@ -78,10 +78,6 @@ fn page(id: i64, name: &str, alias: &[i64]) -> Value {
     page
 }
 
-fn pulled_block(id: i64) -> Value {
-    json!([{"id": id, "uuid": uuid(id), "content": format!("block {id}"), "path-refs": [{"id": 10}]}])
-}
-
 fn editor_block(id: i64) -> Value {
     json!({"id": id, "uuid": uuid(id), "content": format!("block {id}"), "page": {"id": 10}, "children": []})
 }
@@ -101,11 +97,6 @@ fn resolver_name(request: &Value) -> Option<String> {
         let input = request["args"][1].as_str().unwrap();
         serde_json::from_str::<String>(input).unwrap()
     })
-}
-
-/// The request's `:in` inputs, as the text LogSeq reads.
-fn inputs_of(request: &Value) -> Vec<String> {
-    request["args"].as_array().unwrap()[1..].iter().map(|input| input.as_str().unwrap().to_owned()).collect()
 }
 
 /// The first-query answer for a name: the page it names, else nothing.
@@ -128,84 +119,6 @@ fn count_matching(logseq: &MockLogseq, needle: &str) -> usize {
 }
 
 #[tokio::test]
-async fn references_with_no_aliases_costs_three_calls_two_resolvers_and_the_query() {
-    let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
-    let logseq = mock_logseq(move |request| match resolver_name(request) {
-        Some(name) => resolve(&name, &pages),
-        None => json!([pulled_block(101), pulled_block(102)]),
-    })
-    .await;
-
-    let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::References)).await.unwrap();
-
-    assert_eq!(logseq.seen.lock().unwrap().len(), 3);
-    assert_eq!(count_matching(&logseq, ":in $ ?n :where"), 2);
-    let query = logseq.seen.lock().unwrap().iter().find(|r| resolver_name(r).is_none()).cloned().unwrap();
-    assert!(text_of(&query).starts_with("[:find (pull ?block [*]) :in $ ?page-name ?ref-name"));
-    // an exact name is handed on as typed and bound lowercase
-    assert_eq!(inputs_of(&query), ["\"atlas\"", "\"bob\""]);
-    assert_eq!(result["results"].as_array().unwrap().len(), 2);
-    assert_eq!(result["query"], json!({"topicA": "Atlas", "topicB": "Bob", "relationshipType": "references"}));
-}
-
-#[tokio::test]
-async fn referenced_by_asks_for_the_pages_topic_b_references_and_in_pages_linking_to_for_the_pages_that_link_to_it() {
-    let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
-    let run = |relationship_type: RelationshipType| {
-        let pages = pages.clone();
-        async move {
-            let logseq = mock_logseq(move |request| match resolver_name(request) {
-                Some(name) => resolve(&name, &pages),
-                None => json!([pulled_block(101)]),
-            })
-            .await;
-            let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", relationship_type)).await.unwrap();
-            assert_eq!(result["results"].as_array().unwrap().len(), 1);
-            // the same 3 calls as the inbound reading: 2 resolvers and 1 query
-            assert_eq!(logseq.seen.lock().unwrap().len(), 3);
-            let query = logseq.seen.lock().unwrap().iter().find(|r| resolver_name(r).is_none()).cloned().unwrap();
-            (text_of(&query), inputs_of(&query))
-        }
-    };
-
-    let (outbound, inputs) = run(RelationshipType::ReferencedBy).await;
-    assert!(outbound.contains("[?source :block/page ?b] [?source :block/refs ?page]"), "{outbound}");
-    assert!(!outbound.contains("?linker"), "{outbound}");
-    assert_eq!(inputs, ["\"atlas\"", "\"bob\""]);
-
-    let (inbound, inputs) = run(RelationshipType::InPagesLinkingTo).await;
-    assert!(inbound.contains("[?linker :block/refs ?b] [?linker :block/page ?page]"), "{inbound}");
-    assert_eq!(inputs, ["\"atlas\"", "\"bob\""]);
-}
-
-#[tokio::test]
-async fn referenced_by_with_aliases_adds_the_one_alias_lookup_and_matches_by_the_ids_of_the_groups() {
-    let pages = vec![page(10, "Atlas", &[11]), page(20, "Bob", &[21])];
-    let logseq = mock_logseq(move |request| {
-        let text = text_of(request);
-        if let Some(name) = resolver_name(request) {
-            resolve(&name, &pages)
-        } else if text.starts_with("[:find ?start") {
-            json!([
-                [10, {"id": 10, "name": "atlas", "original-name": "Atlas"}],
-                [10, {"id": 11, "name": "project atlas", "original-name": "Project Atlas"}],
-                [20, {"id": 20, "name": "bob", "original-name": "Bob"}],
-                [20, {"id": 21, "name": "robert", "original-name": "Robert"}]
-            ])
-        } else {
-            json!([pulled_block(101)])
-        }
-    })
-    .await;
-
-    search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::ReferencedBy)).await.unwrap();
-
-    // two resolvers, one alias lookup for both topics, one query over the ids of both groups
-    assert_eq!(logseq.seen.lock().unwrap().len(), 4);
-    assert_eq!(count_matching(&logseq, "[(ground [10 11]) [?a ...]] [(ground [20 21]) [?b ...]] [?source :block/page ?b] [?source :block/refs ?page]"), 1);
-}
-
-#[tokio::test]
 async fn the_same_name_twice_is_resolved_once() {
     let pages = vec![page(10, "Atlas", &[])];
     let logseq = mock_logseq(move |request| match resolver_name(request) {
@@ -214,10 +127,12 @@ async fn the_same_name_twice_is_resolved_once() {
     })
     .await;
 
-    search_by_relationship(&client(&logseq), &args("Atlas", " ATLAS ", RelationshipType::InPagesLinkingTo)).await.unwrap();
+    let result = search_by_relationship(&client(&logseq), &args("Atlas", " ATLAS ", RelationshipType::ConnectedWithin)).await.unwrap();
 
-    assert_eq!(logseq.seen.lock().unwrap().len(), 2);
+    // one resolver for both topics, and no walk: they are one page
+    assert_eq!(logseq.seen.lock().unwrap().len(), 1);
     assert_eq!(count_matching(&logseq, ":in $ ?n :where"), 1);
+    assert_eq!(result["warnings"][0]["code"], "same_topic");
 }
 
 #[tokio::test]
@@ -230,17 +145,18 @@ async fn a_topic_with_aliases_adds_one_query_for_both_topics_and_matches_by_id()
         } else if text.starts_with("[:find ?start") {
             json!([[10, {"id": 10, "name": "atlas", "original-name": "Atlas"}], [10, {"id": 11, "name": "project atlas", "original-name": "Project Atlas"}]])
         } else {
-            json!([pulled_block(101)])
+            // the hop from every name of topic A reaches nothing
+            json!([])
         }
     })
     .await;
 
-    let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::References)).await.unwrap();
+    let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", RelationshipType::ConnectedWithin)).await.unwrap();
 
-    // two resolvers, one alias lookup for both topics, one query over the ids of the group
+    // two resolvers, one alias lookup for both topics, one hop query over the ids of the group
     assert_eq!(logseq.seen.lock().unwrap().len(), 4);
     assert_eq!(count_matching(&logseq, "[(ground [10]) [?start ...]]"), 1);
-    assert_eq!(count_matching(&logseq, "[(ground [10 11]) [?page ...]] [(ground [20]) [?ref ...]]"), 1);
+    assert_eq!(count_matching(&logseq, "[(ground [10 11]) [?p ...]]"), 1);
     assert_eq!(result["resolvedAliases"], json!({"topicA": ["Atlas", "Project Atlas"]}));
 }
 
@@ -384,7 +300,7 @@ async fn a_topic_that_is_no_page_fails_with_the_closest_names_and_the_other_topi
     })
     .await;
 
-    let error = search_by_relationship(&client(&logseq), &args("Atlas", "Atlsa", RelationshipType::References)).await.unwrap_err();
+    let error = search_by_relationship(&client(&logseq), &args("Atlas", "Atlsa", RelationshipType::ConnectedWithin)).await.unwrap_err();
 
     assert!(matches!(error, ToolError::PageNotFound(_)), "{error}");
     assert!(error.to_string().starts_with("No page \"Atlsa\"."));
@@ -400,58 +316,12 @@ async fn a_failed_connection_is_the_error_even_when_the_other_topic_is_not_found
     let dead = "http://127.0.0.1:1".to_owned();
     let client = LogseqClient::new(&Config { api_url: dead, auth_token: "t".into(), timeout_ms: Some(2000), tips: None });
 
-    let error = search_by_relationship(&client, &args("Atlas", "Bob", RelationshipType::References)).await.unwrap_err();
+    let error = search_by_relationship(&client, &args("Atlas", "Bob", RelationshipType::ConnectedWithin)).await.unwrap_err();
 
     assert!(error.to_string().starts_with("Cannot connect to LogSeq at"), "{error}");
 }
 
 const RETRY: &str = "Retry in a moment, or call logseq_get_graph to check which graph is open.";
-
-/// A search whose relationship query answers `answer`, and everything else as a real empty answer.
-async fn search_with_query_answer(relationship_type: RelationshipType, answer: Value) -> Value {
-    let pages = vec![page(10, "Atlas", &[]), page(20, "Bob", &[])];
-    let logseq = mock_logseq(move |request| match resolver_name(request) {
-        Some(name) => resolve(&name, &pages),
-        None => answer.clone(),
-    })
-    .await;
-    search_by_relationship(&client(&logseq), &args("Atlas", "Bob", relationship_type)).await.unwrap()
-}
-
-#[tokio::test]
-async fn a_null_answer_to_the_relationship_query_is_a_warning_not_no_matches() {
-    let cases = [
-        (RelationshipType::References, "the blocks of \"Atlas\" that reference \"Bob\""),
-        (RelationshipType::InPagesLinkingTo, "the blocks that reference \"Atlas\" in pages linking to \"Bob\""),
-        (RelationshipType::ReferencedBy, "the blocks that reference \"Atlas\" in pages referenced by \"Bob\""),
-    ];
-    for (relationship_type, sought) in cases {
-        let result = search_with_query_answer(relationship_type, Value::Null).await;
-
-        assert_eq!(result["results"], json!([]), "{relationship_type:?}");
-        assert_eq!(result["hasMore"], json!(false));
-        assert_eq!(
-            result["warnings"],
-            json!([{
-                "code": "relationship_unavailable",
-                "message": format!(
-                    "LogSeq returned no answer when looking up {sought} (possibly no graph open or a re-index in progress), \
-                     so the empty results may not mean nothing matches. {RETRY}"
-                ),
-            }]),
-            "{relationship_type:?}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn a_real_empty_answer_to_the_relationship_query_has_no_warning() {
-    for relationship_type in [RelationshipType::References, RelationshipType::InPagesLinkingTo, RelationshipType::ReferencedBy] {
-        let result = search_with_query_answer(relationship_type, json!([])).await;
-
-        assert_eq!((&result["results"], &result["warnings"]), (&json!([]), &json!([])), "{relationship_type:?}");
-    }
-}
 
 #[tokio::test]
 async fn a_null_hop_stops_the_walk_with_no_more_calls_and_says_not_connected_may_be_wrong() {
@@ -581,32 +451,3 @@ async fn a_null_hop_after_a_cut_hop_keeps_the_frontier_warning_and_adds_its_own(
     assert_eq!(result["hasMore"], json!(false));
 }
 
-#[tokio::test]
-async fn a_null_answer_to_the_aliased_relationship_query_is_still_a_warning_not_no_matches() {
-    for relationship_type in [RelationshipType::References, RelationshipType::InPagesLinkingTo, RelationshipType::ReferencedBy] {
-        let pages = vec![page(10, "Atlas", &[11]), page(20, "Bob", &[])];
-        let logseq = mock_logseq(move |request| {
-            let text = text_of(request);
-            if let Some(name) = resolver_name(request) {
-                resolve(&name, &pages)
-            } else if text.starts_with("[:find ?start") {
-                json!([[10, {"id": 10, "name": "atlas", "original-name": "Atlas"}], [10, {"id": 11, "name": "project atlas", "original-name": "Project Atlas"}]])
-            } else {
-                // the query over the ids of the groups
-                Value::Null
-            }
-        })
-        .await;
-
-        let result = search_by_relationship(&client(&logseq), &args("Atlas", "Bob", relationship_type)).await.unwrap();
-
-        // two resolvers, one alias lookup, the grouped query: the aliased path was taken
-        assert_eq!(asked(&logseq).len(), 4, "{relationship_type:?}");
-        assert_eq!(result["resolvedAliases"]["topicA"], json!(["Atlas", "Project Atlas"]), "{relationship_type:?}");
-        assert_eq!(result["results"], json!([]), "{relationship_type:?}");
-        assert_eq!(result["hasMore"], json!(false));
-        let warnings = result["warnings"].as_array().unwrap();
-        assert_eq!(warnings.len(), 1, "{relationship_type:?}");
-        assert_eq!(warnings[0]["code"], "relationship_unavailable", "{relationship_type:?}");
-    }
-}
