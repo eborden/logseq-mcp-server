@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { queryByProperty } from './helpers/tools.js';
+import { findBlocks } from './helpers/tools.js';
 import { InvalidParameterError } from './helpers/errors.js';
 import { BlockEntity, PageEntity } from './helpers/types.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * query_by_property: Datalog implementation vs the Editor API crawl it replaced.
+ * find_blocks with a property filter (the tool that replaced query_by_property, #491): Datalog implementation vs the
+ * Editor API crawl the first version of that tool replaced.
  *
  * The crawl (getAllPages, then getPageBlocksTree per page, then a walk over
  * every block) lives here as the oracle, against the fixture graph. The cases
@@ -14,6 +15,13 @@ import { connectFixture } from './helpers/fixture-client.js';
  * shape (tests/fixtures/README.md, "Properties"), each with the exact number of
  * blocks it matches. The crawl is ~260 calls on the fixture.
  */
+
+/** The blocks whose `key` property holds `value`, as the Editor API would spell them once the keys are camelCased. */
+const queryByProperty = (client: LogseqClient, key: string, value: string, slimResults?: boolean) =>
+  findBlocks(client, { property: key, value }, { slimResults });
+
+/** LogSeq's own spelling of a key (`created-by`) as the Editor API sends it (`createdBy`). */
+const camelKey = (key: string) => key.replace(/-([a-z0-9])/g, (_, next: string) => next.toUpperCase());
 
 class CountingClient extends LogseqClient {
   methods: string[] = [];
@@ -39,11 +47,11 @@ function newRule(block: BlockEntity, key: string, value: string): boolean {
   return oldRule(block, key, value);
 }
 
-/** Property values are sets, so element order may differ between APIs. */
+/** Property values are sets, so element order may differ between APIs, and the two spell a key differently. */
 function normalizeProps(props: Record<string, any> | undefined): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(props ?? {})) {
-    out[k] = Array.isArray(v) ? [...v].sort() : v;
+    out[camelKey(k)] = Array.isArray(v) ? [...v].sort() : v;
   }
   return out;
 }
@@ -73,7 +81,7 @@ const CASES: Case[] = [
   { label: 'tag value', key: 'topic', value: 'planning', count: 1 },
 ];
 
-describe('query_by_property: Datalog vs Editor API crawl', () => {
+describe('find_blocks by property: Datalog vs Editor API crawl', () => {
   let client: CountingClient;
   let pages: PageEntity[];
   let crawled: BlockEntity[]; // every block in the graph, flattened, with children intact
@@ -157,7 +165,15 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     expect(result.length).toBeGreaterThan(oldMatches.length);
   });
 
-  it('returns blocks in the Editor API shape, minus children and level', async () => {
+  it('returns the newest block first', async () => {
+    for (const { label, key, value } of cases) {
+      const result = (await queryByProperty(client, key, value)) as BlockEntity[];
+      const ids = result.map(block => block.id);
+      expect(ids, label).toEqual([...ids].sort((a, b) => b - a));
+    }
+  });
+
+  it("returns the blocks as LogSeq's query pulls them (kebab-case keys), minus children and level", async () => {
     for (const { label, key, value } of cases) {
       const result = (await queryByProperty(client, key, value)) as BlockEntity[];
       const byUuid = new Map(crawled.map(b => [b.uuid, b]));
@@ -166,12 +182,10 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
         const old = byUuid.get(block.uuid)!;
         expect(old, `${label}: block missing from crawl`).toBeDefined();
 
-        // Same keys, except the tree-only ones the Datalog result doesn't have
-        const missing = Object.keys(old).filter(k => !(k in block));
-        expect(missing.sort(), label).toEqual(
-          Object.keys(old).filter(k => k === 'children' || k === 'level').sort()
-        );
-        expect(Object.keys(block).filter(k => !(k in old)), label).toEqual([]);
+        // The same keys once the Editor API's camelCase is undone, except the tree-only ones the Datalog result
+        // doesn't have
+        const oldKeys = Object.keys(old).filter(k => k !== 'children' && k !== 'level').sort();
+        expect(Object.keys(block).map(camelKey).sort(), label).toEqual(oldKeys);
 
         expect(block.content).toBe(old.content);
         expect(block.id).toBe(old.id);
@@ -180,7 +194,7 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
         expect(block.parent).toEqual(old.parent);
         expect(block.left).toEqual(old.left);
         expect(normalizeProps(block.properties)).toEqual(normalizeProps(old.properties));
-        expect(block.propertiesOrder).toEqual(old.propertiesOrder);
+        expect(((block as any)['properties-order'] as string[] | undefined)?.map(camelKey), label).toEqual(old.propertiesOrder);
         expect(block.page?.id).toBe(old.page?.id);
         expect(block).not.toHaveProperty('children');
       }
@@ -193,7 +207,7 @@ describe('query_by_property: Datalog vs Editor API crawl', () => {
     const result = (await queryByProperty(client, key, value)) as any[];
 
     for (const block of result.slice(0, 25)) {
-      expect(block.page.originalName).toBe(nameById.get(block.page.id));
+      expect(block.page['original-name']).toBe(nameById.get(block.page.id));
       expect(typeof block.page.name).toBe('string');
     }
   });

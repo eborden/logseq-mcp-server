@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { searchBlocks, searchByRelationship } from './helpers/tools.js';
+import { findBlocks, searchByRelationship } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for search_by_relationship and search_blocks against the fixture graph.
+ * Integration tests for search_by_relationship and find_blocks against the fixture graph.
  *
  * `Alice` and `Bob` link each other; 13 blocks on 10 pages link `Bob`; `archive` has no links at
  * all. Read-only.
@@ -93,7 +93,7 @@ describe('Semantic Search Integration Tests', () => {
     });
   });
 
-  describe('enhanced search_blocks with includeContext', () => {
+  describe('find_blocks with includeContext', () => {
     // "test" is in 9 blocks: 3 on `property types`, 3 on the sentinel page, 1 on the hub and the
     // two journals that mention a test plan
     const TEST_PAGES = [
@@ -103,14 +103,14 @@ describe('Semantic Search Integration Tests', () => {
     ];
 
     it('should return blocks without context when includeContext is false', async () => {
-      const results = (await searchBlocks(client, 'test', 5, false))!;
+      const results = (await findBlocks(client, { text: 'test' }, { limit: 5, includeContext: false }))!;
 
       expect(results).toHaveLength(5);
       expect(results.every(b => !('context' in b))).toBe(true);
     });
 
     it('should include context when includeContext is true', async () => {
-      const results = (await searchBlocks(client, 'test', 10, true))!;
+      const results = (await findBlocks(client, { text: 'test' }, { limit: 10, includeContext: true }))!;
 
       expect(results.map(b => b.context!.page.name).sort()).toEqual(TEST_PAGES);
       for (const block of results) {
@@ -121,7 +121,7 @@ describe('Semantic Search Integration Tests', () => {
     });
 
     it('should extract references from block content', async () => {
-      const results = (await searchBlocks(client, 'test', 10, true))!;
+      const results = (await findBlocks(client, { text: 'test' }, { limit: 10, includeContext: true }))!;
       const references = results.flatMap(b => b.context!.references).sort();
 
       // `category:: [[test data]]` and `[[project atlas]]: ... test plan started`
@@ -133,7 +133,7 @@ describe('Semantic Search Integration Tests', () => {
     });
 
     it('should extract tags from block content', async () => {
-      const results = (await searchBlocks(client, '#meeting', 100, true))!;
+      const results = (await findBlocks(client, { text: '#meeting' }, { limit: 100, includeContext: true }))!;
 
       expect(results.map(b => b.context!.page.name).sort()).toEqual([
         'jan 15th, 2025', 'jan 6th, 2025', 'project atlas/meetings', 'project atlas/meetings',

@@ -53,7 +53,7 @@ async function main() {
   for (const [n] of refRows) counts.set(n, (counts.get(n) ?? 0) + 1);
   const subject = choice.rest[0] ?? [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
 
-  // A property key/value that exists, so query_by_property has something to return
+  // A property key/value that exists, so find_blocks with a property has something to return
   const propRows = await logseq.callAPI<Array<[{ properties?: Record<string, unknown> }]>>('logseq.DB.datascriptQuery', [
     `[:find (pull ?b [:block/properties]) :where [?b :block/properties]]`
   ]);
@@ -74,11 +74,11 @@ async function main() {
 
   try {
     const slimCases: Array<[string, string, Args]> = [
-      ['search_blocks (limit 50)', 'logseq_search_blocks', { query: subject.slice(0, 4), limit: 50 }],
-      ['search_blocks include_context (limit 50)', 'logseq_search_blocks', { query: subject.slice(0, 4), limit: 50, include_context: true }],
+      ['find_blocks text (limit 50)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 50 }],
+      ['find_blocks text include_context (limit 50)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 50, include_context: true }],
       ['query_by_date_range last_n 7', 'logseq_query_by_date_range', { last_n: 7 }],
       ...(propKey
-        ? ([['query_by_property', 'logseq_query_by_property', { property_key: propKey, property_value: propValue }]] as Array<[string, string, Args]>)
+        ? ([['find_blocks property', 'logseq_find_blocks', { property: propKey, value: propValue }]] as Array<[string, string, Args]>)
         : [])
     ];
     // These have no slim_results parameter, so slim vs full does not apply. Sizes only.

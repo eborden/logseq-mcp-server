@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { getBacklinksWithMeta, getConceptNetwork, getPage, searchBlocks } from './helpers/tools.js';
+import { getBacklinksWithMeta, getConceptNetwork, findBlocks, getPage } from './helpers/tools.js';
 import { PageNotFoundError } from './helpers/errors.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
@@ -92,7 +92,7 @@ describe('Datalog :in inputs Integration Tests', () => {
     await expect(getConceptNetwork(client, name, 1)).rejects.toBeInstanceOf(PageNotFoundError);
     await expect(getBacklinksWithMeta(client, name)).rejects.toBeInstanceOf(PageNotFoundError);
     // A search term is data too: it matches no block, and the regex it becomes is escaped
-    expect(await searchBlocks(client, name)).toEqual([]);
+    expect(await findBlocks(client, { text: name })).toEqual([]);
   });
 
   it('a name the error message quotes keeps its characters', async () => {

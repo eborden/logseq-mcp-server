@@ -4,7 +4,7 @@
  * checks word for word against the shape it expects; the classes only name what the message says.
  */
 
-/** `No page "<name>". Closest: a, b. Try logseq_search_blocks ...` */
+/** `No page "<name>". Closest: a, b. Try logseq_find_blocks ...` */
 export class PageNotFoundError extends Error {
   constructor(
     readonly pageName: string,

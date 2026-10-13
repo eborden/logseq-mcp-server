@@ -30,10 +30,10 @@ describe('slim_results default (#42)', () => {
     return { data: JSON.parse(result.content[0].text), bytes: result.content.reduce((n, b) => n + b.text.length, 0) };
   }
 
-  it('search_blocks: default is slim, slim_results: false is full, same blocks, slim is smaller', async () => {
-    const args = { query: 'importer', limit: 20 };
-    const slim = await call('logseq_search_blocks', args);
-    const full = await call('logseq_search_blocks', { ...args, slim_results: false });
+  it('find_blocks: default is slim, slim_results: false is full, same blocks, slim is smaller', async () => {
+    const args = { text: 'importer', limit: 20 };
+    const slim = await call('logseq_find_blocks', args);
+    const full = await call('logseq_find_blocks', { ...args, slim_results: false });
 
     expect(slim.data).toHaveLength(11);
     expect(slim.data.every((b: any) => typeof b.pageName === 'string' && b.pageName !== '')).toBe(true);
