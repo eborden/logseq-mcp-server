@@ -44,5 +44,5 @@ Call-count tests pin the batching, so a crawl that reappears fails a test.
 
 - test: `rust/tests/concept_calls.rs` (one query per depth, so at most maxDepth + 1 calls however wide the graph is)
 - test: `rust/tests/simple_tools_calls.rs` (one call per search, and never getAllPages or getPageBlocksTree; one query for query_by_property, which binds its key and value)
-- test: `rust/tests/query_by_date_range_calls.rs` (two queries, whatever the length of the range)
+- test: `rust/tests/timeline_calls.rs` (two queries, whatever the length of the range)
 - reviewer: A new tool makes a bounded number of API calls and never loops a call over graph entities.
