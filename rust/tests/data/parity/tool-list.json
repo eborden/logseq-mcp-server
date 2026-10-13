@@ -40,7 +40,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Explore one page in a call: its blocks, related pages, and linked references (blocks that link to it, most-linking pages first). Page the references with references_offset.\n\n**Use when:** researching a topic that has a page, or asking what links to it.\n**Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
+    "description": "Explore one page: its blocks, related pages and references (blocks linking to it, most-linking pages first; page with references_offset).\n\n**Use when:** researching a topic with a page, or what links to it.\n**Can't find:** topics with no page (logseq_find_blocks), or anything past the caps (hasMore).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
     "inputSchema": {
       "type": "object",
       "properties": {

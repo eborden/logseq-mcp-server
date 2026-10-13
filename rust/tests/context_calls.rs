@@ -265,3 +265,90 @@ async fn the_aliased_path_ranks_the_group_the_same_way_in_the_same_calls() {
     assert_eq!(reference_ids(&context), [201, 202, 401]);
     assert_eq!(context.related_pages.iter().map(|page| page["originalName"].as_str().unwrap()).collect::<Vec<_>>(), ["Alice", "Bob"]);
 }
+
+// ---- what the linked references of get_backlinks pinned, now the references of explore_context
+
+#[tokio::test]
+async fn an_alias_name_hands_the_resolved_pages_lowercase_name_on_and_says_where_it_came_from() {
+    let logseq = mock_logseq(vec![json!([[page(10, "project atlas", "Project Atlas", json!({})), "alias"]]), json!([]), json!([])]).await;
+    let context = explore_page_context(&client(&logseq), "Atlas", Caps::default()).await.unwrap();
+    // the Editor call gets the name of the page the alias stood for, in its own case
+    assert_eq!(args_of(&logseq, 2), [json!("project atlas")]);
+    assert_eq!(context.resolved_from.unwrap(), json!({"name": "Atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"}));
+}
+
+#[tokio::test]
+async fn an_alias_link_with_no_other_page_in_the_group_still_uses_the_editor_call() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        json!([[10, {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}]]),
+        json!([]),
+        json!([]),
+    ])
+    .await;
+    let context = explore_page_context(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap();
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG, DATALOG, LINKED_REFERENCES]);
+    assert!(context.resolved_aliases.is_none() && context.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn a_null_answer_to_the_alias_lookup_warns_and_the_editor_call_reads_the_page_alone() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        Value::Null,
+        json!([]),
+        json!([]),
+    ])
+    .await;
+    let context = explore_page_context(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap();
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG, DATALOG, LINKED_REFERENCES]);
+    assert_eq!(codes(&context.warnings), ["alias_lookup_unavailable"]);
+    assert!(!context.has_more());
+}
+
+#[tokio::test]
+async fn an_error_from_logseq_is_an_error_and_not_an_empty_context() {
+    // from the blocks, from the linked references, and from the aliased query
+    for (answers, calls) in [
+        (vec![json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]), json!({"error": "Query timed out"})], 2),
+        (vec![json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]), json!([]), json!({"error": "Query timed out"})], 3),
+        (
+            vec![
+                json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+                json!([[10, {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}], [10, {"id": 11, "name": "atlas", "original-name": "Atlas"}]]),
+                json!([]),
+                json!({"error": "Query timed out"}),
+            ],
+            4,
+        ),
+    ] {
+        let logseq = mock_logseq(answers).await;
+        let error = explore_page_context(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap_err();
+        assert_eq!(error.to_string(), "LogSeq API error: Query timed out");
+        assert_eq!(methods(&logseq).len(), calls);
+    }
+}
+
+#[tokio::test]
+async fn linked_references_in_a_shape_the_server_cannot_read_are_a_response_error() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({})), "name"]]),
+        json!([]),
+        json!([[null, [{"uuid": "u"}]]]),
+    ])
+    .await;
+    let error = explore_page_context(&client(&logseq), "Project Atlas", Caps::default()).await.unwrap_err();
+    assert!(matches!(error, ToolError::Response(_)), "{error}");
+    assert!(error.to_string().contains("logseq.Editor.getPageLinkedReferences in a shape this server can't read: answer[0][1][0].id"), "{error}");
+}
+
+#[tokio::test]
+async fn an_ambiguous_name_stops_after_the_resolver() {
+    let logseq = mock_logseq(vec![json!([
+        [page(40, "alice", "Alice", json!({})), "alias"],
+        [page(41, "alice notes", "Alice Notes", json!({})), "alias"]
+    ])])
+    .await;
+    assert!(matches!(explore_page_context(&client(&logseq), "al", Caps::default()).await.unwrap_err(), ToolError::AmbiguousPage(_)));
+    assert_eq!(methods(&logseq).len(), 1);
+}
