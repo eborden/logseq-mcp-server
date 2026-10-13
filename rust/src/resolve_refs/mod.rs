@@ -568,10 +568,39 @@ pub fn with_meta(mut result: Map<String, Value>, warnings: &[ResultWarning]) -> 
     result
 }
 
+/// `result` with one more warning, and `hasMore` worked out again over all of them. A result that already has the
+/// keys keeps their place; one that has none gets them after the keys it has, as [`with_meta`] puts them.
+pub fn push_warning(mut result: Map<String, Value>, warning: &ResultWarning) -> Map<String, Value> {
+    let mut warnings = match result.get_mut("warnings") {
+        Some(Value::Array(warnings)) => std::mem::take(warnings),
+        _ => Vec::new(),
+    };
+    warnings.push(serde_json::to_value(warning).expect("a warning serializes"));
+    let has_more = warnings.iter().any(|warning| warning.get("howToFetchAll").is_some());
+    result.insert("hasMore".into(), Value::Bool(has_more));
+    result.insert("warnings".into(), Value::Array(warnings));
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tool::testing::keys;
+
+    #[test]
+    fn a_pushed_warning_adds_the_meta_after_the_keys_or_joins_the_one_that_is_there() {
+        let fetchable = ResultWarning { how_to_fetch_all: Some("Set x".into()), ..ResultWarning::new("b", "m".into()) };
+        let plain = ResultWarning::new("a", "m".into());
+        let Value::Object(bare) = serde_json::json!({"id": 1}) else { unreachable!() };
+        let once = push_warning(bare, &plain);
+        assert_eq!(Value::Object(once.clone()).to_string(), r#"{"id":1,"hasMore":false,"warnings":[{"code":"a","message":"m"}]}"#);
+        // the second joins the first in place, and `hasMore` follows the warnings
+        let twice = push_warning(once, &fetchable);
+        assert_eq!(
+            Value::Object(twice).to_string(),
+            r#"{"id":1,"hasMore":true,"warnings":[{"code":"a","message":"m"},{"code":"b","message":"m","howToFetchAll":"Set x"}]}"#
+        );
+    }
 
     #[test]
     fn a_resolved_ref_names_its_target_then_what_it_resolved_to_then_its_status() {

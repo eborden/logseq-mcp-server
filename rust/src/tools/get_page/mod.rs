@@ -23,6 +23,12 @@
 //! its warnings, `hasMore` and tips in a footer, and no separate tips block. The calls are the same.
 //! `format` and `resolve_refs` each fit only some `detail`s (`check_combination`): an outline takes `json` or
 //! `toon` and no `resolve_refs`, a page or a full page takes `json` or `markdown`.
+//!
+//! A full page has no count cap, so [`call`] cuts it to the character budget (#507, #485): its blocks, nested ones
+//! counted, in page order, until the text it sends is at most `BUDGET_CHARS`. A block is never cut inside its text
+//! (BR-0007), and a kept block that lost children says so with `childrenTruncated`. No parameter pages a page, so
+//! the `result_size_truncated` warning has no `howToFetchAll`; it names the outline and `logseq_get_block`. A page
+//! under the budget, and a `page` or `outline` result, are as they were.
 
 pub mod outline;
 mod tips;
@@ -46,7 +52,12 @@ use crate::resolve_refs::{resolve_block_refs, with_meta};
 use crate::tips::tips_content;
 use crate::tool::{input_schema, read_only_annotations, success_result};
 
-use self::outline::outline_result;
+use crate::block_budget::{Budget, count_blocks, take_blocks};
+use crate::budget::{Fit, fit, size};
+use crate::resolve_refs::push_warning;
+use crate::truncation::{SizeCut, size_truncation_warning};
+
+use self::outline::{MAX_OUTLINE_BLOCKS, outline_result};
 use self::tips::page_tips;
 
 pub const NAME: &str = "logseq_get_page";
@@ -115,15 +126,58 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
     let full = detail == Detail::Full;
     let page = get_page(client, &args.page, full, args.resolve_refs).await?;
     let tips = if tips_enabled { page_tips(&page, &args.page, full) } else { Vec::new() };
-    if args.format == Some(PageFormat::Markdown) {
-        let body = render_page(&page, PageRenderOptions { blocks_fetched: full, ..Default::default() });
-        return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&page, &tips)))]));
+    // The text the call sends, which the character budget measures (#507): the page, then its tips
+    let markdown = args.format == Some(PageFormat::Markdown);
+    let texts = |page: &Value| -> Vec<String> {
+        if markdown {
+            let body = render_page(page, PageRenderOptions { blocks_fetched: full, ..Default::default() });
+            return vec![with_footer(body, &FooterMeta::of_result(page, &tips))];
+        }
+        let mut texts = vec![page.to_string()];
+        texts.extend(tips_content(&tips));
+        texts
+    };
+    let page = if full { fit_to_budget(page, &texts) } else { page };
+    Ok(success_result(texts(&page).into_iter().map(ContentBlock::text).collect()))
+}
+
+/// The page as it is when its text fits the character budget (#507, #485), else with the first blocks that do, nested
+/// ones counted, in page order. A block is never cut inside its text (BR-0007), so a first block over the budget
+/// comes back alone, and the warning says so.
+fn fit_to_budget(page: Value, texts: &impl Fn(&Value) -> Vec<String>) -> Value {
+    let total = page.get("children").and_then(Value::as_array).map_or(0, |blocks| count_blocks(blocks));
+    let size_of = |kept: usize| -> usize {
+        let sent = if kept < total { cut_page(&page, kept, total, false) } else { page.clone() };
+        texts(&sent).iter().map(|text| size(text)).sum()
+    };
+    match fit(total, 1, size_of) {
+        Fit::Whole => page,
+        Fit::Cut { kept, oversize } => cut_page(&page, kept, total, oversize),
     }
-    let mut content = vec![ContentBlock::text(page.to_string())];
-    if let Some(tips) = tips_content(&tips) {
-        content.push(ContentBlock::text(tips));
-    }
-    Ok(success_result(content))
+}
+
+/// The page cut to its first `kept` blocks of `total` (nested ones counted, in page order), with the
+/// `result_size_truncated` warning and `hasMore` worked out again. Every key keeps its place, and `hasMore` and
+/// `warnings` come last when the page had none.
+fn cut_page(page: &Value, kept: usize, total: usize, oversize: bool) -> Value {
+    let Value::Object(fields) = page else { return page.clone() };
+    let blocks = fields.get("children").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    let mut budget = Budget::new(kept);
+    let first = take_blocks(blocks, &mut budget);
+    let mut cut = fields.clone();
+    cut.insert("children".into(), Value::Array(first));
+    let warning = size_truncation_warning(SizeCut {
+        what: "blocks of the page (nested ones counted, in page order)",
+        kept,
+        total,
+        oversize,
+        advice: &format!(
+            "The last blocks are left out, and a kept block marked childrenTruncated lost some of its children. A page can't be paged and no parameter raises this limit: \
+             list its top-level blocks with detail \"outline\" (at most {MAX_OUTLINE_BLOCKS}), then read one with logseq_get_block and include_children."
+        ),
+        how_to_fetch_all: None,
+    });
+    Value::Object(push_warning(cut, &warning))
 }
 
 /// Refuses what `detail` can't take, naming what it can. The outline has no block bodies to resolve, so
@@ -346,6 +400,77 @@ mod tests {
         // resolve_refs is listed before format, so it is the one reported when both are wrong
         let both = check_combination(Detail::Outline, Some(PageFormat::Markdown), true).unwrap_err().to_string();
         assert!(both.starts_with("Invalid parameter 'resolve_refs'"), "{both}");
+    }
+
+    /// A page whose blocks are `count` top-level ones of `length` characters, each with one child of the same length.
+    fn page_of(count: usize, length: usize) -> Value {
+        let block = |n: usize| {
+            json!({"uuid": format!("u{n}"), "content": "x".repeat(length), "children": [{"uuid": format!("c{n}"), "content": "y".repeat(length), "children": []}]})
+        };
+        json!({"id": 1, "originalName": "Atlas", "children": (0..count).map(block).collect::<Vec<_>>()})
+    }
+
+    fn json_text(page: &Value) -> Vec<String> {
+        vec![page.to_string()]
+    }
+
+    #[test]
+    fn a_full_page_at_the_budget_is_untouched_and_one_character_over_is_cut() {
+        use crate::budget::BUDGET_CHARS;
+        // pad the content of the last block so that the page's text is exactly the budget
+        let mut page = page_of(10, 100);
+        let base = size(&page.to_string());
+        page["children"][9]["content"] = json!("x".repeat(100 + BUDGET_CHARS - base));
+        assert_eq!(size(&page.to_string()), BUDGET_CHARS);
+        assert_eq!(fit_to_budget(page.clone(), &json_text), page);
+        page["children"][9]["content"] = json!("x".repeat(100 + BUDGET_CHARS - base + 1));
+        let cut = fit_to_budget(page.clone(), &json_text);
+        assert_ne!(cut, page);
+        assert!(size(&cut.to_string()) <= BUDGET_CHARS);
+    }
+
+    #[test]
+    fn a_cut_keeps_the_first_blocks_in_page_order_and_marks_the_last_one_that_lost_children() {
+        let page = page_of(40, 1000);
+        let cut = fit_to_budget(page.clone(), &json_text);
+        assert!(size(&cut.to_string()) <= crate::budget::BUDGET_CHARS);
+        let blocks = cut["children"].as_array().unwrap();
+        // 80 blocks with their children, ~2,000 characters per top-level block: about 14 fit
+        assert!(blocks.len() > 5 && blocks.len() < 40, "{}", blocks.len());
+        assert_eq!(blocks[0], page["children"][0]);
+        // one more block would not fit, and the warning counts nested blocks
+        let kept = count_blocks(blocks);
+        assert!(size(&cut_page(&page, kept + 1, 80, false).to_string()) > crate::budget::BUDGET_CHARS);
+        let warning = &cut["warnings"][0];
+        assert_eq!(warning["code"], "result_size_truncated");
+        assert!(warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 80 blocks of the page (nested ones counted, in page order)")));
+        assert_eq!(cut["hasMore"], false);
+        let keys: Vec<&String> = cut.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["id", "originalName", "children", "hasMore", "warnings"]);
+    }
+
+    #[test]
+    fn a_cut_keeps_the_warnings_a_page_already_had_and_the_marker_of_a_block_that_lost_children() {
+        let mut page = page_of(40, 1000);
+        page["hasMore"] = json!(false);
+        page["warnings"] = json!([{"code": "ref_unresolved", "message": "m"}]);
+        let cut = fit_to_budget(page, &json_text);
+        let codes: Vec<&str> = cut["warnings"].as_array().unwrap().iter().map(|warning| warning["code"].as_str().unwrap()).collect();
+        assert_eq!(codes, ["ref_unresolved", "result_size_truncated"]);
+        let keys: Vec<&String> = cut.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["id", "originalName", "children", "hasMore", "warnings"]);
+        // a block is cut between its own children: with 1,000-character blocks the cut can fall between a block and its child
+        let last = cut["children"].as_array().unwrap().last().unwrap();
+        let lost = last["children"].as_array().unwrap().is_empty();
+        assert_eq!(last.get("childrenTruncated").is_some(), lost);
+    }
+
+    #[test]
+    fn a_page_with_no_blocks_or_one_block_is_never_cut() {
+        let empty = json!({"id": 1, "originalName": "Atlas"});
+        assert_eq!(fit_to_budget(empty.clone(), &json_text), empty);
+        let one = json!({"id": 1, "children": [{"uuid": "u", "content": "x".repeat(40_000), "children": []}]});
+        assert_eq!(fit_to_budget(one.clone(), &json_text), one);
     }
 
     #[test]
