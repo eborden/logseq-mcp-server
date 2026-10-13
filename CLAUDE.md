@@ -200,7 +200,7 @@ This is an MCP (Model Context Protocol) server that provides Claude with 12 tool
 The repo is Rust-only since #356 (the Go on #349, ADR-0025). A TypeScript server was the first implementation, and the Rust crate was held to its results byte for byte. Its last version is readable with `git show 35fa2dd3:<path>`, and comments in the crate that name a `src/*.ts` file mean it. Its recorded results, with the cases they belong to (`rust/tests/data/parity/`), are the golden tests of the Rust server and the tool contract. Node is still here for the tooling around the crate: the guard tests, the integration suites and the scripts, all dev-only. The Rust binary is released as native binaries on GitHub Releases and started by a launcher script, `scripts/logseq-mcp-server.sh` (ADR-0035); `package.json` is private tooling and `publish.yml` is gone.
 
 **Key Stats:**
-- 15 MCP tools for graph operations, search, and temporal queries
+- 12 MCP tools for graph operations, search, and temporal queries
 - Rust unit and call-count tests (`cd rust && cargo test --locked`), the parity cases (`rust/tests/parity.rs`, run by `cargo test`; `rust/tests/parity_record.rs` is the recorder), the repo's guard tests (`npx vitest run tests/guards tests/rust-guards`) and integration tests against the committed fixture graph (`npm run test:integration`, which runs the Rust server). `npm test` runs the guards and the integration tests.
 - Mostly Datalog: graph traversal, search and date-range queries run as batched Datalog. A few single lookups use `logseq.Editor.*` (see "Current Implementation Status" below)
 
@@ -465,7 +465,7 @@ The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
 - A feature-flagged dual HTTP/Datalog implementation, replaced by Datalog only (df7503a, 37fe0d6): [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md)
 - Strings embedded in query text, later bound with `:in` once probing showed it works: [ADR-0006](docs/adr/0006-embed-strings-in-datalog-queries.md), superseded by [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)
 - Pages without blocks, fixed by splitting queries (d6c3151): [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md)
-- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 15 registered in `rust/src/tools/mod.rs` today.
+- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 12 registered in `rust/src/tools/mod.rs` today.
 - A Rust implementation beside the TypeScript server (ADR-0025, ADR-0031, #122), held to its results byte for byte, then the TypeScript server removed after the Go on #349 (#356, last version at `35fa2dd3`)
 - Oct 2026: a review of 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers set the roadmap in GitHub issues #3–#18. Probing the Datalog constraints and measuring API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`) corrected constraints 1, 2 and 4.
 
