@@ -1,51 +1,67 @@
 # LogSeq MCP Tools Reference
 
-Complete documentation for the LogSeq MCP tools organized by category. The server has 15 tools; `logseq_get_graph` (graph name and path) is the one not covered below.
+Complete documentation for the LogSeq MCP tools organized by category. The server has 14 tools; `logseq_get_graph` (graph name and path) is the one not covered below.
 
 ## Tool Categories Overview
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
-| Basic Tools | 6 tools | Core search, retrieval, and property queries |
+| Basic Tools | 5 tools | Core search (blocks by text, property or period), retrieval, and page names |
 | Graph Traversal | 1 tool | Network visualization and relationship discovery |
 | Semantic Search | 1 tool | Topic-based relationship queries |
 | Context Building | 3 tools | Comprehensive multi-source context aggregation, and what the user is looking at |
 | Temporal Query | 2 tools | Time-based analysis and journal queries |
 | Linking | 1 tool | Checking a `[[link]]` pass before it is reported done |
 
-## Basic Tools (6 tools)
+## Basic Tools (5 tools)
 
-### logseq_search_blocks
+### logseq_find_blocks
 
-Full-text search across all blocks with optional semantic context.
+Find blocks, newest first, by text, by a block property, by a period of journal days, or by any of them together. The filters AND together, and at least one is required: a call with none is refused as an invalid parameter.
 
 **Parameters:**
-- `query` (required): Search term or phrase
+- `text` (optional): Text to find in a block's content. A case-insensitive literal substring: regex characters are plain text, there are no synonyms or stems, and `port` finds "important". An empty `text` is no filter
+- `property` and `value` (optional, together): Keep the blocks whose property holds the value. The key is as stored (`created-by`) or camelCase (`createdBy`); the value is an exact string (a number or boolean as its text: `3`, `true`), with no wildcard; a multi-value property matches on any one of its values. A page property comes back as a hit on the page's first block. A task's `SCHEDULED:` and `DEADLINE:` lines are not properties: find them with `text`
+- `start_date` and `end_date` (together), `last_n` or `preset` (optional, exactly one way of choosing the period): Keep the blocks on journal pages in the period, and no block of any other page. `start_date` and `end_date` are YYYYMMDD, both days included; `last_n` is the last N **calendar days** ending today, today included (not the N most recent journals that exist, as for `query_by_date_range`); `preset` is `today`, `yesterday`, `this_week`, `last_week`, `this_month`, `last_month`, `this_year` or `year_to_date` (weeks run Monday to Sunday, in local time)
 - `limit` (optional): Most blocks returned (default: **100**, max: **500**; a larger value is clamped to 500, not rejected). **Recommend a small `limit` such as 5 to explore**, since the default returns up to 100 blocks
-- `include_context` (optional): Include parent/child blocks for context (default: false, **keep false unless needed**)
-- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
+- `offset` (optional): Matches to skip, newest first, to fetch the next page (default: 0). The list shifts if the graph changes between calls
+- `include_context` (optional): Give each block a `context` with its page, `references` and `tags` (default: false, **keep false unless needed**). It costs one more call
+- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities, with LogSeq's own key spelling (`original-name`, `properties-order`)
 
 **Context cost:** ~200-500 tokens per result. With `include_context=true`: ~500-1000 per result.
 
-**Returns:** a bare array of blocks, newest first (highest block id). The result always has a second content block, `{ "meta": { hasMore, warnings, totals } }`, where `totals.matches` is how many blocks matched before `limit`, whether or not any were cut. A `limit` of 5 on a graph with 180 matches therefore tells you 180 without fetching them.
+**Returns:** a bare array of blocks, flat (no `children`), newest first: highest block id, which is about the order LogSeq created them in, **not the date of the journal page**. The result always has a second content block, `{ "meta": { hasMore, warnings, totals } }`, where `totals.matches` is how many blocks matched before `offset` and `limit`, whether or not any were cut, so a `limit` of 5 on a graph with 180 matches tells you 180 without fetching them. The meta may also carry `tips`.
 
-**A cut result:** when more blocks match than `limit` keeps, the meta holds a `results_truncated` warning ("Showing N of M matching blocks"). The cut drops the oldest blocks. What the warning says next depends on M:
-- M of 500 or fewer: `howToFetchAll` says to set `limit` to M (or higher), and `hasMore` is true
-- M above 500 and `limit` below 500: `howToFetchAll` says to set `limit` to 500 (the maximum) to get 500 of M, then to narrow the query for the rest. That call returns 500 of M, not all of them
-- A raise past about 200 blocks adds "A result this large may be saved to a file by the host instead of shown; the server can't tell" to `howToFetchAll`: the raise still gets those blocks, but the result may not be shown to you, so prefer a narrower query when M is that large.
-- `limit` already at 500 (or a larger value that was clamped, which the message names): no `howToFetchAll` and `hasMore` is false, because no parameter fetches the rest. The warning is the signal. Narrow the query (a more specific phrase) to reach the older blocks
+**A cut result:** a result holds at most 30,000 characters, so either `limit` or that size can cut it, and each warning names the `offset` that reads on:
+- `results_truncated`: more blocks match than `limit` keeps. The message says "Showing N of M matching blocks" (M counts the matches from `offset` on, and says "from offset K" when K is above 0). `howToFetchAll` leads with "Set offset to K for the next page." and then offers raising `limit` as the alternative, only to a value whose result fits 30,000 characters ("the most that fits"), so follow the offset. `hasMore` is true
+- `result_size_truncated`: the blocks `limit` kept do not fit 30,000 characters, so the oldest are cut, whole blocks only. No parameter raises that size, and `include_context=true` and `slim_results=false` make each block bigger. `howToFetchAll` is "Set offset to K for the next page.", `hasMore` is true, and a single block over the size comes back alone
+- `limit` already at 500 (or a larger value that was clamped, which the message names): the next page is still `offset`
+- `search_unavailable`: LogSeq sent no answer, so the empty list is unknown, not "nothing matches". `hasMore` is false and there is no `totals`. Retry. `context_unavailable` says the same of the pages `include_context` asked for
+- An `offset` at or past the last match is an empty page with `totals.matches` and no warning: it is not a miss
 
-**Size:** measured on made-up blocks of one short line (under 100 characters), so read the numbers as floors, since real blocks carry more fields and text: a slim block is about 150 characters in the result, and a longer block adds its extra length, so `limit=300` is about 45,000 characters and `limit=500` about 75,000. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7). Longer blocks or `include_context=true` make it larger, so prefer a narrower query to a `limit` above about 300.
+**To count only:** pass a small `limit`. `totals.matches` is the count of every matching block.
 
 **Use when:**
 - Initial exploration ("what do I know about X?")
-- Finding all mentions of a topic
+- Finding all mentions of a topic, or of a topic in a period ("where did I mention X last week")
 - Needle searches ("find the X from Y")
+- Structured data: tasks by status or priority (`property` and `value`), or by marker (`text` "TODO")
 
 **Example:**
+```json tool=logseq_find_blocks
+{"text": "React hooks", "limit": 5}
 ```
-logseq_search_blocks("React hooks", 5)
-logseq_search_blocks("Nancy budget", 5)
+```json tool=logseq_find_blocks
+{"property": "status", "value": "doing"}
+```
+```json tool=logseq_find_blocks
+{"text": "budget", "preset": "last_week", "limit": 10}
+```
+```json tool=logseq_find_blocks
+{"text": "SCHEDULED:"}
+```
+```json tool=logseq_find_blocks
+{"text": "importer", "limit": 20, "offset": 20}
 ```
 
 ---
@@ -105,7 +121,7 @@ A larger value of either is clamped to its maximum, not rejected. Both are whole
 **Returns:** a bare array of `[page, blocks]` pairs, one per source page, **ranked by the number of blocks that link the page, most first**, ties broken by lowercase page name and then page id. The order is the same on every run, with or without aliases, and applies to every result, not only a cut one: the first entry is the page that links the target most, so match pages by name, not by position. Each page's blocks stay in the order given (nothing ranks them). The cut at `max_pages` keeps the top of this ranking, so a page left out links the target no more than the last page kept (it can tie with it). The ranking counts linking blocks, not importance: a blocker can sit on a page with a single linking block. A second content block, `{ "meta": ... }`, follows when there is a cut, a resolved alias or ISO-date name (`resolvedFrom`), a page with aliases (`resolvedAliases`) or, with next-step tips on (the default), a tip. **The block being there doesn't mean a cut:** a stock server adds one with only `meta.tips` to any non-empty result, and with tips off an uncut exact name gets one block. The signal is `meta.warnings` and `meta.totals`.
 
 **A cut result:** the meta holds `warnings`, `hasMore` and `totals: { pages, blocks }`, which count every source page and every linking block before either cap (only present with a cut):
-- `pages_truncated`: "Showing N of M source pages, ranked by linking blocks (most first, ties by page name). The last page kept has X linking blocks, the first dropped page has Y. Blocks per page are capped separately by max_blocks_per_page." So the message says where the cut fell: every dropped page has Y linking blocks or fewer (with `max_pages` of 0 there is no kept page, so the "last page kept" sentence is left out). What to do next depends on M. M of 100 or fewer: `howToFetchAll` says to set `max_pages` to M. M above 100 and `max_pages` below 100: set it to 100 to get 100 of M, and the warning suggests `logseq_search_blocks` with the query `[[page name]]` for the rest (it finds blocks that write the link that way, not `#tags` or alias spellings). `max_pages` already at 100: this warning has no `howToFetchAll`. A raise whose result would pass about 200 linking blocks (counting each page at `max_blocks_per_page`) adds the large-result note to `howToFetchAll` (see `search_blocks`). `hasMore` comes from all the warnings together, so it can still be true when a `page_blocks_truncated` below 50 has one, and then it doesn't mean raising `max_pages` helps
+- `pages_truncated`: "Showing N of M source pages, ranked by linking blocks (most first, ties by page name). The last page kept has X linking blocks, the first dropped page has Y. Blocks per page are capped separately by max_blocks_per_page." So the message says where the cut fell: every dropped page has Y linking blocks or fewer (with `max_pages` of 0 there is no kept page, so the "last page kept" sentence is left out). What to do next depends on M. M of 100 or fewer: `howToFetchAll` says to set `max_pages` to M. M above 100 and `max_pages` below 100: set it to 100 to get 100 of M, and the warning suggests `logseq_find_blocks` with `text` set to `[[page name]]` for the rest (it finds blocks that write the link that way, not `#tags` or alias spellings). `max_pages` already at 100: this warning has no `howToFetchAll`. A raise whose result would pass about 200 linking blocks (counting each page at `max_blocks_per_page`) adds the large-result note to `howToFetchAll` (see the caps paragraph under Best Practices). `hasMore` comes from all the warnings together, so it can still be true when a `page_blocks_truncated` below 50 has one, and then it doesn't mean raising `max_pages` helps
 - `page_blocks_truncated`: some kept pages hold more than `max_blocks_per_page` linking blocks. It names up to 5 of those pages, in rank order, with their true block counts (and "N more"). The ranking uses those true counts, so the first page listed is the most-linking one even when the array shows only `max_blocks_per_page` of its blocks. Below 50, `howToFetchAll` says to set `max_blocks_per_page` to the largest count, or to 50 when a page holds more, with the same large-result note when the kept pages would then hold more than about 200 blocks. At 50 this warning has no `howToFetchAll` (and `hasMore` is false unless another warning has one); the way to read such a page whole is `logseq_get_page` with `include_children`
 - Both can appear together. Raising `max_pages` shows pages whose blocks the per-page cap may then cut, so a second warning after a raise is expected. Only the pages kept are checked for the per-page cut
 
@@ -147,44 +163,6 @@ logseq_get_block("abc123de-f456-7890-abcd-ef1234567890")
 
 ---
 
-### logseq_query_by_property
-
-Find blocks by property key/value pairs.
-
-**Parameters:**
-- `property_key` (required): Property name (e.g., "status", "priority")
-- `property_value` (required): Property value (e.g., "doing", "high")
-- `limit` (optional): Most blocks returned (default: **100**, max: **500**; a larger value is clamped to 500, not rejected)
-- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities
-
-**Returns:** a bare array of flat blocks (no `children`), sorted by page id and then block id. That order is stable but **not a ranking**, and the cut keeps the first blocks in it, so the pages listed first are the ones with the lowest ids, not the most relevant ones. The array is the whole first content block; a second content block, `{ "meta": ... }`, follows a non-empty result when tips are on (the default), holding only `meta.tips` if nothing was cut. **The block being there doesn't mean a cut:** the signal is `meta.warnings` and `meta.totals`, which are present only when `limit` cut the list.
-
-**A cut result:** the meta holds a `results_truncated` warning ("Showing N of M matching blocks (the first ones listed, not ranked)") and `totals: { matches: M }`, the count before the cut. The query takes only a key and a value and the tool has no offset, so no other parameter narrows it or pages through it. What the warning says depends on M:
-- M of 500 or fewer: `howToFetchAll` says to set `limit` to M (or higher), and that returns all M. `hasMore` is true
-- M above 500 and `limit` below 500: `howToFetchAll` says to set `limit` to 500 (the maximum). That returns **500 of M, not all of them**, and `hasMore` is true even so. After that call the warning is the one below
-- A raise past about 200 blocks adds "A result this large may be saved to a file by the host instead of shown; the server can't tell" to `howToFetchAll`: the raise still gets those blocks, but the result may not be shown to you, so prefer a narrower query when M is that large.
-- `limit` already at 500 (or a larger value that was clamped, which the message names): no `howToFetchAll` and `hasMore` is false. The warning is the signal that the list is partial. Counts made from it (blocks per page, which page has the most) are lower bounds from the first pages in id order, so say so instead of reporting them as the answer
-
-**To count only:** pass a small `limit`. When the list is cut, `totals.matches` is the count of every matching block. When it isn't, the array holds them all.
-
-**Size:** measured on made-up blocks of one short line, so read the numbers as floors (real blocks carry more fields and text): a slim block is about 165 characters in the result, so `limit=100` is about 17,000 characters, `limit=250` about 41,000, `limit=300` about 50,000 and `limit=500` about 83,000. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7), and this tool can't be paged, so a `limit` above about 250 is likely to come back saved. Prefer the count from `totals.matches` to a `limit` of 500 when the question is "how many".
-
-**Use when:**
-- Structured data queries
-- Finding tasks by status/priority
-- Property-based filtering
-
-**Example:**
-```
-logseq_query_by_property("status", "doing")
-logseq_query_by_property("priority", "high")
-logseq_query_by_property("scheduled", "*")  # All scheduled items
-```
-
-**Note:** Use with wildcard `"*"` to find all blocks with that property.
-
----
-
 ### logseq_find_pages
 
 Find non-journal pages, A-Z, to discover graph vocabulary, to check which names exist, or to find pages by a page property. Each page carries its aliases. A large graph's list comes in pages. The filters AND together.
@@ -192,7 +170,7 @@ Find non-journal pages, A-Z, to discover graph vocabulary, to check which names 
 **Parameters:**
 - `text` (optional): Filter pages whose name or alias contains this text (case-insensitive). The page comes back whole, with all its aliases, so searching an alias finds its page
 - `names` (optional): 1 to 50 page names or aliases, each matched exactly (ignoring case), in one call whatever the number. Each name is answered with its page, or with `null` and the closest names. `null` means no page with that exact name or alias: a namespace leaf (`meetings` for `project/meetings`) or an ISO date answers `null` here, though `logseq_get_page` resolves it. Journals are not pages of this tool
-- `property` and `value` (optional, together): Keep the pages whose page-level property holds the value. The key is as stored (`created-by`) or camelCase (`createdBy`); the value is an exact string (a number or boolean as its text: `3`, `true`); a multi-value property matches on any one of its values. Block properties are not matched (use `query_by_property`)
+- `property` and `value` (optional, together): Keep the pages whose page-level property holds the value. The key is as stored (`created-by`) or camelCase (`createdBy`); the value is an exact string (a number or boolean as its text: `3`, `true`); a multi-value property matches on any one of its values. Block properties are not matched (use `find_blocks` with `property` and `value`)
 - `limit` (optional): Maximum pages per call (default: 200, max: 1000). Aliases take no slots
 - `offset` (optional): Matching pages to skip, in name order, to fetch the next page (default: 0)
 
@@ -269,7 +247,7 @@ Find blocks based on topic relationships and connections.
 - `max_distance` (optional): Maximum hops between topics (default: 2)
 - `limit` (optional): Most entries in `results` (default: **50**, max: **500**; a larger value is clamped to 500, not rejected). It changes only how many come back, not which are found, so `max_distance` is no way round it. For `connected-within` it counts every block of both pages' trees, **nested ones too**, topic A's page first; for the other types it counts one per matching block
 
-**Returns:** one object, `{ query, relationshipType, results, hasMore, warnings, totals?, resolvedFrom?, resolvedAliases? }`. Unlike `search_blocks`, `get_backlinks` and `query_by_property`, the meta fields are **inside this first content block**; there is no second block. `hasMore` and `warnings` are always there (`warnings` may be empty), and `totals` is present only with a cut. A kept block that lost some of its children carries `childrenTruncated: true` (`connected-within` only, and only on a cut result).
+**Returns:** one object, `{ query, relationshipType, results, hasMore, warnings, totals?, resolvedFrom?, resolvedAliases? }`. Unlike `find_blocks` and `get_backlinks`, the meta fields are **inside this first content block**; there is no second block. `hasMore` and `warnings` are always there (`warnings` may be empty), and `totals` is present only with a cut. A kept block that lost some of its children carries `childrenTruncated: true` (`connected-within` only, and only on a cut result).
 
 **A cut result:** a `results_truncated` warning says "Showing N of M" and `totals: { blocks: M }` gives the count before the cut. The tool cuts after the query, keeping the first entries in the order they come, which is **not a ranking**:
 - `references`, `referenced-by`, `in-pages-linking-to`: the entries are matching blocks in LogSeq's own order ("the first ones listed, not ranked")
@@ -341,7 +319,7 @@ Gather comprehensive context for a topic in a single call. **This is often the o
 logseq_build_context("Q4 Planning", max_blocks=20)
 ```
 
-**Performance:** Replaces 5+ separate queries with one call. **Don't add search_blocks or get_backlinks after this - it already includes that information.**
+**Performance:** Replaces 5+ separate queries with one call. **Don't add find_blocks or get_backlinks after this - it already includes that information.**
 
 ---
 
@@ -414,7 +392,7 @@ Query journal entries within a date range. **Preferred tool for time-bounded que
 - `summary` (`totalDays`, `totalBlocks`, `topConcepts`) still covers every block found, so it describes the whole range even when `entries` stops early. `summary.totalBlocks` counts top-level blocks, while `totals.blocks` counts in the cap's unit (nested blocks too), so the two differ and neither is an error. `dateRange` stays the range you asked for
 - Below the cap none of this appears and the output is unchanged
 
-**Context cost:** ~1-3k tokens for a week's worth of filtered results. Much cheaper than broad search_blocks.
+**Context cost:** ~1-3k tokens for a week's worth of filtered results. Much cheaper than a broad `find_blocks`.
 
 **Use when:**
 - User says "this week", "recently", "in November", etc.
@@ -429,7 +407,7 @@ logseq_query_by_date_range(20251101, 20251130, "testing")  # November mentions o
 
 **Date Format:** Always use YYYYMMDD (20251101 = November 1, 2025)
 
-**IMPORTANT:** If timeframe is ambiguous ("the X that Y sent"), ASK USER about recency before choosing between this tool and search_blocks.
+**IMPORTANT:** If timeframe is ambiguous ("the X that Y sent"), ASK USER about recency before choosing between this tool and `find_blocks` with a period.
 
 ---
 
@@ -453,7 +431,7 @@ Track how a concept appears and evolves over time.
 **A cut result:** `timeline` is cut to `max_entries` mentions, oldest first with undated (non-journal) mentions last, so the cut drops undated mentions first and then the newest dated ones. The meta fields are inside the result object (no second block, as for `search_by_relationship`): `warnings` and `hasMore` appear when a warning applies, and `totals: { mentions }`, the count before the cut, only with a cut. The `entries_truncated` warning says "Showing N of M mentions (oldest first, undated last; the timeline ends at <day>)", and what it says next:
 - M of 500 or fewer: `howToFetchAll` says to set `max_entries` to M (or higher)
 - M above 500 and `max_entries` below 500: set it to 500 (the maximum) to get 500 of M, not all
-- A raise past about 200 mentions adds the same large-result note to `howToFetchAll` (see `search_blocks`)
+- A raise past about 200 mentions adds a large-result note to `howToFetchAll` ("A result this large may be saved to a file by the host instead of shown; the server can't tell")
 - `max_entries` already at 500: no `howToFetchAll`, so the warning is the signal that the list is partial
 - It also says what the dates can reach: when the cut fell among dated mentions it names the `start_date` to continue from (that day repeats its kept blocks); when it fell among the undated ones, narrowing the dates can't reach the rest
 - `summary` (`totalMentions` and the rest) still counts every mention found, so it can exceed what `timeline` holds, and `groupedTimeline` is built from the kept mentions only
@@ -517,18 +495,19 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 | "How did X evolve over time?" | `get_concept_evolution` |
 | "What was I doing last week?" | `query_by_date_range` |
 | "Find blocks about A that mention B" | `search_by_relationship` |
-| "What are my TODOs?" | `search_blocks` + `query_by_property` |
+| "What are my TODOs?" | `find_blocks` (`text` "TODO", and `property` `status`) |
 | "When did I mention X?" | `get_concept_evolution` (without grouping) |
 | "Get full details on page X" | `build_context` or `get_page` |
 
 ### By Question Type
 
 **Initial exploration:**
-- `search_blocks` (broad text search)
+- `find_blocks` (broad text search)
 - `get_context_for_query` (natural language queries)
 
 **Structured queries:**
-- `query_by_property` (tasks, status, priorities)
+- `find_blocks` with `property` and `value` (tasks, status, priorities)
+- `find_blocks` with a period (blocks from the last days or a named period)
 - `query_by_date_range` (journal entries by date)
 
 **Deep dives:**
@@ -574,7 +553,7 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 
 **Broad exploration:**
 ```
-search_blocks → get_page → get_backlinks
+find_blocks → get_page → get_backlinks
 ```
 
 **Specific deep-dive:**
@@ -584,7 +563,7 @@ get_page → get_related_pages
 
 **Structured data:**
 ```
-query_by_property (for precise matches)
+find_blocks with property and value (for precise matches)
 ```
 
 ---
@@ -595,22 +574,21 @@ query_by_property (for precise matches)
 
 - Use `max_blocks`, `max_related_pages` to control response size
 - Use `depth` and `max_depth` carefully (depth=1 usually sufficient)
-- Use `limit` on `search_blocks` to avoid overwhelming results
+- Use `limit` on `find_blocks` to avoid overwhelming results, and `offset` to read on
 
 **Caps that cut a result:** these tools keep the first results in an order (see the last column) and say so. Each caps at a maximum, clamps a larger value instead of rejecting it, and reports a cut with a warning. Read the warning before you report a count or a list as complete.
 
 | Tool | Parameter (default, max) | Warning code | Where the meta is | Order of what is kept |
 |------|--------------------------|--------------|-------------------|-----------------------|
-| `search_blocks` | `limit` (100, 500) | `results_truncated` | second content block, always (`totals.matches` even when uncut) | newest first |
+| `find_blocks` | `limit` (100, 500), `offset` | `results_truncated`, `result_size_truncated` | second content block, always (`totals.matches` even when uncut) | newest first (highest block id) |
 | `get_backlinks` | `max_pages` (20, 100), `max_blocks_per_page` (10, 50) | `pages_truncated`, `page_blocks_truncated` | second content block, when cut, resolved by alias or date, or with a tip; `totals.pages`, `totals.blocks` only with a cut | ranked by linking blocks, most first (ties by page name) |
-| `query_by_property` | `limit` (100, 500) | `results_truncated` | second content block (with only `tips` when uncut); `totals.matches` only with a cut | by page id, then block id; not ranked |
 | `search_by_relationship` | `limit` (50, 500) | `results_truncated` | the result object itself; `totals.blocks` | first listed, not ranked; `connected-within`: document order over both pages' blocks, nested ones counted, topic A's page first |
 | `get_concept_evolution` | `max_entries` (100, 500) | `entries_truncated` | the result object itself; `totals.mentions` only with a cut | oldest first, undated mentions last |
 | `query_by_date_range` | `max_blocks` (200, 1000) | `blocks_truncated` | the result object itself; `totals.blocks`, `totals.days` | oldest day first |
 
-The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `find_pages` with its `offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 backlink references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `search_blocks` and `query_by_property` scale the block estimate when a hit comes back larger: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `build_context`, `get_concept_evolution` and `search_by_relationship` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved.
+The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `find_pages` and `find_blocks` with their `offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 backlink references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `find_blocks` scales the block estimate when a hit comes back larger, and offers a raise only up to what fits its 30,000-character result: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `build_context`, `get_concept_evolution` and `search_by_relationship` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved.
 
-**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). On short one-line blocks, `query_by_property` reaches that near `limit=300`, `search_blocks` near `limit=330`, `search_by_relationship` near `limit=200` (rounded down) and `get_backlinks` near 250 linking blocks across all pages. These are floors: real blocks are larger. A `limit` at the maximum is usually too big to be shown, so narrow the query or lower the cap rather than raising it.
+**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). On short one-line blocks, `search_by_relationship` reaches that near `limit=200` (rounded down) and `get_backlinks` near 250 linking blocks across all pages. `find_blocks` cannot reach it, since it is cut to 30,000 characters first and says so. These are floors: real blocks are larger. A `limit` at the maximum is usually too big to be shown, so narrow the query or lower the cap rather than raising it.
 
 ### Tool Priority
 
@@ -621,9 +599,9 @@ The warning's `howToFetchAll` never points past a maximum. At the maximum there 
 
 ### Common Patterns
 
-**Task queries:** Use BOTH `search_blocks("TODO")` AND `query_by_property("status", "todo")`
+**Task queries:** Use BOTH `find_blocks(text="TODO")` (markers) AND `find_blocks(property="status", value="todo")` (properties)
 
-**Research:** Start with `search_blocks`, then `get_page`, then `get_backlinks`
+**Research:** Start with `find_blocks`, then `get_page`, then `get_backlinks`
 
 **Graph exploration:** Use `get_concept_network` + `get_backlinks` together
 
@@ -649,7 +627,7 @@ All temporal queries use **YYYYMMDD format:**
 
 15 MCP tools. The 14 below are organized into 6 categories; `logseq_get_graph` (graph name and path) is the 15th:
 
-1. **Basic Tools (6)** - Core search, retrieval, property queries
+1. **Basic Tools (5)** - Core search (text, property, period), retrieval, page names
 2. **Graph Traversal (1)** - Network visualization
 3. **Semantic Search (1)** - Relationship-based queries
 4. **Context Building (3)** - Comprehensive aggregation and current UI context

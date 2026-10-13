@@ -12,7 +12,7 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 
 **4-Phase Approach:**
 
-1. **Search** → `logseq_search_blocks(topic, limit=15)` - cast wide net
+1. **Search** → `logseq_find_blocks(text=topic, limit=15)` - cast wide net
 2. **Retrieve** → `logseq_get_page(relevant_pages, detail="full")` - get full content
 3. **Discover** → `logseq_get_backlinks(key_pages)` - find connections
 4. **Synthesize** → Present organized findings with sources
@@ -21,7 +21,7 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 ```
 User: "What do I know about React hooks?"
 
-1. logseq_search_blocks("React hooks", 15)
+1. logseq_find_blocks(text="React hooks", limit=15)
 2. logseq_get_page("React", detail="full")
 3. logseq_get_backlinks("React")
 4. Synthesize: "You have detailed notes in [[React]] covering useState/useEffect.
@@ -39,16 +39,16 @@ User: "What do I know about React hooks?"
 Execute ALL of these to ensure comprehensive coverage:
 
 ```
-logseq_search_blocks("TODO")
-logseq_search_blocks("DOING")
-logseq_query_by_property("status", "todo")
-logseq_query_by_property("status", "doing")
-logseq_query_by_property("status", "in-progress")
-logseq_query_by_property("priority", "high")
-logseq_query_by_property("scheduled", "*")  # Get all scheduled tasks
+logseq_find_blocks(text="TODO")
+logseq_find_blocks(text="DOING")
+logseq_find_blocks(property="status", value="todo")
+logseq_find_blocks(property="status", value="doing")
+logseq_find_blocks(property="status", value="in-progress")
+logseq_find_blocks(property="priority", value="high")
+logseq_find_blocks(text="SCHEDULED:")  # Get all scheduled tasks
 ```
 
-**Why check multiple?** Users may use markers ("TODO"), properties (`status::doing`), or both. Check everything.
+**Why check multiple?** Users may use markers ("TODO"), properties (`status::doing`), or both. Check everything. A property value is an exact string, so `todo` does not find `TODO`; a scheduled task is found by its `SCHEDULED:` line, which is text and not a property.
 
 ### Step 2: Categorize
 
@@ -103,7 +103,7 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
 
 **3-Step Process:**
 
-1. **Query Scheduled** → `logseq_query_by_property("scheduled", "*")` - find all scheduled tasks
+1. **Query Scheduled** → `logseq_find_blocks(text="SCHEDULED:")` - find all scheduled tasks
 2. **Check Blocked** → Search for "WAITING", "blocked by", or `status::blocked`
 3. **Surface Old** → Present tasks scheduled >2 weeks ago with context
 
@@ -337,14 +337,14 @@ User: "Give me full context on [[Q4 Planning]]"
 - `get_concept_network` - Full graph in one call
 
 **Multi-call workflows (when needed):**
-- Broad exploration: `search_blocks` → `get_page` → `get_backlinks`
+- Broad exploration: `find_blocks` → `get_page` → `get_backlinks`
 - Specific deep-dive: `get_page` → `get_related_pages`
-- Structured data: `query_by_property` for precise matches
+- Structured data: `find_blocks` with `property` and `value` for precise matches
 
 **Limit parameters:**
 - Use `max_blocks`, `max_related_pages` to control response size
 - Use `depth` and `max_depth` carefully (depth=1 usually sufficient)
-- Use `limit` on search_blocks to avoid overwhelming results
+- Use `limit` on find_blocks to avoid overwhelming results
 
 **Best practices:**
 - Prefer `build_context` over manual aggregation
