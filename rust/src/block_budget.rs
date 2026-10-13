@@ -1,5 +1,5 @@
 //! Cutting block trees to a count of blocks, nested ones included (#162, #183). A cap in these units bounds a result however deep the
-//! trees run. Shared by `query_by_date_range` (`max_blocks`) and the cuts of `get_page` and
+//! trees run. Shared by `explore_timeline` (`max_blocks`) and the cuts of `get_page` and
 //! `get_block` (#507).
 //!
 //! A block is the JSON object a tree rebuilt from Datalog holds: its `children` key is an array

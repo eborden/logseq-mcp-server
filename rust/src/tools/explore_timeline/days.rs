@@ -1,10 +1,8 @@
-//! The timeline of a concept's mentions (the pure part of the tool):
-//! which blocks pass the date bounds, how they are grouped by day, cut at `max_entries` and grouped
-//! by period, and the words of the cut. Blocks are the `Value`s LogSeq sent, and an entry names
-//! them by their place in the list of mentions, so the same block is never copied twice.
+//! The dated mentions of a page (the pure part of the page mode): which blocks are inside the period, how they are
+//! grouped by day, and the keys of the weeks and months they can be grouped into. Blocks are the `Value`s LogSeq sent.
 //!
-//! A block's day is its page's `journalDay` (or `journal-day`); a block with no day (not on a
-//! journal) is undated, passes every date filter, and comes last.
+//! A block's day is its page's `journalDay` (or `journal-day`); a block with no day (not on a journal) is undated. With
+//! no period it comes last, after the dated days; with a period it is left out, since it has no day in the period.
 //!
 //! The period keys are plain calendar arithmetic on the `YYYYMMDD` number, with no time zone in it:
 //! there is no local time for a daylight-saving change to move a day into another week by (#249).
@@ -13,18 +11,12 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
+use super::Entry;
 use crate::entity::journal_day_of;
 use crate::js;
-use crate::meta::ResultWarning;
-use crate::truncation::{CappedTruncation, INLINE_BLOCKS, capped_truncation_warning};
+use crate::period::Period;
 
-/// Most mentions one call returns (#61). A larger `max_entries` is clamped to it, and a cut at the
-/// maximum is reported by an `entries_truncated` warning with no `howToFetchAll`. The dates reach
-/// later dated mentions only: mentions on non-journal pages pass every date filter, so no date range
-/// narrows them.
-pub const MAX_ENTRIES: u64 = 500;
-
-/// The periods mentions are grouped into.
+/// The periods entries are grouped into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 // Inlined into the tool's schema, not referenced from `$defs`: the MCP SDK client drops `$defs`.
@@ -34,14 +26,6 @@ pub enum GroupBy {
     Day,
     Week,
     Month,
-}
-
-/// One day's mentions: the day (`None` for the blocks with no journal day) and which blocks.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Entry {
-    pub date: Option<i64>,
-    /// Places in the list of mentions, in the order the blocks were found
-    pub blocks: Vec<usize>,
 }
 
 /// The block's day, `None` when it has none or it is 0.
@@ -57,33 +41,26 @@ pub fn unique_by_id(blocks: Vec<Value>) -> Vec<Value> {
     blocks.into_iter().filter(|block| seen.insert(block.get("id").and_then(crate::wire::whole_number).unwrap_or_default())).collect()
 }
 
-/// The blocks inside the date bounds. A block with no day is kept; a bound that is 0 or absent is no
-/// bound (`startDate && blockDate < startDate`).
-pub fn filter_by_dates(blocks: Vec<Value>, start_date: Option<i64>, end_date: Option<i64>) -> Vec<Value> {
-    let bound = |date: Option<i64>| date.filter(|date| *date != 0);
-    let (start, end) = (bound(start_date), bound(end_date));
-    blocks
-        .into_iter()
-        .filter(|block| {
-            let Some(day) = day_of(block) else { return true };
-            !(start.is_some_and(|start| day < start) || end.is_some_and(|end| day > end))
-        })
-        .collect()
+/// The blocks inside the period. With no period every block stays. With one, a block stays when its day is in it,
+/// and a block with no day is left out: it has no day to be in the period (`explore_timeline` says so in its description).
+pub fn in_period(blocks: Vec<Value>, period: Option<Period>) -> Vec<Value> {
+    let Some(Period { start, end }) = period else { return blocks };
+    blocks.into_iter().filter(|block| day_of(block).is_some_and(|day| start <= day && day <= end)).collect()
 }
 
-/// The mentions grouped by day, oldest first, the undated ones last.
-pub fn full_timeline(blocks: &[Value]) -> Vec<Entry> {
+/// The mentions as entries, oldest day first, the undated ones last. A day keeps its blocks in the order they were
+/// found, and its entry names the page of the first of them (one journal page per day).
+pub fn entries_by_day(blocks: Vec<Value>) -> Vec<Entry> {
     let mut entries: Vec<Entry> = Vec::new();
     let mut at: HashMap<Option<i64>, usize> = HashMap::new();
-    for (place, block) in blocks.iter().enumerate() {
-        let date = day_of(block);
-        match at.get(&date) {
-            Some(&index) => entries[index].blocks.push(place),
-            None => {
-                at.insert(date, entries.len());
-                entries.push(Entry { date, blocks: vec![place] });
-            }
-        }
+    for block in blocks {
+        let date = day_of(&block);
+        let index = *at.entry(date).or_insert_with(|| {
+            let page = if date.is_some() { block.get("page").cloned().unwrap_or(Value::Null) } else { Value::Null };
+            entries.push(Entry { date, page, blocks: Vec::new() });
+            entries.len() - 1
+        });
+        entries[index].blocks.push(block);
     }
     // A stable sort, with the undated entry (there is one at most) last
     entries.sort_by(|a, b| match (a.date, b.date) {
@@ -93,63 +70,6 @@ pub fn full_timeline(blocks: &[Value]) -> Vec<Entry> {
         (Some(x), Some(y)) => x.cmp(&y),
     });
     entries
-}
-
-/// The first `cap` mentions in timeline order (oldest first, undated last): `cap` is `max_entries`,
-/// clamped to 0..[`MAX_ENTRIES`]. At or below the cap every block is kept in its order.
-pub fn cap_timeline(full: &[Entry], max_entries: u64) -> Vec<Entry> {
-    let mut room = max_entries.min(MAX_ENTRIES) as usize;
-    let mut kept = Vec::new();
-    for entry in full {
-        if room == 0 {
-            break;
-        }
-        let taken: Vec<usize> = entry.blocks.iter().copied().take(room).collect();
-        room -= taken.len();
-        kept.push(Entry { date: entry.date, blocks: taken });
-    }
-    kept
-}
-
-/// The places of the blocks the timeline kept, in the order of the mentions.
-pub fn shown_places(total: usize, timeline: &[Entry]) -> Vec<usize> {
-    let kept: HashSet<usize> = timeline.iter().flat_map(|entry| entry.blocks.iter().copied()).collect();
-    (0..total).filter(|place| kept.contains(place)).collect()
-}
-
-fn mention_count(entries: &[Entry], dated: bool) -> usize {
-    entries.iter().filter(|entry| entry.date.is_some() == dated).map(|entry| entry.blocks.len()).sum()
-}
-
-/// The `entries_truncated` warning for a timeline cut from `full` to `kept`. Says where the timeline
-/// ends when it ends on a dated mention, so the caller can continue from there, and says what the dates
-/// can reach: the date filter keeps every block with no journal day, so they never narrow the undated
-/// mentions, which are cut first.
-pub fn entries_truncated(full: &[Entry], kept: &[Entry], total: usize, shown: usize, requested: u64) -> ResultWarning {
-    let ends_at = kept.last().and_then(|entry| entry.date);
-    let dated_cut = mention_count(full, true) > mention_count(kept, true);
-    let narrower = match (dated_cut, ends_at) {
-        // One day can be split across the cut, so starting there repeats its kept blocks
-        (true, Some(date)) => format!(
-            "Set start_date to {} for later dated mentions (that day repeats its kept blocks). Mentions on non-journal pages ignore the dates.",
-            date
-        ),
-        (true, None) => "Narrow start_date and end_date to see dated mentions. Mentions on non-journal pages ignore the dates.".to_owned(),
-        (false, _) => "Mentions on non-journal pages ignore start_date and end_date, so narrowing the dates can't reach the rest.".to_owned(),
-    };
-    let ends = ends_at.map(|date| format!("; the timeline ends at {date}")).unwrap_or_default();
-    capped_truncation_warning(CappedTruncation {
-        what: &format!("mentions (oldest first, undated last{ends})"),
-        shown,
-        total,
-        param: "max_entries",
-        max: MAX_ENTRIES as usize,
-        narrower: &narrower,
-        requested: Some(requested),
-        code: "entries_truncated",
-        inline_max: Some(INLINE_BLOCKS),
-        paging: None,
-    })
 }
 
 /// `parseInt(text)` for the digits of a date: a leading sign and digits, `None` (NaN) for no digits.
@@ -204,7 +124,7 @@ pub fn month_identifier(date: i64) -> String {
 }
 
 /// The key of the period a day falls in, for a grouping. `None` for a day with no week, which is
-/// grouped with the undated mentions: in no period.
+/// grouped with the undated blocks: in no period.
 pub fn period_key(group_by: GroupBy, date: i64) -> Option<String> {
     match group_by {
         GroupBy::Day => Some(date.to_string()),
@@ -212,6 +132,7 @@ pub fn period_key(group_by: GroupBy, date: i64) -> Option<String> {
         GroupBy::Month => Some(month_identifier(date)),
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -225,8 +146,8 @@ mod tests {
         }
     }
 
-    fn places(entries: &[Entry]) -> Vec<(Option<i64>, Vec<usize>)> {
-        entries.iter().map(|e| (e.date, e.blocks.clone())).collect()
+    fn ids(blocks: &[Value]) -> Vec<i64> {
+        blocks.iter().map(|b| b["id"].as_i64().unwrap()).collect()
     }
 
     #[test]
@@ -244,59 +165,26 @@ mod tests {
     }
 
     #[test]
-    fn a_block_with_no_day_passes_and_a_zero_bound_is_no_bound() {
+    fn no_period_keeps_every_block_and_a_period_keeps_the_days_in_it_and_leaves_out_the_undated() {
         let blocks = vec![block(1, Some(20250101)), block(2, Some(20250201)), block(3, None), block(4, Some(0))];
-        let ids = |blocks: Vec<Value>| blocks.iter().map(|b| b["id"].as_i64().unwrap()).collect::<Vec<_>>();
-        assert_eq!(ids(filter_by_dates(blocks.clone(), Some(20250115), None)), [2, 3, 4]);
-        assert_eq!(ids(filter_by_dates(blocks.clone(), None, Some(20250115))), [1, 3, 4]);
-        assert_eq!(ids(filter_by_dates(blocks.clone(), Some(20250101), Some(20250101))), [1, 3, 4]);
-        assert_eq!(ids(filter_by_dates(blocks.clone(), Some(0), Some(0))), [1, 2, 3, 4]);
+        assert_eq!(ids(&in_period(blocks.clone(), None)), [1, 2, 3, 4]);
+        // both ends are in the period
+        assert_eq!(ids(&in_period(blocks.clone(), Some(Period { start: 20250101, end: 20250201 }))), [1, 2]);
+        assert_eq!(ids(&in_period(blocks.clone(), Some(Period { start: 20250115, end: 20250131 }))), Vec::<i64>::new());
+        assert_eq!(ids(&in_period(blocks.clone(), Some(Period { start: 20250102, end: 20250201 }))), [2]);
         // a day of 0 is no day: block 4 is undated
         assert_eq!(day_of(&blocks[3]), None);
     }
 
     #[test]
-    fn the_timeline_is_oldest_first_with_the_undated_last_and_a_day_keeps_its_blocks_in_order() {
+    fn the_entries_are_oldest_first_with_the_undated_last_and_a_day_keeps_its_blocks_in_order() {
         let blocks = vec![block(1, None), block(2, Some(20250201)), block(3, Some(20250101)), block(4, Some(20250201)), block(5, None)];
-        let timeline = full_timeline(&blocks);
-        assert_eq!(places(&timeline), [(Some(20250101), vec![2]), (Some(20250201), vec![1, 3]), (None, vec![0, 4])]);
-    }
-
-    #[test]
-    fn the_cap_keeps_the_first_mentions_in_timeline_order_and_may_split_a_day() {
-        let blocks = vec![block(1, Some(20250101)), block(2, Some(20250101)), block(3, Some(20250102)), block(4, None)];
-        let full = full_timeline(&blocks);
-        assert_eq!(places(&cap_timeline(&full, 3)), [(Some(20250101), vec![0, 1]), (Some(20250102), vec![2])]);
-        assert_eq!(places(&cap_timeline(&full, 1)), [(Some(20250101), vec![0])]);
-        assert_eq!(cap_timeline(&full, 0), []);
-        assert_eq!(cap_timeline(&full, 4), full);
-        assert_eq!(cap_timeline(&full, 99_999), full);
-        assert_eq!(shown_places(4, &cap_timeline(&full, 3)), [0, 1, 2]);
-    }
-
-    #[test]
-    fn a_cut_names_where_the_timeline_ends_and_what_the_dates_can_reach() {
-        let blocks: Vec<Value> = (1..=6).map(|i| block(i, if i <= 4 { Some(20250100 + i) } else { None })).collect();
-        let full = full_timeline(&blocks);
-        let kept = cap_timeline(&full, 2);
-        let warning = entries_truncated(&full, &kept, 6, 2, 2);
-        assert_eq!(warning.code, "entries_truncated");
-        assert_eq!(warning.message, "Showing 2 of 6 mentions (oldest first, undated last; the timeline ends at 20250102).");
-        assert_eq!(
-            warning.how_to_fetch_all.as_deref(),
-            Some("Set max_entries to 6 (or higher) to get all 6.")
-        );
-        // only undated mentions were cut: the dates can't reach them
-        let kept = cap_timeline(&full, 5);
-        let warning = entries_truncated(&full, &kept, 6, 5, 5);
-        assert_eq!(warning.message, "Showing 5 of 6 mentions (oldest first, undated last).");
-        // at the maximum: no way to fetch the rest, and the message says where to continue
-        let many: Vec<Value> = (1..=600).map(|i| block(i, Some(20240101 + i))).collect();
-        let full = full_timeline(&many);
-        let kept = cap_timeline(&full, 700);
-        let warning = entries_truncated(&full, &kept, 600, 500, 700);
-        assert_eq!(warning.how_to_fetch_all, None);
-        assert!(warning.message.starts_with("Showing 500 of 600 mentions (oldest first, undated last; the timeline ends at 20240601): max_entries is capped at its maximum of 500 (700 was asked for), so the rest can't be fetched in one call. Set start_date to 20240601 for later dated mentions"), "{}", warning.message);
+        let entries = entries_by_day(blocks);
+        let shape: Vec<(Option<i64>, Vec<i64>)> = entries.iter().map(|e| (e.date, ids(&e.blocks))).collect();
+        assert_eq!(shape, [(Some(20250101), vec![3]), (Some(20250201), vec![2, 4]), (None, vec![1, 5])]);
+        // a day names its page, the undated entry none
+        assert_eq!(entries[0].page, json!({"id": 1003, "journalDay": 20250101}));
+        assert_eq!(entries[2].page, Value::Null);
     }
 
     /// A week computed independently of the code under test, with no date arithmetic in it: counting the days of the
