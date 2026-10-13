@@ -136,6 +136,44 @@ async fn blocks_on_other_pages_cost_one_lookup_whatever_their_number() {
 }
 
 #[tokio::test]
+async fn a_selection_over_the_character_budget_is_cut_with_no_extra_call_and_a_small_one_is_not() {
+    use logseq_mcp_server::budget::{BUDGET_CHARS, size};
+    let text_of = |result: &rmcp::model::CallToolResult| serde_json::to_value(result).unwrap()["content"][0]["text"].as_str().unwrap().to_owned();
+    // a whole page selected: 400 blocks of 150 characters, ~70,000 characters
+    let selected: Vec<Value> = (1..=400).map(|id| block(1000 + id, &"x".repeat(150), 10)).collect();
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, open_page(10, "Project Atlas")),
+        (GET_CURRENT_BLOCK, block(512, "on atlas", 10)),
+        (GET_SELECTED_BLOCKS, json!(selected)),
+    ])
+    .await;
+    let result = get_current::call(&client(&logseq), true, None).await.unwrap();
+    // the cut reads no more than the context does
+    assert_eq!(methods(&logseq), [GET_CURRENT_BLOCK, GET_CURRENT_PAGE, GET_SELECTED_BLOCKS]);
+    let text = text_of(&result);
+    assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
+    let value: Value = serde_json::from_str(&text).unwrap();
+    let kept = value["selectedBlocks"].as_array().unwrap().len();
+    assert!(kept > 50 && kept < 400, "{kept}");
+    assert_eq!(value["page"]["originalName"], "Project Atlas");
+    assert_eq!(value["focusedBlock"]["content"], "on atlas");
+    assert_eq!(value["hasMore"], false);
+    assert_eq!(value["warnings"][0]["code"], "result_size_truncated");
+
+    let few: Vec<Value> = (1..=5).map(|id| block(1000 + id, "short", 10)).collect();
+    let logseq = mock_logseq(&[
+        (GET_CURRENT_PAGE, open_page(10, "Project Atlas")),
+        (GET_CURRENT_BLOCK, json!(null)),
+        (GET_SELECTED_BLOCKS, json!(few)),
+    ])
+    .await;
+    let result = get_current::call(&client(&logseq), true, None).await.unwrap();
+    let value: Value = serde_json::from_str(&text_of(&result)).unwrap();
+    assert_eq!(value["selectedBlocks"].as_array().unwrap().len(), 5);
+    assert!(value.get("warnings").is_none());
+}
+
+#[tokio::test]
 async fn a_block_with_no_page_costs_no_lookup() {
     let logseq = mock_logseq(&[
         (GET_CURRENT_PAGE, json!(null)),

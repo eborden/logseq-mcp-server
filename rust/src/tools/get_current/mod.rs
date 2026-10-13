@@ -12,6 +12,8 @@
 //! This directory holds everything only the current context uses: the answers it reads
 //! (`wire.rs`). What it shares with other tools is outside it: the page lookup by id, slim output,
 //! entity fields and the tool helpers.
+//!
+//! [`call`] cuts a selection too large for the character budget (#507); the library function [`get_current`] does not.
 
 mod wire;
 
@@ -22,6 +24,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
@@ -30,6 +33,7 @@ use crate::meta::ResultWarning;
 use crate::pages_by_ids::pages_by_ids;
 use crate::slim::{to_slim_block, to_slim_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
+use crate::truncation::{SizeCut, size_truncation_warning};
 
 pub const NAME: &str = "logseq_get_current";
 
@@ -55,8 +59,41 @@ pub fn definition() -> Tool {
 
 /// A call: the context LogSeq is showing, as JSON.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, _arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let context = get_current(client).await?;
+    let context = fit_to_budget(get_current(client).await?);
     Ok(success_result(vec![ContentBlock::text(context.into_value().to_string())]))
+}
+
+/// The context as it is when its text fits the character budget (#507, #485), else with the first selected blocks that
+/// do. The selection is the one list with no cap: it is whatever the user selected in the app, and a whole page selected
+/// is a few hundred blocks. A selected block is never cut inside its text (BR-0007), so a first one over the budget comes
+/// back alone. The open page and the focused block are the frame of the result and are never cut.
+fn fit_to_budget(context: CurrentContext) -> CurrentContext {
+    let total = context.selected_blocks.as_ref().map_or(0, Vec::len);
+    let size_of = |kept: usize| size(&if kept < total { cut_selection(&context, kept, total, false) } else { context.clone() }.into_value().to_string());
+    match fit(total, 1, size_of) {
+        Fit::Whole => context,
+        Fit::Cut { kept, oversize } => cut_selection(&context, kept, total, oversize),
+    }
+}
+
+/// The context with its first `kept` selected blocks of `total` and the `result_size_truncated` warning after any it had.
+fn cut_selection(context: &CurrentContext, kept: usize, total: usize, oversize: bool) -> CurrentContext {
+    let mut warnings = context.warnings.clone().unwrap_or_default();
+    warnings.push(size_truncation_warning(SizeCut {
+        what: "selected blocks",
+        kept,
+        total,
+        oversize,
+        advice: "The last blocks of the selection are left out. A selection can't be paged and no parameter raises this limit: select fewer blocks, \
+                 or read the page with logseq_get_page and detail \"full\".",
+        how_to_fetch_all: None,
+    }));
+    CurrentContext {
+        has_more: Some(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())),
+        warnings: Some(warnings),
+        selected_blocks: context.selected_blocks.as_ref().map(|blocks| blocks[..kept].to_vec()),
+        ..context.clone()
+    }
 }
 
 /// What the user is looking at, as written in BR-0013's order: what must not be missed (`hasMore` and `warnings`,
@@ -245,6 +282,59 @@ mod tests {
             serde_json::to_value(&tool.annotations).unwrap(),
             json!({"title": "Get Current Context", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false})
         );
+    }
+
+    /// A context that has `selected` selected blocks of `length` characters on the open page.
+    fn selecting(selected: usize, length: usize) -> CurrentContext {
+        let block = |n: usize| object(json!({"uuid": format!("u{n}"), "content": "x".repeat(length), "pageName": "Atlas"}));
+        CurrentContext {
+            has_more: None,
+            warnings: None,
+            message: None,
+            page: Some(object(json!({"name": "atlas", "originalName": "Atlas"}))),
+            focused_block: Some(block(999)),
+            selected_blocks: (selected > 0).then(|| (0..selected).map(block).collect()),
+        }
+    }
+
+    #[test]
+    fn a_selection_under_the_budget_and_no_selection_are_left_alone() {
+        let small = selecting(20, 100);
+        assert_eq!(fit_to_budget(small.clone()), small);
+        let none = selecting(0, 100);
+        assert_eq!(fit_to_budget(none.clone()), none);
+        let one = selecting(1, 40_000);
+        assert_eq!(fit_to_budget(one.clone()), one);
+    }
+
+    #[test]
+    fn a_selection_over_the_budget_keeps_its_first_blocks_and_the_frame_and_says_so() {
+        let whole = selecting(400, 150);
+        assert!(size(&whole.clone().into_value().to_string()) > crate::budget::BUDGET_CHARS);
+        let cut = fit_to_budget(whole.clone());
+        let text = cut.clone().into_value().to_string();
+        assert!(size(&text) <= crate::budget::BUDGET_CHARS, "{}", size(&text));
+        let kept = cut.selected_blocks.as_ref().unwrap().len();
+        assert!(kept > 50 && kept < 400, "{kept}");
+        assert_eq!(cut.selected_blocks.as_ref().unwrap()[..], whole.selected_blocks.as_ref().unwrap()[..kept]);
+        assert!(size(&cut_selection(&whole, kept + 1, 400, false).into_value().to_string()) > crate::budget::BUDGET_CHARS);
+        // the open page and the focused block are the frame: never cut
+        assert_eq!((cut.page.clone(), cut.focused_block.clone()), (whole.page.clone(), whole.focused_block.clone()));
+        let warning = &cut.warnings.as_ref().unwrap()[0];
+        assert_eq!(warning.code, "result_size_truncated");
+        assert!(warning.message.starts_with(&format!("Showing {kept} of 400 selected blocks")), "{}", warning.message);
+        assert_eq!(cut.has_more, Some(false));
+        assert_eq!(keys(&cut.into_value()), ["hasMore", "warnings", "page", "focusedBlock", "selectedBlocks"]);
+    }
+
+    #[test]
+    fn a_cut_keeps_the_warning_the_page_names_already_had() {
+        let mut whole = selecting(400, 150);
+        whole.has_more = Some(false);
+        whole.warnings = Some(vec![page_names_unavailable(false)]);
+        let cut = fit_to_budget(whole);
+        let codes: Vec<&str> = cut.warnings.as_ref().unwrap().iter().map(|warning| warning.code.as_str()).collect();
+        assert_eq!(codes, ["page_names_unavailable", "result_size_truncated"]);
     }
 
     #[test]
