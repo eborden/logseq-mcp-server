@@ -2,7 +2,7 @@
 
 ## Statement
 
-`search_blocks`, `query_by_property` and `query_by_date_range` take `slim_results`, default `true`. Only an explicit `false` returns full entities.
+`find_blocks` and `query_by_date_range` take `slim_results`, default `true`. Only an explicit `false` returns full entities.
 
 Slim blocks leave out empty fields: a blank `pageName`, properties with no value (`false` and `0` stay), empty `context.references` and `context.tags`. `uuid` and `content` always stay. Children never carry `pageName`, and neither do blocks inside a date-range entry (the entry has it). `hasMore`, `warnings` and `totals` in meta stay even when empty, because `hasMore: false` is the "nothing was cut" signal (#40). `get_page`, `get_block`, `build_context` and the rest have no slim mode.
 
@@ -30,3 +30,4 @@ test: `rust/tests/parity.rs`
 | 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertion for the `slim_results` default. | #370 |
 | 2026-10-08 | Rationale only: where the default lives is the Rust crate's (`DEFAULT_SLIM_RESULTS` in `rust/src/slim.rs`, read by each tool's `slim_results` argument) and not the TypeScript argument schema. Statement unchanged. | #372 |
 | 2026-10-08 | Mechanical enforcement: the parity check of the server's schema against the recorded `tools/list` is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
+| 2026-10-12 | The statement names `find_blocks`, which replaced `search_blocks` and `query_by_property` (ADR-0037). Nothing else changed. | #525 |

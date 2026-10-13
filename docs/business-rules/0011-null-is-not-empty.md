@@ -26,7 +26,7 @@ test: `rust/tests/find_pages_calls.rs`
 
 What each test file pins on a `null` answer, and that a real `[]` carries no warning where one is tested beside it:
 
-- `simple_tools_calls.rs`: `find_pages` gives `pages_unavailable`; `search_blocks` with `include_context` gives `context_unavailable` on a `null` page lookup.
+- `simple_tools_calls.rs`: `find_pages` gives `pages_unavailable`; `find_blocks` with `include_context` gives `context_unavailable` on a `null` page lookup.
 - `resolve_refs_calls.rs`: a `null` ref lookup gives `refs_unavailable` and no `missing` refs; a real `[]` still gives `missing`.
 - `query_by_date_range_calls.rs`: a `null` journal-page answer gives `journals_unavailable`, a `null` block answer `blocks_unavailable`.
 - `get_page_outline_calls.rs`: `outline_unavailable` on a `null` outline answer; a `null` answer from the page resolver is an error that says LogSeq gave no answer, with no suggestions and no further call.
@@ -39,7 +39,7 @@ What each test file pins on a `null` answer, and that a real `[]` carries no war
 - `check_links_calls.rs`: `check_links` gives `refs_unchecked` on a `null` answer, never missing pages.
 - `find_pages_calls.rs`: `find_pages` with `names` answers no name on a `null` page list (no `names` key beside `pages_unavailable`), so no name is reported as having no page.
 
-No tool maps a `null` answer to an empty result without a warning: each gives one of these warnings or fails with an error (`get_block`, `get_graph`, the page resolver). `search_blocks` and `query_by_property` give `search_unavailable` and `property_query_unavailable` (the empty list, `hasMore` false, no `howToFetchAll`; #415), pinned in `simple_tools_calls.rs`. The reviewer applies the rule to new code.
+No tool maps a `null` answer to an empty result without a warning: each gives one of these warnings or fails with an error (`get_block`, `get_graph`, the page resolver). `find_blocks` gives `search_unavailable` for any filter (the empty list, `hasMore` false, no `howToFetchAll`; #415, #491), pinned in `simple_tools_calls.rs`. It replaced `search_blocks` and `query_by_property`, which gave `search_unavailable` and `property_query_unavailable`. The reviewer applies the rule to new code.
 reviewer: A tool that maps a `null` API response to an empty result adds a warning that says the data was unavailable.
 
 ## Changelog
@@ -61,3 +61,4 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 | 2026-10-09 | Mechanical enforcement: updated the one sentence of the enforcement paragraph that said `search_blocks` and `query_by_property` still return the bare text `null` (#415), which is false now that they give `search_unavailable` and `property_query_unavailable`. The maintainer's OK on #415 covers it. No other paragraph, bullet or `test:` line changed; the Statement is unchanged. | #448 |
 | 2026-10-12 | The paragraph that lists the tools which answer a `null` with a warning or an error names `get_graph`, the new name of `get_graph_info` (ADR-0037). Nothing else changed. | #517 |
 | 2026-10-12 | The statement and the enforcement paragraph name `find_pages`, the new name of `list_pages` (ADR-0037). Mechanical enforcement: added a `test:` line and a paragraph bullet for `find_pages` with `names` (a `null` page list answers no name). Nothing else changed. | #524 |
+| 2026-10-12 | Mechanical enforcement: the paragraph that lists the tools which answer a `null` with a warning names `find_blocks`, which replaced `search_blocks` and `query_by_property` and gives the one code `search_unavailable` for every filter (`property_query_unavailable` is gone), and the `include_context` bullet of `simple_tools_calls.rs` names it too. Statement unchanged. | #525 |
