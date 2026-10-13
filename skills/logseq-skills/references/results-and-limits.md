@@ -79,6 +79,7 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 | | `blocks_truncated`, `related_pages_truncated` with `max_blocks` or `max_related_pages` set to 0 | Expected: the lists you turned off are reported as cut, with `hasMore: true`. Read `references_truncated` instead |
 | | `resolve_refs_ignored_in_compact` | `compact` skips `resolve_refs`. Set `compact` false to get resolved text |
 | `explore_network` | `network_truncated` | The caps dropped pages. A raise of `max_nodes` or `max_fanout` is named only when the larger network fits. Otherwise lower `max_depth` or start from a more specific page |
+| | `hub_pages_not_expanded` | Roll-up pages (pages that link more than 30 pages) were shown as leaves while depth was left, so what they link is not in the network. The message names them. `howToFetchAll` says to set `expand_journals`, only when it is estimated to fit. Otherwise start from the roll-up page itself and read its links |
 | | `result_size_truncated` | The network was cut deepest first. Narrow the walk |
 | | `no_path_within` | With `to`: no path within the depth reached. One more hop is offered when it could find one |
 | | `same_page` | With `to`: the two names are one page (a page and its alias) |

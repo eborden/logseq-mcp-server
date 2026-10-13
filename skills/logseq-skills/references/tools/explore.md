@@ -5,7 +5,7 @@ You have a starting point, a page or a period, and want what surrounds it: what 
 | Tool | Question it answers | Takes |
 |------|---------------------|-------|
 | `logseq_explore_context` | What do I know about this page, and what links to it? | `page`, caps, `references_offset`, `resolve_refs`, `format`, `compact` |
-| `logseq_explore_network` | How does this page connect to others, or to a second page? | `page`, `to`, `max_depth`, `max_nodes`, `max_fanout`, `expand_journals`, `format` |
+| `logseq_explore_network` | How does this page connect to others, or to a second page? | `page`, `to`, `max_depth`, `max_nodes`, `max_fanout`, `expand_journals`, `with_snippets`, `format` |
 | `logseq_explore_timeline` | What happened in a period, or how did this page change? | `page`, a period, `group_by`, `max_blocks`, `top_concepts_limit`, `include_content`, `slim_results`, `resolve_refs` |
 
 Each tool takes one page (or one period) per call. For several pages, call the tool once per page, in parallel: each answer is smaller and is cut on its own. A question is not a page name, so pick the pages yourself; for the words of a question use `logseq_find_blocks`.
@@ -69,12 +69,13 @@ Explore how a page connects: the pages linked to it as nodes and edges, in both 
 | `max_depth` | integer | 2 | Hops. 1 is the page's direct neighbours. Max 3 (a larger value is capped) |
 | `max_nodes` | integer | 50 | Most pages, root included, max 500. Not with `to` |
 | `max_fanout` | integer | 15 | Most new pages any one page may add, max 100. Not with `to` |
-| `expand_journals` | boolean | false | Walk through journal pages instead of treating them as leaves. They link to almost everything, so this can flood the network. Not with `to` |
+| `expand_journals` | boolean | false | Walk through journal pages and roll-up pages instead of treating them as leaves. A roll-up page is a page that links more than 30 pages, such as a generated weekly summary. They link to almost everything, so this can flood the network. Without it they are listed after every other page, so they don't crowd out topical neighbours, and their own links are not followed. Not with `to` |
+| `with_snippets` | boolean | false | Adds to each edge of the root a `snippet`: the first line (80 characters) of one block that makes the link, as a hint of why two pages connect. No extra call, but the result is longer. Not with `to` |
 | `format` | `json`, `markdown` | `json` | `markdown` groups pages by depth and writes one line per link (`A -> B (n)`), about 45% smaller |
 
-Setting `max_nodes`, `max_fanout` or `expand_journals` together with `to` is refused as an invalid parameter.
+Setting `max_nodes`, `max_fanout`, `expand_journals` or `with_snippets` together with `to` is refused as an invalid parameter.
 
-**Returns the network:** `{ page, resolvedFrom?, resolvedAliases?, truncated, hasMore, warnings, nodes, edges }`. `nodes` are `{ id, name, depth }`, the root at depth 0. `edges` are one per pair of pages, `{ from, to, type, count, outbound, inbound }`: `from` is the page nearer the root, `outbound` counts blocks on `from` that link `to`, `inbound` blocks on `to` that link `from`.
+**Returns the network:** `{ page, resolvedFrom?, resolvedAliases?, truncated, hasMore, warnings, nodes, edges }`. `nodes` are `{ id, name, depth }`, the root at depth 0. `edges` are one per pair of pages, `{ from, to, type, count, outbound, inbound }`: `from` is the page nearer the root, `outbound` counts blocks on `from` that link `to`, `inbound` blocks on `to` that link `from`. With `with_snippets`, an edge of the root also has a `snippet`, last. It is a hint, not a summary: a block's first line may not say why the pages are linked.
 
 **Returns the path (with `to`):** `{ page, to, hops?, hasMore, warnings, nodes, edges }`. `nodes` are the pages of the path in order, from `page` to `to`. `hops` is the number of links and is there only when a path was found. With none, `nodes` and `edges` are empty and a warning says why. Every name of a page counts as that page, and among paths of one length the walk takes the one through pages that are not journals.
 
@@ -84,13 +85,13 @@ Setting `max_nodes`, `max_fanout` or `expand_journals` together with `to` is ref
 
 **Use when:** hubs and leaves around a topic, how central it is, how two projects or people connect and through which pages (the middle nodes of a path are the bridges). Don't use it to read what pages say.
 
-**Example 1.** "What is Project Atlas connected to?"
+**Example 1.** "What is Project Atlas connected to, and why?"
 
 ```json tool=logseq_explore_network
-{"page": "project atlas", "max_depth": 1, "format": "markdown"}
+{"page": "project atlas", "max_depth": 1, "with_snippets": true}
 ```
 
-Read the lines for the direct neighbours and their link counts: high counts are the closest ties. If `truncated` is true, see `warnings` for the cap that bit: a page with more than 15 neighbours hits the `max_fanout` default even at depth 1. Next call: `logseq_explore_network` again with `max_depth: 2` from the one neighbour you care about, or `logseq_explore_context` on it.
+Read the `nodes` for the direct neighbours, each `edge` for its link counts (high counts are the closest ties) and its `snippet` for a hint of why the two pages are linked. Roll-up pages and journals are listed last and are not walked through. If `truncated` is true, see `warnings` for the cap that bit: a page with more than 15 neighbours hits the `max_fanout` default even at depth 1. Next call: `logseq_explore_network` again with `max_depth: 2` from the one neighbour you care about, or `logseq_explore_context` on it.
 
 **Example 2.** "How do the billing work and the onboarding redesign connect?"
 
