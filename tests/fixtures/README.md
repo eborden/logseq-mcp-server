@@ -28,7 +28,7 @@ that `pages/` and `journals/` hold only `.md` files. Put any new notes about the
 
 Page counts are the same however the folder is opened. Tests need not allow for a `readme` page or for
 `#NN` tag pages. The README's text is not searchable, so words like "importer", "meeting" and "test" in it
-do not add `search_blocks` hits.
+do not add `find_blocks` hits.
 
 ## What is here so far
 
@@ -110,9 +110,9 @@ One block per value type, and page properties on the first lines. Types as `:blo
 | `link` | a URL on `example.com` | text |
 | `type`, `category`, `created-by` (page) | `reference`, `[[test data]]`, `Alice` | page properties: text, set, text |
 
-`query_by_property` matches set elements with their original casing (`participants` = `Bob`, not `bob`).
+`find_blocks` with a property matches set elements with their original casing (`participants` = `Bob`, not `bob`).
 `status` = `testing` finds the one block on this page. `type` = `project` finds the three project pages.
-The page holds the word "test" for `search_blocks`.
+The page holds the word "test" for `find_blocks`.
 
 With `:property-pages/enabled?`, every property key that is not built in (`status`, `effort`,
 `created-by` and so on, but not `alias`, `tags` or `id`) is also a page with no file.
@@ -260,7 +260,7 @@ written `Row N on [[popular topic]]`, and the target has no file.
 comes first, then `light source` (ranked by linking blocks, #178), at every `max_pages`; `max_pages` 1 keeps `busy source`.
 
 The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
-`search_blocks`' maximum of 500 matches. The fixture holds 494 blocks, 478 of them with an `e` (16 without: 2 older ones and
+`find_blocks`' maximum of 500 matches. The fixture holds 494 blocks, 478 of them with an `e` (16 without: 2 older ones and
 these 14). With an `e` in these 14 it would be 492. Keep new fixture blocks without the letter, or change that test.
 
 ## Files LogSeq writes when it opens the folder

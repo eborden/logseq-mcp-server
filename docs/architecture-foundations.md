@@ -95,7 +95,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **Rule.** The tool schemas are the primary artifact. Change them first, deliberately, and keep them backward compatible.
 
-**Why.** An MCP client, a skill, or a prompt that names `logseq_search_blocks` and its parameters is a consumer you can't see. The schema is how it agrees with the server about reality.
+**Why.** An MCP client, a skill, or a prompt that names `logseq_find_blocks` and its parameters is a consumer you can't see. The schema is how it agrees with the server about reality.
 
 **In this repo.** Tool names, parameter names, required fields and the shape of results are the contract. Contracts change additively ([BR-0004 (additive-tool-contracts)](business-rules/0004-additive-tool-contracts.md)), and every tool keeps its read-only annotations ([BR-0002 (tools-read-only)](business-rules/0002-tools-read-only.md)).
 
