@@ -43,7 +43,7 @@ import {
   type SessionStatus,
   type Surface,
 } from './lib/routing-eval.js';
-import { assertOutPathSafe, claudeArgs, hostEnv, parseOptions, prepareHarness, USAGE, type Harness, type Options } from './lib/routing-eval-host.js';
+import { assertOutPathSafe, claudeArgs, hostEnv, loadSkillText, parseOptions, prepareHarness, USAGE, type Harness, type Options } from './lib/routing-eval-host.js';
 import { parseSavedRun, reconcile, SAVED_RUN_VERSION, scoringHash, textHash } from './lib/routing-eval-saved.js';
 import { requireFixtureGraph } from '../tests/integration/helpers/fixture-graph.js';
 import { assertNotPersonalLogseq, resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
@@ -78,10 +78,10 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 }
 
 /** One headless session: the question on stdin, the stream-json events on stdout. */
-function runSession(question: Question, run: number, options: Options, harness: Harness, env: Record<string, string>): Promise<SessionResult> {
+function runSession(question: Question, run: number, options: Options, harness: Harness, env: Record<string, string>, skillText?: string): Promise<SessionResult> {
   return new Promise(resolve => {
     const trace = new SessionTrace();
-    const child = spawn('claude', claudeArgs(options, harness.mcpConfigPath), { cwd: harness.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    const child = spawn('claude', claudeArgs(options, harness.mcpConfigPath, skillText), { cwd: harness.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     children.add(child);
     let stderr = '';
     let stopped: SessionStatus | undefined;
@@ -138,6 +138,7 @@ function printAggregates(a: Aggregates, options: Options, info: RunInfo): void {
   console.log('\nRouting eval');
   line('surface', a.surface);
   line('model', [...info.models].join(', ') || 'unknown');
+  line('skill', options.skill ? 'SKILL.md body added to the system prompt' : 'none');
   line('questions x runs', `${info.questionCount} x ${info.runs}`);
   line('sessions counted', `${a.sessions} of ${info.planned} planned (${a.failed} failed and left out, ${a.timedOut} timed out, ${a.capped} stopped at ${options.maxCalls} calls)`);
   if (a.failed > 0 || info.stoppedEarly || a.sessions < info.planned) {
@@ -227,6 +228,7 @@ async function main(): Promise<void> {
   if (options.binary) process.env[RUST_BINARY_ENV] = options.binary;
   requireRustBinary();
 
+  const skillText = options.skill ? await loadSkillText(options.skill) : undefined;
   const harness = await prepareHarness(config, rustBinaryPath());
   const env = hostEnv(process.env);
   const onSignal = () => {
@@ -250,7 +252,7 @@ async function main(): Promise<void> {
     const worker = async (): Promise<void> => {
       while (!stoppedEarly && next < queue.length) {
         const { question, run } = queue[next++];
-        const result = await runSession(question, run, options, harness, env);
+        const result = await runSession(question, run, options, harness, env, skillText);
         records.push(result.record);
         if (result.model) models.add(result.model);
         if (result.toolNames.length > 0 && !options.surface) {
