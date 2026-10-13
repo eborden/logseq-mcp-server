@@ -285,12 +285,27 @@ describe('the skills guard can fail (#486 self-test)', () => {
     expect(schemaMismatch('a', { type: 'string', pattern: '^a$' })).toBe(
       'the schema uses "pattern", which this guard cannot check',
     );
-    expect(schemaMismatch('a', { type: 'string', multipleOf: 2, items: {} })).toContain('"multipleOf", "items"');
+    expect(schemaMismatch('a', { type: 'string', multipleOf: 2, uniqueItems: true })).toContain('"multipleOf", "uniqueItems"');
     expect(schemaMismatch(1, { type: 'integer', title: 'T', description: 'd', default: 1, format: 'uint64', $schema: 's' })).toBe(null);
   });
 
   it('reports a schema it cannot check instead of passing it', () => {
     expect(schemaMismatch(1, {})).toContain('cannot check');
+    // an array with no `items` says nothing about what it holds
     expect(schemaMismatch([], { type: 'array' })).toContain('cannot check');
+    expect(schemaMismatch({}, { type: 'object' })).toContain('cannot check');
+  });
+
+  it('checks an array by its length and by each item', () => {
+    const names = { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 2 };
+    expect(schemaMismatch(['a'], names)).toBe(null);
+    expect(schemaMismatch(['a', 'b'], names)).toBe(null);
+    expect(schemaMismatch([], names)).toBe('the array has 0 items, below the minItems of 1');
+    expect(schemaMismatch(['a', 'b', 'c'], names)).toBe('the array has 3 items, above the maxItems of 2');
+    expect(schemaMismatch(['a', 5], names)).toBe('item 1: expected string, got number');
+    expect(schemaMismatch('a', names)).toBe('expected array, got string');
+    // an item that is itself an array of the wrong thing is found, and the keywords of `items` are checked too
+    expect(schemaMismatch([['a', 1]], { type: 'array', items: { type: 'array', items: { type: 'string' } } })).toBe('item 0: item 1: expected string, got number');
+    expect(schemaMismatch(['a'], { type: 'array', items: { type: 'string', pattern: 'a' } })).toContain('"pattern"');
   });
 });
