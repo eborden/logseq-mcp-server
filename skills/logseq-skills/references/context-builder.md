@@ -137,19 +137,20 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
 
 ### Phase 1: Visualize Network
 ```
-logseq_get_concept_network(topic, max_depth=2)
+logseq_explore_network(topic, max_depth=2)
 ```
-- Returns nodes (pages) and edges (connections)
+- Returns nodes (pages) and edges (connections) in both link directions, each node with its distance from the topic and each edge with its reference counts
 - Good for understanding topic centrality
 - Identifies hub pages vs. leaf pages
-- Shows relationship type and distance
+- Capped at 50 pages and cut to 30,000 characters: read the `truncated` flag and the warnings before calling the map complete, and ask about a more specific page or lower `max_depth` for a smaller one
+- To ask how two pages connect, pass the second as `to` (`logseq_explore_network(topic, to=other, max_depth=3)`): the result is the shortest path as nodes and edges, and the middle pages are the bridges. If there is none within `max_depth`, a `no_path_within` warning says how far the walk went
 
 ### Phase 2: Get the References
 ```
 logseq_explore_context(topic, max_blocks=0, max_related_pages=0)
 ```
 - Find the pages that reference the topic, with the blocks that do (the `references`)
-- Complements concept_network with detailed backlink context
+- Complements the network with detailed backlink context
 - Keep the defaults (20 references): they cover "what connects to this". More come back with `references_truncated` in the warnings, with `totals.references` giving the real count, and `references_offset` reads the next page (the warning's `howToFetchAll` names the offset). Say the list is partial. The references come ranked by the blocks on their source page that link the topic, most first (ties by name), so the 20 kept are on the pages that link the topic most and the first one listed is the top referrer, which answers "what connects to this" without raising anything. A page left out links the topic no more than the last one kept, but a ranking by count says nothing about which block matters, so a blocker can sit on a page with one linking block. Read on with `references_offset` only when the question needs every referrer (a blocker hunt); each later page can pass `max_blocks=0` and `max_related_pages=0`. The result is cut to 30,000 characters whole; the warning then names the offset to read on from
 
 ### Phase 3: Present Insights
@@ -162,7 +163,7 @@ logseq_explore_context(topic, max_blocks=0, max_related_pages=0)
 ```
 User: "Show me everything connected to [[Machine Learning]]"
 
-1. logseq_get_concept_network("Machine Learning", max_depth=2)
+1. logseq_explore_network("Machine Learning", max_depth=2)
    → 23 nodes, 47 edges
 
 2. logseq_explore_context("Machine Learning", max_blocks=0, max_related_pages=0)
@@ -316,9 +317,9 @@ User: "Give me full context on [[Q4 Planning]]"
 | Incomplete context | Use `explore_context` |
 | Poor search results | Pick the pages and call `explore_context` for each, or use `find_blocks` for the words |
 | Date queries unclear | Use `query_by_date_range` with YYYYMMDD format |
-| Lost connections | Use `get_concept_network` with max_depth=2 |
+| Lost connections | Use `explore_network` with max_depth=2, or with `to` for how two pages connect |
 | Manual aggregation | Use `explore_context` instead of multiple queries |
-| Shallow exploration | Use `get_concept_network` to see full graph |
+| Shallow exploration | Use `explore_network` to see the pages around a page |
 | Time patterns unclear | Use `get_concept_evolution` with grouping |
 
 ## Performance Tips
@@ -327,7 +328,7 @@ User: "Give me full context on [[Q4 Planning]]"
 
 **Single-call solutions (fastest):**
 - `explore_context` - Replaces 5+ separate queries; one call per page, in parallel for several
-- `get_concept_network` - Full graph in one call
+- `explore_network` - The pages around a page, or the shortest path to a second one, in one call
 
 **Multi-call workflows (when needed):**
 - Broad exploration: `find_blocks` → `get_page` → `explore_context`
@@ -341,7 +342,7 @@ User: "Give me full context on [[Q4 Planning]]"
 
 **Best practices:**
 - Prefer `explore_context` over manual aggregation, and one call per page over several searches
-- Use `find_blocks` with `page` and `links_to` instead of filtering results manually, and `search_by_relationship` to ask whether two pages connect
+- Use `find_blocks` with `page` and `links_to` instead of filtering results manually, and `explore_network` with `to` to ask how two pages connect, and through which pages
 
 ## Example Complete Sessions
 
@@ -381,19 +382,19 @@ User: "Help me plan my week"
 ```
 User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]]?"
 
-1. logseq_search_by_relationship("TypeScript", "GraphQL", "connected-within", max_distance=3)
-   → Returns blocks of both pages, so they are connected within 3 hops
-     (the result gives no distance or path)
+1. logseq_explore_network("TypeScript", to="GraphQL", max_depth=3)
+   → The shortest path, as nodes and edges: [[TypeScript]], [[API Development]], [[GraphQL]]
+     (2 hops, each edge with its reference counts). With no path within 3 hops the result
+     says `no_path_within` and names the depth reached
 
-2. logseq_get_concept_network("TypeScript", max_depth=2)
+2. logseq_explore_network("TypeScript", max_depth=2)
    → Network analysis: 15 nodes including [[GraphQL]], 28 edges
-     ([[API Development]] links to both: the bridge comes from these edges)
 
 3. logseq_explore_context("TypeScript", max_blocks=0, max_related_pages=0)
    → 12 pages with references
 
 4. Present:
-   "CONNECTION FOUND (within 3 hops):
+   "CONNECTION FOUND (2 hops):
     [[TypeScript]] → [[API Development]] → [[GraphQL]]
 
     SHARED CONTEXT:
@@ -455,9 +456,9 @@ User: "How has my approach to testing changed this year?"
 Effective LogSeq knowledge graph queries through:
 
 1. **Smart tool selection** - Use single-call solutions when available (explore_context)
-2. **Graph traversal** - Leverage bidirectional links (get_related_pages, get_concept_network)
+2. **Graph traversal** - Leverage bidirectional links (get_related_pages, explore_network)
 3. **Temporal analysis** - Track concept evolution and patterns over time
-4. **Relationship search** - Find connections between topics semantically
+4. **Relationship search** - Find how two pages connect, as a path of links
 5. **Multi-indicator task queries** (markers + properties)
 6. **Synthesis over raw data** (context + recommendations)
 7. **User system respect** (read-only, no structural changes)
