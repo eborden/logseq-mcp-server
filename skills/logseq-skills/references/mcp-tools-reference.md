@@ -83,6 +83,8 @@ Get a page by name with its properties. Its blocks come only with `detail` `full
 
 **For a long page:** call `logseq_get_page` with `detail` `outline` first, then `logseq_get_block` on the blocks you pick.
 
+**A cut page:** a result holds at most 30,000 characters, and `detail` `full` has no block cap, so a page of a few hundred blocks passes it. The blocks are kept in page order (nested ones count) and the tail is left out, whole blocks only; a kept block that lost children carries `childrenTruncated: true`. The `result_size_truncated` warning says "Showing N of M blocks" and has no `howToFetchAll`, so `hasMore` stays false: no parameter pages a page. Read on with `detail` `outline` and then `logseq_get_block` (with `include_children`) on the blocks you pick. The same cut applies to `format` `markdown`, with the warning in its footer. A page under the size, and `detail` `page`, come back as they were.
+
 **Example:**
 ```
 logseq_get_page("React")
@@ -91,7 +93,7 @@ logseq_get_page("Project Alpha", detail="full")
 
 **`detail` `outline`:** lists a page's top-level blocks without their bodies: the shape of the page, to choose from.
 
-**Returns:** `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`. `snippet` is the first line, cut to 80 characters. `childCount` counts direct children only. Capped at 200 top-level blocks; a longer page gets an `outline_truncated` warning that names `logseq_get_page` for the rest.
+**Returns:** `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`. `snippet` is the first line, cut to 80 characters. `childCount` counts direct children only. Capped at 200 top-level blocks; a longer page gets an `outline_truncated` warning that names `logseq_get_page` for the rest. Two hundred first lines of 80 characters are about 31,000 characters in JSON, so an outline can also be cut to 30,000 characters (`result_size_truncated`, "Showing N of M top-level blocks", last blocks left out, no `howToFetchAll`); that warning replaces `outline_truncated`, and `format` `toon` is shorter and is measured as TOON.
 
 **Cost:** 2 Datalog calls however long the page is. About 98% smaller than `get_page` with `detail` `full` on a long page.
 
@@ -151,6 +153,8 @@ Get specific block by UUID with optional children.
 - `resolve_refs` (optional): Add `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s (depth 2; default: false)
 - `format` (optional): `json` (default) or `markdown`, a `# Block ((uuid))` heading and the block with its children as bullets
 
+**A cut subtree:** with `include_children`, a block with a very large subtree is cut to 30,000 characters: the block, then its descendants in document order, whole blocks only, and a kept block that lost children carries `childrenTruncated: true`. The `result_size_truncated` warning has no `howToFetchAll` (no parameter pages a subtree); read a block marked `childrenTruncated` on its own by its uuid, which starts from it. Without `include_children` the result is one block and is never cut.
+
 **Use when:**
 - Have UUID from search results
 - Need specific block details
@@ -180,9 +184,9 @@ A server that doesn't page the list ignores `limit` and `offset` and returns eve
 - `names`: present only when `names` was sent. One entry per name, in the order sent: `{ name, page }` with the page's own name, or `page: null` with `suggestions` (the closest page names) for a name no page has, or `candidates` (and `candidateCount` past ten) when several pages declare that alias. It answers against every non-journal page, whatever the other filters keep, so a name whose page another filter dropped still shows its page
 - `pages`: Array of `{ name, aliases? }` sorted by `name`. `aliases` is the page's other names (original casing, sorted) and is left off when there are none. An alias is not a page of its own and is never listed alone, so a name declared by two pages shows under both
 - `total`: Count of all matching pages (aliases not counted), including any not returned in this call
-- `hasMore`, `warnings`: present only when something is missing. `pages_truncated` (with `hasMore: true`) means the list was cut. Its message says the rest can be paged through with `offset`, and `howToFetchAll` leads with the `offset` of the next page ("Set offset to 200 for the next page."), then offers raising `limit` as the alternative (with the large-result note when that raise passes about 800 pages, near the host's limit), so follow the offset. `pages_unavailable` (with `pages: []`, `total: 0`, `hasMore: false`) means LogSeq sent no page list: the list is unknown, not empty, and no name is answered
+- `hasMore`, `warnings`: present only when something is missing. `pages_truncated` (with `hasMore: true`) means the list was cut. Its message says the rest can be paged through with `offset`, and `howToFetchAll` leads with the `offset` of the next page ("Set offset to 200 for the next page."), then offers raising `limit` as the alternative (with the large-result note when that raise passes about 800 pages), so follow the offset. A raise is offered only where the raised list fits 30,000 characters ("That is the most that fits" when only part of it does), otherwise the warning says no larger limit fits; the list at `limit=1000` of ordinary names can pass 30,000 characters, and then `result_size_truncated` ("Showing N of M pages", whole pages cut from the tail, in name order) replaces `pages_truncated` and its `howToFetchAll` is the `offset` of the next page. The `names` answers are never cut. Narrow with `text`, `names` or `property` to see fewer pages `pages_unavailable` (with `pages: []`, `total: 0`, `hasMore: false`) means LogSeq sent no page list: the list is unknown, not empty, and no name is answered
 
-**Context cost:** ~6-10 tokens per page: ~1.5-2k tokens for a 200-page call, ~6-10k for a 1000-page call. Use `text`, `names` or `property` when you only need a few
+**Context cost:** ~6-10 tokens per page: ~1.5-2k tokens for a 200-page call, up to ~8k tokens (30,000 characters, where a call is cut) for a 1000-page call. Use `text`, `names` or `property` when you only need a few
 
 **Use when:**
 - Starting a new conversation about the user's knowledge graph
@@ -339,6 +343,8 @@ Parse natural language query and build context automatically.
 2. Builds context for each topic using `build_context`
 3. Returns aggregated results
 
+**A cut result:** the whole result holds at most 30,000 characters, not each topic. Five topics at their caps, or up to 100 keyword hits, can pass it. Entries are cut from the tail, whole: a topic's blocks, then references, then related pages, topic after topic (so the last topics lose theirs first), or for a query with no topic the oldest hits. The `result_size_truncated` warning says how many entries each topic kept (`"Atlas" 4 of 25`) and has no `howToFetchAll`; read a topic on its own with `logseq_build_context`. A `topic_truncated` warning then counts what the topic shows now. The `search_results_truncated` warning offers a larger `max_search_results` only when that many hits fit 30,000 characters ("That is the most that fits"), and after a size cut it gives way to `result_size_truncated`. A result under the size is as it was.
+
 **Use when:**
 - Natural language questions
 - Multi-topic queries
@@ -362,7 +368,7 @@ Get what the user is looking at in LogSeq right now: the open page, the block be
 - The user says "this page", "this block" or "what I'm looking at" without naming it
 - Before `build_context` or `get_page`, to resolve which page "this" means
 
-**Returns:** `{ page, focusedBlock?, selectedBlocks? }`. When no page is open, `page` is `null` with a message. The result reflects live UI state, so calling it twice can give different answers.
+**Returns:** `{ page, focusedBlock?, selectedBlocks? }`. When no page is open, `page` is `null` with a message. The result reflects live UI state, so calling it twice can give different answers. A selection of a few hundred blocks (a whole page) is cut to 30,000 characters: the first selected blocks stay, whole, and a `result_size_truncated` warning says "Showing N of M selected blocks" with no `howToFetchAll`. Select fewer blocks, or read the page with `logseq_get_page`.
 
 **Example:**
 ```
@@ -468,6 +474,8 @@ The gate for a `[[link]]` pass (`skills/concept-linking.md`, step 8). Read-only:
 - `refs`: `{ ok, resolved, unresolved, ambiguous }`. Every `[[term]]` in `after` names exactly one page or alias, file-less pages included. An alias several pages declare is `ambiguous`; one the note already had, with no copy added, is reported but doesn't fail
 - `refsPreserved`: `{ ok, removed }`. Every ref in `before` is still a ref in `after`, as many times
 - `hasMore`, `warnings`, `totals` (`refsBefore`, `refsAfter`, `terms`). A `refs_unchecked` warning means LogSeq gave no answer, so no ref was checked
+
+**A cut result:** 500 distinct terms that all resolve are about 40,000 characters, so the result is cut to 30,000. Only `refs.resolved` is cut, last terms first (they sort by term): `ok`, `unresolved`, `ambiguous` and `refsPreserved` never are, since a gate that drops a failure to fit a limit is not a gate. A `result_size_truncated` warning says "Showing N of M resolved refs" and has no `howToFetchAll`; check the text in parts to see every resolved ref.
 
 **Context cost:** ~100-500 tokens, depending on how many refs the text holds
 
@@ -588,7 +596,7 @@ find_blocks with property and value (for precise matches)
 
 The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `find_pages` and `find_blocks` with their `offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 backlink references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `find_blocks` scales the block estimate when a hit comes back larger, and offers a raise only up to what fits its 30,000-character result: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `build_context`, `get_concept_evolution` and `search_by_relationship` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved.
 
-**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). On short one-line blocks, `search_by_relationship` reaches that near `limit=200` (rounded down) and `get_backlinks` near 250 linking blocks across all pages. `find_blocks` cannot reach it, since it is cut to 30,000 characters first and says so. These are floors: real blocks are larger. A `limit` at the maximum is usually too big to be shown, so narrow the query or lower the cap rather than raising it.
+**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). The tools that return lists or trees (`find_blocks`, `find_pages`, `get_page`, `get_block` with `include_children`, `get_backlinks`, `get_concept_evolution`, `get_concept_network`, `query_by_date_range`, `search_by_relationship`, `build_context`, `get_context_for_query`, `get_current` and `check_links`) cut a result to 30,000 characters first and say so with a `result_size_truncated` warning, so none reaches that size. A `limit` at the maximum is usually cut, so narrow the query or lower the cap rather than raising it.
 
 ### Tool Priority
 

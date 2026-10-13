@@ -3,6 +3,9 @@
 //!
 //! Calls: 1 (`logseq.App.getCurrentGraph`). The answer is the result as it came, so a key LogSeq
 //! adds shows up. `null` is not a graph (BR-0011): it is an error, not an empty result.
+//!
+//! No character budget (#507, #485): the result is one object of three short fields (`url`, `name`, `path`, under 300
+//! characters), with no list to cut.
 
 mod wire;
 
