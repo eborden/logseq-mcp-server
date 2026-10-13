@@ -29,8 +29,7 @@ schemars = "1"
 # lowercase, as the parity harness folds them). Already in the tree, through reqwest > url > idna >
 # idna_adapter, with these same features and locked version, so it adds no build and no download.
 icu_normalizer = { version = "2.2", default-features = false, features = ["compiled_data"] }
-# General categories: letter and number for `query_by_date_range`'s whole-word test (`\p{L}`, `\p{N}`),
-# and mark for the fold above. Already in the tree, under idna_adapter, with the same features and version.
+# General categories: mark, for the fold above (`src/fuzzy.rs`). Already in the tree, under idna_adapter, with the same features and version.
 icu_properties = { version = "2.2", default-features = false, features = ["compiled_data"] }
 # The closest page names for a missing page (`src/fuzzy.rs`, ADR-0034 Decision 4): a maintained fuzzy matcher
 # (helix-editor/nucleo, MPL-2.0, accepted next to this repo's MIT licence by the maintainer on 2026-10-08)

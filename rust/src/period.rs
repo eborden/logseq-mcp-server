@@ -24,7 +24,8 @@ pub struct Selection {
 pub enum Resolved {
     /// An explicit range, or a preset: the journal pages in it, oldest first
     Range { start: i64, end: i64 },
-    /// The `count` most recent journal pages that exist, on or before `latest`, newest first
+    /// The last `count` calendar days ending at `latest` (today), whether or not each has a journal: [`resolve_period`]
+    /// turns it into a [`Period`], so no call asks which journals exist
     LastN { count: u32, latest: i64 },
 }
 
@@ -123,7 +124,7 @@ pub struct Period {
     pub end: i64,
 }
 
-/// The earliest day an explicit date may name (`selection.rs` holds dates to 1900 and later), so `last_n` reaches no
+/// The earliest day an explicit date may name (`is_valid_date_format` holds dates to 1900 and later), so `last_n` reaches no
 /// further back than a date could.
 const EARLIEST_DAY: i64 = 19_000_101;
 
