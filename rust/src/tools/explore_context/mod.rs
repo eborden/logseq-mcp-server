@@ -251,6 +251,8 @@ pub struct TopicContext {
     pub direct_blocks: Vec<Value>,
     /// The pages that link the topic, each shown as `{ page, relationshipType: "inbound" }`
     pub related_pages: Vec<Value>,
+    /// The related pages `max_related_pages` left out, kept to measure whether raising it would fit the budget
+    pub related_beyond_cap: Vec<Value>,
     /// The references from `references_from` on, at most `max_references` of them, most-linking pages first
     pub references: Vec<Reference>,
     /// The references skipped before `references`: the offset asked for, or the number there are when it asked for more
@@ -425,10 +427,32 @@ impl TopicContext {
     fn fit_to_budget(self, render: &impl Fn(&TopicContext) -> String, compact: bool) -> TopicContext {
         let total = self.direct_blocks.len() + self.references.len() + self.related_pages.len();
         let size_of = |kept: usize| size(&render(&if kept < total { self.cut_to(kept, false, compact) } else { self.clone() }));
-        match fit(total, 1, size_of) {
+        let fitted = match fit(total, 1, size_of) {
             Fit::Whole => self,
             Fit::Cut { kept, oversize } => self.cut_to(kept, oversize, compact),
+        };
+        fitted.offer_related_raise_only_if_it_fits(render)
+    }
+
+    /// `related_pages_truncated` offers a raise of `max_related_pages` only when the raised result fits the budget
+    /// (BR-0006, #485): a call that returns the same pages and a `result_size_truncated` warning is no way to fetch the
+    /// rest. Measured as the context with every related page kept; after a size cut it never fits, since the pages are the
+    /// first thing that cut drops and the call would be cut again. Without the raise the warning still says what was cut.
+    fn offer_related_raise_only_if_it_fits(mut self, render: &impl Fn(&TopicContext) -> String) -> TopicContext {
+        let offered = self.warnings.iter().any(|w| w.code == "related_pages_truncated" && w.how_to_fetch_all.is_some());
+        if !offered {
+            return self;
         }
+        let cut_by_size = self.warnings.iter().any(|w| w.code == crate::budget::SIZE_TRUNCATED_CODE);
+        let mut raised = self.clone();
+        raised.related_pages.extend(self.related_beyond_cap.iter().cloned());
+        raised.warnings.retain(|w| w.code != "related_pages_truncated");
+        if cut_by_size || size(&render(&raised)) > crate::budget::BUDGET_CHARS {
+            for warning in self.warnings.iter_mut().filter(|w| w.code == "related_pages_truncated") {
+                warning.how_to_fetch_all = None;
+            }
+        }
+        self
     }
 }
 
@@ -594,7 +618,9 @@ pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: 
     let totals = Totals { blocks: all_blocks.len(), related_pages: all_related_pages.len(), references: all_references.len() };
     let references_from = usize::try_from(caps.references_offset).unwrap_or(usize::MAX).min(all_references.len());
     let mut references: Vec<Reference> = all_references.into_iter().skip(references_from).take(caps.max_references as usize).collect();
-    let related_pages: Vec<Value> = all_related_pages.into_iter().take(caps.max_related_pages as usize).collect();
+    let related_cap = caps.max_related_pages as usize;
+    let related_beyond_cap: Vec<Value> = all_related_pages.iter().skip(related_cap).cloned().collect();
+    let related_pages: Vec<Value> = all_related_pages.into_iter().take(related_cap).collect();
 
     let mut warnings = alias_set_warnings(&[&alias_set]);
     // No `howToFetchAll`: no parameter fetches what LogSeq did not answer, so `hasMore` stays false
@@ -643,6 +669,7 @@ pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: 
         main_page,
         direct_blocks,
         related_pages,
+        related_beyond_cap,
         references,
         references_from,
         temporal_context,
@@ -693,6 +720,7 @@ mod tests {
             references: (0..references as i64)
                 .map(|id| Reference { block: json!({"id": 900 + id, "content": text}), source_page: json!({"id": 2000 + id}) })
                 .collect(),
+            related_beyond_cap: Vec::new(),
             references_from: 0,
             temporal_context: None,
             warnings: vec![],
@@ -731,6 +759,27 @@ mod tests {
         // one more entry would not fit
         let kept = fitted.direct_blocks.len() + fitted.references.len();
         assert!(size(&json_of(&context.cut_to(kept + 1, false, false))) > crate::budget::BUDGET_CHARS);
+    }
+
+    #[test]
+    fn a_related_pages_raise_is_offered_only_when_the_raised_result_fits_the_budget() {
+        let warning = || truncation_warning("related pages", 2, 12, "max_related_pages", "related_pages_truncated", Some(INLINE_RELATED_PAGES));
+        let page = |id: i64, length: usize| json!({"id": id, "name": "x".repeat(length)});
+        let with_beyond = |length: usize| TopicContext {
+            related_pages: vec![page(1, 10), page(2, 10)],
+            related_beyond_cap: (3..=12).map(|id| page(id, length)).collect(),
+            warnings: vec![warning()],
+            ..context_of(0, 0, 0, 0)
+        };
+        // ten more small pages fit: the raise is still offered
+        let small = with_beyond(10).fit_to_budget(&json_of, false);
+        assert_eq!(small.warnings[0].how_to_fetch_all.as_deref(), Some("Set max_related_pages to 12 (or higher) to get all 12."));
+        // ten more pages of 4,000 characters would pass 30,000 together: the warning says what was cut and offers nothing
+        let large = with_beyond(4000).fit_to_budget(&json_of, false);
+        assert_eq!(large.warnings.len(), 1);
+        assert_eq!(large.warnings[0].code, "related_pages_truncated");
+        assert!(large.warnings[0].how_to_fetch_all.is_none() && !large.has_more());
+        assert_eq!(large.warnings[0].message, "Showing 2 of 12 related pages.");
     }
 
     #[test]
@@ -969,6 +1018,7 @@ mod tests {
             direct_blocks: vec![json!({"id": 5, "uuid": "u5"})],
             related_pages: vec![json!({"id": 2})],
             references: vec![Reference { block: json!({"id": 6}), source_page: json!({"id": 2}) }],
+            related_beyond_cap: Vec::new(),
             references_from: 0,
             temporal_context: Some(TemporalContext { is_journal: false, date: None }),
             warnings: vec![ResultWarning::new("w", "m".into())],
