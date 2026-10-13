@@ -23,6 +23,7 @@ test: `rust/tests/concept_calls.rs`
 test: `rust/tests/context_calls.rs`
 test: `rust/tests/check_links_calls.rs`
 test: `rust/tests/find_pages_calls.rs`
+test: `rust/tests/find_blocks_calls.rs`
 
 What each test file pins on a `null` answer, and that a real `[]` carries no warning where one is tested beside it:
 
@@ -33,13 +34,14 @@ What each test file pins on a `null` answer, and that a real `[]` carries no war
 - `get_backlinks_calls.rs`: `backlinks_unavailable` (the list is always `[]` on a `null`) and `alias_lookup_unavailable`.
 - `current_context_calls.rs`: `page_names_unavailable` on a `null` page lookup.
 - `get_page_block_calls.rs` and `page_resource_calls.rs`: `page_blocks_unavailable` on a `null` block tree, as a warning on the page and a footer on the resource.
-- `search_by_relationship_calls.rs`: `relationship_unavailable`, `hop_unavailable` and `page_blocks_unavailable`.
+- `search_by_relationship_calls.rs`: `hop_unavailable` and `page_blocks_unavailable` (its `relationship_unavailable` went with the modes that used it).
+- `find_blocks_calls.rs`: with `page` or `links_to`, `search_unavailable` says which pages the blocks were asked to be on and link to, and `alias_lookup_unavailable` on a `null` alias lookup, which leaves the search to run on the pages alone and claims no alias group.
 - `concept_calls.rs`: `links_unavailable` for `get_concept_network`; `page_blocks_unavailable`, `page_unavailable` and `mentions_unavailable` for `get_concept_evolution`.
 - `context_calls.rs`: `page_blocks_unavailable`, `backlinks_unavailable`, `search_unavailable` and the `topic_unavailable` roll-up for `build_context` and `get_context_for_query`; a `null` resolver answer fails the whole call.
 - `check_links_calls.rs`: `check_links` gives `refs_unchecked` on a `null` answer, never missing pages.
 - `find_pages_calls.rs`: `find_pages` with `names` answers no name on a `null` page list (no `names` key beside `pages_unavailable`), so no name is reported as having no page.
 
-No tool maps a `null` answer to an empty result without a warning: each gives one of these warnings or fails with an error (`get_block`, `get_graph`, the page resolver). `find_blocks` gives `search_unavailable` for any filter (the empty list, `hasMore` false, no `howToFetchAll`; #415, #491), pinned in `simple_tools_calls.rs`. It replaced `search_blocks` and `query_by_property`, which gave `search_unavailable` and `property_query_unavailable`. The reviewer applies the rule to new code.
+No tool maps a `null` answer to an empty result without a warning: each gives one of these warnings or fails with an error (`get_block`, `get_graph`, the page resolver). `find_blocks` gives `search_unavailable` for any filter (the empty list, `hasMore` false, no `howToFetchAll`; #415, #491), pinned in `simple_tools_calls.rs` and, with a page, in `find_blocks_calls.rs`. It replaced `search_blocks` and `query_by_property`, which gave `search_unavailable` and `property_query_unavailable`. The reviewer applies the rule to new code.
 reviewer: A tool that maps a `null` API response to an empty result adds a warning that says the data was unavailable.
 
 ## Changelog
@@ -62,3 +64,4 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 | 2026-10-12 | The paragraph that lists the tools which answer a `null` with a warning or an error names `get_graph`, the new name of `get_graph_info` (ADR-0037). Nothing else changed. | #517 |
 | 2026-10-12 | The statement and the enforcement paragraph name `find_pages`, the new name of `list_pages` (ADR-0037). Mechanical enforcement: added a `test:` line and a paragraph bullet for `find_pages` with `names` (a `null` page list answers no name). Nothing else changed. | #524 |
 | 2026-10-12 | Mechanical enforcement: the paragraph that lists the tools which answer a `null` with a warning names `find_blocks`, which replaced `search_blocks` and `query_by_property` and gives the one code `search_unavailable` for every filter (`property_query_unavailable` is gone), and the `include_context` bullet of `simple_tools_calls.rs` names it too. Statement unchanged. | #525 |
+| 2026-10-12 | Mechanical enforcement: the `search_by_relationship_calls.rs` bullet no longer names `relationship_unavailable`, which went when the `references`, `referenced-by` and `in-pages-linking-to` modes did (`references` is `find_blocks` with `page` and `links_to`), and `find_blocks_calls.rs` is a new `test:` line with its bullet (`search_unavailable` naming the pages, `alias_lookup_unavailable`). Statement unchanged. | #527 |
