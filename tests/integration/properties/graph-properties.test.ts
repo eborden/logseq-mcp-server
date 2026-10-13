@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../../scripts/lib/logseq-api.js';
-import { getConceptNetwork } from '../helpers/tools.js';
-import type { ConceptNetworkResult } from '../helpers/types.js';
+import { exploreNetwork } from '../helpers/tools.js';
+import type { NetworkResult } from '../helpers/types.js';
 import { connectFixture } from '../helpers/fixture-client.js';
 import {
   assertNoNodeDuplicates,
@@ -38,14 +38,14 @@ describe('Property: Graph Traversal Invariants', () => {
   // call queues behind theirs; the file used to make ~200 network calls for ~50 distinct ones.
   // The tool is stateless and the tests only read a result, so sharing one is safe. The idempotence
   // test is the one that must ask again, and does.
-  const networks = new Map<string, Promise<ConceptNetworkResult>>();
-  const network = (page: string, depth: number): Promise<ConceptNetworkResult> => {
+  const networks = new Map<string, Promise<NetworkResult>>();
+  const network = (page: string, depth: number): Promise<NetworkResult> => {
     const key = `${depth}:${page}`;
     let cached = networks.get(key);
     if (!cached) {
       // A rejected call is dropped from the cache, so one transient failure (a timeout under load)
       // fails only the test that hit it; later tests retry instead of replaying the same error.
-      cached = getConceptNetwork(client, page, depth).catch((e: unknown) => {
+      cached = exploreNetwork(client, page, depth).catch((e: unknown) => {
         networks.delete(key);
         throw e;
       });
@@ -199,14 +199,14 @@ describe('Property: Graph Traversal Invariants', () => {
         // Run alone (e.g. with -t), result1 is a fresh call too, so this compares two back-to-back
         // calls: still a valid idempotence check, only without the cross-time part.
         const result1 = await network(page, 2);
-        const result2 = await getConceptNetwork(client, page, 2);
+        const result2 = await exploreNetwork(client, page, 2);
 
         // Property: the same nodes (with names and depths) and the same edges (with counts).
         // Compared as sets: the order of nodes and edges isn't part of the contract. It was
         // identical in every one of ~500 repeated calls on the fixture (#193), but that is
         // not promised, so a failure here is a real change in what is returned.
-        const nodeKey = (r: ConceptNetworkResult) => r.nodes.map(n => `${n.id}:${n.name}:${n.depth}`).sort();
-        const edgeKey = (r: ConceptNetworkResult) =>
+        const nodeKey = (r: NetworkResult) => r.nodes.map(n => `${n.id}:${n.name}:${n.depth}`).sort();
+        const edgeKey = (r: NetworkResult) =>
           r.edges.map(e => `${e.from}>${e.to}:${e.type}:${e.outbound}/${e.inbound}`).sort();
         expect(nodeKey(result1), page).toEqual(nodeKey(result2));
         expect(edgeKey(result1), page).toEqual(edgeKey(result2));
@@ -233,7 +233,7 @@ describe('Property: Graph Traversal Invariants', () => {
       const nonExistentPage = `NonExistent-Page-${Date.now()}`;
 
       // Property: Missing pages throw consistent error
-      await expect(getConceptNetwork(client, nonExistentPage, 2)).rejects.toThrow(/^No page /);
+      await expect(exploreNetwork(client, nonExistentPage, 2)).rejects.toThrow(/^No page /);
     });
   });
 });

@@ -19,9 +19,6 @@ export const MAX_DATE_RANGE_BLOCKS = 1000;
 export const DEFAULT_PROPERTY_LIMIT = 100;
 export const MAX_PROPERTY_LIMIT = 500;
 
-export const DEFAULT_RELATIONSHIP_LIMIT = 50;
-export const MAX_RELATIONSHIP_LIMIT = 500;
-
 export const DEFAULT_MAX_NODES = 50;
 export const DEFAULT_MAX_FANOUT = 15;
 export const MAX_NODES_LIMIT = 500;

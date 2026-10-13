@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { findBlocks, findBlocksWithMeta, searchByRelationship } from './helpers/tools.js';
+import { findBlocks, findBlocksWithMeta } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for search_by_relationship (`connected-within`) and find_blocks (with `page`, `links_to` and
- * `include_context`) against the fixture graph.
+ * Integration tests for find_blocks (with `page`, `links_to` and `include_context`) against the fixture graph. The question
+ * whether two pages connect is `explore_network` with `to`, in graph-tools.test.ts.
  *
  * `Alice` and `Bob` link each other; 13 blocks on 10 pages link `Bob`; `archive` has no links at
  * all. Read-only.
@@ -16,28 +16,6 @@ describe('Semantic Search Integration Tests', () => {
 
   beforeAll(async () => {
     ({ client } = await connectFixture());
-  });
-
-  describe('logseq_search_by_relationship', () => {
-    it('connected-within: adjacent pages return the blocks of both', async () => {
-      const result = await searchByRelationship(client, 'Alice', 'Bob', 'connected-within', 1);
-
-      expect(result.query.maxDistance).toBe(1);
-      // Alice's property block and 3 blocks, Bob's property block and 2 blocks
-      expect(result.results).toHaveLength(7);
-    });
-
-    it('connected-within: a page with no links is connected to nothing', async () => {
-      const result = await searchByRelationship(client, 'archive', 'Bob', 'connected-within', 3);
-
-      expect(result.results).toEqual([]);
-    });
-
-    it('connected-within: adjacent topics are connected whatever the casing', async () => {
-      const result = await searchByRelationship(client, 'ALICE', 'BOB', 'connected-within', 1);
-
-      expect(result.results).toHaveLength(7);
-    });
   });
 
   describe('logseq_find_blocks with page and links_to (#492)', () => {

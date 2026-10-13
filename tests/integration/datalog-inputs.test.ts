@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { exploreContext, getConceptNetwork, findBlocks, getPage } from './helpers/tools.js';
+import { exploreContext, exploreNetwork, findBlocks, getPage } from './helpers/tools.js';
 import { PageNotFoundError } from './helpers/errors.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
@@ -39,13 +39,13 @@ describe('Datalog :in inputs Integration Tests', () => {
   it('every tool that takes a page name is case-insensitive', async () => {
     for (const name of ['bob', 'BOB', 'bOb']) {
       expect((await getPage(client, name, false)).id, name).toBe(pageId);
-      const network = await getConceptNetwork(client, name, 0);
+      const network = await exploreNetwork(client, name, 0);
       expect(network.nodes.map((n: { id: number }) => n.id), name).toEqual([pageId]);
     }
   });
 
-  it('get_concept_network depth 1 finds every page the page links and every page that links it', async () => {
-    const network = await getConceptNetwork(client, 'BOB', 1);
+  it('explore_network depth 1 finds every page the page links and every page that links it', async () => {
+    const network = await exploreNetwork(client, 'BOB', 1);
 
     // `role:: engineer` makes the property page `role` a ref of the property block
     expect(network.nodes.filter((n: { depth: number }) => n.depth === 1).map((n: { name: string }) => n.name).sort()).toEqual([
@@ -89,8 +89,8 @@ describe('Datalog :in inputs Integration Tests', () => {
     ['query-closing characters', 'x"]] [?p :block/name'],
   ])('treats a name containing %s as data and finds no page', async (_label, name) => {
     await expect(getPage(client, name, true)).rejects.toBeInstanceOf(PageNotFoundError);
-    await expect(getConceptNetwork(client, name, 0)).rejects.toBeInstanceOf(PageNotFoundError);
-    await expect(getConceptNetwork(client, name, 1)).rejects.toBeInstanceOf(PageNotFoundError);
+    await expect(exploreNetwork(client, name, 0)).rejects.toBeInstanceOf(PageNotFoundError);
+    await expect(exploreNetwork(client, name, 1)).rejects.toBeInstanceOf(PageNotFoundError);
     await expect(exploreContext(client, name)).rejects.toBeInstanceOf(PageNotFoundError);
     // A search term is data too: it matches no block, and the regex it becomes is escaped
     expect(await findBlocks(client, { text: name })).toEqual([]);
