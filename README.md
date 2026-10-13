@@ -113,7 +113,7 @@ A binary you download by hand through a browser is quarantined by macOS, and Gat
 
 Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The skills refer to them by bare name, so either form works.
 
-## 11 Tools at a Glance
+## 10 Tools at a Glance
 
 ### Basic Operations (4)
 | Tool | Purpose |
