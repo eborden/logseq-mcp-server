@@ -14,6 +14,12 @@
 //! `topic_unavailable` warning about it, since a topic's own warnings are not repeated here. Neither has a
 //! `howToFetchAll`. A topic whose alias group was cut has its `alias_set_truncated` warning passed through, about the topic. A `null` answer from the page resolver fails the whole call (#301).
 //!
+//! [`call`] cuts the whole result to the character budget (#507, #485), not each topic: five topics at their caps, or a
+//! hundred keyword hits, pass it. Entries are cut from the tail (see `QueryContext::cut_to`), whole, and the
+//! `result_size_truncated` warning says what each topic kept. A `max_search_results` warning offers a raise only where
+//! the raised hits fit. A result under the budget is as it was, byte for byte. The library function
+//! [`get_context_for_query`] makes no cut.
+//!
 //! `format: "markdown"` renders the result through [`crate::markdown_context`], its warnings and
 //! `hasMore` in a footer. `compact` reduces every block to its snippet and uuid ([`crate::compact`]).
 
@@ -37,7 +43,8 @@ use crate::resolve::RETRY_ADVICE;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::tools::build_context::{Caps, TopicContext, TopicContextOutput, build_context_for_topic};
 use crate::tools::find_blocks::{blocks_containing, full_blocks_with_context, hit_pages_unavailable};
-use crate::truncation::{CappedTruncation, capped_truncation_warning};
+use crate::budget::{BUDGET_CHARS, Fit, fit, size};
+use crate::truncation::{CappedTruncation, SizeCut, capped_truncation_warning, size_truncation_warning};
 
 pub const NAME: &str = "logseq_get_context_for_query";
 
@@ -110,13 +117,17 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     // Markdown names the page of each keyword hit; JSON hits keep their shape
     let hit_pages = request.format == Some(OutputFormat::Markdown);
     let context = get_context_for_query(client, &request.query, request.max_topics, request.max_search_results, hit_pages).await?;
-    let result = context.to_value();
-    if request.format == Some(OutputFormat::Markdown) {
-        let body = render_query_context(&result, request.compact);
-        return Ok(success_result(vec![ContentBlock::text(with_footer(body, &FooterMeta::of_result(&result, &[])))]));
-    }
-    let shown = if request.compact { compact_query_context(&result) } else { result };
-    Ok(success_result(vec![ContentBlock::text(shown.to_string())]))
+    // The text the call sends, which the character budget measures (#507, #485)
+    let render = |context: &QueryContext| -> String {
+        let result = context.to_value();
+        if request.format == Some(OutputFormat::Markdown) {
+            let body = render_query_context(&result, request.compact);
+            return with_footer(body, &FooterMeta::of_result(&result, &[]));
+        }
+        if request.compact { compact_query_context(&result).to_string() } else { result.to_string() }
+    };
+    let context = context.fit_to_budget(&render, request.compact, hit_pages);
+    Ok(success_result(vec![ContentBlock::text(render(&context))]))
 }
 
 /// A warning of a query's result (`QueryWarning`): `code` and `message` first, then the detail (`topic`, and for
@@ -166,6 +177,11 @@ pub struct QueryContext {
     pub contexts: Vec<TopicContext>,
     /// The keyword hits, when the query named no topic and had a keyword to search
     pub search_results: Option<Vec<Value>>,
+    /// How many blocks held every keyword, before `max_search_results` cut them (0 with no keyword search)
+    pub matching_hits: usize,
+    /// The hits `max_search_results` left out, up to the most one call returns, without their pages. They are never sent;
+    /// the character budget measures on them what a larger `max_search_results` would return (#507).
+    pub unshown_hits: Vec<Value>,
     pub warnings: Vec<QueryWarning>,
 }
 
@@ -231,6 +247,186 @@ impl QueryContext {
         })
     }
 }
+
+/// The code of the warning for keyword hits `max_search_results` cut.
+const HITS_CUT: &str = "search_results_truncated";
+
+/// What the warning of a `max_search_results` cut says about raising it, given the character budget (BR-0006: a
+/// `howToFetchAll` is a promise).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Raise {
+    /// Not measured, or the raise to every hit fits: the usual warning
+    Unchecked,
+    /// A larger `max_search_results` returns more hits, up to `limit`. `exact` is false in Markdown, whose hits come with
+    /// their pages for the hits kept only, so `limit` is an upper bound and the result may be cut earlier.
+    Offer { limit: usize, exact: bool },
+    /// No larger `max_search_results` returns more hits: they would not fit the budget
+    NoMore,
+}
+
+/// The character budget (#507, #485), applied to the whole result, not to each topic: a query that names five topics
+/// sends five contexts, and the keyword hits of a query with none can be a hundred full blocks. The unit is an entry:
+/// a topic's blocks, then its references, then its related pages, topic after topic, and for a query with no topic the
+/// keyword hits, newest first. A cut keeps the first entries and drops the tail, so the last topics lose theirs first.
+/// An entry is never cut inside its text (BR-0007), so a first entry over the budget comes back alone.
+impl QueryContext {
+    /// The entries the budget counts.
+    fn entries(&self) -> usize {
+        self.contexts.iter().map(TopicContext::entries).sum::<usize>() + self.search_results.as_ref().map_or(0, Vec::len)
+    }
+
+    /// The `search_results_truncated` warning for `shown` of `matching_hits` hits, worded for a measured `raise`. The
+    /// usual warning (`Raise::Unchecked`) is the one the search made, so there is none to word here.
+    fn hits_warning(&self, shown: usize, raise: Raise) -> Option<QueryWarning> {
+        let total = self.matching_hits;
+        Some(match raise {
+            Raise::Unchecked => return None,
+            Raise::NoMore => QueryWarning::new(
+                HITS_CUT,
+                format!("Showing {shown} of {total} keyword hits: a result holds at most {BUDGET_CHARS} characters, so no larger max_search_results fits in that. {NARROWER}"),
+            ),
+            Raise::Offer { limit, exact } => QueryWarning::new(HITS_CUT, format!("Showing {shown} of {total} keyword hits.")).how_to_fetch_all(if exact {
+                format!(
+                    "Set max_search_results to {limit} to get {limit} of {total}. That is the most that fits: a result holds at most {BUDGET_CHARS} characters, \
+                     and more hits would be cut. {NARROWER}"
+                )
+            } else {
+                format!(
+                    "Set max_search_results to {limit} to get up to {limit} of {total}. Each hit comes with its page, which is read for the hits kept only, \
+                     so the result may be cut to {BUDGET_CHARS} characters before that. {NARROWER}"
+                )
+            }),
+        })
+    }
+
+    /// The warnings with the one for `max_search_results` replaced by `with` (or dropped when there is none).
+    fn warnings_with_hits(&self, with: Option<QueryWarning>) -> Vec<QueryWarning> {
+        let mut warnings = Vec::new();
+        let mut replaced = false;
+        for warning in &self.warnings {
+            if warning.code != HITS_CUT {
+                warnings.push(warning.clone());
+            } else if let (false, Some(with)) = (replaced, &with) {
+                warnings.push(with.clone());
+                replaced = true;
+            }
+        }
+        warnings
+    }
+
+    /// The result cut to its first `kept` entries, with the `result_size_truncated` warning. The warnings that counted
+    /// what a cut left out are worded again over what is sent: a topic's `topic_truncated` says how many entries it
+    /// shows, and the `max_search_results` warning gives way to the size warning, since a larger `max_search_results`
+    /// would return the same first hits cut the same way.
+    fn cut_to(&self, kept: usize, oversize: bool, compact: bool) -> QueryContext {
+        let mut left = kept;
+        let contexts: Vec<TopicContext> = self
+            .contexts
+            .iter()
+            .map(|context| {
+                let take = left.min(context.entries());
+                left -= take;
+                context.first_entries(take)
+            })
+            .collect();
+        let hits_shown = left.min(self.search_results.as_ref().map_or(0, Vec::len));
+        let search_results = self.search_results.as_ref().map(|hits| hits[..hits_shown].to_vec());
+        let hits_cut = self.search_results.as_ref().is_some_and(|hits| hits_shown < hits.len());
+
+        let mut warnings: Vec<QueryWarning> = if hits_cut { self.warnings_with_hits(None) } else { self.warnings.clone() };
+        for warning in &mut warnings {
+            if let (HITS_CUT_TOPIC, Some(topic)) = (warning.code.as_str(), warning.topic.clone()) {
+                if let Some(context) = contexts.iter().find(|context| context.topic == topic) {
+                    *warning = topic_warning(context, &topic);
+                }
+            }
+        }
+        let (what, total, advice) = if self.search_results.is_some() {
+            (
+                "keyword hits".to_owned(),
+                self.matching_hits,
+                "The oldest hits are left out (newest first). Put the most specific words first, or page one keyword with logseq_find_blocks and its offset, which lists \
+                 every block with that word, not only those with all of them. No parameter raises the size limit."
+                    .to_owned(),
+            )
+        } else {
+            let lost: Vec<String> = self
+                .contexts
+                .iter()
+                .zip(&contexts)
+                .filter(|(before, after)| after.entries() < before.entries())
+                .map(|(before, after)| format!("{} {} of {}", json!(before.topic), after.entries(), before.entries()))
+                .collect();
+            let more = if compact { "Read a block in full with logseq_get_block." } else { "Set compact to true for short snippets, or read a block with logseq_get_block." };
+            (
+                "entries (blocks, then references, then related pages, topic by topic)".to_owned(),
+                self.entries(),
+                format!(
+                    "Entries kept per topic that lost some: {}. Read a topic on its own with logseq_build_context, which has the whole size limit to itself. {more} No parameter raises this limit.",
+                    lost.join(", ")
+                ),
+            )
+        };
+        let shown = if self.search_results.is_some() { hits_shown } else { kept };
+        warnings.push(
+            size_truncation_warning(SizeCut { what: &what, kept: shown, total, oversize, advice: &advice, how_to_fetch_all: None }).into(),
+        );
+        QueryContext { contexts, search_results, warnings, ..self.clone() }
+    }
+
+    /// The result as it is when its text fits the character budget, else cut to the first entries that do. A result
+    /// under the budget is returned as it is, byte for byte, apart from the raise its `max_search_results` warning
+    /// offers, which is checked against the budget too.
+    fn fit_to_budget(self, render: &impl Fn(&QueryContext) -> String, compact: bool, hit_pages: bool) -> QueryContext {
+        let total = self.entries();
+        let size_of = |kept: usize| size(&render(&if kept < total { self.cut_to(kept, false, compact) } else { self.clone() }));
+        match fit(total, 1, size_of) {
+            Fit::Whole => self.with_raise(render, hit_pages),
+            Fit::Cut { kept, oversize } => self.cut_to(kept, oversize, compact),
+        }
+    }
+
+    /// The `max_search_results` warning of a result that fits, worded for what a larger value returns: the usual
+    /// warning when every hit up to the maximum fits the budget too, else the most that fits, or no larger value.
+    /// The hits left out are in hand (`unshown_hits`), so this costs no call. In Markdown their pages are not read,
+    /// so what they would add (a line each) is not counted: a most below every hit is an upper bound, worded so, and
+    /// a raise that fits to the last hit keeps the usual warning, which a result within a few thousand characters of
+    /// the budget could still see cut, with the size warning to say so.
+    fn with_raise(self, render: &impl Fn(&QueryContext) -> String, hit_pages: bool) -> QueryContext {
+        let Some(hits) = &self.search_results else { return self };
+        let shown = hits.len();
+        if self.unshown_hits.is_empty() || !self.warnings.iter().any(|warning| warning.code == HITS_CUT) {
+            return self;
+        }
+        let reachable = shown + self.unshown_hits.len();
+        let every: Vec<Value> = hits.iter().chain(&self.unshown_hits).cloned().collect();
+        // the result of a `max_search_results` of `count`: those hits, and the warning that more were left
+        let at_limit = |count: usize| QueryContext {
+            search_results: Some(every[..count].to_vec()),
+            warnings: self.warnings_with_hits(self.hits_warning(count, Raise::NoMore).filter(|_| count < self.matching_hits)),
+            ..self.clone()
+        };
+        let most = match fit(reachable, 1, |count| size(&render(&at_limit(count)))) {
+            Fit::Whole => reachable,
+            Fit::Cut { kept, .. } => kept,
+        };
+        let raise = if most <= shown {
+            Raise::NoMore
+        } else if most >= reachable {
+            Raise::Unchecked
+        } else {
+            Raise::Offer { limit: most, exact: !hit_pages }
+        };
+        if raise == Raise::Unchecked {
+            return self;
+        }
+        let warning = self.hits_warning(shown, raise);
+        QueryContext { warnings: self.warnings_with_hits(warning), ..self }
+    }
+}
+
+/// The code of a topic's cap warning, which a cut words again over what the topic shows.
+const HITS_CUT_TOPIC: &str = "topic_truncated";
 
 /// The `[[page references]]`, then the `#tags`, each once, first seen first. A ref that holds
 /// another ref is one topic, the largest name: `[[a [[b]] d]]` is `a [[b]] d`, not also `b`. Each
@@ -393,6 +589,8 @@ pub async fn get_context_for_query(
 
     // With no explicit topics, do a text search
     let mut search_results = None;
+    let mut matching_hits = 0;
+    let mut unshown_hits = Vec::new();
     if extracted_topics.is_empty() {
         let keywords = keywords(query);
         if !keywords.is_empty() {
@@ -437,6 +635,9 @@ pub async fn get_context_for_query(
                     .into(),
                 );
             }
+            // The hits `max_search_results` left out, up to the maximum, which the character budget measures a raise on (#507)
+            unshown_hits = hits.iter().skip(kept_count).take((MAX_SEARCH_RESULTS as usize).saturating_sub(kept_count)).cloned().collect();
+            matching_hits = hits.len();
             let kept: Vec<Value> = hits.into_iter().take(kept_count).collect();
 
             // Pages only for the hits kept: one batched lookup
@@ -452,7 +653,7 @@ pub async fn get_context_for_query(
         }
     }
 
-    Ok(QueryContext { query: query.to_owned(), extracted_topics, contexts, search_results, warnings })
+    Ok(QueryContext { query: query.to_owned(), extracted_topics, contexts, search_results, matching_hits, unshown_hits, warnings })
 }
 
 #[cfg(test)]
@@ -627,6 +828,189 @@ mod tests {
         }
     }
 
+    /// A topic with `blocks` blocks of `length` characters, 10 references and 5 related pages, capped as the tool caps it.
+    fn big_topic(name: &str, id: i64, blocks: usize, length: usize) -> TopicContext {
+        let block = |n: usize| json!({"id": id * 1000 + n as i64, "content": "x".repeat(length)});
+        TopicContext {
+            topic: name.into(),
+            resolved_from: None,
+            resolved_aliases: None,
+            main_page: json!({"id": id}),
+            direct_blocks: (0..blocks).map(block).collect(),
+            related_pages: (0..5).map(|n| json!({"id": 90 + n})).collect(),
+            references: (0..10).map(|n| crate::tools::build_context::Reference { block: block(500 + n), source_page: json!({"id": 80}) }).collect(),
+            temporal_context: None,
+            warnings: Vec::new(),
+            totals: crate::tools::build_context::Totals { blocks: blocks + 5, related_pages: 5, references: 10 },
+        }
+    }
+
+    fn query_of(contexts: Vec<TopicContext>, warnings: Vec<QueryWarning>) -> QueryContext {
+        QueryContext {
+            query: "q".into(),
+            extracted_topics: contexts.iter().map(|context| context.topic.clone()).collect(),
+            contexts,
+            search_results: None,
+            matching_hits: 0,
+            unshown_hits: Vec::new(),
+            warnings,
+        }
+    }
+
+    fn json_of(context: &QueryContext) -> String {
+        context.to_value().to_string()
+    }
+
+    fn hit(n: i64, length: usize) -> Value {
+        json!({"id": n, "uuid": format!("u{n}"), "content": format!("{n} mentions the importer {}", "x".repeat(length))})
+    }
+
+    /// A keyword search of `matching` hits of `length` characters, of which `shown` are kept and the rest, up to 100, are in hand.
+    fn search_of(matching: usize, shown: usize, length: usize) -> QueryContext {
+        let hits: Vec<Value> = (0..matching as i64).map(|n| hit(n, length)).collect();
+        let count_cut = matching > shown;
+        QueryContext {
+            query: "importer retries".into(),
+            extracted_topics: Vec::new(),
+            contexts: Vec::new(),
+            search_results: Some(hits[..shown].to_vec()),
+            matching_hits: matching,
+            unshown_hits: hits[shown..matching.min(100)].to_vec(),
+            warnings: if count_cut {
+                vec![
+                    capped_truncation_warning(CappedTruncation {
+                        what: "keyword hits",
+                        shown,
+                        total: matching,
+                        param: "max_search_results",
+                        max: 100,
+                        narrower: NARROWER,
+                        requested: Some(shown as u64),
+                        code: HITS_CUT,
+                        inline_max: None,
+                        paging: None,
+                    })
+                    .into(),
+                ]
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    #[test]
+    fn a_query_result_under_the_budget_is_returned_as_it_is() {
+        let small = query_of(vec![big_topic("a", 1, 10, 100), big_topic("b", 2, 10, 100)], Vec::new());
+        assert_eq!(small.clone().fit_to_budget(&json_of, false, false), small);
+        let none = query_of(Vec::new(), Vec::new());
+        assert_eq!(none.clone().fit_to_budget(&json_of, false, false), none);
+    }
+
+    #[test]
+    fn five_topics_over_the_budget_lose_the_last_topics_entries_first_and_the_warning_says_how_many_each_kept() {
+        let topics: Vec<TopicContext> = (1..=5).map(|id| big_topic(&format!("t{id}"), id, 10, 700)).collect();
+        // each topic is 25 entries; the warnings of the first two say they were cut at the caps
+        let capped = |context: &TopicContext| topic_warning(context, &context.topic);
+        let warnings = vec![capped(&topics[0]), capped(&topics[1])];
+        let whole = query_of(topics, warnings);
+        assert!(size(&json_of(&whole)) > crate::budget::BUDGET_CHARS);
+        let cut = whole.clone().fit_to_budget(&json_of, false, false);
+        assert!(size(&json_of(&cut)) <= crate::budget::BUDGET_CHARS);
+        let kept: Vec<usize> = cut.contexts.iter().map(TopicContext::entries).collect();
+        // the first topics keep everything, one topic is cut in the middle, and the last ones keep nothing
+        assert_eq!(kept[0], 25);
+        assert!(kept.windows(2).all(|pair| pair[0] >= pair[1]), "{kept:?}");
+        assert_eq!(*kept.last().unwrap(), 0);
+        assert_eq!(cut.contexts.len(), 5, "every topic keeps its page");
+        // one more entry would not fit
+        let total: usize = kept.iter().sum();
+        assert!(size(&json_of(&whole.cut_to(total + 1, false, false))) > crate::budget::BUDGET_CHARS);
+        let warning = cut.warnings.last().unwrap();
+        assert_eq!(warning.code, "result_size_truncated");
+        assert!(warning.message.starts_with(&format!("Showing {total} of 125 entries (blocks, then references, then related pages, topic by topic)")), "{}", warning.message);
+        assert!(warning.message.contains("\"t5\" 0 of 25"), "{}", warning.message);
+        assert!(warning.how_to_fetch_all.is_none());
+        // a topic cut at the caps says what it shows now, not what it showed
+        let first = cut.warnings.iter().find(|w| w.topic.as_deref() == Some("t1")).unwrap();
+        assert!(first.message.contains("showing 10/15 blocks, 10/10 references, 5/5 related pages"), "{}", first.message);
+        let second = cut.warnings.iter().find(|w| w.topic.as_deref() == Some("t2")).unwrap();
+        let shown = &cut.contexts[1];
+        assert!(second.message.contains(&format!("showing {}/15 blocks, {}/10 references, {}/5 related pages", shown.direct_blocks.len(), shown.references.len(), shown.related_pages.len())), "{}", second.message);
+        // the cap warnings still offer their way on, so `hasMore` is true
+        assert!(cut.has_more());
+    }
+
+    #[test]
+    fn a_first_entry_over_the_budget_is_kept_alone() {
+        let mut huge = big_topic("a", 1, 3, 10);
+        huge.direct_blocks[0] = json!({"id": 1, "content": "x".repeat(40_000)});
+        let cut = query_of(vec![huge], Vec::new()).fit_to_budget(&json_of, false, false);
+        assert_eq!(cut.contexts[0].entries(), 1);
+        assert!(cut.warnings[0].message.contains("Even those are over that size"), "{}", cut.warnings[0].message);
+    }
+
+    #[test]
+    fn keyword_hits_over_the_budget_are_cut_from_the_oldest_and_the_size_warning_replaces_the_cap_warning() {
+        // 100 hits of ~700 characters, kept at the maximum of 100 with 120 matching
+        let whole = search_of(120, 100, 700);
+        let cut = whole.clone().fit_to_budget(&json_of, false, false);
+        assert!(size(&json_of(&cut)) <= crate::budget::BUDGET_CHARS);
+        let kept = cut.search_results.as_ref().unwrap().len();
+        assert!(kept > 20 && kept < 100, "{kept}");
+        assert_eq!(cut.search_results.as_ref().unwrap()[..], whole.search_results.as_ref().unwrap()[..kept]);
+        let codes: Vec<&str> = cut.warnings.iter().map(|w| w.code.as_str()).collect();
+        assert_eq!(codes, ["result_size_truncated"]);
+        assert!(cut.warnings[0].message.starts_with(&format!("Showing {kept} of 120 keyword hits: the result was cut to fit 30000 characters")), "{}", cut.warnings[0].message);
+        assert!(!cut.has_more(), "no parameter raises the size limit");
+        assert_eq!(cut.to_value()["summary"]["totalBlocks"], kept);
+    }
+
+    #[test]
+    fn a_raise_that_fits_keeps_the_usual_warning_and_one_that_does_not_offers_what_does() {
+        // 150 matching hits of ~230 characters: the default 20 fit, and so do all 100 the maximum allows
+        let fits = search_of(150, 20, 200);
+        assert_eq!(fits.clone().fit_to_budget(&json_of, false, false), fits);
+        // hits of ~580 characters: 20 fit, 100 do not
+        let big = search_of(150, 20, 550);
+        assert!(size(&json_of(&search_of(150, 100, 550))) > crate::budget::BUDGET_CHARS);
+        let offered = big.clone().fit_to_budget(&json_of, false, false);
+        assert_eq!(offered.search_results, big.search_results);
+        let warning = offered.warnings.last().unwrap();
+        assert_eq!(warning.code, HITS_CUT);
+        let how = warning.how_to_fetch_all.as_deref().unwrap();
+        assert!(how.starts_with("Set max_search_results to ") && how.contains("That is the most that fits") && !how.contains("get all"), "{how}");
+        let limit: usize = how.trim_start_matches("Set max_search_results to ").split(' ').next().unwrap().parse().unwrap();
+        assert!(limit > 20 && limit < 100, "{how}");
+        // the offered value comes back whole, and the one after it is cut
+        let at = search_of(150, limit, 550).fit_to_budget(&json_of, false, false);
+        assert_eq!(at.search_results.as_ref().unwrap().len(), limit);
+        assert!(at.warnings.iter().all(|w| w.code != "result_size_truncated"));
+        let past = search_of(150, limit + 1, 550).fit_to_budget(&json_of, false, false);
+        assert!(past.search_results.as_ref().unwrap().len() <= limit);
+        assert!(past.warnings.iter().any(|w| w.code == "result_size_truncated"));
+    }
+
+    #[test]
+    fn a_cap_cut_with_no_larger_value_that_fits_offers_none() {
+        let big = search_of(150, 20, 550);
+        let how = big.fit_to_budget(&json_of, false, false).warnings.last().unwrap().how_to_fetch_all.clone().unwrap();
+        let limit: usize = how.trim_start_matches("Set max_search_results to ").split(' ').next().unwrap().parse().unwrap();
+        let at_most = search_of(150, limit, 550).fit_to_budget(&json_of, false, false);
+        let warning = at_most.warnings.last().unwrap();
+        assert!(warning.message.contains("so no larger max_search_results fits in that"), "{}", warning.message);
+        assert_eq!(warning.how_to_fetch_all, None);
+        assert!(!at_most.has_more());
+    }
+
+    #[test]
+    fn a_topic_with_no_entries_and_a_query_with_no_hits_are_never_cut() {
+        let bare = TopicContext { direct_blocks: Vec::new(), related_pages: Vec::new(), references: Vec::new(), ..big_topic("a", 1, 0, 0) };
+        let query = query_of(vec![bare], Vec::new());
+        assert_eq!(query.clone().fit_to_budget(&json_of, false, false), query);
+        let empty_search = QueryContext { search_results: Some(Vec::new()), ..query_of(Vec::new(), Vec::new()) };
+        assert_eq!(empty_search.clone().fit_to_budget(&json_of, false, false), empty_search);
+    }
+
     #[test]
     fn a_topic_whose_alias_group_was_cut_passes_that_warning_on_about_the_topic() {
         let context = topic("a", 1);
@@ -646,6 +1030,8 @@ mod tests {
             extracted_topics: vec!["a".into()],
             contexts: vec![topic("a", 1)],
             search_results: None,
+            matching_hits: 0,
+            unshown_hits: Vec::new(),
             warnings: vec![QueryWarning::new("topic_not_found", "m".into()).about("b")],
         };
         let value = context.to_value();
