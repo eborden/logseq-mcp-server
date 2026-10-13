@@ -9,7 +9,7 @@
 // never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Every page, block and
 // name is made up, and the output is aggregates only.
 //
-// For each of the 11 tools it calls one representative parity case (the happy path), then a few larger
+// For each of the 10 tools it calls one representative parity case (the happy path), then a few larger
 // made-up cases for the tools that do the most work. Per case and server: `--warmup` untimed calls, then
 // `--iterations` timed ones.
 //
@@ -72,13 +72,13 @@ const REPRESENTATIVE: Array<{ tool: string; name: string }> = [
   { tool: 'logseq_check_links', name: 'links refs: names, an alias and a padded term in one query' },
   { tool: 'logseq_explore_context', name: 'explore_context: exact name, blocks in page order, linking pages and blocks as sent' },
   { tool: 'logseq_get_block', name: 'get_block: block with children' },
-  { tool: 'logseq_get_concept_evolution', name: 'evolution: exact name, the page and its mentions, undated last' },
   { tool: 'logseq_explore_network', name: 'network: exact name, two levels, both directions, journals as leaves' },
   { tool: 'logseq_get_current', name: 'current context: a page is open and nothing else' },
   { tool: 'logseq_get_graph', name: 'graph info' },
   { tool: 'logseq_get_page', name: 'get_page: exact name with its blocks' },
   { tool: 'logseq_find_pages', name: 'every page, aliases nested' },
-  { tool: 'logseq_query_by_date_range', name: 'date range: slim by default: days oldest first, trees by the left chain, the top concepts of the period' },
+  { tool: 'logseq_explore_timeline', name: 'date range: slim by default: days oldest first, trees by the left chain, the top concepts of the period' },
+  { tool: 'logseq_explore_timeline', name: 'evolution: exact name, the page and its mentions, undated last' },
   { tool: 'logseq_find_blocks', name: 'property: slim matches, newest first' },
   { tool: 'logseq_find_blocks', name: 'slim hits, newest first' },
   { tool: 'logseq_find_blocks', name: 'pages: a page and a link, exact names' },
@@ -135,7 +135,7 @@ async function largeDateRange(): Promise<Measured> {
   const BOUNDS = [JSON.stringify(20250101), JSON.stringify(20250107)];
   const [pagesCall, blocksCall] = [base.steps[0][0], base.steps[1][0]];
   return {
-    label: 'query_by_date_range, 7 days, 350 blocks',
+    label: 'explore_timeline, 7 days, 350 blocks',
     tool: base.tool,
     arguments: { start_date: 20250101, end_date: 20250107 },
     // The range's bounds are inputs of both queries, and are checked: the base case's are for its 3 days

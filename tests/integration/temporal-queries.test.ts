@@ -2,12 +2,13 @@ import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { isDeepStrictEqual } from 'util';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import type { PageEntity, BlockEntity } from './helpers/types.js';
-import { getConceptEvolution, queryByDateRange } from './helpers/tools.js';
+import { exploreTimeline } from './helpers/tools.js';
 import { formatLogseqDate } from './helpers/dates.js';
 import { connectFixture, FIXTURE_JOURNAL_DAYS, laterJournalDays } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for query_by_date_range and get_concept_evolution against the fixture graph.
+ * Integration tests for logseq_explore_timeline against the fixture graph: a period alone (the old query_by_date_range)
+ * and a page, with or without a period (the old get_concept_evolution).
  *
  * The fixture's journals are dated 2024 and 2025 (tests/fixtures/README.md, "Journals, tasks,
  * tags and nesting"), so fixed windows give exact results. LogSeq also makes today's journal when
@@ -27,10 +28,11 @@ describe('Temporal Queries Integration Tests', () => {
     ({ client } = await connectFixture());
   });
 
-  describe('logseq_query_by_date_range', () => {
+  describe('logseq_explore_timeline with a period', () => {
     it('should return date range structure with entries', async () => {
-      const result = await queryByDateRange(client, 20250101, 20250131);
+      const result = await exploreTimeline(client, { startDate: 20250101, endDate: 20250131 });
 
+      expect(result.page).toBeUndefined();
       expect(result.dateRange).toEqual({ start: 20250101, end: 20250131 });
       expect(result.entries.map(e => [e.date, e.blocks.length])).toEqual(JANUARY);
       expect(result.summary).toMatchObject({ totalDays: 7, totalBlocks: 20 });
@@ -41,23 +43,14 @@ describe('Temporal Queries Integration Tests', () => {
     });
 
     it('starts and ends a window on the given days, across a year boundary', async () => {
-      const result = await queryByDateRange(client, 20241231, 20250106);
+      const result = await exploreTimeline(client, { startDate: 20241231, endDate: 20250106 });
 
       expect(result.entries.map(e => e.date)).toEqual([20241231, 20250102, 20250106]);
       expect(result.summary.totalDays).toBe(3);
     });
 
-    it('should filter blocks by search term', async () => {
-      const result = await queryByDateRange(client, 20250101, 20250131, 'test');
-
-      expect(result.summary.searchTerm).toBe('test');
-      // Only "NOW Write the test plan for the importer" in January
-      expect(result.entries.map(e => [e.date, e.blocks.length])).toEqual([[20250108, 1]]);
-      expect(result.entries[0].blocks[0].content!.toLowerCase().includes('test')).toBe(true);
-    });
-
     it('should return entries sorted by date', async () => {
-      const result = await queryByDateRange(client, 20240101, 20251231);
+      const result = await exploreTimeline(client, { startDate: 20240101, endDate: 20251231 });
 
       expect(result.entries.map(e => e.date)).toEqual(FIXTURE_JOURNAL_DAYS);
     });
@@ -86,7 +79,7 @@ describe('Temporal Queries Integration Tests', () => {
       it('returns the same days, block counts, ids and nesting order per day', async () => {
         // Every fixture journal, including the hub's 32-block one and Jan 6th's three levels
         const expected = await crawlJournals(20240101, 20251231);
-        const actual = await queryByDateRange(client, 20240101, 20251231);
+        const actual = await exploreTimeline(client, { startDate: 20240101, endDate: 20251231 });
 
         expect(expected.map(d => d.date)).toEqual(FIXTURE_JOURNAL_DAYS);
         expect(actual.entries.map(e => e.date)).toEqual(expected.map(d => d.date));
@@ -102,7 +95,7 @@ describe('Temporal Queries Integration Tests', () => {
       it('uses at most 2 API calls however long the range is', async () => {
         const spy = vi.spyOn(client, 'callAPI');
         try {
-          await queryByDateRange(client, 20000101, 20991231);
+          await exploreTimeline(client, { startDate: 20000101, endDate: 20991231 });
           expect(spy.mock.calls.length).toBeLessThanOrEqual(2);
         } finally {
           spy.mockRestore();
@@ -112,7 +105,7 @@ describe('Temporal Queries Integration Tests', () => {
 
     it('should handle empty date range', async () => {
       // The fixture holds no journal before 2024
-      const result = await queryByDateRange(client, 20230101, 20231231);
+      const result = await exploreTimeline(client, { startDate: 20230101, endDate: 20231231 });
 
       expect(result.entries).toHaveLength(0);
       expect(result.summary.totalDays).toBe(0);
@@ -121,18 +114,23 @@ describe('Temporal Queries Integration Tests', () => {
 
     it('should throw error for invalid date format', async () => {
       await expect(
-        queryByDateRange(client, 99999999, 20250131)
+        exploreTimeline(client, { startDate: 99999999, endDate: 20250131 })
       ).rejects.toThrow(/Invalid parameter.*start_date/);
 
       await expect(
-        queryByDateRange(client, 20250101, 12345)
+        exploreTimeline(client, { startDate: 20250101, endDate: 12345 })
       ).rejects.toThrow(/Invalid parameter.*end_date/);
     });
 
     it('should throw error when start date is after end date', async () => {
       await expect(
-        queryByDateRange(client, 20250131, 20250101)
+        exploreTimeline(client, { startDate: 20250131, endDate: 20250101 })
       ).rejects.toThrow(/Invalid parameter.*date_range/);
+    });
+
+    it('refuses a call with neither a page nor a period, and says what it takes', async () => {
+      await expect(exploreTimeline(client, {})).rejects.toThrow(/Invalid parameter 'page or period': none given/);
+      await expect(exploreTimeline(client, { groupBy: 'week' })).rejects.toThrow(/Invalid parameter 'page or period'/);
     });
 
     it('a window that ends today holds only the journals LogSeq made, not the fixture\'s', async () => {
@@ -141,7 +139,7 @@ describe('Temporal Queries Integration Tests', () => {
       sixtyDaysAgo.setDate(today.getDate() - 60);
       const [startDate, endDate] = [formatLogseqDate(sixtyDaysAgo), formatLogseqDate(today)];
 
-      const result = await queryByDateRange(client, startDate, endDate);
+      const result = await exploreTimeline(client, { startDate, endDate });
       const later = await laterJournalDays(client);
 
       expect(result.dateRange).toEqual({ start: startDate, end: endDate });
@@ -149,88 +147,89 @@ describe('Temporal Queries Integration Tests', () => {
     });
   });
 
-  describe('logseq_get_concept_evolution', () => {
-    it('should return concept evolution structure', async () => {
-      const result = await getConceptEvolution(client, 'Bob');
+  describe('logseq_explore_timeline with a page', () => {
+    it('should return the page over time: its days oldest first, the blocks on non-journal pages last', async () => {
+      const result = await exploreTimeline(client, { page: 'Bob' });
 
-      expect(result.concept).toBe('Bob');
+      expect(result.page).toBe('Bob');
       // Journal days in order, then the non-journal mentions under null
-      expect(result.timeline.map(t => [t.date, t.blocks.length])).toEqual([
+      expect(result.entries.map(t => [t.date, t.blocks.length])).toEqual([
         [20250106, 2], [20250107, 1], [20250110, 1], [20250115, 1], [null, 11],
       ]);
-      expect(result.summary).toEqual({
-        totalMentions: 16,
-        dateRange: { earliest: 20250106, latest: 20250115 },
-        journalMentions: 5,
-        nonJournalMentions: 11,
-      });
+      expect(result.summary).toMatchObject({ totalDays: 4, totalBlocks: 16 });
+      // With no period, the range is the span of the dated blocks
+      expect(result.dateRange).toEqual({ start: 20250106, end: 20250115 });
     });
 
-    it('should filter by date range', async () => {
-      const result = await getConceptEvolution(client, 'Bob', { startDate: 20250101, endDate: 20250110 });
+    it('a period bounds the days and leaves out the blocks on non-journal pages', async () => {
+      const result = await exploreTimeline(client, { page: 'Bob', startDate: 20250101, endDate: 20250110 });
 
-      // Jan 15th falls outside; non-journal mentions have no date and stay
-      expect(result.timeline.map(t => t.date)).toEqual([20250106, 20250107, 20250110, null]);
-      expect(result.summary).toMatchObject({ totalMentions: 15, journalMentions: 4, nonJournalMentions: 11 });
-      expect(result.summary.dateRange).toEqual({ earliest: 20250106, latest: 20250110 });
+      // Jan 15th falls outside; the non-journal mentions have no day in the period
+      expect(result.entries.map(t => t.date)).toEqual([20250106, 20250107, 20250110]);
+      expect(result.summary).toMatchObject({ totalDays: 3, totalBlocks: 4 });
+      expect(result.dateRange).toEqual({ start: 20250101, end: 20250110 });
     });
 
-    it('should group mentions by day', async () => {
-      const result = await getConceptEvolution(client, 'Bob', { groupBy: 'day' });
+    it('takes last_n as calendar days ending today, so the fixture\'s days are out of reach', async () => {
+      const result = await exploreTimeline(client, { page: 'Bob', lastN: 7 });
 
-      expect(Object.fromEntries(Object.entries(result.groupedTimeline as Record<string, unknown[]>).map(([k, v]) => [k, v.length]))).toEqual({
-        '20250106': 2, '20250107': 1, '20250110': 1, '20250115': 1,
-      });
+      expect(result.entries).toEqual([]);
+      expect(result.dateRange.end).toBe(formatLogseqDate(new Date()));
     });
 
-    it('should group mentions by week', async () => {
-      const result = await getConceptEvolution(client, 'Bob', { groupBy: 'week' });
+    it('should join the days by day, which is the default', async () => {
+      const result = await exploreTimeline(client, { page: 'Bob', groupBy: 'day' });
+
+      expect(result.entries.map(t => [t.date, t.blocks.length])).toEqual([
+        [20250106, 2], [20250107, 1], [20250110, 1], [20250115, 1], [null, 11],
+      ]);
+    });
+
+    it('should join mentions by week', async () => {
+      const result = await exploreTimeline(client, { page: 'Bob', groupBy: 'week' });
 
       // Weeks count 7-day blocks from January 1st, not ISO weeks: Jan 6th and 7th are week 1
-      expect(Object.fromEntries(Object.entries(result.groupedTimeline as Record<string, unknown[]>).map(([k, v]) => [k, v.length]))).toEqual({
-        '2025-W01': 3, '2025-W02': 1, '2025-W03': 1,
-      });
+      expect(result.entries.map(t => [t.period ?? t.date, t.blocks.length])).toEqual([
+        ['2025-W01', 3], ['2025-W02', 1], ['2025-W03', 1], [null, 11],
+      ]);
     });
 
-    it('should group mentions by month', async () => {
-      const result = await getConceptEvolution(client, 'Bob', { groupBy: 'month' });
+    it('should join mentions by month', async () => {
+      const result = await exploreTimeline(client, { page: 'Bob', groupBy: 'month' });
 
-      expect(Object.fromEntries(Object.entries(result.groupedTimeline as Record<string, unknown[]>).map(([k, v]) => [k, v.length]))).toEqual({
-        '202501': 5,
-      });
+      expect(result.entries.map(t => [t.period ?? t.date, t.blocks.length])).toEqual([['202501', 5], [null, 11]]);
     });
 
-    it('should return an empty timeline for an existing page nothing mentions', async () => {
+    it('should return no entries for an existing page nothing mentions', async () => {
       // `archive`: the namespace parent of `archive/old plans`, with no file, blocks, refs or aliases
-      const result = await getConceptEvolution(client, 'archive');
+      const result = await exploreTimeline(client, { page: 'archive' });
 
       expect(result.resolvedFrom).toBeUndefined();
-      expect(result.timeline).toHaveLength(0);
-      expect(result.summary).toEqual({
-        totalMentions: 0,
-        dateRange: { earliest: null, latest: null },
-        journalMentions: 0,
-        nonJournalMentions: 0,
-      });
+      expect(result.entries).toHaveLength(0);
+      expect(result.dateRange).toBeUndefined();
+      expect(result.summary).toMatchObject({ totalDays: 0, totalBlocks: 0 });
     });
 
-    it('should throw guidance for a concept that is not a page', async () => {
+    it('should throw guidance for a page that does not exist', async () => {
       await expect(
-        getConceptEvolution(client, 'NonExistentConceptForTesting12345')
+        exploreTimeline(client, { page: 'NonExistentConceptForTesting12345' })
       ).rejects.toThrow(/^No page "NonExistentConceptForTesting12345"\./);
     });
 
     it('counts journal and non-journal mentions of a page that has no file', async () => {
       // `Carol` is only a link target: two journals and two pages mention her
-      const result = await getConceptEvolution(client, 'carol');
+      const result = await exploreTimeline(client, { page: 'carol' });
 
-      expect(result.timeline.map(t => [t.date, t.blocks.length])).toEqual([[20250106, 1], [20250108, 1], [null, 2]]);
-      expect(result.summary).toEqual({
-        totalMentions: 4,
-        dateRange: { earliest: 20250106, latest: 20250108 },
-        journalMentions: 2,
-        nonJournalMentions: 2,
-      });
+      expect(result.entries.map(t => [t.date, t.blocks.length])).toEqual([[20250106, 1], [20250108, 1], [null, 2]]);
+      expect(result.summary).toMatchObject({ totalDays: 2, totalBlocks: 4 });
+      expect(result.dateRange).toEqual({ start: 20250106, end: 20250108 });
+    });
+
+    it('rolls up what the mentions link, without the page itself', async () => {
+      const result = await exploreTimeline(client, { page: 'carol', slimResults: true });
+
+      const names = (result.summary.topConcepts as Array<{ name: string }>).map(concept => concept.name.toLowerCase());
+      expect(names).not.toContain('carol');
     });
   });
 });

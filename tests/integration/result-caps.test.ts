@@ -5,12 +5,10 @@ import { findBlocksWithMeta } from './helpers/tools.js';
 import {
   DEFAULT_DATE_RANGE_MAX_BLOCKS,
   DEFAULT_FIND_PAGES_LIMIT,
-  DEFAULT_MAX_ENTRIES,
   DEFAULT_MAX_REFERENCES,
   DEFAULT_PROPERTY_LIMIT,
   DEFAULT_SEARCH_LIMIT,
   MAX_DATE_RANGE_BLOCKS,
-  MAX_ENTRIES,
   MAX_FIND_PAGES_LIMIT,
   MAX_PROPERTY_LIMIT,
   MAX_SEARCH_LIMIT,
@@ -26,7 +24,7 @@ import { connectMcp } from './helpers/server-under-test.js';
  * Where a maximum is out of reach of the fixture (below), the cut at it is held by the Rust server's own tests: the
  * parity cases in rust/tests/data/parity/ feed a mock more rows than the fixture holds (for example `limit at the maximum
  * with matches left` in find-blocks.json, 520 matches, and `limit at the maximum with matches left` in find-blocks.json, 520
- * source pages), and the Rust unit tests do the same (rust/src/tools/query_by_date_range/cap.rs, 1,001 blocks;
+ * source pages), and the Rust unit tests do the same (rust/src/tools/explore_timeline/cap.rs, 1,001 blocks;
  * rust/src/truncation.rs). They replaced the TypeScript unit tests, which fed 600 matches, 1,100 blocks, 150 pages
  * and 80 blocks.
  *
@@ -36,10 +34,9 @@ import { connectMcp } from './helpers/server-under-test.js';
  * lowered the maximum, which only a direct call to the TypeScript function could do). find_pages needs more than 200
  * non-journal pages, which the hub fixture's pages supply. Assertions on page
  * names compare booleans or counts, so a failure prints no names from the graph.
- * get_concept_evolution's maximum of 500 mentions is out of reach: the hub page has
- * ~140 mentions, the most of any fixture page. Through MCP only the default cut and
- * the clamp can be seen; the cut at 500 is covered by the Rust unit tests.
- * query_by_date_range's default of 200 blocks and maximum of 1000 are out of reach the
+ * explore_timeline's default of 200 blocks and maximum of 1000 are out of reach for the hub page too (about 140
+ * mentions, the most of any fixture page) and the cut at 1000 is covered by the Rust unit tests.
+ * With a period alone they are out of reach the
  * same way: the fixture's journals hold well under 200 blocks. The test passes small
  * caps through MCP (the same code, a smaller bound), and the Rust unit tests feed the tool
  * 1,001 blocks for the cut at the maximum.
@@ -239,77 +236,66 @@ describe('result caps (#61)', () => {
     });
   });
 
-  describe('logseq_get_concept_evolution max_entries (default 100, max 500)', () => {
+  describe('logseq_explore_timeline with a page, max_blocks (default 200, max 1000)', () => {
     // The hub page's own blocks plus every block that links it
-    const CONCEPT = 'hub central';
+    const PAGE = 'hub central';
 
-    interface EvolutionBody extends Partial<Meta> {
-      timeline: Array<{ date: number | null; blocks: unknown[] }>;
-      summary: { totalMentions: number };
+    interface PageBody extends Partial<Meta> {
+      page: string;
+      entries: Array<{ date: number | null; blocks: Array<{ uuid: string; children?: unknown[] }> }>;
+      summary: { totalDays: number; totalBlocks: number };
     }
 
-    async function evolve(max?: number): Promise<{ text: string; body: EvolutionBody }> {
-      const args = max === undefined ? { concept_name: CONCEPT } : { concept_name: CONCEPT, max_entries: max };
-      const text = (await call('logseq_get_concept_evolution', args)).content[0].text;
-      return { text, body: JSON.parse(text) as EvolutionBody };
+    async function timeline(max?: number): Promise<{ text: string; body: PageBody }> {
+      const args = max === undefined ? { page: PAGE } : { page: PAGE, max_blocks: max };
+      const text = (await call('logseq_explore_timeline', args)).content[0].text;
+      return { text, body: JSON.parse(text) as PageBody };
     }
 
-    const mentions = (body: EvolutionBody) => body.timeline.reduce((sum, entry) => sum + entry.blocks.length, 0);
+    /** Every block of the entries, nested ones counted: the unit `max_blocks` cuts in. */
+    const count = (blocks: Array<{ children?: unknown[] }>): number =>
+      blocks.reduce((sum, block) => sum + 1 + count((block.children ?? []) as Array<{ children?: unknown[] }>), 0);
+    const kept = (body: PageBody) => body.entries.reduce((sum, entry) => sum + count(entry.blocks), 0);
 
-    it('never returns more than the cap, reports every cut, and clamps to the same mentions', async () => {
-      const atMax = await evolve(MAX_ENTRIES);
-      // The summary counts every mention found, whatever the timeline kept
-      const total = atMax.body.summary.totalMentions;
+    it('never returns more blocks than the cap, reports every cut, clamps to the same blocks and offers only a way that reads on', async () => {
+      const atMax = await timeline(MAX_DATE_RANGE_BLOCKS);
+      const total = kept(atMax.body);
       expect(
         total,
-        `The hub page has ${total} mentions, not more than the default of ${DEFAULT_MAX_ENTRIES}, ` +
-          'so the cap was never tested. See tests/fixtures/README.md'
-      ).toBeGreaterThan(DEFAULT_MAX_ENTRIES);
-      expect(total, 'the fixture must stay under the maximum for this test to see every mention').toBeLessThan(MAX_ENTRIES);
-
-      // At the maximum the count cap cuts nothing. The hub's mentions run past the 30,000-character budget (#485), so
-      // the one cut is the size cut, which says so alone and keeps the count of what there was
-      const fitting = mentions(atMax.body);
-      expect(fitting, 'the budget keeps some mentions and not all').toBeGreaterThan(0);
-      expect(fitting).toBeLessThan(total);
-      expect(atMax.body.warnings!.map(w => w.code)).toEqual(['result_size_truncated']);
-      expect(atMax.body.totals).toEqual({ mentions: total });
+        `The hub page has ${total} blocks, not more than the default of ${DEFAULT_DATE_RANGE_MAX_BLOCKS}, so the cap was never tested. See tests/fixtures/README.md`
+      ).toBeGreaterThan(100);
+      expect(total, 'the fixture must stay under the maximum for this test to see every block').toBeLessThan(MAX_DATE_RANGE_BLOCKS);
       expect(atMax.text.length, 'the budget is in characters').toBeLessThanOrEqual(30000);
+      // With no period the dated days come first and the blocks on non-journal pages last, in an entry with no date
+      const dates = atMax.body.entries.map(entry => entry.date);
+      expect(dates.slice(0, -1).every(date => date !== null)).toBe(true);
+      expect(dates.at(-1)).toBeNull();
 
       // A value above the maximum is clamped to it, not rejected
-      expect((await evolve(5000)).text).toBe(atMax.text);
+      expect((await timeline(5000)).text).toBe(atMax.text);
 
-      // A cap the budget does not reach (the whole result fits) returns exactly that many and reports only the cap.
-      // A larger one is cut by the count cap first, then by the budget, and reports both.
-      for (const max of [undefined, 1, 50, DEFAULT_MAX_ENTRIES, 101, total - 1]) {
-        const { body } = await evolve(max);
-        const label = `max_entries ${max ?? 'default'}`;
-        const effective = Math.min(max ?? DEFAULT_MAX_ENTRIES, MAX_ENTRIES);
-        const kept = mentions(body);
-        expect(kept, label).toBeLessThanOrEqual(effective);
-        expect(kept, label).toBeLessThanOrEqual(MAX_ENTRIES);
-        if (effective <= fitting - 5) {
-          expect(kept, label).toBe(effective);
-          expect(body.warnings!.map(w => w.code), label).toEqual(['entries_truncated']);
-        } else {
-          expect(kept, label).toBeLessThan(effective);
-          expect(body.warnings!.map(w => w.code), label).toEqual(['entries_truncated', 'result_size_truncated']);
+      for (const max of [1, 50, 100, total - 1]) {
+        const { body } = await timeline(max);
+        const label = `max_blocks ${max}`;
+        expect(kept(body), label).toBeLessThanOrEqual(max);
+        expect(body.summary.totalBlocks, `${label}: the summary counts every block found`).toBe(atMax.body.summary.totalBlocks);
+        const codes = body.warnings!.map(warning => warning.code);
+        expect(codes[0], label).toBe('blocks_truncated');
+        expect(body.totals!.blocks, label).toBeGreaterThanOrEqual(total);
+        // a way on is named only when a call reads on; `max_blocks` is never raised past the maximum
+        expect(body.hasMore, label).toBe(body.warnings!.some(warning => warning.howToFetchAll !== undefined));
+        expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
+        for (const warning of body.warnings!) {
+          expect(warning.howToFetchAll ?? '', `${label}: no search_term`).not.toContain('search_term');
         }
-        expect(body.summary.totalMentions, `${label}: the summary counts every mention`).toBe(total);
-        expect(body.totals, label).toEqual({ mentions: total });
-        // Below the maximum the count cap's warning says which value gets the rest, and it is within the maximum
-        expect(body.hasMore, label).toBe(true);
-        expect(body.warnings![0].howToFetchAll, label).toMatch(new RegExp(`^Set max_entries to ${total}\\b`));
-        expectNoSuggestionPast(body as Meta, 'max_entries', MAX_ENTRIES);
       }
 
       // At the cap exactly, the count cap cuts nothing
-      const exact = await evolve(total);
-      expect(exact.text).toBe(atMax.text);
+      expect((await timeline(total)).text).toBe(atMax.text);
     });
   });
 
-  describe('logseq_query_by_date_range max_blocks (default 200, max 1000)', () => {
+  describe('logseq_explore_timeline with a period, max_blocks (default 200, max 1000)', () => {
     interface SlimNode {
       uuid: string;
       children?: SlimNode[];
@@ -326,7 +312,7 @@ describe('result caps (#61)', () => {
 
     async function range(max?: number, extra: Record<string, unknown> = {}) {
       const args = { start_date: START, end_date: END, ...(max === undefined ? {} : { max_blocks: max }), ...extra };
-      const text = (await call('logseq_query_by_date_range', args)).content[0].text;
+      const text = (await call('logseq_explore_timeline', args)).content[0].text;
       return { text, body: JSON.parse(text) as RangeBody };
     }
 

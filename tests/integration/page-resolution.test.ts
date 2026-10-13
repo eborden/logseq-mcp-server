@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { exploreContext, exploreNetworkPath, findBlocks, findBlocksWithMeta, getConceptEvolution, exploreNetwork, getPage, getPageOutline } from './helpers/tools.js';
+import { exploreContext, exploreNetworkPath, findBlocks, findBlocksWithMeta, exploreTimeline, exploreNetwork, getPage, getPageOutline } from './helpers/tools.js';
 import { AmbiguousPageError, PageNotFoundError } from './helpers/errors.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 
@@ -150,9 +150,9 @@ describe('page resolution against the fixture graph', () => {
   describe('the tools that changed behaviour in #41', () => {
     const MISSING = 'no such page 41 integration probe';
 
-    it('get_concept_evolution, explore_network and explore_context throw guidance for a missing page', async () => {
+    it('explore_timeline, explore_network and explore_context throw guidance for a missing page', async () => {
       for (const run of [
-        () => getConceptEvolution(client, MISSING),
+        () => exploreTimeline(client, { page: MISSING }),
         () => exploreNetwork(client, MISSING, 1),
         () => exploreContext(client, MISSING)
       ]) {
@@ -176,9 +176,9 @@ describe('page resolution against the fixture graph', () => {
       }
     });
 
-    it('get_concept_evolution, explore_network (with and without to) and find_blocks return candidates for a shared alias', async () => {
+    it('explore_timeline, explore_network (with and without to) and find_blocks return candidates for a shared alias', async () => {
       const errors = [
-        await getConceptEvolution(client, SHARED.stub).catch(e => e),
+        await exploreTimeline(client, { page: SHARED.stub }).catch(e => e),
         await exploreNetwork(client, SHARED.stub, 1).catch(e => e),
         await exploreNetworkPath(client, SHARED.stub, EXACT).catch(e => e),
         await exploreNetworkPath(client, EXACT, SHARED.stub).catch(e => e),
@@ -191,13 +191,13 @@ describe('page resolution against the fixture graph', () => {
       }
     });
 
-    it('explore_context, get_concept_evolution and find_blocks say which page an alias stood for', async () => {
+    it('explore_context, explore_timeline and find_blocks say which page an alias stood for', async () => {
       const context = await exploreContext(client, UNIQUE.stub);
-      const evolution = await getConceptEvolution(client, UNIQUE.stub);
+      const timeline = await exploreTimeline(client, { page: UNIQUE.stub });
       const found = await findBlocksWithMeta(client, { page: UNIQUE.stub, linksTo: [EXACT] });
 
       expect(context.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
-      expect(evolution.resolvedFrom?.matchedBy).toBe('alias');
+      expect(timeline.resolvedFrom?.matchedBy).toBe('alias');
       // only the page named by its alias was not an exact name: the link to Bob was
       expect(found.meta?.resolvedFrom).toEqual([{ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source }]);
       // `Let [[Bob]] review the room names` and `... tell [[Bob]].` on project atlas

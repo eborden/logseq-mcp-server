@@ -205,12 +205,13 @@ export async function exploreContext(client: LogseqClient, page: string, options
   ).value;
 }
 
-export interface JournalQuery {
+export interface TimelineQuery {
+  page?: string;
   startDate?: number;
   endDate?: number;
   lastN?: number;
   preset?: string;
-  searchTerm?: string;
+  groupBy?: string;
   slimResults?: boolean;
   includeContent?: boolean;
   topConceptsLimit?: number;
@@ -219,17 +220,18 @@ export interface JournalQuery {
 }
 
 /** `now` fixes the server's clock (`LOGSEQ_MCP_NOW`), which only a debug build honours. */
-export async function queryJournals(client: LogseqClient, options: JournalQuery, now?: Date): Promise<Json> {
+export async function exploreTimeline(client: LogseqClient, options: TimelineQuery, now?: Date): Promise<Json> {
   return (
     await callTool(
       client,
-      'logseq_query_by_date_range',
+      'logseq_explore_timeline',
       {
+        page: options.page,
         start_date: options.startDate,
         end_date: options.endDate,
         last_n: options.lastN,
         preset: options.preset,
-        search_term: options.searchTerm,
+        group_by: options.groupBy,
         slim_results: options.slimResults ?? false,
         include_content: options.includeContent,
         top_concepts_limit: options.topConceptsLimit,
@@ -238,32 +240,6 @@ export async function queryJournals(client: LogseqClient, options: JournalQuery,
       },
       now
     )
-  ).value;
-}
-
-export async function queryByDateRange(
-  client: LogseqClient,
-  startDate: number,
-  endDate: number,
-  searchTerm?: string,
-  slimResults?: boolean
-): Promise<Json> {
-  return queryJournals(client, { startDate, endDate, searchTerm, slimResults });
-}
-
-export async function getConceptEvolution(
-  client: LogseqClient,
-  conceptName: string,
-  options?: { startDate?: number; endDate?: number; groupBy?: string; maxEntries?: number }
-): Promise<Json> {
-  return (
-    await callTool(client, 'logseq_get_concept_evolution', {
-      concept_name: conceptName,
-      start_date: options?.startDate,
-      end_date: options?.endDate,
-      group_by: options?.groupBy,
-      max_entries: options?.maxEntries,
-    })
   ).value;
 }
 

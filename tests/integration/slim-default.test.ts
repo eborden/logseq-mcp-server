@@ -50,10 +50,10 @@ describe('slim_results default (#42)', () => {
     expect(slim.bytes).toBeLessThan(full.bytes);
   });
 
-  it('query_by_date_range: default is slim, entries name the page and blocks do not repeat it', async () => {
+  it('explore_timeline: default is slim, entries name the page and blocks do not repeat it', async () => {
     const range = { start_date: 20250101, end_date: 20250131 };
-    const slim = await call('logseq_query_by_date_range', range);
-    const full = await call('logseq_query_by_date_range', { ...range, slim_results: false });
+    const slim = await call('logseq_explore_timeline', range);
+    const full = await call('logseq_explore_timeline', { ...range, slim_results: false });
 
     expect(slim.data.entries.map((e: any) => e.pageName)).toEqual([
       'Jan 2nd, 2025', 'Jan 6th, 2025', 'Jan 7th, 2025', 'Jan 8th, 2025', 'Jan 10th, 2025', 'Jan 13th, 2025',

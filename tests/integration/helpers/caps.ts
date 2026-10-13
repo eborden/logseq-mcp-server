@@ -10,9 +10,6 @@ export const MAX_SEARCH_LIMIT = 500;
 export const DEFAULT_FIND_PAGES_LIMIT = 200;
 export const MAX_FIND_PAGES_LIMIT = 1000;
 
-export const DEFAULT_MAX_ENTRIES = 100;
-export const MAX_ENTRIES = 500;
-
 export const DEFAULT_DATE_RANGE_MAX_BLOCKS = 200;
 export const MAX_DATE_RANGE_BLOCKS = 1000;
 
@@ -28,7 +25,7 @@ export const DEFAULT_MAX_BLOCKS = 50;
 export const DEFAULT_MAX_RELATED_PAGES = 10;
 export const DEFAULT_MAX_REFERENCES = 20;
 
-/** The pages LogSeq makes itself, which `query_by_date_range` leaves out of `topConcepts` (lowercase `:block/name`). */
+/** The pages LogSeq makes itself, which `explore_timeline` leaves out of `topConcepts` (lowercase `:block/name`). */
 export const BUILT_IN_CONCEPTS: ReadonlySet<string> = new Set([
   'todo',
   'doing',
