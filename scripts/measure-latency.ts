@@ -9,7 +9,7 @@
 // never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Every page, block and
 // name is made up, and the output is aggregates only.
 //
-// For each of the 12 tools it calls one representative parity case (the happy path), then a few larger
+// For each of the 11 tools it calls one representative parity case (the happy path), then a few larger
 // made-up cases for the tools that do the most work. Per case and server: `--warmup` untimed calls, then
 // `--iterations` timed ones.
 //
@@ -73,7 +73,7 @@ const REPRESENTATIVE: Array<{ tool: string; name: string }> = [
   { tool: 'logseq_explore_context', name: 'explore_context: exact name, blocks in page order, linking pages and blocks as sent' },
   { tool: 'logseq_get_block', name: 'get_block: block with children' },
   { tool: 'logseq_get_concept_evolution', name: 'evolution: exact name, the page and its mentions, undated last' },
-  { tool: 'logseq_get_concept_network', name: 'network: exact name, two levels, both directions, journals as leaves' },
+  { tool: 'logseq_explore_network', name: 'network: exact name, two levels, both directions, journals as leaves' },
   { tool: 'logseq_get_current', name: 'current context: a page is open and nothing else' },
   { tool: 'logseq_get_graph', name: 'graph info' },
   { tool: 'logseq_get_page', name: 'get_page: exact name with its blocks' },
@@ -82,7 +82,7 @@ const REPRESENTATIVE: Array<{ tool: string; name: string }> = [
   { tool: 'logseq_find_blocks', name: 'property: slim matches, newest first' },
   { tool: 'logseq_find_blocks', name: 'slim hits, newest first' },
   { tool: 'logseq_find_blocks', name: 'pages: a page and a link, exact names' },
-  { tool: 'logseq_search_by_relationship', name: 'connected: found at the first hop' }
+  { tool: 'logseq_explore_network', name: 'path: found at the first hop' }
 ];
 
 /** A case to measure: what to call, what the stub answers, and how to tell the answer is right. */
@@ -169,7 +169,7 @@ async function largeNetwork(): Promise<Measured> {
     Array.from({ length: 10 }, (_, k) => row(n.id, outer[(i * 5 + k * 3) % 150], k % 2 === 0 ? 'outbound' : 'inbound', 1 + (k % 3)))
   );
   return {
-    label: 'get_concept_network depth 2, 30 + 150 pages, ~300 rows',
+    label: 'explore_network depth 2, 30 + 150 pages, ~300 rows',
     tool: base.tool,
     arguments: { ...base.arguments, max_depth: 2, max_nodes: 500, max_fanout: 100 },
     steps: [resolveStep, [withResponse(depthOne[0], rootRows)], [{ method: depthOne[0].method, args: [connectedQuery(neighbours.map(n => n.id))], response: secondRows }]]

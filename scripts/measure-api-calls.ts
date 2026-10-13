@@ -97,8 +97,8 @@ async function main() {
   };
   const dr = { start_date: ymd(start), end_date: ymd(end) };
   const cases: Case[] = [
-    ['get_concept_network depth=1', 'logseq_get_concept_network', { concept_name: subject, max_depth: 1 }],
-    ['get_concept_network depth=2', 'logseq_get_concept_network', { concept_name: subject, max_depth: 2 }],
+    ['explore_network depth=1', 'logseq_explore_network', { page: subject, max_depth: 1 }],
+    ['explore_network depth=2', 'logseq_explore_network', { page: subject, max_depth: 2 }],
     ['explore_context', 'logseq_explore_context', { page: subject }],
     ['explore_context (references_offset)', 'logseq_explore_context', { page: subject, max_references: 10, references_offset: 10 }],
     ['find_blocks (text)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 10 }],
@@ -118,7 +118,8 @@ async function main() {
     ['find_blocks (page + links_to, same page twice)', 'logseq_find_blocks', { page: subject, links_to: [subject], limit: 10 }],
     ['find_blocks (links_to, 2 pages)', 'logseq_find_blocks', { links_to: [subject, otherSubject], limit: 10 }],
     ['find_blocks (page + links_to + text + 7-day period)', 'logseq_find_blocks', { page: subject, links_to: [otherSubject], text: subject.slice(0, 4), ...dr, limit: 10 }],
-    ['search_by_relationship connected-within', 'logseq_search_by_relationship', { topic_a: subject, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 }],
+    ['explore_network (to a second page, depth 1)', 'logseq_explore_network', { page: subject, to: otherSubject, max_depth: 1 }],
+    ['explore_network (to a second page, depth 2)', 'logseq_explore_network', { page: subject, to: otherSubject, max_depth: 2 }],
     ['find_pages', 'logseq_find_pages', { limit: 50 }],
     ['find_pages (text)', 'logseq_find_pages', { text: subject.slice(0, 4), limit: 50 }],
     ['find_pages (1 name)', 'logseq_find_pages', { names: [subject] }],
@@ -143,10 +144,10 @@ async function main() {
           ['explore_context (aliased page)', 'logseq_explore_context', { page: aliased }],
           ['explore_context (aliased page, references_offset)', 'logseq_explore_context', { page: aliased, max_references: 10, references_offset: 10 }],
           ['get_concept_evolution (aliased page)', 'logseq_get_concept_evolution', { concept_name: aliased }],
-          ['get_concept_network depth=1 (aliased page)', 'logseq_get_concept_network', { concept_name: aliased, max_depth: 1 }],
-          ['get_concept_network depth=2 (aliased page)', 'logseq_get_concept_network', { concept_name: aliased, max_depth: 2 }],
+          ['explore_network depth=1 (aliased page)', 'logseq_explore_network', { page: aliased, max_depth: 1 }],
+          ['explore_network depth=2 (aliased page)', 'logseq_explore_network', { page: aliased, max_depth: 2 }],
           ['find_blocks (page + links_to, aliased page)', 'logseq_find_blocks', { page: aliased, links_to: [otherSubject], limit: 10 }],
-          ['search_by_relationship connected-within (aliased topic)', 'logseq_search_by_relationship', { topic_a: aliased, topic_b: otherSubject, relationship_type: 'connected-within', max_distance: 1 }],
+          ['explore_network (to a second page, aliased page, depth 1)', 'logseq_explore_network', { page: aliased, to: otherSubject, max_depth: 1 }],
           ['query_by_date_range 7d search_term (aliased page)', 'logseq_query_by_date_range', { ...dr, search_term: aliased }]
         ] as Case[])
       : []),

@@ -106,7 +106,7 @@ async function main() {
       ...(pick ? ([['get_block include_children', 'logseq_get_block', { uuid: pick.uuid, include_children: true }]] as Array<[string, string, Args]>) : []),
       ['explore_context', 'logseq_explore_context', { page: subject }],
       ['explore_context (compact)', 'logseq_explore_context', { page: subject, compact: true }],
-      ['get_concept_network depth 2', 'logseq_get_concept_network', { concept_name: subject, max_depth: 2 }]
+      ['explore_network depth 2', 'logseq_explore_network', { page: subject, max_depth: 2 }]
     ];
     console.log(`\n${'format: markdown vs json (bytes)'.padEnd(42)} ${'json'.padStart(9)} ${'markdown'.padStart(9)}  saved`);
     for (const [label, tool, args] of formatCases) {
