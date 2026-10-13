@@ -116,7 +116,7 @@ A type is chosen by what you already have, and it is the second word of the tool
 | `explore` | A starting point, and you want what surrounds it | `logseq_explore_context`, `logseq_explore_network`, `logseq_explore_timeline` | A structured result for synthesis: what is said about it, how it connects, how it changed |
 | `check` | A change you are about to write | `logseq_check_links` | A verdict. Read-only |
 
-Boundary test: if the answer is a list of hits, use `find`. If it is what something is, where it stands, how it connects or how it changed, use `explore`: `find` answers "which blocks", not "what is going on with this".
+Boundary test: if the answer is a list of hits (where something comes up, which notes mention or link it, which have a value), use `find`. If it is a state of affairs (what something is, how it is going, where it stands, what part it plays, how it connects or changed), use `explore`: `find` answers "which blocks", `explore` answers "what is going on with this".
 
 Every tool is read-only. Load `references/tools/<type>.md` for the parameters and worked examples of a type.
 
@@ -130,8 +130,8 @@ Every tool is read-only. Load `references/tools/<type>.md` for the parameters an
 | How something changed over time, or the history of a decision | `logseq_explore_timeline` with `page` and `group_by` | `context-builder.md`, recipe 3 |
 | How two things connect | `logseq_explore_network` with `page` and `to` | `context-builder.md`, recipe 4 |
 | Who owns something, or which pages or blocks have a property | `logseq_find_pages` with `property` and `value` for page properties, `logseq_find_blocks` for block properties | `context-builder.md`, recipe 7 |
-| A word or phrase, or blocks that link to pages (a list of hits) | `logseq_find_blocks` with `text` or `links_to` | `tools/find.md` |
-| Where something stands, what part it plays, what is written about it | `logseq_explore_context` on the page, not a list of blocks | `tools/explore.md` |
+| Where something comes up, which notes mention or link it (a list of places) | `logseq_find_blocks` with `text` or `links_to` | `tools/find.md` |
+| How something is going, where it stands, what part it plays (a state of affairs, not a list) | `logseq_explore_context` on the page, even when two pages are named. Read its blocks and references | `tools/explore.md` |
 | What to work on, tasks, stale work | `logseq_find_blocks` for markers and properties | `context-builder.md`, recipes 5 and 6 |
 | Unsure of a page name (you were given none) | `logseq_find_pages` with `text` or `names` | `tools/find.md` |
 | "This page" or "what I'm looking at" | `logseq_get_current`, then `logseq_explore_context` on its page | `tools/get.md` |
