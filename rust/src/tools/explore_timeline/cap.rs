@@ -7,7 +7,7 @@
 //! that no parameter reads on says so in its message and has no `howToFetchAll`, so `hasMore` is false.
 //!
 //! Entries are days, oldest first (or newest first for `last_n` with no page), and with a page and no period the
-//! mentions on non-journal pages come last in an entry of their own, which no date reaches.
+//! blocks on non-journal pages come last in an entry of their own, which no date reaches.
 
 use serde_json::Value;
 
@@ -29,8 +29,11 @@ pub const MAX_BLOCKS: usize = 1000;
 /// How a day is read in pieces when no call reads it whole.
 const IN_PIECES: &str = "logseq_find_blocks (start_date and end_date set to that day, with limit and offset)";
 
-/// Said when a call that reads on by dates leaves out the mentions on non-journal pages, which have no day.
-const UNDATED_NOTE: &str = " Setting dates leaves out the mentions on non-journal pages.";
+/// Said when a call that reads on by dates leaves out the blocks on non-journal pages (the page's own and the mentions), which have no day.
+const UNDATED_NOTE: &str = " Setting dates leaves out the blocks on non-journal pages.";
+
+/// Said when the cut falls among the blocks with no day, which no date reaches.
+const NO_DAY_FACT: &str = "The rest are blocks on non-journal pages (the page's own and those that link to it), which no dates reach.";
 
 /// How the blocks with no day are read: the page's own blocks by `page`, the blocks that link to it by `links_to`.
 const NO_DAY_WAY: &str = "logseq_find_blocks with page (its own blocks) or links_to (the blocks that link to it), with limit and offset";
@@ -132,7 +135,7 @@ pub struct TruncationOptions {
     pub requested: u64,
     /// A `page` was given, so a call that reads on names it again
     pub with_page: bool,
-    /// The result holds mentions on non-journal pages, which a period leaves out
+    /// The result holds blocks on non-journal pages, which a period leaves out
     pub has_undated: bool,
 }
 
@@ -201,7 +204,7 @@ impl Raises<'_> {
 ///    it at this cap reads only its first blocks, so the way forward is that day alone at a higher
 ///    cap, when that result fits the character budget, then paging; a day that can't be fetched whole (over the
 ///    maximum, or over the budget) is paged past, or read in pieces with `logseq_find_blocks`
-///  - the mentions on non-journal pages (no day): no date reaches them, so only a raise of `max_blocks` can, and it is
+///  - the blocks on non-journal pages, the page's own and the mentions (no day): no date reaches them, so only a raise of `max_blocks` can, and it is
 ///    offered only when it fits
 ///  - nothing kept (a cap of 0): there is no day to page from, so raise the cap, when that fits
 ///
@@ -226,8 +229,8 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
             how_to_fetch_all = raise_all(raises, total, shown, max, &mut facts, options);
         }
         (Place::Undated, _) => {
-            // Cut among the mentions on non-journal pages: no date reaches the rest
-            facts.push("The rest are mentions on non-journal pages, which no dates reach.".to_owned());
+            // Cut among the blocks on non-journal pages: no date reaches the rest
+            facts.push(NO_DAY_FACT.to_owned());
             how_to_fetch_all = raise_all(raises, total, shown, max, &mut facts, options);
         }
         (Place::Day(_), false) => match next {
@@ -235,8 +238,8 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
                 how_to_fetch_all = Some(format!("{} to read the {direction} days.{undated_note}", call_again(day)));
             }
             Place::Undated | Place::Nowhere => {
-                // Everything dated was kept: the rest are mentions on non-journal pages
-                facts.push("The rest are mentions on non-journal pages, which no dates reach.".to_owned());
+                // Everything dated was kept: the rest are blocks on non-journal pages
+                facts.push(NO_DAY_FACT.to_owned());
                 how_to_fetch_all = raise_all(raises, total, shown, max, &mut facts, options);
             }
         },
@@ -291,7 +294,7 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
     let order = if newest_first { "newest day first" } else { "oldest day first" };
     let ends = match last {
         Place::Day(day) => format!("; the entries end at {day}"),
-        Place::Undated => "; the entries end among the mentions on non-journal pages".to_owned(),
+        Place::Undated => "; the entries end among the blocks on non-journal pages".to_owned(),
         Place::Nowhere => String::new(),
     };
     let partial = if cut.partial_block { "; a kept block shows fewer children than it has (childrenTruncated)" } else { "" };
@@ -330,7 +333,7 @@ fn raise_all(raises: &Raises, total: usize, shown: usize, max: usize, facts: &mu
 /// [`blocks_truncated`] it names the day to read on from, since a call from a day reads whole days after the cut;
 /// unlike it, no `max_blocks` raise is offered, because the budget is in characters and a larger cap only brings
 /// the same cut back. A day that alone fills the budget can't be read whole by any call, so then the way on is
-/// the days after it, or `logseq_find_blocks` to read it in pieces. The mentions on non-journal pages have no day, so
+/// the days after it, or `logseq_find_blocks` to read it in pieces. The blocks on non-journal pages have no day, so
 /// no date reads on to them.
 fn size_truncated(cut: &BlockCut, kept: usize, oversize: bool, options: &TruncationOptions) -> ResultWarning {
     let direction = if options.newest_first { "older" } else { "later" };
@@ -356,13 +359,8 @@ fn size_truncated(cut: &BlockCut, kept: usize, oversize: bool, options: &Truncat
             format!("Day {day} alone fills this limit, so no call reads it whole: read it in pieces with {IN_PIECES}."),
             None,
         ),
-        // The rest are mentions on non-journal pages, which no date reaches
-        (Place::Day(_) | Place::Undated, _) => (
-            "The rest are mentions on non-journal pages, which no dates reach. No parameter raises this limit: read them with logseq_find_blocks \
-             (links_to the page, with limit and offset)."
-                .to_owned(),
-            None,
-        ),
+        // The rest are blocks on non-journal pages, which no date reaches
+        (Place::Day(_) | Place::Undated, _) => (format!("{NO_DAY_FACT} No parameter raises this limit: read them with {NO_DAY_WAY}."), None),
         // Nothing kept can't happen (a cut keeps a block), but say nothing false if it does
         (Place::Nowhere, _) => (options.narrow().to_owned(), None),
     };
@@ -486,9 +484,9 @@ mod tests {
             warning.how_to_fetch_all.as_deref(),
             Some("Call again with the same page, start_date 20250102, the same end_date (20250110) and the same max_blocks to read the later days.")
         );
-        // with mentions on non-journal pages in the result, setting dates leaves them out, and the advice says so
+        // with blocks on non-journal pages in the result, setting dates leaves them out, and the advice says so
         let warning = truncated(&entries, 1, &TruncationOptions { with_page: true, has_undated: true, ..options(true) });
-        assert!(warning.how_to_fetch_all.unwrap().ends_with(" Setting dates leaves out the mentions on non-journal pages."));
+        assert!(warning.how_to_fetch_all.unwrap().ends_with(" Setting dates leaves out the blocks on non-journal pages."));
     }
 
     #[test]
@@ -655,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    fn mentions_on_non_journal_pages_come_last_and_no_date_reaches_them() {
+    fn blocks_on_non_journal_pages_come_last_and_no_date_reaches_them() {
         let entries = [entry(20250101, vec![block(1, 0)]), entry(20250102, vec![block(2, 0)]), undated(vec![block(3, 0), block(4, 0)])];
         // cut between the last day and the undated entry
         let cut = cap_entries(&entries, 2, true).unwrap();
@@ -664,7 +662,7 @@ mod tests {
         assert_eq!(
             warning.message,
             "Showing 2 of 4 blocks (nested ones counted; oldest day first; the entries end at 20250102). \
-             The rest are mentions on non-journal pages, which no dates reach."
+             The rest are blocks on non-journal pages (the page's own and those that link to it), which no dates reach."
         );
         // the only way to fetch them is a raise, and it is offered because it fits
         assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_blocks to 4 (or higher) to get all 4."));
@@ -676,7 +674,7 @@ mod tests {
         let cut = cap_entries(&entries, 3, true).unwrap();
         assert_eq!((cut.last, cut.next, cut.split, cut.kept_before), (Place::Undated, Place::Nowhere, true, 2));
         let warning = truncated(&entries, 3, &options(true));
-        assert!(warning.message.contains("the entries end among the mentions on non-journal pages"), "{}", warning.message);
+        assert!(warning.message.contains("the entries end among the blocks on non-journal pages"), "{}", warning.message);
         assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_blocks to 4 (or higher) to get all 4."));
         // a cut inside the last day with only the undated entry after it reads the rest of the day, and says what dates leave out
         let entries = [entry(20250101, vec![block(1, 0)]), entry(20250102, vec![block(2, 0), block(3, 0)]), undated(vec![block(4, 0)])];
@@ -685,7 +683,7 @@ mod tests {
             warning.how_to_fetch_all.as_deref(),
             Some(
                 "Call again with the same page, start_date 20250102, the same end_date (20250110) and the same max_blocks to read the rest of day 20250102 \
-                 (it repeats its kept blocks). Setting dates leaves out the mentions on non-journal pages."
+                 (it repeats its kept blocks). Setting dates leaves out the blocks on non-journal pages."
             )
         );
     }
@@ -826,7 +824,7 @@ mod tests {
         let value: Value = serde_json::from_str(&fitted(&entries, &[], None, true)).unwrap();
         let warning = &value["warnings"][0];
         assert_eq!(warning["code"], "result_size_truncated");
-        assert!(warning["message"].as_str().unwrap().contains("The rest are mentions on non-journal pages, which no dates reach."), "{warning}");
+        assert!(warning["message"].as_str().unwrap().contains("The rest are blocks on non-journal pages (the page's own and those that link to it), which no dates reach."), "{warning}");
         assert!(warning.get("howToFetchAll").is_none(), "{warning}");
     }
 
