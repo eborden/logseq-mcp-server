@@ -13,6 +13,10 @@ use crate::tips::{Kind, MAX_TIPS, suggest_call, suggest_topic};
 pub struct Others {
     pub property: bool,
     pub period: bool,
+    /// The search was limited to the blocks on a page
+    pub page: bool,
+    /// The search needed links to some pages
+    pub links_to: bool,
 }
 
 /// Tips for a finished search: for a miss, a shorter word and a page-name search (when the search had a `text`) or a
@@ -37,14 +41,7 @@ pub fn find_tips(text: Option<&str>, others: Others, results: &[Value], matches:
                     }
                 )
             }
-            None => format!(
-                "No match. {}: loosen a filter.",
-                match (others.property, others.period) {
-                    (true, true) => "A property value must equal the stored text, and a period covers journal blocks only",
-                    (true, false) => "A property value must equal the stored text",
-                    (false, _) => "A period covers journal blocks only",
-                }
-            ),
+            None => format!("No match. {}: loosen a filter.", how_the_filters_match(others)),
         });
     } else {
         tips.push(match suggest_topic(results) {
@@ -62,6 +59,35 @@ pub fn find_tips(text: Option<&str>, others: Others, results: &[Value], matches:
     }
     tips.truncate(MAX_TIPS);
     tips
+}
+
+/// How each filter besides `text` matches, as one sentence: a property is exact, a period is journals only, a page is
+/// where the block was written, and a link is a `[[link]]` or a `#tag`, never the words. The filters that were given
+/// are listed in that order, with "and" before the last.
+fn how_the_filters_match(others: Others) -> String {
+    let mut notes = Vec::new();
+    if others.property {
+        notes.push("A property value must equal the stored text");
+    }
+    if others.period {
+        notes.push("A period covers journal blocks only");
+    }
+    if others.page {
+        notes.push("A page covers the blocks written on it and on its aliases");
+    }
+    if others.links_to {
+        notes.push("A link is a [[link]] or a #tag, not plain words, and every links_to page is needed");
+    }
+    let lowered = |note: &str| note.chars().next().map_or_else(String::new, |initial| format!("{}{}", initial.to_lowercase(), &note[initial.len_utf8()..]));
+    match notes.split_first() {
+        None => "No filter besides text was given".to_owned(),
+        Some((only, [])) => (*only).to_owned(),
+        Some((first, rest)) => {
+            let (last, middle) = rest.split_last().expect("a second note");
+            let middle: String = middle.iter().map(|note| format!(", {}", lowered(note))).collect();
+            format!("{first}{middle}, and {}", lowered(last))
+        }
+    }
 }
 
 /// The text, trimmed, up to the first run of white space (Rust's set).
@@ -100,10 +126,21 @@ mod tests {
 
     #[test]
     fn a_miss_with_no_text_says_how_the_other_filters_match_and_has_no_word_to_suggest() {
-        let said = |property: bool, period: bool| find_tips(None, Others { property, period }, &[], Some(0));
+        let said = |property: bool, period: bool| find_tips(None, Others { property, period, ..Others::default() }, &[], Some(0));
         assert_eq!(said(true, true), ["No match. A property value must equal the stored text, and a period covers journal blocks only: loosen a filter."]);
         assert_eq!(said(true, false), ["No match. A property value must equal the stored text: loosen a filter."]);
         assert_eq!(said(false, true), ["No match. A period covers journal blocks only: loosen a filter."]);
+        // a page and links to pages say how they match, after the others, and three notes read as a list
+        let pages = Others { page: true, links_to: true, ..Others::default() };
+        assert_eq!(
+            find_tips(None, pages, &[], Some(0)),
+            ["No match. A page covers the blocks written on it and on its aliases, and a link is a [[link]] or a #tag, not plain words, and every links_to page is needed: loosen a filter."]
+        );
+        let three = Others { property: true, period: true, links_to: true, page: false };
+        assert_eq!(
+            find_tips(None, three, &[], Some(0)),
+            ["No match. A property value must equal the stored text, a period covers journal blocks only, and a link is a [[link]] or a #tag, not plain words, and every links_to page is needed: loosen a filter."]
+        );
         // matches that an offset skipped past are no miss
         assert!(find_tips(None, Others::default(), &[], Some(4)).is_empty());
     }
