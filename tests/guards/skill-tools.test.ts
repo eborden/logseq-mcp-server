@@ -33,26 +33,28 @@ import {
  *      only the prefixed form.
  * A failure names the file, the line and the bad token or argument.
  *
- * MIN_EXAMPLES_PER_TOOL is 0 here. #497 (the skills rewrite) is the switch: it raises the constant to 2, and in the
- * same PR adds the logseq_get_graph section and deletes its MISSING_SECTION_ALLOWANCES entry.
- * Skills aren't edited by this guard (ADR-0024), so MISSING_SECTION_ALLOWANCES lists the section gaps that exist on
- * main. An entry may only be removed: the guard fails once the heading exists, so the entry is deleted with it.
+ * MIN_EXAMPLES_PER_TOOL is 2 since the skills rewrite (#497), which split the tool reference by type, gave every tool
+ * a section and deleted the section allowance. MISSING_SECTION_ALLOWANCES stays as the place to list a section gap a
+ * later tool needs time to fill. An entry may only be removed: the guard fails once the heading exists, so the entry is
+ * deleted with it.
  */
 
 const SKILLS_DIR = fileURLToPath(new URL('../../skills/logseq-skills', import.meta.url));
 const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
 
-/** The skill's tool reference, relative to SKILLS_DIR. A constant so #497 can split the file by type. */
-const TOOL_REFERENCE_PATHS: readonly string[] = ['references/mcp-tools-reference.md'];
+/** The skill's tool reference, relative to SKILLS_DIR: one file per tool type (ADR-0037), each tool a heading in its type's file. */
+const TOOL_REFERENCE_PATHS: readonly string[] = [
+  'references/tools/get.md',
+  'references/tools/find.md',
+  'references/tools/explore.md',
+  'references/tools/check.md',
+];
 
-/** The minimum number of `json tool=<name>` examples per tool. 0 until #497 raises it to 2. */
-const MIN_EXAMPLES_PER_TOOL = 0;
+/** The minimum number of `json tool=<name>` examples per tool (#497: the worked examples are checked against the schema). */
+const MIN_EXAMPLES_PER_TOOL = 2;
 
-/**
- * Tools the tool reference has no heading for on main (it notes `logseq_get_graph` in prose only). Skill edits
- * are out of scope for #486 (ADR-0024); the section lands with the skills rewrite (#497), which deletes this entry.
- */
-const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph'];
+/** Tools the tool reference has no heading for yet. Empty: every tool has its section. */
+const MISSING_SECTION_ALLOWANCES: readonly string[] = [];
 
 describe('the skills name only real tools (#486)', () => {
   const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];
@@ -73,6 +75,10 @@ describe('the skills name only real tools (#486)', () => {
 
   it('names only recorded tools, documents each, and validates every json tool= example', () => {
     expect(skillViolations(files, tools, real), 'skills/logseq-skills/ breaks the tool contract').toEqual([]);
+  });
+
+  it('keeps the minimum of two worked examples per tool', () => {
+    expect(MIN_EXAMPLES_PER_TOOL).toBeGreaterThanOrEqual(2);
   });
 
   it('names no tool that is gone without its prefix either (#518)', () => {
