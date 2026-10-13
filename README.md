@@ -4,7 +4,7 @@ Turn your LogSeq knowledge graph into an AI-accessible database.
 
 ## What This Does
 
-Provides 11 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+Provides 10 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
 
 ## Quick Start
 
@@ -21,9 +21,9 @@ Provides 11 MCP tools for Claude to traverse your LogSeq graph, track concepts o
 
    To load the config from another file, set the environment variable `LOGSEQ_MCP_CONFIG` to its absolute path. A relative path stops the server at startup with a configuration error. The integration tests use it to run against a per-worktree LogSeq instance (`tests/integration/setup.md`).
 
-   Tips are on by default: four tools (`find_blocks`, `get_page`, `query_by_date_range`, `find_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
+   Tips are on by default: four tools (`find_blocks`, `get_page`, `explore_timeline`, `find_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
 
-   Some tools also accept `name`, `page` (and `page_name` or `block_uuid` where it fits) in place of their canonical parameter (`page`, `concept_name`, `uuid`). This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
+   Some tools also accept `name` or `page_name` in place of `page`, and `block_uuid` in place of `uuid`. This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
 4. Connect it to your MCP client (next section). The server is a Rust binary. Run it with `uvx`, which needs [uv](https://docs.astral.sh/uv/), or build it from a clone, which needs the Rust toolchain that `rust/rust-toolchain.toml` pins (rustup reads it). Node is only for the repo's tooling and tests.
 
 ## Install
@@ -134,11 +134,10 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 | `explore_context` | Explore one page in one call: its blocks, related pages and the blocks that link to it (references, most-linking pages first, paged with `references_offset`) |
 | `get_current` | What the user has open in LogSeq right now |
 
-### Temporal Queries (2)
+### Temporal Queries (1)
 | Tool | Purpose |
 |------|---------|
-| `query_by_date_range` | Query journal entries by date |
-| `get_concept_evolution` | Track concept mentions over time (replaces get_entity_timeline) |
+| `explore_timeline` | A page or a period over time: the journal days in a period, or the blocks on a page and the blocks that link to it by day, oldest first; or both (a period leaves out non-journal pages). `group_by` week or month, `top_concepts_limit` for what a period was about, capped by `max_blocks` and a 30,000-character budget |
 
 ### Graph Information (1)
 | Tool | Purpose |
@@ -212,13 +211,13 @@ Gets: The shortest path of links, as nodes and edges with their reference counts
 
 **"How did my thinking on testing evolve this year?"**
 ```
-Use: get_concept_evolution("testing", 20250101, 20251231, group_by='month')
-Gets: Timeline grouped by month showing pattern changes
+Use: explore_timeline(page="testing", start_date=20250101, end_date=20251231, group_by="month")
+Gets: The days the page was written about or linked, joined by month
 ```
 
 **"What was I working on last week?"**
 ```
-Use: query_by_date_range(20251114, 20251120)
+Use: explore_timeline(start_date=20251114, end_date=20251120)
 Gets: All journal entries in date range
 ```
 
