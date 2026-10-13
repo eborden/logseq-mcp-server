@@ -70,7 +70,7 @@ Use this skill when:
 **`scripts/check-terseness.sh`** - Mandatory validation gate for any summary
 - Detects weekly vs monthly from the filename and applies that budget
 - Reports per-signal word counts, totals, item count, em-dashes, two-sentence bullets, missing sections
-- Checks the page's `summary-source::` line, the roll-up of the `logseq_query_by_date_range` call it was built from. A page with none fails, so a summary built from journal files alone doesn't pass
+- Checks the page's `summary-source::` line, the roll-up of the `logseq_explore_timeline` call it was built from. A page with none fails, so a summary built from journal files alone doesn't pass
 - Exits non-zero on violation; rewrite and re-run rather than explaining the failure away
 
 ### Gates
@@ -89,7 +89,7 @@ Use this skill when:
 - Read this when user asks for research help, task management, or graph exploration
 
 **`references/mcp-tools-reference.md`** - Complete MCP tool documentation
-- All 11 LogSeq MCP tools with parameters and examples
+- All 10 LogSeq MCP tools with parameters and examples
 - Tool comparison tables and selection guidance
 - Read this when verifying tool syntax or discovering capabilities
 
@@ -152,7 +152,7 @@ Use this skill when:
 **Basic Tools (4):** find_blocks, get_page, get_block, find_pages
 **Graph Exploration (1):** explore_network (the pages linked to a page, or with `to` the shortest path of links to a second page)
 **Context Building (1):** explore_context (the page's blocks, its related pages and its references, ranked and paged)
-**Temporal Query (2):** query_by_date_range, get_concept_evolution
+**Temporal Query (1):** explore_timeline (a page or a period, by day, week or month)
 **Linking (1):** check_links
 
 Load `references/mcp-tools-reference.md` for complete tool documentation.

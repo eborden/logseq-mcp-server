@@ -27,11 +27,11 @@ If you don't know what pages exist in the user's graph:
 
 If time scope is ambiguous (no explicit date/timeframe):
 → **ASK USER:** "Was this recent (last week or so) or could it be from any time?"
-→ If recent: Use `query_by_date_range` with `search_term` filter, or `find_blocks` with `text` and a period (`preset`, `last_n` or dates) for a flat, newest-first list of the matching blocks
+→ If recent: Use `find_blocks` with `text` and a period (`preset`, `last_n` or dates) for a flat, newest-first list of the matching blocks, or `explore_timeline` with the period alone for the days as they happened
 → If any time: Use `find_blocks` with conservative limits (limit=5-10)
 
 If user provides explicit timeframe ("this week", "in November", "recently"):
-→ Use `query_by_date_range` directly, no need to ask
+→ Use `find_blocks` with `text` and the period (or `explore_timeline` for the period alone) directly, no need to ask
 
 **Red Flag:** About to search without knowing timeframe? ASK FIRST.
 
@@ -65,19 +65,19 @@ Measured through Claude Code (October 2026) on made-up journals: a result of abo
 
 | Call | Size on those journals | Under the limit |
 |------|------------------------|-----------------|
-| `query_by_date_range`, `max_blocks=100` | ~16,000 chars | yes |
-| `query_by_date_range`, `max_blocks=200` | ~31,000 chars (about 155 per block) | yes, up to about 250 chars per block as returned (about 200 of content) |
-| `query_by_date_range`, `max_blocks=300` | ~46,000 chars | borderline: inline here, saved for longer blocks |
-| `query_by_date_range`, `max_blocks=1000` | ~150,000 chars, or ~86,000 for very short blocks | no, saved to a file |
-| `query_by_date_range`, `include_content=false`, `max_blocks=500` | ~43,000 chars (a snippet is at most 80 characters) | yes on typical page names |
-| `query_by_date_range`, `max_blocks=1`, `top_concepts_limit=0` | ~1,000 chars | yes |
+| `explore_timeline`, `max_blocks=100` | ~16,000 chars | yes |
+| `explore_timeline`, `max_blocks=200` | ~31,000 chars (about 155 per block) | yes, up to about 250 chars per block as returned (about 200 of content) |
+| `explore_timeline`, `max_blocks=300` | ~46,000 chars | borderline: inline here, saved for longer blocks |
+| `explore_timeline`, `max_blocks=1000` | ~150,000 chars, or ~86,000 for very short blocks | no, saved to a file |
+| `explore_timeline`, `include_content=false`, `max_blocks=500` | ~43,000 chars (a snippet is at most 80 characters) | yes on typical page names |
+| `explore_timeline`, `max_blocks=1`, `top_concepts_limit=0` | ~1,000 chars | yes |
 
 What to do:
 
 - **Page small.** For a period's journals use `max_blocks=200` and follow the `blocks_truncated` warning's `start_date` until a result has no warning. Don't raise the cap to avoid a second call. A block's size is unknown before the call, so the cap in blocks is the only handle, and 200 leaves room for long blocks.
 - **Use `include_content=false` for shape.** Its size is bounded by the cap and not by block length (at most 80 characters per snippet, plus page names in `topConcepts`), so `max_blocks=500` is shown on typical page names. `summary.totalBlocks` there counts top-level blocks.
 - **Size a range cheaply.** `max_blocks=1` with `top_concepts_limit=0` costs about 1,000 characters, and its `blocks_truncated` warning carries `totals.blocks` (nested blocks) and `totals.days` for the whole range. A range with no warning had 1 block or fewer.
-- **If a result is saved to a file anyway** (the message says "Output too large" or "exceeds maximum allowed tokens" and names a file), don't open it. Repeat the call with a lower `max_blocks` (halve it) or one day per call. A single day that is still saved can't be read whole: read it in pieces with a `search_term` (one call per name, person or marker you are after) and say that part of the day went unread. A day-sized call at `max_blocks=500` is often too big too: about 75,000 characters on the journals above.
+- **If a result is saved to a file anyway** (the message says "Output too large" or "exceeds maximum allowed tokens" and names a file), don't open it. Repeat the call with a lower `max_blocks` (halve it) or one day per call. A single day that is still saved can't be read whole: read it in pieces with `find_blocks` (`start_date` and `end_date` set to that day, a `text` per name, person or marker you are after, with `limit` and `offset`) and say that part of the day went unread. A day-sized call at `max_blocks=500` is often too big too: about 75,000 characters on the journals above.
 
 ## Decision Flowchart
 
@@ -92,14 +92,14 @@ Do you know what pages exist in the graph?
 Does the question have an EXPLICIT timeframe?
 ("this week", "in November", "today", "recently")
   │
-  ├─ YES → query_by_date_range(search_term=keyword)
+  ├─ YES → find_blocks(text=keyword, period)
   │        DONE - don't add backup searches
   │
   └─ NO → Is the timeframe AMBIGUOUS?
           ("the X that Y sent", "where is the budget sheet")
             │
             ├─ YES → ASK USER about recency first
-            │        → Recent: query_by_date_range
+            │        → Recent: find_blocks(text, period)
             │        → Any time: find_blocks(text, limit=5)
             │
             └─ NO → Is it a "what do I know about X" question?
@@ -134,7 +134,8 @@ Does the question have an EXPLICIT timeframe?
 
 | Scenario | First Tool | Parameters | Ask User? |
 |----------|------------|------------|-----------|
-| "this week" / explicit time | `query_by_date_range` | search_term filter | No |
+| "this week" / explicit time | `find_blocks` (a word) or `explore_timeline` (the period) | text and a period | No |
+| "how did page X change" | `explore_timeline` | page=X, group_by | No |
 | "the X that Y sent" | - | - | YES - about recency |
 | "what do I know about X" | `explore_context` | max_blocks=20 | No |
 | "what pages do I have" | `find_pages` | text filter | No |
