@@ -92,4 +92,5 @@ Date: 2026-10-12
 ## Mechanical enforcement
 
 - test: `tests/guards/tool-taxonomy.test.ts` (over the recorded `tools/list`: name pattern, description verb, no v1 parameter names; `V1_TOOL_ALLOWANCES` exempts the v1 tools and shrinks to empty as each rename lands, #488)
+- test: `tests/guards/tool-taxonomy.test.ts` (every parameter in the recorded `tools/list` is in `ALLOWED_PARAMETERS`, built from this ADR's parameter vocabulary and surface table, so a parameter the table does not list for that tool fails, #519)
 - reviewer: a new tool fits exactly one type and uses the shared parameter vocabulary
