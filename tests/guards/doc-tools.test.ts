@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { docViolations, type DocOptions, type RecordedTool, type ToolPathOptions } from './skill-tools-check.js';
+import {
+  docViolations,
+  FIRST_VERSION_TOOL_NAMES,
+  FORMER_TOOL_NAMES,
+  REMOVED_BEFORE_V1_TOOL_NAMES,
+  type DocOptions,
+  type RecordedTool,
+  type ToolPathOptions,
+} from './skill-tools-check.js';
 
 /**
  * The live docs name only real tools, and their JSON examples validate against the tool's inputSchema (#503, part of #500).
@@ -96,29 +104,8 @@ const NON_TOOL_TOKENS: Readonly<Record<string, string>> = {
   logseq_logseq__logseq_: 'the README glob `mcp__plugin_logseq_logseq__logseq_*`, read as one token because it ends in `*`; names no tool',
 };
 
-/**
- * Every tool name of the first version, without the prefix (the 16 tools of `logseq_*` at v1.x). The list is the
- * guard's memory of what the docs may once have said: once a rename removes a name from the recorded list, a doc that
- * still says it is stale. It never shrinks. Append the old name of a tool when a later rename removes it.
- */
-const FORMER_TOOL_NAMES: readonly string[] = [
-  'build_context',
-  'check_links',
-  'get_backlinks',
-  'get_block',
-  'get_concept_evolution',
-  'get_concept_network',
-  'get_context_for_query',
-  'get_current_context',
-  'get_graph_info',
-  'get_page',
-  'get_page_outline',
-  'list_pages',
-  'query_by_date_range',
-  'query_by_property',
-  'search_blocks',
-  'search_by_relationship',
-];
+// FORMER_TOOL_NAMES, the guard's memory of what the docs may once have said, lives in skill-tools-check.ts (it is
+// shared with the skills guard): the 16 first-version tools plus the two ADR-0008 removed earlier. It never shrinks.
 
 /** Text that holds a former tool name and is not about the tool. The reason sits on each entry. */
 const BARE_CONTEXTS: Readonly<Record<string, string>> = {};
@@ -162,8 +149,10 @@ describe('the live docs name only real tools (#503)', () => {
     for (const context of Object.keys(BARE_CONTEXTS)) expect(text, context).toContain(context);
   });
 
-  it('keeps FORMER_TOOL_NAMES bare, sorted and without repeats, and the 16 first-version tools are in it', () => {
-    expect(FORMER_TOOL_NAMES).toHaveLength(16);
+  it('keeps FORMER_TOOL_NAMES bare, sorted and without repeats, and the 16 first-version tools and the 2 removed earlier are in it', () => {
+    expect(FIRST_VERSION_TOOL_NAMES).toHaveLength(16);
+    expect(REMOVED_BEFORE_V1_TOOL_NAMES).toEqual(['get_entity_timeline', 'get_related_pages']);
+    expect(FORMER_TOOL_NAMES).toHaveLength(18);
     expect(new Set(FORMER_TOOL_NAMES).size).toBe(FORMER_TOOL_NAMES.length);
     expect([...FORMER_TOOL_NAMES].sort()).toEqual(FORMER_TOOL_NAMES);
     for (const name of FORMER_TOOL_NAMES) expect(name, name).toMatch(/^[a-z0-9]+(?:_[a-z0-9]+)*$/);

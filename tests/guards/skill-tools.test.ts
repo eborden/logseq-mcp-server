@@ -4,6 +4,7 @@ import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import {
   docViolations,
+  FORMER_TOOL_NAMES,
   markdownFiles,
   schemaMismatch,
   skillViolations,
@@ -53,30 +54,6 @@ const MIN_EXAMPLES_PER_TOOL = 0;
  */
 const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph'];
 
-/**
- * Every bare tool name the skills may once have used: the 16 tools of the first version (as the live-docs guard lists
- * them, tests/guards/doc-tools.test.ts) and `get_related_pages`, which ADR-0008 removed before that. Never shrinks.
- */
-const FORMER_TOOL_NAMES: readonly string[] = [
-  'build_context',
-  'check_links',
-  'get_backlinks',
-  'get_block',
-  'get_concept_evolution',
-  'get_concept_network',
-  'get_context_for_query',
-  'get_current_context',
-  'get_graph_info',
-  'get_page',
-  'get_page_outline',
-  'get_related_pages',
-  'list_pages',
-  'query_by_date_range',
-  'query_by_property',
-  'search_blocks',
-  'search_by_relationship',
-];
-
 describe('the skills name only real tools (#486)', () => {
   const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];
   const files = markdownFiles(SKILLS_DIR)
@@ -116,8 +93,8 @@ describe('the bare-name rule can fail (#518 self-test)', () => {
     expect(run('Then `get_thing`.\n')).toEqual([]);
   });
 
-  it('keeps get_related_pages, removed by ADR-0008, in the list', () => {
-    expect(FORMER_TOOL_NAMES).toContain('get_related_pages');
+  it('keeps the two tools ADR-0008 removed in the shared list', () => {
+    expect(FORMER_TOOL_NAMES).toEqual(expect.arrayContaining(['get_entity_timeline', 'get_related_pages']));
     expect([...FORMER_TOOL_NAMES].sort()).toEqual(FORMER_TOOL_NAMES);
   });
 });
