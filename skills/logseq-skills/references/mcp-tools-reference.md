@@ -278,6 +278,7 @@ Explore one page in a single call: its blocks, the pages that link to it, and th
 **Context cost:** ~3-8k tokens depending on limits. Still cheaper than manual aggregation.
 
 **Returns:**
+- `page`: the name you asked for, as you wrote it (`resolvedFrom` says when it was an alias, a date or a namespace leaf)
 - Main page with properties
 - Direct blocks from page (`directBlocks`)
 - Related pages (`relatedPages`): the pages that link to it, each once, in the order LogSeq gave them (not ranked)

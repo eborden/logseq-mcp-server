@@ -29,7 +29,7 @@ describe('logseq_explore_context', () => {
   it('returns every block, reference and related page of a page under the caps', async () => {
     const result = await exploreContext(client, 'Bob');
 
-    expect(result.topic).toBe('Bob');
+    expect(result.page).toBe('Bob');
     expect(result.mainPage.name).toBe('bob');
     expect(result.directBlocks).toHaveLength(3);
     // Linked references count the blocks under a referencing block too

@@ -101,7 +101,7 @@ fn group_by_source(references: &[Value]) -> Vec<(Value, Vec<Value>)> {
 pub fn render_topic_context(context: &Value, options: ContextRenderOptions) -> String {
     let ContextRenderOptions { compact, heading_level } = options;
     let main = context.get("mainPage").filter(|page| page.is_object()).cloned().unwrap_or_else(|| json!({}));
-    let topic = context.get("topic").and_then(Value::as_str);
+    let topic = context.get("page").and_then(Value::as_str);
     let mut lines: Vec<String> = vec![heading(heading_level, &page_title(&main, topic)), String::new()];
 
     if let Some(note) = resolved_from_line(context.get("resolvedFrom")) {
@@ -256,7 +256,7 @@ mod tests {
 
     fn context() -> Value {
         json!({
-            "topic": "atlas",
+            "page": "atlas",
             "mainPage": {"id": 10, "name": "atlas", "original-name": "Atlas", "properties": {"type": "project", "tags": ["alpha", "beta"]}},
             "directBlocks": [
                 block(3, 10, 10, 2, "second top"),
@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn a_page_with_no_blocks_says_so_and_a_journal_names_its_day() {
         let context = json!({
-            "topic": "2025-01-01",
+            "page": "2025-01-01",
             "resolvedFrom": {"name": "2025-01-01", "matchedBy": "journal-date", "resolvedTo": "Jan 1st, 2025"},
             "mainPage": {"id": 1, "name": "jan 1st, 2025", "original-name": "Jan 1st, 2025"},
             "directBlocks": [], "relatedPages": [], "references": [],
@@ -346,14 +346,14 @@ mod tests {
             "# Jan 1st, 2025\n\n(resolved from \"2025-01-01\", matched by journal-date)\n\nJournal: 20250101\n\n(this page has no blocks)\n"
         );
         // no mainPage name: the topic is the title
-        assert!(render_topic_context(&json!({"topic": "atlas", "directBlocks": []}), ContextRenderOptions::default()).starts_with("# atlas\n"));
+        assert!(render_topic_context(&json!({"page": "atlas", "directBlocks": []}), ContextRenderOptions::default()).starts_with("# atlas\n"));
     }
 
     #[test]
     fn a_pre_block_is_the_properties_and_is_not_repeated_among_the_blocks() {
         let mut pre = block(1, 10, 10, 10, "type:: project\nstatus:: active");
         pre["pre-block?"] = json!(true);
-        let context = json!({"topic": "atlas", "mainPage": {"id": 10, "name": "atlas", "properties": {"type": "project"}}, "directBlocks": [pre, block(2, 10, 10, 1, "body")]});
+        let context = json!({"page": "atlas", "mainPage": {"id": 10, "name": "atlas", "properties": {"type": "project"}}, "directBlocks": [pre, block(2, 10, 10, 1, "body")]});
         let text = render_topic_context(&context, ContextRenderOptions::default());
         assert_eq!(text, "# atlas\n\ntype:: project\nstatus:: active\n\n## Blocks (2)\n\n- body\n");
     }
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn a_non_inbound_relationship_is_named() {
-        let context = json!({"topic": "t", "directBlocks": [], "relatedPages": [{"page": {"name": "x"}, "relationshipType": "outbound"}]});
+        let context = json!({"page": "t", "directBlocks": [], "relatedPages": [{"page": {"name": "x"}, "relationshipType": "outbound"}]});
         assert!(render_topic_context(&context, ContextRenderOptions::default()).contains("[[x]] (outbound)"));
     }
 
