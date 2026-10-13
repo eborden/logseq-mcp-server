@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
 import { getPageQuery } from './helpers/page-queries.js';
-import { queryJournals } from './helpers/tools.js';
+import { exploreTimeline } from './helpers/tools.js';
 import { BUILT_IN_CONCEPTS } from './helpers/caps.js';
 import type { BlockEntity, DateRangeResult, TopConcept } from './helpers/types.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for summary.topConcepts on query_by_date_range, against the fixture graph.
+ * Integration tests for summary.topConcepts on explore_timeline, against the fixture graph.
  *
  * Read-only. The window is January 2025: seven fixture journals that link 11 pages. The ranking
  * is asserted exactly, and its invariants are checked against the same result's blocks and against
@@ -40,7 +40,7 @@ function* walk(blocks: BlockEntity[]): Generator<BlockEntity> {
   }
 }
 
-describe('query_by_date_range: summary.topConcepts', () => {
+describe('explore_timeline: summary.topConcepts', () => {
   let client: LogseqClient;
   let result: DateRangeResult;
   let concepts: TopConcept[];
@@ -48,7 +48,7 @@ describe('query_by_date_range: summary.topConcepts', () => {
   beforeAll(async () => {
     ({ client } = await connectFixture());
 
-    result = (await queryJournals(client, JANUARY)) as DateRangeResult;
+    result = (await exploreTimeline(client, JANUARY)) as DateRangeResult;
     concepts = result.summary.topConcepts ?? [];
   });
 
@@ -127,7 +127,7 @@ describe('query_by_date_range: summary.topConcepts', () => {
   });
 
   it('gives the same roll-up with include_content: false', async () => {
-    const outline = await queryJournals(client, { ...JANUARY, includeContent: false });
+    const outline = await exploreTimeline(client, { ...JANUARY, includeContent: false });
 
     expect(
       JSON.stringify(outline.summary.topConcepts) === JSON.stringify(concepts),
@@ -136,8 +136,8 @@ describe('query_by_date_range: summary.topConcepts', () => {
   });
 
   it('applies top_concepts_limit as a prefix of the ranking, and 0 leaves it out', async () => {
-    const top3 = await queryJournals(client, { ...JANUARY, topConceptsLimit: 3 });
-    const none = await queryJournals(client, { ...JANUARY, topConceptsLimit: 0 });
+    const top3 = await exploreTimeline(client, { ...JANUARY, topConceptsLimit: 3 });
+    const none = await exploreTimeline(client, { ...JANUARY, topConceptsLimit: 0 });
 
     expect(top3.summary.topConcepts).toEqual(JANUARY_CONCEPTS.slice(0, 3));
     expect(
@@ -148,7 +148,7 @@ describe('query_by_date_range: summary.topConcepts', () => {
   });
 
   it('works over a preset covering the same journals', async () => {
-    const preset = await queryJournals(client, { preset: 'this_month', topConceptsLimit: 50 }, new Date(2025, 0, 15, 12, 0));
+    const preset = await exploreTimeline(client, { preset: 'this_month', topConceptsLimit: 50 }, new Date(2025, 0, 15, 12, 0));
 
     expect(preset.summary.topConcepts).toEqual(JANUARY_CONCEPTS);
   });

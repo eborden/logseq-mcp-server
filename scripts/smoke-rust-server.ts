@@ -5,7 +5,7 @@
  *   node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts rust/target/release/logseq-mcp-server
  *
  * It drives the binary over MCP stdio with the SDK client, the way Claude Code does, and calls
- * each of the 11 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
+ * each of the 10 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
  * gets one prompt and lists tools, prompts, resources and resource templates. A few items read the
  * clock (a preset, `last_n`, and the weekly and monthly prompts with no argument) and are checked against
  * today's local date, which a release binary reads from the system: no parity case can check that. It prints one
@@ -23,7 +23,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { connectFixture } from '../tests/integration/helpers/fixture-client.js';
 
-const EXPECTED_TOOLS = 11;
+const EXPECTED_TOOLS = 10;
 
 interface ToolCall {
   name: string;
@@ -65,21 +65,22 @@ const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_explore_network', args: { page: 'Alice', max_depth: 2 } },
   { name: 'logseq_find_blocks', label: 'by page and links_to', args: { page: 'Alice', links_to: ['Bob'] } },
   { name: 'logseq_explore_network', label: 'path to a second page', args: { page: 'Alice', to: 'Bob' } },
-  { name: 'logseq_query_by_date_range', args: { start_date: 20250101, end_date: 20250131 } },
+  { name: 'logseq_explore_timeline', label: 'a period', args: { start_date: 20250101, end_date: 20250131 } },
   {
-    name: 'logseq_query_by_date_range',
+    name: 'logseq_explore_timeline',
     label: 'preset this_week',
     args: { preset: 'this_week' },
     readsClock: result => dateRangeOf(result).start === ymdOf(MONDAY) && dateRangeOf(result).end === ymdOf(SUNDAY),
   },
   {
     // The fixture instance has today's journal (LogSeq makes it on open), so the newest of the last 3 is today
-    name: 'logseq_query_by_date_range',
+    name: 'logseq_explore_timeline',
     label: 'last_n',
     args: { last_n: 3 },
     readsClock: result => dateRangeOf(result).end === ymdOf(TODAY),
   },
-  { name: 'logseq_get_concept_evolution', args: { concept_name: 'project atlas' } },
+  { name: 'logseq_explore_timeline', label: 'a page', args: { page: 'project atlas' } },
+  { name: 'logseq_explore_timeline', label: 'a page in a period', args: { page: 'project atlas', start_date: 20250101, end_date: 20250131, group_by: 'week' } },
   { name: 'logseq_check_links', args: { before: 'Alice met Bob about atlas.', after: '[[Alice]] met [[Bob]] about [[atlas]].' } },
 ];
 

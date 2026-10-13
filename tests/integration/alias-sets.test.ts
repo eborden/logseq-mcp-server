@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { exploreContext, exploreNetworkPath, findBlocksWithMeta, getConceptEvolution, exploreNetwork, queryJournals } from './helpers/tools.js';
+import { exploreContext, exploreNetworkPath, findBlocksWithMeta, exploreTimeline, exploreNetwork } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -89,14 +89,16 @@ describe('alias-aware link following against the fixture graph', () => {
     expect(calls).toBeLessThanOrEqual(3); // resolvers and the alias group, no hop query
   });
 
-  it('get_concept_evolution: either name yields the same block set, including alias-only blocks', async () => {
-    const byName = await counted(() => getConceptEvolution(client, target.canonical));
-    const byAlias = await counted(() => getConceptEvolution(client, target.alias));
+  it('explore_timeline with a page: either name yields the same block set, including alias-only blocks', async () => {
+    const byName = await counted(() => exploreTimeline(client, { page: target.canonical }));
+    const byAlias = await counted(() => exploreTimeline(client, { page: target.alias }));
 
-    const ids = (r: typeof byName.result) => new Set(r.timeline.flatMap(t => t.blocks.map(b => b.id)));
+    const ids = (r: typeof byName.result) => new Set(r.entries.flatMap(t => t.blocks.map(b => b.id)));
     expect(sameSet(ids(byName.result), ids(byAlias.result))).toBe(true);
     expect(ids(byName.result).size).toBe(22);
-    expect(byName.result.summary).toMatchObject({ totalMentions: 22, journalMentions: 12, nonJournalMentions: 10 });
+    // 12 on journal days, 10 with no day
+    expect(byName.result.summary).toMatchObject({ totalBlocks: 22 });
+    expect(byName.result.entries.filter(t => t.date === null).flatMap(t => t.blocks)).toHaveLength(10);
     expect(byName.result.resolvedAliases).toEqual(ALIAS_GROUP);
     expect(byName.calls <= 5 && byAlias.calls <= 5).toBe(true);
   });
@@ -162,25 +164,16 @@ describe('alias-aware link following against the fixture graph', () => {
     expect(Object.keys(both.meta.resolvedAliases)).toHaveLength(1);
   });
 
-  it('query_by_date_range: a search_term naming either name matches the same blocks, bar in-word hits of the term', async () => {
+  it('explore_timeline with a page and a period: either name yields the same blocks on the journal days', async () => {
     const range = { startDate: 20000101, endDate: 21001231 };
-    const byName: any = await queryJournals(client, { ...range, searchTerm: target.canonical });
-    const byAlias: any = await queryJournals(client, { ...range, searchTerm: target.alias });
+    const byName: any = await exploreTimeline(client, { ...range, page: target.canonical });
+    const byAlias: any = await exploreTimeline(client, { ...range, page: target.alias });
 
-    const blocks = (r: any) => new Map<number, string>(
-      r.entries.flatMap((e: any) => e.blocks.map((b: any) => [b.id, String(b.content ?? '').toLowerCase()]))
-    );
-    const [nameBlocks, aliasBlocks] = [blocks(byName), blocks(byAlias)];
-    // The term itself also matches inside a word, as any term does; the group's other names
-    // match as whole words or refs only. So a block only one call finds holds that call's term.
-    const onlyIn = (a: Map<number, string>, b: Map<number, string>, term: string) =>
-      [...a].filter(([id]) => !b.has(id)).filter(([, content]) => !content.includes(term.toLowerCase())).length;
-    expect(nameBlocks.size).toBe(10);
-    expect(byName.entries.map((e: any) => e.date)).toEqual(
-      [20241231, 20250102, 20250106, 20250107, 20250108, 20250113, 20250115]
-    );
-    expect(onlyIn(nameBlocks, aliasBlocks, target.canonical)).toBe(0);
-    expect(onlyIn(aliasBlocks, nameBlocks, target.alias)).toBe(0);
+    const blocks = (r: any) => new Set<number>(r.entries.flatMap((e: any) => e.blocks.map((b: any) => b.id)));
+    // the 12 blocks on journal days; the 10 on other pages have no day in the period
+    expect(blocks(byName).size).toBe(12);
+    expect(sameSet(blocks(byName), blocks(byAlias))).toBe(true);
+    expect(byName.entries.every((e: any) => e.date !== null)).toBe(true);
     expect(byName.resolvedAliases).toEqual(byAlias.resolvedAliases);
     expect(byName.resolvedAliases).toEqual(ALIAS_GROUP);
   });
@@ -190,7 +183,7 @@ describe('alias-aware link following against the fixture graph', () => {
     expect('resolvedAliases' in context.result).toBe(false);
     expect(context.calls).toBeLessThanOrEqual(3); // resolver, blocks, references
 
-    const evolution = await getConceptEvolution(client, plain);
-    expect('resolvedAliases' in evolution).toBe(false);
+    const timeline = await exploreTimeline(client, { page: plain });
+    expect('resolvedAliases' in timeline).toBe(false);
   });
 });

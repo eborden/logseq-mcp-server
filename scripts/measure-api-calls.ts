@@ -105,15 +105,18 @@ async function main() {
     ['find_blocks (text, offset)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 10, offset: 10 }],
     ['find_blocks (text + 7-day period)', 'logseq_find_blocks', { text: subject.slice(0, 4), ...dr, limit: 10 }],
     ['find_blocks (period alone, last_n 7)', 'logseq_find_blocks', { last_n: 7, limit: 10 }],
-    ['query_by_date_range (7 days)', 'logseq_query_by_date_range', dr],
+    ['explore_timeline (7 days)', 'logseq_explore_timeline', dr],
+    ['explore_timeline (last_n 7)', 'logseq_explore_timeline', { last_n: 7 }],
+    ['explore_timeline (7 days, group_by week)', 'logseq_explore_timeline', { ...dr, group_by: 'week' }],
     ['find_blocks (property)', 'logseq_find_blocks', { property: 'type', value: 'x' }],
     ['find_blocks (text + property + period)', 'logseq_find_blocks', { text: subject.slice(0, 4), property: 'type', value: 'x', ...dr }],
     ['get_current', 'logseq_get_current', {}],
     ['explore_context resolve_refs', 'logseq_explore_context', { page: subject, resolve_refs: true }],
-    ['query_by_date_range 7d resolve_refs', 'logseq_query_by_date_range', { ...dr, resolve_refs: true }],
+    ['explore_timeline 7d resolve_refs', 'logseq_explore_timeline', { ...dr, resolve_refs: true }],
     ['get_page', 'logseq_get_page', { page: subject }],
     ['get_page (outline)', 'logseq_get_page', { page: subject, detail: 'outline' }],
-    ['get_concept_evolution', 'logseq_get_concept_evolution', { concept_name: subject }],
+    ['explore_timeline (page)', 'logseq_explore_timeline', { page: subject }],
+    ['explore_timeline (page, 7-day period)', 'logseq_explore_timeline', { page: subject, ...dr }],
     ['find_blocks (page + links_to)', 'logseq_find_blocks', { page: subject, links_to: [otherSubject], limit: 10 }],
     ['find_blocks (page + links_to, same page twice)', 'logseq_find_blocks', { page: subject, links_to: [subject], limit: 10 }],
     ['find_blocks (links_to, 2 pages)', 'logseq_find_blocks', { links_to: [subject, otherSubject], limit: 10 }],
@@ -143,12 +146,12 @@ async function main() {
       ? ([
           ['explore_context (aliased page)', 'logseq_explore_context', { page: aliased }],
           ['explore_context (aliased page, references_offset)', 'logseq_explore_context', { page: aliased, max_references: 10, references_offset: 10 }],
-          ['get_concept_evolution (aliased page)', 'logseq_get_concept_evolution', { concept_name: aliased }],
+          ['explore_timeline (aliased page)', 'logseq_explore_timeline', { page: aliased }],
           ['explore_network depth=1 (aliased page)', 'logseq_explore_network', { page: aliased, max_depth: 1 }],
           ['explore_network depth=2 (aliased page)', 'logseq_explore_network', { page: aliased, max_depth: 2 }],
           ['find_blocks (page + links_to, aliased page)', 'logseq_find_blocks', { page: aliased, links_to: [otherSubject], limit: 10 }],
           ['explore_network (to a second page, aliased page, depth 1)', 'logseq_explore_network', { page: aliased, to: otherSubject, max_depth: 1 }],
-          ['query_by_date_range 7d search_term (aliased page)', 'logseq_query_by_date_range', { ...dr, search_term: aliased }]
+          ['explore_timeline (aliased page, 7-day period)', 'logseq_explore_timeline', { page: aliased, ...dr }]
         ] as Case[])
       : []),
     ...(isoDay

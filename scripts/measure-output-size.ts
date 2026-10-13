@@ -76,7 +76,7 @@ async function main() {
     const slimCases: Array<[string, string, Args]> = [
       ['find_blocks text (limit 50)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 50 }],
       ['find_blocks text include_context (limit 50)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 50, include_context: true }],
-      ['query_by_date_range last_n 7', 'logseq_query_by_date_range', { last_n: 7 }],
+      ['explore_timeline last_n 7', 'logseq_explore_timeline', { last_n: 7 }],
       ...(propKey
         ? ([['find_blocks property', 'logseq_find_blocks', { property: propKey, value: propValue }]] as Array<[string, string, Args]>)
         : [])
