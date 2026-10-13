@@ -302,6 +302,64 @@ async fn a_hop_past_five_hundred_pages_expands_the_lowest_ids_and_warns_if_nothi
     );
 }
 
+/// 600 pages linked from Atlas, highest id first, and a hop 2 over the 500 lowest that reaches one more page, 5000
+fn after_a_cut_hop(hop_three: Value) -> impl Fn(&Value) -> Value + Send + 'static {
+    let pages = atlas_and_bob();
+    move |request| {
+        let text = text_of(request);
+        if let Some(name) = resolver_name(request) {
+            resolve(&name, &pages)
+        } else if text.contains("[(ground [10]) [?source ...]]") {
+            Value::Array((1000..1600).rev().map(|id| row(10, id, &format!("Page {id}"), "outbound", 1)).collect())
+        } else if text.contains("[(ground [1000 1001") {
+            json!([row(1000, 5000, "Team X", "outbound", 1)])
+        } else if text.contains("[(ground [5000]) [?source ...]]") {
+            hop_three.clone()
+        } else {
+            json!([])
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_path_found_after_a_cut_hop_is_real_and_says_a_shorter_one_may_exist() {
+    let logseq = mock_logseq(after_a_cut_hop(json!([row(5000, 20, "Bob", "outbound", 1)]))).await;
+
+    let answer = explore_path(&client(&logseq), "Atlas", "Bob", 3, 3).await.unwrap();
+
+    assert_eq!(answer.hops(), Some(3));
+    assert_eq!(answer.nodes.iter().map(|node| node.id).collect::<Vec<_>>(), [10, 1000, 5000, 20]);
+    assert_eq!(answer.warnings.len(), 1);
+    assert_eq!(answer.warnings[0].code, "frontier_truncated");
+    assert_eq!(
+        answer.warnings[0].message,
+        "Hop 2 expanded only 500 of the 600 pages reached before it, the ones with the lowest ids, so this path of 3 hops is real but a shorter one may exist. \
+         Start from a more specific page to be sure of the shortest."
+    );
+    assert!(!answer.has_more());
+}
+
+#[tokio::test]
+async fn a_path_found_at_the_cut_hop_itself_is_as_short_as_any_and_says_nothing() {
+    let pages = atlas_and_bob();
+    let logseq = mock_logseq(move |request| {
+        let text = text_of(request);
+        if let Some(name) = resolver_name(request) {
+            resolve(&name, &pages)
+        } else if text.contains("[(ground [10]) [?source ...]]") {
+            Value::Array((1000..1600).rev().map(|id| row(10, id, &format!("Page {id}"), "outbound", 1)).collect())
+        } else {
+            json!([row(1200, 20, "Bob", "outbound", 1)])
+        }
+    })
+    .await;
+
+    let answer = explore_path(&client(&logseq), "Atlas", "Bob", 3, 3).await.unwrap();
+
+    assert_eq!(answer.hops(), Some(2));
+    assert!(answer.warnings.is_empty());
+}
+
 #[tokio::test]
 async fn a_page_that_is_no_page_fails_with_the_closest_names_and_the_other_page_is_still_resolved() {
     let pages = vec![page(10, "Atlas", &[])];

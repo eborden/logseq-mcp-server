@@ -16,8 +16,8 @@
 //!
 //! A `null` answer is not an empty one (BR-0011): the walk stops there with a `links_unavailable` warning and no
 //! `no_path_within`, since "no path" is not known. A hop whose frontier passed [`MAX_FRONTIER`] pages expanded only
-//! the lowest ids, which can hide a path, so a walk that found none says so (`frontier_truncated`). A path that was
-//! found is always real. A path has at most `max_depth + 1` pages (at most 4), so it needs no cut to the character
+//! the lowest ids, which can hide a path, so a walk that found none says so (`frontier_truncated`), and so does one that found a path after that hop, which
+//! may not be the shortest (a path found at that hop is as short as any). A path that was found is always real. A path has at most `max_depth + 1` pages (at most 4), so it needs no cut to the character
 //! budget (#485).
 
 use std::collections::{HashMap, HashSet};
@@ -295,6 +295,20 @@ fn frontier_truncated(hop: u64, reached: usize) -> ResultWarning {
     )
 }
 
+/// A path was found after a hop whose frontier was cut: a page that was not expanded there could have reached `to` sooner,
+/// so the path is real but a shorter one may exist (BR-0006). A path found at the cut hop itself is as short as any, and says
+/// nothing. No parameter fetches the rest, so no `howToFetchAll`.
+fn path_may_not_be_shortest(cut_hop: u64, reached: usize, found_at: u64) -> ResultWarning {
+    ResultWarning::new(
+        "frontier_truncated",
+        format!(
+            "Hop {cut_hop} expanded only {MAX_FRONTIER} of the {reached} pages reached before it, the ones with the lowest ids, \
+             so this path of {} is real but a shorter one may exist. Start from a more specific page to be sure of the shortest.",
+            hops_word(found_at)
+        ),
+    )
+}
+
 /// No parameter fetches what LogSeq did not answer (like `pages_unavailable`, #64), so no `howToFetchAll`.
 fn links_unavailable(hop: u64) -> ResultWarning {
     ResultWarning::new(
@@ -423,7 +437,11 @@ pub async fn explore_path(client: &LogseqClient, page: &str, to: &str, max_depth
         };
         walked = hop;
         match search.hop(rows) {
-            Hop::Found { nodes, edges } => return Ok(answer(nodes, edges, warnings)),
+            Hop::Found { nodes, edges } => {
+                // Only a path found after the cut can be longer than another (see `path_may_not_be_shortest`)
+                warnings.extend(cut_at.filter(|(cut_hop, _)| hop > *cut_hop).map(|(cut_hop, reached)| path_may_not_be_shortest(cut_hop, reached, hop)));
+                return Ok(answer(nodes, edges, warnings));
+            }
             Hop::Reached(next) => frontier = next,
         }
     }
@@ -585,6 +603,18 @@ mod tests {
         let cut = miss(true);
         assert_eq!(cut.message, "No path from \"Atlas\" to \"Zed\" within 1 hop.");
         assert_eq!(cut.how_to_fetch_all, None);
+    }
+
+    #[test]
+    fn a_path_after_a_cut_frontier_says_a_shorter_one_may_exist_and_offers_nothing_to_fetch() {
+        let warning = path_may_not_be_shortest(2, 612, 3);
+        assert_eq!(warning.code, "frontier_truncated");
+        assert_eq!(
+            warning.message,
+            "Hop 2 expanded only 500 of the 612 pages reached before it, the ones with the lowest ids, so this path of 3 hops is real but a shorter one may exist. \
+             Start from a more specific page to be sure of the shortest."
+        );
+        assert!(warning.how_to_fetch_all.is_none());
     }
 
     #[test]

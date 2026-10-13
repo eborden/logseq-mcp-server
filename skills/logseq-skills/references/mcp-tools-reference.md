@@ -207,7 +207,7 @@ How a page connects, as nodes (pages) and edges (links). Without `to` it maps th
 - `result_size_truncated` (the network): the result was cut to 30,000 characters, the deepest pages first and the root always kept. No parameter raises this limit, so narrow the walk. `truncated` is true and `network_truncated`, if there is one, no longer offers a raise
 - `no_path_within` (the path): no path within the depth reached. When one more hop could find one, `howToFetchAll` says to set `max_depth` one higher (up to 3). When the walk reached every page it could, or `max_depth` is at its maximum of 3 (a larger request is capped, and the message says so), nothing reads on and `hasMore` is false
 - `same_page` (the path): the two names are one page (the same name twice, or a page and its alias), so there is no walk
-- `frontier_truncated` (the path): a hop reached more than 500 pages and expanded only the lowest ids, so "no path" may be a false negative. A path that was found is always real
+- `frontier_truncated` (the path): a hop reached more than 500 pages and expanded only the lowest ids, so "no path" may be a false negative, and a path found after that hop is real but a shorter one may exist (a path found at that hop is as short as any)
 - `links_unavailable`: LogSeq gave no answer for a hop, so the walk stopped there. It is not "no path" and not "no links": retry
 
 **Use when:**
