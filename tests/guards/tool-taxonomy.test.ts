@@ -157,6 +157,21 @@ describe('each taxonomy rule can fail', () => {
     expect(violations(tool)).toEqual([]);
   });
 
+  it('exempts an allowlisted tool whose only fault is a parameter outside the positive list', () => {
+    const tool = { ...conforming, inputSchema: { properties: { text: {}, sort_by: {} } } };
+    expect(violations(tool)).not.toEqual([]);
+    expect(violations(tool, [conforming.name])).toEqual([]);
+  });
+
+  it('counts the positive list when judging an allowance stale: an unlisted parameter keeps it needed', () => {
+    const tool = { ...conforming, inputSchema: { properties: { text: {}, sort_by: {} } } };
+    // Not "already conforms": the exemption is still doing work. Dropping the list from the stale check would report it.
+    expect(violations(tool, [conforming.name])).not.toContainEqual(expect.stringContaining('already conforms'));
+    // With the parameter on the list the tool conforms, so the entry is reported for deletion.
+    const allowed = { [conforming.name]: ['text', 'sort_by'] };
+    expect(taxonomyViolations([tool], [conforming.name], allowed)).toEqual([expect.stringContaining('already conforms')]);
+  });
+
   it('fails a stale allowance', () => {
     expect(taxonomyViolations([conforming], ['logseq_get_concept_evolution'])).toEqual([
       expect.stringContaining('V1_TOOL_ALLOWANCES lists logseq_get_concept_evolution'),
