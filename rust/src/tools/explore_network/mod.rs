@@ -216,7 +216,7 @@ impl Default for Options {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Network {
     /// The name as the caller gave it
-    pub concept: String,
+    pub page: String,
     pub resolved_from: Option<Value>,
     pub resolved_aliases: Option<Vec<String>>,
     pub nodes: Vec<Node>,
@@ -234,11 +234,11 @@ impl Network {
         self.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())
     }
 
-    /// The network in BR-0013's key order: `concept`, `resolvedFrom`, `resolvedAliases`, then `truncated`,
+    /// The network in BR-0013's key order: `page`, `resolvedFrom`, `resolvedAliases`, then `truncated`,
     /// `hasMore`, `warnings`, then `nodes` and `edges`.
     pub fn to_value(&self) -> Value {
         result_value(&NetworkOutput {
-            concept: &self.concept,
+            page: &self.page,
             resolved_from: self.resolved_from.as_ref(),
             resolved_aliases: self.resolved_aliases.as_deref(),
             truncated: self.truncated,
@@ -253,7 +253,7 @@ impl Network {
 /// A network as written, in BR-0013's order: what was answered, whether it is complete and why not, then the data.
 #[derive(Serialize)]
 struct NetworkOutput<'a> {
-    concept: &'a str,
+    page: &'a str,
     #[serde(rename = "resolvedFrom", skip_serializing_if = "Option::is_none")]
     resolved_from: Option<&'a Value>,
     #[serde(rename = "resolvedAliases", skip_serializing_if = "Option::is_none")]
@@ -438,7 +438,7 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     }
 
     Ok(Network {
-        concept: page.to_owned(),
+        page: page.to_owned(),
         resolved_from: resolved_from(page, &resolved),
         resolved_aliases: alias_set.resolved_aliases(),
         nodes: nodes.into_vec(),
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn a_network_says_what_it_answered_and_whether_it_is_complete_before_its_nodes_and_edges() {
         let network = Network {
-            concept: "atlas".into(),
+            page: "atlas".into(),
             resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
             resolved_aliases: Some(vec!["Atlas".into(), "Project Atlas".into()]),
             nodes: vec![Node { id: 10, name: "Project Atlas".into(), depth: 0 }, Node { id: 20, name: "Bob".into(), depth: 1 }],
@@ -544,7 +544,7 @@ mod tests {
         assert_eq!(
             network.to_value().to_string(),
             concat!(
-                r#"{"concept":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
+                r#"{"page":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,
                 r#""truncated":true,"hasMore":true,"warnings":[{"code":"w","message":"m","howToFetchAll":"h"}],"#,
                 r#""nodes":[{"id":10,"name":"Project Atlas","depth":0},{"id":20,"name":"Bob","depth":1}],"#,
@@ -555,9 +555,9 @@ mod tests {
 
     #[test]
     fn the_order_of_a_network_does_not_depend_on_which_optional_keys_are_there() {
-        let all = ["concept", "resolvedFrom", "resolvedAliases", "truncated", "hasMore", "warnings", "nodes", "edges"];
+        let all = ["page", "resolvedFrom", "resolvedAliases", "truncated", "hasMore", "warnings", "nodes", "edges"];
         let network = Network {
-            concept: "atlas".into(),
+            page: "atlas".into(),
             resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
             resolved_aliases: Some(vec!["Atlas".into()]),
             nodes: vec![],
@@ -567,7 +567,7 @@ mod tests {
         };
         assert_eq!(keys(&network.to_value()), all);
         let bare = Network { resolved_from: None, resolved_aliases: None, ..network };
-        assert_eq!(keys(&bare.to_value()), ["concept", "truncated", "hasMore", "warnings", "nodes", "edges"]);
+        assert_eq!(keys(&bare.to_value()), ["page", "truncated", "hasMore", "warnings", "nodes", "edges"]);
     }
 
     #[test]
@@ -580,7 +580,7 @@ mod tests {
         assert!(warning.how_to_fetch_all.is_none());
         // so a network that carries only it has no more to fetch
         let network = Network {
-            concept: "atlas".into(),
+            page: "atlas".into(),
             resolved_from: None,
             resolved_aliases: None,
             nodes: vec![],
@@ -603,7 +603,7 @@ mod tests {
         nodes.insert(2, Node { id: 900, name: "deep".into(), depth: 2 });
         edges.push(Edge { from: 2, to: 900, outbound: 1, inbound: 0 });
         Network {
-            concept: "Atlas".into(),
+            page: "Atlas".into(),
             resolved_from: None,
             resolved_aliases: None,
             nodes,
@@ -627,7 +627,7 @@ mod tests {
         assert!(warning.message.starts_with("Showing 4 of 6 pages"), "{}", warning.message);
         assert!(!cut.has_more(), "no parameter fetches the rest");
         // the key order of the result is unchanged
-        assert_eq!(keys(&cut.to_value()), ["concept", "truncated", "hasMore", "warnings", "nodes", "edges"]);
+        assert_eq!(keys(&cut.to_value()), ["page", "truncated", "hasMore", "warnings", "nodes", "edges"]);
     }
 
     #[test]
