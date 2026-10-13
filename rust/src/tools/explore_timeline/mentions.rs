@@ -75,7 +75,9 @@ fn mentions_unavailable_warning() -> ResultWarning {
 ///
 /// Fails with [`ToolError::PageNotFound`] (guidance with the closest names) if no page matches and
 /// [`ToolError::AmbiguousPage`] (with the candidates) if several do.
-pub async fn fetch(client: &LogseqClient, name: &str, period: Option<Period>) -> Result<Found, ToolError> {
+///
+/// `with_refs` pulls each mention's refs for the roll-up of top concepts; with none (`top_concepts_limit` 0) they are left out.
+pub async fn fetch(client: &LogseqClient, name: &str, period: Option<Period>, with_refs: bool) -> Result<Found, ToolError> {
     // Resolve the name first (exact name, alias or ISO date, in one query)
     let resolved = require_page(client, name).await?;
     let lookup_name = resolved.lookup_name.clone();
@@ -113,9 +115,9 @@ pub async fn fetch(client: &LogseqClient, name: &str, period: Option<Period>) ->
     let query = if alias_set.has_aliases() {
         let ids = alias_set.ids()?;
         let own: Vec<PageId> = ids.iter().copied().filter(|id| Some(id.get() as i64) != main_page_id).collect();
-        blocks_referencing_pages(&ids, &own)
+        blocks_referencing_pages(&ids, &own, with_refs)
     } else {
-        blocks_referencing_page(&PageName::new(&lookup_name))
+        blocks_referencing_page(&PageName::new(&lookup_name), with_refs)
     };
     let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
     // A `null` answer is not "no mentions" (BR-0011): the page is listed without any, and the result says so.
