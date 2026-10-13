@@ -163,7 +163,7 @@ export async function exploreNetwork(
   client: LogseqClient,
   page: string,
   maxDepth?: number,
-  options: { maxNodes?: number; maxFanout?: number; expandJournals?: boolean } = {}
+  options: { maxNodes?: number; maxFanout?: number; expandJournals?: boolean; withSnippets?: boolean } = {}
 ): Promise<Json> {
   return (
     await callTool(client, 'logseq_explore_network', {
@@ -172,6 +172,7 @@ export async function exploreNetwork(
       max_nodes: options.maxNodes,
       max_fanout: options.maxFanout,
       expand_journals: options.expandJournals,
+      with_snippets: options.withSnippets,
     })
   ).value;
 }

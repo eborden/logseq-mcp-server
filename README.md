@@ -126,7 +126,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 ### Graph Traversal (1)
 | Tool | Purpose |
 |------|---------|
-| `explore_network` | The pages linked to a page as nodes and edges, in both link directions (capped; `max_depth` up to 3). With `to`, the shortest link path to a second page instead, as nodes and edges with their reference counts. Blocks that link to a page are `find_blocks` with `links_to` |
+| `explore_network` | The pages linked to a page as nodes and edges, in both link directions (capped; `max_depth` up to 3; journals and roll-up pages that link over 30 pages are leaves; `with_snippets` says why two pages connect). With `to`, the shortest link path to a second page instead, as nodes and edges with their reference counts. Blocks that link to a page are `find_blocks` with `links_to` |
 
 ### Context Building (2)
 | Tool | Purpose |
