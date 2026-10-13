@@ -529,7 +529,7 @@ fn references_truncated_warning(offset: usize, shown: usize, total: usize) -> Re
     })
 }
 
-/// LogSeq answered `null` to the query for the blocks of the page/// LogSeq answered `null` to the query for the blocks of the page (or of its alias group).
+/// LogSeq answered `null` to the query for the blocks of the page (or of its alias group).
 fn page_blocks_unavailable(page: &str) -> ResultWarning {
     ResultWarning::new(
         "page_blocks_unavailable",
