@@ -15,6 +15,9 @@ export type Schema = {
   maximum?: number;
   minLength?: number;
   maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  items?: Schema;
   anyOf?: Schema[];
   properties?: Record<string, Schema>;
   required?: string[];
@@ -43,7 +46,7 @@ const tokensOf = (line: string): string[] => [...line.matchAll(TOOL_TOKEN)].map(
 
 // Keywords schemaMismatch checks, and the ones that say nothing about a value. Any other keyword is reported, so a
 // constraint added to a recorded schema later cannot pass unchecked.
-const CHECKED_KEYWORDS = ['type', 'enum', 'anyOf', 'minimum', 'maximum', 'minLength', 'maxLength'];
+const CHECKED_KEYWORDS = ['type', 'enum', 'anyOf', 'minimum', 'maximum', 'minLength', 'maxLength', 'items', 'minItems', 'maxItems'];
 const IGNORED_KEYWORDS = ['description', 'default', 'title', 'format', '$schema'];
 
 /** Why `value` doesn't match `schema`, or null. Supports what the recorded schemas use; anything else is reported. */
@@ -68,12 +71,14 @@ export function schemaMismatch(value: unknown, schema: Schema): string | null {
         return typeof value === 'boolean';
       case 'null':
         return value === null;
+      case 'array':
+        return Array.isArray(value);
       default:
         return false;
     }
   });
-  if (!types.every(t => ['string', 'integer', 'number', 'boolean', 'null'].includes(t))) {
-    return `the schema type ${JSON.stringify(schema.type)} is not a primitive, which this guard cannot check`;
+  if (!types.every(t => ['string', 'integer', 'number', 'boolean', 'null', 'array'].includes(t))) {
+    return `the schema type ${JSON.stringify(schema.type)} is not a primitive or an array, which this guard cannot check`;
   }
   if (!typeOk) return `expected ${types.join(' or ')}, got ${value === null ? 'null' : typeof value}`;
   if (schema.enum && !schema.enum.includes(value)) {
@@ -82,6 +87,16 @@ export function schemaMismatch(value: unknown, schema: Schema): string | null {
   if (typeof value === 'number') {
     if (schema.minimum !== undefined && value < schema.minimum) return `${value} is below the minimum of ${schema.minimum}`;
     if (schema.maximum !== undefined && value > schema.maximum) return `${value} is above the maximum of ${schema.maximum}`;
+  }
+  if (Array.isArray(value)) {
+    // An array is checked by its length and by each item against `items`; without `items` it is not checked at all
+    if (!schema.items) return 'the array schema has no items, which this guard cannot check';
+    if (schema.minItems !== undefined && value.length < schema.minItems) return `the array has ${value.length} items, below the minItems of ${schema.minItems}`;
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) return `the array has ${value.length} items, above the maxItems of ${schema.maxItems}`;
+    for (const [index, item] of value.entries()) {
+      const reason = schemaMismatch(item, schema.items);
+      if (reason !== null) return `item ${index}: ${reason}`;
+    }
   }
   if (typeof value === 'string') {
     if (schema.minLength !== undefined && value.length < schema.minLength) {
