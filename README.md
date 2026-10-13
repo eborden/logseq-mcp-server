@@ -179,13 +179,17 @@ The server cannot write to your graph. The summary prompts end by showing the su
 Beyond individual tools, the `logseq-skills` provides structured workflows that combine multiple tools:
 
 **Available workflows:**
-- **Research Assistant** - "What do I know about X?" - comprehensive topic research
-- **Task Prioritization** - "What should I work on?" - find and organize TODOs
-- **Stale Task Detection** - Find tasks with no recent activity
-- **Weekly Summary** - Generate structured summaries from journal entries
-- **Graph Exploration** - Discover connections between concepts
-- **Temporal Analysis** - Track how concepts evolved over time
-- **Context Building** - One `explore_context` call per page, in parallel for several
+- **Recall a topic** - "What do I know about X?" - one `explore_context` call per page, in parallel for several
+- **Refresh on a person** - A pre-meeting read of a person's page, their recent days and what is open with them
+- **History of a decision** - How a page or decision changed over time, with the blocks that matter
+- **Connect two projects** - The shortest path of links between two pages, and what each link says
+- **Plan the week** - "What should I work on?" - find and organize TODOs, by marker and by property
+- **Stale work** - Find old, waiting or blocked tasks
+- **Who owns it** - Pages and blocks that carry a property
+- **Weekly and monthly summaries** - Generate structured summaries from journal entries
+- **Link concepts** - Add `[[links]]` to notes already written, with a gate
+
+The tool references are one file per tool type (`get`, `find`, `explore`, `check`), each tool with parameters and worked JSON examples.
 
 See `skills/logseq-skills/` for complete workflow documentation (also reachable at `.claude/skills/logseq-skills/` through a symlink for project-local use).
 
