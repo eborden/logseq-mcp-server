@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::args::parse_args;
-use crate::budget::{Fit, fit, size};
+use crate::budget::{BUDGET_CHARS, Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::{InvalidParameter, ToolError};
@@ -55,7 +55,7 @@ use crate::tools::explore_context::resolved_from;
 use self::graph::{Edge, EdgeOutput, Links, Node, Nodes, build_edges, relabel_depths};
 use self::queries::{connected_pages, connected_pages_grouped};
 use self::selection::{Candidate, select_candidates};
-use self::warning::{TruncationFacts, network_truncated_warning};
+use self::warning::{TruncationFacts, network_truncated_then_cut_by_size, network_truncated_warning};
 use self::wire::connected_rows;
 
 pub use self::path::{MAX_FRONTIER, PathAnswer, explore_path};
@@ -205,6 +205,10 @@ fn cut_to_pages(network: &Network, kept: usize, oversize: bool) -> Network {
     let ids: HashSet<i64> = nodes.iter().map(|node| node.id).collect();
     let edges = network.edges.iter().filter(|edge| ids.contains(&edge.from) && ids.contains(&edge.to)).cloned().collect();
     let mut warnings = network.warnings.clone();
+    // The caps dropped pages and the size limit cut the rest: raising a cap would end in this cut again
+    if let Some(facts) = network.cap_facts {
+        replace_cap_warning(&mut warnings, network_truncated_then_cut_by_size(facts));
+    }
     warnings.push(size_truncation_warning(SizeCut {
         what: "pages",
         kept,
@@ -216,8 +220,37 @@ fn cut_to_pages(network: &Network, kept: usize, oversize: bool) -> Network {
     Network { nodes, edges, truncated: true, warnings, ..network.clone() }
 }
 
+/// Puts `warning` where the `network_truncated` warning is, which a walk that was cut has.
+fn replace_cap_warning(warnings: &mut [ResultWarning], warning: ResultWarning) {
+    if let Some(at) = warnings.iter().position(|existing| existing.code == warning.code) {
+        warnings[at] = warning;
+    }
+}
+
+impl Network {
+    /// A raise of `max_nodes` or `max_fanout` is offered only when the raised result would fit the character budget
+    /// (BR-0006, #485): a call that returns the same pages cut to 30,000 characters is no way to fetch the rest. The
+    /// result is measured as it stands, and the pages it holds give the size of one page, so the raised result is an
+    /// estimate, from the pages that raising brings at least (the dropped ones). A result that is over the budget as it
+    /// stands is cut by [`fit_to_budget`], which words the warning itself.
+    fn raise_only_if_it_fits(mut self, render: &impl Fn(&Network) -> String) -> Network {
+        let Some(facts) = self.cap_facts else { return self };
+        if !self.warnings.iter().any(|warning| warning.code == "network_truncated" && warning.how_to_fetch_all.is_some()) {
+            return self;
+        }
+        let whole = size(&render(&self));
+        if whole > BUDGET_CHARS {
+            return self;
+        }
+        let fits = BUDGET_CHARS * self.nodes.len() / whole.max(1);
+        replace_cap_warning(&mut self.warnings, network_truncated_warning(facts, Some(fits)));
+        self
+    }
+}
+
 /// The network as it is when its text fits the character budget, else cut to the pages that do (#485).
 fn fit_to_budget(network: Network, render: &impl Fn(&Network) -> String) -> Network {
+    let network = network.raise_only_if_it_fits(render);
     let total = network.nodes.len();
     // The root is the answer, so it is the one page a cut always keeps
     let cut_size = |kept: usize| size(&render(&if kept < total { cut_to_pages(&network, kept, false) } else { network.clone() }));
@@ -259,6 +292,9 @@ pub struct Network {
     /// `network_truncated` when `truncated`, the alias group's when it was cut or not looked up, and
     /// `links_unavailable` when a depth's query got no answer
     pub warnings: Vec<ResultWarning>,
+    /// What the walk showed about the cut its caps made, which the `network_truncated` warning in `warnings` is
+    /// written from, kept to write it again once the size of the result is known (#494)
+    cap_facts: Option<TruncationFacts>,
 }
 
 impl Network {
@@ -453,19 +489,18 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     // Alongside `truncated`, which stays as is. `dropped` counts only the pages seen at the depths
     // that were walked, so it is a lower bound.
     let mut warnings = alias_set_warnings(&[&alias_set]);
-    if truncated {
-        warnings.push(network_truncated_warning(TruncationFacts {
-            kept,
-            dropped,
-            dropped_by_fanout,
-            dropped_by_budget,
-            max_nodes,
-            max_fanout,
-            first_drop_depth: first_drop_depth.expect("a truncated walk has a first drop"),
-            expand_journals,
-            expanded_journal,
-        }));
-    }
+    let cap_facts = truncated.then(|| TruncationFacts {
+        kept,
+        dropped,
+        dropped_by_fanout,
+        dropped_by_budget,
+        max_nodes,
+        max_fanout,
+        first_drop_depth: first_drop_depth.expect("a truncated walk has a first drop"),
+        expand_journals,
+        expanded_journal,
+    });
+    warnings.extend(cap_facts.map(|facts| network_truncated_warning(facts, None)));
     if let Some(depth) = unavailable_at {
         warnings.push(links_unavailable(depth));
     }
@@ -478,6 +513,7 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
         edges,
         truncated,
         warnings,
+        cap_facts,
     })
 }
 
@@ -605,6 +641,7 @@ mod tests {
             edges: vec![Edge { from: 10, to: 20, outbound: 2, inbound: 1 }],
             truncated: true,
             warnings: vec![ResultWarning { code: "w".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }],
+            cap_facts: None,
         };
         assert_eq!(
             network.to_value().to_string(),
@@ -629,6 +666,7 @@ mod tests {
             edges: vec![],
             truncated: false,
             warnings: vec![],
+            cap_facts: None,
         };
         assert_eq!(keys(&network.to_value()), all);
         let bare = Network { resolved_from: None, resolved_aliases: None, ..network };
@@ -652,6 +690,7 @@ mod tests {
             edges: vec![],
             truncated: false,
             warnings: vec![warning],
+            cap_facts: None,
         };
         assert!(!network.has_more());
         assert_eq!(network.to_value()["truncated"], false);
@@ -675,6 +714,7 @@ mod tests {
             edges,
             truncated: false,
             warnings: vec![],
+            cap_facts: None,
         }
     }
 
@@ -693,6 +733,69 @@ mod tests {
         assert!(!cut.has_more(), "no parameter fetches the rest");
         // the key order of the result is unchanged
         assert_eq!(keys(&cut.to_value()), ["page", "truncated", "hasMore", "warnings", "nodes", "edges"]);
+    }
+
+    /// A star of `pages` pages whose caps dropped `dropped` more, with the warning the walk wrote for it
+    fn capped_star(pages: usize, name_length: usize, dropped: usize) -> Network {
+        let facts = TruncationFacts {
+            kept: pages,
+            dropped,
+            dropped_by_fanout: 0,
+            dropped_by_budget: dropped,
+            max_nodes: pages,
+            max_fanout: 15,
+            first_drop_depth: 1,
+            expand_journals: false,
+            expanded_journal: false,
+        };
+        let mut network = star(pages - 1, name_length);
+        network.truncated = true;
+        network.warnings = vec![network_truncated_warning(facts, None)];
+        network.cap_facts = Some(facts);
+        network
+    }
+
+    fn json_of(network: &Network) -> String {
+        network.to_value().to_string()
+    }
+
+    #[test]
+    fn a_raise_is_offered_when_the_raised_network_fits_the_budget() {
+        let network = capped_star(50, 20, 50);
+        let fitted = fit_to_budget(network.clone(), &json_of);
+        assert_eq!(fitted, network);
+        assert!(fitted.warnings[0].how_to_fetch_all.as_deref().is_some_and(|raise| raise.starts_with("Set max_nodes to 100")));
+        assert!(fitted.has_more());
+    }
+
+    #[test]
+    fn a_raise_is_not_offered_when_the_raised_network_would_be_cut_to_the_budget() {
+        // 50 pages of about 400 characters fit (20,000), the 100 that a raise would bring do not (40,000)
+        let network = capped_star(50, 300, 50);
+        assert!(size(&json_of(&network)) < crate::budget::BUDGET_CHARS);
+        let fitted = fit_to_budget(network, &json_of);
+        assert_eq!(fitted.nodes.len(), 50, "nothing is cut: the result fits as it stands");
+        let warning = &fitted.warnings[0];
+        assert_eq!(warning.code, "network_truncated");
+        assert_eq!(warning.how_to_fetch_all, None);
+        assert!(warning.message.starts_with("Kept 50 pages; at least 50 more connected pages were dropped. A larger cap would only return a result cut to the size limit"), "{}", warning.message);
+        assert!(!fitted.has_more() && fitted.truncated);
+    }
+
+    #[test]
+    fn a_network_cut_to_the_budget_after_the_caps_offers_no_raise_and_says_both_cuts() {
+        let network = capped_star(400, 100, 20);
+        assert!(size(&json_of(&network)) > crate::budget::BUDGET_CHARS);
+        let fitted = fit_to_budget(network, &json_of);
+        assert!(fitted.nodes.len() < 400);
+        let codes: Vec<&str> = fitted.warnings.iter().map(|warning| warning.code.as_str()).collect();
+        assert_eq!(codes, ["network_truncated", "result_size_truncated"]);
+        assert_eq!(
+            fitted.warnings[0].message,
+            "At least 20 more connected pages were dropped by max_nodes or max_fanout before the result was cut to its size limit."
+        );
+        assert!(!fitted.has_more(), "no parameter fetches the rest");
+        assert!(size(&json_of(&fitted)) <= crate::budget::BUDGET_CHARS);
     }
 
     #[test]
