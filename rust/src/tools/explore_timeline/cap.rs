@@ -32,6 +32,9 @@ const IN_PIECES: &str = "logseq_find_blocks (start_date and end_date set to that
 /// Said when a call that reads on by dates leaves out the mentions on non-journal pages, which have no day.
 const UNDATED_NOTE: &str = " Setting dates leaves out the mentions on non-journal pages.";
 
+/// How the blocks with no day are read: the page's own blocks by `page`, the blocks that link to it by `links_to`.
+const NO_DAY_WAY: &str = "logseq_find_blocks with page (its own blocks) or links_to (the blocks that link to it), with limit and offset";
+
 /// Blocks an entry lists against the cap: nested ones too, or only top-level ones (the outline).
 fn listed_blocks(blocks: &[Value], nested: bool) -> usize {
     if nested { count_blocks(blocks) } else { blocks.len() }
@@ -220,12 +223,12 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
     match (last, split) {
         (Place::Nowhere, _) => {
             // Nothing kept: raise the cap to everything, or to the maximum, when that fits
-            how_to_fetch_all = raise_all(raises, total, max, &mut facts, options);
+            how_to_fetch_all = raise_all(raises, total, shown, max, &mut facts, options);
         }
         (Place::Undated, _) => {
             // Cut among the mentions on non-journal pages: no date reaches the rest
             facts.push("The rest are mentions on non-journal pages, which no dates reach.".to_owned());
-            how_to_fetch_all = raise_all(raises, total, max, &mut facts, options);
+            how_to_fetch_all = raise_all(raises, total, shown, max, &mut facts, options);
         }
         (Place::Day(_), false) => match next {
             Place::Day(day) => {
@@ -234,7 +237,7 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
             Place::Undated | Place::Nowhere => {
                 // Everything dated was kept: the rest are mentions on non-journal pages
                 facts.push("The rest are mentions on non-journal pages, which no dates reach.".to_owned());
-                how_to_fetch_all = raise_all(raises, total, max, &mut facts, options);
+                how_to_fetch_all = raise_all(raises, total, shown, max, &mut facts, options);
             }
         },
         (Place::Day(day), true) => {
@@ -304,8 +307,13 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
 }
 
 /// A raise of `max_blocks` to everything there is, or to the maximum, when the raised result fits the budget; when it
-/// doesn't, a fact says so and there is no `howToFetchAll`.
-fn raise_all(raises: &Raises, total: usize, max: usize, facts: &mut Vec<String>, options: &TruncationOptions) -> Option<String> {
+/// doesn't, a fact says so and there is no `howToFetchAll`. At the maximum already (`shown` is `max`) a raise is the call
+/// just made, so none is offered: the blocks with no day can only be read with `find_blocks`.
+fn raise_all(raises: &Raises, total: usize, shown: usize, max: usize, facts: &mut Vec<String>, options: &TruncationOptions) -> Option<String> {
+    if shown >= max {
+        facts.push(format!("No call reads the rest in one go: read them with {NO_DAY_WAY}."));
+        return None;
+    }
     let target = total.min(max);
     if !raises.all_at(target) {
         facts.push(format!("No call returns them inside {BUDGET_CHARS} characters. {}", options.narrow()));
@@ -680,6 +688,26 @@ mod tests {
                  (it repeats its kept blocks). Setting dates leaves out the mentions on non-journal pages."
             )
         );
+    }
+
+    #[test]
+    fn a_raise_is_never_the_call_just_made_so_at_the_maximum_the_blocks_with_no_day_are_read_with_find_blocks() {
+        let blocks = |first: i64, n: i64| (first..first + n).map(|id| block(id, 0)).collect::<Vec<_>>();
+        let read_with = "No call reads the rest in one go: read them with logseq_find_blocks with page (its own blocks) or links_to (the blocks that link to it), with limit and offset.";
+        // the cut falls among the blocks with no day, at the maximum
+        let among = [entry(20250101, blocks(1, 1)), undated(blocks(10, 1100))];
+        let warning = truncated(&among, 1000, &options(true));
+        assert_eq!(warning.how_to_fetch_all, None, "{}", warning.message);
+        assert!(warning.message.ends_with(read_with), "{}", warning.message);
+        // the cut falls right after the last day, with only blocks with no day left
+        let after = [entry(20250101, blocks(1, 1000)), undated(blocks(2000, 5))];
+        let warning = truncated(&after, 1000, &options(true));
+        assert_eq!(warning.how_to_fetch_all, None, "{}", warning.message);
+        assert!(warning.message.ends_with(read_with), "{}", warning.message);
+        // below the maximum the raise is still offered
+        let below = [entry(20250101, blocks(1, 500)), undated(blocks(2000, 505))];
+        let warning = truncated(&below, 999, &options(true));
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_blocks to 1000 (the maximum) to get 1000 of 1005. Narrow the period, or read the blocks with logseq_find_blocks (with limit and offset)."));
     }
 
     #[test]
