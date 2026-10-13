@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { buildContextForTopic, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, queryJournals, searchByRelationship } from './helpers/tools.js';
+import { buildContextForTopic, findBlocksWithMeta, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, queryJournals, searchByRelationship } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -128,15 +128,41 @@ describe('alias-aware link following against the fixture graph', () => {
     expect(byName.nodes.filter(n => rootNames.has(n.name.toLowerCase()))).toHaveLength(1);
   });
 
-  it('search_by_relationship: either name of a topic yields the same blocks', async () => {
-    const byName = await searchByRelationship(client, target.canonical, plain, 'in-pages-linking-to');
-    const byAlias = await searchByRelationship(client, target.alias, plain, 'in-pages-linking-to');
+  it('find_blocks: links_to either name of a page yields the same blocks, and says which names it covered', async () => {
+    const range = { limit: 500 };
+    const byName = await findBlocksWithMeta(client, { linksTo: [target.canonical] }, range);
+    const byAlias = await findBlocksWithMeta(client, { linksTo: [target.alias] }, range);
+    const backlinks = await getBacklinksWithMeta(client, target.canonical);
 
-    expect(sameSet(new Set(byName.results.map(b => b.id)), new Set(byAlias.results.map(b => b.id)))).toBe(true);
-    expect(byName.results).toHaveLength(9);
-    expect(byAlias.resolvedAliases?.topicA).toEqual(byName.resolvedAliases?.topicA);
-    expect(byName.resolvedAliases?.topicA).toEqual(ALIAS_GROUP);
-    expect(byName.resolvedAliases?.topicB).toBeUndefined();
+    const ids = (blocks: Array<{ id?: unknown }>) => new Set<number>(blocks.map(b => Number(b.id)));
+    expect(sameSet(ids(byName.results), ids(byAlias.results))).toBe(true);
+    // 19 blocks link project atlas or atlas directly. 17 are among the 24 backlinks (the other 7 sit under a linking
+    // block and link only through it), and 2 are on project atlas itself, which are no backlinks of it
+    const listed = ids((backlinks.results ?? []).flatMap(([, blocks]) => blocks));
+    expect(byName.results).toHaveLength(19);
+    const own = byName.results.filter(b => !listed.has(Number(b.id)));
+    expect(own).toHaveLength(2);
+    expect(own.every(b => (b.page as { name?: string }).name === target.canonical)).toBe(true);
+    expect(byName.meta.totals).toEqual({ matches: 19 });
+    // each call says which names its page was searched under, and a name that was an alias says which page it stood for
+    expect(Object.values(byName.meta.resolvedAliases)).toEqual([ALIAS_GROUP]);
+    expect(byAlias.meta.resolvedAliases).toEqual(byName.meta.resolvedAliases);
+    expect(byName.meta.resolvedFrom).toBeUndefined();
+    expect(byAlias.meta.resolvedFrom).toEqual([{ name: target.alias, matchedBy: 'alias', resolvedTo: target.canonical }]);
+  });
+
+  it('find_blocks: page covers the blocks written on either name of it, and links_to the links to either name', async () => {
+    const onPage = await findBlocksWithMeta(client, { page: target.alias }, { limit: 500 });
+    const onCanonical = await findBlocksWithMeta(client, { page: target.canonical }, { limit: 500 });
+    expect(onPage.results.map(b => b.id)).toEqual(onCanonical.results.map(b => b.id));
+    expect(onPage.meta.resolvedAliases).toEqual(onCanonical.meta.resolvedAliases);
+
+    const both = await findBlocksWithMeta(client, { page: target.canonical, linksTo: [plain] }, { limit: 500 });
+    const byAlias = await findBlocksWithMeta(client, { page: target.alias, linksTo: [plain] }, { limit: 500 });
+    expect(both.results.length).toBeGreaterThan(0);
+    expect(byAlias.results.map(b => b.id)).toEqual(both.results.map(b => b.id));
+    // Bob has no aliases: he is not in resolvedAliases
+    expect(Object.keys(both.meta.resolvedAliases)).toHaveLength(1);
   });
 
   it('query_by_date_range: a search_term naming either name matches the same blocks, bar in-word hits of the term', async () => {

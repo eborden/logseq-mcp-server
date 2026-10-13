@@ -56,12 +56,13 @@ import { connectMcp } from './helpers/server-under-test.js';
  * linking blocks (#178), so the pages a cut keeps are the same names on every run. Through MCP the
  * default cuts, the values below the maximum and the clamp can be seen; the cut at each
  * maximum is covered by the parity cases (101 source pages, `max_pages: 150`, blocks past the per-page maximum).
- * find_blocks' default of 100 and maximum of 500 are out of reach for a property filter too: no property value sits
- * on more than a few fixture blocks. Through MCP small limits stand in for the default, and the parity cases
- * (`limit at the maximum with matches left`) hold the cut at the maximum.
- * search_by_relationship's default of 50 and maximum of 500 are out of reach as well: no pair of fixture
- * topics returns more than a dozen results. Small limits stand in for the default through MCP, and the
- * parity case `relationship cut: limit past the maximum` holds the cut at the maximum.
+ * find_blocks' default of 100 and maximum of 500 are out of reach for a property filter, and for a page with links_to,
+ * too: no property value sits on more than a few fixture blocks, and no pair of fixture pages returns more than a
+ * dozen. Through MCP small limits stand in for the default, and the parity cases (`limit at the maximum with
+ * matches left`, `pages cut: limit past the maximum`) hold the cut at the maximum.
+ * search_by_relationship's default of 50 and maximum of 500 (connected-within, its one type) are out of reach as well:
+ * no pair of fixture topics returns more than a dozen results. Small limits stand in for the default through MCP, and
+ * the parity case `connected cut: the limit falls inside topic B` and its neighbours hold the cut inside a tree.
  */
 
 interface Meta {
@@ -711,26 +712,24 @@ describe('result caps (#61)', () => {
     });
   });
 
-  describe('logseq_find_blocks limit (default 100, max 500) with a property filter', () => {
-    // No fixture property value sits on more than a handful of blocks, so the default of 100 and
-    // the maximum of 500 are out of reach. Through MCP small limits see the same code with a
-    // smaller bound, and the clamp shows above the maximum; the cut at 500 is covered by the
-    // parity cases (`property: limit at the maximum with matches left`).
-    const KEY = 'type';
-    const VALUE = 'project';
+  // Filters whose matches are few: no fixture property value sits on more than a handful of blocks, and the crowded
+  // topic's pair of pages (tests/fixtures/README.md) on no more than a dozen. So the default of 100 and the maximum of
+  // 500 are out of reach. Through MCP small limits see the same code with a smaller bound, and the clamp shows above
+  // the maximum; the cut at 500 is covered by the parity cases (`property: limit at the maximum with matches left`,
+  // `pages cut: limit past the maximum`).
+  describe.each([
+    { label: 'a property filter', filter: { property: 'type', value: 'project' }, needs: 'blocks with type:: project' },
+    { label: 'a page and links_to', filter: { page: 'busy source', links_to: ['popular topic'] }, needs: 'blocks on busy source that link popular topic' },
+  ])('logseq_find_blocks limit (default 100, max 500) with $label', ({ filter, needs }) => {
 
-    interface PropertyBody {
+    interface SearchBody {
       text: string;
       results: Array<{ uuid: string }>;
       meta: Partial<Meta>;
     }
 
-    async function byProperty(limit?: number): Promise<PropertyBody> {
-      const result = await call('logseq_find_blocks', {
-        property: KEY,
-        value: VALUE,
-        ...(limit === undefined ? {} : { limit }),
-      });
+    async function bySearch(limit?: number): Promise<SearchBody> {
+      const result = await call('logseq_find_blocks', { ...filter, ...(limit === undefined ? {} : { limit }) });
       return {
         text: result.content[0].text,
         results: JSON.parse(result.content[0].text) as Array<{ uuid: string }>,
@@ -738,23 +737,23 @@ describe('result caps (#61)', () => {
       };
     }
 
-    const uuids = (body: PropertyBody) => body.results.map(block => block.uuid);
+    const uuids = (body: SearchBody) => body.results.map(block => block.uuid);
 
     it('never returns more blocks than limit, keeps the same first blocks, and reports every cut', async () => {
-      const full = await byProperty(MAX_PROPERTY_LIMIT);
+      const full = await bySearch(MAX_PROPERTY_LIMIT);
       const total = full.results.length;
-      expect(total, `the fixture needs at least 3 blocks with ${KEY}:: ${VALUE} to see a cut. See tests/fixtures/README.md`).toBeGreaterThanOrEqual(3);
+      expect(total, `the fixture needs at least 3 ${needs} to see a cut. See tests/fixtures/README.md`).toBeGreaterThanOrEqual(3);
       expect(total, 'the fixture must stay under the default cap for the default to return every match').toBeLessThanOrEqual(DEFAULT_PROPERTY_LIMIT);
       // Nothing is cut, so the maximum sends no warning, and a meta with the total (it is always sent)
       expect(full.meta.warnings).toEqual([]);
       expect(full.meta.totals).toEqual({ matches: total });
 
       // The default and a value above the maximum are the full result, byte for byte
-      expect((await byProperty()).text).toBe(full.text);
-      expect((await byProperty(5000)).text).toBe(full.text);
+      expect((await bySearch()).text).toBe(full.text);
+      expect((await bySearch(5000)).text).toBe(full.text);
 
       for (const limit of [0, 1, 2, total - 1, total, total + 1, DEFAULT_PROPERTY_LIMIT]) {
-        const body = await byProperty(limit);
+        const body = await bySearch(limit);
         const label = `limit ${limit}`;
         expect(body.results.length, label).toBeLessThanOrEqual(MAX_PROPERTY_LIMIT);
         expect(body.results.length, label).toBe(Math.min(limit, total));
@@ -784,26 +783,13 @@ describe('result caps (#61)', () => {
   describe('logseq_search_by_relationship limit (default 50, max 500)', () => {
     // No pair of fixture topics returns more than a dozen results, so the default of 50 and the
     // maximum of 500 are out of reach. Through MCP small limits see the same code with a smaller
-    // bound, and the clamp shows above the maximum; the cut at 500 is covered by the parity
-    // case `relationship cut: limit past the maximum`. The pairs below are the fixture's: see tests/fixtures/README.md
-    // for the crowded topic, and the alias-sets and semantic-search suites for the others.
+    // bound, and the clamp shows above the maximum; the cut inside a tree is covered by the parity
+    // cases `connected cut: ...`. The pairs below are the fixture's: see tests/fixtures/README.md
+    // for the pages, and the alias-sets and semantic-search suites for the others.
     const CASES: Array<{ label: string; args: Record<string, unknown>; aliased?: boolean; nested?: boolean }> = [
-      { label: 'references', args: { topic_a: 'busy source', topic_b: 'popular topic', relationship_type: 'references' } },
-      { label: 'referenced-by', args: { topic_a: 'bob', topic_b: 'project atlas', relationship_type: 'referenced-by' }, aliased: true },
-      { label: 'in-pages-linking-to', args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'in-pages-linking-to' } },
       {
         label: 'connected-within',
         args: { topic_a: 'alice', topic_b: 'bob', relationship_type: 'connected-within', max_distance: 1 },
-      },
-      {
-        label: 'in-pages-linking-to, topic A with an alias (#69)',
-        args: { topic_a: 'project atlas', topic_b: 'bob', relationship_type: 'in-pages-linking-to' },
-        aliased: true,
-      },
-      {
-        label: 'in-pages-linking-to, topic B with an alias (#69)',
-        args: { topic_a: 'alice', topic_b: 'atlas', relationship_type: 'in-pages-linking-to' },
-        aliased: true,
       },
       {
         label: 'connected-within, topic A with an alias (#69)',

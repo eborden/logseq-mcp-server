@@ -130,9 +130,11 @@ export async function getBlock(
   ).value;
 }
 
-/** What `logseq_find_blocks` filters on (ADR-0037): at least one of text, property with value, or a period. */
+/** What `logseq_find_blocks` filters on (ADR-0037): at least one of text, a page, pages it links to, property with value, or a period. */
 export interface BlockFilters {
   text?: string;
+  page?: string;
+  linksTo?: string[];
   property?: string;
   value?: string;
   startDate?: number;
@@ -157,6 +159,8 @@ export async function findBlocksWithMeta(
 ): Promise<{ results: Json; meta: Json }> {
   const { value, meta } = await callTool(client, 'logseq_find_blocks', {
     text: filters.text,
+    page: filters.page,
+    links_to: filters.linksTo,
     property: filters.property,
     value: filters.value,
     start_date: filters.startDate,
@@ -196,7 +200,7 @@ export async function searchByRelationship(
   client: LogseqClient,
   topicA: string,
   topicB: string,
-  relationshipType: 'references' | 'in-pages-linking-to' | 'connected-within',
+  relationshipType: 'connected-within',
   maxDistance?: number,
   options: { limit?: number } = {}
 ): Promise<Json> {
