@@ -3,7 +3,7 @@
 //! (`start_date` with `end_date`, `last_n` or `preset`) limits the search to the blocks on the journal pages of those
 //! days (#491; the two tools it replaces, `search_blocks` and `query_by_property`, each had one of the first two).
 //! `page` limits it to the blocks on one page and `links_to` to the blocks that link to every one of 1 to 5 pages,
-//! each followed through its alias group (#492; the `references` mode of `search_by_relationship` was both).
+//! each followed through its alias group (#492; the `references` mode of the removed `search_by_relationship` was both).
 //!
 //! Calls: 1 (the search query, whatever the filters), or 2 with `include_context` (one batched lookup of the pages the
 //! returned blocks sit on, and none when no block has a page id; a `null` answer to it is a
@@ -78,7 +78,7 @@ const NARROWER: &str = "Narrow the filters to see the rest.";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). Pages by limit (max 500) and offset: check hasMore.\n\n\
-**Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_search_by_relationship).";
+**Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_explore_network).";
 
 fn default_limit() -> u64 {
     DEFAULT_FIND_LIMIT

@@ -20,7 +20,6 @@ pub mod get_current;
 pub mod get_graph;
 pub mod get_page;
 pub mod query_by_date_range;
-pub mod search_by_relationship;
 
 /// Every tool, as `tools/list` shows them.
 pub fn list() -> Vec<Tool> {
@@ -36,7 +35,6 @@ pub fn list() -> Vec<Tool> {
         get_graph::definition(),
         get_page::definition(),
         query_by_date_range::definition(),
-        search_by_relationship::definition(),
     ]
 }
 
@@ -60,7 +58,6 @@ pub async fn call(
         get_graph::NAME => Some(get_graph::call(client, tips_enabled, arguments).await),
         get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),
         query_by_date_range::NAME => Some(query_by_date_range::call(client, tips_enabled, clock, arguments).await),
-        search_by_relationship::NAME => Some(search_by_relationship::call(client, tips_enabled, arguments).await),
         _ => None,
     }
 }

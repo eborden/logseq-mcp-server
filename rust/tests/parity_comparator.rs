@@ -357,13 +357,15 @@ fn quirky(tools: &[Value]) -> Vec<Value> {
 #[test]
 fn the_recorded_tool_list_has_every_tool_and_equals_itself() {
     let tools = load_tool_list();
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 11);
     assert_eq!(compare_tool_lists(&tools, &tools.clone()), Vec::<String>::new());
 }
 
 #[test]
 fn a_list_that_differs_only_in_serialization_quirks_is_equal() {
-    let tools = load_tool_list();
+    // No tool of the recorded list has a required enum any more (`search_by_relationship`'s `relationship_type` was the
+    // last, #494), and schemars wraps one in `allOf`: make one required here so that quirk is still read
+    let tools = with_schema(&load_tool_list(), "logseq_get_block", |s| s["required"] = json!(["uuid", "format"]));
     let rewritten = quirky(&tools);
     // The rewrite reached every quirk it is meant to show
     let text = Value::Array(rewritten.clone()).to_string();
@@ -437,10 +439,10 @@ fn a_changed_bound_type_enum_value_required_field_or_description_fails_with_its_
     let failures = compare_tool_lists(&tools, &bound);
     assert_eq!(failures.len(), 1);
     assert!(failures[0].contains("after.maxLength: expected 50000, got 1"), "{failures:?}");
-    let enum_value = quirky(&with_schema(&tools, "logseq_search_by_relationship", |s| s["properties"]["relationship_type"]["enum"][0] = json!("refs")));
+    let enum_value = quirky(&with_schema(&tools, "logseq_explore_network", |s| s["properties"]["format"]["enum"][0] = json!("refs")));
     let failures = compare_tool_lists(&tools, &enum_value);
     assert_eq!(failures.len(), 1);
-    assert!(failures[0].contains("relationship_type.enum[0]: expected \"connected-within\", got \"refs\""), "{failures:?}");
+    assert!(failures[0].contains("format.enum[0]: expected \"json\", got \"refs\""), "{failures:?}");
 }
 
 #[test]
