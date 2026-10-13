@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import {
+  docViolations,
   markdownFiles,
   schemaMismatch,
   skillViolations,
@@ -25,7 +26,10 @@ import {
  *      validates against that tool's inputSchema (a fence that says `tool=` any other way is an error, not a skip):
  *      required properties present, no property outside `properties`,
  *      and primitive types, enums, bounds and lengths matched, with any other schema keyword reported. The validator is hand-rolled (foundations 4.11, no new dependency);
- *   4. every tool has at least MIN_EXAMPLES_PER_TOOL such examples.
+ *   4. every tool has at least MIN_EXAMPLES_PER_TOOL such examples;
+ *   5. a bare name (no `logseq_` prefix) that was ever a tool, FORMER_TOOL_NAMES, is a recorded tool with the prefix
+ *      added (#518). `get_related_pages` stood in the skills for months after ADR-0008 removed it, since rule 1 reads
+ *      only the prefixed form.
  * A failure names the file, the line and the bad token or argument.
  *
  * MIN_EXAMPLES_PER_TOOL is 0 here. #497 (the skills rewrite) is the switch: it raises the constant to 2, and in the
@@ -49,6 +53,30 @@ const MIN_EXAMPLES_PER_TOOL = 0;
  */
 const MISSING_SECTION_ALLOWANCES: readonly string[] = ['logseq_get_graph'];
 
+/**
+ * Every bare tool name the skills may once have used: the 16 tools of the first version (as the live-docs guard lists
+ * them, tests/guards/doc-tools.test.ts) and `get_related_pages`, which ADR-0008 removed before that. Never shrinks.
+ */
+const FORMER_TOOL_NAMES: readonly string[] = [
+  'build_context',
+  'check_links',
+  'get_backlinks',
+  'get_block',
+  'get_concept_evolution',
+  'get_concept_network',
+  'get_context_for_query',
+  'get_current_context',
+  'get_graph_info',
+  'get_page',
+  'get_page_outline',
+  'get_related_pages',
+  'list_pages',
+  'query_by_date_range',
+  'query_by_property',
+  'search_blocks',
+  'search_by_relationship',
+];
+
 describe('the skills name only real tools (#486)', () => {
   const tools = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as RecordedTool[];
   const files = markdownFiles(SKILLS_DIR)
@@ -68,6 +96,29 @@ describe('the skills name only real tools (#486)', () => {
 
   it('names only recorded tools, documents each, and validates every json tool= example', () => {
     expect(skillViolations(files, tools, real), 'skills/logseq-skills/ breaks the tool contract').toEqual([]);
+  });
+
+  it('names no tool that is gone without its prefix either (#518)', () => {
+    const options = { nonToolTokens: {}, historyMarker: 'guard:history', formerToolNames: FORMER_TOOL_NAMES, bareContexts: {} };
+    expect(docViolations(files, tools, options), 'skills/logseq-skills/ names a removed tool bare').toEqual([]);
+  });
+});
+
+describe('the bare-name rule can fail (#518 self-test)', () => {
+  const tools: RecordedTool[] = [{ name: 'logseq_get_thing', inputSchema: { type: 'object', properties: {} } }];
+  const options = { nonToolTokens: {}, historyMarker: 'guard:history', formerToolNames: ['get_gone', 'get_thing'], bareContexts: {} };
+  const run = (text: string) => docViolations([{ path: 'skill.md', text }], tools, options);
+
+  it('flags a removed tool written without its prefix, and passes a live one', () => {
+    expect(run('Then `get_thing` → `get_gone`.\n')).toEqual([
+      'skill.md:1: "get_gone" is not a tool in tool-list.json, as logseq_get_gone (it is written without the prefix)',
+    ]);
+    expect(run('Then `get_thing`.\n')).toEqual([]);
+  });
+
+  it('keeps get_related_pages, removed by ADR-0008, in the list', () => {
+    expect(FORMER_TOOL_NAMES).toContain('get_related_pages');
+    expect([...FORMER_TOOL_NAMES].sort()).toEqual(FORMER_TOOL_NAMES);
   });
 });
 
