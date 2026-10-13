@@ -40,7 +40,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Explore everything on one page in a call: its blocks, related pages, and linked references.\n\n**Use when:** researching or explaining a topic that has a page.\n**Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
+    "description": "Explore one page in a call: its blocks, related pages, and linked references (blocks that link to it, most-linking pages first). Page the references with references_offset.\n\n**Use when:** researching a topic that has a page, or asking what links to it.\n**Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -65,6 +65,12 @@
           "default": 20,
           "type": "integer",
           "minimum": 0
+        },
+        "references_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Reference blocks to skip, most-linking pages first (default: 0)"
         },
         "include_temporal_context": {
           "description": "Include temporal context for journal pages (default: true)",
@@ -292,42 +298,6 @@
     }
   },
   {
-    "name": "logseq_get_backlinks",
-    "title": "Get Backlinks",
-    "annotations": {
-      "title": "Get Backlinks",
-      "readOnlyHint": true,
-      "destructiveHint": false,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "description": "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n**Use when:** \"what links to X?\" or \"where is X used?\"\n**Can't find:** unlinked text mentions (logseq_find_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n**Alternatives:** logseq_explore_context for related pages.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "page_name": {
-          "description": "Page to get backlinks for (name, alias or ISO date)",
-          "type": "string"
-        },
-        "max_pages": {
-          "description": "Max source pages (default: 20, max: 100)",
-          "default": 20,
-          "type": "integer",
-          "minimum": 0
-        },
-        "max_blocks_per_page": {
-          "description": "Max linking blocks per source page (default: 10, max: 50)",
-          "default": 10,
-          "type": "integer",
-          "minimum": 0
-        }
-      },
-      "required": [
-        "page_name"
-      ]
-    }
-  },
-  {
     "name": "logseq_get_block",
     "title": "Get Block",
     "annotations": {
@@ -515,7 +485,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages) or what links here (logseq_get_backlinks).\n**Alternatives:** logseq_explore_context adds related pages and references.",
+    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages).\n**Alternatives:** logseq_explore_context adds related pages and what links here.",
     "inputSchema": {
       "type": "object",
       "properties": {

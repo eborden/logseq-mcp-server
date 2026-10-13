@@ -1,27 +1,38 @@
-//! `logseq_explore_context`: everything on one page
-//! in a call. The page's blocks, the pages that link to it and the blocks that do, capped by
-//! `max_blocks`, `max_related_pages` and `max_references`.
+//! `logseq_explore_context`: everything on one page in a call. The page's blocks, the pages that link to it and
+//! the blocks that do (its references), capped by `max_blocks`, `max_related_pages` and `max_references`, with the
+//! references paged by `references_offset`.
+//!
+//! The references are the linked references of the page and of every alias, most-linking source pages first (ties by
+//! page name, then id; [`references::rank_backlinks`]), so the blocks of one source page sit together. The related
+//! pages are those source pages in the order LogSeq sent them, each once. `references_offset` skips that many
+//! references from the top of the ranking, so a later page of references is the same ranking read further on.
 //!
 //! Calls (the two-query pattern, ADR-0007): the page resolver (1 query for an exact name, an alias
 //! or an ISO date; a namespace-leaf name adds the leaf query, and a missing page adds the
 //! suggestion lookup before it fails), the alias lookup (1 query, only when the page has alias
 //! links), the page's blocks (1 query: over the whole alias group for a page with aliases), then
 //! the linked references (`logseq.Editor.getPageLinkedReferences` for a page with no aliases, or
-//! one Datalog query over the group). The caps are applied after the fetch, so they cost no call.
-//! With `resolve_refs`, up to 2 more Datalog queries, none when no returned block holds a ref.
+//! one Datalog query over the group). The ranking, the caps and the offset are applied after the fetch, so they
+//! cost no call. With `resolve_refs`, up to 2 more Datalog queries, none when no returned block holds a ref.
 //!
 //! A `null` answer to the blocks or to the linked references is not "none" (BR-0011, #338): the context is built
 //! without that part and carries a `page_blocks_unavailable` or `backlinks_unavailable` warning, with no
 //! `howToFetchAll` (`hasMore` stays false).
 //!
+//! The result is cut to the character budget (#485) after the caps, blocks first, then references, then related
+//! pages. A cut that drops some of the references and none of the blocks names the `references_offset` that reads on.
+//!
 //! `format: "markdown"` renders the same context through [`crate::markdown_context`], its warnings
 //! and `hasMore` in a footer. `compact` replaces each block with its snippet and uuid
 //! ([`crate::compact`]) and skips `resolve_refs`, with a warning.
 //!
-//! This directory holds what only this tool uses: its queries (`queries.rs`). The linked references
-//! are `get_backlinks`'s, and the alias groups and the resolver are shared (`resolve`).
+//! This directory holds what only this tool uses: its queries (`queries.rs`), where the linked references are read
+//! and ranked (`references.rs`) and the answers it reads (`wire.rs`). The alias groups and the resolver are shared
+//! (`resolve`).
 
 mod queries;
+mod references;
+mod wire;
 
 use std::collections::HashSet;
 
@@ -46,16 +57,19 @@ use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, ResolvedPage, require_page};
 use crate::resolve_refs::resolve_block_refs;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
-use crate::tools::get_backlinks::{block_rows, fetch_backlinks};
-use crate::truncation::{INLINE_BLOCKS, INLINE_REFERENCES, INLINE_RELATED_PAGES, SizeCut, size_truncation_warning, truncation_warning};
+use crate::truncation::{
+    CappedTruncation, INLINE_BLOCKS, INLINE_REFERENCES, INLINE_RELATED_PAGES, Paging, SizeCut, capped_truncation_warning, size_truncation_warning, truncation_warning,
+};
 
 use self::queries::{get_blocks_on_pages, get_page_blocks};
+use self::references::{fetch_backlinks, rank_backlinks};
+use self::wire::{Backlink, block_rows};
 
 pub const NAME: &str = "logseq_explore_context";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Explore everything on one page in a call: its blocks, related pages, and linked references.\n\n\
-**Use when:** researching or explaining a topic that has a page.\n\
+const DESCRIPTION: &str = "Explore one page in a call: its blocks, related pages, and linked references (blocks that link to it, most-linking pages first). Page the references with references_offset.\n\n\
+**Use when:** researching a topic that has a page, or asking what links to it.\n\
 **Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n\
 **Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).";
 
@@ -103,6 +117,9 @@ pub struct Args {
     /// Maximum number of reference blocks to include (default: 20)
     #[serde(default = "default_max_references")]
     pub max_references: u64,
+    /// Reference blocks to skip, most-linking pages first (default: 0)
+    #[serde(default)]
+    pub references_offset: u64,
     /// Include temporal context for journal pages (default: true)
     #[serde(default = "default_include_temporal_context")]
     pub include_temporal_context: bool,
@@ -128,9 +145,9 @@ struct Request {
 
 impl From<Args> for Request {
     fn from(args: Args) -> Request {
-        let Args { page, max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs, format, compact } = args;
+        let Args { page, max_blocks, max_related_pages, max_references, references_offset, include_temporal_context, resolve_refs, format, compact } = args;
         // Compact output drops the bodies, so there is nothing to resolve refs in
-        let caps = Caps { max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs: resolve_refs && !compact };
+        let caps = Caps { max_blocks, max_related_pages, max_references, references_offset, include_temporal_context, resolve_refs: resolve_refs && !compact };
         Request { page, caps, format, compact, resolve_refs }
     }
 }
@@ -175,6 +192,8 @@ pub struct Caps {
     pub max_blocks: u64,
     pub max_related_pages: u64,
     pub max_references: u64,
+    /// References skipped from the top of the ranking before `max_references` are kept
+    pub references_offset: u64,
     pub include_temporal_context: bool,
     /// Resolve `((uuid))` refs and `{{embed}}`s in the blocks and the reference blocks returned
     pub resolve_refs: bool,
@@ -186,6 +205,7 @@ impl Default for Caps {
             max_blocks: DEFAULT_MAX_BLOCKS,
             max_related_pages: DEFAULT_MAX_RELATED_PAGES,
             max_references: DEFAULT_MAX_REFERENCES,
+            references_offset: 0,
             include_temporal_context: DEFAULT_INCLUDE_TEMPORAL_CONTEXT,
             resolve_refs: false,
         }
@@ -200,7 +220,7 @@ pub struct Reference {
     pub source_page: Value,
 }
 
-/// Real counts before the caps were applied (`totals`; the `summary` counts what is returned).
+/// Real counts before the caps and the offset were applied (`totals`; the `summary` counts what is returned).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Totals {
     pub blocks: usize,
@@ -231,7 +251,10 @@ pub struct TopicContext {
     pub direct_blocks: Vec<Value>,
     /// The pages that link the topic, each shown as `{ page, relationshipType: "inbound" }`
     pub related_pages: Vec<Value>,
+    /// The references from `references_from` on, at most `max_references` of them, most-linking pages first
     pub references: Vec<Reference>,
+    /// The references skipped before `references`: the offset asked for, or the number there are when it asked for more
+    pub references_from: usize,
     pub temporal_context: Option<TemporalContext>,
     pub warnings: Vec<ResultWarning>,
     pub totals: Totals,
@@ -334,22 +357,38 @@ impl TopicContext {
     /// (#485): the page's own blocks are the answer, the references come next, and the related pages, which are
     /// names the references mostly repeat, go first. `summary` counts what is returned and `totals` what there was
     /// before the caps; the warning says what is left.
+    ///
+    /// A count cap's warning (`blocks_truncated`, `references_truncated`, `related_pages_truncated`) is dropped when
+    /// this cut goes further into the same list: its advice, to raise the cap or to read on from the end of the list it
+    /// counted, would be about entries that are no longer there. The size cut says what is left instead, and when it
+    /// has dropped references and no block, it names the `references_offset` that reads on from the last one kept.
     fn cut_to(&self, kept: usize, oversize: bool, compact: bool) -> TopicContext {
         let (blocks, references, related) = self.share_of(kept);
-        let mut warnings = self.warnings.clone();
+        let mut warnings: Vec<ResultWarning> = self
+            .warnings
+            .iter()
+            .filter(|warning| match warning.code.as_str() {
+                "blocks_truncated" => blocks == self.direct_blocks.len(),
+                "references_truncated" => references == self.references.len(),
+                "related_pages_truncated" => related == self.related_pages.len(),
+                _ => true,
+            })
+            .cloned()
+            .collect();
         let more = if compact { "Read a block in full with logseq_get_block." } else { "Set compact to true for short snippets, or read a block with logseq_get_block." };
+        let (tail, how_to_fetch_all) = self.read_on(blocks, references);
         warnings.push(size_truncation_warning(SizeCut {
             what: "entries (blocks, then references, then related pages)",
             kept,
             total: self.direct_blocks.len() + self.references.len() + self.related_pages.len(),
             oversize,
             advice: &format!(
-                "That is {blocks} of {} blocks, {references} of {} references and {related} of {} related pages. {more} No parameter raises this limit.",
+                "That is {blocks} of {} blocks, {references} of {} references and {related} of {} related pages. {more} {tail}",
                 self.direct_blocks.len(),
                 self.references.len(),
                 self.related_pages.len()
             ),
-            how_to_fetch_all: None,
+            how_to_fetch_all,
         }));
         TopicContext {
             direct_blocks: self.direct_blocks[..blocks].to_vec(),
@@ -358,6 +397,28 @@ impl TopicContext {
             warnings,
             ..self.clone()
         }
+    }
+
+    /// What a reader can do about a size cut that kept `blocks` blocks and `references` references: the sentence for
+    /// the warning, and the `howToFetchAll` when a parameter reads on (BR-0006). Only the references can be read on,
+    /// by `references_offset` from the last one kept, or by making room for them with a lower `max_blocks` when the
+    /// blocks left none. Blocks and related pages have no offset.
+    fn read_on(&self, blocks: usize, references: usize) -> (String, Option<String>) {
+        let left_out = |kept: usize, all: usize| kept < all;
+        if references > 0 && left_out(references, self.references.len()) && blocks == self.direct_blocks.len() {
+            let next = self.references_from + references;
+            return (
+                "No parameter raises this limit, but references_offset reads on.".to_owned(),
+                Some(format!("Set references_offset to {next} for the next references. Pass max_blocks 0 and max_related_pages 0 to leave out what is already read.")),
+            );
+        }
+        if references == 0 && !self.references.is_empty() {
+            return (
+                "No parameter raises this limit, but a lower max_blocks makes room for the references.".to_owned(),
+                Some("Set max_blocks lower (0 leaves the blocks out) to read the references the blocks left no room for.".to_owned()),
+            );
+        }
+        ("No parameter raises this limit.".to_owned(), None)
     }
 
     /// The context as it is when its text fits the character budget (#485), else cut to the first entries that do.
@@ -396,30 +457,45 @@ fn blocks_of(fetched: Vec<Value>, aliased: bool, main_page_id: Option<i64>) -> V
     own.into_iter().chain(others).collect()
 }
 
-/// The inbound pages and the reference blocks of a topic's linked references: each block with the
-/// page it sits on (the tuple's page, else the block's own), and each page once, first seen first.
-fn references_of(backlinks: Vec<crate::tools::get_backlinks::Backlink>) -> (Vec<Value>, Vec<Reference>) {
+/// The page a linking block sits on: the tuple's page, else the block's own. None for a block with neither, which is
+/// no reference.
+fn source_page_of(backlink: &Backlink, block: &Value) -> Option<Value> {
+    match (&backlink.page, block.get("page")) {
+        (page, _) if !page.is_null() => Some(page.clone()),
+        (_, Some(page)) if !page.is_null() => Some(page.clone()),
+        _ => None,
+    }
+}
+
+/// The pages that link the topic, each once, in the order of `backlinks` (LogSeq's, or by name for an alias group):
+/// the source page of each linking block.
+fn related_pages_of(backlinks: &[Backlink]) -> Vec<Value> {
     let mut related_pages = Vec::new();
-    let mut references = Vec::new();
     let mut seen = HashSet::new();
     for backlink in backlinks {
-        for block in backlink.blocks {
-            // The source page is the tuple's first element, or `block.page` for a tuple with none
-            let source = match (&backlink.page, block.get("page")) {
-                (page, _) if !page.is_null() => page.clone(),
-                (_, Some(page)) if !page.is_null() => page.clone(),
-                _ => continue,
-            };
-            // Add the source page to the related pages (an inbound connection), once
+        for block in &backlink.blocks {
+            let Some(source) = source_page_of(backlink, block) else { continue };
             if let Some(id) = id_of(Some(&source)) {
                 if seen.insert(id) {
-                    related_pages.push(source.clone());
+                    related_pages.push(source);
                 }
             }
-            references.push(Reference { block, source_page: source });
         }
     }
-    (related_pages, references)
+    related_pages
+}
+
+/// The reference blocks, each with the page it sits on, in the order of `backlinks`. A block with no source page is
+/// no reference.
+fn references_of(backlinks: Vec<Backlink>) -> Vec<Reference> {
+    let mut references = Vec::new();
+    for backlink in backlinks {
+        for block in &backlink.blocks {
+            let Some(source_page) = source_page_of(&backlink, block) else { continue };
+            references.push(Reference { block: block.clone(), source_page });
+        }
+    }
+    references
 }
 
 /// The `temporalContext` of a page: whether it is a journal, and its day.
@@ -431,7 +507,29 @@ fn temporal_context(page: &Value) -> TemporalContext {
     }
 }
 
-/// LogSeq answered `null` to the query for the blocks of the page (or of its alias group).
+/// The `references_truncated` warning: `shown` of the references from `offset` on were kept, out of `total`. It pages
+/// with `references_offset` first and offers the raise of `max_references` as the other way, and it has no maximum to
+/// name: the character budget bounds the result, and its own warning says when it bites.
+fn references_truncated_warning(offset: usize, shown: usize, total: usize) -> ResultWarning {
+    let remaining = total - offset;
+    let what = if offset > 0 { format!("references from offset {offset}") } else { "references".to_owned() };
+    // An offset that does not move reads nothing on, so a result with no reference has no next page
+    let paging = (shown > 0).then(|| Paging { param: "references_offset", next: format!("Set references_offset to {} for the next page.", offset + shown) });
+    capped_truncation_warning(CappedTruncation {
+        what: &what,
+        shown,
+        total: remaining,
+        param: "max_references",
+        max: usize::MAX,
+        narrower: "",
+        requested: None,
+        code: "references_truncated",
+        inline_max: Some(INLINE_REFERENCES),
+        paging,
+    })
+}
+
+/// LogSeq answered `null` to the query for the blocks of the page/// LogSeq answered `null` to the query for the blocks of the page (or of its alias group).
 fn page_blocks_unavailable(page: &str) -> ResultWarning {
     ResultWarning::new(
         "page_blocks_unavailable",
@@ -487,12 +585,16 @@ pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: 
     let backlinks = fetch_backlinks(client, &resolved.lookup_name, &alias_set).await?;
     let backlinks_unavailable = backlinks.is_none();
     let backlinks = backlinks.unwrap_or_default();
-    let (all_related_pages, all_references) = references_of(backlinks);
+    // The related pages stay in the order LogSeq gave them, and the references are ranked, most-linking pages first
+    let all_related_pages = related_pages_of(&backlinks);
+    let all_references = references_of(rank_backlinks(backlinks));
 
-    // Everything is already in memory, so the totals cost no extra API call.
-    let mut references: Vec<Reference> = all_references.iter().take(caps.max_references as usize).cloned().collect();
-    let related_pages: Vec<Value> = all_related_pages.iter().take(caps.max_related_pages as usize).cloned().collect();
+    // Everything is already in memory, so the totals cost no extra API call. An offset past the last reference reads
+    // nothing and is no more than the end.
     let totals = Totals { blocks: all_blocks.len(), related_pages: all_related_pages.len(), references: all_references.len() };
+    let references_from = usize::try_from(caps.references_offset).unwrap_or(usize::MAX).min(all_references.len());
+    let mut references: Vec<Reference> = all_references.into_iter().skip(references_from).take(caps.max_references as usize).collect();
+    let related_pages: Vec<Value> = all_related_pages.into_iter().take(caps.max_related_pages as usize).collect();
 
     let mut warnings = alias_set_warnings(&[&alias_set]);
     // No `howToFetchAll`: no parameter fetches what LogSeq did not answer, so `hasMore` stays false
@@ -505,8 +607,8 @@ pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: 
     if totals.blocks > direct_blocks.len() {
         warnings.push(truncation_warning("blocks", direct_blocks.len(), totals.blocks, "max_blocks", "blocks_truncated", Some(INLINE_BLOCKS)));
     }
-    if totals.references > references.len() {
-        warnings.push(truncation_warning("references", references.len(), totals.references, "max_references", "references_truncated", Some(INLINE_REFERENCES)));
+    if totals.references > references_from + references.len() {
+        warnings.push(references_truncated_warning(references_from, references.len(), totals.references));
     }
     if totals.related_pages > related_pages.len() {
         warnings.push(truncation_warning(
@@ -542,6 +644,7 @@ pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: 
         direct_blocks,
         related_pages,
         references,
+        references_from,
         temporal_context,
         warnings,
         totals,
@@ -552,7 +655,6 @@ pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: 
 mod tests {
     use super::*;
     use crate::tool::testing::{meaning, schema_of};
-    use crate::tools::get_backlinks::Backlink;
 
     fn args(value: Value) -> Option<JsonObject> {
         value.as_object().cloned()
@@ -568,6 +670,7 @@ mod tests {
                 "max_blocks": {"type": "integer", "minimum": 0, "default": 50, "description": "Maximum number of blocks to include (default: 50)"},
                 "max_related_pages": {"type": "integer", "minimum": 0, "default": 10, "description": "Maximum number of related pages to include (default: 10)"},
                 "max_references": {"type": "integer", "minimum": 0, "default": 20, "description": "Maximum number of reference blocks to include (default: 20)"},
+                "references_offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Reference blocks to skip, most-linking pages first (default: 0)"},
                 "include_temporal_context": {"type": "boolean", "default": true, "description": "Include temporal context for journal pages (default: true)"},
                 "resolve_refs": {"type": "boolean", "default": false, "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)"},
                 "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact"},
@@ -590,6 +693,7 @@ mod tests {
             references: (0..references as i64)
                 .map(|id| Reference { block: json!({"id": 900 + id, "content": text}), source_page: json!({"id": 2000 + id}) })
                 .collect(),
+            references_from: 0,
             temporal_context: None,
             warnings: vec![],
             totals: Totals { blocks: blocks + 5, related_pages: related, references },
@@ -620,8 +724,10 @@ mod tests {
         let value = fitted.to_value();
         assert_eq!(value["summary"]["totalReferences"], json!(fitted.references.len()));
         assert_eq!(value["totals"], json!({"blocks": 35, "relatedPages": 20, "references": 30}));
-        assert_eq!(value["hasMore"], false);
+        // the references that did not fit can be read on with an offset, so there is more
+        assert_eq!(value["hasMore"], true);
         assert_eq!(value["warnings"][0]["code"], "result_size_truncated");
+        assert!(value["warnings"][0]["howToFetchAll"].as_str().unwrap().starts_with(&format!("Set references_offset to {} ", fitted.references.len())));
         // one more entry would not fit
         let kept = fitted.direct_blocks.len() + fitted.references.len();
         assert!(size(&json_of(&context.cut_to(kept + 1, false, false))) > crate::budget::BUDGET_CHARS);
@@ -687,7 +793,7 @@ mod tests {
         use crate::args::testing::{Takes, sweep};
         let base = json!({"page": "Atlas"});
         sweep::<Args>(json!({}), "page", Takes::Text, true);
-        for count in ["max_blocks", "max_related_pages", "max_references"] {
+        for count in ["max_blocks", "max_related_pages", "max_references", "references_offset"] {
             sweep::<Args>(base.clone(), count, Takes::Count(0), false);
         }
         for flag in ["include_temporal_context", "resolve_refs", "compact"] {
@@ -716,21 +822,126 @@ mod tests {
         assert_eq!(ids(blocks_of(fetched, false, Some(10))), [1, 2, 3, 4]);
     }
 
-    #[test]
-    fn related_pages_are_the_source_pages_once_each_and_every_block_is_a_reference() {
-        let backlinks = vec![
+    fn tuples() -> Vec<Backlink> {
+        vec![
             Backlink { page: json!({"id": 20, "name": "bob"}), blocks: vec![block(201, 20), block(202, 20)] },
             // a tuple with no page: the block's own page names the source
             Backlink { page: Value::Null, blocks: vec![block(301, 30), json!({"id": 302, "uuid": "u302"})] },
             Backlink { page: json!({"id": 20, "name": "bob"}), blocks: vec![block(203, 20)] },
-        ];
-        let (pages, references) = references_of(backlinks);
-        assert_eq!(pages, [json!({"id": 20, "name": "bob"}), json!({"id": 30})]);
+        ]
+    }
+
+    fn ids(references: &[Reference]) -> Vec<i64> {
+        references.iter().map(|r| r.block["id"].as_i64().unwrap()).collect()
+    }
+
+    #[test]
+    fn related_pages_are_the_source_pages_once_each_and_every_block_is_a_reference() {
+        assert_eq!(related_pages_of(&tuples()), [json!({"id": 20, "name": "bob"}), json!({"id": 30})]);
+        let references = references_of(tuples());
         // the block with no page anywhere has no source and is skipped
-        assert_eq!(references.iter().map(|r| r.block["id"].as_i64().unwrap()).collect::<Vec<_>>(), [201, 202, 301, 203]);
+        assert_eq!(ids(&references), [201, 202, 301, 203]);
         assert_eq!(references[2].source_page, json!({"id": 30}));
     }
 
+    #[test]
+    fn the_references_come_ranked_and_the_related_pages_in_the_order_of_the_tuples() {
+        // bob links twice in the first tuple, carol once, alice three times in the last
+        let source = |id: i64, name: &str, blocks: usize| Backlink {
+            page: json!({"id": id, "name": name}),
+            blocks: (0..blocks as i64).map(|n| block(id * 100 + n, id)).collect(),
+        };
+        let backlinks = vec![source(2, "bob", 2), source(3, "carol", 1), source(1, "alice", 3)];
+        let related = related_pages_of(&backlinks);
+        assert_eq!(related.iter().map(|page| page["name"].as_str().unwrap()).collect::<Vec<_>>(), ["bob", "carol", "alice"]);
+        let ranked = references_of(rank_backlinks(backlinks));
+        // alice (3), bob (2), carol (1), and the blocks of one page sit together
+        assert_eq!(ids(&ranked), [100, 101, 102, 200, 201, 300]);
+    }
+
+    fn references_of_pages(per_page: &[usize]) -> Vec<Reference> {
+        per_page
+            .iter()
+            .enumerate()
+            .flat_map(|(page, &count)| (0..count).map(move |n| Reference { block: json!({"id": page * 100 + n, "content": "x"}), source_page: json!({"id": page + 1}) }))
+            .collect()
+    }
+
+    #[test]
+    fn a_cut_references_warning_names_the_offset_that_reads_on_and_the_raise_as_the_other_way() {
+        let warning = references_truncated_warning(0, 20, 66);
+        assert_eq!(warning.code, "references_truncated");
+        assert_eq!(warning.message, "Showing 20 of 66 references. Page through the rest with references_offset.");
+        assert_eq!(
+            warning.how_to_fetch_all.as_deref(),
+            Some("Set references_offset to 20 for the next page. Or set max_references to 66 (or higher) to get all 66 in one call.")
+        );
+        // from an offset the count is of what is left, and the next page starts where this one ends
+        let later = references_truncated_warning(20, 20, 66);
+        assert_eq!(later.message, "Showing 20 of 46 references from offset 20. Page through the rest with references_offset.");
+        assert!(later.how_to_fetch_all.as_deref().unwrap().starts_with("Set references_offset to 40 for the next page. Or set max_references to 46 "));
+        // a cap of 0 shows none, so an offset that does not move is not offered
+        let none = references_truncated_warning(0, 0, 5);
+        assert_eq!(none.message, "Showing 0 of 5 references.");
+        assert_eq!(none.how_to_fetch_all.as_deref(), Some("Set max_references to 5 (or higher) to get all 5."));
+        // a raise past the inline estimate carries the large-result note
+        assert!(references_truncated_warning(0, 20, 400).how_to_fetch_all.unwrap().ends_with("A result this large may be saved to a file by the host instead of shown; the server can't tell."));
+    }
+
+    fn with_references(references: Vec<Reference>, references_from: usize, warnings: Vec<ResultWarning>) -> TopicContext {
+        TopicContext { references, references_from, warnings, ..context_of(0, 0, 0, 0) }
+    }
+
+    #[test]
+    fn a_size_cut_that_drops_references_but_no_block_names_the_offset_after_the_last_one_kept() {
+        let mut context = with_references(references_of_pages(&[10]), 30, vec![references_truncated_warning(30, 10, 80)]);
+        context.direct_blocks = vec![json!({"id": 1, "content": "b"})];
+        // 1 block and 4 of the 10 references kept
+        let cut = context.cut_to(5, false, false);
+        assert_eq!(cut.references.len(), 4);
+        // the count cap's own advice is about references that are no longer there, so the size cut says it instead
+        assert_eq!(cut.warnings.iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["result_size_truncated"]);
+        let warning = &cut.warnings[0];
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set references_offset to 34 for the next references. Pass max_blocks 0 and max_related_pages 0 to leave out what is already read."));
+        assert!(warning.message.contains("That is 1 of 1 blocks, 4 of 10 references and 0 of 0 related pages."), "{}", warning.message);
+        assert!(warning.message.ends_with("No parameter raises this limit, but references_offset reads on."), "{}", warning.message);
+        assert!(cut.has_more());
+    }
+
+    #[test]
+    fn a_count_cap_warning_stays_when_the_size_cut_leaves_its_list_alone() {
+        // the references are kept whole, so the count cap's paging advice still holds; only a related page goes
+        let mut context = with_references(references_of_pages(&[3]), 0, vec![references_truncated_warning(0, 3, 50)]);
+        context.related_pages = vec![json!({"id": 1}), json!({"id": 2})];
+        let cut = context.cut_to(4, false, false);
+        assert_eq!((cut.references.len(), cut.related_pages.len()), (3, 1));
+        assert_eq!(cut.warnings.iter().map(|w| w.code.as_str()).collect::<Vec<_>>(), ["references_truncated", "result_size_truncated"]);
+        assert!(cut.warnings[1].how_to_fetch_all.is_none());
+        assert!(cut.warnings[1].message.ends_with("No parameter raises this limit."));
+    }
+
+    #[test]
+    fn references_the_blocks_left_no_room_for_are_reached_with_a_lower_max_blocks() {
+        let mut context = with_references(references_of_pages(&[4]), 0, vec![]);
+        context.direct_blocks = vec![json!({"id": 1, "content": "b"}), json!({"id": 2, "content": "b"})];
+        // only the blocks fit: no reference is kept, and paging would read the same call again
+        let cut = context.cut_to(2, false, false);
+        assert!(cut.references.is_empty());
+        let warning = &cut.warnings[0];
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_blocks lower (0 leaves the blocks out) to read the references the blocks left no room for."));
+        assert!(warning.message.ends_with("No parameter raises this limit, but a lower max_blocks makes room for the references."), "{}", warning.message);
+        // a cut inside the blocks drops the references too, and so does the same advice
+        assert!(context.cut_to(1, false, false).warnings[0].how_to_fetch_all.is_some());
+    }
+
+    #[test]
+    fn a_size_cut_with_no_references_to_read_on_has_nothing_to_fetch() {
+        let mut context = with_references(Vec::new(), 0, vec![]);
+        context.direct_blocks = vec![json!({"id": 1, "content": "b"}), json!({"id": 2, "content": "b"})];
+        let cut = context.cut_to(1, false, false);
+        assert_eq!(cut.warnings[0].how_to_fetch_all, None);
+        assert!(!cut.has_more());
+    }
 
     #[test]
     fn the_properties_of_a_page_with_none_are_an_empty_object() {
@@ -758,6 +969,7 @@ mod tests {
             direct_blocks: vec![json!({"id": 5, "uuid": "u5"})],
             related_pages: vec![json!({"id": 2})],
             references: vec![Reference { block: json!({"id": 6}), source_page: json!({"id": 2}) }],
+            references_from: 0,
             temporal_context: Some(TemporalContext { is_journal: false, date: None }),
             warnings: vec![ResultWarning::new("w", "m".into())],
             totals: Totals { blocks: 9, related_pages: 1, references: 1 },

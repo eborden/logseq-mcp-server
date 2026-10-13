@@ -1,15 +1,13 @@
-//! What the backlinks tool reads from LogSeq: the Editor API's linked references
-//! and the blocks of the aliased Datalog query.
+//! What `explore_context` reads from LogSeq beyond the page itself: the Editor API's linked references
+//! and the blocks of the aliased Datalog query (and of the page's own blocks query, which has the same cells).
 //!
 //! Both are checked against their wire types and then kept as the values LogSeq sent: the
 //! tool's output carries each entity as it came (BR-0004), so a typed copy would only be thrown
 //! away. The schema checks are `entity.rs`'s.
 
-use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::entity::shape::{Block, PageLike};
-use crate::tool::result_value;
 use crate::wire::{DATALOG_METHOD, ResponseError, parse, sent_cells};
 
 /// The method whose answer [`linked_references`] reads.
@@ -27,18 +25,6 @@ impl Backlink {
     /// The page of the first block, which names the source when `page` is null.
     pub fn block_page(&self) -> Option<&Map<String, Value>> {
         self.blocks.first()?.get("page")?.as_object()
-    }
-
-    /// The tuple as the Editor API sends it.
-    pub fn into_value(self) -> Value {
-        result_value(&self)
-    }
-}
-
-/// `[page, blocks]`: a tuple is an array of two, the page first (BR-0013 keeps an entity as LogSeq sent it).
-impl Serialize for Backlink {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        (&self.page, &self.blocks).serialize(serializer)
     }
 }
 
@@ -96,7 +82,7 @@ mod tests {
         ]);
         let rows = linked_references(answer.clone()).unwrap().unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].clone().into_value(), answer[0]);
+        assert_eq!(json!([rows[0].page, rows[0].blocks]), answer[0]);
         assert_eq!(rows[1].page, Value::Null);
         assert_eq!(rows[1].block_page().unwrap()["name"], "bob");
     }

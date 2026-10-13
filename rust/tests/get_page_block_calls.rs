@@ -142,7 +142,7 @@ async fn the_exact_name_of_a_page_with_a_file_costs_one_call_and_no_resolver() {
     // the page was read without its blocks, so the first tip offers them
     assert_eq!(
         text_of(&result, 1),
-        r#"{"meta":{"tips":["For its blocks: logseq_get_page {\"page\":\"Project Atlas\",\"detail\":\"full\"}.","For what links here: logseq_get_backlinks {\"page_name\":\"Project Atlas\"}."]}}"#
+        r#"{"meta":{"tips":["For its blocks: logseq_get_page {\"page\":\"Project Atlas\",\"detail\":\"full\"}.","For what links here: logseq_explore_context {\"page\":\"Project Atlas\"}."]}}"#
     );
 }
 
@@ -154,7 +154,7 @@ async fn tips_can_be_turned_off_and_a_page_read_with_its_blocks_offers_only_the_
 
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas", true), json!([editor_block(11, "First")])]).await;
     let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
-    assert_eq!(text_of(&result, 1), r#"{"meta":{"tips":["For what links here: logseq_get_backlinks {\"page_name\":\"Project Atlas\"}."]}}"#);
+    assert_eq!(text_of(&result, 1), r#"{"meta":{"tips":["For what links here: logseq_explore_context {\"page\":\"Project Atlas\"}."]}}"#);
 }
 
 #[tokio::test]
@@ -332,7 +332,7 @@ async fn a_page_as_markdown_costs_the_same_calls_and_carries_its_tips_in_the_foo
     assert_eq!(methods(&logseq), ["logseq.Editor.getPage", "logseq.Editor.getPageBlocksTree"]);
     assert_eq!(
         text_of(&result, 0),
-        "# Project Atlas\n\n- First\n- Second\n\t- Nested\n\n---\nTips:\n- For what links here: logseq_get_backlinks {\"page_name\":\"Project Atlas\"}.\n"
+        "# Project Atlas\n\n- First\n- Second\n\t- Nested\n\n---\nTips:\n- For what links here: logseq_explore_context {\"page\":\"Project Atlas\"}.\n"
     );
     // one text block: the tips are in the footer, not a second block
     assert_eq!(serde_json::to_value(&result).unwrap()["content"].as_array().unwrap().len(), 1);
