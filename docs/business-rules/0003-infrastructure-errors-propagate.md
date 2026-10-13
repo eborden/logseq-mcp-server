@@ -12,7 +12,6 @@ People and agents act on what they are shown. A result that says "no matches" wh
 
 test: `rust/tests/get_page_block_calls.rs`
 test: `rust/tests/get_page_outline_calls.rs`
-test: `rust/tests/get_backlinks_calls.rs`
 test: `rust/tests/resolve_refs_calls.rs`
 test: `rust/tests/context_calls.rs`
 test: `rust/src/server.rs`
@@ -28,3 +27,4 @@ reviewer: A new error arm on a `Result` from a LogSeq call (`match`, `.ok()`, `u
 | 2026-10-05 | Extended to `get_page` and its page lookups. | #35 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the Rust server's call-count tests and the integration suite with the TypeScript server's removal. Statement unchanged. Added the outline's resolver error paths (leaf query, suggestion lookup). | #370 |
 | 2026-10-08 | Statement and reviewer line: the TypeScript wording ("re-throw", `isInfrastructureError`, `catch`) is the Rust crate's (propagate, `LogseqError::is_infrastructure`, an error arm). The rule is unchanged. | #372 |
+| 2026-10-13 | Mechanical enforcement: dropped the `test:` line of `get_backlinks_calls.rs`, which went with `get_backlinks` when `explore_context` took its references (ADR-0037); `context_calls.rs`, already listed, now holds its error cases. Statement unchanged. | #529 |

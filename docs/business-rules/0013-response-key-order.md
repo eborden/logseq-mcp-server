@@ -32,8 +32,7 @@ The rule states an intent, not a layout. Which key belongs to which category, an
 
 ## Mechanical enforcement
 
-test: `rust/src/tools/build_context/mod.rs` (the order of a topic context, with and without its optional keys)
-test: `rust/src/tools/get_context_for_query/mod.rs` (the order of a query result and of a warning)
+test: `rust/src/tools/explore_context/mod.rs` (the order of a page's context, with and without its optional keys)
 test: `rust/src/tools/get_concept_network/mod.rs` (the order of a network)
 test: `rust/src/tools/get_concept_evolution/mod.rs` (the order of an evolution result, its summary and a timeline entry)
 test: `rust/src/tools/find_pages/mod.rs` (the order of a page list, and of its `names` before the total)
@@ -51,3 +50,4 @@ reviewer: A new key in a tool result goes in the position of its category, and a
 | 2026-10-08 | Enforcement: unit tests pin the key order of the first tools' typed outputs (additive; the `none-yet` line stays for the other tools). | #398 |
 | 2026-10-12 | Mechanical enforcement: the `test:` path of the current context follows the rename of `logseq_get_current_context` to `logseq_get_current` (`rust/src/tools/get_current/mod.rs`). Same test; statement and paragraphs unchanged. | #517 |
 | 2026-10-12 | Mechanical enforcement: the `test:` path of the page list follows the rename of `logseq_list_pages` to `logseq_find_pages` (`rust/src/tools/find_pages/mod.rs`), whose test also pins the new `names` key before `total`, as the server's reading of the request (category 1). Statement and paragraphs unchanged. | #524 |
+| 2026-10-13 | Mechanical enforcement: the `test:` path of the context follows the rename of `build_context` to `explore_context` (`rust/src/tools/explore_context/mod.rs`), and the `get_context_for_query` line goes with that tool (ADR-0037). Statement and paragraphs unchanged. | #529 |
