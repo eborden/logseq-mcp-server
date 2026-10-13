@@ -9,7 +9,7 @@
 // never contacts port 12315 and never reads ~/.logseq-mcp/config.json (BR-0001). Every page, block and
 // name is made up, and the output is aggregates only.
 //
-// For each of the 15 tools it calls one representative parity case (the happy path), then a few larger
+// For each of the 14 tools it calls one representative parity case (the happy path), then a few larger
 // made-up cases for the tools that do the most work. Per case and server: `--warmup` untimed calls, then
 // `--iterations` timed ones.
 //

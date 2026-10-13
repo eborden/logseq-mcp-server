@@ -5,7 +5,7 @@
  *   node node_modules/vite-node/vite-node.mjs scripts/smoke-rust-server.ts rust/target/release/logseq-mcp-server
  *
  * It drives the binary over MCP stdio with the SDK client, the way Claude Code does, and calls
- * each of the 15 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
+ * each of the 14 tools once on a fixture page, reads `logseq://page/{name}` and `logseq://guide`,
  * gets one prompt and lists tools, prompts, resources and resource templates. A few items read the
  * clock (a preset, `last_n`, and the weekly and monthly prompts with no argument) and are checked against
  * today's local date, which a release binary reads from the system: no parity case can check that. It prints one
@@ -23,7 +23,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { connectFixture } from '../tests/integration/helpers/fixture-client.js';
 
-const EXPECTED_TOOLS = 15;
+const EXPECTED_TOOLS = 14;
 
 interface ToolCall {
   name: string;
