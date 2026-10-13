@@ -93,9 +93,9 @@ describe('a wrong-typed argument is refused before any call (ADR-0019)', () => {
         swept++;
       }
     }
-    // Every parameter slot of the 11 tools was tried (61 when this was written, 65 at 12 tools before search_by_relationship's
-    // five went and to came; it only grows with the schema)
+    // Every parameter slot of the 10 tools was tried (57 when this was written: 61 at 11 tools, less the 10 slots of query_by_date_range and
+    // the 5 of get_concept_evolution, plus the 11 of explore_timeline; it only grows with the schema)
     expect(swept).toBe(tools.reduce((sum, tool) => sum + Object.keys(tool.inputSchema.properties ?? {}).length, 0));
-    expect(swept).toBeGreaterThanOrEqual(61);
+    expect(swept).toBeGreaterThanOrEqual(57);
   }, 120000);
 });

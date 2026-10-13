@@ -144,8 +144,8 @@ describe('integration suites reach the tools through the helpers', () => {
 
   it('finds the helper functions', () => {
     // 19 until #491 merged searchBlocks and queryByProperty (and their WithMeta forms) into findBlocks and findBlocksWithMeta,
-    // then 17, and 15 when #493 merged getBacklinks, getBacklinksWithMeta, buildContextForTopic and getContextForQuery into exploreContext
-    expect(helperNames.size).toBeGreaterThanOrEqual(15);
+    // then 17, and 15 when #493 merged getBacklinks, getBacklinksWithMeta, buildContextForTopic and getContextForQuery into exploreContext, and 13 when #495 merged queryJournals, queryByDateRange and getConceptEvolution into exploreTimeline
+    expect(helperNames.size).toBeGreaterThanOrEqual(13);
     expect(helperNames.has('getPage')).toBe(true);
   });
 
