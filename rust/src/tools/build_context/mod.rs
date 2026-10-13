@@ -328,14 +328,39 @@ impl TopicContext {
 }
 
 impl TopicContext {
+    /// The entries the character budget counts (#485): its blocks, references and related pages.
+    pub(crate) fn entries(&self) -> usize {
+        self.direct_blocks.len() + self.references.len() + self.related_pages.len()
+    }
+
+    /// How many blocks, references and related pages the first `kept` entries are, in that order.
+    fn share_of(&self, kept: usize) -> (usize, usize, usize) {
+        let blocks = kept.min(self.direct_blocks.len());
+        let references = (kept - blocks).min(self.references.len());
+        let related = (kept - blocks - references).min(self.related_pages.len());
+        (blocks, references, related)
+    }
+
+    /// The context cut to its first `kept` entries, with the warnings it had and no more: a result that holds
+    /// several contexts (`get_context_for_query`, #507) says what it cut once, for all of them.
+    pub(crate) fn first_entries(&self, kept: usize) -> TopicContext {
+        let (blocks, references, related) = self.share_of(kept);
+        TopicContext {
+            direct_blocks: self.direct_blocks[..blocks].to_vec(),
+            references: self.references[..references].to_vec(),
+            related_pages: self.related_pages[..related].to_vec(),
+            ..self.clone()
+        }
+    }
+}
+
+impl TopicContext {
     /// The blocks, then the references, then the related pages, cut to the first `kept` of them in that order
     /// (#485): the page's own blocks are the answer, the references come next, and the related pages, which are
     /// names the references mostly repeat, go first. `summary` counts what is returned and `totals` what there was
     /// before the caps; the warning says what is left.
     fn cut_to(&self, kept: usize, oversize: bool, compact: bool) -> TopicContext {
-        let blocks = kept.min(self.direct_blocks.len());
-        let references = (kept - blocks).min(self.references.len());
-        let related = (kept - blocks - references).min(self.related_pages.len());
+        let (blocks, references, related) = self.share_of(kept);
         let mut warnings = self.warnings.clone();
         let more = if compact { "Read a block in full with logseq_get_block." } else { "Set compact to true for short snippets, or read a block with logseq_get_block." };
         warnings.push(size_truncation_warning(SizeCut {
