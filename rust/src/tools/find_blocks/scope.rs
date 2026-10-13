@@ -135,7 +135,18 @@ pub async fn resolve_scope(client: &crate::client::LogseqClient, page: Option<&s
     let sets = resolve_alias_sets(client, &pages).await?;
 
     let mut notes = Notes::default();
-    notes.warnings.extend(alias_set_warnings(&sets.iter().collect::<Vec<_>>()));
+    // Two names of one page (a page and its alias) are one set, so its warning is said once
+    let mut seen_pages: Vec<Option<i64>> = Vec::new();
+    let distinct: Vec<&AliasSet> = sets
+        .iter()
+        .filter(|set| {
+            let page = set.members.first().map(|member| member.id);
+            let first = !seen_pages.contains(&page);
+            seen_pages.push(page);
+            first
+        })
+        .collect();
+    notes.warnings.extend(alias_set_warnings(&distinct));
     // Only the first mention of a name says how it resolved, so a name used twice says it once
     let mut said: Vec<String> = Vec::new();
     let mut group_of = |name: &str| -> Result<Group, ToolError> {
