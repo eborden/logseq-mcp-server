@@ -8,7 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
-use logseq_mcp_server::tools::{find_pages, get_block, get_context_for_query, get_page};
+use logseq_mcp_server::tools::{check_links, find_pages, get_block, get_context_for_query, get_page};
 use serde_json::{Value, json};
 
 const PAGE: &str = "logseq.Editor.getPage";
@@ -113,6 +113,54 @@ async fn a_page_without_its_blocks_is_never_cut() {
     let page: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert!(page.get("warnings").is_none());
     assert_eq!(methods(&logseq), [PAGE]);
+}
+
+// ---- logseq_check_links
+
+/// 500 page names of `length` characters after their number.
+fn link_names(count: usize, length: usize) -> Vec<String> {
+    (0..count).map(|n| format!("page {n:04} {}", "n".repeat(length))).collect()
+}
+
+#[tokio::test]
+async fn a_pass_over_five_hundred_links_is_cut_in_the_refs_that_resolved_and_nothing_else() {
+    let names = link_names(499, 40);
+    let rows: Vec<Value> = names.iter().enumerate().map(|(n, name)| json!([{"id": n as i64 + 1, "name": name.to_lowercase(), "original-name": name, "file": {"id": 9000 + n as i64}}, "name", name.to_lowercase()])).collect();
+    let after = names.iter().map(|name| format!("[[{name}]]")).collect::<Vec<_>>().join(" ");
+    let before = names.join(" ");
+    // the 500th, the most distinct terms one call takes, is a ref that no page answers to: a failure the cut must keep
+    let after = format!("{after} [[no such page]]");
+    let before = format!("{before} no such page");
+    let logseq = mock_logseq(vec![json!(rows)]).await;
+    let result = check_links::call(&client(&logseq), true, arguments(json!({"before": before, "after": after}))).await.unwrap();
+    assert_eq!(methods(&logseq), [DATALOG], "the cut reads no more than the check does");
+    let text = text_of(&result, 0);
+    assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
+    let value: Value = serde_json::from_str(&text).unwrap();
+    let kept = value["refs"]["resolved"].as_array().unwrap().len();
+    assert!(kept > 100 && kept < 500, "{kept}");
+    // the verdict and what failed are as the check made them
+    assert_eq!(value["ok"], false);
+    assert_eq!(value["refs"]["unresolved"], json!(["no such page"]));
+    assert_eq!(value["totals"]["terms"], 500);
+    let warnings = value["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["code"], "result_size_truncated");
+    assert!(warnings[0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 499 resolved refs")), "{}", warnings[0]["message"]);
+    assert_eq!(value["hasMore"], false);
+}
+
+#[tokio::test]
+async fn a_pass_under_the_budget_is_unchanged() {
+    let names = link_names(30, 40);
+    let rows: Vec<Value> = names.iter().enumerate().map(|(n, name)| json!([{"id": n as i64 + 1, "name": name.to_lowercase(), "original-name": name, "file": {"id": 9000 + n as i64}}, "name", name.to_lowercase()])).collect();
+    let after = names.iter().map(|name| format!("[[{name}]]")).collect::<Vec<_>>().join(" ");
+    let logseq = mock_logseq(vec![json!(rows)]).await;
+    let result = check_links::call(&client(&logseq), true, arguments(json!({"before": names.join(" "), "after": after}))).await.unwrap();
+    let value: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
+    assert_eq!(value["warnings"], json!([]));
+    assert_eq!(value["refs"]["resolved"].as_array().unwrap().len(), 30);
+    assert_eq!(value["ok"], true);
 }
 
 // ---- logseq_get_context_for_query

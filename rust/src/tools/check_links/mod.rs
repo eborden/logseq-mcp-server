@@ -11,6 +11,8 @@
 //! Calls: one Datalog query for all the distinct `[[terms]]` in `after`, however many there are
 //! (`:in $ [?n ...]`), and none when it has no terms. Never one call per term. Checks 1, 2 and 4 read
 //! only the texts (`text.rs`). Read-only: it reads page names, never writes. The tool has no tips.
+//!
+//! [`call`] cuts the one list that can pass the character budget, the refs that resolved (#507); see `fit_to_budget`.
 
 mod text;
 
@@ -20,11 +22,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::args::parse_args;
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::errors::{InvalidParameter, MatchedBy, ToolError};
 use crate::meta::ResultWarning;
 use crate::resolve::{Resolution, link_key, resolve_link_targets};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
+use crate::truncation::{SizeCut, size_truncation_warning};
 
 use self::text::{BracketCheck, ProseCheck, RefsPreservedCheck, check_brackets, check_prose, check_refs_preserved, key_counts, key_of, link_counts};
 
@@ -67,8 +71,44 @@ pub fn definition() -> Tool {
 /// A call: arguments read, then the checks.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
-    let result = check_links(client, &args.before, &args.after).await?;
+    let result = fit_to_budget(check_links(client, &args.before, &args.after).await?);
     Ok(success_result(vec![ContentBlock::text(result.to_string())]))
+}
+
+/// The result as it is when its text fits the character budget (#507, #485), else with the first of the refs that
+/// resolved to one page and no more. Those are the only entries the budget cuts: they are what passed, so leaving some
+/// out changes no verdict. `ok`, the unresolved and ambiguous refs and the refs that were removed are what a caller
+/// acts on, and a gate that drops a failure to fit a limit is not a gate (BR-0006), so they are never cut. Up to 500
+/// resolved refs are about 40,000 characters, so the budget is passed only by a pass over a great many distinct links.
+fn fit_to_budget(result: Value) -> Value {
+    let total = result["refs"]["resolved"].as_array().map_or(0, Vec::len);
+    let size_of = |kept: usize| size(&if kept < total { cut_resolved(&result, kept, total, false) } else { result.clone() }.to_string());
+    match fit(total, 0, size_of) {
+        Fit::Whole => result,
+        Fit::Cut { kept, oversize } => cut_resolved(&result, kept, total, oversize),
+    }
+}
+
+/// The result with its first `kept` resolved refs of `total`, the `result_size_truncated` warning added and `hasMore`
+/// worked out again. Every key keeps its place.
+fn cut_resolved(result: &Value, kept: usize, total: usize, oversize: bool) -> Value {
+    let mut cut = result.clone();
+    let first: Vec<Value> = result["refs"]["resolved"].as_array().map_or_else(Vec::new, |resolved| resolved[..kept].to_vec());
+    cut["refs"]["resolved"] = Value::Array(first);
+    let warning = size_truncation_warning(SizeCut {
+        what: "resolved refs",
+        kept,
+        total,
+        oversize,
+        advice: "Only refs that resolved to one page are left out, last terms first: ok, the unresolved and ambiguous refs and refsPreserved are never cut. \
+                 Check the text in parts to see every resolved ref. No parameter raises this limit.",
+        how_to_fetch_all: None,
+    });
+    let mut warnings = cut["warnings"].as_array().cloned().unwrap_or_default();
+    warnings.push(serde_json::to_value(warning).expect("a warning serializes"));
+    cut["hasMore"] = Value::Bool(warnings.iter().any(|warning| warning.get("howToFetchAll").is_some()));
+    cut["warnings"] = Value::Array(warnings);
+    cut
 }
 
 /// How many non-overlapping copies of `token` the text holds.
@@ -256,6 +296,62 @@ mod tests {
         assert_eq!(keys(&value["refs"]["resolved"][0]), ["term", "page", "matchedBy"]);
         assert_eq!(keys(&value["refs"]["ambiguous"][0]), ["term", "candidates", "totalCandidates", "preexisting"]);
         assert_eq!(value["refs"]["unresolved"].to_string(), r#"["gone"]"#);
+    }
+
+    /// A result with `resolved` resolved refs and the given unresolved ones, as `check_links` writes it.
+    fn result_of(resolved: usize, unresolved: &[String]) -> Value {
+        let refs: Vec<ResolvedRef<'_>> = (0..resolved).map(|_| ResolvedRef { term: "a term of some length", page: "A page of some length", matched_by: "name" }).collect();
+        let unresolved: Vec<&str> = unresolved.iter().map(String::as_str).collect();
+        result_value(&CheckLinksOutput {
+            has_more: false,
+            warnings: &[],
+            totals: RefTotals { refs_before: resolved, refs_after: resolved, terms: resolved },
+            ok: unresolved.is_empty(),
+            prose: &check_prose("a", "a"),
+            brackets: &check_brackets("[[a]]"),
+            refs: RefsCheck { ok: unresolved.is_empty(), resolved: refs, unresolved, ambiguous: Vec::new() },
+            refs_preserved: &check_refs_preserved("", ""),
+        })
+    }
+
+    #[test]
+    fn a_result_under_the_budget_is_returned_as_it_is() {
+        let result = result_of(100, &[]);
+        assert_eq!(fit_to_budget(result.clone()), result);
+        assert_eq!(fit_to_budget(result_of(0, &[])), result_of(0, &[]));
+    }
+
+    #[test]
+    fn a_result_over_the_budget_loses_resolved_refs_from_the_tail_and_keeps_every_failure() {
+        let failures: Vec<String> = (0..20).map(|n| format!("missing {n}")).collect();
+        let whole = result_of(600, &failures);
+        assert!(size(&whole.to_string()) > crate::budget::BUDGET_CHARS);
+        let cut = fit_to_budget(whole.clone());
+        assert!(size(&cut.to_string()) <= crate::budget::BUDGET_CHARS);
+        let kept = cut["refs"]["resolved"].as_array().unwrap().len();
+        assert!(kept > 100 && kept < 600, "{kept}");
+        assert!(size(&cut_resolved(&whole, kept + 1, 600, false).to_string()) > crate::budget::BUDGET_CHARS);
+        // the verdict, the failures and the totals are untouched
+        assert_eq!(cut["ok"], whole["ok"]);
+        assert_eq!(cut["refs"]["unresolved"], whole["refs"]["unresolved"]);
+        assert_eq!(cut["totals"], whole["totals"]);
+        assert_eq!(cut["warnings"][0]["code"], "result_size_truncated");
+        assert_eq!(cut["hasMore"], false);
+        let keys: Vec<&String> = cut.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["hasMore", "warnings", "totals", "ok", "prose", "brackets", "refs", "refsPreserved"]);
+    }
+
+    #[test]
+    fn failures_that_are_over_the_budget_by_themselves_are_never_cut_and_every_resolved_ref_goes() {
+        let failures: Vec<String> = (0..2000).map(|n| format!("a missing page with a long name, number {n}")).collect();
+        let whole = result_of(50, &failures);
+        let cut = fit_to_budget(whole.clone());
+        assert_eq!(cut["refs"]["unresolved"], whole["refs"]["unresolved"]);
+        assert_eq!(cut["refs"]["resolved"], serde_json::json!([]));
+        assert!(cut["warnings"][0]["message"].as_str().unwrap().contains("Even those are over that size"));
+        // with no resolved ref to leave out there is nothing to cut, and the result is as it was
+        let bare = result_of(0, &failures);
+        assert_eq!(fit_to_budget(bare.clone()), bare);
     }
 
     fn read(value: Value) -> Result<Args, InvalidParameter> {
