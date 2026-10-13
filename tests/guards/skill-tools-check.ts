@@ -176,10 +176,66 @@ export type DocOptions = {
    * with no former tool name in it, is an error.
    */
   bareContexts: Readonly<Record<string, string>>;
+  /**
+   * The tool directory paths of the docs (#520). Off when absent (the skills guard passes none). A path that starts
+   * `rust/src/tools/` (or `src/tools/`) must name what exists under the tools directory, and so must every `name/`
+   * entry in the file-map row of rust/README.md. A rename of a tool's directory then fails on the doc that still says
+   * the old one, unless that line carries the history comment naming the old directory.
+   */
+  toolPaths?: ToolPathOptions;
+};
+
+export type ToolPathOptions = {
+  /** What `rel`, a path relative to rust/src/tools (`get_page/outline`, `get_page/mod.rs`), is on disk, or null. */
+  kindOf: (rel: string) => 'dir' | 'file' | null;
+  /** The file-map row: the doc it is in and the text its line starts with. Its `name/` entries are directory names. */
+  fileMap: { path: string; rowStart: string };
 };
 
 const markerPattern = (keyword: string): RegExp =>
   new RegExp(`<!--\\s*${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}((?:\\s+[A-Za-z0-9_]+)*)\\s*-->`);
+
+// `rust/src/tools/<path>` or, inside rust/README.md, `src/tools/<path>`. The path runs to the first character a path does
+// not hold, so a placeholder (`<name>`) or a backtick ends it, and a sentence's closing dot is cut off after the match.
+const TOOLS_PATH = /(?<![A-Za-z0-9_./-])(?:rust\/)?src\/tools\/([A-Za-z0-9_./-]*)/g;
+// A code span that is only a directory name with its slash, `get_page/` or `get_page/outline/`: an entry of the file map.
+const DIR_ENTRY = /`([a-z0-9_]+(?:\/[a-z0-9_]+)*)\/`/g;
+
+type MissingPath = { name: string; message: string };
+
+/** The tool paths on one line (outside its history comment) that do not exist, each with the name a comment excuses. */
+function missingToolPaths(file: string, line: number, text: string, options: ToolPathOptions, inFileMap: boolean): MissingPath[] {
+  const found = new Map<string, MissingPath>();
+  const check = (written: string, rest: string, trailingSlash: boolean): void => {
+    const parts = rest.split('/').filter(part => part !== '');
+    for (let i = 0; i < parts.length; i++) {
+      // `.` and `..` are not names; stop rather than guess where the path goes.
+      if (/^\.+$/.test(parts[i])) return;
+      const rel = parts.slice(0, i + 1).join('/');
+      const last = i === parts.length - 1;
+      const wantsFile = last && !trailingSlash && /\.[A-Za-z0-9]+$/.test(parts[i]);
+      const kind = options.kindOf(rel);
+      // A name with an extension is a file. A name that ends the path with no slash and no extension may be either.
+      const ok = wantsFile ? kind === 'file' : last && !trailingSlash ? kind !== null : kind === 'dir';
+      if (ok) continue;
+      const what = wantsFile ? 'file' : 'directory';
+      // One report per missing path per line: the first way the line wrote it.
+      if (!found.has(rel)) found.set(rel, {
+        name: parts[i].replace(/\.[A-Za-z0-9]+$/, ''),
+        message: `${file}:${line}: "${written}" names the ${what} rust/src/tools/${rel}${what === 'directory' ? '/' : ''}, which does not exist`,
+      });
+      return;
+    }
+  };
+  for (const m of text.matchAll(TOOLS_PATH)) {
+    const rest = m[1].replace(/[.,:;]+$/, '');
+    check(`${m[0].slice(0, m[0].length - m[1].length)}${rest}`, rest, rest.endsWith('/'));
+  }
+  if (inFileMap) {
+    for (const m of text.matchAll(DIR_ENTRY)) check(m[0].slice(1, -1), m[1], true);
+  }
+  return [...found.values()];
+}
 
 type Scan = {
   out: string[];
@@ -255,12 +311,18 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
           if (!isTool(m[1]) && !bad.includes(m[1]) && !inPath(rest, m.index, m[1].length, former)) bad.push(m[1]);
         }
       }
+      // Tool paths that name a directory or file that is not there (#520). A history comment excuses the directory name.
+      const fileMap = doc?.toolPaths?.fileMap;
+      const missing =
+        doc?.toolPaths && fileMap
+          ? missingToolPaths(path, lineNo, body, doc.toolPaths, path === fileMap.path && line.startsWith(fileMap.rowStart))
+          : [];
       if (doc && marker) {
         const comment = `<!-- ${doc.historyMarker} logseq_old_name -->`;
         if (named.length === 0) out.push(`${path}:${lineNo}: the history comment must name the tool names it excuses, as ${comment}`);
         for (const name of named) {
           if (isTool(name)) out.push(`${path}:${lineNo}: "${name}" is a tool in tool-list.json, so remove it from the history comment`);
-          else if (!bad.includes(name)) {
+          else if (!bad.includes(name) && !missing.some(m => m.name === name)) {
             // A bare name outside the former list is never read bare, so the line cannot name it. Say that, not "not on the line".
             out.push(
               !name.startsWith('logseq_') && !doc.formerToolNames.includes(name)
@@ -276,6 +338,7 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
         const how = token.startsWith('logseq_') ? '' : `, as logseq_${token} (it is written without the prefix)`;
         out.push(`${path}:${lineNo}: "${token}" is not a tool in tool-list.json${how}`);
       }
+      for (const m of missing) if (!named.includes(m.name)) out.push(m.message);
     };
     let open: Fence | null = null;
     for (let i = 0; i < lines.length; i++) {
@@ -368,6 +431,14 @@ export function docViolations(files: SkillFile[], tools: RecordedTool[], options
   for (const token of Object.keys(options.nonToolTokens)) {
     if (known.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which is a tool in tool-list.json, so delete it`);
     else if (!usedNonTool.has(token)) out.push(`NON_TOOL_TOKENS names "${token}", which no live doc uses, so delete it`);
+  }
+  const fileMap = options.toolPaths?.fileMap;
+  if (fileMap) {
+    // The file-map check must not switch itself off: the row has to be there, once, and list at least one directory.
+    const doc = files.find(f => f.path === fileMap.path);
+    const rows = (doc?.text ?? '').replace(/\r\n?/g, '\n').split('\n').filter(l => l.startsWith(fileMap.rowStart));
+    if (rows.length !== 1) out.push(`${fileMap.path}: expected one file-map row starting ${fileMap.rowStart}, found ${rows.length}`);
+    else if ([...rows[0].matchAll(DIR_ENTRY)].length === 0) out.push(`${fileMap.path}: the file-map row lists no \`name/\` directory, so the check has nothing to read`);
   }
   const holdsName = bareNamePattern(options.formerToolNames, '');
   for (const context of Object.keys(options.bareContexts)) {
