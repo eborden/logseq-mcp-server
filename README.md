@@ -118,7 +118,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 ### Basic Operations (5)
 | Tool | Purpose |
 |------|---------|
-| `find_blocks` | Find blocks, newest first, by `text` (a case-insensitive substring), a block property (`property` with `value`), a period of journal days (`start_date` with `end_date`, `last_n` days or a `preset`), or any of them together. Paged with `limit` and `offset`; `include_context` adds each block's page, references and tags |
+| `find_blocks` | Find blocks, newest first, by `text` (a case-insensitive substring), the `page` they are on, the pages they link to (`links_to`, 1 to 5; `[[x]]` and `#x` count, plain text does not; every page's aliases are followed), a block property (`property` with `value`), a period of journal days (`start_date` with `end_date`, `last_n` days or a `preset`), or any of them together. Paged with `limit` and `offset`; `include_context` adds each block's page, references and tags |
 | `get_page` | Retrieve a page. `detail`: `page` (default), `full` (with its blocks) or `outline` (top-level blocks: uuid, first-line snippet, child count) |
 | `get_backlinks` | Find all references to a page |
 | `get_block` | Get specific block by UUID |
@@ -132,7 +132,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 ### Semantic Search (1)
 | Tool | Purpose |
 |------|---------|
-| `search_by_relationship` | Find blocks based on topic relationships |
+| `search_by_relationship` | Whether topic A connects to topic B within N hops (`connected-within`, its one type), and the blocks of both pages when it does. Blocks that link to a page are `find_blocks` with `links_to` |
 
 ### Context Building (3)
 | Tool | Purpose |
