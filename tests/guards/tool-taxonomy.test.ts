@@ -139,6 +139,24 @@ describe('each taxonomy rule can fail', () => {
     expect(violations(on('logseq_explore_network'))).toEqual([expect.stringContaining('include_temporal_context is not in the ADR-0037 vocabulary')]);
   });
 
+  it.each(['oneOf', 'anyOf', 'allOf'])('reads the parameters under %s, so a schema shape change cannot skirt the list', keyword => {
+    const tool: TaxonomyTool = {
+      ...conforming,
+      inputSchema: { properties: { text: {} }, [keyword]: [{ properties: { limit: {} } }, { properties: { sort_by: {} } }] },
+    };
+    expect(violations(tool)).toEqual([expect.stringContaining('the parameter sort_by is not in the ADR-0037 vocabulary')]);
+  });
+
+  it('reads a v1 name hidden under a nested composition', () => {
+    const tool: TaxonomyTool = { ...conforming, inputSchema: { properties: { text: {} }, anyOf: [{ allOf: [{ properties: { page_name: {} } }] }] } };
+    expect(violations(tool)).toEqual([expect.stringContaining('the parameter page_name is a v1 name')]);
+  });
+
+  it('does not read a properties nested inside a property, which is a value shape, not a parameter', () => {
+    const tool: TaxonomyTool = { ...conforming, inputSchema: { properties: { text: { properties: { inner: {} } } } } };
+    expect(violations(tool)).toEqual([]);
+  });
+
   it('fails a stale allowance', () => {
     expect(taxonomyViolations([conforming], ['logseq_get_concept_evolution'])).toEqual([
       expect.stringContaining('V1_TOOL_ALLOWANCES lists logseq_get_concept_evolution'),

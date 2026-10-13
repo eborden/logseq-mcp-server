@@ -3,10 +3,18 @@
  * `tests/guards/tool-taxonomy.test.ts` (the recorded list and the self-test of each rule).
  */
 
+/** A JSON Schema node, as far as the parameter rules read it: its `properties` and the branches of `oneOf`, `anyOf` and `allOf`. */
+export type SchemaNode = {
+  properties?: Record<string, unknown>;
+  oneOf?: readonly SchemaNode[];
+  anyOf?: readonly SchemaNode[];
+  allOf?: readonly SchemaNode[];
+};
+
 export type TaxonomyTool = {
   name: string;
   description?: string;
-  inputSchema?: { properties?: Record<string, unknown> };
+  inputSchema?: SchemaNode;
 };
 
 /** The four tool types, and the verb each type's description opens with. */
@@ -96,6 +104,24 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
  */
 export const V1_TOOL_ALLOWANCES: readonly string[] = [];
 
+/**
+ * Every parameter name a schema advertises: the top-level `properties`, and those under the branches of `oneOf`, `anyOf`
+ * and `allOf`, to any depth of composition, so a schema that nests parameters in a branch cannot skirt the rules. A
+ * `properties` nested inside a property is a value's shape, not a parameter, and is not read.
+ */
+export function schemaParameters(schema: SchemaNode | undefined): string[] {
+  const names = new Set<string>();
+  const walk = (node: SchemaNode | undefined): void => {
+    if (!node || typeof node !== 'object') return;
+    for (const name of Object.keys(node.properties ?? {})) names.add(name);
+    for (const keyword of ['oneOf', 'anyOf', 'allOf'] as const) {
+      for (const branch of node[keyword] ?? []) walk(branch);
+    }
+  };
+  walk(schema);
+  return [...names];
+}
+
 /** Every way one tool breaks the three rules, ignoring any allowance. */
 function toolViolations(tool: TaxonomyTool, allowed: Readonly<Record<string, readonly string[]>>): string[] {
   const violations: string[] = [];
@@ -111,7 +137,7 @@ function toolViolations(tool: TaxonomyTool, allowed: Readonly<Record<string, rea
     }
   }
 
-  const parameters = Object.keys(tool.inputSchema?.properties ?? {});
+  const parameters = schemaParameters(tool.inputSchema);
   for (const parameter of parameters) {
     if (V1_PARAMETER_NAMES.includes(parameter)) {
       violations.push(`${tool.name}: the parameter ${parameter} is a v1 name. Use the shared vocabulary of ADR-0037.`);
