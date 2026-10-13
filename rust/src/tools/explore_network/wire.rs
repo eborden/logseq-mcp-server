@@ -1,6 +1,7 @@
 //! What the concept network reads from LogSeq: the rows of its connected-pages query.
 
 use serde::Deserialize;
+use serde::de::IgnoredAny;
 use serde_json::Value;
 
 use crate::wire::{DATALOG_METHOD, Id, ResponseError, parse};
@@ -45,9 +46,10 @@ struct Cells(Id, Id, String, String, bool, Direction, Id);
 struct SnippetCells(Id, Id, String, String, bool, Direction, Id, Key);
 
 /// The best block of a pair as the query picks it: `[prose, length, content]` (`SNIPPET_CLAUSE` in `queries.rs`). Only
-/// the content is read: the other two are what the query ranked the blocks by.
+/// the content is read: the other two are what the query ranked the blocks by, so they are skipped, as a field the code
+/// does not read is (the cell must still be a row of three).
 #[derive(Deserialize)]
-struct Key(Id, Id, String);
+struct Key(IgnoredAny, IgnoredAny, String);
 
 #[derive(Deserialize)]
 enum Direction {
