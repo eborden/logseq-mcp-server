@@ -349,7 +349,7 @@ User: "Give me full context on [[Q4 Planning]]"
 **Best practices:**
 - Prefer `build_context` over manual aggregation
 - Prefer `get_context_for_query` over multiple searches
-- Use relationship search instead of filtering results manually
+- Use `find_blocks` with `page` and `links_to` instead of filtering results manually, and `search_by_relationship` to ask whether two pages connect
 
 ## Example Complete Sessions
 
