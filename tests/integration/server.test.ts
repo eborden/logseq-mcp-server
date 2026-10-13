@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { getBacklinks, getPage, queryByProperty, searchBlocks } from './helpers/tools.js';
+import { findBlocks, getBacklinks, getPage } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
  * Integration tests for the basic tools against the fixture graph: get_page, get_backlinks,
- * search_blocks and query_by_property on known pages. Read-only.
+ * find_blocks by text and by property on known pages. Read-only.
  */
 
 describe('LogSeq MCP Server Integration Tests', () => {
@@ -70,9 +70,9 @@ describe('LogSeq MCP Server Integration Tests', () => {
     });
   });
 
-  describe('logseq_search_blocks', () => {
+  describe('logseq_find_blocks by text', () => {
     it('should search for blocks by content', async () => {
-      const result = (await searchBlocks(client, 'importer'))!;
+      const result = (await findBlocks(client, { text: 'importer' }))!;
 
       // The 11 blocks that say "importer": 7 in journals, 4 on pages
       expect(result).toHaveLength(11);
@@ -81,14 +81,14 @@ describe('LogSeq MCP Server Integration Tests', () => {
     });
 
     it('should return empty array for non-matching search', async () => {
-      const result = (await searchBlocks(client, 'xyzzyqwertyneverexists12345'))!;
+      const result = (await findBlocks(client, { text: 'xyzzyqwertyneverexists12345' }))!;
       expect(result).toEqual([]);
     });
   });
 
-  describe('logseq_query_by_property', () => {
+  describe('logseq_find_blocks by property', () => {
     it('should query blocks by property', async () => {
-      const result = (await queryByProperty(client, 'status', 'testing')) as Array<{ content: string; properties?: unknown }>;
+      const result = (await findBlocks(client, { property: 'status', value: 'testing' })) as Array<{ content: string; properties?: unknown }>;
 
       expect(result).toHaveLength(1);
       expect(result[0].content).toBe('A text value\nstatus:: testing');
@@ -96,7 +96,7 @@ describe('LogSeq MCP Server Integration Tests', () => {
     });
 
     it('should return empty array for non-existent property', async () => {
-      const result = await queryByProperty(client, 'nonexistentproperty12345', 'neverexists');
+      const result = await findBlocks(client, { property: 'nonexistentproperty12345', value: 'neverexists' });
       expect(result).toEqual([]);
     });
   });

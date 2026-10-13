@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { searchBlocksWithMeta } from './helpers/tools.js';
+import { findBlocksWithMeta } from './helpers/tools.js';
 import {
   DEFAULT_DATE_RANGE_MAX_BLOCKS,
   DEFAULT_FIND_PAGES_LIMIT,
@@ -32,13 +32,13 @@ import { connectMcp } from './helpers/server-under-test.js';
  *
  * Where a maximum is out of reach of the fixture (below), the cut at it is held by the Rust server's own tests: the
  * parity cases in rust/tests/data/parity/ feed a mock more rows than the fixture holds (for example `limit at the maximum
- * with matches left` in search-blocks.ts, 520 matches, and `caps: max_pages above the maximum` in get-backlinks.ts, 101
+ * with matches left` in find-blocks.json, 520 matches, and `caps: max_pages above the maximum` in get-backlinks.ts, 101
  * source pages), and the Rust unit tests do the same (rust/src/tools/query_by_date_range/cap.rs, 1,001 blocks;
  * rust/src/truncation.rs). They replaced the TypeScript unit tests, which fed 600 matches, 1,100 blocks, 150 pages
  * and 80 blocks.
  *
  * Against the fixture graph. Read-only. Its ~494 blocks (478 of them with the letter e) are fewer than
- * search_blocks' maximum of 500, so through MCP only the cut below the maximum
+ * find_blocks' maximum of 500, so through MCP only the cut below the maximum
  * and the clamp can be seen; the cut at the maximum is the parity cases' (#356 dropped the integration test that
  * lowered the maximum, which only a direct call to the TypeScript function could do). The keyword `neighbour` matches 190 blocks (the hub fixture), past
  * get_context_for_query's maximum of 100. find_pages needs more than 200
@@ -56,7 +56,7 @@ import { connectMcp } from './helpers/server-under-test.js';
  * linking blocks (#178), so the pages a cut keeps are the same names on every run. Through MCP the
  * default cuts, the values below the maximum and the clamp can be seen; the cut at each
  * maximum is covered by the parity cases (101 source pages, `max_pages: 150`, blocks past the per-page maximum).
- * query_by_property's default of 100 and maximum of 500 are out of reach too: no property value sits
+ * find_blocks' default of 100 and maximum of 500 are out of reach for a property filter too: no property value sits
  * on more than a few fixture blocks. Through MCP small limits stand in for the default, and the parity cases
  * (`limit at the maximum with matches left`) hold the cut at the maximum.
  * search_by_relationship's default of 50 and maximum of 500 are out of reach as well: no pair of fixture
@@ -95,21 +95,21 @@ describe('result caps (#61)', () => {
   /** Every `Set <param> to N` in a warning names a value within the maximum. */
   function expectNoSuggestionPast(meta: Meta, param: string, max: number) {
     for (const warning of meta.warnings) {
-      for (const match of (warning.howToFetchAll ?? '').matchAll(new RegExp(`Set ${param} to (\\d+)`, 'g'))) {
+      for (const match of (warning.howToFetchAll ?? '').matchAll(new RegExp(`[Ss]et ${param} to (\\d+)`, 'g'))) {
         expect(Number(match[1]), `${warning.code} suggests ${param} past ${max}`).toBeLessThanOrEqual(max);
       }
     }
   }
 
-  describe('logseq_search_blocks limit (max 500)', () => {
+  describe('logseq_find_blocks limit (max 500) with a text filter', () => {
     // "e" is in all but 16 of the fixture's blocks (478 of ~494). The crowded topic's blocks avoid it on
     // purpose to keep this margin: see "The crowded topic" in tests/fixtures/README.md
     const QUERY = 'e';
     let matches: number;
 
     async function search(limit?: number) {
-      const args = limit === undefined ? { query: QUERY } : { query: QUERY, limit };
-      const result = await call('logseq_search_blocks', args);
+      const args = limit === undefined ? { text: QUERY } : { text: QUERY, limit };
+      const result = await call('logseq_find_blocks', args);
       // A null API response sends no meta block; say so instead of a bare JSON.parse error
       expect(result.content, `limit ${limit ?? 'default'}: results block plus meta block`).toHaveLength(2);
       return {
@@ -121,7 +121,7 @@ describe('result caps (#61)', () => {
     }
 
     beforeAll(async () => {
-      const { meta } = await searchBlocksWithMeta(client, QUERY, 0);
+      const { meta } = await findBlocksWithMeta(client, { text: QUERY }, { limit: 0 });
       matches = meta!.totals!.matches;
       // Every block bar 16 (the fixture holds ~494): computed, so a new fixture block does not break it
       expect(matches, 'too few fixture blocks hold the letter e to see the default cut').toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
@@ -138,22 +138,28 @@ describe('result caps (#61)', () => {
       expect(results).toHaveLength(DEFAULT_SEARCH_LIMIT);
       expect(meta.totals).toEqual({ matches });
       expect(meta.warnings.map(w => w.code)).toEqual(['results_truncated']);
-      // Every match is ~60,000 characters (#506), so "get all" would be cut: the raise offered is the most that fits,
-      // and hasMore is true because a parameter really fetches that many
-      const fitting = (await search(MAX_SEARCH_LIMIT)).results.length;
-      expect(fitting).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
-      expect(fitting).toBeLessThan(matches);
+      // Every match is ~60,000 characters (#506), so "get all" would be cut: the next page leads, and the raise offered
+      // is the most that fits. hasMore is true because a parameter really fetches that many
+      const sizeCut = (await search(MAX_SEARCH_LIMIT)).results.length;
+      expect(sizeCut).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+      expect(sizeCut).toBeLessThan(matches);
       expect(meta.hasMore).toBe(true);
-      expect(meta.warnings[0].howToFetchAll).toMatch(new RegExp(`^Set limit to ${fitting} to get ${fitting} of ${matches}\\.`));
-      expect(meta.warnings[0].howToFetchAll).not.toMatch(/get all/);
+      const how = meta.warnings[0].howToFetchAll!;
+      expect(how).toMatch(new RegExp(`^Set offset to ${DEFAULT_SEARCH_LIMIT} for the next page\\. Or set limit to \\d+ to get \\d+ of ${matches}\\.`));
+      expect(how).not.toMatch(/get all/);
       expectNoSuggestionPast(meta, 'limit', MAX_SEARCH_LIMIT);
+      // The size cut's own warning is longer than a limit cut's, so it keeps a hit or two fewer than the raise offered
+      const fitting = Number(how.match(/Or set limit to (\d+) to get/)![1]);
+      expect(fitting).toBeGreaterThanOrEqual(sizeCut);
+      expect(fitting).toBeLessThanOrEqual(sizeCut + 3);
 
-      // Following it returns that many hits with no size cut, and the next limit up is cut back to the same count
+      // Following it returns that many hits with no size cut, and the next limit up is cut back to about the same count
       const raised = await search(fitting);
       expect(raised.results).toHaveLength(fitting);
       expect(raised.meta.warnings.map(w => w.code)).not.toContain('result_size_truncated');
       const beyond = await search(fitting + 1);
-      expect(beyond.results).toHaveLength(fitting);
+      expect(beyond.results.length).toBeLessThanOrEqual(fitting);
+      expect(beyond.results.length).toBeGreaterThanOrEqual(fitting - 3);
       expect(beyond.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
     });
 
@@ -162,16 +168,16 @@ describe('result caps (#61)', () => {
       const above = await search(1000);
 
       // The count cap cuts nothing here (matches < 500). Every match is ~60,000 characters, past the budget (#506),
-      // so the one cut is the size cut: it says so alone, names the total, and offers no larger limit (hasMore false
-      // pairs with no howToFetchAll)
+      // so the one cut is the size cut: it says so alone, names the total, offers no larger limit, and names the next
+      // page, so hasMore is true
       const sent = [...atMax.text].length + [...atMax.metaText].length;
       expect(sent, 'the budget is in characters').toBeLessThanOrEqual(30000);
       // ...and it keeps what fits: a regression that over-cuts keeps far fewer than the ~160 hits of 30,000 characters
       expect(sent, 'the cut keeps the most hits that fit').toBeGreaterThanOrEqual(29000);
       expect(atMax.results.length).toBeLessThan(matches);
-      expect(atMax.meta).toMatchObject({ hasMore: false, totals: { matches } });
+      expect(atMax.meta).toMatchObject({ hasMore: true, totals: { matches } });
       expect(atMax.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
-      expect(atMax.meta.warnings[0].howToFetchAll).toBeUndefined();
+      expect(atMax.meta.warnings[0].howToFetchAll).toBe(`Set offset to ${atMax.results.length} for the next page.`);
       expect(atMax.meta.warnings[0].message).toMatch(new RegExp(`^Showing ${atMax.results.length} of ${matches} matching blocks`));
       expect(above.text).toBe(atMax.text);
       expect(above.meta).toEqual(atMax.meta);
@@ -692,31 +698,30 @@ describe('result caps (#61)', () => {
     });
   });
 
-  describe('logseq_query_by_property limit (default 100, max 500)', () => {
+  describe('logseq_find_blocks limit (default 100, max 500) with a property filter', () => {
     // No fixture property value sits on more than a handful of blocks, so the default of 100 and
     // the maximum of 500 are out of reach. Through MCP small limits see the same code with a
     // smaller bound, and the clamp shows above the maximum; the cut at 500 is covered by the
-    // parity cases (`limit at the maximum with matches left`).
+    // parity cases (`property: limit at the maximum with matches left`).
     const KEY = 'type';
     const VALUE = 'project';
 
     interface PropertyBody {
       text: string;
       results: Array<{ uuid: string }>;
-      /** The second content block's meta, absent when the tool sent none */
-      meta?: Partial<Meta>;
+      meta: Partial<Meta>;
     }
 
     async function byProperty(limit?: number): Promise<PropertyBody> {
-      const result = await call('logseq_query_by_property', {
-        property_key: KEY,
-        property_value: VALUE,
+      const result = await call('logseq_find_blocks', {
+        property: KEY,
+        value: VALUE,
         ...(limit === undefined ? {} : { limit }),
       });
       return {
         text: result.content[0].text,
         results: JSON.parse(result.content[0].text) as Array<{ uuid: string }>,
-        meta: result.content[1] ? (JSON.parse(result.content[1].text) as { meta: Partial<Meta> }).meta : undefined,
+        meta: (JSON.parse(result.content[1].text) as { meta: Partial<Meta> }).meta,
       };
     }
 
@@ -727,9 +732,9 @@ describe('result caps (#61)', () => {
       const total = full.results.length;
       expect(total, `the fixture needs at least 3 blocks with ${KEY}:: ${VALUE} to see a cut. See tests/fixtures/README.md`).toBeGreaterThanOrEqual(3);
       expect(total, 'the fixture must stay under the default cap for the default to return every match').toBeLessThanOrEqual(DEFAULT_PROPERTY_LIMIT);
-      // Nothing is cut, so the maximum sends no warning and no totals
-      expect(full.meta?.warnings ?? []).toEqual([]);
-      expect(full.meta?.totals).toBeUndefined();
+      // Nothing is cut, so the maximum sends no warning, and a meta with the total (it is always sent)
+      expect(full.meta.warnings).toEqual([]);
+      expect(full.meta.totals).toEqual({ matches: total });
 
       // The default and a value above the maximum are the full result, byte for byte
       expect((await byProperty()).text).toBe(full.text);
@@ -745,16 +750,20 @@ describe('result caps (#61)', () => {
 
         if (limit >= total) {
           expect(body.text, `${label}: nothing is cut, so the result is the full one`).toBe(full.text);
-          expect(body.meta?.warnings ?? [], label).toEqual([]);
+          expect(body.meta.warnings, label).toEqual([]);
           continue;
         }
-        expect(body.meta!.warnings!.map(w => w.code), label).toEqual(['results_truncated']);
-        expect(body.meta!.totals, label).toEqual({ matches: total });
-        // Below the maximum the warning says which value gets the rest, and it is within the maximum
-        expect(body.meta!.hasMore, label).toBe(true);
-        expect(body.meta!.warnings![0].howToFetchAll, label).toBe(`Set limit to ${total} (or higher) to get all ${total}.`);
+        expect(body.meta.warnings!.map(w => w.code), label).toEqual(['results_truncated']);
+        expect(body.meta.totals, label).toEqual({ matches: total });
+        // The next page leads, and the raise is the alternative; with nothing shown there is no next page
+        expect(body.meta.hasMore, label).toBe(true);
+        expect(body.meta.warnings![0].howToFetchAll, label).toBe(
+          limit === 0
+            ? `Set limit to ${total} (or higher) to get all ${total}.`
+            : `Set offset to ${limit} for the next page. Or set limit to ${total} (or higher) to get all ${total} in one call.`
+        );
         expectNoSuggestionPast(body.meta as Meta, 'limit', MAX_PROPERTY_LIMIT);
-        expect(body.meta!.warnings![0].message, label).toContain('the first ones listed, not ranked');
+        expect(body.meta.warnings![0].message, label).toContain(`Showing ${limit} of ${total} matching blocks`);
       }
     });
   });

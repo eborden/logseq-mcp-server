@@ -81,8 +81,8 @@ const REPRESENTATIVE: Array<{ tool: string; name: string }> = [
   { tool: 'logseq_get_page', name: 'get_page: exact name with its blocks' },
   { tool: 'logseq_find_pages', name: 'every page, aliases nested' },
   { tool: 'logseq_query_by_date_range', name: 'date range: slim by default: days oldest first, trees by the left chain, the top concepts of the period' },
-  { tool: 'logseq_query_by_property', name: 'property: slim matches, sorted by page then block' },
-  { tool: 'logseq_search_blocks', name: 'slim hits, newest first' },
+  { tool: 'logseq_find_blocks', name: 'property: slim matches, newest first' },
+  { tool: 'logseq_find_blocks', name: 'slim hits, newest first' },
   { tool: 'logseq_search_by_relationship', name: 'relationship: references, exact names' }
 ];
 

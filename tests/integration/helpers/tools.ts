@@ -35,7 +35,7 @@ const compact = <T extends Record<string, unknown>>(args: T): Record<string, unk
 };
 
 /** The server's words for a page that wasn't found, split into the name and the closest names. */
-const NOT_FOUND = /^No page ("(?:[^"\\]|\\.)*")\.(?: Closest: (.*?)\.)? Try logseq_search_blocks/s;
+const NOT_FOUND = /^No page ("(?:[^"\\]|\\.)*")\.(?: Closest: (.*?)\.)? Try logseq_find_blocks/s;
 
 /** The error a tool's error message stands for. */
 function errorFor(message: string): Error {
@@ -130,57 +130,49 @@ export async function getBlock(
   ).value;
 }
 
+/** What `logseq_find_blocks` filters on (ADR-0037): at least one of text, property with value, or a period. */
+export interface BlockFilters {
+  text?: string;
+  property?: string;
+  value?: string;
+  startDate?: number;
+  endDate?: number;
+  lastN?: number;
+  preset?: string;
+}
+
+/** How a `logseq_find_blocks` result is paged and shaped. */
+export interface BlockPaging {
+  limit?: number;
+  offset?: number;
+  includeContext?: boolean;
+  slimResults?: boolean;
+}
+
 // A direct call defaulted to full results, the tool to slim (BR-0012), so each call says which
-export async function searchBlocksWithMeta(
+export async function findBlocksWithMeta(
   client: LogseqClient,
-  query: string,
-  limit?: number,
-  includeContext?: boolean,
-  slimResults?: boolean
+  filters: BlockFilters,
+  paging: BlockPaging = {}
 ): Promise<{ results: Json; meta: Json }> {
-  const { value, meta } = await callTool(client, 'logseq_search_blocks', {
-    query,
-    limit,
-    include_context: includeContext ?? false,
-    slim_results: slimResults ?? false,
+  const { value, meta } = await callTool(client, 'logseq_find_blocks', {
+    text: filters.text,
+    property: filters.property,
+    value: filters.value,
+    start_date: filters.startDate,
+    end_date: filters.endDate,
+    last_n: filters.lastN,
+    preset: filters.preset,
+    limit: paging.limit,
+    offset: paging.offset,
+    include_context: paging.includeContext ?? false,
+    slim_results: paging.slimResults ?? false,
   });
   return { results: value, meta };
 }
 
-export async function searchBlocks(
-  client: LogseqClient,
-  query: string,
-  limit?: number,
-  includeContext?: boolean,
-  slimResults?: boolean
-): Promise<Json> {
-  return (await searchBlocksWithMeta(client, query, limit, includeContext, slimResults)).results;
-}
-
-export async function queryByPropertyWithMeta(
-  client: LogseqClient,
-  propertyName: string,
-  propertyValue: string,
-  slimResults?: boolean,
-  limit?: number
-): Promise<{ results: Json; meta: Json }> {
-  const { value, meta } = await callTool(client, 'logseq_query_by_property', {
-    property_key: propertyName,
-    property_value: propertyValue,
-    slim_results: slimResults ?? false,
-    limit,
-  });
-  return { results: value, meta };
-}
-
-export async function queryByProperty(
-  client: LogseqClient,
-  propertyName: string,
-  propertyValue: string,
-  slimResults?: boolean,
-  limit?: number
-): Promise<Json> {
-  return (await queryByPropertyWithMeta(client, propertyName, propertyValue, slimResults, limit)).results;
+export async function findBlocks(client: LogseqClient, filters: BlockFilters, paging: BlockPaging = {}): Promise<Json> {
+  return (await findBlocksWithMeta(client, filters, paging)).results;
 }
 
 export async function getConceptNetwork(

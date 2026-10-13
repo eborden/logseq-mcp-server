@@ -219,7 +219,7 @@ describe('page resolution against the fixture graph', () => {
       expect(error instanceof PageNotFoundError).toBe(true);
       const message = String(error.message);
       expect(message.startsWith('No page "no such page 41 integration probe".')).toBe(true);
-      expect(message.includes('logseq_search_blocks')).toBe(true);
+      expect(message.includes('logseq_find_blocks')).toBe(true);
       expect(message.includes('logseq_find_pages')).toBe(true);
       expect(Array.isArray(error.suggestions) && error.suggestions.length <= 3).toBe(true);
     });
