@@ -150,8 +150,7 @@ Use this skill when:
 ## Tool Categories
 
 **Basic Tools (4):** find_blocks, get_page, get_block, find_pages
-**Graph Traversal (1):** get_concept_network
-**Semantic Search (1):** search_by_relationship
+**Graph Exploration (1):** explore_network (the pages linked to a page, or with `to` the shortest path of links to a second page)
 **Context Building (1):** explore_context (the page's blocks, its related pages and its references, ranked and paged)
 **Temporal Query (2):** query_by_date_range, get_concept_evolution
 **Linking (1):** check_links

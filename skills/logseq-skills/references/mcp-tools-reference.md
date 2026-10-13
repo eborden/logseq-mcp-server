@@ -7,8 +7,7 @@ Complete documentation for the LogSeq MCP tools organized by category. The serve
 | Category | Tools | Purpose |
 |----------|-------|---------|
 | Basic Tools | 4 tools | Core search (blocks by text, property or period), retrieval, and page names |
-| Graph Traversal | 1 tool | Network visualization and relationship discovery |
-| Semantic Search | 1 tool | Topic-based relationship queries |
+| Graph Exploration | 1 tool | How a page connects: the pages linked to it, or the shortest link path to a second page |
 | Context Building | 2 tools | Comprehensive context for one page with its references, and what the user is looking at |
 | Temporal Query | 2 tools | Time-based analysis and journal queries |
 | Linking | 1 tool | Checking a `[[link]]` pass before it is reported done |
@@ -183,78 +182,48 @@ logseq_find_pages(property="status", value="active")  # Pages whose page propert
 
 ---
 
-## Graph Traversal Tools (1 tool)
+## Graph Exploration Tools (1 tool)
 
-### logseq_get_concept_network
+### logseq_explore_network
 
-Build graph network with nodes (pages) and edges (connections).
-
-**Parameters:**
-- `concept_name` (required): Root page name
-- `max_depth` (optional): Maximum traversal depth (default: 2, max: 3)
-- `format` (optional): `json` (default) or `markdown`: pages grouped by depth, then one line per link (`A -> B (n)`, `A <- B (n)` or `A <-> B (out/in)`). About 45% smaller.
-
-**Returns:**
-- `nodes`: Array of pages with depth information
-- `edges`: Array of connections with relationship types (inbound/outbound)
-
-**Use when:**
-- Visualizing knowledge network
-- Understanding topic centrality
-- Finding hubs and clusters
-- Discovering bridges between topics
-
-**Example:**
-```
-logseq_get_concept_network("Machine Learning", max_depth=2)
-```
-
-**Performance:** Gets full network in one call (vs. N calls for N pages).
-
----
-
-## Semantic Search Tools (1 tool)
-
-### logseq_search_by_relationship
-
-Find out whether two pages are connected within N link hops, and read both pages' blocks when they are. Its one `relationship_type` is `connected-within`. For the blocks of a page that link to another page, use `find_blocks` with `page` and `links_to`: that is what this tool's `references` type was, and the `referenced-by` and `in-pages-linking-to` types are gone.
+How a page connects, as nodes (pages) and edges (links). Without `to` it maps the pages linked to `page`, in both link directions, up to `max_depth` hops. With `to` it finds the shortest path of links from `page` to a second page, and answers no path when there is none within `max_depth`. For the blocks of a page that link to another page, use `find_blocks` with `page` and `links_to`.
 
 **Parameters:**
-- `topic_a` (required): First topic name
-- `topic_b` (required): Second topic name
-- `relationship_type` (required): `connected-within`, the only value
-- `max_distance` (optional): Maximum hops between topics (default: 2)
-- `limit` (optional): Most entries in `results` (default: **50**, max: **500**; a larger value is clamped to 500, not rejected). It changes only how many come back, not which are found, so `max_distance` is no way round it. It counts every block of both pages' trees, **nested ones too**, topic A's page first
+- `page` (required): Page to start from (name, alias or ISO date)
+- `to` (optional): A second page. The result is then the shortest path from `page` to it, and not the network
+- `max_depth` (optional): Maximum hops (default: 2, max: 3; a larger value is capped at 3)
+- `max_nodes` (optional): Most pages in the network, the root included (default: 50, max: 500; a larger value is clamped)
+- `max_fanout` (optional): Most new pages any one page may add (default: 15, max: 100; a larger value is clamped)
+- `expand_journals` (optional): Walk through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network
+- `format` (optional): `json` (default) or `markdown`. The network is its pages grouped by depth, then one line per link (`A -> B (n)`, `A <- B (n)` or `A <-> B (out/in)`), about 45% smaller. The path is the chain of pages, then one line per link
+- `max_nodes`, `max_fanout` and `expand_journals` size the network, so a call with `to` that sets one is refused as an invalid parameter
 
-**Returns:** one object, `{ query, relationshipType, results, hasMore, warnings, totals?, resolvedFrom?, resolvedAliases? }`. Unlike `find_blocks`, the meta fields are **inside this first content block**; there is no second block. `hasMore` and `warnings` are always there (`warnings` may be empty), and `totals` is present only with a cut. A kept block that lost some of its children carries `childrenTruncated: true` (only on a cut result).
+**Returns the network (no `to`):** `{ page, resolvedFrom?, resolvedAliases?, truncated, hasMore, warnings, nodes, edges }`. `nodes` are `{ id, name, depth }` with the root at depth 0 and `depth` the fewest hops from it along the returned edges. `edges` are one per pair of pages, `{ from, to, type, count, outbound, inbound }`: `from` is the page nearer the root, `outbound` counts the blocks on `from` that link `to`, `inbound` the blocks on `to` that link `from`, `count` is both, and `type` is `reference` when `from` links `to` at all and `backlink` when only `to` links `from`.
 
-**A cut result:** a `results_truncated` warning says "Showing N of M" and `totals: { blocks: M }` gives the count before the cut. The tool cuts after the walk, keeping the first entries in the order they come, which is **not a ranking**: the entries are the blocks of the two pages' trees, **nested ones counted**, in document order (a block, then its children, then its next sibling), topic A's page first and then topic B's. `limit` bounds the number of blocks in the result however deep the pages nest, and `totals.blocks` counts in the same unit. The warning reads: "Showing 50 of 168 blocks of the two pages, nested ones counted (kept 50 from topic A and 0 from topic B, of 120 and 48; topic A's first, then topic B's; a kept block shows fewer children than it has (childrenTruncated))". So it says how many of the kept blocks came from each topic and how many each page has, and a result that shows no block of topic B may just mean A's page filled the cap. The last clause appears only when a kept block lost children: that block keeps the first children that fit and has `childrenTruncated: true`, so a block with no `children` and no flag is a real leaf. A page with few top-level blocks and many nested ones is cut too; a result at or below `limit` comes back whole and unchanged
+**Returns the path (with `to`):** `{ page, to, resolvedFrom?, resolvedAliases?, hops?, hasMore, warnings, nodes, edges }`. `nodes` are the pages of the path in order, from `page` to `to`, with `depth` 0, 1, 2 and so on, and `edges` the links between consecutive pages, each as above with `from` the earlier page. `hops` is the number of links and is there only when a path was found. With no path, `nodes` and `edges` are empty and a warning says why. `resolvedFrom` and `resolvedAliases` are keyed `page` and `to`, each present only for a name that was an alias, date or namespace leaf, or a page that has aliases. Every name of a page counts as that page, so the path starts from all the names of `page` and ends at any name of `to`. The walk goes through journal pages like any other page, and among paths of the same length takes the one through pages that are not journals, then the one with more references.
 
-What the warning says next depends on M:
-- M of 500 or fewer: `howToFetchAll` says to set `limit` to M (or higher), and that returns all M
-- M above 500 and `limit` below 500: it says to set `limit` to 500 (the maximum) to get 500 of M, which is **500 of M, not all**. `hasMore` is true even so
-- A raise past about 200 blocks adds "A result this large may be saved to a file by the host instead of shown; the server can't tell" to `howToFetchAll`: the raise still gets those blocks, but the result may not be shown to you, so prefer a narrower query when M is that large.
-- `limit` already at 500 (or a larger value that was clamped, which the message names): no `howToFetchAll` and `hasMore` is false. No other parameter narrows the query ("No other parameter narrows this query"), so the warning is the signal that the list is partial; say so instead of reporting a count from it
-
-Other warnings (`frontier_truncated`, `same_topic`) are separate and can appear alongside it; `warnings` holds them all.
-
-**Size:** the entries are full blocks (there is no `slim_results` here), about 215 characters each when the content is one short line, so `limit=50` is about 11,000 characters, `limit=200` about 43,000, `limit=230` about 50,000 and `limit=500` over 100,000. Real blocks carry more fields, so read these as floors. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB (see `context-efficiency.md` section 7), so treat a `limit` above about 200 as likely to come back saved (rounded down for that reason). `connected-within` is the same size per block, nested ones included (about 33,000 characters for 168 blocks on made-up pages), so `limit` is also its size bound.
-
-**Relationship type:**
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `connected-within` | Both pages' blocks, when a path of N hops or fewer links A and B (no path or distance is returned; find a bridge page with `get_concept_network`). Two names of one page (the same name twice, or a page and its alias) are not a connection: no results and a `same_topic` warning | "TypeScript" and "GraphQL" linked within 3 hops |
+**Warnings:**
+- `network_truncated` (the network): the caps dropped pages. `howToFetchAll` names a raise of `max_nodes` or `max_fanout`, and only when the larger network is estimated to fit the 30,000-character result. Otherwise the warning says what was cut and how to narrow the walk (lower `max_depth`, or start from a more specific page), and `hasMore` is false. At the maximums it says so
+- `result_size_truncated` (the network): the result was cut to 30,000 characters, the deepest pages first and the root always kept. No parameter raises this limit, so narrow the walk. `truncated` is true and `network_truncated`, if there is one, no longer offers a raise
+- `no_path_within` (the path): no path within the depth reached. When one more hop could find one, `howToFetchAll` says to set `max_depth` one higher (up to 3). When the walk reached every page it could, or `max_depth` is at its maximum of 3 (a larger request is capped, and the message says so), nothing reads on and `hasMore` is false
+- `same_page` (the path): the two names are one page (the same name twice, or a page and its alias), so there is no walk
+- `frontier_truncated` (the path): a hop reached more than 500 pages and expanded only the lowest ids, so "no path" may be a false negative. A path that was found is always real
+- `links_unavailable`: LogSeq gave no answer for a hop, so the walk stopped there. It is not "no path" and not "no links": retry
 
 **Use when:**
-- Finding connections between topics
-- Understanding relationships
-- Semantic proximity queries
+- Seeing the pages around a page: hubs and leaves, how central the topic is
+- Asking how two pages connect, and through which pages
+- Discovering bridge pages: they are the middle nodes of the path
 
-**Example:**
+**Examples:**
+```json tool=logseq_explore_network
+{ "page": "Machine Learning", "max_depth": 2 }
 ```
-logseq_search_by_relationship("TypeScript", "GraphQL", "connected-within", max_distance=3)
+```json tool=logseq_explore_network
+{ "page": "TypeScript", "to": "GraphQL", "max_depth": 3 }
 ```
+
+**Performance:** The network costs the page's resolver query, one alias query when the page has an alias link, and one query per hop (3 calls for depth 2). The path costs the resolver query for each page (run together), one alias query for both pages when either has an alias link, and one query per hop, ending at the first hop that reaches `to`: 3 calls for a page one link away. It reads no page, so it returns no blocks: use `explore_context` or `find_blocks` with `links_to` for the blocks that link the pages.
 
 ---
 
@@ -389,7 +358,7 @@ Track how a concept appears and evolves over time.
 - Journal vs. non-journal distinction
 - Chronologically sorted
 
-**A cut result:** `timeline` is cut to `max_entries` mentions, oldest first with undated (non-journal) mentions last, so the cut drops undated mentions first and then the newest dated ones. The meta fields are inside the result object (no second block, as for `search_by_relationship`): `warnings` and `hasMore` appear when a warning applies, and `totals: { mentions }`, the count before the cut, only with a cut. The `entries_truncated` warning says "Showing N of M mentions (oldest first, undated last; the timeline ends at <day>)", and what it says next:
+**A cut result:** `timeline` is cut to `max_entries` mentions, oldest first with undated (non-journal) mentions last, so the cut drops undated mentions first and then the newest dated ones. The meta fields are inside the result object (no second block, as for `explore_network`): `warnings` and `hasMore` appear when a warning applies, and `totals: { mentions }`, the count before the cut, only with a cut. The `entries_truncated` warning says "Showing N of M mentions (oldest first, undated last; the timeline ends at <day>)", and what it says next:
 - M of 500 or fewer: `howToFetchAll` says to set `max_entries` to M (or higher)
 - M above 500 and `max_entries` below 500: set it to 500 (the maximum) to get 500 of M, not all
 - A raise past about 200 mentions adds a large-result note to `howToFetchAll` ("A result this large may be saved to a file by the host instead of shown; the server can't tell")
@@ -454,11 +423,11 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 |----------|-------------|
 | "What pages do I have?" | `find_pages` |
 | "What do I know about X?" | `explore_context` (once per page) |
-| "Show me everything connected to X" | `get_concept_network` + `explore_context` |
+| "Show me everything connected to X" | `explore_network` + `explore_context` |
 | "How did X evolve over time?" | `get_concept_evolution` |
 | "What was I doing last week?" | `query_by_date_range` |
 | "Find blocks about A that link B" | `find_blocks` (`page` A with `links_to` B) |
-| "Are A and B connected?" | `search_by_relationship` (`connected-within`) |
+| "How are A and B connected?" | `explore_network` (`page` A, `to` B) |
 | "What are my TODOs?" | `find_blocks` (`text` "TODO", and `property` `status`) |
 | "When did I mention X?" | `get_concept_evolution` (without grouping) |
 | "What links to X?" | `explore_context` (its `references`) |
@@ -480,11 +449,11 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 
 **Discovering connections:**
 - `explore_context` (pages linking to this one, and the blocks that do)
-- `get_concept_network` (full network visualization)
+- `explore_network` (the pages around a page, as nodes and edges)
 
 **Relationship-based search:**
 - `find_blocks` with `page` and `links_to` (blocks on a page that link other pages, or blocks that link every one of 1 to 5 pages)
-- `search_by_relationship` (are two pages connected within N hops, and both pages' blocks if so)
+- `explore_network` with `to` (the shortest path of links between two pages, if there is one within N hops)
 
 **Time-based analysis:**
 - `get_concept_evolution` (track concept over time)
@@ -504,9 +473,9 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 - One call for complete context, with the references ranked and paged
 - Best for deep dives, one page per call
 
-**`get_concept_network`:**
-- Full graph in one call
-- Shows all connections at once
+**`explore_network`:**
+- The pages around a page, or the path to a second one, in one call
+- Shows all connections at once, within its caps
 - Best for visualization
 
 ### Multi-Call Workflows (When Needed)
@@ -542,19 +511,19 @@ find_blocks with property and value (for precise matches)
 |------|--------------------------|--------------|-------------------|-----------------------|
 | `find_blocks` (with `page` and `links_to` too) | `limit` (100, 500), `offset` | `results_truncated`, `result_size_truncated` | second content block, always (`totals.matches` even when uncut) | newest first (highest block id) |
 | `explore_context` | `max_blocks` (50), `max_related_pages` (10), `max_references` (20, no maximum), `references_offset` | `blocks_truncated`, `related_pages_truncated`, `references_truncated`, `result_size_truncated` | the result object itself; `totals.blocks`, `totals.relatedPages`, `totals.references` | blocks in page order; references ranked by linking blocks, most first (ties by page name), paged with `references_offset`; related pages in LogSeq's order |
-| `search_by_relationship` | `limit` (50, 500) | `results_truncated` | the result object itself; `totals.blocks` | document order over both pages' blocks, nested ones counted, topic A's page first |
+| `explore_network` (the network) | `max_nodes` (50, 500), `max_fanout` (15, 100), `max_depth` (2, 3) | `network_truncated`, `result_size_truncated` | the result object itself; `truncated` | the pages nearest the root; the deepest are cut first, and the root is always kept |
 | `get_concept_evolution` | `max_entries` (100, 500) | `entries_truncated` | the result object itself; `totals.mentions` only with a cut | oldest first, undated mentions last |
 | `query_by_date_range` | `max_blocks` (200, 1000) | `blocks_truncated` | the result object itself; `totals.blocks`, `totals.days` | oldest day first |
 
-The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `find_pages`, `find_blocks` and the references of `explore_context` with their `offset` and `references_offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `find_blocks` scales the block estimate when a hit comes back larger, and offers a raise only up to what fits its 30,000-character result: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `explore_context`, `get_concept_evolution` and `search_by_relationship` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved.
+The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `find_pages`, `find_blocks` and the references of `explore_context` with their `offset` and `references_offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `find_blocks` scales the block estimate when a hit comes back larger, and offers a raise only up to what fits its 30,000-character result: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `explore_context` and `get_concept_evolution` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved. `explore_network` is the one that measures its result: it offers a raise of `max_nodes` or `max_fanout` only when the larger network is estimated to fit 30,000 characters, and says how to narrow the walk otherwise.
 
-**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). The tools that return lists or trees (`find_blocks`, `find_pages`, `get_page`, `get_block` with `include_children`, `get_concept_evolution`, `get_concept_network`, `query_by_date_range`, `search_by_relationship`, `explore_context`, `get_current` and `check_links`) cut a result to 30,000 characters first, whole entries from the tail, and say so with a `result_size_truncated` warning. A result passes 30,000 characters only when one entry does (a lone oversized block is returned whole) or when the part that is never cut does (the `find_pages` `names` answers, the `check_links` failures, the open page and focused block of `get_current`), and the warning then says even those are over that size. A `limit` at the maximum is usually cut, so narrow the query or lower the cap rather than raising it.
+**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). The tools that return lists or trees (`find_blocks`, `find_pages`, `get_page`, `get_block` with `include_children`, `get_concept_evolution`, `explore_network`, `query_by_date_range`, `explore_context`, `get_current` and `check_links`) cut a result to 30,000 characters first, whole entries from the tail, and say so with a `result_size_truncated` warning. A result passes 30,000 characters only when one entry does (a lone oversized block is returned whole) or when the part that is never cut does (the `find_pages` `names` answers, the `check_links` failures, the open page and focused block of `get_current`), and the warning then says even those are over that size. A `limit` at the maximum is usually cut, so narrow the query or lower the cap rather than raising it.
 
 ### Tool Priority
 
 1. Prefer `explore_context` over manual aggregation, and one call per page over several searches
 2. Use `find_blocks` with `page` and `links_to` instead of filtering results manually
-3. Use `get_concept_network` for full graph (not sequential backlink queries)
+3. Use `explore_network` for the pages around a page, or the path between two (not sequential backlink queries)
 
 ### Common Patterns
 
@@ -562,7 +531,7 @@ The warning's `howToFetchAll` never points past a maximum. At the maximum there 
 
 **Research:** Start with `find_blocks`, then `get_page`, then `explore_context`
 
-**Graph exploration:** Use `get_concept_network` + `explore_context` together
+**Graph exploration:** Use `explore_network` + `explore_context` together
 
 **Temporal analysis:** Use `get_concept_evolution` with grouping for patterns
 
