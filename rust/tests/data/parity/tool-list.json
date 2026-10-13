@@ -105,7 +105,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); property + value (exact; any one value of a multi-value property); period on journals (start_date + end_date, last_n days or preset). Pages by limit (max 500) and offset: check hasMore.\n\n**Can't find:** synonyms or stems, ranged values, or link structure (logseq_search_by_relationship).",
+    "description": "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). Pages by limit (max 500) and offset: check hasMore.\n\n**Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_search_by_relationship).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -115,6 +115,25 @@
             "string",
             "null"
           ]
+        },
+        "page": {
+          "description": "Only blocks on this page and its aliases (page name, alias or ISO date)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "links_to": {
+          "description": "Only blocks that link to every one of these pages, under any of their names: [[x]], #x and #[[x]] count, plain text does not (1 to 5 page names, aliases or ISO dates)",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 5
         },
         "property": {
           "description": "Block property to match (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent). Needs value",
@@ -130,7 +149,8 @@
               "type": "string"
             },
             {
-              "type": "number"
+              "type": "number",
+              "format": "double"
             },
             {
               "type": "boolean"
@@ -139,15 +159,27 @@
         },
         "start_date": {
           "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
         },
         "end_date": {
           "description": "End date in YYYYMMDD format (e.g., 20251120). Needs start_date",
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
         },
         "last_n": {
           "description": "Only blocks on journal pages in the last N calendar days, today included (whole number, 1+)",
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
           "minimum": 1
         },
         "preset": {

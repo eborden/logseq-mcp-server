@@ -2,10 +2,14 @@
 //! literal substring of the block's content, `property` with `value` an exact property value, and a period
 //! (`start_date` with `end_date`, `last_n` or `preset`) limits the search to the blocks on the journal pages of those
 //! days (#491; the two tools it replaces, `search_blocks` and `query_by_property`, each had one of the first two).
+//! `page` limits it to the blocks on one page and `links_to` to the blocks that link to every one of 1 to 5 pages,
+//! each followed through its alias group (#492; the `references` mode of `search_by_relationship` was both).
 //!
 //! Calls: 1 (the search query, whatever the filters), or 2 with `include_context` (one batched lookup of the pages the
 //! returned blocks sit on, and none when no block has a page id; a `null` answer to it is a
-//! `context_unavailable` warning, not blocks with no context, BR-0011). The match runs inside LogSeq
+//! `context_unavailable` warning, not blocks with no context, BR-0011). Naming pages adds the calls that find them
+//! first (`scope.rs`): one resolver query per distinct name, then one alias-group query for all of them, or none when
+//! no page has an alias link. The match runs inside LogSeq
 //! (`re-pattern` / `re-find` over the text with its metacharacters escaped; `:block/properties` for the property),
 //! results are sorted here, newest first (highest block id), and cut to `offset` and `limit`, since Datalog here has no
 //! `:limit`.
@@ -23,6 +27,7 @@
 
 mod period;
 mod queries;
+pub mod scope;
 mod tips;
 mod wire;
 
@@ -51,6 +56,7 @@ use crate::truncation::{CappedTruncation, Paging, SizeCut, blocks_inline_max, ca
 
 use self::period::{Period, resolve_period};
 use self::queries::Match;
+use self::scope::{Notes, Scope, check_names, resolve_scope};
 use self::tips::{Others, find_tips};
 
 pub const NAME: &str = "logseq_find_blocks";
@@ -71,8 +77,8 @@ const COUNT_CUT: &str = "results_truncated";
 const NARROWER: &str = "Narrow the filters to see the rest.";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); property + value (exact; any one value of a multi-value property); period on journals (start_date + end_date, last_n days or preset). Pages by limit (max 500) and offset: check hasMore.\n\n\
-**Can't find:** synonyms or stems, ranged values, or link structure (logseq_search_by_relationship).";
+const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). Pages by limit (max 500) and offset: check hasMore.\n\n\
+**Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_search_by_relationship).";
 
 fn default_limit() -> u64 {
     DEFAULT_FIND_LIMIT
@@ -88,6 +94,11 @@ fn default_slim_results() -> bool {
 pub struct Args {
     /// Text to find in block content (case-insensitive, literal)
     pub text: Option<String>,
+    /// Only blocks on this page and its aliases (page name, alias or ISO date)
+    pub page: Option<String>,
+    /// Only blocks that link to every one of these pages, under any of their names: [[x]], #x and #[[x]] count, plain text does not (1 to 5 page names, aliases or ISO dates)
+    #[schemars(length(min = 1, max = 5))]
+    pub links_to: Option<Vec<String>>,
     /// Block property to match (letters, digits, "-" and "_"; createdAt and created-at are equivalent). Needs value
     pub property: Option<String>,
     /// Exact value of the property. A multi-value property matches if any one value equals it. Needs property
@@ -132,13 +143,17 @@ pub struct Filters {
     pub property: Option<PropertyFilter>,
     /// The days whose journal pages the blocks must be on
     pub period: Option<Period>,
+    /// The `page` and the `links_to` pages, once resolved ([`resolve_scope`]). Empty until [`Filters::scoped`] sets it
+    pub scope: Scope,
 }
 
 impl Filters {
     /// The filters the arguments name, with `today` as the day a `last_n` or a preset counts from. A `property` without
-    /// a `value` (or the reverse), a key LogSeq can't store, a period chosen in no way or in several, and a call with
-    /// no filter at all are an `InvalidParameter`, refused before any LogSeq call.
+    /// a `value` (or the reverse), a key LogSeq can't store, a period chosen in no way or in several, a blank page
+    /// name, and a call with no filter at all are an `InvalidParameter`, refused before any LogSeq call. The pages
+    /// are not resolved yet: that takes calls ([`Filters::scoped`]), and a call that is refused makes none.
     pub fn from_args(args: &Args, today: CalendarDate) -> Result<Filters, InvalidParameter> {
+        check_names(args.page.as_deref(), args.links_to.as_deref())?;
         let property = property_filter(args.property.as_deref(), args.value.as_ref())?;
         let selection = Selection {
             start_date: args.start_date.map(|day| day.0),
@@ -146,45 +161,70 @@ impl Filters {
             last_n: args.last_n.map(saturate),
             preset: args.preset,
         };
-        Filters::assemble(args.text.as_deref(), property, resolve_period(selection, today)?)
+        let names_a_page = args.page.is_some() || args.links_to.is_some();
+        Filters::assemble(args.text.as_deref(), property, resolve_period(selection, today)?, names_a_page)
     }
 
     /// The filters of a search with no period, from the arguments that name them ([`Filters::from_args`] checks the
     /// same things for a call).
     pub fn parse(text: Option<&str>, property: Option<&str>, value: Option<&Scalar>) -> Result<Filters, InvalidParameter> {
-        Filters::assemble(text, property_filter(property, value)?, None)
+        Filters::assemble(text, property_filter(property, value)?, None, false)
     }
 
-    fn assemble(text: Option<&str>, property: Option<PropertyFilter>, period: Option<Period>) -> Result<Filters, InvalidParameter> {
+    /// `names_a_page`: the call has a `page` or `links_to`, which are filters of their own (resolved later).
+    fn assemble(text: Option<&str>, property: Option<PropertyFilter>, period: Option<Period>, names_a_page: bool) -> Result<Filters, InvalidParameter> {
         let sent_empty = text == Some("");
         let text = text.filter(|text| !text.is_empty()).map(str::to_owned);
-        if text.is_none() && property.is_none() && period.is_none() {
+        if text.is_none() && property.is_none() && period.is_none() && !names_a_page {
             return Err(InvalidParameter {
                 param: "filters".to_owned(),
                 // a model that sent `text: ""` should learn why that was nothing
                 value: if sent_empty { "none given: text is empty, so it filters nothing" } else { "none given" }.to_owned(),
-                expected: "At least one of: text, property with value, or a period (start_date with end_date, last_n or preset)".to_owned(),
-                example: Some("text: \"importer\", or property: \"status\" with value: \"doing\", or last_n: 7".to_owned()),
+                expected: "At least one of: text, page, links_to, property with value, or a period (start_date with end_date, last_n or preset)".to_owned(),
+                example: Some("text: \"importer\", or links_to: [\"alice\"], or property: \"status\" with value: \"doing\", or last_n: 7".to_owned()),
             });
         }
-        Ok(Filters { text, property, period })
+        Ok(Filters { text, property, period, scope: Scope::default() })
+    }
+
+    /// These filters with the pages of the call resolved.
+    pub fn scoped(self, scope: Scope) -> Filters {
+        Filters { scope, ..self }
     }
 
     /// The filters besides `text`, as the tip for a miss names them.
     fn others(&self) -> Others {
-        Others { property: self.property.is_some(), period: self.period.is_some() }
+        Others {
+            property: self.property.is_some(),
+            period: self.period.is_some(),
+            page: self.scope.page.is_some(),
+            links_to: !self.scope.links_to.is_empty(),
+        }
     }
 
     fn matching(&self) -> Match<'_> {
-        Match { text: self.text.as_deref(), property: self.property.as_ref(), period: self.period }
+        Match {
+            text: self.text.as_deref(),
+            page: self.scope.page.as_ref().map(|page| page.ids.as_slice()),
+            links_to: self.scope.links_to.iter().map(|group| group.ids.as_slice()).collect(),
+            property: self.property.as_ref(),
+            period: self.period,
+        }
     }
 
-    /// What the blocks are said to be when the search was not answered: "contain "x"", "have the property "k"", "sit on
-    /// journal pages from 20250101 to 20250107", or the ones that were asked for, joined by "and".
+    /// What the blocks are said to be when the search was not answered: "contain "x"", "sit on the page "p"", "link to
+    /// "a"", "have the property "k"", "sit on journal pages from 20250101 to 20250107", or the ones that were asked
+    /// for, joined by "and".
     fn describe(&self) -> String {
         let mut parts = Vec::new();
         if let Some(text) = &self.text {
             parts.push(format!("contain {}", json!(text)));
+        }
+        if let Some(page) = &self.scope.page {
+            parts.push(format!("sit on the page {}", json!(page.asked)));
+        }
+        for group in &self.scope.links_to {
+            parts.push(format!("link to {}", json!(group.asked)));
         }
         if let Some(filter) = &self.property {
             parts.push(format!("have the property {}", json!(filter.key.as_str())));
@@ -208,6 +248,9 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let args = parse_args::<Args>(arguments.as_ref())?;
     let filters = Filters::from_args(&args, clock.today())?;
+    // The pages, resolved after every argument is checked, so a refusal makes no call
+    let scope = resolve_scope(client, args.page.as_deref(), args.links_to.as_deref().unwrap_or_default()).await?;
+    let filters = filters.scoped(scope);
     let text = filters.text.as_deref();
     let searched = search(client, &filters, args.limit, args.offset, args.include_context, args.slim_results).await?.with_raise(tips_enabled, text);
     let (results, meta) = fit_to_budget(&searched, tips_enabled, text);
@@ -243,6 +286,8 @@ struct Searched {
     plain: Vec<Value>,
     /// The filters besides `text`, for the tip of a miss
     others: Others,
+    /// What resolving the pages of the call found: which names were not exact, the groups searched, the alias warnings
+    notes: Notes,
     /// What the warning of a `limit` cut says about raising it, once measured ([`Searched::with_raise`])
     raise: Raise,
 }
@@ -281,11 +326,13 @@ impl Searched {
     /// the hits against every match from `offset`, so it replaces the count cap's warning: that one would offer a larger
     /// `limit`, which returns the same first hits cut the same way (BR-0006). Its `howToFetchAll` is the next page.
     fn warnings(&self, cut: Option<SizeCutTo>) -> Vec<ResultWarning> {
+        // What was said about the pages comes first: it is about how the request was read, before what came back
+        let mut warnings = self.notes.warnings.clone();
         if let Some(asked) = &self.unavailable_for {
-            return vec![search_unavailable(asked)];
+            warnings.push(search_unavailable(asked));
+            return warnings;
         }
         let shown = cut.map_or(self.results.len(), |cut| cut.kept);
-        let mut warnings = Vec::new();
         match cut {
             Some(SizeCutTo { kept, oversize }) => warnings.push(size_truncation_warning(SizeCut {
                 what: &self.what(),
@@ -373,6 +420,7 @@ impl Searched {
             unavailable_for: None,
             plain: Vec::new(),
             others: self.others,
+            notes: self.notes.clone(),
             raise: Raise::Offer { limit: reachable, exact: !self.include_context },
         };
         let most = match fit(reachable, 1, |hits| at_limit(hits).size_with(tips_enabled, text, hits)) {
@@ -423,9 +471,15 @@ impl Searched {
         let sent = &self.results[..cut.map_or(self.results.len(), |cut| cut.kept)];
         // No tip for a search LogSeq did not answer: "No match" would say what the warning says it can't
         let tips = if tips_enabled && self.unavailable_for.is_none() { find_tips(text, self.others, sent, Some(self.total)) } else { Vec::new() };
-        let mut meta = serde_json::to_value(self.meta(cut)).expect("a result meta serializes");
+        // BR-0013: how the pages were read (`resolvedFrom`, `resolvedAliases`) first, then what must not be missed
+        // (`hasMore`, `warnings`, `totals`), then the tips
+        let mut meta = Map::new();
+        meta.extend(self.notes.resolved_from_value().map(|from| ("resolvedFrom".to_owned(), from)));
+        meta.extend(self.notes.resolved_aliases_value().map(|aliases| ("resolvedAliases".to_owned(), aliases)));
+        let Value::Object(counted) = serde_json::to_value(self.meta(cut)).expect("a result meta serializes") else { unreachable!("a result meta is an object") };
+        meta.extend(counted);
         if !tips.is_empty() {
-            meta.as_object_mut().expect("a result meta is an object").insert("tips".into(), json!(tips));
+            meta.insert("tips".into(), json!(tips));
         }
         (serde_json::to_string(sent).expect("results serialize"), json!({ "meta": meta }).to_string())
     }
@@ -624,7 +678,7 @@ async fn find(client: &LogseqClient, filters: &Filters) -> Result<Option<Vec<Val
 /// The blocks whose content holds `text`, newest first and not cut, or `None` when LogSeq answers `null`. One call.
 /// `get_context_for_query`'s keyword search reads these itself and does the cutting.
 pub async fn blocks_containing(client: &LogseqClient, text: &str) -> Result<Option<Vec<Value>>, ToolError> {
-    find(client, &Filters { text: Some(text.to_owned()), property: None, period: None }).await
+    find(client, &Filters { text: Some(text.to_owned()), property: None, period: None, scope: Scope::default() }).await
 }
 
 /// `blocks` as full results with `context` (page, references, tags) added from one batched page
@@ -682,6 +736,7 @@ async fn search(
             unavailable_for: Some(filters.describe()),
             plain: Vec::new(),
             others: filters.others(),
+            notes: filters.scope.notes.clone(),
             raise: Raise::Unchecked,
         });
     };
@@ -707,7 +762,7 @@ async fn search(
     } else {
         matches.iter().chain(&beyond).map(|block| if slim_results { slim_result(block, None) } else { full_result(block, None) }).collect()
     };
-    Ok(Searched { results, total, offset, limit, include_context, slim_results, context_missing, unavailable_for: None, plain, others: filters.others(), raise: Raise::Unchecked })
+    Ok(Searched { results, total, offset, limit, include_context, slim_results, context_missing, unavailable_for: None, plain, others: filters.others(), notes: filters.scope.notes.clone(), raise: Raise::Unchecked })
 }
 
 #[cfg(test)]
@@ -766,7 +821,7 @@ mod tests {
     }
 
     fn searched(results: Vec<Value>, total: usize) -> Searched {
-        Searched { results, total, offset: 0, limit: 100, include_context: false, slim_results: true, context_missing: false, unavailable_for: None, plain: Vec::new(), others: Others::default(), raise: Raise::Unchecked }
+        Searched { results, total, offset: 0, limit: 100, include_context: false, slim_results: true, context_missing: false, unavailable_for: None, plain: Vec::new(), others: Others::default(), notes: Notes::default(), raise: Raise::Unchecked }
     }
 
     /// A slim hit whose content is `length` characters.
@@ -1114,6 +1169,14 @@ mod tests {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "Text to find in block content (case-insensitive, literal)"},
+                "page": {"type": "string", "description": "Only blocks on this page and its aliases (page name, alias or ISO date)"},
+                "links_to": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "description": "Only blocks that link to every one of these pages, under any of their names: [[x]], #x and #[[x]] count, plain text does not (1 to 5 page names, aliases or ISO dates)"
+                },
                 "property": {"type": "string", "description": "Block property to match (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent). Needs value"},
                 "value": {"anyOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}], "description": "Exact value of the property. A multi-value property matches if any one value equals it. Needs property"},
                 "start_date": {"type": "number", "description": "Start date in YYYYMMDD format (e.g., 20251115). Needs end_date"},
@@ -1152,6 +1215,8 @@ mod tests {
             defaults,
             Args {
                 text: None,
+                page: None,
+                links_to: None,
                 property: None,
                 value: None,
                 start_date: None,
@@ -1192,6 +1257,8 @@ mod tests {
         use crate::args::testing::{Takes, sweep};
         let base = json!({"text": "x"});
         sweep::<Args>(json!({}), "text", Takes::Text, false);
+        sweep::<Args>(json!({}), "page", Takes::Text, false);
+        sweep::<Args>(json!({}), "links_to", Takes::List(scope::MAX_LINKS_TO), false);
         sweep::<Args>(json!({}), "property", Takes::Text, false);
         sweep::<Args>(json!({}), "value", Takes::Scalar, false);
         sweep::<Args>(base.clone(), "start_date", Takes::Date, false);
@@ -1219,8 +1286,8 @@ mod tests {
 
     #[test]
     fn a_call_with_no_filter_is_refused_and_says_what_a_filter_is() {
-        let refusal = "Invalid parameter 'filters': none given\n\nExpected: At least one of: text, property with value, or a period (start_date with end_date, last_n or preset)\n\
-                       Example: text: \"importer\", or property: \"status\" with value: \"doing\", or last_n: 7";
+        let refusal = "Invalid parameter 'filters': none given\n\nExpected: At least one of: text, page, links_to, property with value, or a period (start_date with end_date, last_n or preset)\n\
+                       Example: text: \"importer\", or links_to: [\"alice\"], or property: \"status\" with value: \"doing\", or last_n: 7";
         assert_eq!(filters(None, None, None).unwrap_err(), refusal);
         assert_eq!(from_arguments(json!({"limit": 3})).unwrap_err(), refusal);
         // an empty text is no filter, and the refusal says the text was empty
@@ -1283,5 +1350,65 @@ mod tests {
         let period = from_arguments(json!({"text": "x", "start_date": 20250101, "end_date": 20250107})).unwrap();
         assert_eq!(period.describe(), r#"contain "x" and sit on journal pages from 20250101 to 20250107"#);
         assert!(search_unavailable(&text.describe()).message.starts_with(r#"LogSeq returned no answer when looking up blocks that contain "a \"b\"" (possibly"#));
+    }
+
+    fn group(asked: &str, ids: &[i64]) -> scope::Group {
+        scope::Group { asked: asked.to_owned(), ids: ids.iter().map(|&id| crate::edn::PageId::new(id).unwrap()).collect() }
+    }
+
+    #[test]
+    fn a_page_or_a_list_of_links_is_a_filter_of_its_own() {
+        for arguments in [json!({"page": "Atlas"}), json!({"links_to": ["Alice"]}), json!({"page": "Atlas", "links_to": ["Alice", "Bob"]})] {
+            assert!(from_arguments(arguments.clone()).is_ok(), "{arguments}");
+        }
+        // blank names are refused before any call, the page first, and `text: ""` beside a page is still no text
+        assert!(from_arguments(json!({"page": " "})).unwrap_err().starts_with("Invalid parameter 'page': \" \""));
+        assert!(from_arguments(json!({"links_to": ["Alice", ""]})).unwrap_err().starts_with("Invalid parameter 'links_to': \"\""));
+        assert_eq!(from_arguments(json!({"text": "", "page": "Atlas"})).unwrap().text, None);
+        // the bounds of the list are the argument parser's, with the words every list has
+        assert_eq!(
+            parse_args::<Args>(json!({"links_to": []}).as_object()).unwrap_err().to_string(),
+            "Invalid parameter 'links_to': []\n\nExpected: at least 1 item\nExample: links_to: [\"...\"]"
+        );
+        assert!(parse_args::<Args>(json!({"links_to": ["a", "b", "c", "d", "e", "f"]}).as_object()).unwrap_err().to_string().contains("at most 5 items"));
+    }
+
+    #[test]
+    fn the_pages_are_in_what_a_search_that_got_no_answer_says_it_asked_for() {
+        let scope = Scope { page: Some(group("Atlas", &[1])), links_to: vec![group("alice", &[2]), group("Bob \"b\"", &[3])], notes: Notes::default() };
+        let filters = Filters::parse(Some("x"), None, None).unwrap().scoped(scope);
+        assert_eq!(filters.describe(), r#"contain "x" and sit on the page "Atlas" and link to "alice" and link to "Bob \"b\"""#);
+        let others = filters.others();
+        assert!(others.page && others.links_to && !others.property && !others.period);
+        // what the query is matched against is the ids of the groups, in the order asked
+        let wanted = filters.matching();
+        assert_eq!(wanted.page.map(|ids| ids.len()), Some(1));
+        assert_eq!(wanted.links_to.iter().map(|ids| ids[0].get()).collect::<Vec<_>>(), [2, 3]);
+    }
+
+    #[test]
+    fn how_the_pages_were_read_leads_the_meta_and_the_alias_warnings_lead_the_warnings() {
+        let notes = Notes {
+            resolved_from: vec![scope::ResolvedFrom { name: "al".into(), matched_by: crate::errors::MatchedBy::Alias, resolved_to: "Alice".into() }],
+            resolved_aliases: vec![("Alice".into(), vec!["Al".into(), "Alice".into()])],
+            warnings: vec![ResultWarning::new("alias_lookup_unavailable", "m".into())],
+        };
+        let found = Searched { notes, ..searched(vec![hit(10)], 1) };
+        let texts = found.texts(true, None, None);
+        let meta = meta_of(&texts);
+        let keys: Vec<&str> = meta.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "tips"]);
+        assert_eq!(meta["resolvedFrom"], json!([{"name": "al", "matchedBy": "alias", "resolvedTo": "Alice"}]));
+        assert_eq!(meta["resolvedAliases"], json!({"Alice": ["Al", "Alice"]}));
+        assert_eq!(meta["warnings"][0]["code"], "alias_lookup_unavailable");
+        // no pages named: the meta is the one it always was
+        let plain = meta_of(&searched(vec![hit(10)], 1).texts(false, None, None));
+        assert_eq!(plain.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["hasMore", "warnings", "totals"]);
+        // a search that was not answered keeps the alias warning beside its own, and claims no total
+        let mut unanswered = Searched { notes: found.notes.clone(), ..searched(Vec::new(), 0) };
+        unanswered.unavailable_for = Some("x".into());
+        let meta = meta_of(&unanswered.texts(true, None, None));
+        assert_eq!(meta["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["alias_lookup_unavailable", "search_unavailable"]);
+        assert_eq!(meta["totals"], json!({}));
     }
 }
