@@ -8,7 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::errors::ToolError;
-use logseq_mcp_server::tools::explore_network::{Options, explore_network};
+use logseq_mcp_server::tools::explore_network::{HUB_LINKS, Options, explore_network};
 use serde_json::{Value, json};
 
 const DATALOG: &str = "logseq.DB.datascriptQuery";
@@ -184,6 +184,191 @@ async fn a_null_answer_for_the_aliased_first_depth_is_a_links_unavailable_warnin
     assert_eq!(codes(&network.warnings), ["links_unavailable"]);
     assert!(network.warnings[0].message.contains("depth 1"), "{}", network.warnings[0].message);
     assert!(!network.has_more() && !network.truncated);
+}
+
+/// A `degree` row: how many pages the connected page links.
+fn degree(source: i64, connected: i64, name: &str, pages: i64) -> Value {
+    json!([source, connected, name.to_lowercase(), name, false, "degree", pages])
+}
+
+/// The names of a network's pages, in the order they joined.
+fn names(network: &logseq_mcp_server::tools::explore_network::Network) -> Vec<&str> {
+    network.nodes.iter().map(|node| node.name.as_str()).collect()
+}
+
+/// The depth-1 answer of a root with a roll-up and some topical pages. A roll-up links more pages than `HUB_LINKS`, and
+/// its two blocks that link the root out-rank a topical page's one.
+fn roll_up_rows(roll_up_links: i64) -> Value {
+    json!([
+        row(10, 20, "Roll Up", false, "inbound", 2),
+        degree(10, 20, "Roll Up", roll_up_links),
+        row(10, 21, "Topic A", false, "outbound", 1),
+        degree(10, 21, "Topic A", 3),
+        row(10, 22, "Topic B", false, "outbound", 1),
+        degree(10, 22, "Topic B", 4),
+    ])
+}
+
+#[tokio::test]
+async fn a_roll_up_ranks_after_the_topical_pages_and_is_a_leaf_that_a_warning_names() {
+    let logseq = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 1), json!([])]).await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
+
+    // the same calls as without the rule: the resolver and one query per depth, and the degrees came with the first
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG, DATALOG]);
+    assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B", "Roll Up"]);
+    // depth 2 walks through the topical pages and not through the roll-up (ids 21 and 22 only)
+    assert!(args_of(&logseq, 2)[0].as_str().unwrap().contains("[(ground [21 22]) [?source ...]]"), "{}", args_of(&logseq, 2)[0]);
+    // the links of the pair still make an edge
+    assert_eq!(network.edges.len(), 3);
+    assert!(!network.truncated);
+    assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded"]);
+    let warning = &network.warnings[0];
+    assert!(warning.message.contains("Roll Up (31 pages)"), "{}", warning.message);
+    // 4 pages are kept and the roll-up links 31: walking through it brings up to 15 more
+    assert!(warning.how_to_fetch_all.as_deref().is_some_and(|how| how.starts_with("Set expand_journals to true")));
+    assert!(network.has_more());
+}
+
+#[tokio::test]
+async fn a_page_at_the_threshold_is_walked_through_and_one_over_it_is_not() {
+    for (links, walked) in [(HUB_LINKS - 1, true), (HUB_LINKS, true), (HUB_LINKS + 1, false)] {
+        let logseq = mock_logseq(vec![root(), roll_up_rows(links), json!([])]).await;
+        let network = explore_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
+        let second = args_of(&logseq, 2)[0].as_str().unwrap().to_owned();
+        assert_eq!(second.contains("[(ground [20 21 22]) [?source ...]]"), walked, "{links} links: {second}");
+        assert_eq!(network.warnings.is_empty(), walked, "{links} links");
+        // the roll-up ranks first among the pages that tie, so the pages are in order of their counts
+        let expected = if walked { ["Project Atlas", "Roll Up", "Topic A", "Topic B"] } else { ["Project Atlas", "Topic A", "Topic B", "Roll Up"] };
+        assert_eq!(names(&network), expected, "{links} links");
+    }
+}
+
+#[tokio::test]
+async fn a_roll_up_is_walked_through_with_expand_journals_but_still_ranks_last() {
+    let logseq = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 20), json!([])]).await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, Options { expand_journals: true, ..Options::default() }).await.unwrap();
+    assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B", "Roll Up"]);
+    assert!(args_of(&logseq, 2)[0].as_str().unwrap().contains("[(ground [21 22 20]) [?source ...]]"), "{}", args_of(&logseq, 2)[0]);
+    assert!(network.warnings.is_empty());
+}
+
+#[tokio::test]
+async fn a_roll_up_at_the_last_depth_is_shown_and_needs_no_warning_since_nothing_is_walked_there() {
+    let logseq = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 1)]).await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 1, Options::default()).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 2);
+    assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B", "Roll Up"]);
+    assert!(network.warnings.is_empty() && !network.has_more());
+}
+
+#[tokio::test]
+async fn a_cap_that_bites_drops_the_roll_up_first_and_the_warning_is_the_cap_s() {
+    let logseq = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 1), json!([])]).await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, Options { max_fanout: 2, ..Options::default() }).await.unwrap();
+    assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B"]);
+    assert!(network.truncated);
+    assert_eq!(codes(&network.warnings), ["network_truncated"]);
+}
+
+#[tokio::test]
+async fn walking_through_a_roll_up_is_not_offered_when_it_would_bring_no_page() {
+    // the node budget is full: a roll-up that is walked through would add nothing
+    let full = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 1), json!([])]).await;
+    let network = explore_network(&client(&full), "Project Atlas", 2, Options { max_nodes: 4, ..Options::default() }).await.unwrap();
+    assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded"]);
+    assert!(network.warnings[0].how_to_fetch_all.is_none() && !network.has_more() && !network.truncated);
+
+    // the network already holds more pages than the roll-up links: all of them are in it
+    let mut rows: Vec<Value> = (0..40).flat_map(|n| [row(10, 100 + n, &format!("Topic {n}"), false, "outbound", 1), degree(10, 100 + n, &format!("Topic {n}"), 2)]).collect();
+    rows.extend([row(10, 20, "Roll Up", false, "inbound", 2), degree(10, 20, "Roll Up", HUB_LINKS + 1)]);
+    let held = mock_logseq(vec![root(), json!(rows), json!([])]).await;
+    let network = explore_network(&client(&held), "Project Atlas", 2, Options { max_fanout: 100, ..Options::default() }).await.unwrap();
+    assert_eq!(network.nodes.len(), 42);
+    assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded"]);
+    assert!(network.warnings[0].how_to_fetch_all.is_none() && !network.has_more());
+}
+
+#[tokio::test]
+async fn walking_through_a_roll_up_is_not_offered_when_the_walk_did_not_get_to_the_end() {
+    let logseq = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 1), json!(null)]).await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
+    assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded", "links_unavailable"]);
+    assert!(network.warnings[0].how_to_fetch_all.is_none() && !network.has_more());
+}
+
+#[tokio::test]
+async fn a_page_with_aliases_asks_for_the_degrees_in_its_grouped_query_too() {
+    let logseq = mock_logseq(vec![
+        json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]]),
+        json!([[10, {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}], [10, {"id": 11, "name": "atlas", "original-name": "Atlas"}]]),
+        roll_up_rows(HUB_LINKS + 1),
+    ])
+    .await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 1, Options::default()).await.unwrap();
+    let grouped = args_of(&logseq, 2)[0].as_str().unwrap().to_owned();
+    assert!(grouped.contains("[(ground \"degree\") ?rel-type]"), "{grouped}");
+    assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B", "Roll Up"]);
+}
+
+/// A depth-1 answer with the text of one block in a last cell, as the query that asks for snippets answers it.
+fn snippet_row(source: i64, connected: i64, name: &str, rel: &str, count: i64, text: &str) -> Value {
+    json!([source, connected, name.to_lowercase(), name, false, rel, count, text])
+}
+
+#[tokio::test]
+async fn snippets_come_with_the_first_depth_and_cost_no_call() {
+    let logseq = mock_logseq(vec![
+        root(),
+        json!([
+            // a page the root links and is linked by: the root's own block is the one shown
+            snippet_row(10, 20, "Bob", "outbound", 1, "Met Bob at the fair\nsecond line"),
+            snippet_row(10, 20, "Bob", "inbound", 1, "Notes from Bob"),
+            degree_with_snippet(10, 20, "Bob", 2),
+            // a page that only links the root: its block is shown
+            snippet_row(10, 21, "Carol", "inbound", 1, &"x".repeat(100)),
+            // a page whose block has no text
+            snippet_row(10, 22, "Dave", "outbound", 1, ""),
+        ]),
+        json!([row(20, 23, "Erin", false, "outbound", 1)]),
+    ])
+    .await;
+    let options = Options { with_snippets: true, ..Options::default() };
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, options).await.unwrap();
+
+    // one resolver query and one query per depth, as without snippets
+    assert_eq!(methods(&logseq).len(), 3);
+    let first = args_of(&logseq, 1)[0].as_str().unwrap().to_owned();
+    assert!(first.contains("(min ?content)"), "{first}");
+    // the second depth asks for no text, and its rows have no extra cell
+    assert!(!args_of(&logseq, 2)[0].as_str().unwrap().contains("?content"));
+    let edges = network.to_value()["edges"].clone();
+    let snippet = |to: i64| edges.as_array().unwrap().iter().find(|edge| edge["to"] == to).and_then(|edge| edge["snippet"].as_str().map(str::to_owned));
+    assert_eq!(snippet(20).as_deref(), Some("Met Bob at the fair"));
+    assert_eq!(snippet(21), Some(format!("{}...", "x".repeat(77))));
+    assert_eq!(snippet(22), None, "an empty block says nothing");
+    // an edge past the first depth has none
+    assert_eq!(snippet(23), None);
+    assert!(network.warnings.is_empty());
+}
+
+fn degree_with_snippet(source: i64, connected: i64, name: &str, pages: i64) -> Value {
+    snippet_row(source, connected, name, "degree", pages, "")
+}
+
+#[tokio::test]
+async fn without_with_snippets_no_edge_has_a_snippet_and_the_query_asks_for_no_text() {
+    let logseq = mock_logseq(vec![root(), json!([row(10, 20, "Bob", false, "outbound", 3)])]).await;
+    let network = explore_network(&client(&logseq), "Project Atlas", 1, Options::default()).await.unwrap();
+    assert!(!args_of(&logseq, 1)[0].as_str().unwrap().contains("?content"));
+    assert!(network.to_value()["edges"][0].get("snippet").is_none());
+}
+
+#[tokio::test]
+async fn a_snippet_row_with_no_text_cell_is_a_response_error_not_an_empty_snippet() {
+    let logseq = mock_logseq(vec![root(), json!([row(10, 20, "Bob", false, "outbound", 3)])]).await;
+    let error = explore_network(&client(&logseq), "Project Atlas", 1, Options { with_snippets: true, ..Options::default() }).await.unwrap_err();
+    assert!(matches!(error, ToolError::Response(_)), "{error}");
 }
 
 #[tokio::test]
