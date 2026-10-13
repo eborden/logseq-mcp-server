@@ -192,27 +192,27 @@ User: "Show me everything connected to [[Machine Learning]]"
 
 **For Journal Queries:**
 ```
-logseq_query_by_date_range(start_date, end_date, search_term?)
+logseq_explore_timeline(start_date=..., end_date=...)   # or last_n, or preset
 ```
 - Use YYYYMMDD format (20251101 = Nov 1, 2025)
-- Optional search term filters blocks
+- To filter a period by a word, use `logseq_find_blocks` with `text` and the same period
 - Returns entries sorted chronologically
 
 **For Concept Evolution:**
 ```
-logseq_get_concept_evolution(concept, start_date?, end_date?, group_by?)
+logseq_explore_timeline(page=..., group_by=...)   # a period (both dates) is optional
 ```
 - Tracks how concept appears over time
 - Supports grouping: 'day', 'week', 'month'
 - Shows temporal patterns and gaps
 - Sorted chronologically
-- Distinguishes journal vs. non-journal pages
+- Distinguishes journal vs. non-journal pages (a period leaves the non-journal ones out)
 
 **Example:**
 ```
 User: "How has my thinking on [[Rust]] evolved this year?"
 
-1. logseq_get_concept_evolution("Rust", 20250101, 20251231, group_by='month')
+1. logseq_explore_timeline(page="Rust", start_date=20250101, end_date=20251231, group_by="month")
    → Timeline with monthly grouping
 
 2. Present:
@@ -316,11 +316,11 @@ User: "Give me full context on [[Q4 Planning]]"
 | Missing tasks | Check BOTH markers and properties |
 | Incomplete context | Use `explore_context` |
 | Poor search results | Pick the pages and call `explore_context` for each, or use `find_blocks` for the words |
-| Date queries unclear | Use `query_by_date_range` with YYYYMMDD format |
+| Date queries unclear | Use `explore_timeline` with YYYYMMDD format |
 | Lost connections | Use `explore_network` with max_depth=2, or with `to` for how two pages connect |
 | Manual aggregation | Use `explore_context` instead of multiple queries |
 | Shallow exploration | Use `explore_network` to see the pages around a page |
-| Time patterns unclear | Use `get_concept_evolution` with grouping |
+| Time patterns unclear | Use `explore_timeline` with `page` and `group_by` |
 
 ## Performance Tips
 
@@ -415,13 +415,13 @@ User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]
 ```
 User: "How has my approach to testing changed this year?"
 
-1. logseq_get_concept_evolution("Testing", 20250101, 20251231, group_by='month')
+1. logseq_explore_timeline(page="Testing", start_date=20250101, end_date=20251231, group_by="month")
    → 67 mentions across 11 months
 
-2. logseq_query_by_date_range(20250101, 20250331, "testing")
+2. logseq_find_blocks(text="testing", start_date=20250101, end_date=20250331)
    → Q1 entries
 
-3. logseq_query_by_date_range(20251001, 20251231, "testing")
+3. logseq_find_blocks(text="testing", start_date=20251001, end_date=20251231)
    → Q4 entries (current)
 
 4. Present:

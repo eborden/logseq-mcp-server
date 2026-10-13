@@ -71,7 +71,7 @@ Every summary page carries these sections in this order. `## Unresolved` and `##
 
 ```markdown
 tags:: [[<Granularity> Summary]], <constituent page links; weekly day links in the graph's journal title format>
-summary-source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top <name> <count>/<days> | <name> <count>/<days>
+summary-source:: explore_timeline YYYYMMDD-YYYYMMDD; days N; blocks N; top <name> <count>/<days> | <name> <count>/<days>
 
 - **<Period>**: [1-2 sentence gist]
 - ## Signals
@@ -83,7 +83,7 @@ summary-source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top <n
 	- [non-work items worth remembering, if any]
 ```
 
-The `summary-source::` line records the roll-up (`summary.totalDays`, `summary.totalBlocks`, the first five `summary.topConcepts`) of the `logseq_query_by_date_range` call the page was built from. It has no `[[brackets]]`, so it adds no links to the graph. The top concepts are `name count/days` entries separated by ` | `, so a name may hold `/` or `,`. `top none` means the query returned no `topConcepts`. On an update in place, replace the page's existing `summary-source::` line with this run's roll-up. The sub-skill says which call to copy it from.
+The `summary-source::` line records the roll-up (`summary.totalDays`, `summary.totalBlocks`, the first five `summary.topConcepts`) of the `logseq_explore_timeline` call the page was built from. It has no `[[brackets]]`, so it adds no links to the graph. The top concepts are `name count/days` entries separated by ` | `, so a name may hold `/` or `,`. `top none` means the query returned no `topConcepts`. On an update in place, replace the page's existing `summary-source::` line with this run's roll-up. The sub-skill says which call to copy it from.
 
 ## Formatting
 
@@ -121,7 +121,7 @@ A format with a slash, as in `EEE, MM/dd/yyyy` above, also has a cost: LogSeq re
 
 ## Reading the Period: Query First, Files Only After a Failure
 
-Build every summary from `logseq_query_by_date_range`, after loading the tools and calling `logseq_get_graph` (Step 0 of the sub-skill). A journal file is a fallback for a tool call that has actually failed: you made the call and it returned an error, or the server wouldn't connect. These are not failures: the tool is deferred and needs a search to load, a search took a call, or files looked easier. Load the tool.
+Build every summary from `logseq_explore_timeline`, after loading the tools and calling `logseq_get_graph` (Step 0 of the sub-skill). A journal file is a fallback for a tool call that has actually failed: you made the call and it returned an error, or the server wouldn't connect. These are not failures: the tool is deferred and needs a search to load, a search took a call, or files looked easier. Load the tool.
 
 One read is allowed besides the query: the single `:journal/page-title-format` key in `<graph>/logseq/config.edn`, for the day-link format (see "Journal Day Links"). It is a config file, not a journal, and it can come after the period query. It is not a licence to open `journals/` or `pages/`.
 

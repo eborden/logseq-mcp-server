@@ -14,7 +14,7 @@
 #
 # Source line (read-only, no graph access): the page must carry a `summary-source::` property that records
 # the roll-up of the period query it was built from, as
-#   summary-source:: query_by_date_range 20250106-20250110; days 5; blocks 250; top Name 12/4 | Name 9/2
+#   summary-source:: explore_timeline 20250106-20250110; days 5; blocks 250; top Name 12/4 | Name 9/2
 # (days and blocks from summary.totalDays and summary.totalBlocks; top from the first five of
 # summary.topConcepts as "name count/days" separated by " | ", or "top none" when the query returned no
 # topConcepts). A page with no such line was not built from the query, and fails. The range must lie inside
@@ -139,11 +139,11 @@ day_number() {
 }
 
 source_line=$(grep -m1 -E '^summary-source::' "$FILE" || true)
-source_re='^summary-source:: query_by_date_range ([0-9]{8})-([0-9]{8}); days ([0-9]{1,4}); blocks ([0-9]{1,7}); top (.+)$'
+source_re='^summary-source:: explore_timeline ([0-9]{8})-([0-9]{8}); days ([0-9]{1,4}); blocks ([0-9]{1,7}); top (.+)$'
 top_entry_re='^[^|]+ [0-9]+/[0-9]+$'
-src_hint="Run logseq_query_by_date_range for the period and record its summary on a summary-source:: line under the tags line (Step 6 of the sub-skill)."
+src_hint="Run logseq_explore_timeline for the period and record its summary on a summary-source:: line under the tags line (Step 6 of the sub-skill)."
 if [[ -z "$source_line" ]]; then
-  echo "FAIL: no 'summary-source::' line, so the page was not built from logseq_query_by_date_range. $src_hint"
+  echo "FAIL: no 'summary-source::' line, so the page was not built from logseq_explore_timeline. $src_hint"
   fail=1
 elif [[ "$source_line" =~ ^summary-source::\ files(\;|$) ]]; then
   if [[ ! "$source_line" =~ ^summary-source::\ files\;\ +[^\ ] ]]; then
@@ -159,7 +159,7 @@ elif [[ "$source_line" =~ ^summary-source::\ files(\;|$) ]]; then
 elif [[ "$source_line" =~ $source_re ]]; then
   src_start=${BASH_REMATCH[1]}; src_end=${BASH_REMATCH[2]}
   src_days=$((10#${BASH_REMATCH[3]})); src_blocks=$((10#${BASH_REMATCH[4]})); src_top=${BASH_REMATCH[5]}
-  printf 'source: query_by_date_range %s-%s, %s days, %s blocks\n' "$src_start" "$src_end" "$src_days" "$src_blocks"
+  printf 'source: explore_timeline %s-%s, %s days, %s blocks\n' "$src_start" "$src_end" "$src_days" "$src_blocks"
   (( src_days >= 1 && src_blocks >= 1 )) || { echo "FAIL: the source line records no days or no blocks; there is nothing to summarize"; fail=1; }
   start_n=$(day_number "$src_start"); end_n=$(day_number "$src_end")
   if (( start_n < 0 || end_n < 0 )); then
@@ -198,7 +198,7 @@ elif [[ "$source_line" =~ $source_re ]]; then
     [[ "${src_start:0:6}" == "$want" && "${src_end:0:6}" == "$want" ]] || { echo "FAIL: source range $src_start-$src_end is not inside the month $want"; fail=1; }
   fi
 else
-  echo "FAIL: malformed summary-source line. Expected 'summary-source:: query_by_date_range YYYYMMDD-YYYYMMDD; days N; blocks N; top none' or 'top Name 12/4 | Name 9/2'. $src_hint"
+  echo "FAIL: malformed summary-source line. Expected 'summary-source:: explore_timeline YYYYMMDD-YYYYMMDD; days N; blocks N; top none' or 'top Name 12/4 | Name 9/2'. $src_hint"
   fail=1
 fi
 

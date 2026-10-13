@@ -1,6 +1,6 @@
 # LogSeq MCP Tools Reference
 
-Complete documentation for the LogSeq MCP tools organized by category. The server has 11 tools; `logseq_get_graph` (graph name and path) is the one not covered below.
+Complete documentation for the LogSeq MCP tools organized by category. The server has 10 tools; `logseq_get_graph` (graph name and path) is the one not covered below.
 
 ## Tool Categories Overview
 
@@ -9,7 +9,7 @@ Complete documentation for the LogSeq MCP tools organized by category. The serve
 | Basic Tools | 4 tools | Core search (blocks by text, property or period), retrieval, and page names |
 | Graph Exploration | 1 tool | How a page connects: the pages linked to it, or the shortest link path to a second page |
 | Context Building | 2 tools | Comprehensive context for one page with its references, and what the user is looking at |
-| Temporal Query | 2 tools | Time-based analysis and journal queries |
+| Temporal Query | 1 tool | A page or a period over time, and journal queries |
 | Linking | 1 tool | Checking a `[[link]]` pass before it is reported done |
 
 ## Basic Tools (4 tools)
@@ -23,7 +23,7 @@ Find blocks, newest first, by text, by the page they are on, by the pages they l
 - `page` (optional): Keep the blocks written on this page. A page name (case-insensitive), an alias, or an ISO date (`2025-01-01`) for a journal, resolved like every page name; the blocks of every name of the page count, so `atlas` and `project atlas` give the same blocks when one is an alias of the other. A page that does not exist is an error with the closest names, and a name that matches several pages comes back as a list of candidates; no search is made in either case
 - `links_to` (optional): A list of 1 to 5 pages; keep the blocks that link to **every one** of them. A block links to a page when its `[[link]]`, `#tag` or `#[[multi word tag]]` points at it, in any casing, under any name of the page (its aliases are followed), so a block that only says the name in plain words does not match: `text` "bob" finds those, `links_to` ["bob"] does not. Only the block's own links count, not links inherited from the blocks above it. Each name resolves like `page`
 - `property` and `value` (optional, together): Keep the blocks whose property holds the value. The key is as stored (`created-by`) or camelCase (`createdBy`); the value is an exact string (a number or boolean as its text: `3`, `true`), with no wildcard; a multi-value property matches on any one of its values. A page property comes back as a hit on the page's first block. A task's `SCHEDULED:` and `DEADLINE:` lines are not properties: find them with `text`
-- `start_date` and `end_date` (together), `last_n` or `preset` (optional, exactly one way of choosing the period): Keep the blocks on journal pages in the period, and no block of any other page. `start_date` and `end_date` are YYYYMMDD, both days included; `last_n` is the last N **calendar days** ending today, today included (not the N most recent journals that exist, as for `query_by_date_range`); `preset` is `today`, `yesterday`, `this_week`, `last_week`, `this_month`, `last_month`, `this_year` or `year_to_date` (weeks run Monday to Sunday, in local time)
+- `start_date` and `end_date` (together), `last_n` or `preset` (optional, exactly one way of choosing the period): Keep the blocks on journal pages in the period, and no block of any other page. `start_date` and `end_date` are YYYYMMDD, both days included; `last_n` is the last N **calendar days** ending today, today included (not the N most recent journals that exist); `preset` is `today`, `yesterday`, `this_week`, `last_week`, `this_month`, `last_month`, `this_year` or `year_to_date` (weeks run Monday to Sunday, in local time)
 - `limit` (optional): Most blocks returned (default: **100**, max: **500**; a larger value is clamped to 500, not rejected). **Recommend a small `limit` such as 5 to explore**, since the default returns up to 100 blocks
 - `offset` (optional): Matches to skip, newest first, to fetch the next page (default: 0). The list shifts if the graph changes between calls
 - `include_context` (optional): Give each block a `context` with its page, `references` and `tags` (default: false, **keep false unless needed**). It costs one more call
@@ -301,83 +301,63 @@ logseq_get_current()  # → then logseq_explore_context(page.originalName)
 
 ---
 
-## Temporal Query Tools (2 tools)
+## Temporal Query Tools (1 tool)
 
-### logseq_query_by_date_range
+### logseq_explore_timeline
 
-Query journal entries within a date range. **Preferred tool for time-bounded questions.**
+Explore a page or a period over time: blocks by journal day (or week, or month), with `summary.topConcepts`. **Preferred tool for time-bounded questions and for how a page evolved.**
 
-**Parameters:**
-- `start_date` (required): Start date in YYYYMMDD format (e.g., 20251101)
-- `end_date` (required): End date in YYYYMMDD format (e.g., 20251130)
-- `search_term` (optional): Filter blocks containing this term
-- `top_concepts_limit` (optional): Size of `summary.topConcepts`, the pages linked most in the range as `{ name, count, days }` (default 10, 0 omits it)
-- `include_content` (optional): `false` returns only per-day block counts and top-level snippets, without the blocks (default `true`)
-- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities. Entries carry `pageName`, so their blocks don't repeat it
-- `max_blocks` (optional): Most blocks returned across all days (default 200, max 1000; a larger value is clamped). Nested blocks count, except with `include_content=false`, where only the top-level blocks (the snippets) count. The oldest days are kept first, and `last_n` keeps the newest first. **Page at the default of 200 rather than raising it:** a result of about 50,000 characters or more is saved to a file by Claude Code and the model loses `summary`, `totals` and `warnings`, and a dense week at 1000 is about 150,000 characters (sizes and what to do: `context-efficiency.md` section 7)
+**Parameters** (at least one of `page` or a period is required, else `Invalid parameter 'page or period': none given`):
+- `page` (optional): A page name (case-insensitive), an alias or an ISO date. It follows the whole alias group: the page's own blocks and the blocks that link to it, under any of its names
+- `start_date` and `end_date` (together), `last_n` or `preset` (optional, exactly one way of choosing the period): `start_date` and `end_date` are YYYYMMDD, both days included, real dates from 1900 to 2100, with the start not after the end; a lone one is refused. `last_n` is the last N **calendar days** ending today, today included, whether or not each has a journal (not the N most recent journals that exist); `preset` is `today`, `yesterday`, `this_week`, `last_week`, `this_month`, `last_month`, `this_year` or `year_to_date` (weeks run Monday to Sunday). **A period leaves out every block with no journal day**, so with a `page` it drops the page's own blocks and its mentions on other non-journal pages, unless the page is itself a journal page
+- `group_by` (optional): `day` (default), `week` (key like `2025-W02`; week 1 is the first 7 days of the year, not an ISO week) or `month` (key `202501`). It joins the days into one entry per period, after the caps, with or without `page`
+- `top_concepts_limit` (optional): Size of `summary.topConcepts`, the pages linked most as `{ name, count, days }` (default 10, 0 omits it). With a `page` it counts the pages that the blocks linking to the page also link (the page, its aliases, journal pages and built-in task tags are left out; the page's own blocks are not counted)
+- `include_content` (optional): `false` returns only a `blockCount` and first-line `snippets` per entry, without the blocks (default `true`)
+- `slim_results` (optional): Slim blocks by default (uuid, content, pageName, marker, properties, tags, pageRefs; no numeric ids or page objects). Pass `false` for full entities. Slim day entries carry `pageName`, so their blocks don't repeat it
+- `resolve_refs` (optional): Adds `resolvedContent` and `resolvedRefs` for `((uuid))` refs and embeds (default `false`; +0 to +2 calls)
+- `max_blocks` (optional): Most blocks returned across all entries (default 200, max 1000; a larger value is clamped). Nested blocks count, except with `include_content=false`, where only the top-level blocks (the snippets) count. **Page at the default of 200 rather than raising it:** a result of about 50,000 characters or more is saved to a file by Claude Code and the model loses `summary`, `totals` and `warnings`, and a dense week at 1000 is about 150,000 characters (sizes and what to do: `context-efficiency.md` section 7)
 
-**A cut result:** when the range holds more than `max_blocks`, the result keeps the first blocks and says so:
-- A `blocks_truncated` warning gives what was kept out of how many (in `totals: { blocks, days }`, range-wide and counted in the same unit as the cap) and where the entries end (`the entries end at <day>`), then `howToFetchAll` leads with a paging call: again with the same `end_date` and `max_blocks` and the `start_date` of the first day not shown, or, when the cut fell inside a day, that day itself (it repeats its kept blocks). It never suggests raising `max_blocks` for a range of days, so there is nothing to ignore. `hasMore` stays true at the maximum of 1000 too, as long as a paged call reaches more. Two cases say something else. If the first day alone fills the cap, the warning names that day's block count and says to query the day alone at it, with a note that the result may be saved to a file and the advice to read the day in pieces with a `search_term` if it is. A day holding more than 1000 blocks can't be fetched whole by any call: the warning pages past it, or, with no later day, suggests `max_blocks` 1000 for that day (with the note) below the maximum and has no `howToFetchAll` at it, so `hasMore` is false there. Any `max_blocks` raise the warning does suggest (a cap of 0, or a last day over 1000 at a lower cap) carries the same note. Page with the warning's `start_date` at 200, and for a day too big to read whole use a lower cap or a `search_term` (`context-efficiency.md` section 7; the summary skills spell out the steps)
-- A kept block that lost some children has `childrenTruncated: true`: the children shown are not all of them, so fetch the block with `get_block` and `include_children` if they matter
-- `summary` (`totalDays`, `totalBlocks`, `topConcepts`) still covers every block found, so it describes the whole range even when `entries` stops early. `summary.totalBlocks` counts top-level blocks, while `totals.blocks` counts in the cap's unit (nested blocks too), so the two differ and neither is an error. `dateRange` stays the range you asked for
-- Below the cap none of this appears and the output is unchanged
+**Returns** (one shape for both modes; optional keys are absent when they have nothing to say): `page` (the name as typed), `resolvedFrom` and `resolvedAliases`, `dateRange` (`{ start, end }`: the period asked for, or with a `page` and no period the span of its dated blocks), `hasMore`, `warnings`, `totals`, `summary` (`totalDays`, `totalBlocks`, `topConcepts`) and `entries`. An entry is a journal day, `{ date: 20250106, pageName: "Jan 6th, 2025", blocks }` (`{ date, page, blocks }` with `slim_results=false`; `{ date, pageName, blockCount, snippets }` with `include_content=false`). With `group_by` week or month an entry is `{ period: "2025-W02", blocks }` and each slim block carries its own `pageName`. With a `page` and no period, the blocks on non-journal pages come last in one entry with `date: null`, each slim block carrying its `pageName`.
 
-**Context cost:** ~1-3k tokens for a week's worth of filtered results. Much cheaper than a broad `find_blocks`.
+**Order:** oldest day first. The exception is a period with no `page` and `last_n`, which lists the newest day first.
+
+**A cut result:** when more blocks match than `max_blocks`, the result keeps the first and says so:
+- A `blocks_truncated` warning gives what was kept out of how many (in `totals: { blocks, days }`, counted in the same unit as the cap), then `howToFetchAll` leads with a paging call: again with the `start_date` of the first day not shown, the same `end_date` (and the same `page`) and the same `max_blocks`, or, when the cut fell inside a day, that day itself (it repeats its kept blocks). With `last_n` and no `page` the days run newest first, so the call names the `start_date` and `end_date` that read the older days
+- If the first day alone fills the cap, the warning names that day's block count and offers to call again with `start_date` and `end_date` both set to that day and a higher `max_blocks`, **only when that day alone fits the 30,000-character budget**. A day that can't be read whole is read in pieces with `find_blocks` (`start_date` and `end_date` set to that day, with `limit` and `offset`)
+- A raise of `max_blocks` is offered only when the raised result would fit the budget. Otherwise there may be no `howToFetchAll` after a cut, `hasMore` is false and the warning says why
+- The mentions on non-journal pages (a `page` with no period) come after every dated day, and no date reaches them: if the cut falls among them, the only ways on are a `max_blocks` raise (when it fits) or `find_blocks` with `links_to`
+- The 30,000-character budget can cut as well: a `result_size_truncated` warning means whole blocks were dropped from the tail. After a size cut that follows a count cut, the `blocks_truncated` warning has no `howToFetchAll` and the `result_size_truncated` one names the call that reads on
+- A kept block that lost some children has `childrenTruncated: true`: fetch it with `get_block` and `include_children` if they matter
+- `summary` still covers every block found, so it describes the whole range even when `entries` stops early. `summary.totalBlocks` counts top-level blocks, while `totals.blocks` counts in the cap's unit (nested blocks too), so the two differ and neither is an error
+- Below the caps none of this appears and the output is unchanged
+
+**Other warnings:** `journals_unavailable` and `blocks_unavailable` (a period alone), `page_blocks_unavailable`, `page_unavailable` and `mentions_unavailable` (with a `page`) mean LogSeq answered null: the result is partial, never an empty one. `alias_set_truncated` and `alias_lookup_unavailable` mean the aliases are not all covered.
+
+**API calls:** a period alone makes 2 (1 when no journal is in range), whatever its length. A `page` makes 4 (5 with aliases); a period with it costs no call, since it is applied after the fetch. `resolve_refs` adds 0 to 2.
+
+**Context cost:** ~1-3k tokens for a week of a page's blocks. Much cheaper than a broad `find_blocks`.
 
 **Use when:**
-- User says "this week", "recently", "in November", etc.
+- User says "this week", "recently", "in November", etc. (a period alone)
+- "How did X evolve over time?" (a `page`, optionally with a period and `group_by`)
 - Journal entry queries
-- Time-bounded searches
 
 **Example:**
+```json tool=logseq_explore_timeline
+{"start_date": 20251201, "end_date": 20251208}
 ```
-logseq_query_by_date_range(20251201, 20251208, "Alice")  # This week's Alice mentions
-logseq_query_by_date_range(20251101, 20251130, "testing")  # November mentions of "testing"
+```json tool=logseq_explore_timeline
+{"page": "Rust", "group_by": "month"}
 ```
+```json tool=logseq_explore_timeline
+{"page": "Machine Learning", "start_date": 20250101, "end_date": 20251231, "group_by": "month", "include_content": false}
+```
+
+For a term inside a period, use `find_blocks` with `text` and the period. A `page` here is for a page name, not a word.
 
 **Date Format:** Always use YYYYMMDD (20251101 = November 1, 2025)
 
 **IMPORTANT:** If timeframe is ambiguous ("the X that Y sent"), ASK USER about recency before choosing between this tool and `find_blocks` with a period.
-
----
-
-### logseq_get_concept_evolution
-
-Track how a concept appears and evolves over time.
-
-**Parameters:**
-- `concept_name` (required): Page or topic name
-- `start_date` (optional): Start date in YYYYMMDD format
-- `end_date` (optional): End date in YYYYMMDD format
-- `group_by` (optional): Grouping level: 'day', 'week', 'month'
-- `max_entries` (optional): Most mentions kept in `timeline` (default: **100**, max: **500**; a larger value is clamped to 500, not rejected; a fraction is rejected). Dates narrow only dated mentions: a mention on a non-journal page has no date and passes every `start_date` and `end_date`, so no date range reaches it
-
-**Returns:**
-- Timeline of mentions
-- Temporal patterns and gaps
-- Journal vs. non-journal distinction
-- Chronologically sorted
-
-**A cut result:** `timeline` is cut to `max_entries` mentions, oldest first with undated (non-journal) mentions last, so the cut drops undated mentions first and then the newest dated ones. The meta fields are inside the result object (no second block, as for `explore_network`): `warnings` and `hasMore` appear when a warning applies, and `totals: { mentions }`, the count before the cut, only with a cut. The `entries_truncated` warning says "Showing N of M mentions (oldest first, undated last; the timeline ends at <day>)", and what it says next:
-- M of 500 or fewer: `howToFetchAll` says to set `max_entries` to M (or higher)
-- M above 500 and `max_entries` below 500: set it to 500 (the maximum) to get 500 of M, not all
-- A raise past about 200 mentions adds a large-result note to `howToFetchAll` ("A result this large may be saved to a file by the host instead of shown; the server can't tell")
-- `max_entries` already at 500: no `howToFetchAll`, so the warning is the signal that the list is partial
-- It also says what the dates can reach: when the cut fell among dated mentions it names the `start_date` to continue from (that day repeats its kept blocks); when it fell among the undated ones, narrowing the dates can't reach the rest
-- `summary` (`totalMentions` and the rest) still counts every mention found, so it can exceed what `timeline` holds, and `groupedTimeline` is built from the kept mentions only
-
-**Use when:**
-- "How did X evolve over time?"
-- Tracking concept development
-- Finding temporal patterns
-
-**Example:**
-```
-logseq_get_concept_evolution("Rust", 20250101, 20251231, group_by='month')
-logseq_get_concept_evolution("Machine Learning")  # All time
-```
-
-**Benefits:** See learning progression, identify gaps, understand engagement patterns.
 
 ---
 
@@ -424,12 +404,12 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 | "What pages do I have?" | `find_pages` |
 | "What do I know about X?" | `explore_context` (once per page) |
 | "Show me everything connected to X" | `explore_network` + `explore_context` |
-| "How did X evolve over time?" | `get_concept_evolution` |
-| "What was I doing last week?" | `query_by_date_range` |
+| "How did X evolve over time?" | `explore_timeline` (`page` X) |
+| "What was I doing last week?" | `explore_timeline` (`preset` `last_week`) |
 | "Find blocks about A that link B" | `find_blocks` (`page` A with `links_to` B) |
 | "How are A and B connected?" | `explore_network` (`page` A, `to` B) |
 | "What are my TODOs?" | `find_blocks` (`text` "TODO", and `property` `status`) |
-| "When did I mention X?" | `get_concept_evolution` (without grouping) |
+| "When did I mention X?" | `explore_timeline` (`page` X, no `group_by`) |
 | "What links to X?" | `explore_context` (its `references`) |
 | "Get full details on page X" | `explore_context` or `get_page` |
 
@@ -441,7 +421,7 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 **Structured queries:**
 - `find_blocks` with `property` and `value` (tasks, status, priorities)
 - `find_blocks` with a period (blocks from the last days or a named period)
-- `query_by_date_range` (journal entries by date)
+- `explore_timeline` with a period (journal entries by date)
 
 **Deep dives:**
 - `get_page` with `detail="full"` (full page content)
@@ -456,8 +436,8 @@ logseq_check_links(before="- met Alice about project atlas", after="- met [[Alic
 - `explore_network` with `to` (the shortest path of links between two pages, if there is one within N hops)
 
 **Time-based analysis:**
-- `get_concept_evolution` (track concept over time)
-- `query_by_date_range` (journal queries)
+- `explore_timeline` with `page` (track a page over time, with `group_by` for patterns)
+- `explore_timeline` with a period (journal queries)
 
 **Specific blocks:**
 - `get_block` (when you have a UUID)
@@ -512,12 +492,11 @@ find_blocks with property and value (for precise matches)
 | `find_blocks` (with `page` and `links_to` too) | `limit` (100, 500), `offset` | `results_truncated`, `result_size_truncated` | second content block, always (`totals.matches` even when uncut) | newest first (highest block id) |
 | `explore_context` | `max_blocks` (50), `max_related_pages` (10), `max_references` (20, no maximum), `references_offset` | `blocks_truncated`, `related_pages_truncated`, `references_truncated`, `result_size_truncated` | the result object itself; `totals.blocks`, `totals.relatedPages`, `totals.references` | blocks in page order; references ranked by linking blocks, most first (ties by page name), paged with `references_offset`; related pages in LogSeq's order |
 | `explore_network` (the network) | `max_nodes` (50, 500), `max_fanout` (15, 100), `max_depth` (2, 3) | `network_truncated`, `result_size_truncated` | the result object itself; `truncated` | the pages nearest the root; the deepest are cut first, and the root is always kept |
-| `get_concept_evolution` | `max_entries` (100, 500) | `entries_truncated` | the result object itself; `totals.mentions` only with a cut | oldest first, undated mentions last |
-| `query_by_date_range` | `max_blocks` (200, 1000) | `blocks_truncated` | the result object itself; `totals.blocks`, `totals.days` | oldest day first |
+| `explore_timeline` | `max_blocks` (200, 1000) | `blocks_truncated`, `result_size_truncated` | the result object itself; `totals.blocks`, `totals.days` | oldest day first (newest first for `last_n` with no `page`); with a `page`, non-journal blocks last |
 
-The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `query_by_date_range` leads with a call from the day where the entries end, and `find_pages`, `find_blocks` and the references of `explore_context` with their `offset` and `references_offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `find_blocks` scales the block estimate when a hit comes back larger, and offers a raise only up to what fits its 30,000-character result: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `explore_context` and `get_concept_evolution` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved. `explore_network` is the one that measures its result: it offers a raise of `max_nodes` or `max_fanout` only when the larger network is estimated to fit 30,000 characters, and says how to narrow the walk otherwise.
+The warning's `howToFetchAll` never points past a maximum. At the maximum there is no `howToFetchAll`, `hasMore` is false and the warning is the only signal, so say the list is partial. The exceptions are the tools that page: `explore_timeline` leads with a call from the day where the entries end, and `find_pages`, `find_blocks` and the references of `explore_context` with their `offset` and `references_offset`, so `hasMore` stays true at their maximum. Below it, a total above the maximum gets "set it to the maximum to get N of M", which is a bigger cut list, not all of them. A raise whose result may be too large to be shown carries the note "A result this large may be saved to a file by the host instead of shown; the server can't tell." That note is a hedge, not a size: it appears when the suggested value is past about 200 blocks (150 references, 500 related pages, 200 network nodes, 800 listed pages, or the pages whose blocks add up to 200). Those are sized from slim blocks with no context. `find_blocks` scales the block estimate when a hit comes back larger, and offers a raise only up to what fits its 30,000-character result: about 120 hits with `include_context=true`, about 125 with `slim_results=false`, about 65 with both. `explore_context` and `explore_timeline` use the slim estimate whatever their other options, so with long blocks the note can come later than the real limit. It means the raise is still the call that gets those items, but a narrower query may be shown where the raise is saved. `explore_network` is the one that measures its result: it offers a raise of `max_nodes` or `max_fanout` only when the larger network is estimated to fit 30,000 characters, and says how to narrow the walk otherwise.
 
-**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). The tools that return lists or trees (`find_blocks`, `find_pages`, `get_page`, `get_block` with `include_children`, `get_concept_evolution`, `explore_network`, `query_by_date_range`, `explore_context`, `get_current` and `check_links`) cut a result to 30,000 characters first, whole entries from the tail, and say so with a `result_size_truncated` warning. A result passes 30,000 characters only when one entry does (a lone oversized block is returned whole) or when the part that is never cut does (the `find_pages` `names` answers, the `check_links` failures, the open page and focused block of `get_current`), and the warning then says even those are over that size. A `limit` at the maximum is usually cut, so narrow the query or lower the cap rather than raising it.
+**Size:** Claude Code saves a tool result of about 50,000 characters or more to a file and shows the model only the first 2 KB (`context-efficiency.md` section 7). The tools that return lists or trees (`find_blocks`, `find_pages`, `get_page`, `get_block` with `include_children`, `explore_network`, `explore_timeline`, `explore_context`, `get_current` and `check_links`) cut a result to 30,000 characters first, whole entries from the tail, and say so with a `result_size_truncated` warning. A result passes 30,000 characters only when one entry does (a lone oversized block is returned whole) or when the part that is never cut does (the `find_pages` `names` answers, the `check_links` failures, the open page and focused block of `get_current`), and the warning then says even those are over that size. A `limit` at the maximum is usually cut, so narrow the query or lower the cap rather than raising it.
 
 ### Tool Priority
 
@@ -533,7 +512,7 @@ The warning's `howToFetchAll` never points past a maximum. At the maximum there 
 
 **Graph exploration:** Use `explore_network` + `explore_context` together
 
-**Temporal analysis:** Use `get_concept_evolution` with grouping for patterns
+**Temporal analysis:** Use `explore_timeline` with a `page` and `group_by` for patterns
 
 ---
 
@@ -553,12 +532,12 @@ All temporal queries use **YYYYMMDD format:**
 
 ## Summary
 
-11 MCP tools. The 10 below are organized into 5 categories; `logseq_get_graph` (graph name and path) is the 11th:
+10 MCP tools. The 9 below are organized into 5 categories; `logseq_get_graph` (graph name and path) is the 10th:
 
 1. **Basic Tools (4)** - Core search (text, property, period), retrieval, page names
 2. **Graph Exploration (1)** - How a page connects: its network, or the shortest path to a second page
 3. **Context Building (2)** - Comprehensive context for one page and current UI context
-4. **Temporal Query (2)** - Time-based analysis
+4. **Temporal Query (1)** - A page or a period over time
 5. **Linking (1)** - Checking a link pass
 
 **Key principle:** Start with the high-level tool (`explore_context`) and drill down with specific tools only when needed.
