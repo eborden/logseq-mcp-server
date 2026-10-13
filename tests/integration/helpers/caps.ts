@@ -7,9 +7,6 @@
 export const DEFAULT_SEARCH_LIMIT = 100;
 export const MAX_SEARCH_LIMIT = 500;
 
-export const DEFAULT_MAX_SEARCH_RESULTS = 20;
-export const MAX_SEARCH_RESULTS = 100;
-
 export const DEFAULT_FIND_PAGES_LIMIT = 200;
 export const MAX_FIND_PAGES_LIMIT = 1000;
 
@@ -18,11 +15,6 @@ export const MAX_ENTRIES = 500;
 
 export const DEFAULT_DATE_RANGE_MAX_BLOCKS = 200;
 export const MAX_DATE_RANGE_BLOCKS = 1000;
-
-export const DEFAULT_MAX_PAGES = 20;
-export const MAX_PAGES = 100;
-export const DEFAULT_MAX_BLOCKS_PER_PAGE = 10;
-export const MAX_BLOCKS_PER_PAGE = 50;
 
 export const DEFAULT_PROPERTY_LIMIT = 100;
 export const MAX_PROPERTY_LIMIT = 500;

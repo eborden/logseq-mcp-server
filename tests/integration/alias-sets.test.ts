@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { buildContextForTopic, findBlocksWithMeta, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, queryJournals, searchByRelationship } from './helpers/tools.js';
+import { exploreContext, findBlocksWithMeta, getConceptEvolution, getConceptNetwork, queryJournals, searchByRelationship } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -37,24 +37,24 @@ describe('alias-aware link following against the fixture graph', () => {
     }) as typeof client.callAPI;
   });
 
-  it('get_backlinks: the alias and the canonical name return the same blocks, from at most 3 calls', async () => {
-    const byName = await counted(() => getBacklinksWithMeta(client, target.canonical));
-    const byAlias = await counted(() => getBacklinksWithMeta(client, target.alias));
+  it('explore_context: the alias and the canonical name return the same references, from at most 4 calls', async () => {
+    const byName = await counted(() => exploreContext(client, target.canonical, { maxReferences: 100, maxRelatedPages: 100 }));
+    const byAlias = await counted(() => exploreContext(client, target.alias, { maxReferences: 100, maxRelatedPages: 100 }));
 
-    const ids = (r: typeof byName.result) =>
-      new Set((r.results ?? []).flatMap(([, blocks]) => blocks.map(b => b.id)));
+    const ids = (r: typeof byName.result) => new Set(r.references.map(reference => reference.block.id));
     // 24 blocks on 14 pages link project atlas or atlas
     expect(ids(byName.result).size).toBe(24);
-    expect(byName.result.results).toHaveLength(14);
+    expect(byName.result.relatedPages).toHaveLength(14);
     expect(sameSet(ids(byName.result), ids(byAlias.result))).toBe(true);
-    expect(byName.result.meta?.resolvedAliases).toEqual(ALIAS_GROUP);
-    expect(byAlias.result.meta?.resolvedAliases).toEqual(byName.result.meta?.resolvedAliases);
-    expect(byName.calls <= 3 && byAlias.calls <= 3).toBe(true); // resolver, alias group, references
+    expect(byName.result.references.map(reference => reference.block.id)).toEqual(byAlias.result.references.map(reference => reference.block.id));
+    expect(byName.result.resolvedAliases).toEqual(ALIAS_GROUP);
+    expect(byAlias.result.resolvedAliases).toEqual(byName.result.resolvedAliases);
+    expect(byName.calls <= 4 && byAlias.calls <= 4).toBe(true); // resolver, alias group, blocks, references
   });
 
-  it('get_backlinks includes every block that references the alias page itself', async () => {
-    const { results } = await getBacklinksWithMeta(client, target.canonical);
-    const found = new Set((results ?? []).flatMap(([, blocks]) => blocks.map(b => b.id)));
+  it('explore_context includes every block that references the alias page itself', async () => {
+    const { references } = await exploreContext(client, target.canonical, { maxReferences: 100 });
+    const found = new Set(references.map(reference => reference.block.id));
     const direct = await client.callAPI<any[]>('logseq.DB.datascriptQuery', [
       `[:find ?b :where [?a :block/name ${JSON.stringify(target.alias)}] [?b :block/refs ?a] [?b :block/page ?pg] (not [?pg :block/alias ?a])]`
     ]);
@@ -65,8 +65,8 @@ describe('alias-aware link following against the fixture graph', () => {
     expect(missing).toBe(0);
   });
 
-  it('get_backlinks: a source page carries the same keys as the Editor call gives it', async () => {
-    const { results } = await getBacklinksWithMeta(client, target.canonical);
+  it('explore_context: a source page carries the same keys as the Editor call gives it', async () => {
+    const { references } = await exploreContext(client, target.canonical, { maxReferences: 100 });
     const keysOf = (page: object) => Object.keys(page).sort().join(',');
     const editorKeys = new Map<number, string>();
     for (const name of [target.canonical, target.alias]) {
@@ -74,11 +74,10 @@ describe('alias-aware link following against the fixture graph', () => {
       for (const [page] of tuples) if (page?.id !== undefined) editorKeys.set(page.id, keysOf(page));
     }
 
-    const shared = (results ?? []).filter(([page]) => editorKeys.has(page!.id!));
-    expect(shared).toHaveLength(14);
-    const mismatched = shared.filter(([page, blocks]) =>
-      keysOf(page!) !== editorKeys.get(page!.id!) || blocks.some(b => keysOf(b.page as object) !== keysOf(page!))
-    ).length;
+    const sharedPages = new Map<number, object>();
+    for (const reference of references) if (editorKeys.has(reference.sourcePage.id)) sharedPages.set(reference.sourcePage.id, reference.sourcePage);
+    expect(sharedPages.size).toBe(14);
+    const mismatched = [...sharedPages].filter(([id, page]) => keysOf(page) !== editorKeys.get(id)).length;
     expect(mismatched).toBe(0);
   });
 
@@ -104,9 +103,9 @@ describe('alias-aware link following against the fixture graph', () => {
     expect(byName.calls <= 5 && byAlias.calls <= 5).toBe(true);
   });
 
-  it('build_context: either name yields the same references and blocks', async () => {
-    const byName = await buildContextForTopic(client, target.canonical);
-    const byAlias = await buildContextForTopic(client, target.alias);
+  it('explore_context: either name yields the same references and blocks', async () => {
+    const byName = await exploreContext(client, target.canonical);
+    const byAlias = await exploreContext(client, target.alias);
 
     const refIds = (c: typeof byName) => new Set(c.references.map(r => r.block.id));
     expect(sameSet(refIds(byName), refIds(byAlias))).toBe(true);
@@ -132,13 +131,13 @@ describe('alias-aware link following against the fixture graph', () => {
     const range = { limit: 500 };
     const byName = await findBlocksWithMeta(client, { linksTo: [target.canonical] }, range);
     const byAlias = await findBlocksWithMeta(client, { linksTo: [target.alias] }, range);
-    const backlinks = await getBacklinksWithMeta(client, target.canonical);
+    const context = await exploreContext(client, target.canonical, { maxReferences: 100 });
 
     const ids = (blocks: Array<{ id?: unknown }>) => new Set<number>(blocks.map(b => Number(b.id)));
     expect(sameSet(ids(byName.results), ids(byAlias.results))).toBe(true);
     // 19 blocks link project atlas or atlas directly. 17 are among the 24 backlinks (the other 7 sit under a linking
     // block and link only through it), and 2 are on project atlas itself, which are no backlinks of it
-    const listed = ids((backlinks.results ?? []).flatMap(([, blocks]) => blocks));
+    const listed = ids(context.references.map(reference => reference.block));
     expect(byName.results).toHaveLength(19);
     const own = byName.results.filter(b => !listed.has(Number(b.id)));
     expect(own).toHaveLength(2);
@@ -189,9 +188,9 @@ describe('alias-aware link following against the fixture graph', () => {
   });
 
   it('a page with no aliases is unchanged: no resolvedAliases, no extra calls', async () => {
-    const backlinks = await counted(() => getBacklinksWithMeta(client, plain));
-    expect(backlinks.result.meta).toBeNull();
-    expect(backlinks.calls).toBeLessThanOrEqual(2); // resolver (none for an exact page with a file) + references
+    const context = await counted(() => exploreContext(client, plain));
+    expect('resolvedAliases' in context.result).toBe(false);
+    expect(context.calls).toBeLessThanOrEqual(3); // resolver, blocks, references
 
     const evolution = await getConceptEvolution(client, plain);
     expect('resolvedAliases' in evolution).toBe(false);

@@ -36,7 +36,7 @@ The skeleton (#87) and its content:
 
 - #88: edge cases (aliases, namespaces, block refs and embeds, properties), journals, tags and tasks (done, see "Edge cases, journals, tags and tasks" below)
 - #89: a hub page with 100+ neighbours (done, see "The hub" below)
-- #61: a topic with a page of 12 linking blocks, for the per-page cap of `get_backlinks` (see "The crowded topic" below)
+- #61: a topic with a page of 12 linking blocks, for the ranking of the references of `explore_context` (see "The crowded topic" below)
 - #90: `npm run test:integration` runs against this graph only, with exact assertions (done; see `tests/integration/setup.md`)
 
 | Page | Exists to test |
@@ -170,7 +170,7 @@ non-journal page. The dates are all in the past, 2025.
 
 `hub central` has **120 neighbours** (non-journal pages that link it, or that it links), plus one
 journal that links it. It is the fixture for the caps and `hasMore`/`warnings` of
-`get_concept_network`, `build_context` and `get_backlinks`. The files are generated, then committed:
+`get_concept_network` and `explore_context`. The files are generated, then committed:
 
 ```bash
 npx tsx scripts/generate-hub-fixture.ts          # rewrite the files
@@ -214,8 +214,8 @@ Expected results, measured against a live instance (#118) with the code at the t
 | depth 2, same caps, `expandJournals` true | 192 nodes (+30 `journal-topic-*`) |
 | `get_concept_network` on `journal-topic-01`, depth 2, defaults | 2 nodes: itself and the journal (a leaf) |
 | same, `expand_journals` true | 17 nodes (the journal, then 15 of its other pages: `max_fanout` 15 bites), `truncated` true. Add `max_fanout` 100 for 32 nodes (the journal, 29 other topics, `hub central`), `truncated` false |
-| `build_context` on the hub | 50 of 71 blocks, 20 of 66 references, 10 of 61 related pages; totals `blocks` 71, `references` 66, `relatedPages` 61; `hasMore` true with `blocks_truncated`, `references_truncated` and `related_pages_truncated` |
-| `get_backlinks` on the hub | defaults: 20 of 61 source pages (a prefix of the full list), `pages_truncated`, `totals` `{ pages: 61, blocks: 66 }`, `hasMore` true. `max_pages` 61 or more (100 is the most): all 61 pages, 66 blocks, no `meta`. No page has more than 2 blocks, so `max_blocks_per_page` never bites here (see "The crowded topic") |
+| `explore_context` on the hub | 50 of 71 blocks, 20 of 66 references, 10 of 61 related pages; totals `blocks` 71, `references` 66, `relatedPages` 61; `hasMore` true with `blocks_truncated`, `references_truncated` and `related_pages_truncated`. The references are a prefix of the full ranking (see "Fixed by ranking") |
+| `explore_context` on the hub, `references_offset` 20, 40 and 60 | the next 20 of the 66 references, then 20, then the last 6: `references_truncated` says "Showing 20 of 46 references from offset 20" and names `references_offset` 40, and the last page has no `references_truncated`. At 66 or more no reference and no warning about them |
 | `get_page` on the hub, with children | 71 children |
 
 What is fixed and what is not. `selectCandidates` ranks non-journal pages first, then by references, then by
@@ -229,14 +229,13 @@ lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count
   whether `hub central` is among them. For these, assert only the node count, `truncated` and the
   `network_truncated` warning (#90). A test that needs a particular fringe or topic page present must use a case
   where the cap does not bite (the `Infinity` rows).
-- **Fixed by ranking (#178).** `get_backlinks` ranks source pages by linking blocks, most first, ties by lowercase page
-  name. The hub's 61 source pages come out as `neighbour-in-01..05` (2 blocks each), then the 56 single-block pages by
-  name: `jun 17th, 2024`, `neighbour-both-01..10`, `neighbour-in-06..50`. The default 20 are `neighbour-in-01..05`,
-  `jun 17th, 2024`, `neighbour-both-01..10` and `neighbour-in-06..09`. Tests may assert these names.
-- **Also depends on id order, outside the hub.** `get_context_for_query` on `[[Bob]]` and `[[Alice]]` keeps 5
-  related pages per topic, picked among ties, so how many the two share (and so `summary.totalPages`) changed
-  between two instance starts. Assert 5 per topic and count the distinct pages from the result.
-- **Not covered by the hub: `get_backlinks` `max_blocks_per_page` (#61).** No hub neighbour has more than 2 blocks that
+- **Fixed by ranking (#178, #493).** `explore_context` ranks its references by the blocks of their source page that link
+  the target, most first, ties by lowercase page name, the blocks of one page together. The hub's 61 source pages come
+  out as `neighbour-in-01..05` (2 blocks each), then the 56 single-block pages by name: `jun 17th, 2024`,
+  `neighbour-both-01..10`, `neighbour-in-06..50`. The default 20 references are `neighbour-in-01..05` (2 each),
+  `jun 17th, 2024` and `neighbour-both-01..09`. Tests may assert these names. The related pages are not ranked:
+  they keep LogSeq's order, which changes between instance starts.
+- **Not covered by the hub: a source page with many linking blocks (#61).** No hub neighbour has more than 2 blocks that
   link it, and giving one 11 would change the depth-1 ranking above. The crowded topic below covers it.
 
 Pages the hub fixture adds to the graph: 1 hub, 120 neighbours, 40 fringe, 30 topics and 1 journal,
@@ -244,7 +243,7 @@ Pages the hub fixture adds to the graph: 1 hub, 120 neighbours, 40 fringe, 30 to
 
 ## The crowded topic (#61)
 
-`popular topic` has **14 linking blocks on 2 source pages**, for `get_backlinks` `max_blocks_per_page`. It is separate
+`popular topic` has **14 linking blocks on 2 source pages**, for the ranking of the references of `explore_context`. It is separate
 from the hub so the hub's depth-1 ranking stays as documented. Both source pages hold nothing but linking blocks,
 written `Row N on [[popular topic]]`, and the target has no file.
 
@@ -254,10 +253,10 @@ written `Row N on [[popular topic]]`, and the target has no file.
 | `busy source` | `pages/busy source.md` | 12 blocks that link the target, more than the default of 10 per page, fewer than the maximum of 50 |
 | `light source` | `pages/light source.md` | 2 blocks that link the target, under every cap |
 
-`get_backlinks` on `popular topic`: 2 source pages, 14 blocks. At the defaults `busy source` keeps its first 10 blocks and
-`light source` keeps both, with one `page_blocks_truncated` warning, `totals` `{ pages: 2, blocks: 14 }`, `hasMore` true and
-`Set max_blocks_per_page to 12`. At `max_blocks_per_page` 12 or more the result is whole and there is no `meta`. `busy source`
-comes first, then `light source` (ranked by linking blocks, #178), at every `max_pages`; `max_pages` 1 keeps `busy source`.
+`explore_context` on `popular topic`: 14 references on 2 source pages. `busy source`'s 12 come first and then `light source`'s 2
+(ranked by linking blocks, #178), and the default `max_references` of 20 holds all 14, so there is no `references_truncated`.
+`max_references` 10 keeps the first 10 of `busy source`'s, with `references_offset` 10 for the last 2 of them and the 2 of
+`light source`.
 
 The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
 `find_blocks`' maximum of 500 matches. The fixture holds 494 blocks, 478 of them with an `e` (16 without: 2 older ones and

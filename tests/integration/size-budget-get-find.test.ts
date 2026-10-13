@@ -9,7 +9,7 @@ import { connectMcp } from './helpers/server-under-test.js';
  *
  * The fixture is small, so most tools are under 30,000 characters at their largest caps on it, and these tests pin that
  * (a result under the budget comes back as it was). The one result the fixture takes past the budget is
- * `get_context_for_query` over five busy topics, which is cut here. Every other cut is held by the Rust server's own
+ * `explore_context` on the hub at its largest caps, which is cut here. Every other cut is held by the Rust server's own
  * tests with larger stubs: `rust/tests/budget_get_calls.rs`, `rust/tests/current_context_calls.rs` and the over-budget
  * parity cases (`rust/tests/data/parity/*.json`, named "over the character budget"). Assertions on size and on codes,
  * never on page names from the graph.
@@ -42,28 +42,31 @@ describe('the character budget of the get and find tools (#507)', () => {
     return { text: result.content[0].text, sent, body: JSON.parse(result.content[0].text) as Meta & Record<string, any> };
   }
 
-  it('cuts five busy topics to the budget as a whole, from the last topic, and says what each kept', async () => {
-    const query = 'compare [[hub central]], [[project atlas]], [[bob]], [[alice]] and [[project borealis]]';
-    const { body, sent } = await call('logseq_get_context_for_query', { query });
+  it('cuts the hub at its largest caps to the budget, from the last reference, and names the offset that reads on', async () => {
+    const caps = { page: 'hub central', max_blocks: 500, max_references: 500, max_related_pages: 500 };
+    const { body, sent } = await call('logseq_explore_context', caps);
     expect(sent).toBeLessThanOrEqual(BUDGET);
     // it keeps what fits: a cut that drops more entries than it must is a regression
     expect(sent).toBeGreaterThanOrEqual(28000);
-    expect(body.extractedTopics).toHaveLength(5);
-    expect(body.contexts).toHaveLength(5);
-    const codes = (body.warnings ?? []).map(w => w.code);
-    expect(codes[codes.length - 1]).toBe('result_size_truncated');
-    const size = body.warnings!.find(w => w.code === 'result_size_truncated')!;
-    expect(size.howToFetchAll).toBeUndefined();
-    expect(size.message).toMatch(/^Showing \d+ of \d+ entries \(blocks, then references, then related pages, topic by topic\)/);
-    // the first topic keeps its entries and the last loses its first
-    const kept = (body.contexts as Array<{ directBlocks: unknown[]; references: unknown[]; relatedPages: unknown[] }>).map(
-      context => context.directBlocks.length + context.references.length + context.relatedPages.length
+    // the blocks are the answer and stay whole; the related pages go first, then the last references
+    expect(body.directBlocks).toHaveLength(71);
+    expect(body.relatedPages).toEqual([]);
+    expect(body.references.length).toBeGreaterThan(0);
+    expect(body.references.length).toBeLessThan(66);
+    expect(body.totals).toEqual({ blocks: 71, relatedPages: 61, references: 66 });
+    expect((body.warnings ?? []).map(w => w.code)).toEqual(['result_size_truncated']);
+    const size = body.warnings![0];
+    expect(body.hasMore).toBe(true);
+    expect(size.howToFetchAll).toBe(
+      `Set references_offset to ${body.references.length} for the next references. Pass max_blocks 0 and max_related_pages 0 to leave out what is already read.`
     );
-    expect(kept[0]).toBeGreaterThan(0);
-    expect(kept[4]).toBeLessThan(kept[0]);
-    // a topic cut at the caps says what it shows now
-    const capped = body.warnings!.find(w => w.code === 'topic_truncated');
-    expect(capped?.howToFetchAll).toMatch(/logseq_build_context/);
+
+    // reading on from there finds every reference left, with nothing repeated
+    const next = await call('logseq_explore_context', { ...caps, max_blocks: 0, max_related_pages: 0, references_offset: body.references.length });
+    const ids = [...body.references, ...next.body.references].map(reference => reference.block.id);
+    expect(ids).toHaveLength(66);
+    expect(new Set(ids).size).toBe(66);
+    expect(next.body.warnings?.map(w => w.code)).not.toContain('references_truncated');
   });
 
   it('leaves the hub page, its outline and its first block under the budget as they were', async () => {
