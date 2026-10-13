@@ -11,11 +11,11 @@ use crate::errors::ToolError;
 
 pub mod check_links;
 pub mod explore_context;
+pub mod explore_network;
 pub mod find_blocks;
 pub mod find_pages;
 pub mod get_block;
 pub mod get_concept_evolution;
-pub mod get_concept_network;
 pub mod get_current;
 pub mod get_graph;
 pub mod get_page;
@@ -27,11 +27,11 @@ pub fn list() -> Vec<Tool> {
     vec![
         check_links::definition(),
         explore_context::definition(),
+        explore_network::definition(),
         find_blocks::definition(),
         find_pages::definition(),
         get_block::definition(),
         get_concept_evolution::definition(),
-        get_concept_network::definition(),
         get_current::definition(),
         get_graph::definition(),
         get_page::definition(),
@@ -51,11 +51,11 @@ pub async fn call(
     match name {
         check_links::NAME => Some(check_links::call(client, tips_enabled, arguments).await),
         explore_context::NAME => Some(explore_context::call(client, tips_enabled, arguments).await),
+        explore_network::NAME => Some(explore_network::call(client, tips_enabled, arguments).await),
         find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, arguments).await),
         find_pages::NAME => Some(find_pages::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
         get_concept_evolution::NAME => Some(get_concept_evolution::call(client, tips_enabled, arguments).await),
-        get_concept_network::NAME => Some(get_concept_network::call(client, tips_enabled, arguments).await),
         get_current::NAME => Some(get_current::call(client, tips_enabled, arguments).await),
         get_graph::NAME => Some(get_graph::call(client, tips_enabled, arguments).await),
         get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),
