@@ -467,7 +467,7 @@ find_blocks → get_page → explore_context
 
 **Specific deep-dive:**
 ```
-get_page → get_related_pages
+get_page → explore_network
 ```
 
 **Structured data:**
@@ -482,7 +482,7 @@ find_blocks with property and value (for precise matches)
 ### Limit Parameters
 
 - Use `max_blocks`, `max_related_pages` to control response size
-- Use `depth` and `max_depth` carefully (depth=1 usually sufficient)
+- Use `max_depth` on `explore_network` carefully: 1 is a page's direct neighbours, the default is 2 and the maximum is 3
 - Use `limit` on `find_blocks` to avoid overwhelming results, and `offset` to read on
 
 **Caps that cut a result:** these tools keep the first results in an order (see the last column) and say so. Each caps at a maximum, clamps a larger value instead of rejecting it, and reports a cut with a warning. Read the warning before you report a count or a list as complete.

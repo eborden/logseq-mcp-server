@@ -13,7 +13,7 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 **4-Phase Approach:**
 
 1. **Search** → `logseq_find_blocks(text=topic, limit=15)` - cast wide net
-2. **Retrieve** → `logseq_get_page(relevant_pages, detail="full")` - get full content
+2. **Retrieve** → `logseq_get_page(page, detail="full")` for each relevant page - get full content
 3. **Discover** → `logseq_explore_context(page)` for each key page, in parallel - find connections
 4. **Synthesize** → Present organized findings with sources
 
@@ -123,8 +123,8 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
    - Single call replaces multiple queries
 
 2. **Manual Context** (only to read a page whole):
-   - Get full page: `logseq_get_page(name, detail="full")`
-   - Get connections: the `references` of `logseq_explore_context(name)`
+   - Get full page: `logseq_get_page(page, detail="full")`
+   - Get connections: the `references` of `logseq_explore_context(page)`
    - Extract linked pages from content
 
 3. Synthesize: content summary + connections + usage patterns
@@ -137,17 +137,17 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
 
 ### Phase 1: Visualize Network
 ```
-logseq_explore_network(topic, max_depth=2)
+logseq_explore_network(page, max_depth=2)
 ```
 - Returns nodes (pages) and edges (connections) in both link directions, each node with its distance from the topic and each edge with its reference counts
 - Good for understanding topic centrality
 - Identifies hub pages vs. leaf pages
 - Capped at 50 pages and cut to 30,000 characters: read the `truncated` flag and the warnings before calling the map complete, and ask about a more specific page or lower `max_depth` for a smaller one
-- To ask how two pages connect, pass the second as `to` (`logseq_explore_network(topic, to=other, max_depth=3)`): the result is the shortest path as nodes and edges, and the middle pages are the bridges. If there is none within `max_depth`, a `no_path_within` warning says how far the walk went
+- To ask how two pages connect, pass the second as `to` (`logseq_explore_network(page, to=other, max_depth=3)`): the result is the shortest path as nodes and edges, and the middle pages are the bridges. If there is none within `max_depth`, a `no_path_within` warning says how far the walk went
 
 ### Phase 2: Get the References
 ```
-logseq_explore_context(topic, max_blocks=0, max_related_pages=0)
+logseq_explore_context(page, max_blocks=0, max_related_pages=0)
 ```
 - Find the pages that reference the topic, with the blocks that do (the `references`)
 - Complements the network with detailed backlink context
@@ -248,7 +248,7 @@ logseq_explore_context("Team Meeting")
 
 **Deep Dives:**
 ```
-logseq_explore_context(topic, max_blocks=50, max_related_pages=10)
+logseq_explore_context(page, max_blocks=50, max_related_pages=10)
 ```
 - Main page with properties
 - Direct blocks from page
@@ -332,12 +332,12 @@ User: "Give me full context on [[Q4 Planning]]"
 
 **Multi-call workflows (when needed):**
 - Broad exploration: `find_blocks` → `get_page` → `explore_context`
-- Specific deep-dive: `get_page` → `get_related_pages`
+- Specific deep-dive: `get_page` → `explore_network`
 - Structured data: `find_blocks` with `property` and `value` for precise matches
 
 **Limit parameters:**
 - Use `max_blocks`, `max_related_pages` to control response size
-- Use `depth` and `max_depth` carefully (depth=1 usually sufficient)
+- Use `max_depth` on `explore_network` carefully: 1 is a page's direct neighbours, the default is 2 and the maximum is 3
 - Use `limit` on find_blocks to avoid overwhelming results
 
 **Best practices:**
@@ -456,7 +456,7 @@ User: "How has my approach to testing changed this year?"
 Effective LogSeq knowledge graph queries through:
 
 1. **Smart tool selection** - Use single-call solutions when available (explore_context)
-2. **Graph traversal** - Leverage bidirectional links (get_related_pages, explore_network)
+2. **Graph traversal** - Leverage bidirectional links (explore_network, and the `references` of explore_context)
 3. **Temporal analysis** - Track concept evolution and patterns over time
 4. **Relationship search** - Find how two pages connect, as a path of links
 5. **Multi-indicator task queries** (markers + properties)
