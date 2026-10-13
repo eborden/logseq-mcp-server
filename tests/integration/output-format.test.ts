@@ -157,8 +157,8 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
       expect(repeatedAsBullet, `${repeatedAsBullet} of ${sample.length} pages repeated the property block as a bullet`).toBe(0);
     });
 
-    it('build_context renders the blocks, related pages and references as sections', async () => {
-      const text = (await call('logseq_build_context', { topic_name: hub, format: 'markdown' })).content[0].text;
+    it('explore_context renders the blocks, related pages and references as sections', async () => {
+      const text = (await call('logseq_explore_context', { page: hub, format: 'markdown' })).content[0].text;
 
       expect(text.startsWith('# hub central\n')).toBe(true);
       expect(text.includes('## Blocks (50 of 71)')).toBe(true);
@@ -168,11 +168,7 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
       expect(() => JSON.parse(text)).toThrow();
     });
 
-    it('get_context_for_query and get_concept_network render too', async () => {
-      const query = (await call('logseq_get_context_for_query', { query: `about [[${hub}]]`, format: 'markdown' })).content[0].text;
-      expect(query.startsWith('# Context for: ')).toBe(true);
-      expect(query.includes('Topics: [[')).toBe(true);
-
+    it('get_concept_network renders too', async () => {
       const network = (await call('logseq_get_concept_network', { concept_name: hub, max_depth: 1, format: 'markdown' })).content[0].text;
       expect(network.startsWith('# Concept network: [[')).toBe(true);
       expect(network.includes('## Depth 1 (') && network.includes('## Links (')).toBe(true);
@@ -194,9 +190,9 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
   });
 
   describe('compact', () => {
-    it('build_context JSON keeps uuids and snippets and drops block bodies', async () => {
-      const full = await json('logseq_build_context', { topic_name: hub });
-      const compact = await json('logseq_build_context', { topic_name: hub, compact: true });
+    it('explore_context JSON keeps uuids and snippets and drops block bodies', async () => {
+      const full = await json('logseq_explore_context', { page: hub });
+      const compact = await json('logseq_explore_context', { page: hub, compact: true });
 
       expect(compact.directBlocks.length).toBe(full.directBlocks.length);
       expect(compact.directBlocks).toHaveLength(50);
@@ -207,8 +203,8 @@ describe('page outline and markdown output against the fixture graph (#43)', () 
       expect(compact.hasMore).toBe(full.hasMore);
     });
 
-    it('build_context compact markdown carries uuids instead of bodies', async () => {
-      const text = (await call('logseq_build_context', { topic_name: hub, format: 'markdown', compact: true })).content[0].text;
+    it('explore_context compact markdown carries uuids instead of bodies', async () => {
+      const text = (await call('logseq_explore_context', { page: hub, format: 'markdown', compact: true })).content[0].text;
       // The footer (after the `---` rule) has bullets of its own: warnings and tips
       const body = text.split('\n---\n')[0];
       const bullets = body.split('\n').filter(line => /^\t*- /.test(line));

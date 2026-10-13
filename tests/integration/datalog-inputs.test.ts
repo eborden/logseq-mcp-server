@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { getBacklinksWithMeta, getConceptNetwork, findBlocks, getPage } from './helpers/tools.js';
+import { exploreContext, getConceptNetwork, findBlocks, getPage } from './helpers/tools.js';
 import { PageNotFoundError } from './helpers/errors.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
@@ -56,10 +56,11 @@ describe('Datalog :in inputs Integration Tests', () => {
     expect(network.edges).toHaveLength(11);
   });
 
-  it('get_backlinks finds the same blocks on the same pages, whatever the casing', async () => {
+  it('explore_context finds the same references on the same pages, whatever the casing', async () => {
     for (const name of ['Bob', 'bob']) {
-      const { results, meta } = await getBacklinksWithMeta(client, name, { maxPages: 100, maxBlocksPerPage: 50 });
-      const bySource = Object.fromEntries(results.map(([page, blocks]: [{ name: string }, unknown[]]) => [page.name, blocks.length]));
+      const { references, warnings } = await exploreContext(client, name, { maxReferences: 100 });
+      const bySource: Record<string, number> = {};
+      for (const reference of references) bySource[reference.sourcePage.name] = (bySource[reference.sourcePage.name] ?? 0) + 1;
 
       // The linking blocks, grouped by their page (13 hold the link, the others sit under one that does)
       expect(bySource, name).toEqual({
@@ -74,8 +75,8 @@ describe('Datalog :in inputs Integration Tests', () => {
         'jan 7th, 2025': 1,
         'project cascade': 1,
       });
-      // Nothing was cut, so there is no meta block
-      expect(meta, name).toBeNull();
+      // Nothing was cut
+      expect(warnings, name).toEqual([]);
     }
   });
 
@@ -90,7 +91,7 @@ describe('Datalog :in inputs Integration Tests', () => {
     await expect(getPage(client, name, true)).rejects.toBeInstanceOf(PageNotFoundError);
     await expect(getConceptNetwork(client, name, 0)).rejects.toBeInstanceOf(PageNotFoundError);
     await expect(getConceptNetwork(client, name, 1)).rejects.toBeInstanceOf(PageNotFoundError);
-    await expect(getBacklinksWithMeta(client, name)).rejects.toBeInstanceOf(PageNotFoundError);
+    await expect(exploreContext(client, name)).rejects.toBeInstanceOf(PageNotFoundError);
     // A search term is data too: it matches no block, and the regex it becomes is escaped
     expect(await findBlocks(client, { text: name })).toEqual([]);
   });

@@ -111,7 +111,7 @@ describe('hub fixture counts', () => {
     expect(row('Blocks on the hub page')).toContain(`| ${counts.hubBlocks} `);
     expect(row('Blocks elsewhere that link the hub')).toContain(`| ${counts.hubInboundBlocks} `);
     expect(row('Source pages of those blocks')).toContain(`| ${counts.hubInboundPages + 1} `);
-    const context = row('`build_context` on the hub');
+    const context = row('`explore_context` on the hub |');
     expect(context).toContain(`of ${counts.hubBlocks} blocks`);
     expect(context).toContain(`of ${counts.hubInboundBlocks} references`);
     expect(context).toContain(`of ${counts.hubInboundPages + 1} related pages`);

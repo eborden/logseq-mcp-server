@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { findBlocks, getBacklinks, getPage } from './helpers/tools.js';
+import { exploreContext, findBlocks, getPage } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * Integration tests for the basic tools against the fixture graph: get_page, get_backlinks,
+ * Integration tests for the basic tools against the fixture graph: get_page, the references of explore_context,
  * find_blocks by text and by property on known pages. Read-only.
  */
 
@@ -47,10 +47,12 @@ describe('LogSeq MCP Server Integration Tests', () => {
     });
   });
 
-  describe('logseq_get_backlinks', () => {
-    it('groups the blocks that link a page by their source page', async () => {
-      const result = await getBacklinks(client, 'Alice');
-      const bySource = Object.fromEntries((result ?? []).map(([page, blocks]) => [page!.name, blocks.length]));
+  describe('logseq_explore_context references', () => {
+    it('groups the blocks that link a page by their source page, most-linking page first', async () => {
+      const result = await exploreContext(client, 'Alice', { maxReferences: 100, maxRelatedPages: 100 });
+      const sources: string[] = result.references.map(reference => reference.sourcePage.name);
+      const bySource: Record<string, number> = {};
+      for (const name of sources) bySource[name] = (bySource[name] ?? 0) + 1;
 
       expect(bySource).toEqual({
         'dec 31st, 2024': 1,
@@ -62,11 +64,21 @@ describe('LogSeq MCP Server Integration Tests', () => {
         'project cascade': 1,
         'property types': 2,
       });
+      // the blocks of one page sit together, the busiest page first, ties by name
+      expect(sources).toEqual([
+        ...Array(6).fill('jan 6th, 2025'),
+        ...Array(2).fill('project atlas/meetings'),
+        ...Array(2).fill('property types'),
+        'dec 31st, 2024', 'jan 15th, 2025', 'jan 7th, 2025', 'project atlas', 'project cascade',
+      ]);
+      expect(result.relatedPages).toHaveLength(8);
     });
 
     it('returns nothing for a page no block links', async () => {
-      const result = await getBacklinks(client, 'property types');
-      expect(result ?? []).toEqual([]);
+      const result = await exploreContext(client, 'property types');
+      expect(result.references).toEqual([]);
+      expect(result.relatedPages).toEqual([]);
+      expect(result.totals.references).toBe(0);
     });
   });
 

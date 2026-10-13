@@ -94,27 +94,6 @@ export async function getPageOutline(client: LogseqClient, pageName: string): Pr
   return (await callTool(client, 'logseq_get_page', { page: pageName, detail: 'outline' })).value;
 }
 
-export async function getBacklinksWithMeta(
-  client: LogseqClient,
-  pageName: string,
-  caps?: { maxPages?: number; maxBlocksPerPage?: number }
-): Promise<{ results: Json; meta: Json }> {
-  const { value, meta } = await callTool(client, 'logseq_get_backlinks', {
-    page_name: pageName,
-    max_pages: caps?.maxPages,
-    max_blocks_per_page: caps?.maxBlocksPerPage,
-  });
-  return { results: value, meta };
-}
-
-export async function getBacklinks(
-  client: LogseqClient,
-  pageName: string,
-  caps?: { maxPages?: number; maxBlocksPerPage?: number }
-): Promise<Json> {
-  return (await getBacklinksWithMeta(client, pageName, caps)).results;
-}
-
 export async function getBlock(
   client: LogseqClient,
   blockUuid: string,
@@ -215,39 +194,26 @@ export async function searchByRelationship(
   ).value;
 }
 
-export async function buildContextForTopic(
-  client: LogseqClient,
-  topicName: string,
-  options?: {
-    maxBlocks?: number;
-    maxRelatedPages?: number;
-    maxReferences?: number;
-    includeTemporalContext?: boolean;
-    resolveRefs?: boolean;
-  }
-): Promise<Json> {
+/** What `logseq_explore_context` takes beyond the page; each is the tool's parameter in camel case. */
+export interface ExploreOptions {
+  maxBlocks?: number;
+  maxRelatedPages?: number;
+  maxReferences?: number;
+  referencesOffset?: number;
+  includeTemporalContext?: boolean;
+  resolveRefs?: boolean;
+}
+
+export async function exploreContext(client: LogseqClient, page: string, options?: ExploreOptions): Promise<Json> {
   return (
-    await callTool(client, 'logseq_build_context', {
-      topic_name: topicName,
+    await callTool(client, 'logseq_explore_context', {
+      page,
       max_blocks: options?.maxBlocks,
       max_related_pages: options?.maxRelatedPages,
       max_references: options?.maxReferences,
+      references_offset: options?.referencesOffset,
       include_temporal_context: options?.includeTemporalContext,
       resolve_refs: options?.resolveRefs,
-    })
-  ).value;
-}
-
-export async function getContextForQuery(
-  client: LogseqClient,
-  query: string,
-  options: { maxTopics?: number; maxSearchResults?: number } = {}
-): Promise<Json> {
-  return (
-    await callTool(client, 'logseq_get_context_for_query', {
-      query,
-      max_topics: options.maxTopics,
-      max_search_results: options.maxSearchResults,
     })
   ).value;
 }

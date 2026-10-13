@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { buildContextForTopic, findBlocks, findBlocksWithMeta, getBacklinks, getBacklinksWithMeta, getConceptEvolution, getConceptNetwork, getContextForQuery, getPage, getPageOutline, searchByRelationship } from './helpers/tools.js';
+import { exploreContext, findBlocks, findBlocksWithMeta, getConceptEvolution, getConceptNetwork, getPage, getPageOutline, searchByRelationship } from './helpers/tools.js';
 import { AmbiguousPageError, PageNotFoundError } from './helpers/errors.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 
@@ -67,14 +67,13 @@ describe('page resolution against the fixture graph', () => {
       expect(page.resolvedFrom).toEqual({ name: JOURNAL.iso, matchedBy: 'journal-date', resolvedTo: 'Jan 6th, 2025' });
     });
 
-    it('builds context and backlinks for an ISO date', async () => {
-      const context = await buildContextForTopic(client, JOURNAL.iso);
-      const backlinks = await getBacklinks(client, JOURNAL.iso);
+    it('builds context, and finds the references, for an ISO date', async () => {
+      const context = await exploreContext(client, JOURNAL.iso);
 
       expect(context.mainPage.id).toBe(journalPageId);
       expect(context.resolvedFrom?.matchedBy).toBe('journal-date');
       // Nothing links that journal
-      expect(backlinks ?? []).toEqual([]);
+      expect(context.references).toEqual([]);
     });
 
     it('reports a date with no journal as not found without a page-list call', async () => {
@@ -94,9 +93,9 @@ describe('page resolution against the fixture graph', () => {
       expect(calls).toBe(2);
     });
 
-    it('returns the declaring page from get_page and build_context', async () => {
+    it('returns the declaring page from get_page and explore_context', async () => {
       const page = await getPage(client, UNIQUE.stub, false);
-      const context = await buildContextForTopic(client, UNIQUE.stub);
+      const context = await exploreContext(client, UNIQUE.stub);
 
       expect(page.name).toBe(UNIQUE.source);
       expect(page.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
@@ -120,18 +119,9 @@ describe('page resolution against the fixture graph', () => {
       expect(calls).toBe(1);
     });
 
-    it('throws AmbiguousPageError from get_page and get_backlinks without picking a page', async () => {
+    it('throws AmbiguousPageError from get_page and explore_context without picking a page', async () => {
       await expect(getPage(client, SHARED.stub, false)).rejects.toBeInstanceOf(AmbiguousPageError);
-      await expect(getBacklinks(client, SHARED.stub)).rejects.toBeInstanceOf(AmbiguousPageError);
-    });
-
-    it('skips an ambiguous topic in get_context_for_query with an ambiguous_page warning', async () => {
-      const result = await getContextForQuery(client, `about [[${SHARED.stub}]]`);
-      const warning = result.warnings.find(w => w.code === 'ambiguous_page');
-
-      expect(warning?.candidates?.map(c => c.name).sort()).toEqual(SHARED.sources);
-      expect(result.contexts).toEqual([]);
-      expect(result.hasMore).toBe(false);
+      await expect(exploreContext(client, SHARED.stub)).rejects.toBeInstanceOf(AmbiguousPageError);
     });
   });
 
@@ -160,11 +150,11 @@ describe('page resolution against the fixture graph', () => {
   describe('the tools that changed behaviour in #41', () => {
     const MISSING = 'no such page 41 integration probe';
 
-    it('get_concept_evolution, get_concept_network and get_backlinks throw guidance for a missing page', async () => {
+    it('get_concept_evolution, get_concept_network and explore_context throw guidance for a missing page', async () => {
       for (const run of [
         () => getConceptEvolution(client, MISSING),
         () => getConceptNetwork(client, MISSING, 1),
-        () => getBacklinks(client, MISSING)
+        () => exploreContext(client, MISSING)
       ]) {
         const error = await run().catch(e => e);
         expect(error instanceof PageNotFoundError).toBe(true);
@@ -201,12 +191,12 @@ describe('page resolution against the fixture graph', () => {
       }
     });
 
-    it('get_backlinks, get_concept_evolution and find_blocks say which page an alias stood for', async () => {
-      const { meta } = await getBacklinksWithMeta(client, UNIQUE.stub);
+    it('explore_context, get_concept_evolution and find_blocks say which page an alias stood for', async () => {
+      const context = await exploreContext(client, UNIQUE.stub);
       const evolution = await getConceptEvolution(client, UNIQUE.stub);
       const found = await findBlocksWithMeta(client, { page: UNIQUE.stub, linksTo: [EXACT] });
 
-      expect(meta?.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
+      expect(context.resolvedFrom).toEqual({ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source });
       expect(evolution.resolvedFrom?.matchedBy).toBe('alias');
       // only the page named by its alias was not an exact name: the link to Bob was
       expect(found.meta?.resolvedFrom).toEqual([{ name: UNIQUE.stub, matchedBy: 'alias', resolvedTo: UNIQUE.source }]);
