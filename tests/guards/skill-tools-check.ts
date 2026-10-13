@@ -204,7 +204,14 @@ const DIR_ENTRY = /`([a-z0-9_]+(?:\/[a-z0-9_]+)*)\/`/g;
 type MissingPath = { name: string; message: string };
 
 /** The tool paths on one line (outside its history comment) that do not exist, each with the name a comment excuses. */
-function missingToolPaths(file: string, line: number, text: string, options: ToolPathOptions, inFileMap: boolean): MissingPath[] {
+function missingToolPaths(
+  file: string,
+  line: number,
+  text: string,
+  options: ToolPathOptions,
+  inFileMap: boolean,
+  former: ReadonlySet<string>,
+): MissingPath[] {
   const found = new Map<string, MissingPath>();
   const check = (written: string, rest: string, trailingSlash: boolean): void => {
     const parts = rest.split('/').filter(part => part !== '');
@@ -221,7 +228,9 @@ function missingToolPaths(file: string, line: number, text: string, options: Too
       const what = wantsFile ? 'file' : 'directory';
       // One report per missing path per line: the first way the line wrote it.
       if (!found.has(rel)) found.set(rel, {
-        name: parts[i].replace(/\.[A-Za-z0-9]+$/, ''),
+        // Only a directory whose name is in FORMER_TOOL_NAMES can be excused by a history comment. A file has no such
+        // name, and a directory the list does not know is not excused: '' matches no name in a comment.
+        name: wantsFile || !former.has(parts[i]) ? '' : parts[i],
         message: `${file}:${line}: "${written}" names the ${what} rust/src/tools/${rel}${what === 'directory' ? '/' : ''}, which does not exist`,
       });
       return;
@@ -315,7 +324,7 @@ function scan(files: SkillFile[], known: Map<string, RecordedTool>, referencePat
       const fileMap = doc?.toolPaths?.fileMap;
       const missing =
         doc?.toolPaths && fileMap
-          ? missingToolPaths(path, lineNo, body, doc.toolPaths, path === fileMap.path && line.startsWith(fileMap.rowStart))
+          ? missingToolPaths(path, lineNo, body, doc.toolPaths, path === fileMap.path && line.startsWith(fileMap.rowStart), former)
           : [];
       if (doc && marker) {
         const comment = `<!-- ${doc.historyMarker} logseq_old_name -->`;
