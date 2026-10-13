@@ -1,5 +1,11 @@
 //! `summary.topConcepts`: the pages the returned blocks reference most. Tags, `[[links]]` and aliases all end up as `:block/refs` of the
 //! same page, so they merge on page id with no parsing of content.
+//!
+//! With a `page`, the roll-up counts what the blocks that link to the page link alongside it (the mentions, whose refs the
+//! mentions query pulls as page maps), not the links inside the page's own blocks. The Editor API tree gives those refs as
+//! bare ids, and naming them takes one more LogSeq call, which would raise a ceiling (ADR-0011) and needs the
+//! maintainer's OK. `get_concept_evolution` had no `topConcepts`, so nothing is lost; a follow-up can add that call if the page's own
+//! links are wanted.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
