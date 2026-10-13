@@ -465,7 +465,7 @@ The history and the reasons are in the ADRs ([index](docs/adr/README.md)):
 - A feature-flagged dual HTTP/Datalog implementation, replaced by Datalog only (df7503a, 37fe0d6): [ADR-0005 (datalog-only-no-feature-flags)](docs/adr/0005-datalog-only-no-feature-flags.md)
 - Strings embedded in query text, later bound with `:in` once probing showed it works: [ADR-0006](docs/adr/0006-embed-strings-in-datalog-queries.md), superseded by [ADR-0013 (strings-bound-via-in-inputs)](docs/adr/0013-strings-bound-via-in-inputs.md)
 - Pages without blocks, fixed by splitting queries (d6c3151): [ADR-0007 (two-query-pattern-for-optional-data)](docs/adr/0007-two-query-pattern-for-optional-data.md)
-- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 11 registered in `rust/src/tools/mod.rs` today.
+- Redundant tools removed, 13 to 11 (9642558, 34a699a): [ADR-0008 (remove-redundant-tools)](docs/adr/0008-remove-redundant-tools.md). Later work added tools back. There are 10 registered in `rust/src/tools/mod.rs` today.
 - A Rust implementation beside the TypeScript server (ADR-0025, ADR-0031, #122), held to its results byte for byte, then the TypeScript server removed after the Go on #349 (#356, last version at `35fa2dd3`)
 - Oct 2026: a review of 11 LogSeq, Obsidian, Roam, Notion, Tana and Basic Memory MCP servers set the roadmap in GitHub issues #3–#18. Probing the Datalog constraints and measuring API calls against a live graph (`scripts/probe-constraints.ts`, `scripts/measure-api-calls.ts`) corrected constraints 1, 2 and 4.
 
