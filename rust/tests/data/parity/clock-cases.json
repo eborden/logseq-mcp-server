@@ -14,7 +14,7 @@
   "date range: preset year_to_date",
   "date range: a preset with journals in it",
   "date range: last_n cut: the way on is older days",
-  "date range: a null answer to the up-to query is not a graph with no journals",
+  "date range: last_n with a null answer to the journal query is not a graph with no journals",
   "prompts: weekly_summary with no arguments is the week in progress",
   "prompts: weekly_summary with an empty argument object",
   "prompts: weekly_summary for this week, in capitals",
