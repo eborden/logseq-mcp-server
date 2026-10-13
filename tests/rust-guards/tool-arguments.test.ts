@@ -93,8 +93,8 @@ describe('a wrong-typed argument is refused before any call (ADR-0019)', () => {
         swept++;
       }
     }
-    // Every parameter slot of the 12 tools was tried (63 when this was written; it only grows with the schema)
+    // Every parameter slot of the 12 tools was tried (65 when this was written; it only grows with the schema)
     expect(swept).toBe(tools.reduce((sum, tool) => sum + Object.keys(tool.inputSchema.properties ?? {}).length, 0));
-    expect(swept).toBeGreaterThanOrEqual(63);
+    expect(swept).toBeGreaterThanOrEqual(64);
   }, 120000);
 });
