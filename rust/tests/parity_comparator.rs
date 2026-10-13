@@ -357,7 +357,7 @@ fn quirky(tools: &[Value]) -> Vec<Value> {
 #[test]
 fn the_recorded_tool_list_has_every_tool_and_equals_itself() {
     let tools = load_tool_list();
-    assert_eq!(tools.len(), 14);
+    assert_eq!(tools.len(), 13);
     assert_eq!(compare_tool_lists(&tools, &tools.clone()), Vec::<String>::new());
 }
 
@@ -407,15 +407,15 @@ fn a_changed_bound_type_enum_value_required_field_or_description_fails_with_its_
     let tools = load_tool_list();
     let changed: Vec<(&str, Vec<Value>, &str)> = vec![
         ("bound", with_schema(&tools, "logseq_check_links", |s| s["properties"]["after"]["maxLength"] = json!(50001)), "logseq_check_links.inputSchema.properties.after.maxLength: expected 50000, got 50001"),
-        ("type", with_schema(&tools, "logseq_build_context", |s| s["properties"]["max_blocks"]["type"] = json!("number")), "logseq_build_context.inputSchema.properties.max_blocks.type: expected \"integer\", got \"number\""),
+        ("type", with_schema(&tools, "logseq_explore_context", |s| s["properties"]["max_blocks"]["type"] = json!("number")), "logseq_explore_context.inputSchema.properties.max_blocks.type: expected \"integer\", got \"number\""),
         ("enum value", with_schema(&tools, "logseq_get_block", |s| s["properties"]["format"]["enum"] = json!(["json", "md"])), "logseq_get_block.inputSchema.properties.format.enum[1]: expected \"markdown\", got \"md\""),
-        ("required field", with_schema(&tools, "logseq_build_context", |s| s["required"] = json!([])), "logseq_build_context.inputSchema.required: expected [\"topic_name\"], got []"),
-        ("parameter description", with_schema(&tools, "logseq_build_context", |s| {
+        ("required field", with_schema(&tools, "logseq_explore_context", |s| s["required"] = json!([])), "logseq_explore_context.inputSchema.required: expected [\"page\"], got []"),
+        ("parameter description", with_schema(&tools, "logseq_explore_context", |s| {
             let text = s["properties"]["max_blocks"]["description"].as_str().unwrap().to_owned();
             s["properties"]["max_blocks"]["description"] = json!(format!("{text}!"));
-        }), "logseq_build_context.inputSchema.properties.max_blocks.description: expected"),
+        }), "logseq_explore_context.inputSchema.properties.max_blocks.description: expected"),
         ("tool description", tools.iter().map(|t| if t["name"] == "logseq_get_block" { let mut c = t.clone(); c["description"] = json!(format!("{} ", t["description"].as_str().unwrap())); c } else { t.clone() }).collect(), "logseq_get_block.description: expected"),
-        ("default", with_schema(&tools, "logseq_build_context", |s| s["properties"]["max_blocks"]["default"] = json!(51)), "logseq_build_context.inputSchema.properties.max_blocks.default: expected 50, got 51"),
+        ("default", with_schema(&tools, "logseq_explore_context", |s| s["properties"]["max_blocks"]["default"] = json!(51)), "logseq_explore_context.inputSchema.properties.max_blocks.default: expected 50, got 51"),
         ("additionalProperties", with_schema(&tools, "logseq_get_page", |s| s["additionalProperties"] = json!(false)), "logseq_get_page.inputSchema.additionalProperties: expected nothing, got false"),
     ];
     for (what, list, line) in &changed {
@@ -477,8 +477,8 @@ fn a_property_named_format_and_a_null_on_a_required_property_still_count() {
     assert!(failures[0].contains(r#""enum":["json","markdown"]"#), "{failures:?}");
     // The tools with a `format` parameter: its enum and description still count
     let with_format: Vec<&str> = tools.iter().filter(|t| t["inputSchema"]["properties"].get("format").is_some()).map(|t| t["name"].as_str().unwrap()).collect();
-    // Five render Markdown, and the page tool also takes `toon` for its outline; the flat-list tool takes `toon` instead (BR-0014)
-    assert_eq!(with_format.len(), 6, "{with_format:?}");
+    // Four render Markdown, and the page tool also takes `toon` for its outline; the flat-list tool takes `toon` instead (BR-0014)
+    assert_eq!(with_format.len(), 5, "{with_format:?}");
     for name in with_format {
         let words = match name {
             "logseq_find_pages" => r#"["json","toon"]"#,
@@ -492,10 +492,10 @@ fn a_property_named_format_and_a_null_on_a_required_property_still_count() {
         assert_eq!(failures.len(), 1, "{name}: {failures:?}");
         assert!(failures[0].starts_with(&format!("{name}.inputSchema.properties.format.description: expected \"")) && failures[0].ends_with(", got \"other\""), "{name}: {failures:?}");
     }
-    let nullable = with_schema(&tools, "logseq_build_context", |s| s["properties"]["topic_name"]["type"] = json!(["string", "null"]));
+    let nullable = with_schema(&tools, "logseq_explore_context", |s| s["properties"]["page"]["type"] = json!(["string", "null"]));
     assert_eq!(
         compare_tool_lists(&tools, &nullable),
-        vec!["logseq_build_context.inputSchema.properties.topic_name.type: expected \"string\", got [\"string\",\"null\"]".to_owned()]
+        vec!["logseq_explore_context.inputSchema.properties.page.type: expected \"string\", got [\"string\",\"null\"]".to_owned()]
     );
 }
 

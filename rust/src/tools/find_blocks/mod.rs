@@ -573,17 +573,6 @@ fn context_unavailable(count: usize) -> ResultWarning {
     )
 }
 
-/// `get_context_for_query` could not read the pages of the `count` keyword hits: a hit keeps the page its own block names, if any.
-pub fn hit_pages_unavailable(count: usize) -> ResultWarning {
-    ResultWarning::new(
-        "hit_pages_unavailable",
-        format!(
-            "LogSeq returned no answer when looking up the pages of the {count} keyword hit(s) (possibly no graph open or a re-index in \
-             progress), so a hit may be listed without its page. This does not mean it has none. {RETRY_ADVICE}"
-        ),
-    )
-}
-
 /// A block and what `include_context` adds to it.
 struct Context {
     page: Map<String, Value>,
@@ -673,20 +662,6 @@ async fn find(client: &LogseqClient, filters: &Filters) -> Result<Option<Vec<Val
     // Ids are unique, and a sort that keeps ties in order
     matches.sort_by_key(|block| std::cmp::Reverse(block_id(block)));
     Ok(Some(matches))
-}
-
-/// The blocks whose content holds `text`, newest first and not cut, or `None` when LogSeq answers `null`. One call.
-/// `get_context_for_query`'s keyword search reads these itself and does the cutting.
-pub async fn blocks_containing(client: &LogseqClient, text: &str) -> Result<Option<Vec<Value>>, ToolError> {
-    find(client, &Filters { text: Some(text.to_owned()), property: None, period: None, scope: Scope::default() }).await
-}
-
-/// `blocks` as full results with `context` (page, references, tags) added from one batched page
-/// lookup, and whether LogSeq answered `null` to that lookup (the blocks then carry no
-/// `context`, and the caller says so with [`hit_pages_unavailable`]). API calls: 1, or 0 when no block has a page id.
-pub async fn full_blocks_with_context(client: &LogseqClient, blocks: Vec<Value>) -> Result<(Vec<Value>, bool), ToolError> {
-    let (contexts, unavailable) = with_page_context(client, &blocks).await?;
-    Ok((blocks.iter().zip(&contexts).map(|(block, context)| full_result(block, context.as_ref())).collect(), unavailable))
 }
 
 /// Find the blocks that match `filters`: the results and their meta (`totals.matches` is the number of

@@ -12,7 +12,7 @@ pub fn backlink_tips(page_name: &str, has_results: bool) -> Vec<String> {
     if let (Some(page), true) = (non_empty(page_name), has_results) {
         tips.push(format!(
             "For the page's own content and related pages: {}.",
-            suggest_call("logseq_build_context", &json!({"topic_name": page}))
+            suggest_call("logseq_explore_context", &json!({"page": page}))
         ));
     }
     tips.truncate(MAX_TIPS);
@@ -27,7 +27,7 @@ mod tests {
     fn the_tip_names_the_page_as_the_caller_wrote_it() {
         assert_eq!(
             backlink_tips("Project \"Atlas\"", true),
-            ["For the page's own content and related pages: logseq_build_context {\"topic_name\":\"Project \\\"Atlas\\\"\"}."]
+            ["For the page's own content and related pages: logseq_explore_context {\"page\":\"Project \\\"Atlas\\\"\"}."]
         );
     }
 

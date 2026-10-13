@@ -1,7 +1,6 @@
-//! `logseq_build_context`: everything on one topic
+//! `logseq_explore_context`: everything on one page
 //! in a call. The page's blocks, the pages that link to it and the blocks that do, capped by
-//! `max_blocks`, `max_related_pages` and `max_references`. `get_context_for_query` builds one of
-//! these for each topic of its query.
+//! `max_blocks`, `max_related_pages` and `max_references`.
 //!
 //! Calls (the two-query pattern, ADR-0007): the page resolver (1 query for an exact name, an alias
 //! or an ISO date; a namespace-leaf name adds the leaf query, and a missing page adds the
@@ -52,16 +51,16 @@ use crate::truncation::{INLINE_BLOCKS, INLINE_REFERENCES, INLINE_RELATED_PAGES, 
 
 use self::queries::{get_blocks_on_pages, get_page_blocks};
 
-pub const NAME: &str = "logseq_build_context";
+pub const NAME: &str = "logseq_explore_context";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n\
+const DESCRIPTION: &str = "Explore everything on one page in a call: its blocks, related pages, and linked references.\n\n\
 **Use when:** researching or explaining a topic that has a page.\n\
 **Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n\
 **Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
-const ALIASES: ParamAliases = &[("topic_name", &["name", "page", "page_name"])];
+const ALIASES: ParamAliases = &[("page", &["name", "page_name"])];
 
 /// Blocks kept when `max_blocks` is absent (`DEFAULT_MAX_BLOCKS`).
 pub const DEFAULT_MAX_BLOCKS: u64 = 50;
@@ -93,8 +92,8 @@ fn default_include_temporal_context() -> bool {
 /// ignores them.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
-    /// Topic to build context for (page name, alias or ISO date)
-    pub topic_name: String,
+    /// Page to explore (name, alias or ISO date)
+    pub page: String,
     /// Maximum number of blocks to include (default: 50)
     #[serde(default = "default_max_blocks")]
     pub max_blocks: u64,
@@ -120,7 +119,7 @@ pub struct Args {
 /// What a call asked for, from the arguments parsed into [`Args`].
 #[derive(Debug, PartialEq)]
 struct Request {
-    topic_name: String,
+    page: String,
     caps: Caps,
     format: Option<OutputFormat>,
     compact: bool,
@@ -129,18 +128,18 @@ struct Request {
 
 impl From<Args> for Request {
     fn from(args: Args) -> Request {
-        let Args { topic_name, max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs, format, compact } = args;
+        let Args { page, max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs, format, compact } = args;
         // Compact output drops the bodies, so there is nothing to resolve refs in
         let caps = Caps { max_blocks, max_related_pages, max_references, include_temporal_context, resolve_refs: resolve_refs && !compact };
-        Request { topic_name, caps, format, compact, resolve_refs }
+        Request { page, caps, format, compact, resolve_refs }
     }
 }
 
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
-        .with_title("Build Context")
-        .with_annotations(read_only_annotations("Build Context"))
+        .with_title("Explore Context")
+        .with_annotations(read_only_annotations("Explore Context"))
 }
 
 /// A call: aliases folded, arguments read, the context, then JSON, compact JSON or Markdown. This
@@ -148,7 +147,7 @@ pub fn definition() -> Tool {
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let request = Request::from(parse_args::<Args>(arguments.as_ref())?);
-    let mut context = build_context_for_topic(client, &request.topic_name, request.caps).await?;
+    let mut context = explore_page_context(client, &request.page, request.caps).await?;
     // Compact output has no block bodies to resolve refs in. Say so rather than drop the request silently.
     if request.compact && request.resolve_refs {
         context.warnings.push(ResultWarning::new(
@@ -159,7 +158,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     }
     // The text the call sends, which the character budget measures (#485)
     let render = |context: &TopicContext| -> String {
-        let result = context.to_value(true);
+        let result = context.to_value();
         if request.format == Some(OutputFormat::Markdown) {
             let body = render_topic_context(&result, ContextRenderOptions { compact: request.compact, ..Default::default() });
             return with_footer(body, &FooterMeta::of_result(&result, &[]));
@@ -271,17 +270,15 @@ struct Completeness<'a> {
 /// A context as written, in BR-0013's order: what was answered (`topic`, `resolvedFrom`,
 /// `resolvedAliases`), what must not be missed (`hasMore`, `warnings`, `totals`, then `summary`), then
 /// the data (`mainPage`, `directBlocks`, `relatedPages`, `references`, `temporalContext`).
-/// `get_context_for_query` keeps each topic's context without the completeness keys
-/// (`TopicQueryContext`), since it rolls the warnings up into its own.
 #[derive(Serialize)]
-pub(crate) struct TopicContextOutput<'a> {
+struct TopicContextOutput<'a> {
     topic: &'a str,
     #[serde(rename = "resolvedFrom", skip_serializing_if = "Option::is_none")]
     resolved_from: Option<&'a Value>,
     #[serde(rename = "resolvedAliases", skip_serializing_if = "Option::is_none")]
     resolved_aliases: Option<&'a [String]>,
     #[serde(flatten)]
-    completeness: Option<Completeness<'a>>,
+    completeness: Completeness<'a>,
     summary: ContextSummary,
     #[serde(rename = "mainPage")]
     main_page: &'a Value,
@@ -300,18 +297,13 @@ impl TopicContext {
         self.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())
     }
 
-    /// The context in BR-0013's key order, with `hasMore`, `warnings` and `totals` when `with_meta`.
-    pub fn to_value(&self, with_meta: bool) -> Value {
-        result_value(&self.output(with_meta))
-    }
-
-    /// What [`to_value`](Self::to_value) writes, for a result that holds contexts of its own.
-    pub(crate) fn output(&self, with_meta: bool) -> TopicContextOutput<'_> {
-        TopicContextOutput {
+    /// The context in BR-0013's key order.
+    pub fn to_value(&self) -> Value {
+        result_value(&TopicContextOutput {
             topic: &self.topic,
             resolved_from: self.resolved_from.as_ref(),
             resolved_aliases: self.resolved_aliases.as_deref(),
-            completeness: with_meta.then(|| Completeness { has_more: self.has_more(), warnings: &self.warnings, totals: self.totals }),
+            completeness: Completeness { has_more: self.has_more(), warnings: &self.warnings, totals: self.totals },
             summary: ContextSummary {
                 total_blocks: self.direct_blocks.len(),
                 total_related_pages: self.related_pages.len(),
@@ -323,34 +315,17 @@ impl TopicContext {
             related_pages: self.related_pages.iter().map(|page| RelatedPage { page, relationship_type: "inbound" }).collect(),
             references: &self.references,
             temporal_context: self.temporal_context,
-        }
+        })
     }
 }
 
 impl TopicContext {
-    /// The entries the character budget counts (#485): its blocks, references and related pages.
-    pub(crate) fn entries(&self) -> usize {
-        self.direct_blocks.len() + self.references.len() + self.related_pages.len()
-    }
-
     /// How many blocks, references and related pages the first `kept` entries are, in that order.
     fn share_of(&self, kept: usize) -> (usize, usize, usize) {
         let blocks = kept.min(self.direct_blocks.len());
         let references = (kept - blocks).min(self.references.len());
         let related = (kept - blocks - references).min(self.related_pages.len());
         (blocks, references, related)
-    }
-
-    /// The context cut to its first `kept` entries, with the warnings it had and no more: a result that holds
-    /// several contexts (`get_context_for_query`, #507) says what it cut once, for all of them.
-    pub(crate) fn first_entries(&self, kept: usize) -> TopicContext {
-        let (blocks, references, related) = self.share_of(kept);
-        TopicContext {
-            direct_blocks: self.direct_blocks[..blocks].to_vec(),
-            references: self.references[..references].to_vec(),
-            related_pages: self.related_pages[..related].to_vec(),
-            ..self.clone()
-        }
     }
 }
 
@@ -478,17 +453,17 @@ fn backlinks_unavailable_warning(page: &str) -> ResultWarning {
     )
 }
 
-/// Builds the context of a topic.
+/// Builds the context of a page.
 ///
-/// `topic_name` is a page name, an alias or an ISO date (`2025-01-01`) of a journal. The page is
+/// `page_name` is a page name, an alias or an ISO date (`2025-01-01`) of a journal. The page is
 /// resolved first (BR-0010); with aliases, its blocks and references cover every name of the group
 /// (#69).
 ///
 /// Fails with [`ToolError::PageNotFound`] (guidance with the closest names) if no page matches, and
 /// [`ToolError::AmbiguousPage`] (with the candidates) if several do.
-pub async fn build_context_for_topic(client: &LogseqClient, topic_name: &str, caps: Caps) -> Result<TopicContext, ToolError> {
+pub async fn explore_page_context(client: &LogseqClient, page_name: &str, caps: Caps) -> Result<TopicContext, ToolError> {
     // Query 1: resolve the main page (exact name, alias or ISO date, in one query)
-    let resolved = require_page(client, topic_name).await?;
+    let resolved = require_page(client, page_name).await?;
     let main_page = resolved.page.raw.clone();
 
     // The names this page goes by (#69): a page with no `alias::` costs no call here
@@ -560,8 +535,8 @@ pub async fn build_context_for_topic(client: &LogseqClient, topic_name: &str, ca
     let temporal_context = caps.include_temporal_context.then(|| temporal_context(&main_page));
 
     Ok(TopicContext {
-        topic: topic_name.to_owned(),
-        resolved_from: resolved_from(topic_name, &resolved),
+        topic: page_name.to_owned(),
+        resolved_from: resolved_from(page_name, &resolved),
         resolved_aliases: alias_set.resolved_aliases(),
         main_page,
         direct_blocks,
@@ -584,12 +559,12 @@ mod tests {
     }
 
     #[test]
-    fn the_build_context_schema_means_what_the_pinned_one_means() {
-        // `inputSchema` of logseq_build_context in the ADR-0016 snapshot
+    fn the_explore_context_schema_means_what_the_pinned_one_means() {
+        // `inputSchema` of logseq_explore_context in the ADR-0016 snapshot
         let pinned = json!({
             "type": "object",
             "properties": {
-                "topic_name": {"type": "string", "description": "Topic to build context for (page name, alias or ISO date)"},
+                "page": {"type": "string", "description": "Page to explore (name, alias or ISO date)"},
                 "max_blocks": {"type": "integer", "minimum": 0, "default": 50, "description": "Maximum number of blocks to include (default: 50)"},
                 "max_related_pages": {"type": "integer", "minimum": 0, "default": 10, "description": "Maximum number of related pages to include (default: 10)"},
                 "max_references": {"type": "integer", "minimum": 0, "default": 20, "description": "Maximum number of reference blocks to include (default: 20)"},
@@ -598,7 +573,7 @@ mod tests {
                 "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact"},
                 "compact": {"type": "boolean", "default": false, "description": "Block snippets and uuids, no bodies. Read one with logseq_get_block"},
             },
-            "required": ["topic_name"],
+            "required": ["page"],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
@@ -622,7 +597,7 @@ mod tests {
     }
 
     fn json_of(context: &TopicContext) -> String {
-        context.to_value(true).to_string()
+        context.to_value().to_string()
     }
 
     #[test]
@@ -642,7 +617,7 @@ mod tests {
         assert!(fitted.references.len() < 30 && fitted.references.len() > 0);
         assert!(fitted.related_pages.is_empty());
         // `summary` counts what is returned, `totals` what there was before the caps
-        let value = fitted.to_value(true);
+        let value = fitted.to_value();
         assert_eq!(value["summary"]["totalReferences"], json!(fitted.references.len()));
         assert_eq!(value["totals"], json!({"blocks": 35, "relatedPages": 20, "references": 30}));
         assert_eq!(value["hasMore"], false);
@@ -671,7 +646,7 @@ mod tests {
     fn the_budget_measures_the_markdown_and_the_compact_text_the_call_sends() {
         let context = context_of(30, 30, 0, 600);
         let markdown = |context: &TopicContext| {
-            let result = context.to_value(true);
+            let result = context.to_value();
             with_footer(render_topic_context(&result, ContextRenderOptions::default()), &FooterMeta::of_result(&result, &[]))
         };
         let fitted = context.clone().fit_to_budget(&markdown, false);
@@ -680,7 +655,7 @@ mod tests {
         // the footer carries the warning
         assert!(markdown(&fitted).contains("result_size_truncated"));
         // compact text is short enough for the same context to fit whole
-        let compact = |context: &TopicContext| compact_topic_context(&context.to_value(true)).to_string();
+        let compact = |context: &TopicContext| compact_topic_context(&context.to_value()).to_string();
         assert_eq!(context.clone().fit_to_budget(&compact, true), context);
     }
 
@@ -688,10 +663,10 @@ mod tests {
     fn the_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
-        assert_eq!(tool.title.as_deref(), Some("Build Context"));
+        assert_eq!(tool.title.as_deref(), Some("Explore Context"));
         assert_eq!(
             serde_json::to_value(&tool.annotations).unwrap(),
-            json!({"title": "Build Context", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
+            json!({"title": "Explore Context", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
         );
     }
 
@@ -699,19 +674,19 @@ mod tests {
     fn the_arguments_are_read_in_schema_order_and_the_aliases_are_folded() {
         let folded = resolve_param_aliases(ALIASES, args(json!({"page_name": "Atlas", "max_blocks": 3}))).unwrap();
         let request = Request::from(parse_args::<Args>(folded.as_ref()).unwrap());
-        assert_eq!(request.topic_name, "Atlas");
+        assert_eq!(request.page, "Atlas");
         assert_eq!(request.caps, Caps { max_blocks: 3, ..Caps::default() });
-        let error = parse_args::<Args>(args(json!({"topic_name": "a", "max_blocks": -1, "format": "xml"})).as_ref()).unwrap_err();
+        let error = parse_args::<Args>(args(json!({"page": "a", "max_blocks": -1, "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_blocks': -1"), "{error}");
         let error = parse_args::<Args>(args(json!({})).as_ref()).unwrap_err();
-        assert!(error.to_string().starts_with("Invalid parameter 'topic_name': missing"), "{error}");
+        assert!(error.to_string().starts_with("Invalid parameter 'page': missing"), "{error}");
     }
 
     #[test]
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
-        let base = json!({"topic_name": "Atlas"});
-        sweep::<Args>(json!({}), "topic_name", Takes::Text, true);
+        let base = json!({"page": "Atlas"});
+        sweep::<Args>(json!({}), "page", Takes::Text, true);
         for count in ["max_blocks", "max_related_pages", "max_references"] {
             sweep::<Args>(base.clone(), count, Takes::Count(0), false);
         }
@@ -723,9 +698,9 @@ mod tests {
 
     #[test]
     fn compact_skips_resolve_refs_but_the_request_remembers_it_was_asked() {
-        let request = Request::from(parse_args::<Args>(args(json!({"topic_name": "a", "resolve_refs": true, "compact": true})).as_ref()).unwrap());
+        let request = Request::from(parse_args::<Args>(args(json!({"page": "a", "resolve_refs": true, "compact": true})).as_ref()).unwrap());
         assert!(!request.caps.resolve_refs && request.resolve_refs && request.compact);
-        let request = Request::from(parse_args::<Args>(args(json!({"topic_name": "a", "resolve_refs": true})).as_ref()).unwrap());
+        let request = Request::from(parse_args::<Args>(args(json!({"page": "a", "resolve_refs": true})).as_ref()).unwrap());
         assert!(request.caps.resolve_refs);
     }
 
@@ -792,7 +767,7 @@ mod tests {
     #[test]
     fn a_context_writes_what_was_answered_then_what_must_not_be_missed_then_the_data() {
         assert_eq!(
-            context().to_value(true).to_string(),
+            context().to_value().to_string(),
             concat!(
                 r#"{"topic":"atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"#,
                 r#""resolvedAliases":["Atlas","Project Atlas"],"#,
@@ -812,14 +787,11 @@ mod tests {
             "topic", "resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages",
             "references", "temporalContext",
         ];
-        assert_eq!(keys(&context().to_value(true)), all);
-        // `get_context_for_query` keeps a topic's context without the completeness keys
-        let without_meta: Vec<&str> = all.iter().copied().filter(|key| !["hasMore", "warnings", "totals"].contains(key)).collect();
-        assert_eq!(keys(&context().to_value(false)), without_meta);
+        assert_eq!(keys(&context().to_value()), all);
         // no resolution, no temporal context: the others keep their places
         let bare = TopicContext { resolved_from: None, resolved_aliases: None, temporal_context: None, ..context() };
         assert_eq!(
-            keys(&bare.to_value(true)),
+            keys(&bare.to_value()),
             ["topic", "hasMore", "warnings", "totals", "summary", "mainPage", "directBlocks", "relatedPages", "references"]
         );
     }

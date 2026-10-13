@@ -46,7 +46,7 @@ pub const NAME: &str = "logseq_get_backlinks";
 const DESCRIPTION: &str = "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n\
 **Use when:** \"what links to X?\" or \"where is X used?\"\n\
 **Can't find:** unlinked text mentions (logseq_find_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n\
-**Alternatives:** logseq_build_context for related pages.";
+**Alternatives:** logseq_explore_context for related pages.";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("page_name", &["name", "page"])];
@@ -462,7 +462,7 @@ fn group_by_source_page(rows: Vec<Option<Map<String, Value>>>) -> Vec<Backlink> 
 /// API's own call for `resolved_name`, unchanged. For a page with aliases it is one Datalog query
 /// over the ids of the whole group, shaped like that call's result (camelCase entities, one
 /// `[page, blocks]` tuple per source page), the pages in order of name, then id. A caller that ranks
-/// them (`get_backlinks`) loses that order, one that doesn't (`build_context`) keeps it.
+/// them (`get_backlinks`) loses that order, one that doesn't (`explore_context`) keeps it.
 ///
 /// `None` is LogSeq's `null` on either path (BR-0011, #318): no answer, which is not "nothing links
 /// here". The caller says so.

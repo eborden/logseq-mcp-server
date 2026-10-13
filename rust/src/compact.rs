@@ -3,7 +3,7 @@
 //! is its first line cut to 80 characters; the model reads only the blocks it picks, with
 //! `logseq_get_block`. The Markdown form of `compact` shows the same snippets.
 //!
-//! Supported by `build_context` and `get_context_for_query`, whose blocks are the bulk of the
+//! Supported by `explore_context`, whose blocks are the bulk of the
 //! output. Everything outside the blocks (`summary`, `totals`, `warnings`, `hasMore`,
 //! `resolvedFrom`) is kept as it is.
 //!
@@ -81,18 +81,6 @@ pub fn compact_topic_context(context: &Value) -> Value {
     Value::Object(out)
 }
 
-/// A query's context with every topic compacted and the search hits reduced
-/// to snippets.
-pub fn compact_query_context(context: &Value) -> Value {
-    let mut out = map_of(context);
-    out = with(out, "contexts", each(context.get("contexts"), compact_topic_context));
-    // a missing `searchResults` stays a missing key
-    if let Some(results) = context.get("searchResults") {
-        out = with(out, "searchResults", each(Some(results), compact_block));
-    }
-    Value::Object(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,17 +128,5 @@ mod tests {
                 r#""summary":{"totalBlocks":1},"hasMore":false,"warnings":[],"totals":{"blocks":1}}"#
             )
         );
-    }
-
-    #[test]
-    fn a_query_context_compacts_every_topic_and_the_search_hits() {
-        let query = json!({"query": "q", "extractedTopics": ["atlas"], "contexts": [context()], "searchResults": [{"id": 9, "uuid": "u9", "content": "hit"}], "warnings": [], "hasMore": false});
-        let compacted = compact_query_context(&query);
-        assert_eq!(compacted["searchResults"], json!([{"uuid": "u9", "snippet": "hit"}]));
-        assert_eq!(compacted["contexts"][0]["directBlocks"], json!([{"uuid": "u5", "snippet": "first"}]));
-        assert_eq!(compacted.as_object().unwrap().keys().collect::<Vec<_>>(), ["query", "extractedTopics", "contexts", "searchResults", "warnings", "hasMore"]);
-        // a query with no keyword search has no `searchResults` to compact
-        let none = compact_query_context(&json!({"query": "q", "contexts": []}));
-        assert!(none.get("searchResults").is_none());
     }
 }

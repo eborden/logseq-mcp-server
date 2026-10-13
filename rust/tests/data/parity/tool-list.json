@@ -1,20 +1,51 @@
 [
   {
-    "name": "logseq_build_context",
-    "title": "Build Context",
+    "name": "logseq_check_links",
+    "title": "Check Links",
     "annotations": {
-      "title": "Build Context",
+      "title": "Check Links",
       "readOnlyHint": true,
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Everything on one topic in a call: the page's blocks, related pages, and linked references.\n\n**Use when:** researching or explaining a topic that has a page.\n**Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
+    "description": "Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.\n\n**Can't find:** a link to the wrong page, or a name split across a ref.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "topic_name": {
-          "description": "Topic to build context for (page name, alias or ISO date)",
+        "before": {
+          "description": "Text before linking",
+          "type": "string",
+          "maxLength": 50000
+        },
+        "after": {
+          "description": "before plus [[links]], at most 500 distinct terms",
+          "type": "string",
+          "maxLength": 50000
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ]
+    }
+  },
+  {
+    "name": "logseq_explore_context",
+    "title": "Explore Context",
+    "annotations": {
+      "title": "Explore Context",
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "description": "Explore everything on one page in a call: its blocks, related pages, and linked references.\n\n**Use when:** researching or explaining a topic that has a page.\n**Can't find:** topics with no page (use logseq_find_blocks), or anything past the caps (see hasMore and warnings).\n**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "page": {
+          "description": "Page to explore (name, alias or ISO date)",
           "type": "string"
         },
         "max_blocks": {
@@ -60,38 +91,7 @@
         }
       },
       "required": [
-        "topic_name"
-      ]
-    }
-  },
-  {
-    "name": "logseq_check_links",
-    "title": "Check Links",
-    "annotations": {
-      "title": "Check Links",
-      "readOnlyHint": true,
-      "destructiveHint": false,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "description": "Check a [[link]] pass. ok is true only if after strips back to before, brackets balance and don't nest, every ref in before is kept, and each [[term]] names exactly one page or alias.\n\n**Can't find:** a link to the wrong page, or a name split across a ref.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "before": {
-          "description": "Text before linking",
-          "type": "string",
-          "maxLength": 50000
-        },
-        "after": {
-          "description": "before plus [[links]], at most 500 distinct terms",
-          "type": "string",
-          "maxLength": 50000
-        }
-      },
-      "required": [
-        "before",
-        "after"
+        "page"
       ]
     }
   },
@@ -301,7 +301,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n**Use when:** \"what links to X?\" or \"where is X used?\"\n**Can't find:** unlinked text mentions (logseq_find_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n**Alternatives:** logseq_build_context for related pages.",
+    "description": "List the pages and blocks that link to a page with [[page]] or #tag, most-linking pages first. Capped by max_pages and max_blocks_per_page: check meta.\n\n**Use when:** \"what links to X?\" or \"where is X used?\"\n**Can't find:** unlinked text mentions (logseq_find_blocks), outbound links (logseq_get_concept_network), or over 100 pages.\n**Alternatives:** logseq_explore_context for related pages.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -426,7 +426,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n**Can't find:** unlinked pages, or what pages say (logseq_build_context).",
+    "description": "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n**Can't find:** unlinked pages, or what pages say (logseq_explore_context).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -472,55 +472,6 @@
     }
   },
   {
-    "name": "logseq_get_context_for_query",
-    "title": "Get Context for Query",
-    "annotations": {
-      "title": "Get Context for Query",
-      "readOnlyHint": true,
-      "destructiveHint": false,
-      "idempotentHint": true,
-      "openWorldHint": false
-    },
-    "description": "Context for a natural-language question. Takes [[page]] and #tag topics from the query, else searches its first 3 words over 3 letters (max 100 hits), and builds context for each.\n\n**Can't find:** meaning, or over 100 keyword hits (put specific words first). Topics come from links, tags or literal words, so put page names in [[brackets]].\n**Alternatives:** logseq_build_context for one known topic.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "query": {
-          "description": "Natural language query (can include [[page references]] and #tags)",
-          "type": "string"
-        },
-        "max_topics": {
-          "description": "Maximum number of topics to extract context for (default: 5)",
-          "default": 5,
-          "type": "integer",
-          "minimum": 1
-        },
-        "max_search_results": {
-          "description": "Maximum number of search results for queries without explicit topics (default: 20, max: 100)",
-          "default": 20,
-          "type": "integer",
-          "minimum": 0
-        },
-        "format": {
-          "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact",
-          "type": "string",
-          "enum": [
-            "json",
-            "markdown"
-          ]
-        },
-        "compact": {
-          "description": "Block snippets and uuids, no bodies. Read one with logseq_get_block",
-          "default": false,
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "query"
-      ]
-    }
-  },
-  {
     "name": "logseq_get_current",
     "title": "Get Current Context",
     "annotations": {
@@ -530,7 +481,7 @@
       "idempotentHint": false,
       "openWorldHint": false
     },
-    "description": "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n**Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_build_context or logseq_get_page.\n\n**Can't find:** anything not open right now. Returns page: null with a message when no page is open.",
+    "description": "Get what the user is looking at in LogSeq right now: the open page, the block being edited, and any selected blocks.\n\n**Use when:** the user says \"this page\", \"this block\" or \"what I'm looking at\" without naming it. Then pass the page name to logseq_explore_context or logseq_get_page.\n\n**Can't find:** anything not open right now. Returns page: null with a message when no page is open.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -547,7 +498,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get the connected graph's name and filesystem path.\n\n**Use when:** confirming which graph is attached or debugging paths.\n**Can't find:** anything about content. See logseq_find_pages and logseq_build_context.",
+    "description": "Get the connected graph's name and filesystem path.\n\n**Use when:** confirming which graph is attached or debugging paths.\n**Can't find:** anything about content. See logseq_find_pages and logseq_explore_context.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -564,7 +515,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages) or what links here (logseq_get_backlinks).\n**Alternatives:** logseq_build_context adds related pages and references.",
+    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages) or what links here (logseq_get_backlinks).\n**Alternatives:** logseq_explore_context adds related pages and references.",
     "inputSchema": {
       "type": "object",
       "properties": {

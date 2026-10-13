@@ -1,5 +1,5 @@
 //! Reading `[[page refs]]` and `#tags` out of text: one grammar for every tool that does it
-//! (slim `pageRefs` and `tags`, `get_context_for_query`'s topics, the `check_links` checks and the
+//! (slim `pageRefs` and `tags`, the `check_links` checks and the
 //! `{{embed [[page]]}}` of `resolve_refs`).
 //!
 //! A page ref is `[[` + a name + `]]`. The name is one or more characters, none of them `[`, `]` or

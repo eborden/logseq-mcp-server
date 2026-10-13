@@ -51,9 +51,9 @@ pub fn find_tips(text: Option<&str>, others: Others, results: &[Value], matches:
                     Kind::Topic => "topic most results mention",
                     Kind::Page => "page most results are on",
                 },
-                suggest_call("logseq_build_context", &json!({"topic_name": name}))
+                suggest_call("logseq_explore_context", &json!({"page": name}))
             ),
-            None => "Results carry page ids only. Repeat with slim_results: true to get page names, then logseq_build_context on one."
+            None => "Results carry page ids only. Repeat with slim_results: true to get page names, then logseq_explore_context on one."
                 .to_owned(),
         });
     }
@@ -107,7 +107,7 @@ mod tests {
     }
 
     fn page_tip(name: &str) -> String {
-        format!("To read the page most results are on: logseq_build_context {{\"topic_name\":\"{name}\"}}.")
+        format!("To read the page most results are on: logseq_explore_context {{\"page\":\"{name}\"}}.")
     }
 
     #[test]
@@ -158,7 +158,7 @@ mod tests {
         let hits = [slim("Alice", &["urgent"]), slim("Bob", &["urgent", "later"])];
         assert_eq!(
             find_tips(Some("x"), Others::default(), &hits, Some(2)),
-            [r#"To read the topic most results mention: logseq_build_context {"topic_name":"urgent"}."#]
+            [r#"To read the topic most results mention: logseq_explore_context {"page":"urgent"}."#]
         );
     }
 
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(find_tips(Some("x"), Others::default(), &[journal.clone(), journal.clone(), plain], Some(3)), [page_tip("Alice")]);
         assert_eq!(
             find_tips(Some("x"), Others::default(), &[journal], Some(1)),
-            [r#"To read the topic most results mention: logseq_build_context {"topic_name":"t"}."#]
+            [r#"To read the topic most results mention: logseq_explore_context {"page":"t"}."#]
         );
     }
 
@@ -186,7 +186,7 @@ mod tests {
         let hit = json!({"id": 1, "uuid": "u", "content": "c", "page": {"id": 2}});
         assert_eq!(
             find_tips(Some("x"), Others::default(), &[hit], Some(1)),
-            ["Results carry page ids only. Repeat with slim_results: true to get page names, then logseq_build_context on one."]
+            ["Results carry page ids only. Repeat with slim_results: true to get page names, then logseq_explore_context on one."]
         );
     }
 

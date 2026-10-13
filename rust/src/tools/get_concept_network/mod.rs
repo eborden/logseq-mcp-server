@@ -49,7 +49,7 @@ use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::truncation::{SizeCut, size_truncation_warning};
-use crate::tools::build_context::resolved_from;
+use crate::tools::explore_context::resolved_from;
 
 use self::graph::{Edge, EdgeOutput, Links, Node, Nodes, build_edges, relabel_depths};
 use self::queries::{connected_pages, connected_pages_grouped};
@@ -64,7 +64,7 @@ pub const NAME: &str = "logseq_get_concept_network";
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n\
 **Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n\
-**Can't find:** unlinked pages, or what pages say (logseq_build_context).";
+**Can't find:** unlinked pages, or what pages say (logseq_explore_context).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("concept_name", &["name", "page", "page_name"])];
