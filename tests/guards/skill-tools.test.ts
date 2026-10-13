@@ -77,6 +77,15 @@ describe('the skills name only real tools (#486)', () => {
     expect(skillViolations(files, tools, real), 'skills/logseq-skills/ breaks the tool contract').toEqual([]);
   });
 
+  it('teaches the four types of ADR-0037 and no other grouping (#497)', () => {
+    // The six categories SKILL.md and the old tool reference used before the v2 rename, none of them a tool type
+    const oldCategories = ['Basic Tools', 'Graph Exploration', 'Context Building', 'Temporal Query', 'Semantic Search', 'Linking Tools'];
+    const found = files.flatMap(f => oldCategories.filter(c => f.text.includes(c)).map(c => `${f.path}: "${c}"`));
+    expect(found, 'the skills use a category that is not get, find, explore or check').toEqual([]);
+    const skill = files.find(f => f.path === 'SKILL.md');
+    for (const type of ['get', 'find', 'explore', 'check']) expect(skill?.text, `SKILL.md names the ${type} type`).toContain(`| \`${type}\` |`);
+  });
+
   it('keeps the minimum of two worked examples per tool', () => {
     expect(MIN_EXAMPLES_PER_TOOL).toBeGreaterThanOrEqual(2);
   });

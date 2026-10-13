@@ -1,468 +1,278 @@
-# LogSeq Context Builder Workflows
+# LogSeq Context Builder Recipes
 
-Detailed workflows for building comprehensive context from LogSeq knowledge graphs.
+Multi-step recipes for questions about the graph. Each is a numbered list of calls, written as JSON the way the tool takes it, with what to read in each result and the next call. The made-up pages (`project atlas`, `Alice`, `Bob`) stand for the user's own.
 
-## Overview
+Core principle: **name the page, then explore it.** `logseq_explore_context` for a page you can name, `logseq_find_blocks` for words and properties, `logseq_explore_timeline` for time, `logseq_explore_network` for structure. Read `context-efficiency.md` first, and `results-and-limits.md` whenever a result carries `warnings`. Parameters and worked single calls are in `tools/get.md`, `find.md`, `explore.md` and `check.md`.
 
-Build comprehensive context from LogSeq knowledge graphs by searching blocks, following backlinks, and discovering connections. Core principle: **Start broad (search), then focus (get pages), then discover (the references of `explore_context`)**.
+## Recipe 1: Recall a topic
 
-## Workflow 1: Research Assistant
+**When:** "What do I know about X?", "what links to X?", research for a topic.
 
-**When:** User asks "what do I know about X?" or needs research context.
+1. If you are not sure of the page name, look it up. Skip this when the user named the page.
 
-**4-Phase Approach:**
-
-1. **Search** → `logseq_find_blocks(text=topic, limit=15)` - cast wide net
-2. **Retrieve** → `logseq_get_page(page, detail="full")` for each relevant page - get full content
-3. **Discover** → `logseq_explore_context(page)` for each key page, in parallel - find connections
-4. **Synthesize** → Present organized findings with sources
-
-**Example:**
-```
-User: "What do I know about React hooks?"
-
-1. logseq_find_blocks(text="React hooks", limit=15)
-2. logseq_get_page("React", detail="full")
-3. logseq_explore_context("React")
-4. Synthesize: "You have detailed notes in [[React]] covering useState/useEffect.
-   Referenced in [[Project Alpha]] and [[Interview Notes]]. Gap: error boundary hooks."
+```json tool=logseq_find_pages
+{"text": "react"}
 ```
 
-## Workflow 2: Task Prioritization
+Read the names and aliases. A name with no page is a vocabulary miss, so search for the words instead (step 3) and say there is no page.
 
-**When:** User asks about tasks, TODOs, what to work on, or managing their work.
+2. Explore the page. One call has its blocks, related pages and references, so don't add a search or a second look at the links.
 
-**4-Step Process:**
-
-### Step 1: Find All Tasks
-
-Execute ALL of these to ensure comprehensive coverage:
-
-```
-logseq_find_blocks(text="TODO")
-logseq_find_blocks(text="DOING")
-logseq_find_blocks(property="status", value="todo")
-logseq_find_blocks(property="status", value="doing")
-logseq_find_blocks(property="status", value="in-progress")
-logseq_find_blocks(property="priority", value="high")
-logseq_find_blocks(text="SCHEDULED:")  # Get all scheduled tasks
+```json tool=logseq_explore_context
+{"page": "React", "max_blocks": 20}
 ```
 
-**Why check multiple?** Users may use markers ("TODO"), properties (`status::doing`), or both. Check everything. A property value is an exact string, so `todo` does not find `TODO`; a scheduled task is found by its `SCHEDULED:` line, which is text and not a property.
+Read `directBlocks` for what the page says, then `references` (ranked, with each `sourcePage`) for what the rest of the graph says. Check `warnings` and `totals` before you call the list complete. For more references, call again with the `references_offset` the warning names and `max_blocks` and `max_related_pages` at 0.
 
-### Step 2: Categorize
+3. If the topic has no page, or the user asked about a phrase, search the words with a small limit.
 
-Group by:
-- **Status**: TODO, DOING, WAITING, etc.
-- **Project/Page**: Which pages contain these tasks
-- **Priority**: high/medium/low or A/B/C markers
-- **Time**: Scheduled dates, deadlines
-
-### Step 3: Identify Active Work
-
-Extract tasks marked as:
-- "DOING" in content
-- `status::doing` or `status::in-progress` properties
-- Recently scheduled (this week)
-
-### Step 4: Present & Recommend
-
-Structure:
-```
-CURRENTLY ACTIVE (DOING):
-- List all in-progress work
-
-HIGH PRIORITY (This Week):
-- Deadlines/scheduled this week
-- High priority markers
-
-BY PROJECT:
-- Group remaining TODOs by page/project
-
-RECOMMENDATION:
-- Complete active tasks before starting new ones
-- Highlight urgent items
-- Note any blockers or dependencies
+```json tool=logseq_find_blocks
+{"text": "error boundary", "limit": 5}
 ```
 
-**Example:**
+Read `totals.matches` for how many there are and each `pageName` for where. Next call: `logseq_explore_context` on the page that holds the most hits.
+
+**Present:** the organized findings with sources as `[[page]]` links, the gaps ("no notes on error boundaries") and, for a long page, the outline first (`logseq_get_page` with `detail` `outline`, then `logseq_get_block`). For several topics, run step 2 once per page, in parallel.
+
+## Recipe 2: Refresh on a person before a meeting
+
+**When:** "I'm meeting Alice in ten minutes", "what's going on with the Atlas team".
+
+1. Check the page exists and which names it answers to. Skip when you are sure.
+
+```json tool=logseq_find_pages
+{"names": ["Alice"]}
 ```
-User: "What should I work on today?"
 
-Findings:
-- 2 DOING tasks (auth implementation, blog draft)
-- 3 high priority (tests, PR review, docs)
-- 18 total TODOs across 5 projects
+Read `names`: the page, or `null` with close suggestions. Use the page's own `name`.
 
-Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
+2. Read the page and everything that links to it. These two calls are independent, so make them in parallel. Compact keeps the first one cheap.
+
+```json tool=logseq_explore_context
+{"page": "Alice", "max_blocks": 20, "max_references": 15, "compact": true}
 ```
 
-## Workflow 3: Stale Task Detection
+```json tool=logseq_explore_timeline
+{"page": "Alice", "last_n": 30, "top_concepts_limit": 5}
+```
 
-**When:** User asks about old/forgotten tasks or wants backlog review.
+Read the snippets and `sourcePage` names of the first for standing context (role, projects, how they work). Read the timeline `entries` for the last 30 days, newest facts last, and `summary.topConcepts` for the projects that came up with them. With a period, blocks on non-journal pages are left out, which is why the first call is also needed.
 
-**3-Step Process:**
+3. Find what is still open with them.
 
-1. **Query Scheduled** → `logseq_find_blocks(text="SCHEDULED:")` - find all scheduled tasks
-2. **Check Blocked** → Search for "WAITING", "blocked by", or `status::blocked`
-3. **Surface Old** → Present tasks scheduled >2 weeks ago with context
+```json tool=logseq_find_blocks
+{"text": "TODO", "links_to": ["Alice"], "limit": 10}
+```
+
+Read each `content` and `pageName`. A task that mentions Alice only in plain words is not here: `links_to` matches links. Next call: `logseq_get_block` with a `uuid` and `include_children: true` for the context under a task.
+
+**Present:** who they are in the graph, what happened lately, open items, what to ask or raise. Quote actual content with its source page.
+
+## Recipe 3: The history of a decision
+
+**When:** "How did we end up choosing X", "how has my thinking on X changed", "how did this project evolve".
+
+1. Follow the page over time, grouped by month, to see when it was active.
+
+```json tool=logseq_explore_timeline
+{"page": "project atlas", "group_by": "month"}
+```
+
+Read `dateRange`, the entries in order (oldest first) and `summary.topConcepts`. Gaps between entries are periods with nothing said. Check `warnings`: `blocks_truncated` means later months are missing, and `howToFetchAll` names the call that continues.
+
+2. Find the block where the decision was made.
+
+```json tool=logseq_find_blocks
+{"text": "decided", "links_to": ["project atlas"], "limit": 10}
+```
+
+Read the hits newest first. Words differ ("chose", "agreed", "going with"), and search is literal, so try the others if this is empty before you say it wasn't written down.
+
+3. Read the discussion around the best hit.
+
+```json tool=logseq_get_block
+{"uuid": "0088f1a0-0000-4000-8000-000000000001", "include_children": true}
+```
+
+Read `content` and the nested `children`. A `((uuid))` in it is a quoted block: follow it with `logseq_get_block`, or repeat with `resolve_refs: true`.
+
+**Present:** the timeline as phases, each with its dates and one quote, then the decision with its source and what came before it. Say where the notes stop.
+
+## Recipe 4: Connect two projects
+
+**When:** "How do the billing work and the onboarding redesign relate", "what do these two have in common".
+
+1. Find the shortest path of links between the pages.
+
+```json tool=logseq_explore_network
+{"page": "billing", "to": "onboarding redesign", "max_depth": 3}
+```
+
+Read `hops` and the `nodes` in order: the pages in the middle are the bridges. If there are no nodes, read the `no_path_within` warning: one more hop may be offered (3 is the maximum), or the pages are not linked.
+
+2. Read the blocks that make the link, for the bridge page or for blocks that link both ends.
+
+```json tool=logseq_find_blocks
+{"links_to": ["billing", "onboarding redesign"], "limit": 10}
+```
+
+Read each `content` and `pageName`: these are blocks that link both pages themselves. If it is empty, the connection runs through the bridge page, so read it:
+
+```json tool=logseq_explore_context
+{"page": "customer accounts", "max_blocks": 10, "max_references": 10}
+```
+
+3. For the shape around one end instead, map its neighbours.
+
+```json tool=logseq_explore_network
+{"page": "billing", "max_depth": 1, "format": "markdown"}
+```
+
+Read the lines for the neighbours and link counts: high counts are the closest ties. A neighbour that is a hub is a bridge candidate.
+
+**Present:** the path as `[[A]] -> [[bridge]] -> [[B]]` with the reference counts, what each link says (quote the block), and what the bridge page is for. When there is no path, say they are not linked and offer a word search.
+
+## Recipe 5: Plan the week
+
+**When:** "What should I work on?", "help me plan my week", any request about tasks.
+
+1. Find the tasks. Users mark them with markers (`TODO`), with properties (`status:: doing`), or both, and a property value is an exact string, so check each way. These calls ask different questions, so make them together.
+
+```json tool=logseq_find_blocks
+{"text": "DOING", "limit": 20}
+```
+
+```json tool=logseq_find_blocks
+{"text": "TODO", "limit": 30}
+```
+
+```json tool=logseq_find_blocks
+{"property": "status", "value": "doing", "limit": 20}
+```
+
+```json tool=logseq_find_blocks
+{"property": "priority", "value": "high", "limit": 20}
+```
+
+Read `marker`, `content` and `pageName` of each hit, and `totals.matches` for how many exist beyond the limit. `text` is a case-insensitive substring, so `DOING` also hits ordinary prose: trust `marker`, not the match. A `SCHEDULED:` or `DEADLINE:` line is text, not a property, so find those with `text`:
+
+```json tool=logseq_find_blocks
+{"text": "SCHEDULED:", "limit": 30}
+```
+
+2. Group what you found by status (DOING, TODO, WAITING), by page (project) and by date. Check `warnings`: a cut list means there are more tasks than you read, so say so.
+
+3. Get the context of the busiest project before recommending.
+
+```json tool=logseq_explore_context
+{"page": "project atlas", "max_blocks": 20}
+```
 
 **Present:**
-- Task content with original scheduled date
-- Page/project context
-- Suggestion: reschedule, archive, or revive
 
-## Workflow 4: Page Context Building
-
-**When:** User mentions specific page and needs full context.
-
-**With explore_context:**
-
-1. **Quick Context**: `logseq_explore_context(page)`
-   - Gets page + blocks + related pages + references + temporal info
-   - Single call replaces multiple queries
-
-2. **Manual Context** (only to read a page whole):
-   - Get full page: `logseq_get_page(page, detail="full")`
-   - Get connections: the `references` of `logseq_explore_context(page)`
-   - Extract linked pages from content
-
-3. Synthesize: content summary + connections + usage patterns
-
-## Workflow 5: Graph Exploration
-
-**When:** User wants to explore knowledge network, find related concepts, or understand relationships.
-
-**3-Phase Approach:**
-
-### Phase 1: Visualize Network
 ```
-logseq_explore_network(page, max_depth=2)
-```
-- Returns nodes (pages) and edges (connections) in both link directions, each node with its distance from the topic and each edge with its reference counts
-- Good for understanding topic centrality
-- Identifies hub pages vs. leaf pages
-- Capped at 50 pages and cut to 30,000 characters: read the `truncated` flag and the warnings before calling the map complete, and ask about a more specific page or lower `max_depth` for a smaller one
-- To ask how two pages connect, pass the second as `to` (`logseq_explore_network(page, to=other, max_depth=3)`): the result is the shortest path as nodes and edges, and the middle pages are the bridges. If there is none within `max_depth`, a `no_path_within` warning says how far the walk went
-
-### Phase 2: Get the References
-```
-logseq_explore_context(page, max_blocks=0, max_related_pages=0)
-```
-- Find the pages that reference the topic, with the blocks that do (the `references`)
-- Complements the network with detailed backlink context
-- Keep the defaults (20 references): they cover "what connects to this". More come back with `references_truncated` in the warnings, with `totals.references` giving the real count, and `references_offset` reads the next page (the warning's `howToFetchAll` names the offset). Say the list is partial. The references come ranked by the blocks on their source page that link the topic, most first (ties by name), so the 20 kept are on the pages that link the topic most and the first one listed is the top referrer, which answers "what connects to this" without raising anything. A page left out links the topic no more than the last one kept, but a ranking by count says nothing about which block matters, so a blocker can sit on a page with one linking block. Read on with `references_offset` only when the question needs every referrer (a blocker hunt); each later page can pass `max_blocks=0` and `max_related_pages=0`. The result is cut to 30,000 characters whole; the warning then names the offset to read on from
-
-### Phase 3: Present Insights
-- **Core connections**: Pages at distance 1
-- **Clusters**: Groups of highly connected pages
-- **Bridges**: Pages connecting different clusters
-- **Orphans**: Related pages with few connections
-
-**Example:**
-```
-User: "Show me everything connected to [[Machine Learning]]"
-
-1. logseq_explore_network("Machine Learning", max_depth=2)
-   → 23 nodes, 47 edges
-
-2. logseq_explore_context("Machine Learning", max_blocks=0, max_related_pages=0)
-   → 15 pages with references
-
-3. Present:
-   "CORE CONNECTIONS (depth 1):
-    - [[Neural Networks]] (referenced in 8 places)
-    - [[Python]] (used in all ML projects)
-    - [[Transformers]] (recent deep dive)
-
-    CONNECTED TOPICS (depth 2):
-    - [[NLP]] → via [[Transformers]]
-    - [[Computer Vision]] → via [[Neural Networks]]
-    - [[Data Science]] → via [[Python]]
-
-    NETWORK INSIGHTS:
-    - [[Machine Learning]] is a hub (23 connections)
-    - Most activity in [[Neural Networks]] cluster
-    - [[Transformers]] is bridge to [[NLP]]"
+CURRENTLY ACTIVE (DOING): the in-progress work
+HIGH PRIORITY (this week): deadlines, scheduled items, priority markers
+BY PROJECT: the remaining TODOs grouped by page
+RECOMMENDATION: finish active tasks first, name the urgent ones, note blockers
 ```
 
-## Workflow 6: Temporal Analysis
+## Recipe 6: Find stale work
 
-**When:** User asks about time-based patterns, concept evolution, or "what was I thinking about X?"
+**When:** "What have I forgotten?", backlog review, old or blocked tasks.
 
-**For Journal Queries:**
-```
-logseq_explore_timeline(start_date=..., end_date=...)   # or last_n, or preset
-```
-- Use YYYYMMDD format (20251101 = Nov 1, 2025)
-- To filter a period by a word, use `logseq_find_blocks` with `text` and the same period
-- Returns entries sorted chronologically
+1. Find tasks from an older period. Journals carry a date, so a period of last spring finds what was written then and is still marked open.
 
-**For Concept Evolution:**
-```
-logseq_explore_timeline(page=..., group_by=...)   # a period (both dates) is optional
-```
-- Tracks how concept appears over time
-- Supports grouping: 'day', 'week', 'month'
-- Shows temporal patterns and gaps
-- Sorted chronologically
-- Distinguishes journal vs. non-journal pages (a period leaves the non-journal ones out)
-
-**Example:**
-```
-User: "How has my thinking on [[Rust]] evolved this year?"
-
-1. logseq_explore_timeline(page="Rust", start_date=20250101, end_date=20251231, group_by="month")
-   → Timeline with monthly grouping
-
-2. Present:
-   "RUST EVOLUTION (2025):
-
-    Jan-Feb: Initial learning phase
-    - 12 mentions (basics, ownership, borrowing)
-
-    Mar-May: Active project work
-    - 34 mentions (async, tokio, production issues)
-
-    Jun-Aug: Deep dive period
-    - 28 mentions (unsafe, FFI, optimization)
-
-    Sep-Nov: Maintenance
-    - 8 mentions (updates, refactoring)
-
-    PATTERN: Intense learning → Active development → Maintenance
-    GAP: No mentions in September (vacation?)"
+```json tool=logseq_find_blocks
+{"text": "TODO", "start_date": 20250101, "end_date": 20250331, "limit": 30}
 ```
 
-## Workflow 7: Smart Context Building
+Read `content`, `pageName` and `totals.matches`. A TODO in an old journal may have been finished elsewhere: check the page before calling it stale.
 
-**When:** User asks complex questions requiring comprehensive context from multiple sources.
+2. Find what is blocked or waiting.
 
-**Several topics:**
+```json tool=logseq_find_blocks
+{"text": "WAITING", "limit": 20}
 ```
-logseq_explore_context("Project X")
-logseq_explore_context("Team Meeting")
+
+```json tool=logseq_find_blocks
+{"property": "status", "value": "blocked", "limit": 20}
 ```
-- Pick the pages from the question yourself, and call once per page, in parallel
-- Each answer is smaller and is cut on its own; for the words of a question that name no page, use `find_blocks`
 
-**Deep Dives:**
+3. For the old items that matter, read the page to see whether the work moved on.
+
+```json tool=logseq_explore_timeline
+{"page": "project atlas", "last_n": 60, "include_content": false}
 ```
-logseq_explore_context(page, max_blocks=50, max_related_pages=10)
+
+Read the day counts and snippets: a page with recent activity is not abandoned.
+
+**Present:** each stale task with its original date and page, and a suggestion (reschedule, archive or revive).
+
+## Recipe 7: Who owns it, or which pages have a property
+
+**When:** "Who owns the importer?", "which vendors do we use", any ask for the value of a property or the pages that carry one.
+
+1. Pages that carry a page property (`owner:: Alice` at the top of a page):
+
+```json tool=logseq_find_pages
+{"property": "owner", "value": "Alice"}
 ```
-- Main page with properties
-- Direct blocks from page
-- Related pages (the pages that link to it)
-- Reference blocks mentioning the topic, most-linking pages first, paged with `references_offset`
-- Temporal context (for journal pages)
-- Summary statistics
 
-**Example:**
+Read `pages` and `total`. If it is empty, the property may be on a block and not on the page, so try blocks:
+
+```json tool=logseq_find_blocks
+{"property": "owner", "value": "Alice", "limit": 10}
 ```
-User: "Give me full context on [[Q4 Planning]]"
 
-1. logseq_explore_context("Q4 Planning", max_blocks=50, max_related_pages=15)
-   → Comprehensive aggregation
+2. For the value of a property on a page you can name, read the page. Page properties are in its properties.
 
-2. Present:
-   "Q4 PLANNING CONTEXT:
-
-    MAIN PAGE:
-    - 23 blocks (goals, milestones, retrospective)
-    - Properties: quarter::4, year::2025, status::active
-
-    RELATED PAGES (15 of 15, the pages that link to it)
-
-    REFERENCES (14), most-linking pages first:
-    - [[Weekly Standup]] (7 linking blocks)
-    - [[Engineering Notes]] (4 linking blocks)
-    - [[Leadership Meeting]] (3 linking blocks)
-
-    TEMPORAL CONTEXT:
-    - Not a journal page (a journal page reports its date)
-
-    SUMMARY:
-    - 23 direct blocks
-    - 15 related pages
-    - 14 reference blocks
-    - Active planning document"
+```json tool=logseq_get_page
+{"page": "importer"}
 ```
+
+Read the properties of the page. Next call: `logseq_explore_context` when the answer needs more than the property.
+
+**Present:** the owner and where the fact is written (page, block). If two sources disagree, say so.
 
 ## Core Guidelines
 
-### Do ✅
+### Do
 
-- **Search first** to understand the landscape
-- **Follow backlinks** aggressively (crucial for context)
-- **Quote actual content** with proper source attribution
-- **Use [[double brackets]]** for page references
+- **Name the page, then explore it** (`logseq_explore_context`), one page per call, in parallel for several
+- **Follow references**: they reveal context the page itself doesn't hold
+- **Quote actual content** with its source page, and use `[[double brackets]]` for page references
 - **Surface unexpected connections** and patterns
-- **Be honest about gaps** ("you don't have notes on X")
-- **Check multiple status indicators** for tasks (TODO, DOING, status::, etc.)
+- **Be honest about gaps** ("you don't have notes on X"), and read `warnings` before you say it
+- **Check several status indicators** for tasks (markers and properties)
 
-### Don't ❌
+### Don't
 
 - Assume page structure without checking
-- Ignore backlinks (they reveal hidden context)
-- Search only once (iterate if results are poor)
-- Return raw UUIDs without context
+- Search once and stop when results are poor: check the vocabulary with `logseq_find_pages`, then retry
+- Return raw uuids without context
 - Suggest creating pages unless asked
-- Make changes to LogSeq structure (read-only assistance)
+- Modify LogSeq structure (these tools are read-only)
 
 ## Common Pitfalls
 
-| Pitfall | Solution |
-|---------|----------|
-| Missing tasks | Check BOTH markers and properties |
-| Incomplete context | Use `explore_context` |
-| Poor search results | Pick the pages and call `explore_context` for each, or use `find_blocks` for the words |
-| Date queries unclear | Use `explore_timeline` with YYYYMMDD format |
-| Lost connections | Use `explore_network` with max_depth=2, or with `to` for how two pages connect |
-| Manual aggregation | Use `explore_context` instead of multiple queries |
-| Shallow exploration | Use `explore_network` to see the pages around a page |
-| Time patterns unclear | Use `explore_timeline` with `page` and `group_by` |
-
-## Performance Tips
-
-### Smart Tool Selection:
-
-**Single-call solutions (fastest):**
-- `explore_context` - Replaces 5+ separate queries; one call per page, in parallel for several
-- `explore_network` - The pages around a page, or the shortest path to a second one, in one call
-
-**Multi-call workflows (when needed):**
-- Broad exploration: `find_blocks` → `get_page` → `explore_context`
-- Specific deep-dive: `get_page` → `explore_network`
-- Structured data: `find_blocks` with `property` and `value` for precise matches
-
-**Limit parameters:**
-- Use `max_blocks`, `max_related_pages` to control response size
-- Use `max_depth` on `explore_network` carefully: 1 is a page's direct neighbours, the default is 2 and the maximum is 3
-- Use `limit` on find_blocks to avoid overwhelming results
-
-**Best practices:**
-- Prefer `explore_context` over manual aggregation, and one call per page over several searches
-- Use `find_blocks` with `page` and `links_to` instead of filtering results manually, and `explore_network` with `to` to ask how two pages connect, and through which pages
-
-## Example Complete Sessions
-
-### Session 1: Weekly Planning
-
-```
-User: "Help me plan my week"
-
-1. Find all tasks (6 queries: TODO, DOING, status properties)
-   → 2 DOING, 18 TODO, 4 high priority
-
-2. Check deadlines
-   → 3 tasks due this week
-
-3. Present:
-   "CURRENTLY ACTIVE:
-    - [[Client Project]]: Payment integration (DOING)
-    - [[Blog]]: Testing patterns article (DOING)
-
-    HIGH PRIORITY (This Week):
-    - PR review (deadline: Thu)
-    - Talk abstract (deadline: Fri)
-    - Onboarding docs (priority::high)
-
-    PROJECTS NEEDING ATTENTION:
-    - [[Client Project]]: 6 TODOs (2 scheduled this week)
-    - [[Open Source]]: 4 TODOs (1 high priority)
-    - [[Learning]]: 3 TODOs (no deadlines)
-
-    RECOMMENDATION: Complete active tasks first, then high-priority deadlines."
-
-4. Ask: "Want to dive deeper into any project?"
-```
-
-### Session 2: Knowledge Graph Exploration
-
-```
-User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]]?"
-
-1. logseq_explore_network("TypeScript", to="GraphQL", max_depth=3)
-   → The shortest path, as nodes and edges: [[TypeScript]], [[API Development]], [[GraphQL]]
-     (2 hops, each edge with its reference counts). With no path within 3 hops the result
-     says `no_path_within` and names the depth reached
-
-2. logseq_explore_network("TypeScript", max_depth=2)
-   → Network analysis: 15 nodes including [[GraphQL]], 28 edges
-
-3. logseq_explore_context("TypeScript", max_blocks=0, max_related_pages=0)
-   → 12 pages with references
-
-4. Present:
-   "CONNECTION FOUND (2 hops):
-    [[TypeScript]] → [[API Development]] → [[GraphQL]]
-
-    SHARED CONTEXT:
-    - Both referenced in [[API Development]] (8 mentions)
-    - Both tagged in [[Backend Architecture]]
-    - Co-occur in 3 project pages
-
-    RELATIONSHIP INSIGHTS:
-    - GraphQL types written in TypeScript
-    - Type safety mentioned in both contexts
-    - [[API Development]] is the bridge concept
-
-    RECOMMENDATION: Review [[API Development]] to see how you use them together."
-```
-
-### Session 3: Temporal Analysis
-
-```
-User: "How has my approach to testing changed this year?"
-
-1. logseq_explore_timeline(page="Testing", start_date=20250101, end_date=20251231, group_by="month")
-   → 67 mentions across 11 months
-
-2. logseq_find_blocks(text="testing", start_date=20250101, end_date=20250331)
-   → Q1 entries
-
-3. logseq_find_blocks(text="testing", start_date=20251001, end_date=20251231)
-   → Q4 entries (current)
-
-4. Present:
-   "TESTING EVOLUTION (2025):
-
-    Q1 (Jan-Mar): Learning phase
-    - 18 mentions: Unit testing basics, TDD introduction
-    - Focus: Jest, Vitest setup
-
-    Q2 (Apr-Jun): Adoption
-    - 24 mentions: Integration tests, test architecture
-    - Focus: Testing strategies, mocking
-
-    Q3 (Jul-Sep): Mastery
-    - 15 mentions: Advanced patterns, performance testing
-    - Focus: Property-based testing, benchmarks
-
-    Q4 (Oct-Nov): Teaching
-    - 10 mentions: Testing guides, team workshops
-    - Focus: Documentation, mentoring
-
-    KEY SHIFTS:
-    - From learning → practicing → teaching
-    - From unit focus → integration + E2E
-    - Added property-based testing in Q3
-
-    CURRENT STATE: You're now teaching testing patterns to others."
-```
+| Pitfall | Fix |
+|---------|-----|
+| Missing tasks | Check markers (`text`) and properties (`property` with `value`) |
+| Incomplete context | `logseq_explore_context` on the page |
+| Poor search results | Check the vocabulary with `logseq_find_pages`, and remember search is literal |
+| A period with no results | A period keeps only journal pages. Use `page` on `logseq_explore_timeline` for non-journal blocks |
+| Date arguments refused | `start_date` and `end_date` are numbers in YYYYMMDD with no separators, and both are needed |
+| Lost connections | `logseq_explore_network`, with `to` for how two pages connect |
+| Reporting a cut list as complete | Read `warnings` and `totals` (`results-and-limits.md`) |
+| A `((uuid))` left unread | `logseq_get_block`, or `resolve_refs: true` on the call |
 
 ## Summary
 
-Effective LogSeq knowledge graph queries through:
+1. **Choose by type**: `get` when you name it, `find` for criteria, `explore` for what surrounds it, `check` before writing
+2. **One high-level call before several small ones**: `logseq_explore_context` replaces a chain of searches
+3. **Multi-indicator task queries**: markers and properties
+4. **Synthesis over raw data**: context and recommendations, with sources
+5. **Read-only**: you are helping the user use their own notes, not imposing structure
 
-1. **Smart tool selection** - Use single-call solutions when available (explore_context)
-2. **Graph traversal** - Leverage bidirectional links (explore_network, and the `references` of explore_context)
-3. **Temporal analysis** - Track concept evolution and patterns over time
-4. **Relationship search** - Find how two pages connect, as a path of links
-5. **Multi-indicator task queries** (markers + properties)
-6. **Synthesis over raw data** (context + recommendations)
-7. **User system respect** (read-only, no structural changes)
-
-Remember: You're helping the user leverage their own knowledge, not imposing structure.
-
-For complete tool documentation, see `mcp-tools-reference.md`.
+For the parameters of each tool, see `tools/get.md`, `tools/find.md`, `tools/explore.md` and `tools/check.md`.

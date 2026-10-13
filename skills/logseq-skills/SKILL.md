@@ -5,7 +5,7 @@ description: 'Query and organize a LogSeq knowledge graph with the logseq_* MCP 
 
 # LogSeq Skills
 
-Comprehensive suite of workflows for querying and analyzing LogSeq knowledge graphs via MCP tools.
+Workflows for querying and analyzing a LogSeq knowledge graph through its MCP tools. The ten tools come in four types, named in their tool names: `get`, `find`, `explore` and `check`.
 
 **Tool names:** this skill refers to tools by their bare names (`logseq_get_page`). Your host may show them with a prefix, such as `mcp__logseq__logseq_get_page` (manual MCP config) or `mcp__plugin_logseq_logseq__logseq_get_page` (plugin install). Call whichever form your tool list shows.
 
@@ -54,7 +54,7 @@ Use this skill when:
 - The link / ask / skip decision table, and what counts as corroboration for a partial name
 - Anti-patterns: rewording to force a match, fragmenting a proper noun, expanding abbreviations, linking adjectival mentions
 - **ALWAYS read this alongside `skills/concept-linking.md`**
-- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; an uncorroborated partial name goes into the batched question rather than being linked or silently dropped. Identity and bracketability are separate questions, and settling the first does not settle the second: a short form sitting inside a page title cannot be bracketed at all, and a page title sitting inside a longer proper noun (`[[Kofi]] Mensah`) must not be, because it fragments the name past what the gate can see. Both want an `alias::` on the target page with the owner's consent, never an expansion of the prose. Validate with `logseq_check_links(before, after)` before reporting done, and never remove a ref the note already had to make it pass.
+- **Non-negotiable constraint:** a linking pass adds brackets and changes nothing else, capitalisation included. A lone candidate page is not evidence of identity; an uncorroborated partial name goes into the batched question rather than being linked or silently dropped. Identity and bracketability are separate questions, and settling the first does not settle the second: a short form sitting inside a page title cannot be bracketed at all, and a page title sitting inside a longer proper noun (`[[Kofi]] Mensah`) must not be, because it fragments the name past what the gate can see. Both want an `alias::` on the target page with the owner's consent, never an expansion of the prose. Validate with `logseq_check_links` (`before` and `after`) before reporting done, and never remove a ref the note already had to make it pass.
 
 **`references/summary-compression.md`** - Compression philosophy shared by all summary granularities
 - Salience filtering, emotional markers, the hard word budget, merge-vs-drop
@@ -75,7 +75,7 @@ Use this skill when:
 
 ### Gates
 
-**`logseq_check_links(before, after)`** - Mandatory validation gate for any linking pass (a server tool, not a script)
+**`logseq_check_links`** (arguments `before` and `after`) - Mandatory validation gate for any linking pass (a server tool, not a script)
 - Checks that stripping all `[[ ]]` from before and after leaves them identical, so the pass only added brackets
 - Checks bracket balance, that every ref resolves to exactly one page or alias (resolved in the graph, file-less pages included), and that every ref in before is still in after
 - Proves an edit was safe, never that the classification was right; a pass that links nothing passes every check
@@ -83,15 +83,21 @@ Use this skill when:
 
 ### Other References
 
-**`references/context-builder.md`** - Detailed workflows for context building and research
-- 7 comprehensive workflows: research, tasks, stale detection, page context, graph exploration, temporal analysis, smart context building
-- Performance tips, common pitfalls, example sessions
-- Read this when user asks for research help, task management, or graph exploration
+**`references/context-builder.md`** - Multi-step recipes for questions about the graph
+- Recall a topic, refresh on a person before a meeting, the history of a decision, connect two projects, plan the week, find stale work
+- Each recipe is a numbered list of JSON calls, what to read in each result and the next call
+- Read this when the user asks for research help, task management, or graph exploration
 
-**`references/mcp-tools-reference.md`** - Complete MCP tool documentation
-- All 10 LogSeq MCP tools with parameters and examples
-- Tool comparison tables and selection guidance
-- Read this when verifying tool syntax or discovering capabilities
+**`references/tools/`** - One file per tool type, every tool with its parameters and worked examples
+- `get.md`: `logseq_get_page`, `logseq_get_block`, `logseq_get_current`, `logseq_get_graph`
+- `find.md`: `logseq_find_blocks`, `logseq_find_pages`
+- `explore.md`: `logseq_explore_context`, `logseq_explore_network`, `logseq_explore_timeline`
+- `check.md`: `logseq_check_links`
+- Read the file for the type you are about to call when you need exact parameter names, or a worked call to copy
+
+**`references/results-and-limits.md`** - How to read what comes back
+- `warnings`, `hasMore` and `howToFetchAll`, paging, the 30,000-character budget and host limits, with every warning code by tool
+- **Read it before you report a count, a list or a miss as complete**
 
 **`references/context-efficiency.md`** - Context-efficient querying patterns
 - Token cost awareness and conservative defaults
@@ -99,30 +105,50 @@ Use this skill when:
 - Anti-patterns to avoid (parallel overlapping searches, high limits)
 - **ALWAYS read this before making LogSeq queries**
 
+## The Four Tool Types
+
+A type is chosen by what you already have, and it is the second word of the tool name (`logseq_<type>_<object>`).
+
+| Type | You have | Tools | Returns |
+|------|----------|-------|---------|
+| `get` | The thing: a page name, a block uuid, "the page that's open" | `logseq_get_page`, `logseq_get_block`, `logseq_get_current`, `logseq_get_graph` | That one thing, or not-found with the closest names. Never a list |
+| `find` | Criteria, not the thing | `logseq_find_blocks`, `logseq_find_pages` | A flat list, paged with `limit` and `offset` |
+| `explore` | A starting point, and you want what surrounds it | `logseq_explore_context`, `logseq_explore_network`, `logseq_explore_timeline` | A structured result for synthesis: what is said about it, how it connects, how it changed |
+| `check` | A change you are about to write | `logseq_check_links` | A verdict. Read-only |
+
+Boundary test: if the answer is a list of hits, use `find`. If it is what something is, how it connects or how it changed, use `explore`.
+
+Every tool is read-only. Load `references/tools/<type>.md` for the parameters and worked examples of a type.
+
 ## Quick Tool Selection
 
-| User Request | Best Approach |
-|--------------|---------------|
-| "What should I work on?" | Load context-builder.md → Workflow 2 (Task Prioritization) |
-| "Summarize my week" | Load skills/weekly-summary.md + references/summary-compression.md |
-| "Summarize my month" | Load skills/monthly-summary.md + references/summary-compression.md |
-| "Add links to this block" | Load skills/concept-linking.md + references/link-resolution.md |
-| "What do I know about X?" | Load context-builder.md → Workflow 1 (Research Assistant) |
-| "Show connections to X" | Load context-builder.md → Workflow 5 (Graph Exploration) |
-| "What pages exist?" | Use `logseq_find_pages` for vocabulary discovery |
-| "How did X evolve over time?" | Load context-builder.md → Workflow 6 (Temporal Analysis) |
-| "Need tool syntax" | Load mcp-tools-reference.md |
+| The job | Call | Read more |
+|---------|------|-----------|
+| Recall a topic ("what do I know about X") | `logseq_explore_context` with `page` and `max_blocks: 20`. One call per page, in parallel for several | `context-builder.md`, recipe 1 |
+| Refresh on a person or project before a meeting | `logseq_explore_context` on the page, then `logseq_explore_timeline` with `page` and `last_n` | `context-builder.md`, recipe 2 |
+| What happened in a period | `logseq_explore_timeline` with `preset`, `last_n` or `start_date` and `end_date` | `tools/explore.md` |
+| How something changed over time, or the history of a decision | `logseq_explore_timeline` with `page` and `group_by` | `context-builder.md`, recipe 3 |
+| How two things connect | `logseq_explore_network` with `page` and `to` | `context-builder.md`, recipe 4 |
+| Who owns something, or which pages or blocks have a property | `logseq_find_pages` with `property` and `value` for page properties, `logseq_find_blocks` for block properties | `context-builder.md`, recipe 7 |
+| A word or phrase, or blocks that link to pages | `logseq_find_blocks` with `text` or `links_to` | `tools/find.md` |
+| What to work on, tasks, stale work | `logseq_find_blocks` for markers and properties | `context-builder.md`, recipes 5 and 6 |
+| Unsure of a page name | `logseq_find_pages` with `text` or `names` | `tools/find.md` |
+| "This page" or "what I'm looking at" | `logseq_get_current`, then `logseq_explore_context` on its page | `tools/get.md` |
+| A page you can name, or a long one | `logseq_get_page` (`detail` `outline` first for a long one), then `logseq_get_block` | `tools/get.md` |
+| Before writing links into notes | `logseq_check_links` (the gate), after the `skills/concept-linking.md` workflow | `tools/check.md` |
+| Summarize my week or month | `skills/weekly-summary.md` or `skills/monthly-summary.md` with `references/summary-compression.md` | the sub-skills |
 
 ## Loading Instructions
 
 **For research, tasks, or graph queries:**
-- Read `references/context-builder.md` for detailed workflow guidance
-- Optionally read `references/mcp-tools-reference.md` for tool syntax
+- Read `references/context-efficiency.md` first, then the recipe in `references/context-builder.md`
+- Read `references/tools/<type>.md` for exact parameters and a worked call
+- Read `references/results-and-limits.md` when a result carries `warnings`
 
 **For summaries (weekly, monthly, or any future granularity):**
 - Read `references/summary-compression.md` for the shared compression philosophy and formatting
 - Read the matching sub-skill for cadence specifics: `skills/weekly-summary.md` or `skills/monthly-summary.md`
-- Optionally read `references/mcp-tools-reference.md` for tool syntax
+- Optionally read `references/tools/explore.md` for `logseq_explore_timeline`
 - **Query before files.** Step 0 of each sub-skill loads the LogSeq tools (search for them if they're deferred), calls `logseq_get_graph`, and runs the period query before any shell command that reads the graph. The journals are also files on disk, but they are the fallback for a tool call that has failed, never a shortcut past loading the tools
 - The open-items `grep` over `journals/` checks marker state only. It doesn't replace the period query
 - Adding a new granularity (quarterly, annual) means adding one sub-skill; the compression rules are inherited from the reference
@@ -133,26 +159,17 @@ Use this skill when:
 - The fixture at `tests/fixtures/graph-linking/` is the worked example and the regression suite
 
 **For tool verification:**
-- Read `references/mcp-tools-reference.md` for parameters and examples
+- Read `references/tools/<type>.md` for parameters and examples, and `references/results-and-limits.md` for caps and warnings
 
 ## Core Principles
 
-1. **Start narrow, expand if needed** - Default limit=5, include_context=false; expand only when needed
+1. **Start narrow, expand if needed** - Start `logseq_find_blocks` with `limit` 5 and `include_context` false; expand only when needed
 2. **Clarify recency for ambiguous queries** - Ask user "Was this recent?" before querying when timeframe unclear
 3. **Leverage bidirectional links** - Backlinks reveal hidden context
 4. **Multiple indicators** - Check both markers (TODO) and properties (status::doing)
 5. **Synthesize, don't dump** - Provide context and recommendations, not raw data
 6. **Read-only assistance** - Never modify LogSeq structure without explicit request
-7. **Discover before searching** - Call `find_pages` when you don't know the graph vocabulary
+7. **Discover before searching** - Call `logseq_find_pages` when you don't know the graph vocabulary
+8. **Read the warnings** - A result with `warnings` was cut or is partial. Say so before you call a list complete or something missing
 
 **CRITICAL:** Read `references/context-efficiency.md` before making LogSeq queries to avoid context waste.
-
-## Tool Categories
-
-**Basic Tools (4):** find_blocks, get_page, get_block, find_pages
-**Graph Exploration (1):** explore_network (the pages linked to a page, or with `to` the shortest path of links to a second page)
-**Context Building (1):** explore_context (the page's blocks, its related pages and its references, ranked and paged)
-**Temporal Query (1):** explore_timeline (a page or a period, by day, week or month)
-**Linking (1):** check_links
-
-Load `references/mcp-tools-reference.md` for complete tool documentation.

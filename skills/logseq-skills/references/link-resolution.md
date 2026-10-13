@@ -144,15 +144,15 @@ Each corroboration check costs one or two tool calls, so only run them on partia
 
 Before reporting a linking pass complete, call:
 
-```
-logseq_check_links(before="<text before the edit>", after="<text after it>")
+```json tool=logseq_check_links
+{"before": "<text before the edit>", "after": "<text after it>"}
 ```
 
 It checks that stripping every `[[` and `]]` from both texts leaves them identical, that brackets are balanced and unnested, that every ref resolves to exactly one page or alias, and that every ref in `before` is still in `after`. It resolves refs in the graph itself, file-less pages included.
 
 The first check is the load-bearing one. It proves mechanically that the pass added brackets and changed nothing else, capitalisation included, which is what distinguishes bracketing the text as written from substituting a page's spelling for the note's. Keep a copy of the file from before the edit so the gate has the before text.
 
-The last check closes the gap the first leaves: stripping brackets from both sides means un-bracketing a ref the note already had changes nothing the first check can see. Never remove a pre-existing ref to make the gate pass. An unresolved ref the note already had is a lookup problem: confirm it with `logseq_find_pages(text=...)`, leave it, and report it.
+The last check closes the gap the first leaves: stripping brackets from both sides means un-bracketing a ref the note already had changes nothing the first check can see. Never remove a pre-existing ref to make the gate pass. An unresolved ref the note already had is a lookup problem: confirm it with `logseq_find_pages` and `text`, leave it, and report it.
 
 `ok` is false on any violation. Fix the edit and re-run rather than explaining the failure away.
 
