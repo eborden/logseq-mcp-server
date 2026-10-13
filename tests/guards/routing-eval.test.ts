@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertOutPathSafe, claudeArgs, DEFAULT_MODEL, hostEnv, LIMITS, parseOptions, prepareHarness } from '../../scripts/lib/routing-eval-host.js';
+import { assertOutPathSafe, claudeArgs, DEFAULT_MODEL, hostEnv, LIMITS, loadSkillText, parseOptions, prepareHarness } from '../../scripts/lib/routing-eval-host.js';
 import { parseSavedRun, reconcile, SAVED_RUN_VERSION, scoringHash, textHash } from '../../scripts/lib/routing-eval-saved.js';
 import {
   aggregate,
@@ -299,6 +299,25 @@ describe('the options and the host (scripts/lib/routing-eval-host.ts)', () => {
     expect(after('--permission-mode')).toBe('dontAsk');
     expect(after('--max-budget-usd')).toBe('0.1');
     expect(after('--model')).toBe('m');
+  });
+
+  it('adds a skill to the system prompt only when --skill names one (#497)', async () => {
+    expect(parseOptions([]).skill).toBeUndefined();
+    expect(parseOptions(['--skill', 'skills/x']).skill).toBe('skills/x');
+    expect(() => parseOptions(['--skill'])).toThrow('needs a value');
+    expect(claudeArgs({ model: 'm', maxBudgetUsd: 0.1 }, '/tmp/mcp.json')).not.toContain('--append-system-prompt');
+    const withSkill = claudeArgs({ model: 'm', maxBudgetUsd: 0.1 }, '/tmp/mcp.json', 'the body');
+    expect(withSkill[withSkill.indexOf('--append-system-prompt') + 1]).toBe('the body');
+    const dir = await mkdtemp(join(tmpdir(), 'routing-eval-skill-'));
+    try {
+      await writeFile(join(dir, 'SKILL.md'), '---\nname: x\ndescription: y\n---\n\n# Body\n\ntext\n');
+      expect(await loadSkillText(dir)).toBe('# Body\n\ntext');
+      await writeFile(join(dir, 'SKILL.md'), '---\nname: x\n---\n');
+      await expect(loadSkillText(dir)).rejects.toThrow('no body');
+      await expect(loadSkillText(join(dir, 'missing'))).rejects.toThrow('no readable SKILL.md');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('gives the host no personal server config, and turns CLAUDE.md files and memory off', () => {

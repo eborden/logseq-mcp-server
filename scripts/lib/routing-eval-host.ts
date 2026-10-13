@@ -1,7 +1,7 @@
 // How scripts/routing-eval.ts sets up its sessions (#487): the options and their bounds, the `claude` arguments and
 // environment that keep the model to this server's tools, and the temp files. Kept apart from the runner so
 // tests/guards/routing-eval.test.ts can pin the bounds and the isolation without a model or an instance.
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { MCP_TOOL_PREFIX, type Surface } from './routing-eval.js';
@@ -34,6 +34,8 @@ export interface Options {
   maxTotalUsd: number;
   surface: Surface | undefined;
   binary: string | undefined;
+  /** A directory holding a SKILL.md whose body is added to the session's system prompt (#497) */
+  skill: string | undefined;
   dryRun: boolean;
   rescore: string | undefined;
   help: boolean;
@@ -52,6 +54,7 @@ export const USAGE = `Usage: npx tsx scripts/routing-eval.ts [options]
   --max-total-usd <x>    the whole run: no new session starts once the finished ones cost this much, and the run exits 1 (default 3, at most ${LIMITS.maxTotalUsd})
   --surface v1|v2        which acceptable-tool list to score against (default: read from the server's tool list)
   --binary <path>        the server binary (default: LOGSEQ_MCP_RUST_BIN, else rust/target/debug/logseq-mcp-server)
+  --skill <dir>          add the body of <dir>/SKILL.md to every session's system prompt, to measure a skill against the run without it (#497)
   --rescore <file>       print the aggregates of an earlier --out file against the current questions; calls no model
   --dry-run              check the question file and print the plan; start nothing`;
 
@@ -85,6 +88,7 @@ export function parseOptions(argv: readonly string[]): Options {
     maxTotalUsd: 3,
     surface: undefined,
     binary: undefined,
+    skill: undefined,
     dryRun: false,
     rescore: undefined,
     help: false,
@@ -136,6 +140,9 @@ export function parseOptions(argv: readonly string[]): Options {
       case '--binary':
         options.binary = value();
         break;
+      case '--skill':
+        options.skill = value();
+        break;
       case '--rescore':
         options.rescore = value();
         break;
@@ -158,8 +165,8 @@ export function parseOptions(argv: readonly string[]): Options {
  * built-in tool, no other MCP server, no skill, no user, project or local settings, no saved session, and a
  * permission mode that denies anything outside the one allowed server.
  */
-export function claudeArgs(options: Pick<Options, 'model' | 'maxBudgetUsd'>, mcpConfigPath: string): string[] {
-  return [
+export function claudeArgs(options: Pick<Options, 'model' | 'maxBudgetUsd'>, mcpConfigPath: string, skillText?: string): string[] {
+  const args = [
     '-p',
     '--output-format', 'stream-json',
     '--verbose',
@@ -174,6 +181,24 @@ export function claudeArgs(options: Pick<Options, 'model' | 'maxBudgetUsd'>, mcp
     '--permission-mode', 'dontAsk',
     '--max-budget-usd', String(options.maxBudgetUsd),
   ];
+  // The skill is not run as a skill (the host has no built-in tool and no slash command): its body is what the model
+  // would read once the skill loaded, so it goes in as system prompt text
+  if (skillText !== undefined) args.push('--append-system-prompt', skillText);
+  return args;
+}
+
+/**
+ * The body of `<dir>/SKILL.md` without its front matter, which is what a host shows the model once the skill has loaded.
+ * @throws Error when the file is missing or has no body
+ */
+export async function loadSkillText(dir: string): Promise<string> {
+  const path = join(dir, 'SKILL.md');
+  const raw = await readFile(path, 'utf8').catch(() => {
+    throw new Error(`--skill ${dir} has no readable SKILL.md`);
+  });
+  const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+  if (body === '') throw new Error(`${path} has no body after its front matter`);
+  return body;
 }
 
 /** The model host's environment: the caller's, without the server settings, and with CLAUDE.md files and auto-memory off. */
