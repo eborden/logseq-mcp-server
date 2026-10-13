@@ -93,7 +93,7 @@ logseq_get_page("Project Alpha", detail="full")
 
 **`detail` `outline`:** lists a page's top-level blocks without their bodies: the shape of the page, to choose from.
 
-**Returns:** `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`. `snippet` is the first line, cut to 80 characters. `childCount` counts direct children only. Capped at 200 top-level blocks; a longer page gets an `outline_truncated` warning that names `logseq_get_page` for the rest. Two hundred first lines of 80 characters are about 31,000 characters in JSON, so an outline can also be cut to 30,000 characters (`result_size_truncated`, "Showing N of M top-level blocks", last blocks left out, no `howToFetchAll`); that warning replaces `outline_truncated`, and `format` `toon` is shorter and is measured as TOON.
+**Returns:** `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`. `snippet` is the first line, cut to 80 characters. `childCount` counts direct children only. Capped at 200 top-level blocks; a longer page gets an `outline_truncated` warning that names `logseq_get_block` (by uuid) and `logseq_find_blocks` (by text) for the rest, since `detail` `full` is cut to 30,000 characters too. Two hundred first lines of 80 characters are about 31,000 characters in JSON, so an outline can also be cut to 30,000 characters (`result_size_truncated`, "Showing N of M top-level blocks", last blocks left out, no `howToFetchAll`); that warning replaces `outline_truncated`, and `format` `toon` is shorter and is measured as TOON.
 
 **Cost:** 2 Datalog calls however long the page is. About 98% smaller than `get_page` with `detail` `full` on a long page.
 

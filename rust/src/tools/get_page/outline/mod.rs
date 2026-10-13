@@ -170,7 +170,7 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
             "outline_truncated",
             format!(
                 "Showing the first {} of {} top-level blocks. \
-                 The outline has no way to page; read the rest with logseq_get_page and detail \"full\".",
+                 The outline has no way to page; read a block with logseq_get_block by its uuid, or find a later one by its text with logseq_find_blocks. Detail \"full\" is cut to 30000 characters too, so it does not read the rest.",
                 shown.len(),
                 total
             ),
@@ -343,7 +343,7 @@ mod tests {
         assert_eq!(meta.warnings[0].code, "outline_truncated");
         assert_eq!(
             meta.warnings[0].message,
-            "Showing the first 200 of 201 top-level blocks. The outline has no way to page; read the rest with logseq_get_page and detail \"full\"."
+            "Showing the first 200 of 201 top-level blocks. The outline has no way to page; read a block with logseq_get_block by its uuid, or find a later one by its text with logseq_find_blocks. Detail \"full\" is cut to 30000 characters too, so it does not read the rest."
         );
     }
 
