@@ -56,8 +56,6 @@ export const V1_TOOL_ALLOWANCES: readonly string[] = [
   'logseq_get_concept_network',
   'logseq_get_context_for_query',
   'logseq_query_by_date_range',
-  'logseq_query_by_property',
-  'logseq_search_blocks',
   'logseq_search_by_relationship',
 ];
 
