@@ -16,6 +16,13 @@
 //! pages in all (the root included), and journal pages are leaves unless `expand_journals` is set.
 //! `truncated` is set whenever a cap dropped a page, with a `network_truncated` warning (BR-0006).
 //!
+//! Roll-up pages (#498) are leaves too: a page that links more than [`HUB_LINKS`] pages (the generated weekly or
+//! monthly summary pages of a graph) behaves like a journal, so it ranks after every other page when a cap bites and is
+//! not walked through unless `expand_journals` is set. The same query that finds the links counts them
+//! (a `degree` row per pair, no call of its own), so the rule costs no call, and the pages it kept as leaves are named in
+//! a `hub_pages_not_expanded` warning. `with_snippets` adds to each edge of the root the first line of one block that
+//! makes the link, cut to 80 characters, from the same call again (the block's text is one more cell of depth 1).
+//!
 //! `format: "markdown"` renders the same network through [`crate::markdown_context`], its warnings and
 //! `hasMore` in a footer. This tool makes no tips.
 //!
@@ -48,24 +55,26 @@ use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::alias::{AliasSet, alias_set_warnings, resolve_alias_set};
 use crate::resolve::{RETRY_ADVICE, require_page};
+use crate::snippet::Snippet;
 use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
 use crate::truncation::{SizeCut, size_truncation_warning};
 use crate::tools::explore_context::resolved_from;
 
 use self::graph::{Edge, EdgeOutput, Links, Node, Nodes, build_edges, relabel_depths};
-use self::queries::{connected_pages, connected_pages_grouped};
+use self::queries::{Extras, connected_pages, connected_pages_grouped};
 use self::selection::{Candidate, select_candidates};
-use self::warning::{TruncationFacts, network_truncated_then_cut_by_size, network_truncated_warning};
-use self::wire::connected_rows;
+use self::warning::{HUB_CODE, HubPage, TruncationFacts, hub_pages_not_expanded, network_truncated_then_cut_by_size, network_truncated_warning};
+use self::wire::{Link, connected_rows, connected_rows_with_snippets};
 
 pub use self::path::{MAX_FRONTIER, PathAnswer, explore_path};
+pub use self::selection::HUB_LINKS;
 pub use self::warning::{MAX_FANOUT_LIMIT, MAX_NODES_LIMIT};
 
 pub const NAME: &str = "logseq_explore_network";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Explore how a page connects: pages linked to it as nodes and edges, both directions, up to max_depth hops, one edge per page pair with a reference count. With to, the shortest link path to a second page.\n\n\
-**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, see warnings.\n\
+const DESCRIPTION: &str = "Explore how a page connects: linked pages as nodes and edges, both directions, max_depth hops, one edge per pair with a reference count. With to, the shortest link path to a second page.\n\n\
+**Caps:** 50 pages, 15 new per page; journals and roll-ups (over 30 links) rank last, unexpanded. If truncated is true, see warnings.\n\
 **Can't find:** unlinked pages, or what pages say (logseq_explore_context).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
@@ -112,9 +121,12 @@ pub struct Args {
     #[serde(default = "default_max_fanout")]
     #[schemars(range(min = 1))]
     pub max_fanout: u64,
-    /// Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network. Not with to
+    /// Expand through journal pages and roll-up pages (pages that link over 30 pages) instead of treating them as leaves (default: false). They link to almost everything, so this can flood the network. Not with to
     #[serde(default)]
     pub expand_journals: bool,
+    /// Add to each edge of the root the first line (80 characters) of one block that makes the link (default: false: longer results). Not with to
+    #[serde(default)]
+    pub with_snippets: bool,
     /// json (default), or markdown text. Markdown has block uuids only on search hits and with compact
     pub format: Option<OutputFormat>,
 }
@@ -131,8 +143,8 @@ struct Request {
 
 impl From<Args> for Request {
     fn from(args: Args) -> Request {
-        let Args { page, to, max_depth, max_nodes, max_fanout, expand_journals, format } = args;
-        Request { page, to, max_depth, options: Options { max_nodes, max_fanout, expand_journals }, format }
+        let Args { page, to, max_depth, max_nodes, max_fanout, expand_journals, with_snippets, format } = args;
+        Request { page, to, max_depth, options: Options { max_nodes, max_fanout, expand_journals, with_snippets }, format }
     }
 }
 
@@ -145,7 +157,7 @@ pub fn definition() -> Tool {
 
 /// The arguments that size the walk without `to`. The path is one page after another, at most `max_depth` hops long,
 /// so they have nothing to bound there.
-const NETWORK_ONLY: [&str; 3] = ["max_nodes", "max_fanout", "expand_journals"];
+const NETWORK_ONLY: [&str; 4] = ["max_nodes", "max_fanout", "expand_journals", "with_snippets"];
 
 /// With `to`, the arguments of the walk without it are refused rather than ignored, in the order the schema lists them.
 /// `null` counts as absent, as everywhere. They are read from the arguments as sent, since a default and a value that
@@ -209,15 +221,16 @@ fn cut_to_pages(network: &Network, kept: usize, oversize: bool) -> Network {
     if let Some(facts) = network.cap_facts {
         replace_cap_warning(&mut warnings, network_truncated_then_cut_by_size(facts));
     }
-    warnings.push(size_truncation_warning(SizeCut {
-        what: "pages",
-        kept,
-        total: network.nodes.len(),
-        oversize,
-        advice: "Start from a more specific page, or lower max_depth, to see a smaller network. No parameter raises this limit.",
-        how_to_fetch_all: None,
-    }));
-    Network { nodes, edges, truncated: true, warnings, ..network.clone() }
+    // The roll-ups the cut kept are the ones to name, and walking through them would be cut again
+    let hubs: Vec<HubPage> = network.hubs.iter().filter(|hub| ids.contains(&hub.id)).cloned().collect();
+    set_hub_warning(&mut warnings, &hubs, false);
+    let advice = if network.with_snippets {
+        "Start from a more specific page, or lower max_depth, to see a smaller network. Leaving out with_snippets also shortens each edge. No parameter raises this limit."
+    } else {
+        "Start from a more specific page, or lower max_depth, to see a smaller network. No parameter raises this limit."
+    };
+    warnings.push(size_truncation_warning(SizeCut { what: "pages", kept, total: network.nodes.len(), oversize, advice, how_to_fetch_all: None }));
+    Network { nodes, edges, truncated: true, warnings, hubs, ..network.clone() }
 }
 
 /// Puts `warning` where the `network_truncated` warning is, which a walk that was cut has.
@@ -227,15 +240,30 @@ fn replace_cap_warning(warnings: &mut [ResultWarning], warning: ResultWarning) {
     }
 }
 
+/// The `hub_pages_not_expanded` warning for `hubs`, in the place of the one the walk wrote (and gone when `hubs` is empty).
+fn set_hub_warning(warnings: &mut Vec<ResultWarning>, hubs: &[HubPage], offer: bool) {
+    let Some(at) = warnings.iter().position(|existing| existing.code == HUB_CODE) else { return };
+    if hubs.is_empty() {
+        warnings.remove(at);
+    } else {
+        warnings[at] = hub_pages_not_expanded(hubs, offer);
+    }
+}
+
 impl Network {
     /// A raise of `max_nodes` or `max_fanout` is offered only when the raised result would fit the character budget
     /// (BR-0006, #485): a call that returns the same pages cut to 30,000 characters is no way to fetch the rest. The
     /// result is measured as it stands, and the pages it holds give the size of one page, so the raised result is an
     /// estimate, from the pages that raising brings at least (the dropped ones). A result that is over the budget as it
     /// stands is cut by [`fit_to_budget`], which words the warning itself.
+    ///
+    /// The same goes for walking through the roll-up pages (`expand_journals`, #498): it is offered while the pages it
+    /// brings at least (`hub_adds`) fit as well.
     fn raise_only_if_it_fits(mut self, render: &impl Fn(&Network) -> String) -> Network {
-        let Some(facts) = self.cap_facts else { return self };
-        if !self.warnings.iter().any(|warning| warning.code == "network_truncated" && warning.how_to_fetch_all.is_some()) {
+        let offers = |code: &str, warnings: &[ResultWarning]| warnings.iter().any(|warning| warning.code == code && warning.how_to_fetch_all.is_some());
+        let raises_cap = self.cap_facts.is_some() && offers("network_truncated", &self.warnings);
+        let walks_hubs = offers(HUB_CODE, &self.warnings);
+        if !raises_cap && !walks_hubs {
             return self;
         }
         let whole = size(&render(&self));
@@ -244,7 +272,13 @@ impl Network {
         }
         // A page past the first hop tends to bring more edges than the pages kept averaged, so the estimate keeps a tenth back
         let fits = BUDGET_CHARS * self.nodes.len() / whole.max(1) * 9 / 10;
-        replace_cap_warning(&mut self.warnings, network_truncated_warning(facts, Some(fits)));
+        if let Some(facts) = self.cap_facts.filter(|_| raises_cap) {
+            replace_cap_warning(&mut self.warnings, network_truncated_warning(facts, Some(fits)));
+        }
+        if walks_hubs && self.nodes.len() + self.hub_adds > fits {
+            let hubs = self.hubs.clone();
+            set_hub_warning(&mut self.warnings, &hubs, false);
+        }
         self
     }
 }
@@ -268,14 +302,17 @@ pub struct Options {
     pub max_nodes: u64,
     /// Most new pages any single page may add to the network
     pub max_fanout: u64,
-    /// Journal pages link to nearly everything, so by default they appear as leaf nodes but are not
-    /// expanded at the next depth. Set to walk through them like any other page.
+    /// Journal pages and roll-up pages (those that link more than [`HUB_LINKS`] pages) link to nearly everything, so
+    /// by default they appear as leaf nodes but are not expanded at the next depth. Set to walk through them like any
+    /// other page.
     pub expand_journals: bool,
+    /// Each edge of the root carries the first line of one block that makes the link (#498)
+    pub with_snippets: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { max_nodes: DEFAULT_MAX_NODES, max_fanout: DEFAULT_MAX_FANOUT, expand_journals: false }
+        Options { max_nodes: DEFAULT_MAX_NODES, max_fanout: DEFAULT_MAX_FANOUT, expand_journals: false, with_snippets: false }
     }
 }
 
@@ -296,6 +333,17 @@ pub struct Network {
     /// What the walk showed about the cut its caps made, which the `network_truncated` warning in `warnings` is
     /// written from, kept to write it again once the size of the result is known (#494)
     cap_facts: Option<TruncationFacts>,
+    /// The roll-up pages the walk showed as leaves although a further depth was left, which the
+    /// `hub_pages_not_expanded` warning names (#498)
+    hubs: Vec<HubPage>,
+    /// The pages walking through `hubs` would bring at least: 0 when it would bring none, or when the walk did not get
+    /// to the end. The warning offers `expand_journals` only when it is more than 0
+    hub_adds: usize,
+    /// The first line of one block that makes each edge of the root, by the pair `(from, to)`, when `with_snippets` was
+    /// asked (#498)
+    snippets: HashMap<(i64, i64), String>,
+    /// `with_snippets` was asked, so the words of a size cut may say how to shorten the edges
+    with_snippets: bool,
 }
 
 impl Network {
@@ -315,7 +363,11 @@ impl Network {
             has_more: self.has_more(),
             warnings: &self.warnings,
             nodes: &self.nodes,
-            edges: self.edges.iter().map(EdgeOutput::from).collect(),
+            edges: self
+                .edges
+                .iter()
+                .map(|edge| EdgeOutput::from(edge).with_snippet(self.snippets.get(&(edge.from, edge.to)).map(String::as_str)))
+                .collect(),
         })
     }
 }
@@ -381,6 +433,7 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     let max_nodes = cap(options.max_nodes);
     let max_fanout = cap(options.max_fanout);
     let expand_journals = options.expand_journals;
+    let with_snippets = options.with_snippets;
     let mut truncated = false;
     let mut dropped = 0usize;
     // Which cap dropped them (#132): `max_fanout` leaves a page's extra neighbours out, `max_nodes`
@@ -393,6 +446,12 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     let mut expanded_journal = false;
     // The depth whose connected-pages query LogSeq did not answer: the walk stopped there (BR-0011)
     let mut unavailable_at: Option<i64> = None;
+    // The roll-up pages admitted as leaves with a depth left, in the order they joined (#498)
+    let mut unexpanded_hubs: Vec<HubPage> = Vec::new();
+    // The text of one linking block per page the root links or is linked by: from the root's own blocks when it has
+    // one, else from the page's (#498). Read at depth 1 only
+    let mut outbound_snippets: HashMap<i64, String> = HashMap::new();
+    let mut inbound_snippets: HashMap<i64, String> = HashMap::new();
 
     let mut nodes = Nodes::default();
     let mut links = Links::default();
@@ -418,33 +477,50 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
     let mut frontier = vec![root_id];
     let mut depth = 1i64;
     while depth as u64 <= max_depth && !frontier.is_empty() {
-        // At depth 1 the frontier is the root, expanded through every one of its names
+        // At depth 1 the frontier is the root, expanded through every one of its names. Every depth also asks for how many
+        // pages each connected page links (the roll-up rule, #498), and depth 1 for a block's text when it was asked
+        let extras = Extras { degree: true, snippets: with_snippets && depth == 1 };
         let query = if depth == 1 && aliased {
             let root = PageId::new(root_id)?;
             let pairs: Vec<(PageId, PageId)> = member_ids.iter().map(|&id| (id, root)).collect();
-            connected_pages_grouped(&pairs)
+            connected_pages_grouped(&pairs, extras)
         } else {
-            connected_pages(&page_ids(&frontier)?)
+            connected_pages(&page_ids(&frontier)?, extras)
         };
         let answer = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // A `null` answer is not "no connected pages" (BR-0011): the walk stops here and says so.
-        let Some(rows) = connected_rows(&answer)? else {
+        let rows = if extras.snippets { connected_rows_with_snippets(&answer)? } else { connected_rows(&answer)? };
+        let Some(rows) = rows else {
             unavailable_at = Some(depth);
             break;
         };
 
         let mut candidates: HashMap<i64, Candidate> = HashMap::new();
+        // How many pages each connected page links; a page with no row links none
+        let mut degrees: HashMap<i64, i64> = HashMap::new();
         for row in rows {
             // Self-loops are excluded in the query; guard anyway.
             if row.source == row.connected || folded_ids.contains(&row.connected) {
                 continue;
             }
+            let outbound = match row.link {
+                Link::Degree => {
+                    degrees.insert(row.connected, row.count);
+                    continue;
+                }
+                Link::Outbound => true,
+                Link::Inbound => false,
+            };
             // The same links are reported from both sides when two frontier pages link to each other,
             // so set (never add) the directed count.
-            if row.outbound {
+            if outbound {
                 links.set(row.source, row.connected, row.count);
             } else {
                 links.set(row.connected, row.source, row.count);
+            }
+            if let Some(text) = row.snippet.as_deref().filter(|text| !text.is_empty()) {
+                let snippets = if outbound { &mut outbound_snippets } else { &mut inbound_snippets };
+                snippets.insert(row.connected, Snippet::of(Some(text)).as_str().to_owned());
             }
             if nodes.contains(row.connected) {
                 continue;
@@ -453,11 +529,15 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
                 id: row.connected,
                 name: if row.original_name.is_empty() { row.name.clone() } else { row.original_name.clone() },
                 is_journal: row.is_journal,
+                links: 0,
                 by_source: HashMap::new(),
                 total: 0,
             });
             *candidate.by_source.entry(row.source).or_insert(0) += row.count;
             candidate.total += row.count;
+        }
+        for candidate in candidates.values_mut() {
+            candidate.links = degrees.get(&candidate.id).copied().unwrap_or(0);
         }
 
         let budget = max_nodes as i64 - nodes.len() as i64;
@@ -473,11 +553,15 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
         let mut next_frontier = Vec::new();
         for candidate in &selection.admitted {
             nodes.insert(Node { id: candidate.id, name: candidate.name.clone(), depth });
-            if expand_journals || !candidate.is_journal {
+            // A roll-up is a leaf like a journal: walked through only with `expand_journals`
+            let leaf = candidate.is_journal || candidate.is_hub();
+            if expand_journals || !leaf {
                 next_frontier.push(candidate.id);
-                if candidate.is_journal && (depth as u64) < max_depth && !truncated {
+                if leaf && (depth as u64) < max_depth && !truncated {
                     expanded_journal = true;
                 }
+            } else if candidate.is_hub() && (depth as u64) < max_depth {
+                unexpanded_hubs.push(HubPage { id: candidate.id, name: candidate.name.clone(), links: candidate.links });
             }
         }
         frontier = next_frontier;
@@ -502,9 +586,30 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
         expanded_journal,
     });
     warnings.extend(cap_facts.map(|facts| network_truncated_warning(facts, None)));
+    // Walking through a roll-up brings pages when it links more of them than the network holds (the network holds `kept`
+    // pages, the roll-up one of them), a page not yet in it is admitted unless the node budget is full, and a page that
+    // was left out by `max_fanout` of another page has a slot of its own under the roll-up. Each roll-up brings at most
+    // `max_fanout`. The walk must also have reached its end, or the depth that would expand them never ran.
+    let room = max_nodes.saturating_sub(kept);
+    let hub_adds = if unavailable_at.is_some() {
+        0
+    } else {
+        unexpanded_hubs
+            .iter()
+            .map(|hub| usize::try_from(hub.links).unwrap_or(0).saturating_sub(kept - 1).min(max_fanout).min(room))
+            .max()
+            .unwrap_or(0)
+    };
+    if !unexpanded_hubs.is_empty() {
+        warnings.push(hub_pages_not_expanded(&unexpanded_hubs, hub_adds > 0));
+    }
     if let Some(depth) = unavailable_at {
         warnings.push(links_unavailable(depth));
     }
+    // Only the edges of the root have a snippet: from the root's own blocks, else the other page's
+    let snippets: HashMap<(i64, i64), String> = nodes_of_root_edges(&edges, root_id)
+        .filter_map(|to| Some(((root_id, to), outbound_snippets.get(&to).or_else(|| inbound_snippets.get(&to))?.clone())))
+        .collect();
 
     Ok(Network {
         page: page.to_owned(),
@@ -515,7 +620,16 @@ pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, 
         truncated,
         warnings,
         cap_facts,
+        hubs: unexpanded_hubs,
+        hub_adds,
+        snippets,
+        with_snippets,
     })
+}
+
+/// The page at the other end of each edge that starts at the root.
+fn nodes_of_root_edges(edges: &[Edge], root: i64) -> impl Iterator<Item = i64> + '_ {
+    edges.iter().filter(move |edge| edge.from == root).map(|edge| edge.to)
 }
 
 #[cfg(test)]
@@ -539,7 +653,8 @@ mod tests {
                 "max_depth": {"type": "integer", "minimum": 0, "default": 2, "description": "Maximum depth to traverse (default: 2, max: 3)"},
                 "max_nodes": {"type": "integer", "minimum": 1, "default": 50, "description": "Maximum pages in the network, root included (default: 50, max: 500). Not with to"},
                 "max_fanout": {"type": "integer", "minimum": 1, "default": 15, "description": "Maximum new pages any one page may add (default: 15, max: 100). Not with to"},
-                "expand_journals": {"type": "boolean", "default": false, "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network. Not with to"},
+                "expand_journals": {"type": "boolean", "default": false, "description": "Expand through journal pages and roll-up pages (pages that link over 30 pages) instead of treating them as leaves (default: false). They link to almost everything, so this can flood the network. Not with to"},
+                "with_snippets": {"type": "boolean", "default": false, "description": "Add to each edge of the root the first line (80 characters) of one block that makes the link (default: false: longer results). Not with to"},
                 "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact"},
             },
             "required": ["page"],
@@ -573,6 +688,7 @@ mod tests {
         sweep::<Args>(base.clone(), "max_nodes", Takes::Count(1), false);
         sweep::<Args>(base.clone(), "max_fanout", Takes::Count(1), false);
         sweep::<Args>(base.clone(), "expand_journals", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "with_snippets", Takes::Flag, false);
         sweep::<Args>(base, "format", Takes::Words(&["json", "markdown"]), false);
     }
 
@@ -610,7 +726,7 @@ mod tests {
         // null is absent
         assert!(check_combination(args(json!({"page": "a", "to": "b", "max_nodes": null, "expand_journals": null})).as_ref()).is_ok());
         assert!(check_combination(None).is_ok());
-        for (param, value) in [("max_nodes", json!(10)), ("max_fanout", json!(5)), ("expand_journals", json!(false))] {
+        for (param, value) in [("max_nodes", json!(10)), ("max_fanout", json!(5)), ("expand_journals", json!(false)), ("with_snippets", json!(true))] {
             let error = check_combination(args(json!({"page": "a", "to": "b", param: value.clone()})).as_ref()).unwrap_err();
             let text = error.to_string();
             assert!(text.starts_with(&format!("Invalid parameter '{param}': {value}\n\nExpected: left out when to is given")), "{text}");
@@ -643,6 +759,10 @@ mod tests {
             truncated: true,
             warnings: vec![ResultWarning { code: "w".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }],
             cap_facts: None,
+            hubs: vec![],
+            hub_adds: 0,
+            snippets: HashMap::new(),
+            with_snippets: false,
         };
         assert_eq!(
             network.to_value().to_string(),
@@ -668,6 +788,10 @@ mod tests {
             truncated: false,
             warnings: vec![],
             cap_facts: None,
+            hubs: vec![],
+            hub_adds: 0,
+            snippets: HashMap::new(),
+            with_snippets: false,
         };
         assert_eq!(keys(&network.to_value()), all);
         let bare = Network { resolved_from: None, resolved_aliases: None, ..network };
@@ -692,6 +816,10 @@ mod tests {
             truncated: false,
             warnings: vec![warning],
             cap_facts: None,
+            hubs: vec![],
+            hub_adds: 0,
+            snippets: HashMap::new(),
+            with_snippets: false,
         };
         assert!(!network.has_more());
         assert_eq!(network.to_value()["truncated"], false);
@@ -716,6 +844,10 @@ mod tests {
             truncated: false,
             warnings: vec![],
             cap_facts: None,
+            hubs: vec![],
+            hub_adds: 0,
+            snippets: HashMap::new(),
+            with_snippets: false,
         }
     }
 
@@ -837,6 +969,77 @@ mod tests {
         // one more page would not have fit
         let one_more = size(&render(&cut_to_pages(&network, fitted.nodes.len() + 1, false)));
         assert!(one_more > crate::budget::BUDGET_CHARS);
+    }
+
+    /// A star whose neighbours 2 and 3 are roll-ups shown as leaves, with the warning the walk wrote for them
+    fn star_with_roll_ups(pages: usize, name_length: usize, hub_adds: usize) -> Network {
+        let mut network = star(pages, name_length);
+        let hubs = vec![
+            HubPage { id: 2, name: "x".repeat(name_length), links: 41 },
+            HubPage { id: 3, name: "x".repeat(name_length), links: 52 },
+        ];
+        network.warnings = vec![hub_pages_not_expanded(&hubs, hub_adds > 0)];
+        network.hubs = hubs;
+        network.hub_adds = hub_adds;
+        network
+    }
+
+    #[test]
+    fn walking_through_the_roll_ups_is_offered_while_the_pages_it_brings_fit_the_budget() {
+        let network = star_with_roll_ups(50, 20, 15);
+        let fitted = fit_to_budget(network.clone(), &json_of);
+        assert_eq!(fitted, network);
+        assert!(fitted.warnings[0].how_to_fetch_all.as_deref().is_some_and(|raise| raise.starts_with("Set expand_journals to true")));
+        assert!(fitted.has_more());
+    }
+
+    #[test]
+    fn walking_through_the_roll_ups_is_not_offered_when_the_result_it_would_bring_would_not_fit() {
+        // 51 pages of about 400 characters fit as they are (about 21,000), the 20 more that expanding brings do not
+        let network = star_with_roll_ups(50, 300, 20);
+        assert!(size(&json_of(&network)) < crate::budget::BUDGET_CHARS);
+        let fitted = fit_to_budget(network, &json_of);
+        assert_eq!(fitted.nodes.len(), 51, "nothing is cut: the result fits as it stands");
+        let warning = &fitted.warnings[0];
+        assert_eq!(warning.code, "hub_pages_not_expanded");
+        assert_eq!(warning.how_to_fetch_all, None);
+        // the warning still names the roll-ups
+        assert!(warning.message.starts_with("2 pages link more than 30 pages each"), "{}", warning.message);
+        assert!(!fitted.has_more());
+    }
+
+    #[test]
+    fn a_cut_keeps_the_roll_ups_it_kept_and_offers_no_walk_through_them() {
+        let network = star_with_roll_ups(5, 3, 15);
+        // 6 pages: the root, 5 neighbours and the page behind the first one. Keeping 3 drops the deep page and pages 4 and 5
+        let cut = cut_to_pages(&network, 3, false);
+        assert_eq!(cut.nodes.iter().map(|node| node.id).collect::<Vec<_>>(), [1, 2, 3]);
+        let warning = &cut.warnings[0];
+        assert_eq!(warning.code, "hub_pages_not_expanded");
+        assert!(warning.message.starts_with("2 pages link more than 30 pages each"), "{}", warning.message);
+        assert_eq!(warning.how_to_fetch_all, None);
+        assert!(!cut.has_more());
+        // keeping 2 leaves one of them, and keeping only the root leaves none and no warning
+        let one = cut_to_pages(&network, 2, false);
+        assert!(one.warnings[0].message.starts_with("1 page links more than 30 pages"), "{}", one.warnings[0].message);
+        let none = cut_to_pages(&network, 1, false);
+        assert!(none.warnings.iter().all(|warning| warning.code != "hub_pages_not_expanded"));
+    }
+
+    #[test]
+    fn the_snippets_are_the_last_key_of_the_edges_of_the_root_and_a_size_cut_says_how_to_shorten_them() {
+        let mut network = star(3, 3);
+        network.with_snippets = true;
+        network.snippets = HashMap::from([((1, 2), "Met Bob at the fair".to_owned())]);
+        let value = network.to_value();
+        assert_eq!(value["edges"][0].to_string(), r#"{"from":1,"to":2,"type":"reference","count":1,"outbound":1,"inbound":0,"snippet":"Met Bob at the fair"}"#);
+        // an edge with none has no key, and the other keys are where they were
+        assert_eq!(keys(&value["edges"][1]), ["from", "to", "type", "count", "outbound", "inbound"]);
+        let cut = cut_to_pages(&network, 2, false);
+        assert!(cut.warnings.last().unwrap().message.contains("Leaving out with_snippets also shortens each edge."), "{}", cut.warnings.last().unwrap().message);
+        // without snippets the advice is as it was
+        let plain = cut_to_pages(&star(3, 3), 2, false);
+        assert!(!plain.warnings.last().unwrap().message.contains("with_snippets"));
     }
 
     #[test]

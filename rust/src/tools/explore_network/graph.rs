@@ -42,7 +42,8 @@ impl Edge {
     }
 }
 
-/// An [`Edge`] as the result writes it.
+/// An [`Edge`] as the result writes it. A snippet, when the call asked for them (#498), is the last key: the optional
+/// extra of a record that is identity, then state (BR-0013).
 #[derive(Debug, Serialize)]
 pub struct EdgeOutput {
     from: i64,
@@ -52,11 +53,29 @@ pub struct EdgeOutput {
     count: i64,
     outbound: i64,
     inbound: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snippet: Option<String>,
 }
 
 impl From<&Edge> for EdgeOutput {
     fn from(edge: &Edge) -> Self {
-        EdgeOutput { from: edge.from, to: edge.to, kind: edge.kind(), count: edge.count(), outbound: edge.outbound, inbound: edge.inbound }
+        EdgeOutput {
+            from: edge.from,
+            to: edge.to,
+            kind: edge.kind(),
+            count: edge.count(),
+            outbound: edge.outbound,
+            inbound: edge.inbound,
+            snippet: None,
+        }
+    }
+}
+
+impl EdgeOutput {
+    /// The edge with the first line of a block that makes it.
+    pub fn with_snippet(mut self, snippet: Option<&str>) -> Self {
+        self.snippet = snippet.map(str::to_owned);
+        self
     }
 }
 

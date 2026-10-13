@@ -10,8 +10,55 @@
 //! tells this warning how many pages fit ([`network_truncated_warning`]'s `fits`), and when the result is cut to the
 //! budget after all, the warning is the one of [`network_truncated_then_cut_by_size`], with no advice to raise.
 
+use super::selection::HUB_LINKS;
 use crate::meta::ResultWarning;
 use crate::truncation::{INLINE_NETWORK_NODES, large_result_note};
+
+/// A roll-up page the walk showed and did not walk through (#498).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HubPage {
+    pub id: i64,
+    pub name: String,
+    /// The pages it links
+    pub links: i64,
+}
+
+/// The code of the `hub_pages_not_expanded` warning.
+pub const HUB_CODE: &str = "hub_pages_not_expanded";
+
+/// The `hub_pages_not_expanded` warning (#498, BR-0006): the pages of `hubs` are in the result as leaves, so what they
+/// link is not. With `offer`, `expand_journals` is the way to walk through them, and the caller has made sure that
+/// doing so brings more pages and that the result would still fit the character budget; without it the warning says only
+/// how to see one page's links.
+pub fn hub_pages_not_expanded(hubs: &[HubPage], offer: bool) -> ResultWarning {
+    const LISTED: usize = 5;
+    let listed: Vec<String> = hubs.iter().take(LISTED).map(|hub| format!("{} ({} pages)", hub.name, hub.links)).collect();
+    let more = hubs.len().saturating_sub(LISTED);
+    let list = if more == 0 { listed.join(", ") } else { format!("{}, and {more} more", listed.join(", ")) };
+    let (message, them) = if hubs.len() == 1 {
+        (
+            format!(
+                "1 page links more than {HUB_LINKS} pages, like a roll-up, so it is shown but its links are not followed: {list}. \
+                 To see its links, start from it."
+            ),
+            "it",
+        )
+    } else {
+        (
+            format!(
+                "{} pages link more than {HUB_LINKS} pages each, like roll-ups, so they are shown but their links are not followed: {list}. \
+                 To see the links of one, start from it.",
+                hubs.len()
+            ),
+            "them",
+        )
+    };
+    ResultWarning {
+        code: HUB_CODE.to_owned(),
+        message,
+        how_to_fetch_all: offer.then(|| format!("Set expand_journals to true to walk through {them} too. It can flood the network.")),
+    }
+}
 
 /// The most the handler lets a caller set `max_nodes` to.
 pub const MAX_NODES_LIMIT: usize = 500;
@@ -293,6 +340,41 @@ mod tests {
         assert_eq!(offered(120).as_deref(), Some("Set max_nodes to 100 (max 500)."));
         // none does
         assert_eq!(offered(99), None);
+    }
+
+    fn hub(id: i64, name: &str, links: i64) -> HubPage {
+        HubPage { id, name: name.to_owned(), links }
+    }
+
+    #[test]
+    fn one_roll_up_is_named_with_its_links_and_the_way_to_walk_through_it() {
+        let warning = hub_pages_not_expanded(&[hub(1, "Rollup", 41)], true);
+        assert_eq!(warning.code, "hub_pages_not_expanded");
+        assert_eq!(
+            warning.message,
+            "1 page links more than 30 pages, like a roll-up, so it is shown but its links are not followed: Rollup (41 pages). To see its links, start from it."
+        );
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set expand_journals to true to walk through it too. It can flood the network."));
+    }
+
+    #[test]
+    fn several_roll_ups_are_listed_up_to_five_and_counted_after_that() {
+        let hubs: Vec<HubPage> = (1..=7).map(|n| hub(n, &format!("Rollup {n}"), 30 + n)).collect();
+        let warning = hub_pages_not_expanded(&hubs, true);
+        assert_eq!(
+            warning.message,
+            "7 pages link more than 30 pages each, like roll-ups, so they are shown but their links are not followed: \
+             Rollup 1 (31 pages), Rollup 2 (32 pages), Rollup 3 (33 pages), Rollup 4 (34 pages), Rollup 5 (35 pages), and 2 more. \
+             To see the links of one, start from it."
+        );
+        assert!(warning.how_to_fetch_all.unwrap().starts_with("Set expand_journals to true to walk through them too."));
+        let two = hub_pages_not_expanded(&hubs[..2], false);
+        assert!(two.message.ends_with("Rollup 1 (31 pages), Rollup 2 (32 pages). To see the links of one, start from it."), "{}", two.message);
+    }
+
+    #[test]
+    fn without_an_offer_there_is_nothing_to_fetch() {
+        assert_eq!(hub_pages_not_expanded(&[hub(1, "Rollup", 41)], false).how_to_fetch_all, None);
     }
 
     #[test]

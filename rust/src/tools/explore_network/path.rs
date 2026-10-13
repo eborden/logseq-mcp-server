@@ -26,8 +26,8 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use super::graph::{Edge, EdgeOutput, Links, Node};
-use super::queries::{connected_pages, connected_pages_grouped};
-use super::wire::{ConnectedRow, connected_rows};
+use super::queries::{Extras, connected_pages, connected_pages_grouped};
+use super::wire::{ConnectedRow, Link, connected_rows};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::ToolError;
@@ -169,10 +169,11 @@ impl Search {
             }
             // The same links are reported from both sides when two frontier pages link to each other, so set
             // (never add) the directed count.
-            if row.outbound {
-                self.links.set(row.source, row.connected, row.count);
-            } else {
-                self.links.set(row.connected, row.source, row.count);
+            match row.link {
+                Link::Outbound => self.links.set(row.source, row.connected, row.count),
+                Link::Inbound => self.links.set(row.connected, row.source, row.count),
+                // the path asks for no degrees, and a count of pages is no link
+                Link::Degree => continue,
             }
             if self.reached.contains_key(&row.connected) {
                 continue;
@@ -425,9 +426,9 @@ pub async fn explore_path(client: &LogseqClient, page: &str, to: &str, max_depth
         let query = if hop == 1 && aliased {
             let root = PageId::new(start.id)?;
             let pairs: Vec<(PageId, PageId)> = member_ids.iter().map(|&id| (id, root)).collect();
-            connected_pages_grouped(&pairs)
+            connected_pages_grouped(&pairs, Extras::default())
         } else {
-            connected_pages(&frontier.iter().map(|&id| PageId::new(id)).collect::<Result<Vec<_>, _>>()?)
+            connected_pages(&frontier.iter().map(|&id| PageId::new(id)).collect::<Result<Vec<_>, _>>()?, Extras::default())
         };
         let reply = client.execute_datalog_query(&query.text, &query.inputs).await?;
         // `null` is not "no linked pages" (BR-0011): the walk stops here instead of ending "no path"
@@ -464,7 +465,8 @@ mod tests {
     use crate::tool::testing::keys;
 
     fn row(source: i64, connected: i64, name: &str, is_journal: bool, outbound: bool, count: i64) -> ConnectedRow {
-        ConnectedRow { source, connected, name: name.to_lowercase(), original_name: name.to_owned(), is_journal, outbound, count }
+        let link = if outbound { Link::Outbound } else { Link::Inbound };
+        ConnectedRow { source, connected, name: name.to_lowercase(), original_name: name.to_owned(), is_journal, link, count, snippet: None }
     }
 
     fn search(seeds: &[i64], targets: &[i64]) -> Search {
