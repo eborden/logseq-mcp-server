@@ -146,9 +146,49 @@ async fn a_search_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_e
     let warnings = meta["meta"]["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0]["code"], "result_size_truncated");
-    assert!(warnings[0].get("howToFetchAll").is_none());
-    assert_eq!(meta["meta"]["hasMore"], false);
+    // no parameter raises the size limit, but the next page reads on from where the cut fell
+    assert_eq!(warnings[0]["howToFetchAll"], format!("Set offset to {} for the next page.", kept.len()));
+    assert_eq!(meta["meta"]["hasMore"], true);
     assert_eq!(meta["meta"]["totals"], json!({"matches": 100}));
+}
+
+#[tokio::test]
+async fn the_offset_a_size_cut_names_reads_on_with_the_next_hits_and_no_overlap() {
+    // 100 hits of 600 characters, the same answer for each call: the first page is cut to the budget, and the page the
+    // warning names starts at the next hit and is cut the same way
+    let big: Vec<Value> = (1..=100).map(|id| hit(id, 600)).collect();
+    let page = |offset: Option<usize>| {
+        let big = big.clone();
+        async move {
+            let logseq = mock_logseq(vec![json!(big)]).await;
+            let args = offset.map_or(json!({"text": "importer"}), |offset| json!({"text": "importer", "offset": offset}));
+            let result = find_blocks::call(&client(&logseq), true, NOW, arguments(args)).await.unwrap();
+            assert_eq!(methods(&logseq), [DATALOG], "a page costs the same one call");
+            let hits: Vec<Value> = serde_json::from_str(&text_of(&result, 0)).unwrap();
+            (hits, search_meta(&result))
+        }
+    };
+    let (first, meta) = page(None).await;
+    let how = meta["warnings"][0]["howToFetchAll"].as_str().unwrap().to_owned();
+    assert_eq!(how, format!("Set offset to {} for the next page.", first.len()));
+
+    let (second, meta) = page(Some(first.len())).await;
+    // the hits are newest first, so the second page starts at the next id down, and no hit is on both
+    assert_eq!(first[0]["uuid"], uuid(100));
+    assert_eq!(second[0]["uuid"], uuid(100 - first.len() as i64));
+    assert!(second.iter().all(|hit| !first.contains(hit)));
+    assert_eq!(meta["totals"]["matches"], 100, "the total counts the hits skipped too");
+    let warning = &meta["warnings"][0];
+    assert_eq!(warning["code"], "result_size_truncated");
+    assert!(warning["message"].as_str().unwrap().contains(&format!("matching blocks from offset {}", first.len())), "{warning}");
+    assert_eq!(warning["howToFetchAll"], format!("Set offset to {} for the next page.", first.len() + second.len()));
+
+    // an offset past the last hit reads nothing, and says nothing was cut
+    let (none, meta) = page(Some(100)).await;
+    assert!(none.is_empty());
+    assert_eq!(meta["warnings"], json!([]));
+    assert_eq!(meta["hasMore"], false);
+    assert_eq!(meta["totals"]["matches"], 100);
 }
 
 #[tokio::test]
@@ -162,7 +202,10 @@ async fn a_search_cut_by_its_limit_and_its_size_offers_no_larger_limit() {
     let warnings = meta["meta"]["warnings"].as_array().unwrap();
     assert_eq!(warnings.iter().map(|warning| warning["code"].as_str().unwrap()).collect::<Vec<_>>(), ["result_size_truncated"]);
     assert!(warnings[0]["message"].as_str().unwrap().contains(" of 300 matching blocks"), "{}", warnings[0]["message"]);
-    assert_eq!(meta["meta"]["hasMore"], false);
+    // the next page is the way on, and it is not a larger limit
+    assert!(warnings[0]["howToFetchAll"].as_str().unwrap().starts_with("Set offset to "), "{}", warnings[0]["howToFetchAll"]);
+    assert!(!warnings[0]["howToFetchAll"].as_str().unwrap().contains("limit"), "{}", warnings[0]["howToFetchAll"]);
+    assert_eq!(meta["meta"]["hasMore"], true);
     assert_eq!(meta["meta"]["totals"]["matches"], 300);
 }
 
@@ -192,7 +235,9 @@ async fn the_raise_a_limit_warning_offers_returns_exactly_that_many_hits_and_one
     assert_eq!(warning["code"], "results_truncated");
     assert_eq!(meta["hasMore"], true);
     let how = warning["howToFetchAll"].as_str().unwrap();
-    let offered: usize = how.strip_prefix("Set limit to ").unwrap().split(' ').next().unwrap().parse().unwrap();
+    // the next page leads, and the raise is the alternative
+    assert!(how.starts_with("Set offset to 100 for the next page. Or set limit to "), "{how}");
+    let offered: usize = how.split("Or set limit to ").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
     assert!(offered > 100 && offered < 300, "{how}");
     assert!(!how.contains("get all"), "{how}");
 
@@ -200,10 +245,12 @@ async fn the_raise_a_limit_warning_offers_returns_exactly_that_many_hits_and_one
     let (hits, meta) = run(Some(offered as u64)).await;
     assert_eq!(hits, offered);
     assert!(meta["warnings"].as_array().unwrap().iter().all(|warning| warning["code"] != "result_size_truncated"), "{meta}");
+    // the size cut's own warning is longer than a limit cut's, so it keeps a hit or so fewer than the offered count
     let (hits, meta) = run(Some(offered as u64 + 1)).await;
-    assert_eq!(hits, offered);
+    assert!(hits <= offered && hits + 3 >= offered, "{hits} of {offered}");
     assert_eq!(meta["warnings"][0]["code"], "result_size_truncated");
-    assert_eq!(meta["hasMore"], false);
+    assert_eq!(meta["warnings"][0]["howToFetchAll"], format!("Set offset to {hits} for the next page."));
+    assert_eq!(meta["hasMore"], true);
 }
 
 #[tokio::test]

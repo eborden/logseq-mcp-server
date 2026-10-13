@@ -134,7 +134,7 @@ async fn a_null_page_list_is_not_an_empty_one() {
 #[tokio::test]
 async fn a_search_costs_one_call_and_binds_its_text_with_in() {
     let logseq = mock_logseq(vec![json!([block(2, "an a.b match", 5), block(9, "a newer a.b match", 5)])]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("a.b (x)"), 100, false, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("a.b (x)"), 100, 0, false, true).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
     let seen = logseq.seen.lock().unwrap();
@@ -156,7 +156,7 @@ async fn context_costs_one_more_call_for_the_pages_of_the_hits_kept_only() {
         json!([page(5)]),
     ])
     .await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 2, true, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 2, 0, true, true).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery", "logseq.DB.datascriptQuery"]);
     let seen = logseq.seen.lock().unwrap();
@@ -171,7 +171,7 @@ async fn context_costs_one_more_call_for_the_pages_of_the_hits_kept_only() {
 #[tokio::test]
 async fn a_null_context_lookup_is_a_warning_and_an_empty_one_is_not() {
     let logseq = mock_logseq(vec![json!([block(1, "text", 5), block(2, "more", 5)]), json!(null)]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, true, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, 0, true, true).await.unwrap();
     assert_eq!(found.results.len(), 2);
     assert!(found.results.iter().all(|result| result.get("context").is_none()));
     assert_eq!(found.meta.warnings.len(), 1);
@@ -181,7 +181,7 @@ async fn a_null_context_lookup_is_a_warning_and_an_empty_one_is_not() {
 
     // a real `[]` is pages not found, with no warning
     let logseq = mock_logseq(vec![json!([block(1, "text", 5)]), json!([])]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, true, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, 0, true, true).await.unwrap();
     assert!(found.meta.warnings.is_empty());
     assert!(found.results[0].get("context").is_none());
 }
@@ -189,7 +189,7 @@ async fn a_null_context_lookup_is_a_warning_and_an_empty_one_is_not() {
 #[tokio::test]
 async fn context_costs_no_call_when_no_hit_has_a_page_id() {
     let logseq = mock_logseq(vec![json!([[{"id": 1, "uuid": "u1", "content": "text"}]])]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("text"), 100, true, false).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("text"), 100, 0, true, false).await.unwrap();
     assert_eq!(methods(&logseq).len(), 1);
     assert!(found.results[0].get("context").is_none());
 }
@@ -198,7 +198,7 @@ async fn context_costs_no_call_when_no_hit_has_a_page_id() {
 #[tokio::test]
 async fn a_null_answer_is_an_unavailable_warning_and_no_match_is_an_empty_result_without_one() {
     let logseq = mock_logseq(vec![json!(null)]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, false, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, 0, false, true).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
     assert!(found.results.is_empty());
     assert!(found.is_unavailable());
@@ -209,7 +209,7 @@ async fn a_null_answer_is_an_unavailable_warning_and_no_match_is_an_empty_result
     assert!(!found.meta.has_more && found.meta.warnings[0].how_to_fetch_all.is_none());
 
     let logseq = mock_logseq(vec![json!([])]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, false, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, 0, false, true).await.unwrap();
     assert!(found.results.is_empty());
     assert!(!found.is_unavailable());
     assert!(found.meta.warnings.is_empty());
@@ -245,14 +245,14 @@ async fn a_null_answer_to_the_search_is_written_as_an_empty_list_and_a_warning_w
 #[tokio::test]
 async fn a_logseq_error_is_an_error_and_not_an_empty_result() {
     let logseq = mock_logseq(vec![json!({"error": "Query timed out"})]).await;
-    let error = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, false, true).await.unwrap_err();
+    let error = find_blocks::find_blocks_with_meta(&client(&logseq), &text("x"), 100, 0, false, true).await.unwrap_err();
     assert_eq!(error.to_string(), "LogSeq API error: Query timed out");
 }
 
 #[tokio::test]
 async fn a_property_search_costs_one_query_and_binds_its_key_and_value() {
     let logseq = mock_logseq(vec![json!([block(2, "a block\nstatus:: testing", 5), block(9, "another\nstatus:: testing", 5)])]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &property("status", "test\"ing"), 100, false, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &property("status", "test\"ing"), 100, 0, false, true).await.unwrap();
 
     // one call, whatever the number of matches, and never a crawl of the pages
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
@@ -274,7 +274,7 @@ async fn a_property_search_costs_one_query_and_binds_its_key_and_value() {
 async fn every_filter_costs_the_one_call_and_all_of_them_are_bound_in_the_order_the_query_declares_them() {
     let logseq = mock_logseq(vec![json!([block(2, "a match", 5)])]).await;
     let filters = Filters::parse(Some("a.b"), Some("createdAt"), Some(&Scalar::Number(3.0))).unwrap();
-    find_blocks::find_blocks_with_meta(&client(&logseq), &filters, 100, false, true).await.unwrap();
+    find_blocks::find_blocks_with_meta(&client(&logseq), &filters, 100, 0, false, true).await.unwrap();
 
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
     let seen = logseq.seen.lock().unwrap();
@@ -292,7 +292,7 @@ async fn a_bad_property_key_is_refused_before_any_call_and_a_null_answer_is_an_u
     assert!(error.to_string().starts_with("Invalid parameter 'property': bad name"), "{error}");
     assert!(methods(&logseq).is_empty());
     // BR-0011: `null` is not an empty list
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &property("status", "x"), 100, false, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &property("status", "x"), 100, 0, false, true).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
     assert!(found.results.is_empty());
     assert!(found.is_unavailable());
@@ -304,7 +304,7 @@ async fn a_bad_property_key_is_refused_before_any_call_and_a_null_answer_is_an_u
 
     // a real `[]` is no match, with no warning
     let logseq = mock_logseq(vec![json!([])]).await;
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &property("status", "x"), 100, false, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &property("status", "x"), 100, 0, false, true).await.unwrap();
     assert!(found.results.is_empty());
     assert!(!found.is_unavailable() && found.meta.warnings.is_empty());
     assert_eq!(found.matches(), Some(0));
@@ -385,7 +385,7 @@ async fn a_period_alone_is_a_filter_and_two_ways_of_choosing_one_are_refused_bef
 async fn a_null_answer_to_a_search_with_a_period_says_which_days_were_asked_for() {
     let logseq = mock_logseq(vec![json!(null)]).await;
     let filters = Filters::parse(Some("x"), None, None).unwrap();
-    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &filters, 100, false, true).await.unwrap();
+    let found = find_blocks::find_blocks_with_meta(&client(&logseq), &filters, 100, 0, false, true).await.unwrap();
     assert!(found.is_unavailable());
 
     let logseq = mock_logseq(vec![json!(null)]).await;
@@ -398,6 +398,49 @@ async fn a_null_answer_to_a_search_with_a_period_says_which_days_were_asked_for(
         meta["meta"]["warnings"][0]["message"].as_str().unwrap().starts_with("LogSeq returned no answer when looking up blocks that sit on journal pages from 20250310 to 20250310 ("),
         "{meta}"
     );
+}
+
+// #491: `offset` skips matches that are already in hand, so a page costs the call a first one does
+#[tokio::test]
+async fn an_offset_at_or_past_the_last_match_is_an_empty_page_that_counts_the_matches_and_is_no_miss() {
+    for offset in [2, 3, 50] {
+        let logseq = mock_logseq(vec![json!([block(1, "a match", 5), block(2, "another match", 5)])]).await;
+        let arguments = json!({"text": "match", "offset": offset}).as_object().cloned();
+        let result = find_blocks::call(&client(&logseq), true, NOW, arguments).await.unwrap();
+        let content = serde_json::to_value(&result).unwrap()["content"].clone();
+
+        assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"], "offset {offset}");
+        assert_eq!(content[0]["text"], "[]");
+        // no warning (nothing was cut), the real total, and no "No match" tip: matches exist, the page is past them
+        assert_eq!(content[1]["text"], r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":2}}}"#, "offset {offset}");
+    }
+}
+
+#[tokio::test]
+async fn an_offset_pages_the_hits_newest_first_and_a_page_past_the_cut_names_the_next_offset() {
+    let hits = || json!([block(1, "oldest", 5), block(4, "newest", 5), block(3, "newer", 5), block(2, "older", 5)]);
+    let page = |offset: u64, limit: u64| {
+        let arguments = json!({"text": "e", "limit": limit, "offset": offset});
+        async move {
+            let logseq = mock_logseq(vec![hits()]).await;
+            let found = find_blocks::find_blocks_with_meta(&client(&logseq), &text("e"), limit, offset, false, true).await.unwrap();
+            assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"], "{arguments}");
+            found
+        }
+    };
+    let first = page(0, 2).await;
+    assert_eq!(first.results.iter().map(|hit| hit["content"].as_str().unwrap()).collect::<Vec<_>>(), ["newest", "newer"]);
+    assert_eq!(first.meta.warnings[0].how_to_fetch_all.as_deref().unwrap().split(". ").next(), Some("Set offset to 2 for the next page"));
+
+    let second = page(2, 2).await;
+    assert_eq!(second.results.iter().map(|hit| hit["content"].as_str().unwrap()).collect::<Vec<_>>(), ["older", "oldest"]);
+    assert!(second.meta.warnings.is_empty() && !second.meta.has_more, "the last page is complete");
+    assert_eq!(second.matches(), Some(4), "the total counts the hits skipped too");
+
+    // with `limit` 0 nothing is shown, so no offset would move: the warning offers the raise alone
+    let none = page(1, 0).await;
+    assert!(none.results.is_empty());
+    assert_eq!(none.meta.warnings[0].how_to_fetch_all.as_deref(), Some("Set limit to 3 (or higher) to get all 3."));
 }
 
 #[tokio::test]
