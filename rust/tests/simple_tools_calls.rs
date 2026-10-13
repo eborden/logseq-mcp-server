@@ -17,9 +17,9 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// 2025-03-12T03:30:00Z, the instant the parity harness reads as now: Tuesday 2025-03-11 in New York, where it also
-/// pins the zone.
-const NOW: Clock = Clock::Fixed(1_741_750_200_000);
+/// 2025-03-12T12:00:00Z: Wednesday the 12th in every zone from UTC-12 to UTC+11, since `Clock::today` reads the local date
+/// (`localtime_r`, which honours `TZ`) and these in-process tests pin no zone. The parity harness pins its own.
+const NOW: Clock = Clock::Fixed(1_741_780_800_000);
 
 /// A LogSeq that answers each request with the next canned body, and records the requests.
 struct MockLogseq {
@@ -343,7 +343,7 @@ async fn a_period_costs_no_call_of_its_own_and_binds_its_days_with_in() {
     for (arguments, bounds) in [
         (json!({"text": "x", "start_date": 20250101, "end_date": 20250107}), ("20250101", "20250107")),
         (json!({"text": "x", "preset": "last_week"}), ("20250303", "20250309")),
-        (json!({"text": "x", "last_n": 7}), ("20250305", "20250311")),
+        (json!({"text": "x", "last_n": 7}), ("20250306", "20250312")),
     ] {
         let logseq = mock_logseq(vec![json!([block(4, "a match on a journal", 5)])]).await;
         let result = find_blocks::call(&client(&logseq), true, NOW, arguments.as_object().cloned()).await.unwrap();
@@ -364,8 +364,8 @@ async fn a_period_alone_is_a_filter_and_two_ways_of_choosing_one_are_refused_bef
     let logseq = mock_logseq(vec![json!([block(4, "a block", 5)])]).await;
     find_blocks::call(&client(&logseq), true, NOW, json!({"last_n": 1}).as_object().cloned()).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.DB.datascriptQuery"]);
-    // today is the 11th in New York, though it is already the 12th in UTC
-    assert_eq!(logseq.seen.lock().unwrap()[0]["args"].as_array().unwrap()[1..], [json!("20250311"), json!("20250311")]);
+    // today is the 12th, in any zone
+    assert_eq!(logseq.seen.lock().unwrap()[0]["args"].as_array().unwrap()[1..], [json!("20250312"), json!("20250312")]);
 
     for (arguments, said) in [
         (json!({"text": "x", "last_n": 3, "preset": "today"}), "Invalid parameter 'date selection': last_n and preset"),
@@ -395,7 +395,7 @@ async fn a_null_answer_to_a_search_with_a_period_says_which_days_were_asked_for(
     let meta: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
     assert_eq!(meta["meta"]["warnings"][0]["code"], "search_unavailable");
     assert!(
-        meta["meta"]["warnings"][0]["message"].as_str().unwrap().starts_with("LogSeq returned no answer when looking up blocks that sit on journal pages from 20250310 to 20250310 ("),
+        meta["meta"]["warnings"][0]["message"].as_str().unwrap().starts_with("LogSeq returned no answer when looking up blocks that sit on journal pages from 20250311 to 20250311 ("),
         "{meta}"
     );
 }
