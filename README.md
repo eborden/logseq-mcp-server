@@ -4,7 +4,7 @@ Turn your LogSeq knowledge graph into an AI-accessible database.
 
 ## What This Does
 
-Provides 12 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+Provides 11 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
 
 ## Quick Start
 
@@ -113,7 +113,7 @@ A binary you download by hand through a browser is quarantined by macOS, and Gat
 
 Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The skills refer to them by bare name, so either form works.
 
-## 12 Tools at a Glance
+## 11 Tools at a Glance
 
 ### Basic Operations (4)
 | Tool | Purpose |
@@ -126,12 +126,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 ### Graph Traversal (1)
 | Tool | Purpose |
 |------|---------|
-| `get_concept_network` | Build network graph with nodes/edges |
-
-### Semantic Search (1)
-| Tool | Purpose |
-|------|---------|
-| `search_by_relationship` | Whether topic A connects to topic B within N hops (`connected-within`, its one type), and the blocks of both pages when it does. Blocks that link to a page are `find_blocks` with `links_to` |
+| `explore_network` | The pages linked to a page as nodes and edges, in both link directions (capped; `max_depth` up to 3). With `to`, the shortest link path to a second page instead, as nodes and edges with their reference counts. Blocks that link to a page are `find_blocks` with `links_to` |
 
 ### Context Building (2)
 | Tool | Purpose |
@@ -157,7 +152,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 
 ### Markdown output and compact results
 
-`get_page`, `get_block`, `explore_context` and `get_concept_network` take `format: "markdown"` (the default is `"json"`). The result is one plain text block: page properties as `key:: value` lines, blocks as indented `- ` bullets with `((uuid))` refs kept (block uuids are left out, except in `compact`), related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. It is roughly 45-80% smaller than the JSON. `explore_context` also takes `compact: true`, which swaps block bodies for a first-line snippet plus the block's uuid (it pays off on long blocks, and `resolve_refs` is skipped with a warning). For a long page, `get_page` with `detail: "outline"` lists the top-level blocks (uuid, snippet, child count) and `get_block` reads the ones you pick. The `logseq://page/{name}` resource renders through the same code.
+`get_page`, `get_block`, `explore_context` and `explore_network` take `format: "markdown"` (the default is `"json"`). The result is one plain text block: page properties as `key:: value` lines, blocks as indented `- ` bullets with `((uuid))` refs kept (block uuids are left out, except in `compact`), related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. It is roughly 45-80% smaller than the JSON. `explore_context` also takes `compact: true`, which swaps block bodies for a first-line snippet plus the block's uuid (it pays off on long blocks, and `resolve_refs` is skipped with a warning). For a long page, `get_page` with `detail: "outline"` lists the top-level blocks (uuid, snippet, child count) and `get_block` reads the ones you pick. The `logseq://page/{name}` resource renders through the same code.
 
 ## Prompts
 
@@ -205,8 +200,14 @@ Gets: Page + blocks + related pages + references + temporal context
 
 **"Show everything connected to Machine Learning"**
 ```
-Use: get_concept_network("Machine Learning", max_depth=2)
+Use: explore_network("Machine Learning", max_depth=2)
 Gets: Network graph with nodes and edges
+```
+
+**"How does Machine Learning connect to Statistics?"**
+```
+Use: explore_network("Machine Learning", to="Statistics")
+Gets: The shortest path of links, as nodes and edges with their reference counts
 ```
 
 **"How did my thinking on testing evolve this year?"**

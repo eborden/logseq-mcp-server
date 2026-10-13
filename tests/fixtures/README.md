@@ -170,7 +170,7 @@ non-journal page. The dates are all in the past, 2025.
 
 `hub central` has **120 neighbours** (non-journal pages that link it, or that it links), plus one
 journal that links it. It is the fixture for the caps and `hasMore`/`warnings` of
-`get_concept_network` and `explore_context`. The files are generated, then committed:
+`explore_network` and `explore_context`. The files are generated, then committed:
 
 ```bash
 npx tsx scripts/generate-hub-fixture.ts          # rewrite the files
@@ -206,17 +206,22 @@ Expected results, measured against a live instance (#118) with the code at the t
 
 | Call | Result |
 |---|---|
-| `get_concept_network` depth 1, defaults | 16 nodes (root + 15), exactly `neighbour-both-01..10` and `neighbour-in-01..05` (the only pages with 2 references, 15 of them, equal to `max_fanout`), `truncated` and `hasMore` true, one `network_truncated` warning |
-| `get_concept_network` depth 2, defaults | 50 nodes (1 + 15 + 34 `fringe-*`), `truncated` true. The `max_nodes` cap bites, the 15 kept pages reach all 40 fringe pages |
+| `explore_network` depth 1, defaults | 16 nodes (root + 15), exactly `neighbour-both-01..10` and `neighbour-in-01..05` (the only pages with 2 references, 15 of them, equal to `max_fanout`), `truncated` and `hasMore` true, one `network_truncated` warning |
+| `explore_network` depth 2, defaults | 50 nodes (1 + 15 + 34 `fringe-*`), `truncated` true. The `max_nodes` cap bites, the 15 kept pages reach all 40 fringe pages |
 | depth 1, `max_nodes` 500, `max_fanout` 100 (the most an MCP client can ask for) | 101 nodes (the fanout cap keeps 100 of 121 candidates), `truncated` true. The journal ranks last, so it is dropped |
 | depth 1, `maxNodes` 500, `maxFanout` `Infinity` (library call only) | 122 nodes (the hub, 120 neighbours, the journal), `truncated` false. The journal is a depth-1 node |
 | depth 2, same caps | 162 nodes (+40 `fringe-*`). The journal is a leaf: its 30 topics are not reached |
 | depth 2, same caps, `expandJournals` true | 192 nodes (+30 `journal-topic-*`) |
-| `get_concept_network` on `journal-topic-01`, depth 2, defaults | 2 nodes: itself and the journal (a leaf) |
+| `explore_network` on `journal-topic-01`, depth 2, defaults | 2 nodes: itself and the journal (a leaf) |
 | same, `expand_journals` true | 17 nodes (the journal, then 15 of its other pages: `max_fanout` 15 bites), `truncated` true. Add `max_fanout` 100 for 32 nodes (the journal, 29 other topics, `hub central`), `truncated` false |
 | `explore_context` on the hub | 50 of 71 blocks, 20 of 66 references, 10 of 61 related pages; totals `blocks` 71, `references` 66, `relatedPages` 61; `hasMore` true with `blocks_truncated`, `references_truncated` and `related_pages_truncated`. The references are a prefix of the full ranking (see "Fixed by ranking") |
 | `explore_context` on the hub, `references_offset` 20, 40 and 60 | the next 20 of the 66 references, then 20, then the last 6: `references_truncated` says "Showing 20 of 46 references from offset 20" and names `references_offset` 40, and the last page has no `references_truncated`. At 66 or more no reference and no warning about them |
 | `get_page` on the hub, with children | 71 children |
+| `explore_network` with `to`: `alice` to `project atlas`, `max_depth` 2 | 1 hop: `Alice`, `project atlas`; one edge of count 2 (one block each way), and `resolvedAliases.to` is `atlas`, `project atlas` |
+| same, `Alice` to `Bob`, and `Bob` to `Alice`, `max_depth` 1 | 1 hop, one edge of count 1: Alice's block links Bob, so it is a `reference` from Alice and a `backlink` when asked from Bob |
+| same, `journal-topic-01` to `hub central`, `max_depth` 2 | 2 hops through the journal `Jun 17th, 2024` (two edges of count 1). With `max_depth` 1 there is no path: `no_path_within`, and `howToFetchAll` offers `max_depth` 2 |
+| same, `archive` or `empty page` to `Bob` | no path, and the walk ran out of pages after 1 hop: nothing links them. `Alice` to `archive` at depth 3 is no path within the maximum depth |
+| same, `project atlas` to `atlas` | the same page: `same_page` and no walk |
 
 What is fixed and what is not. `selectCandidates` ranks non-journal pages first, then by references, then by
 lower `:db/id` (LogSeq assigns ids in file load order, so ties at the same count are not stable names):
