@@ -143,8 +143,9 @@ describe('integration suites reach the tools through the helpers', () => {
   const files = testFiles(integrationDir);
 
   it('finds the helper functions', () => {
-    // 19 until #491 merged searchBlocks and queryByProperty (and their WithMeta forms) into findBlocks and findBlocksWithMeta
-    expect(helperNames.size).toBeGreaterThanOrEqual(17);
+    // 19 until #491 merged searchBlocks and queryByProperty (and their WithMeta forms) into findBlocks and findBlocksWithMeta,
+    // then 17, and 15 when #493 merged getBacklinks, getBacklinksWithMeta, buildContextForTopic and getContextForQuery into exploreContext
+    expect(helperNames.size).toBeGreaterThanOrEqual(15);
     expect(helperNames.has('getPage')).toBe(true);
   });
 
