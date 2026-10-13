@@ -23,6 +23,7 @@
 //! pages join, the graph it builds and the words of the cut.
 
 mod graph;
+mod path;
 mod queries;
 mod selection;
 mod warning;
@@ -39,9 +40,9 @@ use crate::args::parse_args;
 use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
-use crate::errors::ToolError;
+use crate::errors::{InvalidParameter, ToolError};
 use crate::markdown::{FooterMeta, with_footer};
-use crate::markdown_context::render_network;
+use crate::markdown_context::{render_network, render_path};
 use crate::meta::ResultWarning;
 use crate::output_format::OutputFormat;
 use crate::params::{ParamAliases, resolve_param_aliases};
@@ -57,13 +58,14 @@ use self::selection::{Candidate, select_candidates};
 use self::warning::{TruncationFacts, network_truncated_warning};
 use self::wire::connected_rows;
 
+pub use self::path::{MAX_FRONTIER, PathAnswer, explore_path};
 pub use self::warning::{MAX_FANOUT_LIMIT, MAX_NODES_LIMIT};
 
 pub const NAME: &str = "logseq_explore_network";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Explore the pages linked to a page as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n\
-**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n\
+const DESCRIPTION: &str = "Explore how a page connects: the pages linked to it as nodes and edges, both link directions, up to max_depth hops, one edge per page pair with a reference count. With to, the shortest link path to a second page instead.\n\n\
+**Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, see warnings.\n\
 **Can't find:** unlinked pages, or what pages say (logseq_explore_context).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
@@ -97,18 +99,20 @@ fn default_max_fanout() -> u64 {
 pub struct Args {
     /// Page to start from (page name, alias or ISO date)
     pub page: String,
+    /// A second page: the shortest path of links from page to it, within max_depth, instead of the network
+    pub to: Option<String>,
     /// Maximum depth to traverse (default: 2, max: 3)
     #[serde(default = "default_max_depth")]
     pub max_depth: u64,
-    /// Maximum pages in the network, root included (default: 50, max: 500)
+    /// Maximum pages in the network, root included (default: 50, max: 500). Not with to
     #[serde(default = "default_max_nodes")]
     #[schemars(range(min = 1))]
     pub max_nodes: u64,
-    /// Maximum new pages any one page may add (default: 15, max: 100)
+    /// Maximum new pages any one page may add (default: 15, max: 100). Not with to
     #[serde(default = "default_max_fanout")]
     #[schemars(range(min = 1))]
     pub max_fanout: u64,
-    /// Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network.
+    /// Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network. Not with to
     #[serde(default)]
     pub expand_journals: bool,
     /// json (default), or markdown text. Markdown has block uuids only on search hits and with compact
@@ -119,6 +123,7 @@ pub struct Args {
 #[derive(Debug, PartialEq)]
 struct Request {
     page: String,
+    to: Option<String>,
     max_depth: u64,
     options: Options,
     format: Option<OutputFormat>,
@@ -126,8 +131,8 @@ struct Request {
 
 impl From<Args> for Request {
     fn from(args: Args) -> Request {
-        let Args { page, max_depth, max_nodes, max_fanout, expand_journals, format } = args;
-        Request { page, max_depth, options: Options { max_nodes, max_fanout, expand_journals }, format }
+        let Args { page, to, max_depth, max_nodes, max_fanout, expand_journals, format } = args;
+        Request { page, to, max_depth, options: Options { max_nodes, max_fanout, expand_journals }, format }
     }
 }
 
@@ -138,12 +143,41 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Explore Network"))
 }
 
-/// A call: aliases folded, arguments read, the walk (with the handler's own limits on it: depth 3,
-/// 500 nodes, 100 per page, whatever the caller asks for), then JSON or Markdown. This tool makes
-/// no tips.
+/// The arguments that size the walk without `to`. The path is one page after another, at most `max_depth` hops long,
+/// so they have nothing to bound there.
+const NETWORK_ONLY: [&str; 3] = ["max_nodes", "max_fanout", "expand_journals"];
+
+/// With `to`, the arguments of the walk without it are refused rather than ignored, in the order the schema lists them.
+/// `null` counts as absent, as everywhere. They are read from the arguments as sent, since a default and a value that
+/// was asked for look the same once parsed.
+fn check_combination(arguments: Option<&JsonObject>) -> Result<(), ToolError> {
+    for param in NETWORK_ONLY {
+        let Some(value) = arguments.and_then(|arguments| arguments.get(param)).filter(|value| !value.is_null()) else { continue };
+        return Err(ToolError::InvalidParameter(InvalidParameter {
+            param: param.to_owned(),
+            value: value.to_string(),
+            expected: format!("left out when to is given: {param} sizes the network, and with to the result is one path, at most max_depth hops long"),
+            example: Some("max_depth: 3".to_owned()),
+        }));
+    }
+    Ok(())
+}
+
+/// A call: aliases folded, arguments read, then the path to `to` when it is given, else the walk (with the handler's
+/// own limits on it: depth 3, 500 nodes, 100 per page, whatever the caller asks for), as JSON or Markdown. This tool
+/// makes no tips.
 pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let request = Request::from(parse_args::<Args>(arguments.as_ref())?);
+    let markdown = request.format == Some(OutputFormat::Markdown);
+    if let Some(to) = &request.to {
+        check_combination(arguments.as_ref())?;
+        let depth = request.max_depth.min(MAX_DEPTH_LIMIT);
+        let answer = explore_path(client, &request.page, to, depth, request.max_depth).await?;
+        let result = answer.to_value();
+        let text = if markdown { with_footer(render_path(&result), &FooterMeta::of_result(&result, &[])) } else { result.to_string() };
+        return Ok(success_result(vec![ContentBlock::text(text)]));
+    }
     // Safeguards: caps on the walk, whatever the caller asks for
     let options = Options {
         max_nodes: request.options.max_nodes.min(MAX_NODES_LIMIT as u64),
@@ -152,7 +186,6 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     };
     let network = explore_network(client, &request.page, request.max_depth.min(MAX_DEPTH_LIMIT), options).await?;
     // The text the call sends, which the character budget measures (#485)
-    let markdown = request.format == Some(OutputFormat::Markdown);
     let render = |network: &Network| -> String {
         let result = network.to_value();
         if markdown { with_footer(render_network(&result), &FooterMeta::of_result(&result, &[])) } else { result.to_string() }
@@ -459,16 +492,17 @@ mod tests {
     }
 
     #[test]
-    fn the_concept_network_schema_means_what_the_pinned_one_means() {
+    fn the_network_schema_means_what_the_pinned_one_means() {
         // `inputSchema` of logseq_explore_network in the ADR-0016 snapshot
         let pinned = json!({
             "type": "object",
             "properties": {
                 "page": {"type": "string", "description": "Page to start from (page name, alias or ISO date)"},
+                "to": {"type": "string", "description": "A second page: the shortest path of links from page to it, within max_depth, instead of the network"},
                 "max_depth": {"type": "integer", "minimum": 0, "default": 2, "description": "Maximum depth to traverse (default: 2, max: 3)"},
-                "max_nodes": {"type": "integer", "minimum": 1, "default": 50, "description": "Maximum pages in the network, root included (default: 50, max: 500)"},
-                "max_fanout": {"type": "integer", "minimum": 1, "default": 15, "description": "Maximum new pages any one page may add (default: 15, max: 100)"},
-                "expand_journals": {"type": "boolean", "default": false, "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network."},
+                "max_nodes": {"type": "integer", "minimum": 1, "default": 50, "description": "Maximum pages in the network, root included (default: 50, max: 500). Not with to"},
+                "max_fanout": {"type": "integer", "minimum": 1, "default": 15, "description": "Maximum new pages any one page may add (default: 15, max: 100). Not with to"},
+                "expand_journals": {"type": "boolean", "default": false, "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network. Not with to"},
                 "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact"},
             },
             "required": ["page"],
@@ -497,6 +531,7 @@ mod tests {
         use crate::args::testing::{Takes, sweep};
         let base = json!({"page": "Atlas"});
         sweep::<Args>(json!({}), "page", Takes::Text, true);
+        sweep::<Args>(base.clone(), "to", Takes::Text, false);
         sweep::<Args>(base.clone(), "max_depth", Takes::Count(0), false);
         sweep::<Args>(base.clone(), "max_nodes", Takes::Count(1), false);
         sweep::<Args>(base.clone(), "max_fanout", Takes::Count(1), false);
@@ -517,6 +552,36 @@ mod tests {
         assert!(error.to_string().starts_with("Invalid parameter 'max_depth': -1"), "{error}");
         let error = parse_request(args(json!({})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'page': missing"), "{error}");
+    }
+
+    #[test]
+    fn a_second_page_is_a_path_and_null_is_none() {
+        let request = parse_request(args(json!({"page": "a", "to": "b", "max_depth": 3})).as_ref()).unwrap();
+        assert_eq!((request.to.as_deref(), request.max_depth), (Some("b"), 3));
+        assert_eq!(parse_request(args(json!({"page": "a", "to": null})).as_ref()).unwrap().to, None);
+        assert_eq!(parse_request(args(json!({"page": "a"})).as_ref()).unwrap().to, None);
+        // `to` is read after `page` and before the counts
+        let error = parse_request(args(json!({"to": 5, "max_depth": -1})).as_ref()).unwrap_err();
+        assert!(error.to_string().starts_with("Invalid parameter 'page': missing"), "{error}");
+        let error = parse_request(args(json!({"page": "a", "to": 5, "max_depth": -1})).as_ref()).unwrap_err();
+        assert!(error.to_string().starts_with("Invalid parameter 'to': 5"), "{error}");
+    }
+
+    #[test]
+    fn the_arguments_that_size_the_network_are_refused_with_to_in_the_order_the_schema_lists_them() {
+        assert!(check_combination(args(json!({"page": "a", "to": "b", "max_depth": 2, "format": "markdown"})).as_ref()).is_ok());
+        // null is absent
+        assert!(check_combination(args(json!({"page": "a", "to": "b", "max_nodes": null, "expand_journals": null})).as_ref()).is_ok());
+        assert!(check_combination(None).is_ok());
+        for (param, value) in [("max_nodes", json!(10)), ("max_fanout", json!(5)), ("expand_journals", json!(false))] {
+            let error = check_combination(args(json!({"page": "a", "to": "b", param: value.clone()})).as_ref()).unwrap_err();
+            let text = error.to_string();
+            assert!(text.starts_with(&format!("Invalid parameter '{param}': {value}\n\nExpected: left out when to is given")), "{text}");
+            assert!(text.ends_with("Example: max_depth: 3"), "{text}");
+        }
+        // the first of them in schema order is the one named
+        let error = check_combination(args(json!({"expand_journals": true, "max_fanout": 5, "max_nodes": 10})).as_ref()).unwrap_err();
+        assert!(error.to_string().starts_with("Invalid parameter 'max_nodes': 10"), "{error}");
     }
 
     #[test]
