@@ -1,24 +1,34 @@
 //! Server `instructions`, sent in the `initialize` response (#44). Hosts show them to the model once per
 //! session, so every character is paid for every session. The text is held byte for byte by
 //! the guide resource (`rust/tests/data/parity/resources.json`).
+//!
+//! The text routes by the four tool types of ADR-0037 (get, find, explore, check) and gives one line to each
+//! second-brain question, then keeps the notes on reading results. Every tool but `logseq_get_graph` (a
+//! debugging aid) is named, and the length is held at or under `MAX_CHARS` (#496).
 
 /// The server instructions.
 pub const SERVER_INSTRUCTIONS: &str = r##"Read-only access to a LogSeq graph. Nothing here edits it.
 
-Start with:
-- "what do I know about X": logseq_explore_context (one page; call it once per page, in parallel, for several)
-- keywords: logseq_find_blocks
-- journals and "last week", or a page over time: logseq_explore_timeline
+Types: get (you name it), find (criteria in, hits out), explore (what it is, how it connects or changed), check (before writing).
+- recall a topic or refresh on a person: logseq_explore_context (one page per call, in parallel)
+- what happened in a period, or how a page changed: logseq_explore_timeline
+- how two pages connect: logseq_explore_network with to
+- keywords, blocks linking to pages: logseq_find_blocks
+- what has a property: logseq_find_pages or logseq_find_blocks
 - unsure of a page name: logseq_find_pages
-- "this page": logseq_get_current
-- a long page: logseq_get_page with detail "outline", then logseq_get_block on the uuids you pick
+- before writing links: logseq_check_links
+- a named page or block: logseq_get_page, logseq_get_block; this page: logseq_get_current; long page: get_page detail outline first
 
 Reading results:
-- Page names are case-insensitive. Block uuid is the stable id; numeric id is internal.
-- ((uuid)) in content is a block ref. Fetch it with logseq_get_block, or pass resolve_refs (get_page, get_block, explore_context, explore_timeline) to get resolvedRefs.
-- A warning means the result was cut or partial. hasMore: true means a parameter can fetch more (howToFetchAll says which); with hasMore: false the warning says why not (narrow the request). Check warnings before saying something doesn't exist.
-- Search is literal (no synonyms) and traversal only follows [[links]] and #tags.
-- A trailing meta block may carry tips for a next call. Ignore them if unhelpful."##;
+- ((uuid)) is a block ref: logseq_get_block, or resolve_refs.
+- A warning means the result was cut or partial; read it before saying something doesn't exist. hasMore: true: howToFetchAll names the parameter for more; false: the warning says why.
+- Search is literal (no synonyms); traversal follows only [[links]] and #tags.
+- Tips in a trailing meta block are optional."##;
+
+/// The most characters the instructions may hold: the length of the text this replaced (#496). Every
+/// session pays for each one, so a longer text has to say what it buys and raise this on purpose.
+#[cfg(test)]
+const MAX_CHARS: usize = 1145;
 
 #[cfg(test)]
 mod tests {
@@ -34,6 +44,26 @@ mod tests {
         for word in SERVER_INSTRUCTIONS.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
             if word.starts_with("logseq_") {
                 assert!(listed.iter().any(|name| name == word), "the instructions name {word}, which is not a tool");
+            }
+        }
+    }
+
+    #[test]
+    fn the_text_fits_the_character_budget() {
+        let chars = SERVER_INSTRUCTIONS.chars().count();
+        assert!(chars <= MAX_CHARS, "the instructions are {chars} characters, over the {MAX_CHARS} budget");
+    }
+
+    /// Routing by type (ADR-0037): the four types are named, and every tool a question routes to appears.
+    #[test]
+    fn the_text_names_the_four_types_and_every_routed_tool() {
+        for ty in ["get (", "find (", "explore (", "check ("] {
+            assert!(SERVER_INSTRUCTIONS.contains(ty), "the instructions don't introduce the type {ty:?}");
+        }
+        for tool in crate::tools::list() {
+            let name = tool.name.to_string();
+            if name != "logseq_get_graph" {
+                assert!(SERVER_INSTRUCTIONS.contains(&name), "the instructions don't route to {name}");
             }
         }
     }
