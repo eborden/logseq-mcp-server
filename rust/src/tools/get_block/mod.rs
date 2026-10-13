@@ -76,35 +76,42 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
     let markdown = args.format == Some(OutputFormat::Markdown);
     let text = |block: &Value| if markdown { with_footer(render_block(block), &FooterMeta::of_result(block, &[])) } else { block.to_string() };
     // Without `include_children` the children are unfetched `["uuid", "<id>"]` tuples, and the result is one block
-    let block = if args.include_children { fit_to_budget(block, &text) } else { block };
+    let block = if args.include_children { fit_to_budget(block, &text, markdown) } else { block };
     Ok(success_result(vec![ContentBlock::text(text(&block))]))
 }
 
 /// The block as it is when its text fits the character budget (#507, #485), else with the first blocks that do: the
 /// block itself, then its descendants in document order. A block is never cut inside its text (BR-0007), so a block
 /// that is over the budget by itself comes back alone.
-fn fit_to_budget(block: Value, text: &impl Fn(&Value) -> String) -> Value {
+fn fit_to_budget(block: Value, text: &impl Fn(&Value) -> String, markdown: bool) -> Value {
     let total = count_blocks(std::slice::from_ref(&block));
-    let size_of = |kept: usize| size(&text(&if kept < total { cut_block(&block, kept, total, false) } else { block.clone() }));
+    let size_of = |kept: usize| size(&text(&if kept < total { cut_block(&block, kept, total, false, markdown) } else { block.clone() }));
     match fit(total, 1, size_of) {
         Fit::Whole => block,
-        Fit::Cut { kept, oversize } => cut_block(&block, kept, total, oversize),
+        Fit::Cut { kept, oversize } => cut_block(&block, kept, total, oversize, markdown),
     }
 }
 
 /// The block cut to its first `kept` blocks of `total` (itself and its descendants, in document order), with the
 /// `result_size_truncated` warning and `hasMore` worked out again. A kept block that lost children carries
 /// `childrenTruncated`. `hasMore` and `warnings` come last when the block had none.
-fn cut_block(block: &Value, kept: usize, total: usize, oversize: bool) -> Value {
+fn cut_block(block: &Value, kept: usize, total: usize, oversize: bool, markdown: bool) -> Value {
     let mut budget = Budget::new(kept);
     let Some(Value::Object(cut)) = take_blocks(std::slice::from_ref(block), &mut budget).into_iter().next() else { return block.clone() };
+    // Markdown writes no marker for a block that lost children, so it names none
+    let advice = if markdown {
+        "The last blocks are left out, and the last blocks kept may have lost some of their children. No parameter raises this limit: \
+         find what was left out by its text with logseq_find_blocks."
+    } else {
+        "The last blocks are left out, and a kept block marked childrenTruncated lost some of its children. No parameter raises this limit: \
+         read such a block on its own with logseq_get_block and include_children, which starts from it, or find a block left out by its text with logseq_find_blocks."
+    };
     let warning = size_truncation_warning(SizeCut {
         what: "blocks (the block and its descendants, in document order)",
         kept,
         total,
         oversize,
-        advice: "The last blocks are left out, and a kept block marked childrenTruncated lost some of its children. No parameter raises this limit: \
-                 read such a block on its own with logseq_get_block and include_children, which starts from it, or find a block left out by its text with logseq_find_blocks.",
+        advice,
         how_to_fetch_all: None,
     });
     Value::Object(push_warning(cut, &warning))
@@ -219,18 +226,18 @@ mod tests {
     #[test]
     fn a_subtree_under_the_budget_is_untouched_and_a_lone_block_is_never_cut() {
         let small = tree(5, 100);
-        assert_eq!(fit_to_budget(small.clone(), &json_text), small);
+        assert_eq!(fit_to_budget(small.clone(), &json_text, false), small);
         let lone = json!({"id": 1, "uuid": "root", "content": "x".repeat(40_000), "children": []});
-        assert_eq!(fit_to_budget(lone.clone(), &json_text), lone);
+        assert_eq!(fit_to_budget(lone.clone(), &json_text, false), lone);
         // a block whose children are unfetched tuples is one block too
         let tuples = json!({"id": 1, "uuid": "root", "content": "x", "children": [["uuid", "a"], ["uuid", "b"]]});
-        assert_eq!(fit_to_budget(tuples.clone(), &json_text), tuples);
+        assert_eq!(fit_to_budget(tuples.clone(), &json_text, false), tuples);
     }
 
     #[test]
     fn a_subtree_over_the_budget_keeps_the_first_blocks_in_document_order_and_marks_what_lost_children() {
         let big = tree(40, 1000);
-        let cut = fit_to_budget(big.clone(), &json_text);
+        let cut = fit_to_budget(big.clone(), &json_text, false);
         assert!(size(&cut.to_string()) <= crate::budget::BUDGET_CHARS);
         // the root is kept, with its first children (and the grandchild under the first)
         assert_eq!(cut["uuid"], "root");
@@ -238,7 +245,7 @@ mod tests {
         assert!(kept > 5 && kept < 42, "{kept}");
         assert_eq!(cut["children"][0], big["children"][0]);
         assert_eq!(cut["childrenTruncated"], true);
-        assert!(size(&cut_block(&big, kept + 1, 42, false).to_string()) > crate::budget::BUDGET_CHARS);
+        assert!(size(&cut_block(&big, kept + 1, 42, false, false).to_string()) > crate::budget::BUDGET_CHARS);
         let warning = &cut["warnings"][0];
         assert_eq!(warning["code"], "result_size_truncated");
         assert!(warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 42 blocks (the block and its descendants, in document order)")));
@@ -252,7 +259,7 @@ mod tests {
     fn a_root_over_the_budget_is_kept_alone_with_its_children_dropped_and_the_warning_says_so() {
         let mut big = tree(3, 10);
         big["content"] = json!("x".repeat(40_000));
-        let cut = fit_to_budget(big, &json_text);
+        let cut = fit_to_budget(big, &json_text, false);
         assert_eq!(cut["children"], json!([]));
         assert!(cut["warnings"][0]["message"].as_str().unwrap().contains("Even those are over that size"));
     }

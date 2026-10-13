@@ -83,7 +83,7 @@ Get a page by name with its properties. Its blocks come only with `detail` `full
 
 **For a long page:** call `logseq_get_page` with `detail` `outline` first, then `logseq_get_block` on the blocks you pick.
 
-**A cut page:** a result holds at most 30,000 characters, and `detail` `full` has no block cap, so a page of a few hundred blocks passes it. The blocks are kept in page order (nested ones count) and the tail is left out, whole blocks only; a kept block that lost children carries `childrenTruncated: true`. The `result_size_truncated` warning says "Showing N of M blocks" and has no `howToFetchAll`, so `hasMore` stays false: no parameter pages a page. Read on with `detail` `outline` and then `logseq_get_block` (with `include_children`) on the blocks you pick. The same cut applies to `format` `markdown`, with the warning in its footer. A page under the size, and `detail` `page`, come back as they were.
+**A cut page:** a result holds at most 30,000 characters, and `detail` `full` has no block cap, so a page of a few hundred blocks passes it. The blocks are kept in page order (nested ones count) and the tail is left out, whole blocks only; a kept block that lost children carries `childrenTruncated: true`. The `result_size_truncated` warning says "Showing N of M blocks" and has no `howToFetchAll`, so `hasMore` stays false: no parameter pages a page. Read on with `detail` `outline` and then `logseq_get_block` (with `include_children`) on the blocks you pick. The same cut applies to `format` `markdown`, with the warning in its footer; Markdown writes no `childrenTruncated` marker, so its warning says the last blocks kept may have lost some of their children. A page under the size, and `detail` `page`, come back as they were.
 
 **Example:**
 ```

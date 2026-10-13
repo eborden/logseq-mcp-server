@@ -83,6 +83,9 @@ async fn a_full_page_in_markdown_is_cut_to_the_budget_with_the_warning_in_its_fo
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     assert!(text.contains("result_size_truncated: Showing "), "{}", &text[text.len().saturating_sub(700)..]);
+    // Markdown writes no `childrenTruncated` marker, so its warning names none
+    assert!(!text.contains("childrenTruncated"), "{}", &text[text.len().saturating_sub(700)..]);
+    assert!(text.contains("may have lost some of their children"));
 }
 
 #[tokio::test]
@@ -375,6 +378,9 @@ async fn a_block_with_children_in_markdown_is_cut_with_the_warning_in_its_footer
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     assert!(text.contains("result_size_truncated: Showing "), "{}", &text[text.len().saturating_sub(500)..]);
+    // Markdown writes no `childrenTruncated` marker, so its warning names none
+    assert!(!text.contains("childrenTruncated"), "{}", &text[text.len().saturating_sub(500)..]);
+    assert!(text.contains("may have lost some of their children"));
 }
 
 // ---- logseq_get_page, detail outline

@@ -137,42 +137,44 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
         texts.extend(tips_content(&tips));
         texts
     };
-    let page = if full { fit_to_budget(page, &texts) } else { page };
+    let page = if full { fit_to_budget(page, &texts, markdown) } else { page };
     Ok(success_result(texts(&page).into_iter().map(ContentBlock::text).collect()))
 }
 
 /// The page as it is when its text fits the character budget (#507, #485), else with the first blocks that do, nested
 /// ones counted, in page order. A block is never cut inside its text (BR-0007), so a first block over the budget
 /// comes back alone, and the warning says so.
-fn fit_to_budget(page: Value, texts: &impl Fn(&Value) -> Vec<String>) -> Value {
+fn fit_to_budget(page: Value, texts: &impl Fn(&Value) -> Vec<String>, markdown: bool) -> Value {
     let total = page.get("children").and_then(Value::as_array).map_or(0, |blocks| count_blocks(blocks));
     let size_of = |kept: usize| -> usize {
-        let sent = if kept < total { cut_page(&page, kept, total, false) } else { page.clone() };
+        let sent = if kept < total { cut_page(&page, kept, total, false, markdown) } else { page.clone() };
         texts(&sent).iter().map(|text| size(text)).sum()
     };
     match fit(total, 1, size_of) {
         Fit::Whole => page,
-        Fit::Cut { kept, oversize } => cut_page(&page, kept, total, oversize),
+        Fit::Cut { kept, oversize } => cut_page(&page, kept, total, oversize, markdown),
     }
 }
 
 /// The page cut to its first `kept` blocks of `total` (nested ones counted, in page order), with the
 /// `result_size_truncated` warning and `hasMore` worked out again. Every key keeps its place, and `hasMore` and
 /// `warnings` come last when the page had none.
-fn cut_page(page: &Value, kept: usize, total: usize, oversize: bool) -> Value {
+fn cut_page(page: &Value, kept: usize, total: usize, oversize: bool, markdown: bool) -> Value {
     let Value::Object(fields) = page else { return page.clone() };
     let blocks = fields.get("children").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
     let mut budget = Budget::new(kept);
     let first = take_blocks(blocks, &mut budget);
     let mut cut = fields.clone();
     cut.insert("children".into(), Value::Array(first));
+    // Markdown writes no marker for a block that lost children, so it names none
+    let lost = if markdown { "the last blocks kept may have lost some of their children" } else { "a kept block marked childrenTruncated lost some of its children" };
     let warning = size_truncation_warning(SizeCut {
         what: "blocks of the page (nested ones counted, in page order)",
         kept,
         total,
         oversize,
         advice: &format!(
-            "The last blocks are left out, and a kept block marked childrenTruncated lost some of its children. A page can't be paged and no parameter raises this limit: \
+            "The last blocks are left out, and {lost}. A page can't be paged and no parameter raises this limit: \
              list its top-level blocks with detail \"outline\" (at most {MAX_OUTLINE_BLOCKS}), then read one with logseq_get_block and include_children."
         ),
         how_to_fetch_all: None,
@@ -422,9 +424,9 @@ mod tests {
         let base = size(&page.to_string());
         page["children"][9]["content"] = json!("x".repeat(100 + BUDGET_CHARS - base));
         assert_eq!(size(&page.to_string()), BUDGET_CHARS);
-        assert_eq!(fit_to_budget(page.clone(), &json_text), page);
+        assert_eq!(fit_to_budget(page.clone(), &json_text, false), page);
         page["children"][9]["content"] = json!("x".repeat(100 + BUDGET_CHARS - base + 1));
-        let cut = fit_to_budget(page.clone(), &json_text);
+        let cut = fit_to_budget(page.clone(), &json_text, false);
         assert_ne!(cut, page);
         assert!(size(&cut.to_string()) <= BUDGET_CHARS);
     }
@@ -432,7 +434,7 @@ mod tests {
     #[test]
     fn a_cut_keeps_the_first_blocks_in_page_order_and_marks_the_last_one_that_lost_children() {
         let page = page_of(40, 1000);
-        let cut = fit_to_budget(page.clone(), &json_text);
+        let cut = fit_to_budget(page.clone(), &json_text, false);
         assert!(size(&cut.to_string()) <= crate::budget::BUDGET_CHARS);
         let blocks = cut["children"].as_array().unwrap();
         // 80 blocks with their children, ~2,000 characters per top-level block: about 14 fit
@@ -440,7 +442,7 @@ mod tests {
         assert_eq!(blocks[0], page["children"][0]);
         // one more block would not fit, and the warning counts nested blocks
         let kept = count_blocks(blocks);
-        assert!(size(&cut_page(&page, kept + 1, 80, false).to_string()) > crate::budget::BUDGET_CHARS);
+        assert!(size(&cut_page(&page, kept + 1, 80, false, false).to_string()) > crate::budget::BUDGET_CHARS);
         let warning = &cut["warnings"][0];
         assert_eq!(warning["code"], "result_size_truncated");
         assert!(warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 80 blocks of the page (nested ones counted, in page order)")));
@@ -454,7 +456,7 @@ mod tests {
         let mut page = page_of(40, 1000);
         page["hasMore"] = json!(false);
         page["warnings"] = json!([{"code": "ref_unresolved", "message": "m"}]);
-        let cut = fit_to_budget(page, &json_text);
+        let cut = fit_to_budget(page, &json_text, false);
         let codes: Vec<&str> = cut["warnings"].as_array().unwrap().iter().map(|warning| warning["code"].as_str().unwrap()).collect();
         assert_eq!(codes, ["ref_unresolved", "result_size_truncated"]);
         let keys: Vec<&String> = cut.as_object().unwrap().keys().collect();
@@ -468,9 +470,9 @@ mod tests {
     #[test]
     fn a_page_with_no_blocks_or_one_block_is_never_cut() {
         let empty = json!({"id": 1, "originalName": "Atlas"});
-        assert_eq!(fit_to_budget(empty.clone(), &json_text), empty);
+        assert_eq!(fit_to_budget(empty.clone(), &json_text, false), empty);
         let one = json!({"id": 1, "children": [{"uuid": "u", "content": "x".repeat(40_000), "children": []}]});
-        assert_eq!(fit_to_budget(one.clone(), &json_text), one);
+        assert_eq!(fit_to_budget(one.clone(), &json_text, false), one);
     }
 
     #[test]
