@@ -2,9 +2,9 @@
 
 ## Statement
 
-`find_blocks` and `query_by_date_range` take `slim_results`, default `true`. Only an explicit `false` returns full entities.
+`find_blocks` and `explore_timeline` take `slim_results`, default `true`. Only an explicit `false` returns full entities.
 
-Slim blocks leave out empty fields: a blank `pageName`, properties with no value (`false` and `0` stay), empty `context.references` and `context.tags`. `uuid` and `content` always stay. Children never carry `pageName`, and neither do blocks inside a date-range entry (the entry has it). `hasMore`, `warnings` and `totals` in meta stay even when empty, because `hasMore: false` is the "nothing was cut" signal (#40). `get_page`, `get_block`, `explore_context` and the rest have no slim mode.
+Slim blocks leave out empty fields: a blank `pageName`, properties with no value (`false` and `0` stay), empty `context.references` and `context.tags`. `uuid` and `content` always stay. Children never carry `pageName`, and neither do blocks inside the entry of a day in `explore_timeline` (the entry has it). A block in an entry with no day (a page's mentions on non-journal pages), or in an entry that joins the days of a week or month, carries its own `pageName`, since no entry names one page for it. `hasMore`, `warnings` and `totals` in meta stay even when empty, because `hasMore: false` is the "nothing was cut" signal (#40). `get_page`, `get_block`, `explore_context` and the rest have no slim mode.
 
 ## Rationale
 
@@ -32,3 +32,4 @@ test: `rust/tests/parity.rs`
 | 2026-10-08 | Mechanical enforcement: the parity check of the server's schema against the recorded `tools/list` is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
 | 2026-10-12 | The statement names `find_blocks`, which replaced `search_blocks` and `query_by_property` (ADR-0037). Nothing else changed. | #525 |
 | 2026-10-13 | The statement names `explore_context`, the new name of `build_context`, among the tools with no slim mode, and the rationale drops the keyword search of `get_context_for_query`, which went (ADR-0037). Nothing else changed. | #529 |
+| 2026-10-13 | The statement names `explore_timeline`, which replaced `query_by_date_range` and brings `slim_results` to a page's days (ADR-0037), and says where a slim block names its page: an entry of one day names it, an entry with no day or one that joins a week or month cannot, so each block there does. The default and the full output are unchanged. | #531 |

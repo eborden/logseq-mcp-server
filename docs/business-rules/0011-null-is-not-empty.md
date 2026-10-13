@@ -12,7 +12,7 @@ An absent answer and an empty answer mean different things to the caller. Report
 
 test: `rust/tests/simple_tools_calls.rs`
 test: `rust/tests/resolve_refs_calls.rs`
-test: `rust/tests/query_by_date_range_calls.rs`
+test: `rust/tests/timeline_calls.rs`
 test: `rust/tests/get_page_outline_calls.rs`
 test: `rust/tests/current_context_calls.rs`
 test: `rust/tests/get_page_block_calls.rs`
@@ -28,13 +28,13 @@ What each test file pins on a `null` answer, and that a real `[]` carries no war
 
 - `simple_tools_calls.rs`: `find_pages` gives `pages_unavailable`; `find_blocks` with `include_context` gives `context_unavailable` on a `null` page lookup.
 - `resolve_refs_calls.rs`: a `null` ref lookup gives `refs_unavailable` and no `missing` refs; a real `[]` still gives `missing`.
-- `query_by_date_range_calls.rs`: a `null` journal-page answer gives `journals_unavailable`, a `null` block answer `blocks_unavailable`.
+- `timeline_calls.rs`: `explore_timeline` with a period gives `journals_unavailable` for a `null` journal-page answer and `blocks_unavailable` for a `null` block answer; with a `page` it gives `page_blocks_unavailable`, `page_unavailable` and `mentions_unavailable` for a `null` block tree, page and mentions answer, and a real `[]` of mentions says nothing.
 - `get_page_outline_calls.rs`: `outline_unavailable` on a `null` outline answer; a `null` answer from the page resolver is an error that says LogSeq gave no answer, with no suggestions and no further call.
 - `current_context_calls.rs`: `page_names_unavailable` on a `null` page lookup.
 - `get_page_block_calls.rs` and `page_resource_calls.rs`: `page_blocks_unavailable` on a `null` block tree, as a warning on the page and a footer on the resource.
 - `network_path_calls.rs`: `explore_network` with `to` gives `links_unavailable` for a `null` hop, and no `no_path_within`, since "no path" is not known; a real `[]` is `no_path_within`. A failed hop is an error.
 - `find_blocks_calls.rs`: with `page` or `links_to`, `search_unavailable` says which pages the blocks were asked to be on and link to, and `alias_lookup_unavailable` on a `null` alias lookup, which leaves the search to run on the pages alone and claims no alias group.
-- `concept_calls.rs`: `links_unavailable` for `explore_network`; `page_blocks_unavailable`, `page_unavailable` and `mentions_unavailable` for `get_concept_evolution`.
+- `concept_calls.rs`: `links_unavailable` for `explore_network`.
 - `context_calls.rs`: `explore_context` gives `page_blocks_unavailable`, `backlinks_unavailable` (the references are always `[]` on a `null`) and `alias_lookup_unavailable`; a `null` resolver answer fails the whole call.
 - `check_links_calls.rs`: `check_links` gives `refs_unchecked` on a `null` answer, never missing pages.
 - `find_pages_calls.rs`: `find_pages` with `names` answers no name on a `null` page list (no `names` key beside `pages_unavailable`), so no name is reported as having no page.
@@ -65,3 +65,4 @@ reviewer: A tool that maps a `null` API response to an empty result adds a warni
 | 2026-10-12 | Mechanical enforcement: the `search_by_relationship_calls.rs` bullet no longer names `relationship_unavailable`, which went when the `references`, `referenced-by` and `in-pages-linking-to` modes did (`references` is `find_blocks` with `page` and `links_to`), and `find_blocks_calls.rs` is a new `test:` line with its bullet (`search_unavailable` naming the pages, `alias_lookup_unavailable`). Statement unchanged. | #527 |
 | 2026-10-13 | Mechanical enforcement: `explore_context` took `build_context` and `get_backlinks`, and `get_context_for_query` went (ADR-0037). The `get_backlinks_calls.rs` line and bullet are dropped, and the `context_calls.rs` bullet names the warnings of `explore_context` (`search_unavailable` and the `topic_unavailable` roll-up went with `get_context_for_query`). Statement unchanged. | #529 |
 | 2026-10-13 | Mechanical enforcement: `explore_network` with `to` replaces `search_by_relationship` (ADR-0037). The `search_by_relationship_calls.rs` line and bullet are `network_path_calls.rs`, whose bullet names `links_unavailable` for a `null` hop (`hop_unavailable` and `page_blocks_unavailable` went with the tool and the page trees it read), and the `concept_calls.rs` bullet names `explore_network`. Statement unchanged. | #530 |
+| 2026-10-13 | Mechanical enforcement: `explore_timeline` replaces `query_by_date_range` and `get_concept_evolution` (ADR-0037). The `query_by_date_range_calls.rs` line is `timeline_calls.rs`, whose bullet names the warnings of both of its modes (`journals_unavailable` and `blocks_unavailable` for a period; `page_blocks_unavailable`, `page_unavailable` and `mentions_unavailable` for a page), and the `concept_calls.rs` bullet keeps `explore_network` alone. The same cases are pinned; the one for a `search_term`'s alias lookup went with the parameter. The rule is unchanged. | #531 |
