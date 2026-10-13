@@ -241,8 +241,8 @@ pub fn blocks_truncated(cut: &BlockCut, shown: usize, options: &TruncationOption
             }
         },
         (Place::Day(day), true) => {
-            if last_total <= shown {
-                // Cut inside a day that fits the cap (so earlier days were kept): a call from it reads that day whole
+            if last_total <= shown && raises.day_at(day, last_total) {
+                // Cut inside a day that fits the cap and the budget alone (so earlier days were kept): a call from it reads that day whole
                 how_to_fetch_all = Some(match next {
                     Place::Day(_) => format!("{} to read the {direction} days (day {day} repeats its kept blocks).", call_again(day)),
                     _ => format!("{} to read the rest of day {day} (it repeats its kept blocks).{undated_note}", call_again(day)),
@@ -708,6 +708,29 @@ mod tests {
         let below = [entry(20250101, blocks(1, 500)), undated(blocks(2000, 505))];
         let warning = truncated(&below, 999, &options(true));
         assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_blocks to 1000 (the maximum) to get 1000 of 1005. Narrow the period, or read the blocks with logseq_find_blocks (with limit and offset)."));
+    }
+
+    #[test]
+    fn a_cut_inside_a_day_that_fits_the_cap_names_a_call_from_it_only_when_the_day_alone_fits_the_budget() {
+        // day 1 holds one block, day 2 three of them (a cap of 3 cuts inside it, and it fits the cap), day 3 one
+        let entries = [entry(20250101, vec![block(1, 0)]), entry(20250102, vec![block(2, 0), block(3, 0), block(4, 0)]), entry(20250103, vec![block(5, 0)])];
+        let fits = truncated(&entries, 3, &options(true));
+        assert!(fits.how_to_fetch_all.unwrap().contains("(day 20250102 repeats its kept blocks)"));
+        // the day's blocks are large: a call from it would come back cut at fewer blocks than this result holds, so it is not named
+        let large = |entries: &[Entry]| entries.iter().all(|entry| entry.date != Some(20250102) || entry.blocks.len() < 3);
+        let too_large = truncated_with(&entries, 3, &options(true), &large);
+        assert_eq!(
+            too_large.how_to_fetch_all.as_deref(),
+            Some(
+                "Call again with start_date 20250103, the same end_date (20250110) and the same max_blocks for the rest of the range, \
+                 or read day 20250102 in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."
+            )
+        );
+        assert!(too_large.message.contains("Day 20250102 holds 3 blocks, more than fit in 30000 characters, so no call can return it whole."), "{}", too_large.message);
+        // with no day after it, nothing reads the day whole and no call is named
+        let last = truncated_with(&entries[..2], 3, &options(true), &large);
+        assert_eq!(last.how_to_fetch_all, None);
+        assert!(last.message.ends_with("Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."), "{}", last.message);
     }
 
     #[test]
