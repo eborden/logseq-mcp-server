@@ -457,6 +457,37 @@ export function docViolations(files: SkillFile[], tools: RecordedTool[], options
   return out;
 }
 
+/** The 16 tools of `logseq_*` at v1.x, without the prefix. */
+export const FIRST_VERSION_TOOL_NAMES: readonly string[] = [
+  'build_context',
+  'check_links',
+  'get_backlinks',
+  'get_block',
+  'get_concept_evolution',
+  'get_concept_network',
+  'get_context_for_query',
+  'get_current_context',
+  'get_graph_info',
+  'get_page',
+  'get_page_outline',
+  'list_pages',
+  'query_by_date_range',
+  'query_by_property',
+  'search_blocks',
+  'search_by_relationship',
+];
+
+/** Tools that ADR-0008 removed before v1.x (13 to 11 tools), so they are in no recorded list. */
+export const REMOVED_BEFORE_V1_TOOL_NAMES: readonly string[] = ['get_entity_timeline', 'get_related_pages'];
+
+/**
+ * Every tool name a doc or skill may once have said, without the prefix: the one list behind the live-docs guard
+ * (doc-tools.test.ts) and the skills guard (skill-tools.test.ts). Once a rename or removal takes a name out of the
+ * recorded list, text that still says it is stale. It never shrinks. Append the old name of a tool when a later
+ * rename removes it, to the first-version list if it was one of the 16, else to the removed-earlier list or a new one.
+ */
+export const FORMER_TOOL_NAMES: readonly string[] = [...FIRST_VERSION_TOOL_NAMES, ...REMOVED_BEFORE_V1_TOOL_NAMES].sort();
+
 export function markdownFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const full = join(dir, entry.name);
