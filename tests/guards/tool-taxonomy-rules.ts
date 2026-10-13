@@ -81,7 +81,7 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
     'format',
     'compact',
   ],
-  logseq_explore_network: ['page', 'to', 'max_depth', 'max_nodes', 'max_fanout', 'expand_journals', 'format'],
+  logseq_explore_network: ['page', 'to', 'max_depth', 'max_nodes', 'max_fanout', 'expand_journals', 'with_snippets', 'format'],
   logseq_explore_timeline: [
     'page',
     ...PERIOD,

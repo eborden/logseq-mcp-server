@@ -52,7 +52,7 @@ Boundary test: if the answer is a list of hits, it is `find`. If it is what some
 | find | `logseq_find_pages` | `text`, `names`, `property` + `value`, `limit`, `offset`, `format` | `list_pages` |
 | find | `logseq_find_blocks` | `text`, `page`, `links_to`, `property` + `value`, period, `limit`, `offset`, `include_context`, `slim_results` | `search_blocks`, `query_by_property`, the `references` mode of `search_by_relationship` |
 | explore | `logseq_explore_context` | `page`, its caps, `references_offset`, `resolve_refs`, `format`, `compact` | `build_context`, `get_backlinks`, `get_context_for_query` |
-| explore | `logseq_explore_network` | `page`, `to`, `max_depth`, `max_nodes`, `max_fanout`, `expand_journals`, `format` | `get_concept_network`, the `connected-within` mode of `search_by_relationship` |
+| explore | `logseq_explore_network` | `page`, `to`, `max_depth`, `max_nodes`, `max_fanout`, `expand_journals`, `with_snippets`, `format` | `get_concept_network`, the `connected-within` mode of `search_by_relationship` |
 | explore | `logseq_explore_timeline` | `page`, period, `group_by`, `max_blocks`, `top_concepts_limit`, `include_content`, `slim_results`, `resolve_refs` | `query_by_date_range`, `get_concept_evolution` |
 | check | `logseq_check_links` | `before`, `after` | `check_links` (unchanged) |
 
