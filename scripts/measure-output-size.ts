@@ -84,7 +84,7 @@ async function main() {
     // These have no slim_results parameter, so slim vs full does not apply. Sizes only.
     const plainCases: Array<[string, string, Args]> = [
       ['get_page detail full', 'logseq_get_page', { page: subject, detail: 'full' }],
-      ['build_context', 'logseq_build_context', { topic_name: subject }]
+      ['explore_context', 'logseq_explore_context', { page: subject }]
     ];
 
     console.log(`${'case'.padEnd(42)} ${'full'.padStart(9)} ${'slim'.padStart(9)}  saved`);
@@ -104,9 +104,8 @@ async function main() {
     const formatCases: Array<[string, string, Args]> = [
       ['get_page detail full', 'logseq_get_page', { page: subject, detail: 'full' }],
       ...(pick ? ([['get_block include_children', 'logseq_get_block', { uuid: pick.uuid, include_children: true }]] as Array<[string, string, Args]>) : []),
-      ['build_context', 'logseq_build_context', { topic_name: subject }],
-      ['build_context (compact)', 'logseq_build_context', { topic_name: subject, compact: true }],
-      ['get_context_for_query', 'logseq_get_context_for_query', { query: `what about [[${subject}]]?` }],
+      ['explore_context', 'logseq_explore_context', { page: subject }],
+      ['explore_context (compact)', 'logseq_explore_context', { page: subject, compact: true }],
       ['get_concept_network depth 2', 'logseq_get_concept_network', { concept_name: subject, max_depth: 2 }]
     ];
     console.log(`\n${'format: markdown vs json (bytes)'.padEnd(42)} ${'json'.padStart(9)} ${'markdown'.padStart(9)}  saved`);
@@ -125,14 +124,14 @@ async function main() {
       const pageJson = await sizeOf(mcp, 'logseq_get_page', { page: biggest, detail: 'full' });
       const pageMarkdown = await sizeOf(mcp, 'logseq_get_page', { page: biggest, detail: 'full', format: 'markdown' });
       const outlineJson = await sizeOf(mcp, 'logseq_get_page', { page: biggest, detail: 'outline' });
-      const contextJson = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest });
-      const contextMarkdown = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest, format: 'markdown' });
-      const contextCompact = await sizeOf(mcp, 'logseq_build_context', { topic_name: biggest, compact: true });
+      const contextJson = await sizeOf(mcp, 'logseq_explore_context', { page: biggest });
+      const contextMarkdown = await sizeOf(mcp, 'logseq_explore_context', { page: biggest, format: 'markdown' });
+      const contextCompact = await sizeOf(mcp, 'logseq_explore_context', { page: biggest, compact: true });
       console.log(`\n${'largest page (bytes)'.padEnd(42)} ${'json'.padStart(9)} ${'other'.padStart(9)}  saved`);
       console.log(`${'get_page children: markdown'.padEnd(42)} ${String(pageJson).padStart(9)} ${String(pageMarkdown).padStart(9)}  ${pct(pageMarkdown, pageJson)}`);
       console.log(`${'get_page children: outline'.padEnd(42)} ${String(pageJson).padStart(9)} ${String(outlineJson).padStart(9)}  ${pct(outlineJson, pageJson)}`);
-      console.log(`${'build_context: markdown'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextMarkdown).padStart(9)}  ${pct(contextMarkdown, contextJson)}`);
-      console.log(`${'build_context: compact json'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextCompact).padStart(9)}  ${pct(contextCompact, contextJson)}`);
+      console.log(`${'explore_context: markdown'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextMarkdown).padStart(9)}  ${pct(contextMarkdown, contextJson)}`);
+      console.log(`${'explore_context: compact json'.padEnd(42)} ${String(contextJson).padStart(9)} ${String(contextCompact).padStart(9)}  ${pct(contextCompact, contextJson)}`);
     }
   } finally {
     await rust.close();

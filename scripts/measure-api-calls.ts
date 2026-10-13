@@ -99,8 +99,8 @@ async function main() {
   const cases: Case[] = [
     ['get_concept_network depth=1', 'logseq_get_concept_network', { concept_name: subject, max_depth: 1 }],
     ['get_concept_network depth=2', 'logseq_get_concept_network', { concept_name: subject, max_depth: 2 }],
-    ['build_context', 'logseq_build_context', { topic_name: subject }],
-    ['get_context_for_query (1 topic)', 'logseq_get_context_for_query', { query: `what about [[${subject}]]?` }],
+    ['explore_context', 'logseq_explore_context', { page: subject }],
+    ['explore_context (references_offset)', 'logseq_explore_context', { page: subject, max_references: 10, references_offset: 10 }],
     ['find_blocks (text)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 10 }],
     ['find_blocks (text, offset)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 10, offset: 10 }],
     ['find_blocks (text + 7-day period)', 'logseq_find_blocks', { text: subject.slice(0, 4), ...dr, limit: 10 }],
@@ -109,11 +109,10 @@ async function main() {
     ['find_blocks (property)', 'logseq_find_blocks', { property: 'type', value: 'x' }],
     ['find_blocks (text + property + period)', 'logseq_find_blocks', { text: subject.slice(0, 4), property: 'type', value: 'x', ...dr }],
     ['get_current', 'logseq_get_current', {}],
-    ['build_context resolve_refs', 'logseq_build_context', { topic_name: subject, resolve_refs: true }],
+    ['explore_context resolve_refs', 'logseq_explore_context', { page: subject, resolve_refs: true }],
     ['query_by_date_range 7d resolve_refs', 'logseq_query_by_date_range', { ...dr, resolve_refs: true }],
     ['get_page', 'logseq_get_page', { page: subject }],
     ['get_page (outline)', 'logseq_get_page', { page: subject, detail: 'outline' }],
-    ['get_backlinks', 'logseq_get_backlinks', { page_name: subject }],
     ['get_concept_evolution', 'logseq_get_concept_evolution', { concept_name: subject }],
     ['find_blocks (page + links_to)', 'logseq_find_blocks', { page: subject, links_to: [otherSubject], limit: 10 }],
     ['find_blocks (page + links_to, same page twice)', 'logseq_find_blocks', { page: subject, links_to: [subject], limit: 10 }],
@@ -131,7 +130,7 @@ async function main() {
     ['check_links (4 terms)', 'logseq_check_links', checkLinksArgs()],
     ...(uniqueAlias
       ? ([
-          ['build_context (alias)', 'logseq_build_context', { topic_name: uniqueAlias }],
+          ['explore_context (alias)', 'logseq_explore_context', { page: uniqueAlias }],
           ['get_page (alias)', 'logseq_get_page', { page: uniqueAlias }],
           ['get_page (outline, alias)', 'logseq_get_page', { page: uniqueAlias, detail: 'outline' }]
         ] as Case[])
@@ -141,8 +140,8 @@ async function main() {
       : []),
     ...(aliased
       ? ([
-          ['get_backlinks (aliased page)', 'logseq_get_backlinks', { page_name: aliased }],
-          ['build_context (aliased page)', 'logseq_build_context', { topic_name: aliased }],
+          ['explore_context (aliased page)', 'logseq_explore_context', { page: aliased }],
+          ['explore_context (aliased page, references_offset)', 'logseq_explore_context', { page: aliased, max_references: 10, references_offset: 10 }],
           ['get_concept_evolution (aliased page)', 'logseq_get_concept_evolution', { concept_name: aliased }],
           ['get_concept_network depth=1 (aliased page)', 'logseq_get_concept_network', { concept_name: aliased, max_depth: 1 }],
           ['get_concept_network depth=2 (aliased page)', 'logseq_get_concept_network', { concept_name: aliased, max_depth: 2 }],
@@ -155,7 +154,7 @@ async function main() {
       ? ([
           ['get_page (ISO date)', 'logseq_get_page', { page: isoDay }],
           ['get_page (outline, ISO date)', 'logseq_get_page', { page: isoDay, detail: 'outline' }],
-          ['build_context (ISO date)', 'logseq_build_context', { topic_name: isoDay }]
+          ['explore_context (ISO date)', 'logseq_explore_context', { page: isoDay }]
         ] as Case[])
       : []),
     ...(refBlock && refPage
