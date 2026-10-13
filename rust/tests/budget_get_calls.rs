@@ -114,3 +114,56 @@ async fn a_page_without_its_blocks_is_never_cut() {
     assert!(page.get("warnings").is_none());
     assert_eq!(methods(&logseq), [PAGE]);
 }
+
+// ---- logseq_get_page, detail outline
+
+const DATALOG: &str = "logseq.DB.datascriptQuery";
+
+/// A top-level block row of the outline query: the first line is `length` characters.
+fn outline_row(id: i64, left: i64, length: usize) -> Value {
+    json!([{"id": id, "uuid": uuid(id), "content": "w".repeat(length), "left": {"id": left}, "parent": {"id": 10}}])
+}
+
+fn outline_answer(count: i64, length: usize) -> Value {
+    json!((0..count).map(|n| outline_row(1000 + n, if n == 0 { 10 } else { 999 + n }, length)).collect::<Vec<_>>())
+}
+
+fn resolved_root() -> Value {
+    json!([[{"id": 10, "uuid": uuid(10), "name": "project atlas", "original-name": "Project Atlas", "file": {"id": 5010}}, "name"]])
+}
+
+#[tokio::test]
+async fn an_outline_of_two_hundred_full_lines_is_cut_to_the_budget_and_a_short_one_is_not() {
+    // 200 blocks of 80-character lines: the cap of 200 alone leaves ~31,000 characters
+    let logseq = mock_logseq(vec![resolved_root(), outline_answer(200, 80)]).await;
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();
+    assert_eq!(methods(&logseq), [DATALOG, DATALOG]);
+    let (outline, tips) = (text_of(&result, 0), text_of(&result, 1));
+    assert!(size(&outline) + size(&tips) <= BUDGET_CHARS, "{}", size(&outline) + size(&tips));
+    let outline: Value = serde_json::from_str(&outline).unwrap();
+    let kept = outline["blocks"].as_array().unwrap().len();
+    assert!(kept > 150 && kept < 200, "{kept}");
+    assert_eq!(outline["hasMore"], false);
+    assert_eq!(outline["totals"], json!({"blocks": 200}));
+    let warnings = outline["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["code"], "result_size_truncated");
+    assert!(warnings[0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 200 top-level blocks")));
+
+    let logseq = mock_logseq(vec![resolved_root(), outline_answer(200, 20)]).await;
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();
+    let outline: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
+    assert_eq!(outline["blocks"].as_array().unwrap().len(), 200);
+    assert_eq!(outline["warnings"], json!([]));
+}
+
+#[tokio::test]
+async fn an_outline_in_toon_is_measured_as_toon() {
+    let logseq = mock_logseq(vec![resolved_root(), outline_answer(200, 80)]).await;
+    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline", "format": "toon"}))).await.unwrap();
+    let (outline, tips) = (text_of(&result, 0), text_of(&result, 1));
+    assert!(size(&outline) + size(&tips) <= BUDGET_CHARS);
+    // the keys are written once in TOON, so what it sends is judged as TOON and not as the JSON it replaces
+    assert!(!outline.contains("result_size_truncated"), "{}", &outline[outline.len().saturating_sub(300)..]);
+    assert_eq!(outline.matches("00000000-0000-4000-8000-").count(), 200);
+}

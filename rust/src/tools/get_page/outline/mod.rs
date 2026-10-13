@@ -20,6 +20,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Serialize;
 
 use crate::block_tree::order_siblings;
+use crate::budget::{Fit, fit, size};
 use crate::client::LogseqClient;
 use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
@@ -29,6 +30,7 @@ use crate::resolve::require_page;
 use crate::snippet::Snippet;
 use crate::tips::tips_value;
 use crate::tool::{result_value, success_result};
+use crate::truncation::{SizeCut, size_truncation_warning};
 
 use self::tips::{TipBlock, outline_tips};
 use self::wire::OutlineBlock;
@@ -41,16 +43,58 @@ pub async fn outline_result(
     page: &str,
     format: Option<ListFormat>,
 ) -> Result<CallToolResult, ToolError> {
-    let outline = get_page_outline(client, page).await?;
-    let mut content = vec![ContentBlock::text(ListFormat::text(format, &result_value(&outline))?)];
+    let outline = fit_to_budget(get_page_outline(client, page).await?, tips_enabled, format);
+    Ok(success_result(outline_texts(&outline, tips_enabled, format)?.into_iter().map(ContentBlock::text).collect()))
+}
+
+/// The text of the content blocks a call sends for `outline`: the outline, then its tip.
+fn outline_texts(outline: &PageOutline, tips_enabled: bool, format: Option<ListFormat>) -> Result<Vec<String>, ToolError> {
+    let mut texts = vec![ListFormat::text(format, &result_value(outline))?];
     if tips_enabled {
         let blocks: Vec<TipBlock<'_>> =
             outline.blocks.iter().map(|block| TipBlock { uuid: &block.uuid, child_count: block.child_count }).collect();
         if let Some(tips) = tips_value(&outline_tips(&blocks)) {
-            content.push(ContentBlock::text(ListFormat::text(format, &tips)?));
+            texts.push(ListFormat::text(format, &tips)?);
         }
     }
-    Ok(success_result(content))
+    Ok(texts)
+}
+
+/// The outline as it is when the text it sends fits the character budget (#507, #485), else with the first top-level
+/// blocks that do. The 200-block cap leaves a long outline of long snippets just over it: each entry is a 36-character
+/// uuid and a snippet of up to 80, so 200 of them are about 31,000 characters in JSON. An entry is never cut inside
+/// its text (BR-0007). No LogSeq call is made.
+fn fit_to_budget(outline: PageOutline, tips_enabled: bool, format: Option<ListFormat>) -> PageOutline {
+    let size_of = |kept: usize| -> usize {
+        let sent = if kept < outline.blocks.len() { cut_outline(&outline, kept, false) } else { outline.clone() };
+        outline_texts(&sent, tips_enabled, format).map_or(0, |texts| texts.iter().map(|text| size(text)).sum())
+    };
+    match fit(outline.blocks.len(), 1, size_of) {
+        Fit::Whole => outline,
+        Fit::Cut { kept, oversize } => cut_outline(&outline, kept, oversize),
+    }
+}
+
+/// The outline cut to its first `kept` top-level blocks, with the `result_size_truncated` warning in place of the
+/// `outline_truncated` one, which counted against the 200-block cap and said to read the rest with `detail` `full`.
+/// `totals.blocks` is still every top-level block the page has.
+fn cut_outline(outline: &PageOutline, kept: usize, oversize: bool) -> PageOutline {
+    let total = outline.meta.totals.get("blocks").and_then(serde_json::Value::as_u64).map_or(outline.blocks.len(), |total| total as usize);
+    let mut warnings: Vec<ResultWarning> = outline.meta.warnings.iter().filter(|warning| warning.code != "outline_truncated").cloned().collect();
+    warnings.push(size_truncation_warning(SizeCut {
+        what: "top-level blocks",
+        kept,
+        total,
+        oversize,
+        advice: "The last blocks are left out. The outline can't be paged and no parameter raises this limit: read a block with logseq_get_block and its uuid, or find a later one by its text with logseq_find_blocks.",
+        how_to_fetch_all: None,
+    }));
+    let has_more = warnings.iter().any(|warning| warning.how_to_fetch_all.is_some());
+    PageOutline {
+        blocks: outline.blocks[..kept].to_vec(),
+        meta: ResultMeta { has_more, warnings, totals: outline.meta.totals.clone() },
+        ..outline.clone()
+    }
 }
 
 /// Most top-level blocks one outline lists. A page with more is cut, and the result says so.
@@ -301,6 +345,69 @@ mod tests {
             meta.warnings[0].message,
             "Showing the first 200 of 201 top-level blocks. The outline has no way to page; read the rest with logseq_get_page and detail \"full\"."
         );
+    }
+
+    /// An outline of `count` top-level blocks whose first lines are `snippet` characters long.
+    fn outline_of_lines(count: usize, snippet: usize) -> PageOutline {
+        let entry = |n: usize| OutlineEntry {
+            uuid: format!("00000000-0000-4000-8000-{n:012}"),
+            snippet: Snippet::of(Some(&"w".repeat(snippet))),
+            child_count: n % 3,
+        };
+        PageOutline {
+            page: "Atlas".into(),
+            resolved_from: None,
+            blocks: (0..count).map(entry).collect(),
+            meta: ResultMeta::new(Vec::new(), &[("blocks", count)]),
+        }
+    }
+
+    fn sent(outline: &PageOutline, format: Option<ListFormat>) -> usize {
+        outline_texts(outline, true, format).unwrap().iter().map(|text| size(text)).sum()
+    }
+
+    #[test]
+    fn two_hundred_entries_with_full_snippets_are_over_the_budget_and_under_it_with_short_ones() {
+        // the cap of 200 blocks alone does not keep an outline under 30,000 characters
+        let long = outline_of_lines(MAX_OUTLINE_BLOCKS, 80);
+        assert!(sent(&long, None) > crate::budget::BUDGET_CHARS, "{}", sent(&long, None));
+        let cut = fit_to_budget(long.clone(), true, None);
+        assert!(sent(&cut, None) <= crate::budget::BUDGET_CHARS);
+        let kept = cut.blocks.len();
+        assert!(kept > 150 && kept < MAX_OUTLINE_BLOCKS, "{kept}");
+        assert_eq!(cut.blocks[..], long.blocks[..kept]);
+        assert!(sent(&cut_outline(&long, kept + 1, false), None) > crate::budget::BUDGET_CHARS);
+        // a short outline, and an outline of short lines, are as they were
+        let short = outline_of_lines(MAX_OUTLINE_BLOCKS, 20);
+        assert_eq!(fit_to_budget(short.clone(), true, None), short);
+        assert_eq!(fit_to_budget(outline_of_lines(3, 80), true, None), outline_of_lines(3, 80));
+    }
+
+    #[test]
+    fn a_cut_outline_says_so_in_place_of_the_cap_warning_and_counts_every_top_level_block() {
+        let mut long = outline_of_lines(MAX_OUTLINE_BLOCKS, 80);
+        // the page had 230 top-level blocks and the cap of 200 had cut it
+        long.meta = ResultMeta::new(
+            vec![ResultWarning::new("outline_truncated", "Showing the first 200 of 230 top-level blocks.".into())],
+            &[("blocks", 230)],
+        );
+        let cut = fit_to_budget(long, false, None);
+        let codes: Vec<&str> = cut.meta.warnings.iter().map(|warning| warning.code.as_str()).collect();
+        assert_eq!(codes, ["result_size_truncated"]);
+        let kept = cut.blocks.len();
+        assert!(cut.meta.warnings[0].message.starts_with(&format!("Showing {kept} of 230 top-level blocks: the result was cut to fit 30000 characters")), "{}", cut.meta.warnings[0].message);
+        assert!(!cut.meta.has_more);
+        assert_eq!(cut.meta.totals["blocks"], 230);
+    }
+
+    #[test]
+    fn toon_is_measured_as_toon() {
+        // the same 200 entries in TOON are shorter, and may fit where JSON does not
+        let long = outline_of_lines(MAX_OUTLINE_BLOCKS, 80);
+        let toon = sent(&long, Some(ListFormat::Toon));
+        assert!(toon < sent(&long, None), "{toon}");
+        let fitted = fit_to_budget(long.clone(), true, Some(ListFormat::Toon));
+        assert_eq!(fitted == long, toon <= crate::budget::BUDGET_CHARS);
     }
 
     #[test]
