@@ -50,12 +50,12 @@ If user provides explicit timeframe ("this week", "in November", "recently"):
 
 ### 6. Trust High-Level Tools
 
-`build_context` replaces manual aggregation chains. Don't follow it with:
+`explore_context` replaces manual aggregation chains. Don't follow it with:
 - `find_blocks` (already searched)
-- `get_backlinks` (already included)
+- a separate look at what links to the page (its `references` are included, ranked, with `references_offset` for the rest)
 - `get_page` (already retrieved)
 
-Only add follow-up queries if `build_context` returns insufficient results.
+Only add follow-up queries if `explore_context` returns insufficient results. For several pages, call it once per page, in parallel, rather than once for all.
 
 ### 7. Keep Date-Range Results Small Enough to Be Shown
 
@@ -104,7 +104,7 @@ Does the question have an EXPLICIT timeframe?
             │
             └─ NO → Is it a "what do I know about X" question?
                       │
-                      ├─ YES → build_context(topic, max_blocks=20)
+                      ├─ YES → explore_context(page, max_blocks=20)
                       │        DONE - trust this tool
                       │
                       └─ NO → find_blocks(text, limit=5-10)
@@ -116,7 +116,7 @@ Does the question have an EXPLICIT timeframe?
 |--------------|------------|-----------------|------------|
 | `find_blocks(text, limit=30, include_context=true)` | 10-20k | `find_blocks(text, limit=5)` | 1-2k |
 | Multiple parallel overlapping searches | 2-3x waste | Single targeted search | 1x |
-| `build_context` + `find_blocks` + `get_backlinks` | 15-25k | `build_context` alone | 5-8k |
+| `explore_context` + `find_blocks` + a second look at the links | 15-25k | `explore_context` alone | 5-8k |
 | "Backup" searches "just in case" | +5-10k each | Expand ONLY if needed | 0 |
 | Searching for compound phrases blindly | wasted turns | `find_pages` → targeted search | 1 extra call |
 
@@ -128,7 +128,7 @@ Does the question have an EXPLICIT timeframe?
 | "What if the first search misses it?" | Try first search. Expand IF it fails. |
 | "include_context gives better understanding" | It also costs 2-3x tokens. Only use when needed. |
 | "Parallel searches are faster" | Parallel overlapping searches waste context. One query first. |
-| "build_context might miss something" | It's comprehensive by design. Trust it. |
+| "explore_context might miss something" | It's comprehensive by design. Trust it. |
 
 ## Quick Reference
 
@@ -136,7 +136,7 @@ Does the question have an EXPLICIT timeframe?
 |----------|------------|------------|-----------|
 | "this week" / explicit time | `query_by_date_range` | search_term filter | No |
 | "the X that Y sent" | - | - | YES - about recency |
-| "what do I know about X" | `build_context` | max_blocks=20 | No |
+| "what do I know about X" | `explore_context` | max_blocks=20 | No |
 | "what pages do I have" | `find_pages` | text filter | No |
 | searching blind | `find_pages` | - | No - call first |
 | "find X" (general) | `find_blocks` | text, limit=5 | Maybe |

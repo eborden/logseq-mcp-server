@@ -4,7 +4,7 @@ Detailed workflows for building comprehensive context from LogSeq knowledge grap
 
 ## Overview
 
-Build comprehensive context from LogSeq knowledge graphs by searching blocks, following backlinks, and discovering connections. Core principle: **Start broad (search), then focus (get pages), then discover (backlinks)**.
+Build comprehensive context from LogSeq knowledge graphs by searching blocks, following backlinks, and discovering connections. Core principle: **Start broad (search), then focus (get pages), then discover (the references of `explore_context`)**.
 
 ## Workflow 1: Research Assistant
 
@@ -14,7 +14,7 @@ Build comprehensive context from LogSeq knowledge graphs by searching blocks, fo
 
 1. **Search** → `logseq_find_blocks(text=topic, limit=15)` - cast wide net
 2. **Retrieve** → `logseq_get_page(relevant_pages, detail="full")` - get full content
-3. **Discover** → `logseq_get_backlinks(key_pages)` - find connections
+3. **Discover** → `logseq_explore_context(page)` for each key page, in parallel - find connections
 4. **Synthesize** → Present organized findings with sources
 
 **Example:**
@@ -23,7 +23,7 @@ User: "What do I know about React hooks?"
 
 1. logseq_find_blocks(text="React hooks", limit=15)
 2. logseq_get_page("React", detail="full")
-3. logseq_get_backlinks("React")
+3. logseq_explore_context("React")
 4. Synthesize: "You have detailed notes in [[React]] covering useState/useEffect.
    Referenced in [[Project Alpha]] and [[Interview Notes]]. Gap: error boundary hooks."
 ```
@@ -116,15 +116,15 @@ Recommend: Complete your 2 active tasks, then tackle the 3 high-priority items.
 
 **When:** User mentions specific page and needs full context.
 
-**Enhanced with build_context:**
+**With explore_context:**
 
-1. **Quick Context**: `logseq_build_context(page_name)`
+1. **Quick Context**: `logseq_explore_context(page)`
    - Gets page + blocks + related pages + references + temporal info
    - Single call replaces multiple queries
 
-2. **Manual Context** (if build_context not available):
+2. **Manual Context** (only to read a page whole):
    - Get full page: `logseq_get_page(name, detail="full")`
-   - Get connections: `logseq_get_backlinks(name)`
+   - Get connections: the `references` of `logseq_explore_context(name)`
    - Extract linked pages from content
 
 3. Synthesize: content summary + connections + usage patterns
@@ -144,13 +144,13 @@ logseq_get_concept_network(topic, max_depth=2)
 - Identifies hub pages vs. leaf pages
 - Shows relationship type and distance
 
-### Phase 2: Get Backlinks
+### Phase 2: Get the References
 ```
-logseq_get_backlinks(topic)
+logseq_explore_context(topic, max_blocks=0, max_related_pages=0)
 ```
-- Find pages that reference the topic
+- Find the pages that reference the topic, with the blocks that do (the `references`)
 - Complements concept_network with detailed backlink context
-- Keep the defaults (20 source pages, 10 linking blocks each): they cover "what connects to this". A longer list comes back with `pages_truncated` or `page_blocks_truncated` in the meta, with `totals` giving the real counts. Say the list is partial. The pages come ranked by linking blocks, most first (ties by name), so the 20 kept are the pages that link the topic most and the first one listed is the top referrer, which answers "what connects to this" without raising anything. A page left out links the topic no more than the last one kept, but a ranking by count says nothing about which block matters, so a blocker can sit on a page with one linking block. Raise the caps only when the question needs every referrer (a blocker hunt). This is not an exploratory limit: the warning names the number and `totals` bounds the size. Raise `max_pages` to the number the warning names and keep `max_blocks_per_page` at 10, unless `totals.blocks` is under about 200, when raising both in one call is fine. Past that the result is too big to be shown
+- Keep the defaults (20 references): they cover "what connects to this". More come back with `references_truncated` in the warnings, with `totals.references` giving the real count, and `references_offset` reads the next page (the warning's `howToFetchAll` names the offset). Say the list is partial. The references come ranked by the blocks on their source page that link the topic, most first (ties by name), so the 20 kept are on the pages that link the topic most and the first one listed is the top referrer, which answers "what connects to this" without raising anything. A page left out links the topic no more than the last one kept, but a ranking by count says nothing about which block matters, so a blocker can sit on a page with one linking block. Read on with `references_offset` only when the question needs every referrer (a blocker hunt); each later page can pass `max_blocks=0` and `max_related_pages=0`. The result is cut to 30,000 characters whole; the warning then names the offset to read on from
 
 ### Phase 3: Present Insights
 - **Core connections**: Pages at distance 1
@@ -165,8 +165,8 @@ User: "Show me everything connected to [[Machine Learning]]"
 1. logseq_get_concept_network("Machine Learning", max_depth=2)
    → 23 nodes, 47 edges
 
-2. logseq_get_backlinks("Machine Learning")
-   → 15 pages with backlinks
+2. logseq_explore_context("Machine Learning", max_blocks=0, max_related_pages=0)
+   → 15 pages with references
 
 3. Present:
    "CORE CONNECTIONS (depth 1):
@@ -237,22 +237,22 @@ User: "How has my thinking on [[Rust]] evolved this year?"
 
 **When:** User asks complex questions requiring comprehensive context from multiple sources.
 
-**Simple Queries:**
+**Several topics:**
 ```
-logseq_get_context_for_query("What did I write about [[Project X]] in [[Team Meeting]]?")
+logseq_explore_context("Project X")
+logseq_explore_context("Team Meeting")
 ```
-- Automatically extracts topics from [[references]] and #tags
-- Builds context for each topic
-- Returns aggregated results
+- Pick the pages from the question yourself, and call once per page, in parallel
+- Each answer is smaller and is cut on its own; for the words of a question that name no page, use `find_blocks`
 
 **Deep Dives:**
 ```
-logseq_build_context(topic, max_blocks=50, max_related_pages=10)
+logseq_explore_context(topic, max_blocks=50, max_related_pages=10)
 ```
 - Main page with properties
 - Direct blocks from page
-- Related pages (inbound + outbound)
-- Reference blocks mentioning the topic
+- Related pages (the pages that link to it)
+- Reference blocks mentioning the topic, most-linking pages first, paged with `references_offset`
 - Temporal context (for journal pages)
 - Summary statistics
 
@@ -260,7 +260,7 @@ logseq_build_context(topic, max_blocks=50, max_related_pages=10)
 ```
 User: "Give me full context on [[Q4 Planning]]"
 
-1. logseq_build_context("Q4 Planning", max_blocks=50, max_related_pages=15)
+1. logseq_explore_context("Q4 Planning", max_blocks=50, max_related_pages=15)
    → Comprehensive aggregation
 
 2. Present:
@@ -270,21 +270,15 @@ User: "Give me full context on [[Q4 Planning]]"
     - 23 blocks (goals, milestones, retrospective)
     - Properties: quarter::4, year::2025, status::active
 
-    RELATED PAGES (15):
-    Outbound references:
-    - [[Product Roadmap]] (planning source)
-    - [[Team Capacity]] (resource planning)
-    - [[Budget 2025]] (financial planning)
+    RELATED PAGES (15 of 15, the pages that link to it)
 
-    Inbound references:
-    - [[Weekly Standup]] (7 mentions)
-    - [[Engineering Notes]] (4 mentions)
-    - [[Leadership Meeting]] (3 mentions)
+    REFERENCES (14), most-linking pages first:
+    - [[Weekly Standup]] (7 linking blocks)
+    - [[Engineering Notes]] (4 linking blocks)
+    - [[Leadership Meeting]] (3 linking blocks)
 
     TEMPORAL CONTEXT:
-    - Created: Oct 15, 2025
-    - Most recent: Nov 20, 2025
-    - Nearby dates: Oct 14-15, Oct 16-17 (planning session)
+    - Not a journal page (a journal page reports its date)
 
     SUMMARY:
     - 23 direct blocks
@@ -319,11 +313,11 @@ User: "Give me full context on [[Q4 Planning]]"
 | Pitfall | Solution |
 |---------|----------|
 | Missing tasks | Check BOTH markers and properties |
-| Incomplete context | Use `build_context` or get backlinks |
-| Poor search results | Use `get_context_for_query` for natural language |
+| Incomplete context | Use `explore_context` |
+| Poor search results | Pick the pages and call `explore_context` for each, or use `find_blocks` for the words |
 | Date queries unclear | Use `query_by_date_range` with YYYYMMDD format |
 | Lost connections | Use `get_concept_network` with max_depth=2 |
-| Manual aggregation | Use `build_context` instead of multiple queries |
+| Manual aggregation | Use `explore_context` instead of multiple queries |
 | Shallow exploration | Use `get_concept_network` to see full graph |
 | Time patterns unclear | Use `get_concept_evolution` with grouping |
 
@@ -332,12 +326,11 @@ User: "Give me full context on [[Q4 Planning]]"
 ### Smart Tool Selection:
 
 **Single-call solutions (fastest):**
-- `build_context` - Replaces 5+ separate queries
-- `get_context_for_query` - Handles natural language automatically
+- `explore_context` - Replaces 5+ separate queries; one call per page, in parallel for several
 - `get_concept_network` - Full graph in one call
 
 **Multi-call workflows (when needed):**
-- Broad exploration: `find_blocks` → `get_page` → `get_backlinks`
+- Broad exploration: `find_blocks` → `get_page` → `explore_context`
 - Specific deep-dive: `get_page` → `get_related_pages`
 - Structured data: `find_blocks` with `property` and `value` for precise matches
 
@@ -347,8 +340,7 @@ User: "Give me full context on [[Q4 Planning]]"
 - Use `limit` on find_blocks to avoid overwhelming results
 
 **Best practices:**
-- Prefer `build_context` over manual aggregation
-- Prefer `get_context_for_query` over multiple searches
+- Prefer `explore_context` over manual aggregation, and one call per page over several searches
 - Use `find_blocks` with `page` and `links_to` instead of filtering results manually, and `search_by_relationship` to ask whether two pages connect
 
 ## Example Complete Sessions
@@ -397,8 +389,8 @@ User: "What's the relationship between my notes on [[TypeScript]] and [[GraphQL]
    → Network analysis: 15 nodes including [[GraphQL]], 28 edges
      ([[API Development]] links to both: the bridge comes from these edges)
 
-3. logseq_get_backlinks("TypeScript")
-   → 12 pages with backlinks
+3. logseq_explore_context("TypeScript", max_blocks=0, max_related_pages=0)
+   → 12 pages with references
 
 4. Present:
    "CONNECTION FOUND (within 3 hops):
@@ -462,7 +454,7 @@ User: "How has my approach to testing changed this year?"
 
 Effective LogSeq knowledge graph queries through:
 
-1. **Smart tool selection** - Use single-call solutions when available (build_context, get_context_for_query)
+1. **Smart tool selection** - Use single-call solutions when available (explore_context)
 2. **Graph traversal** - Leverage bidirectional links (get_related_pages, get_concept_network)
 3. **Temporal analysis** - Track concept evolution and patterns over time
 4. **Relationship search** - Find connections between topics semantically
