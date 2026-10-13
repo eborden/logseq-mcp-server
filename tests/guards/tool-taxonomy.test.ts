@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import {
+  ALLOWED_PARAMETERS,
   taxonomyViolations,
   V1_PARAMETER_NAMES,
   V1_TOOL_ALLOWANCES,
@@ -13,7 +14,9 @@ import {
  *
  * The recorded list, rust/tests/data/parity/tool-list.json, is held to the v2 naming rules: every name is
  * `logseq_<type>_<object>` with a type of get, find, explore or check; every description opens with its type's verb; and
- * no parameter uses a v1 name for a concept that v2 shares. The 16 v1 tools are exempt through V1_TOOL_ALLOWANCES, and
+ * no parameter uses a v1 name for a concept that v2 shares. Since #519 a positive list holds it as well: every parameter
+ * must be one ADR-0037's vocabulary and surface table gives that tool (ALLOWED_PARAMETERS), so a new name fails even when
+ * the forbidden list of v1 names does not know it. The forbidden list stays, for its clearer error on a retired name. The 16 v1 tools are exempt through V1_TOOL_ALLOWANCES, and
  * each rename PR (#489 to #495) deletes its own entries. A stale entry fails, so the list can only shrink to empty.
  * Follows the DESCRIPTION_ALLOWANCES pattern of ADR-0016.
  */
@@ -31,6 +34,16 @@ describe('tool taxonomy (ADR-0037)', () => {
       expect(V1_TOOL_ALLOWANCES, name).not.toContain(name);
     }
     expect(V1_TOOL_ALLOWANCES).toHaveLength(0);
+  });
+
+  it('has an entry in the allowed parameters for every recorded tool, and for no other', () => {
+    expect(Object.keys(ALLOWED_PARAMETERS).sort()).toEqual(recorded.map(tool => tool.name).sort());
+  });
+
+  it('allows no v1 parameter name on any tool', () => {
+    for (const [tool, parameters] of Object.entries(ALLOWED_PARAMETERS)) {
+      for (const parameter of parameters) expect(V1_PARAMETER_NAMES, `${tool} ${parameter}`).not.toContain(parameter);
+    }
   });
 
   it('lists each allowance once', () => {
@@ -81,12 +94,49 @@ describe('each taxonomy rule can fail', () => {
 
   it.each(Object.entries(TYPE_VERBS))('type %s opens with %s, and no other type\'s verb', (type, verb) => {
     const tool = (opening: string): TaxonomyTool => ({ ...conforming, name: `logseq_${type}_thing`, description: `${opening} a thing.` });
-    expect(violations(tool(verb))).toEqual([]);
+    const allowed = { [`logseq_${type}_thing`]: ['text', 'limit'] };
+    expect(taxonomyViolations([tool(verb)], [], allowed)).toEqual([]);
     for (const other of Object.values(TYPE_VERBS).filter(v => v !== verb)) {
-      expect(violations(tool(other)), `${type} must not accept ${other}`).toEqual([
+      expect(taxonomyViolations([tool(other)], [], allowed), `${type} must not accept ${other}`).toEqual([
         expect.stringContaining(`must open with "${verb}"`),
       ]);
     }
+  });
+
+  it('fails a parameter that is not in the vocabulary of any tool, naming the tool and the ADR table', () => {
+    const tool = { ...conforming, inputSchema: { properties: { text: {}, sort_by: {} } } };
+    expect(violations(tool)).toEqual([
+      expect.stringMatching(/^logseq_find_pages: the parameter sort_by is not in the ADR-0037 vocabulary for this tool\. Add it to the ADR's parameter vocabulary and surface table first/),
+    ]);
+  });
+
+  it('fails a parameter that is in the vocabulary but not listed for this tool', () => {
+    // `to` is real, but only on explore_network; `uuid` only on get_block; `detail` only on get_page.
+    for (const parameter of ['to', 'uuid', 'detail', 'links_to']) {
+      const tool = { ...conforming, inputSchema: { properties: { text: {}, [parameter]: {} } } };
+      expect(violations(tool), parameter).toEqual([expect.stringContaining(`the parameter ${parameter} is not in the ADR-0037 vocabulary`)]);
+    }
+  });
+
+  it('passes a listed parameter on the tool the table gives it to', () => {
+    const tool: TaxonomyTool = { name: 'logseq_explore_network', description: 'Explore a network.', inputSchema: { properties: { page: {}, to: {} } } };
+    expect(violations(tool)).toEqual([]);
+  });
+
+  it('fails a tool that has no entry in the allowed parameters', () => {
+    const tool: TaxonomyTool = { name: 'logseq_find_widgets', description: 'Find widgets.', inputSchema: { properties: { text: {} } } };
+    expect(violations(tool)).toEqual([expect.stringContaining('logseq_find_widgets: the tool has no entry in ALLOWED_PARAMETERS')]);
+  });
+
+  it('reports a v1 name once, through the forbidden list, and not again as unlisted', () => {
+    const tool = { ...conforming, inputSchema: { properties: { page_name: {} } } };
+    expect(violations(tool)).toEqual([expect.stringContaining('the parameter page_name is a v1 name')]);
+  });
+
+  it('allows include_temporal_context on explore_context only', () => {
+    const on = (name: string): TaxonomyTool => ({ name, description: `${name.split('_')[1][0].toUpperCase()}${name.split('_')[1].slice(1)} it.`, inputSchema: { properties: { include_temporal_context: {} } } });
+    expect(violations(on('logseq_explore_context'))).toEqual([]);
+    expect(violations(on('logseq_explore_network'))).toEqual([expect.stringContaining('include_temporal_context is not in the ADR-0037 vocabulary')]);
   });
 
   it('fails a stale allowance', () => {
