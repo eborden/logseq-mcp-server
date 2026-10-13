@@ -1,4 +1,4 @@
-//! The LogSeq traffic of `logseq_get_concept_network` and `logseq_get_concept_evolution` against a mock
+//! The LogSeq traffic of `logseq_explore_network` and `logseq_get_concept_evolution` against a mock
 //! LogSeq on a local port: how many calls each makes, in which order, with which inputs. The call counts
 //! are those in CLAUDE.md ("Current Implementation Status"); the parity harness
 //! (`parity.rs`) checks the same calls and the result bytes against the recorded results.
@@ -9,7 +9,7 @@ mod common;
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::errors::ToolError;
 use logseq_mcp_server::tools::get_concept_evolution::{GroupBy, Options as EvolutionOptions, get_concept_evolution};
-use logseq_mcp_server::tools::get_concept_network::{Options, get_concept_network};
+use logseq_mcp_server::tools::explore_network::{Options, explore_network};
 use serde_json::{Value, json};
 
 const DATALOG: &str = "logseq.DB.datascriptQuery";
@@ -46,7 +46,7 @@ async fn an_exact_name_costs_the_resolver_and_one_query_per_depth() {
     ])
     .await;
     let (max_depth, options) = depth(2);
-    let network = get_concept_network(&client(&logseq), "Project Atlas", max_depth, options).await.unwrap();
+    let network = explore_network(&client(&logseq), "Project Atlas", max_depth, options).await.unwrap();
 
     assert_eq!(methods(&logseq), [DATALOG, DATALOG, DATALOG]);
     // the name is bound as a lowercase EDN string for the resolver and never embedded
@@ -67,13 +67,13 @@ async fn a_depth_that_admits_nothing_to_expand_ends_the_walk() {
     // only a journal at depth 1, and a journal is a leaf: no second query although max_depth is 2
     let logseq = mock_logseq(vec![root(), json!([row(10, 30, "Jan 1st, 2025", true, "outbound", 2)])]).await;
     let (max_depth, options) = depth(2);
-    let network = get_concept_network(&client(&logseq), "Project Atlas", max_depth, options).await.unwrap();
+    let network = explore_network(&client(&logseq), "Project Atlas", max_depth, options).await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
     assert_eq!(network.nodes.len(), 2);
 
     // with expand_journals it is walked through
     let walked = mock_logseq(vec![root(), json!([row(10, 30, "Jan 1st, 2025", true, "outbound", 2)]), json!([])]).await;
-    get_concept_network(&client(&walked), "Project Atlas", 2, Options { expand_journals: true, ..Options::default() }).await.unwrap();
+    explore_network(&client(&walked), "Project Atlas", 2, Options { expand_journals: true, ..Options::default() }).await.unwrap();
     assert_eq!(methods(&walked).len(), 3);
     assert!(args_of(&walked, 2)[0].as_str().unwrap().contains("[(ground [30]) [?source ...]]"));
 }
@@ -82,7 +82,7 @@ async fn a_depth_that_admits_nothing_to_expand_ends_the_walk() {
 async fn a_depth_past_the_limit_is_the_callers_to_clamp_and_zero_asks_nothing_of_the_graph() {
     // the handler passes at most 3; the walk itself does exactly the depth it is given
     let zero = mock_logseq(vec![json!([[page(10, "project atlas", "Project Atlas", json!({"alias": [{"id": 11}]})), "name"]])]).await;
-    let network = get_concept_network(&client(&zero), "Project Atlas", 0, Options::default()).await.unwrap();
+    let network = explore_network(&client(&zero), "Project Atlas", 0, Options::default()).await.unwrap();
     // not even the alias lookup of a page that has alias links
     assert_eq!(methods(&zero), [DATALOG]);
     assert_eq!(network.nodes.len(), 1);
@@ -99,7 +99,7 @@ async fn a_page_with_aliases_adds_the_alias_query_and_expands_every_name_in_one_
         json!([row(20, 11, "Atlas", false, "outbound", 3)]),
     ])
     .await;
-    let network = get_concept_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
 
     assert_eq!(methods(&logseq).len(), 4);
     let grouped = args_of(&logseq, 2)[0].as_str().unwrap().to_owned();
@@ -115,7 +115,7 @@ async fn a_page_with_aliases_adds_the_alias_query_and_expands_every_name_in_one_
 #[tokio::test]
 async fn a_missing_page_adds_the_suggestion_lookup_and_fails_with_the_closest_names() {
     let logseq = mock_logseq(vec![json!([]), json!([]), json!([{"originalName": "Project Atlas"}])]).await;
-    let error = get_concept_network(&client(&logseq), "Projct Atlas", 2, Options::default()).await.unwrap_err();
+    let error = explore_network(&client(&logseq), "Projct Atlas", 2, Options::default()).await.unwrap_err();
     assert_eq!(methods(&logseq), [DATALOG, DATALOG, "logseq.Editor.getAllPages"]);
     assert!(matches!(&error, ToolError::PageNotFound(missing) if missing.suggestions == ["Project Atlas"]), "{error}");
 }
@@ -127,7 +127,7 @@ fn codes(warnings: &[logseq_mcp_server::meta::ResultWarning]) -> Vec<&str> {
 #[tokio::test]
 async fn a_null_answer_for_the_first_depth_is_a_links_unavailable_warning_not_an_empty_network() {
     let null = mock_logseq(vec![root(), json!(null)]).await;
-    let network = get_concept_network(&client(&null), "Project Atlas", 2, Options::default()).await.unwrap();
+    let network = explore_network(&client(&null), "Project Atlas", 2, Options::default()).await.unwrap();
     // the root alone, and the walk stopped at once: no depth 2 query
     assert_eq!(network.nodes.len(), 1);
     assert_eq!(methods(&null).len(), 2);
@@ -142,7 +142,7 @@ async fn a_null_answer_for_the_first_depth_is_a_links_unavailable_warning_not_an
 
     // a real [] is a network with no links, and says nothing
     let empty = mock_logseq(vec![root(), json!([])]).await;
-    let network = get_concept_network(&client(&empty), "Project Atlas", 2, Options::default()).await.unwrap();
+    let network = explore_network(&client(&empty), "Project Atlas", 2, Options::default()).await.unwrap();
     assert!(network.warnings.is_empty());
 }
 
@@ -155,7 +155,7 @@ async fn a_null_answer_at_a_later_depth_keeps_what_was_found_and_leaves_truncate
     ])
     .await;
     // the fanout cap drops Carol at depth 1, then depth 2 gets no answer
-    let network = get_concept_network(&client(&logseq), "Project Atlas", 3, Options { max_fanout: 1, ..Options::default() }).await.unwrap();
+    let network = explore_network(&client(&logseq), "Project Atlas", 3, Options { max_fanout: 1, ..Options::default() }).await.unwrap();
     assert_eq!(methods(&logseq).len(), 3);
     assert_eq!(network.nodes.iter().map(|node| node.name.as_str()).collect::<Vec<_>>(), ["Project Atlas", "Bob"]);
     assert!(network.truncated);
@@ -165,7 +165,7 @@ async fn a_null_answer_at_a_later_depth_keeps_what_was_found_and_leaves_truncate
 
     // without a cap that bit, `truncated` stays false
     let quiet = mock_logseq(vec![root(), json!([row(10, 20, "Bob", false, "outbound", 2)]), json!(null)]).await;
-    let network = get_concept_network(&client(&quiet), "Project Atlas", 3, Options::default()).await.unwrap();
+    let network = explore_network(&client(&quiet), "Project Atlas", 3, Options::default()).await.unwrap();
     assert!(!network.truncated && !network.has_more());
     assert_eq!(codes(&network.warnings), ["links_unavailable"]);
 }
@@ -179,7 +179,7 @@ async fn a_null_answer_for_the_aliased_first_depth_is_a_links_unavailable_warnin
         json!(null),
     ])
     .await;
-    let network = get_concept_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
+    let network = explore_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
     assert_eq!(methods(&logseq).len(), 3);
     assert!(args_of(&logseq, 2)[0].as_str().unwrap().contains("[(ground [[10 10] [11 10]]) [[?source ?group] ...]]"));
     assert_eq!(network.nodes.len(), 1);
@@ -192,7 +192,7 @@ async fn a_null_answer_for_the_aliased_first_depth_is_a_links_unavailable_warnin
 #[tokio::test]
 async fn an_infrastructure_error_for_the_connected_pages_propagates() {
     let failing = mock_logseq(vec![root(), json!({"error": "Query timed out"})]).await;
-    let error = get_concept_network(&client(&failing), "Project Atlas", 2, Options::default()).await.unwrap_err();
+    let error = explore_network(&client(&failing), "Project Atlas", 2, Options::default()).await.unwrap_err();
     assert!(matches!(error, ToolError::Logseq(_)), "{error}");
 }
 

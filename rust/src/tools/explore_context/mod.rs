@@ -71,7 +71,7 @@ pub const NAME: &str = "logseq_explore_context";
 const DESCRIPTION: &str = "Explore one page: its blocks, related pages and references (blocks linking to it, most-linking pages first; page with references_offset).\n\n\
 **Use when:** researching a topic with a page, or what links to it.\n\
 **Can't find:** topics with no page (logseq_find_blocks), or anything past the caps (hasMore).\n\
-**Alternatives:** logseq_get_page (content only), logseq_get_concept_network (structure only).";
+**Alternatives:** logseq_get_page (content only), logseq_explore_network (structure only).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
 const ALIASES: ParamAliases = &[("page", &["name", "page_name"])];

@@ -1,4 +1,4 @@
-//! The Datalog queries only `get_concept_network` makes. The frontier's ids are embedded, bound
+//! The Datalog queries only `explore_network` makes. The frontier's ids are embedded, bound
 //! straight to the entity variable (constraint 6): [`PageId`] makes sure each is a real id, and no
 //! string is part of either query.
 

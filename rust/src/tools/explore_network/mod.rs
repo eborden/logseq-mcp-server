@@ -1,5 +1,5 @@
-//! `logseq_get_concept_network`: the pages
-//! linked to a concept as nodes and edges, in both link directions, up to `max_depth` hops, with one
+//! `logseq_explore_network`: the pages
+//! linked to a page as nodes and edges, in both link directions, up to `max_depth` hops, with one
 //! edge per page pair and its reference count.
 //!
 //! Calls (Pattern 2, ADR-0011): the page resolver (1 query for an exact name, an alias or an ISO
@@ -59,15 +59,15 @@ use self::wire::connected_rows;
 
 pub use self::warning::{MAX_FANOUT_LIMIT, MAX_NODES_LIMIT};
 
-pub const NAME: &str = "logseq_get_concept_network";
+pub const NAME: &str = "logseq_explore_network";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Map pages linked to a concept as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n\
+const DESCRIPTION: &str = "Explore the pages linked to a page as nodes and edges, in both link directions, up to max_depth hops. One edge per page pair, with a reference count.\n\n\
 **Caps:** 50 pages, 15 new per page; journal pages are shown but not expanded. If truncated is true, raise max_nodes/max_fanout or set expand_journals.\n\
 **Can't find:** unlinked pages, or what pages say (logseq_explore_context).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
-const ALIASES: ParamAliases = &[("concept_name", &["name", "page", "page_name"])];
+const ALIASES: ParamAliases = &[("page", &["name", "page_name"])];
 
 /// Depth walked when `max_depth` is absent.
 pub const DEFAULT_MAX_DEPTH: u64 = 2;
@@ -95,8 +95,8 @@ fn default_max_fanout() -> u64 {
 /// ignores them. `max_nodes` and `max_fanout` start at 1, a `max_depth` of 0 returns the root alone.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
-    /// Root concept (page name, alias or ISO date)
-    pub concept_name: String,
+    /// Page to start from (page name, alias or ISO date)
+    pub page: String,
     /// Maximum depth to traverse (default: 2, max: 3)
     #[serde(default = "default_max_depth")]
     pub max_depth: u64,
@@ -118,7 +118,7 @@ pub struct Args {
 /// What a call asked for, from the arguments parsed into [`Args`].
 #[derive(Debug, PartialEq)]
 struct Request {
-    concept_name: String,
+    page: String,
     max_depth: u64,
     options: Options,
     format: Option<OutputFormat>,
@@ -126,16 +126,16 @@ struct Request {
 
 impl From<Args> for Request {
     fn from(args: Args) -> Request {
-        let Args { concept_name, max_depth, max_nodes, max_fanout, expand_journals, format } = args;
-        Request { concept_name, max_depth, options: Options { max_nodes, max_fanout, expand_journals }, format }
+        let Args { page, max_depth, max_nodes, max_fanout, expand_journals, format } = args;
+        Request { page, max_depth, options: Options { max_nodes, max_fanout, expand_journals }, format }
     }
 }
 
 /// The tool as `tools/list` shows it.
 pub fn definition() -> Tool {
     Tool::new(NAME, DESCRIPTION, input_schema::<Args>())
-        .with_title("Get Concept Network")
-        .with_annotations(read_only_annotations("Get Concept Network"))
+        .with_title("Explore Network")
+        .with_annotations(read_only_annotations("Explore Network"))
 }
 
 /// A call: aliases folded, arguments read, the walk (with the handler's own limits on it: depth 3,
@@ -150,10 +150,10 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
         max_fanout: request.options.max_fanout.min(MAX_FANOUT_LIMIT as u64),
         ..request.options
     };
-    let network = get_concept_network(client, &request.concept_name, request.max_depth.min(MAX_DEPTH_LIMIT), options).await?;
+    let network = explore_network(client, &request.page, request.max_depth.min(MAX_DEPTH_LIMIT), options).await?;
     // The text the call sends, which the character budget measures (#485)
     let markdown = request.format == Some(OutputFormat::Markdown);
-    let render = |network: &ConceptNetwork| -> String {
+    let render = |network: &Network| -> String {
         let result = network.to_value();
         if markdown { with_footer(render_network(&result), &FooterMeta::of_result(&result, &[])) } else { result.to_string() }
     };
@@ -164,7 +164,7 @@ pub async fn call(client: &LogseqClient, _tips_enabled: bool, arguments: Option<
 /// The network cut to its `kept` pages nearest the root (the deepest go first, and the earlier admitted
 /// first among equals), with the links among them, as `truncated`, and with the `result_size_truncated` warning (#485).
 /// Pages keep the order they had. The root is at depth 0, so it is always kept.
-fn cut_to_pages(network: &ConceptNetwork, kept: usize, oversize: bool) -> ConceptNetwork {
+fn cut_to_pages(network: &Network, kept: usize, oversize: bool) -> Network {
     let mut by_depth: Vec<usize> = (0..network.nodes.len()).collect();
     by_depth.sort_by_key(|&at| network.nodes[at].depth);
     let keep: HashSet<usize> = by_depth.into_iter().take(kept).collect();
@@ -180,11 +180,11 @@ fn cut_to_pages(network: &ConceptNetwork, kept: usize, oversize: bool) -> Concep
         advice: "Start from a more specific page, or lower max_depth, to see a smaller network. No parameter raises this limit.",
         how_to_fetch_all: None,
     }));
-    ConceptNetwork { nodes, edges, truncated: true, warnings, ..network.clone() }
+    Network { nodes, edges, truncated: true, warnings, ..network.clone() }
 }
 
 /// The network as it is when its text fits the character budget, else cut to the pages that do (#485).
-fn fit_to_budget(network: ConceptNetwork, render: &impl Fn(&ConceptNetwork) -> String) -> ConceptNetwork {
+fn fit_to_budget(network: Network, render: &impl Fn(&Network) -> String) -> Network {
     let total = network.nodes.len();
     // The root is the answer, so it is the one page a cut always keeps
     let cut_size = |kept: usize| size(&render(&if kept < total { cut_to_pages(&network, kept, false) } else { network.clone() }));
@@ -212,9 +212,9 @@ impl Default for Options {
     }
 }
 
-/// A concept network (`ConceptNetworkResult`).
+/// A concept network (`NetworkResult`).
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConceptNetwork {
+pub struct Network {
     /// The name as the caller gave it
     pub concept: String,
     pub resolved_from: Option<Value>,
@@ -228,7 +228,7 @@ pub struct ConceptNetwork {
     pub warnings: Vec<ResultWarning>,
 }
 
-impl ConceptNetwork {
+impl Network {
     /// `hasMore`: some warning says how to fetch what it cut.
     pub fn has_more(&self) -> bool {
         self.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())
@@ -304,10 +304,10 @@ fn page_ids(ids: &[i64]) -> Result<Vec<PageId>, ToolError> {
 /// pages first, then more references to the frontier, then lower id. `truncated` is set if any page
 /// was dropped.
 ///
-/// `concept_name` is a page name, an alias or an ISO date (`2025-01-01`) of the root. Fails with
+/// `page` is a page name, an alias or an ISO date (`2025-01-01`) of the root. Fails with
 /// [`ToolError::PageNotFound`] (guidance with the closest names) if none matches and
 /// [`ToolError::AmbiguousPage`] (with the candidates) if several do.
-pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_depth: u64, options: Options) -> Result<ConceptNetwork, ToolError> {
+pub async fn explore_network(client: &LogseqClient, page: &str, max_depth: u64, options: Options) -> Result<Network, ToolError> {
     let max_nodes = cap(options.max_nodes);
     let max_fanout = cap(options.max_fanout);
     let expand_journals = options.expand_journals;
@@ -328,11 +328,11 @@ pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_
     let mut links = Links::default();
 
     // Query 0: resolve the root page (exact name, alias or ISO date, in one query).
-    let resolved = require_page(client, concept_name).await?;
+    let resolved = require_page(client, page).await?;
     let root_id = resolved.page.entity_id().filter(|id| *id != 0);
     let root_name = resolved.page.display_name();
     let Some(root_id) = root_id.filter(|_| !root_name.is_empty()) else {
-        return Err(ToolError::Failed(format!("Invalid root page data for: {concept_name}")));
+        return Err(ToolError::Failed(format!("Invalid root page data for: {page}")));
     };
     nodes.insert(Node { id: root_id, name: root_name, depth: 0 });
 
@@ -437,9 +437,9 @@ pub async fn get_concept_network(client: &LogseqClient, concept_name: &str, max_
         warnings.push(links_unavailable(depth));
     }
 
-    Ok(ConceptNetwork {
-        concept: concept_name.to_owned(),
-        resolved_from: resolved_from(concept_name, &resolved),
+    Ok(Network {
+        concept: page.to_owned(),
+        resolved_from: resolved_from(page, &resolved),
         resolved_aliases: alias_set.resolved_aliases(),
         nodes: nodes.into_vec(),
         edges,
@@ -460,18 +460,18 @@ mod tests {
 
     #[test]
     fn the_concept_network_schema_means_what_the_pinned_one_means() {
-        // `inputSchema` of logseq_get_concept_network in the ADR-0016 snapshot
+        // `inputSchema` of logseq_explore_network in the ADR-0016 snapshot
         let pinned = json!({
             "type": "object",
             "properties": {
-                "concept_name": {"type": "string", "description": "Root concept (page name, alias or ISO date)"},
+                "page": {"type": "string", "description": "Page to start from (page name, alias or ISO date)"},
                 "max_depth": {"type": "integer", "minimum": 0, "default": 2, "description": "Maximum depth to traverse (default: 2, max: 3)"},
                 "max_nodes": {"type": "integer", "minimum": 1, "default": 50, "description": "Maximum pages in the network, root included (default: 50, max: 500)"},
                 "max_fanout": {"type": "integer", "minimum": 1, "default": 15, "description": "Maximum new pages any one page may add (default: 15, max: 100)"},
                 "expand_journals": {"type": "boolean", "default": false, "description": "Expand through journal pages instead of treating them as leaves (default: false). Journal pages link to almost everything, so this can flood the network."},
                 "format": {"type": "string", "enum": ["json", "markdown"], "description": "json (default), or markdown text. Markdown has block uuids only on search hits and with compact"},
             },
-            "required": ["concept_name"],
+            "required": ["page"],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
@@ -480,10 +480,10 @@ mod tests {
     fn the_tool_is_read_only_and_titled_as_pinned() {
         let tool = definition();
         assert_eq!(tool.name, NAME);
-        assert_eq!(tool.title.as_deref(), Some("Get Concept Network"));
+        assert_eq!(tool.title.as_deref(), Some("Explore Network"));
         assert_eq!(
             serde_json::to_value(&tool.annotations).unwrap(),
-            json!({"title": "Get Concept Network", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
+            json!({"title": "Explore Network", "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false})
         );
         assert!(tool.description.as_deref().unwrap().contains("**Can't find:**"));
     }
@@ -495,8 +495,8 @@ mod tests {
     #[test]
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
-        let base = json!({"concept_name": "Atlas"});
-        sweep::<Args>(json!({}), "concept_name", Takes::Text, true);
+        let base = json!({"page": "Atlas"});
+        sweep::<Args>(json!({}), "page", Takes::Text, true);
         sweep::<Args>(base.clone(), "max_depth", Takes::Count(0), false);
         sweep::<Args>(base.clone(), "max_nodes", Takes::Count(1), false);
         sweep::<Args>(base.clone(), "max_fanout", Takes::Count(1), false);
@@ -506,25 +506,25 @@ mod tests {
 
     #[test]
     fn the_arguments_are_read_in_schema_order_and_the_aliases_are_folded() {
-        let folded = resolve_param_aliases(ALIASES, args(json!({"page": "Atlas", "max_depth": 3, "expand_journals": true}))).unwrap();
+        let folded = resolve_param_aliases(ALIASES, args(json!({"page_name": "Atlas", "max_depth": 3, "expand_journals": true}))).unwrap();
         let request = parse_request(folded.as_ref()).unwrap();
-        assert_eq!(request.concept_name, "Atlas");
+        assert_eq!(request.page, "Atlas");
         assert_eq!(request.max_depth, 3);
         assert_eq!(request.options, Options { expand_journals: true, ..Options::default() });
-        let request = parse_request(args(json!({"concept_name": "a", "format": "markdown"})).as_ref()).unwrap();
+        let request = parse_request(args(json!({"page": "a", "format": "markdown"})).as_ref()).unwrap();
         assert_eq!((request.max_depth, request.format), (2, Some(OutputFormat::Markdown)));
-        let error = parse_request(args(json!({"concept_name": "a", "max_depth": -1, "max_nodes": 0})).as_ref()).unwrap_err();
+        let error = parse_request(args(json!({"page": "a", "max_depth": -1, "max_nodes": 0})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'max_depth': -1"), "{error}");
         let error = parse_request(args(json!({})).as_ref()).unwrap_err();
-        assert!(error.to_string().starts_with("Invalid parameter 'concept_name': missing"), "{error}");
+        assert!(error.to_string().starts_with("Invalid parameter 'page': missing"), "{error}");
     }
 
     #[test]
     fn max_nodes_and_max_fanout_start_at_one_and_max_depth_at_zero() {
-        let request = parse_request(args(json!({"concept_name": "a", "max_depth": 0, "max_nodes": 1, "max_fanout": 1})).as_ref()).unwrap();
+        let request = parse_request(args(json!({"page": "a", "max_depth": 0, "max_nodes": 1, "max_fanout": 1})).as_ref()).unwrap();
         assert_eq!((request.max_depth, request.options.max_nodes, request.options.max_fanout), (0, 1, 1));
         for param in ["max_nodes", "max_fanout"] {
-            let error = parse_request(args(json!({"concept_name": "a", param: 0})).as_ref()).unwrap_err();
+            let error = parse_request(args(json!({"page": "a", param: 0})).as_ref()).unwrap_err();
             assert!(error.to_string().starts_with(&format!("Invalid parameter '{param}': 0")), "{error}");
             assert!(error.to_string().contains("at least 1"), "{error}");
         }
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn a_network_says_what_it_answered_and_whether_it_is_complete_before_its_nodes_and_edges() {
-        let network = ConceptNetwork {
+        let network = Network {
             concept: "atlas".into(),
             resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
             resolved_aliases: Some(vec!["Atlas".into(), "Project Atlas".into()]),
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn the_order_of_a_network_does_not_depend_on_which_optional_keys_are_there() {
         let all = ["concept", "resolvedFrom", "resolvedAliases", "truncated", "hasMore", "warnings", "nodes", "edges"];
-        let network = ConceptNetwork {
+        let network = Network {
             concept: "atlas".into(),
             resolved_from: Some(json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"})),
             resolved_aliases: Some(vec!["Atlas".into()]),
@@ -566,7 +566,7 @@ mod tests {
             warnings: vec![],
         };
         assert_eq!(keys(&network.to_value()), all);
-        let bare = ConceptNetwork { resolved_from: None, resolved_aliases: None, ..network };
+        let bare = Network { resolved_from: None, resolved_aliases: None, ..network };
         assert_eq!(keys(&bare.to_value()), ["concept", "truncated", "hasMore", "warnings", "nodes", "edges"]);
     }
 
@@ -579,7 +579,7 @@ mod tests {
         assert!(warning.message.ends_with(RETRY_ADVICE), "{}", warning.message);
         assert!(warning.how_to_fetch_all.is_none());
         // so a network that carries only it has no more to fetch
-        let network = ConceptNetwork {
+        let network = Network {
             concept: "atlas".into(),
             resolved_from: None,
             resolved_aliases: None,
@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(network.to_value()["truncated"], false);
     }
 
-    fn star(pages: usize, name_length: usize) -> ConceptNetwork {
+    fn star(pages: usize, name_length: usize) -> Network {
         // a root, `pages - 1` neighbours at depth 1 and a second-level page behind the first neighbour
         let mut nodes = vec![Node { id: 1, name: "Atlas".into(), depth: 0 }];
         let mut edges = Vec::new();
@@ -602,7 +602,7 @@ mod tests {
         }
         nodes.insert(2, Node { id: 900, name: "deep".into(), depth: 2 });
         edges.push(Edge { from: 2, to: 900, outbound: 1, inbound: 0 });
-        ConceptNetwork {
+        Network {
             concept: "Atlas".into(),
             resolved_from: None,
             resolved_aliases: None,
@@ -633,14 +633,14 @@ mod tests {
     #[test]
     fn a_network_that_fits_is_returned_as_it_is() {
         let network = star(5, 3);
-        let render = |network: &ConceptNetwork| network.to_value().to_string();
+        let render = |network: &Network| network.to_value().to_string();
         assert_eq!(fit_to_budget(network.clone(), &render), network);
     }
 
     #[test]
     fn a_network_over_the_budget_is_cut_to_fit_and_the_root_is_always_kept() {
         let network = star(400, 100);
-        let render = |network: &ConceptNetwork| network.to_value().to_string();
+        let render = |network: &Network| network.to_value().to_string();
         assert!(size(&render(&network)) > crate::budget::BUDGET_CHARS);
         let fitted = fit_to_budget(network.clone(), &render);
         assert!(size(&render(&fitted)) <= crate::budget::BUDGET_CHARS);

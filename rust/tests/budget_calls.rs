@@ -9,7 +9,7 @@ mod common;
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
 use logseq_mcp_server::dates::Clock;
-use logseq_mcp_server::tools::{explore_context, find_blocks, get_concept_network};
+use logseq_mcp_server::tools::{explore_context, explore_network, find_blocks};
 use serde_json::{Value, json};
 
 /// 2025-03-12T03:30:00Z, the instant the parity harness reads as now.
@@ -42,15 +42,15 @@ fn neighbours(count: i64, length: usize) -> Value {
 
 #[tokio::test]
 async fn a_network_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_extra_call() {
-    let args = json!({"concept_name": "Project Atlas", "max_depth": 1});
+    let args = json!({"page": "Project Atlas", "max_depth": 1});
     let logseq = mock_logseq(vec![root(), neighbours(10, 50)]).await;
-    let small = get_concept_network::call(&client(&logseq), true, arguments(args.clone())).await.unwrap();
+    let small = explore_network::call(&client(&logseq), true, arguments(args.clone())).await.unwrap();
     assert!(!text_of(&small, 0).contains("result_size_truncated"));
     assert_eq!(methods(&logseq), [DATALOG, DATALOG]);
 
     // 40 neighbours with 1,000-character names: 40,000 characters of names alone
     let logseq = mock_logseq(vec![root(), neighbours(40, 1000)]).await;
-    let big = get_concept_network::call(&client(&logseq), true, arguments(json!({"concept_name": "Project Atlas", "max_depth": 1, "max_fanout": 100}))).await.unwrap();
+    let big = explore_network::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "max_depth": 1, "max_fanout": 100}))).await.unwrap();
     // the cut reads no more than the walk does
     assert_eq!(methods(&logseq), [DATALOG, DATALOG]);
     assert_eq!(args_of(&logseq, 1).len(), 1);
@@ -73,10 +73,10 @@ async fn a_network_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_
 #[tokio::test]
 async fn a_network_in_markdown_is_cut_to_the_budget_with_the_warning_in_its_footer() {
     let logseq = mock_logseq(vec![root(), neighbours(40, 1000)]).await;
-    let result = get_concept_network::call(
+    let result = explore_network::call(
         &client(&logseq),
         true,
-        arguments(json!({"concept_name": "Project Atlas", "max_depth": 1, "max_fanout": 100, "format": "markdown"})),
+        arguments(json!({"page": "Project Atlas", "max_depth": 1, "max_fanout": 100, "format": "markdown"})),
     )
     .await
     .unwrap();

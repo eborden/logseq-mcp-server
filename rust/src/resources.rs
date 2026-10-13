@@ -58,7 +58,7 @@ const GUIDE_TOOL_ORDER: [&str; 12] = [
     "logseq_find_blocks",
     "logseq_query_by_date_range",
     "logseq_explore_context",
-    "logseq_get_concept_network",
+    "logseq_explore_network",
     "logseq_search_by_relationship",
     "logseq_get_concept_evolution",
     "logseq_check_links",
