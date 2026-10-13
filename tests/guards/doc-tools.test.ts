@@ -106,10 +106,7 @@ const FORMER_TOOL_NAMES: readonly string[] = [
 ];
 
 /** Text that holds a former tool name and is not about the tool. The reason sits on each entry. */
-const BARE_CONTEXTS: Readonly<Record<string, string>> = {
-  // CLAUDE.md, "Real implementation" under Pattern 2: the function in `rust/src/tools/get_concept_network/mod.rs`.
-  '`get_concept_network` (`mod.rs`)': 'the Rust function of that name in the tool\'s mod.rs, not the MCP tool',
-};
+const BARE_CONTEXTS: Readonly<Record<string, string>> = {};
 
 const read = (path: string) => ({ path, text: readFileSync(fileURLToPath(new URL(path, ROOT)), 'utf-8') });
 
