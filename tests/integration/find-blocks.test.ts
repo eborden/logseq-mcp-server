@@ -115,6 +115,18 @@ describe('find_blocks: text, property and period together', () => {
       }
     });
 
+    it('finds a scheduled task by its SCHEDULED: line, which the skills rely on, and a property wildcard finds nothing', async () => {
+      // 4 blocks carry a SCHEDULED: line: Jan 2nd and Jan 8th on journals, and two on `schedule cases`
+      const scheduled = await found({ text: 'SCHEDULED:' });
+      expect(scheduled).toHaveLength(4);
+      expect(scheduled.every(hit => hit.content.includes('SCHEDULED: <'))).toBe(true);
+      expect(pageNames(scheduled)).toEqual(['jan 2nd, 2025', 'jan 8th, 2025', 'schedule cases', 'schedule cases']);
+      // beside a period only the journal ones stay
+      expect(pageNames(await found({ text: 'SCHEDULED:', startDate: 20250101, endDate: 20250131 }))).toEqual(['jan 2nd, 2025', 'jan 8th, 2025']);
+      // `scheduled` is no property and `*` is no wildcard: the value is an exact string
+      expect(await found({ property: 'scheduled', value: '*' })).toEqual([]);
+    });
+
     it('refuses a call with no filter at all, and a property without a value, as an invalid parameter', async () => {
       await expect(findBlocks(client, {})).rejects.toThrow(InvalidParameterError);
       await expect(findBlocks(client, { text: '' })).rejects.toThrow(InvalidParameterError);

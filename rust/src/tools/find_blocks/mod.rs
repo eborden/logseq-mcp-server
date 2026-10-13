@@ -156,11 +156,13 @@ impl Filters {
     }
 
     fn assemble(text: Option<&str>, property: Option<PropertyFilter>, period: Option<Period>) -> Result<Filters, InvalidParameter> {
+        let sent_empty = text == Some("");
         let text = text.filter(|text| !text.is_empty()).map(str::to_owned);
         if text.is_none() && property.is_none() && period.is_none() {
             return Err(InvalidParameter {
                 param: "filters".to_owned(),
-                value: "none given".to_owned(),
+                // a model that sent `text: ""` should learn why that was nothing
+                value: if sent_empty { "none given: text is empty, so it filters nothing" } else { "none given" }.to_owned(),
                 expected: "At least one of: text, property with value, or a period (start_date with end_date, last_n or preset)".to_owned(),
                 example: Some("text: \"importer\", or property: \"status\" with value: \"doing\", or last_n: 7".to_owned()),
             });
@@ -1221,9 +1223,10 @@ mod tests {
                        Example: text: \"importer\", or property: \"status\" with value: \"doing\", or last_n: 7";
         assert_eq!(filters(None, None, None).unwrap_err(), refusal);
         assert_eq!(from_arguments(json!({"limit": 3})).unwrap_err(), refusal);
-        assert_eq!(from_arguments(json!({"text": ""})).unwrap_err(), refusal);
-        // an empty text is no filter, whatever else the call has
-        assert_eq!(filters(Some(""), None, None).unwrap_err(), refusal);
+        // an empty text is no filter, and the refusal says the text was empty
+        let empty = refusal.replace("none given", "none given: text is empty, so it filters nothing");
+        assert_eq!(from_arguments(json!({"text": ""})).unwrap_err(), empty);
+        assert_eq!(filters(Some(""), None, None).unwrap_err(), empty);
         // white space is text: a block can hold exactly that
         assert_eq!(filters(Some(" "), None, None).unwrap().text.as_deref(), Some(" "));
     }
