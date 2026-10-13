@@ -76,6 +76,7 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 | `explore_context` | `blocks_truncated`, `related_pages_truncated`, `references_truncated` | A count cap bit. For references, follow `references_offset`. `howToFetchAll` for blocks and related pages is a raise, offered only when it is estimated to fit |
 | | `result_size_truncated` | The lists the caps kept don't fit: related pages go first, then the last references, then blocks |
 | | `backlinks_unavailable`, `page_blocks_unavailable` | No answer for that part. Not "nothing links here" |
+| | `blocks_truncated`, `related_pages_truncated` with `max_blocks` or `max_related_pages` set to 0 | Expected: the lists you turned off are reported as cut, with `hasMore: true`. Read `references_truncated` instead |
 | | `resolve_refs_ignored_in_compact` | `compact` skips `resolve_refs`. Set `compact` false to get resolved text |
 | `explore_network` | `network_truncated` | The caps dropped pages. A raise of `max_nodes` or `max_fanout` is named only when the larger network fits. Otherwise lower `max_depth` or start from a more specific page |
 | | `result_size_truncated` | The network was cut deepest first. Narrow the walk |
