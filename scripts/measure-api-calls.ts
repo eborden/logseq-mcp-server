@@ -221,6 +221,8 @@ async function main() {
       // #552: the two tree reads, on the fixture's long page and its first section (`tests/fixtures/README.md`, "A long page").
       // On another graph the page is not found: an error, no cursor, and the line says so.
       { tool: 'logseq_get_page', label: 'get_page full (quartz log', args: { page: 'quartz log', detail: 'full' }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      // #553: the outline of the fixture's page with 450 top-level blocks ("A page with many top-level blocks")
+      { tool: 'logseq_get_page', label: 'get_page outline (quartz outline', args: { page: 'quartz outline', detail: 'outline' }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
       { tool: 'logseq_get_block', label: 'get_block children (part 1', args: { uuid: '0088f1a0-0000-4000-8000-000000000b01', include_children: true }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
       // #555: the context of the most-linked page (the fixture's hub has more of every list than a page holds), with and
       // without `resolve_refs`, which a hit still runs for the blocks and references of the page it sends. A graph

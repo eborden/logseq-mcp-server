@@ -235,6 +235,8 @@ async function main(): Promise<void> {
     // nextCursor is in the top-level object, read on with the cursor alone. A later page of a block is its frame
     for (const [label, first, frame] of [
       ['logseq_get_page (the cursor reads the next blocks of a full page)', { name: 'logseq_get_page', arguments: { page: 'quartz log', detail: 'full' } }, 'children'],
+      // #553: the outline of the fixture's `quartz outline` page, 450 top-level blocks, a page of 200
+      ['logseq_get_page (the cursor reads the next blocks of an outline)', { name: 'logseq_get_page', arguments: { page: 'quartz outline', detail: 'outline' } }, 'blocks'],
       ['logseq_get_block (the cursor reads the next children of a block)', { name: 'logseq_get_block', arguments: { uuid: '0088f1a0-0000-4000-8000-000000000b01', include_children: true } }, 'continued'],
     ] as const) {
       await check(`tools/call ${label}`, async () => {
@@ -245,7 +247,8 @@ async function main(): Promise<void> {
         const problem = toolProblem(next);
         if (problem) return problem;
         const page = JSON.parse(next.content?.[0]?.text ?? 'null') as Record<string, unknown> | null;
-        return page && frame in page && Array.isArray(page.children) && page.children.length > 0 ? undefined : `no blocks on the next page (${frame})`;
+        const list = page?.[frame === 'blocks' ? 'blocks' : 'children'];
+        return page && frame in page && Array.isArray(list) && list.length > 0 ? undefined : `no blocks on the next page (${frame})`;
       });
     }
 
