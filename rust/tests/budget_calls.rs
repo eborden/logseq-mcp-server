@@ -103,10 +103,11 @@ fn reference_ids(value: &Value) -> Vec<i64> {
 }
 
 #[tokio::test]
-async fn references_over_the_budget_are_cut_from_the_last_one_and_the_next_offset_reads_on() {
+async fn references_over_the_budget_are_cut_from_the_last_one_and_the_cursor_reads_on() {
     // 30 references of about 2,000 characters: 60,000 characters, with the caps raised past them
+    let snapshots = Snapshots::new(1);
     let logseq = mock_logseq(vec![root(), json!([]), six_sources(2000)]).await;
-    let result = explore_context::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas", "max_references": 100}))).await.unwrap();
+    let result = explore_context::call(&client(&logseq), false, &snapshots, arguments(json!({"page": "Project Atlas", "max_references": 100}))).await.unwrap();
     // the cut reads no more than the call does
     assert_eq!(methods(&logseq), [DATALOG, DATALOG, LINKED_REFERENCES]);
     let text = text_of(&result, 0);
@@ -117,12 +118,12 @@ async fn references_over_the_budget_are_cut_from_the_last_one_and_the_next_offse
     assert_eq!(first["totals"]["references"], 30);
     assert_eq!(first["warnings"][0]["code"], "result_size_truncated");
     assert_eq!(first["hasMore"], true);
-    let how = first["warnings"][0]["howToFetchAll"].as_str().unwrap();
-    assert!(how.starts_with(&format!("Set references_offset to {} for the next references.", kept.len())), "{how}");
+    assert_eq!(first["warnings"][0]["howToFetchAll"], "Pass nextCursor as cursor, with no other argument, to read the next page.");
 
-    // the next page starts where the cut fell: the same ranking, read further on, with nothing skipped or repeated
-    let logseq = mock_logseq(vec![root(), json!([]), six_sources(2000)]).await;
-    let next = explore_context::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas", "max_references": 100, "references_offset": kept.len(), "max_blocks": 0}))).await.unwrap();
+    // the next page starts where the cut fell: the same ranking, read further on, with nothing skipped or repeated, and
+    // from the snapshot: no call at all
+    let next = explore_context::call(&client(&logseq), false, &snapshots, arguments(json!({"cursor": first["nextCursor"]}))).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 3, "a page read from the snapshot makes no call");
     let second: Value = serde_json::from_str(&text_of(&next, 0)).unwrap();
     let rest = reference_ids(&second);
     // the six pages link five times each, so the ranking is by name: the ids run in order
@@ -130,6 +131,7 @@ async fn references_over_the_budget_are_cut_from_the_last_one_and_the_next_offse
     assert_eq!(kept, all[..kept.len()]);
     assert_eq!(rest, all[kept.len()..kept.len() + rest.len()]);
     assert_eq!(second["totals"]["references"], 30);
+    assert!(size(&text_of(&next, 0)) <= BUDGET_CHARS);
 }
 
 /// A search row: one block of `length` characters of text, newest when `id` is highest, on page 5.

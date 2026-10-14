@@ -186,7 +186,7 @@ async fn a_page_over_the_budget_is_cut_in_whole_blocks_and_the_text_sent_is_what
     // 30 blocks of 4,000 characters: ~120,000 characters, under the default cap of 50 blocks
     let blocks: Vec<Value> = (1..=30).map(|id| page_block(100 + id, 4000)).collect();
     let logseq = mock_logseq(vec![explored_page(), json!(blocks), json!([])]).await;
-    let result = explore_context::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas"}))).await.unwrap();
+    let result = explore_context::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas"}))).await.unwrap();
     // the cut reads no more than the call does
     assert_eq!(methods(&logseq), [DATALOG, DATALOG, LINKED_REFERENCES]);
     let text = text_of(&result, 0);
@@ -199,20 +199,22 @@ async fn a_page_over_the_budget_is_cut_in_whole_blocks_and_the_text_sent_is_what
     let warnings = value["warnings"].as_array().unwrap();
     assert_eq!(warnings.iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["result_size_truncated"]);
     assert!(warnings[0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 30 entries")), "{}", warnings[0]["message"]);
-    assert_eq!(value["hasMore"], false);
+    // the blocks the cut left out are read on with the cursor
+    assert_eq!(value["hasMore"], true);
+    assert!(value["nextCursor"].is_string());
 }
 
 #[tokio::test]
 async fn a_page_in_markdown_and_compact_is_measured_as_sent() {
     let blocks: Vec<Value> = (1..=10).map(|id| page_block(100 + id, 4000)).collect();
     let logseq = mock_logseq(vec![explored_page(), json!(blocks.clone()), json!([])]).await;
-    let result = explore_context::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "format": "markdown"}))).await.unwrap();
+    let result = explore_context::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "format": "markdown"}))).await.unwrap();
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     assert!(text.contains("result_size_truncated: Showing "), "{}", &text[text.len().saturating_sub(500)..]);
     // compact blocks are short, so the same page fits whole
     let logseq = mock_logseq(vec![explored_page(), json!(blocks), json!([])]).await;
-    let result = explore_context::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "compact": true}))).await.unwrap();
+    let result = explore_context::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "compact": true}))).await.unwrap();
     assert!(!text_of(&result, 0).contains("result_size_truncated"));
 }
 

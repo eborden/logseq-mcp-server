@@ -171,7 +171,7 @@ async fn a_null_answer_to_each_aliased_query_is_the_same_warning() {
     assert_eq!(methods(&logseq).len(), 4);
 }
 
-// ---- the references: most-linking pages first, and paged with `references_offset`
+// ---- the references: most-linking pages first, and cut by their page size
 
 /// The linked references of a page, as the Editor call sends them: bob links once, alice three times, carol twice.
 fn three_sources() -> Value {
@@ -206,46 +206,28 @@ async fn the_references_are_ranked_by_linking_blocks_and_the_related_pages_keep_
 }
 
 #[tokio::test]
-async fn references_offset_reads_the_same_ranking_further_on_and_the_last_page_has_no_warning() {
-    let page = |offset: u64| Caps { max_references: 2, references_offset: offset, ..Caps::default() };
-    let (first, calls) = explored(page(0)).await;
-    assert_eq!(calls, 3, "paging costs no call");
+async fn a_page_size_that_cuts_the_references_offers_the_raise_and_no_cursor_without_a_snapshot_to_read_from() {
+    let (first, calls) = explored(Caps { max_references: 2, ..Caps::default() }).await;
+    assert_eq!(calls, 3, "a page size costs no call");
     assert_eq!(reference_ids(&first), [401, 402]);
     let warning = &first.warnings[0];
     assert_eq!(warning.code, "references_truncated");
-    assert_eq!(warning.message, "Showing 2 of 6 references. Page through the rest with references_offset.");
-    assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set references_offset to 2 for the next page. Or set max_references to 6 (or higher) to get all 6 in one call."));
-    assert!(first.has_more());
-
-    let (second, _) = explored(page(2)).await;
-    assert_eq!(reference_ids(&second), [403, 301]);
-    assert_eq!(second.warnings[0].message, "Showing 2 of 4 references from offset 2. Page through the rest with references_offset.");
-    assert!(second.warnings[0].how_to_fetch_all.as_deref().unwrap().starts_with("Set references_offset to 4 for the next page."));
-
-    let (last, _) = explored(page(4)).await;
-    assert_eq!(reference_ids(&last), [302, 201]);
-    assert!(last.warnings.is_empty() && !last.has_more());
-    // the totals are always the whole ranking
-    assert_eq!(last.totals.references, 6);
+    assert_eq!(warning.message, "Showing 1-2 of 6 references.");
+    // the library function keeps no snapshot, so the one way on is the raise; `call` leads with the cursor
+    assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_references to 6 (or higher) to get all 6 in one call."));
+    assert_eq!((first.next_cursor, first.totals.references), (None, 6));
+    // a page size at the number there are is no cut
+    let (whole, _) = explored(Caps { max_references: 6, ..Caps::default() }).await;
+    assert!(whole.warnings.is_empty());
 }
 
 #[tokio::test]
-async fn an_offset_at_or_past_the_end_reads_nothing_and_says_nothing_was_cut() {
-    for offset in [6, 7, u64::MAX] {
-        let (context, calls) = explored(Caps { references_offset: offset, ..Caps::default() }).await;
-        assert_eq!(calls, 3);
-        assert!(context.references.is_empty() && context.warnings.is_empty());
-        assert_eq!(context.totals.references, 6);
-    }
-}
-
-#[tokio::test]
-async fn a_cap_of_zero_with_an_offset_offers_the_raise_and_no_page_that_would_not_move() {
-    let (context, _) = explored(Caps { max_references: 0, references_offset: 1, ..Caps::default() }).await;
+async fn a_cap_of_zero_leaves_the_references_out_and_offers_the_raise() {
+    let (context, _) = explored(Caps { max_references: 0, ..Caps::default() }).await;
     assert!(context.references.is_empty());
     let warning = &context.warnings[0];
-    assert_eq!(warning.message, "Showing 0 of 5 references from offset 1.");
-    assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_references to 5 (or higher) to get all 5."));
+    assert_eq!(warning.message, "Showing 0 of 6 references.");
+    assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_references to 6 (or higher) to get all 6 in one call."));
 }
 
 #[tokio::test]
