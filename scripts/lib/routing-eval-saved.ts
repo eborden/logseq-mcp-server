@@ -29,6 +29,8 @@ export interface SavedRun {
   models: string[];
   textHash: string;
   scoringHash: string;
+  /** Hash of the SKILL.md body the run was given (`--skill`); absent for a run with no skill and for files written before it was recorded */
+  skillHash?: string;
   /** Sessions the run set out to make */
   planned: number;
   /** The run stopped before it made them all (the total spend cap) */
@@ -75,6 +77,7 @@ export function parseSavedRun(raw: unknown): SavedRun {
   if (raw.surface !== 'v1' && raw.surface !== 'v2') fail('surface', 'is not v1 or v2');
   if (!Array.isArray(raw.models) || raw.models.some(model => typeof model !== 'string')) fail('models', 'is not a list of strings');
   if (typeof raw.textHash !== 'string' || typeof raw.scoringHash !== 'string') fail('the question hashes', 'are missing');
+  if (raw.skillHash !== undefined && typeof raw.skillHash !== 'string') fail('skillHash', 'is not a string');
   if (typeof raw.planned !== 'number' || !Number.isInteger(raw.planned) || raw.planned < 0) fail('planned', 'is not a count');
   if (typeof raw.stoppedEarly !== 'boolean') fail('stoppedEarly', 'is not a boolean');
   if (!Array.isArray(raw.sessions)) fail('sessions', 'is not a list');
@@ -83,6 +86,7 @@ export function parseSavedRun(raw: unknown): SavedRun {
     models: raw.models as string[],
     textHash: raw.textHash,
     scoringHash: raw.scoringHash,
+    ...(raw.skillHash !== undefined ? { skillHash: raw.skillHash } : {}),
     planned: raw.planned,
     stoppedEarly: raw.stoppedEarly,
     sessions: raw.sessions.map(parseSession),

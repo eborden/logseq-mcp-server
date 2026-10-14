@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assertOutPathSafe, claudeArgs, DEFAULT_MODEL, hostEnv, LIMITS, loadSkillText, parseOptions, prepareHarness } from '../../scripts/lib/routing-eval-host.js';
+import { assertOutPathSafe, claudeArgs, DEFAULT_MODEL, hostEnv, LIMITS, loadSkillText, parseOptions, prepareHarness, skillHash } from '../../scripts/lib/routing-eval-host.js';
 import { parseSavedRun, reconcile, SAVED_RUN_VERSION, scoringHash, textHash } from '../../scripts/lib/routing-eval-saved.js';
 import {
   aggregate,
@@ -315,6 +315,15 @@ describe('the options and the host (scripts/lib/routing-eval-host.ts)', () => {
       await writeFile(join(dir, 'SKILL.md'), '---\nname: x\n---\n');
       await expect(loadSkillText(dir)).rejects.toThrow('no body');
       await expect(loadSkillText(join(dir, 'missing'))).rejects.toThrow('no readable SKILL.md');
+      // CRLF endings, and a closing fence that ends the file, are stripped too, so front matter never reaches the prompt
+      await writeFile(join(dir, 'SKILL.md'), '---\r\nname: x\r\n---\r\n\r\n# Body\r\n');
+      expect(await loadSkillText(dir)).toBe('# Body');
+      await writeFile(join(dir, 'SKILL.md'), '---\nname: x\n---');
+      await expect(loadSkillText(dir)).rejects.toThrow('no body');
+      await writeFile(join(dir, 'SKILL.md'), '---\nname: x\n\n# Body\n');
+      await expect(loadSkillText(dir)).rejects.toThrow('never closes');
+      expect(skillHash('a')).toMatch(/^[0-9a-f]{12}$/);
+      expect(skillHash('a')).not.toBe(skillHash('b'));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -390,6 +399,9 @@ describe('the saved run (scripts/lib/routing-eval-saved.ts)', () => {
     expect(() => parseSavedRun(saved([], { surface: 'v3' }))).toThrow('surface');
     expect(() => parseSavedRun(saved([], { textHash: undefined }))).toThrow('hashes');
     expect(() => parseSavedRun(saved([], { planned: -1 }))).toThrow('planned');
+    expect(parseSavedRun(saved([])).skillHash).toBeUndefined();
+    expect(parseSavedRun(saved([], { skillHash: 'abc' })).skillHash).toBe('abc');
+    expect(() => parseSavedRun(saved([], { skillHash: 5 }))).toThrow('skillHash');
     expect(() => parseSavedRun(saved([], { stoppedEarly: 'no' }))).toThrow('stoppedEarly');
     expect(() => parseSavedRun(saved([{ questionId: 'a', run: 1, status: 'ok' }]))).toThrow('calls');
     expect(() => parseSavedRun(saved([session('a', { status: 'weird' })]))).toThrow('status');
