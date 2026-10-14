@@ -227,11 +227,15 @@ async function main() {
       // whose page fits one page of each list has no second page, and the line says so.
       { tool: 'logseq_explore_context', label: 'explore_context (subject', args: { page: subject }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
       { tool: 'logseq_explore_context', label: 'explore_context (subject, resolve_refs', args: { page: subject, resolve_refs: true }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      // #554: the timeline of a period and of a page, with a page size that leaves a second page. Its nextCursor is in the one object
+      { tool: 'logseq_explore_timeline', label: 'explore_timeline period (10', args: { start_date: 20200101, end_date: dr.end_date, max_blocks: 10 }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      { tool: 'logseq_explore_timeline', label: 'explore_timeline page (10', args: { page: subject, max_blocks: 10 }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
     ];
     const another = await startRustServer(choice.rustBinary, config, true);
     try {
       for (const { tool, label, args, cursorOf } of paged) {
-        const name = tool.replace('logseq_', '');
+        // The tool, or the tool and its variant (explore_timeline has two lines)
+        const name = label.split(' (')[0];
         const cursor = await read(rust, `${label}, page 1)`, tool, args, cursorOf);
         if (cursor) {
           await read(rust, `${name} (cursor, a hit)`, tool, { cursor }, cursorOf);

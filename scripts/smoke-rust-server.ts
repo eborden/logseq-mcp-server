@@ -218,6 +218,19 @@ async function main(): Promise<void> {
       return Array.isArray(pages) && pages.length > 0 ? undefined : 'no pages on the next page';
     });
 
+    // ADR-0038 (#554): the timeline of a page, cut at 2 blocks, read on with the cursor alone; the next page has no summary
+    await check('tools/call logseq_explore_timeline (the cursor reads the next page)', async () => {
+      const first = (await mcp.callTool({ name: 'logseq_explore_timeline', arguments: { page: 'project atlas', max_blocks: 2 } })) as { isError?: boolean; content?: Content };
+      const page = JSON.parse(first.content?.[0]?.text ?? 'null') as { hasMore?: boolean; nextCursor?: string } | null;
+      if (!page?.nextCursor || page.hasMore !== true) return 'no nextCursor on a cut result';
+      const next = (await mcp.callTool({ name: 'logseq_explore_timeline', arguments: { cursor: page.nextCursor } })) as { isError?: boolean; content?: Content };
+      const problem = toolProblem(next);
+      if (problem) return problem;
+      const body = JSON.parse(next.content?.[0]?.text ?? 'null') as { summary?: unknown; entries?: unknown[] } | null;
+      if (body?.summary !== undefined) return 'a page after the first has a summary';
+      return Array.isArray(body?.entries) && body.entries.length > 0 ? undefined : 'no entries on the next page';
+    });
+
     // ADR-0038 (#552): a tree larger than the budget (the fixture's `quartz log` page and its first section), whose
     // nextCursor is in the top-level object, read on with the cursor alone. A later page of a block is its frame
     for (const [label, first, frame] of [
