@@ -263,6 +263,7 @@ async function main(): Promise<void> {
       if (problem) return problem;
       const page = JSON.parse(next.content?.[0]?.text ?? 'null') as { references?: unknown[] } | null;
       return Array.isArray(page?.references) && page.references.length > 0 ? undefined : 'no references on the next page';
+    });
 
     // ADR-0038 (#556): the walk of a page read in pages of 5, whose nextCursor is in its one object
     await check('tools/call logseq_explore_network (the cursor reads the next pages)', async () => {
