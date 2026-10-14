@@ -96,7 +96,7 @@ Use this skill when:
 - Read the file for the type you are about to call when you need exact parameter names, or a worked call to copy
 
 **`references/results-and-limits.md`** - How to read what comes back
-- `warnings`, `hasMore` and `howToFetchAll`, paging, the 30,000-character budget and host limits, with every warning code by tool
+- `warnings`, `hasMore` and `howToFetchAll`, paging, the 30,000-character budget and host limits, with the warning codes to act on, by tool
 - **Read it before you report a count, a list or a miss as complete**
 
 **`references/context-efficiency.md`** - Context-efficient querying patterns
@@ -116,7 +116,7 @@ A type is chosen by what you already have, and it is the second word of the tool
 | `explore` | A starting point, and you want what surrounds it | `logseq_explore_context`, `logseq_explore_network`, `logseq_explore_timeline` | A structured result for synthesis: what is said about it, how it connects, how it changed |
 | `check` | A change you are about to write | `logseq_check_links` | A verdict. Read-only |
 
-Boundary test: if the answer is a list of hits (where something comes up, which notes mention or link it, which have a value), use `find`. If it is a state of affairs (what something is, how it is going, where it stands, what part it plays, how it connects or changed), use `explore`: `find` answers "which blocks", `explore` answers "what is going on with this".
+Boundary test: if the answer is a list of hits (blocks that contain a word, link several pages together, link one page in a period, or carry a property value), use `find`. "What links to X" (everything pointing at one page) is not a list of hits to search for: it is `logseq_explore_context`, whose `references` are the answer. If it is a state of affairs (what something is, how it is going, where it stands, what part it plays, how it connects or changed), use `explore`: `find` answers "which blocks", `explore` answers "what is going on with this".
 
 Every tool is read-only. Load `references/tools/<type>.md` for the parameters and worked examples of a type.
 
@@ -129,9 +129,11 @@ Every tool is read-only. Load `references/tools/<type>.md` for the parameters an
 | What happened in a period | `logseq_explore_timeline` with `preset`, `last_n` or `start_date` and `end_date` | `tools/explore.md` |
 | How something changed over time, or the history of a decision | `logseq_explore_timeline` with `page` and `group_by` | `context-builder.md`, recipe 3 |
 | How two things connect | `logseq_explore_network` with `page` and `to` | `context-builder.md`, recipe 4 |
-| Who owns something, or which pages or blocks have a property | `logseq_find_pages` with `property` and `value` for page properties, `logseq_find_blocks` for block properties | `context-builder.md`, recipe 7 |
-| Where something comes up, which notes mention or link it (a list of places) | `logseq_find_blocks` with `text` or `links_to` | `tools/find.md` |
-| How something is going, where it stands, what part it plays (a state of affairs, not a list) | `logseq_explore_context` on the page, even when two pages are named. Read its blocks and references | `tools/explore.md` |
+| Who owns something, or what a page's property is (a page you can name) | `logseq_get_page`: its properties hold the owner | `context-builder.md`, recipe 7 |
+| Which pages or blocks have a property value ("everything Alice owns") | `logseq_find_pages` with `property` and `value` for page properties, `logseq_find_blocks` for block properties | `context-builder.md`, recipe 7 |
+| What links to a page | `logseq_explore_context` on the page: its `references` | `tools/explore.md` |
+| Where a word comes up, or blocks that link several pages together or link one in a period (a list of places) | `logseq_find_blocks` with `text`, `links_to` and a period | `tools/find.md` |
+| How something is going, where it stands, what part it plays (a state of affairs, not a list) | `logseq_explore_context` on the page the question is about (the project or topic, not the person asking). When a person is named too, find them in its `references`, or check with `logseq_find_blocks` and `links_to` | `tools/explore.md` |
 | What to work on, tasks, stale work | `logseq_find_blocks` for markers and properties | `context-builder.md`, recipes 5 and 6 |
 | Unsure of a page name (you were given none) | `logseq_find_pages` with `text` or `names` | `tools/find.md` |
 | "This page" or "what I'm looking at" | `logseq_get_current`, then `logseq_explore_context` on its page | `tools/get.md` |
