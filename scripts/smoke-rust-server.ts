@@ -61,7 +61,6 @@ const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_find_blocks', label: 'by property', args: { property: 'status', value: 'active' } },
   { name: 'logseq_find_blocks', label: 'by period and text, a page of 2', args: { text: 'importer', start_date: 20250101, end_date: 20250131, limit: 2 } },
   { name: 'logseq_explore_context', args: { page: 'project atlas' } },
-  { name: 'logseq_explore_context', label: 'references from an offset', args: { page: 'Bob', max_references: 1, references_offset: 1 } },
   { name: 'logseq_explore_network', args: { page: 'Alice', max_depth: 2 } },
   { name: 'logseq_find_blocks', label: 'by page and links_to', args: { page: 'Alice', links_to: ['Bob'] } },
   { name: 'logseq_explore_network', label: 'path to a second page', args: { page: 'Alice', to: 'Bob' } },
@@ -236,6 +235,19 @@ async function main(): Promise<void> {
         return page && frame in page && Array.isArray(page.children) && page.children.length > 0 ? undefined : `no blocks on the next page (${frame})`;
       });
     }
+
+    // ADR-0038 (#555): the hub has more blocks, references and related pages than a page holds, so its context has a
+    // nextCursor at the top level, and the cursor alone reads the next page: the references the first page left
+    await check('tools/call logseq_explore_context (the cursor reads the next references)', async () => {
+      const one = (await mcp.callTool({ name: 'logseq_explore_context', arguments: { page: 'hub central' } })) as { isError?: boolean; content?: Content };
+      const body = JSON.parse(one.content?.[0]?.text ?? 'null') as { hasMore?: boolean; nextCursor?: string } | null;
+      if (!body?.nextCursor || body.hasMore !== true) return 'no nextCursor on a cut context';
+      const next = (await mcp.callTool({ name: 'logseq_explore_context', arguments: { cursor: body.nextCursor } })) as { isError?: boolean; content?: Content };
+      const problem = toolProblem(next);
+      if (problem) return problem;
+      const page = JSON.parse(next.content?.[0]?.text ?? 'null') as { references?: unknown[] } | null;
+      return Array.isArray(page?.references) && page.references.length > 0 ? undefined : 'no references on the next page';
+    });
 
     await check('resources/read logseq://page/{name}', async () => {
       const { contents } = await mcp.readResource({ uri: `logseq://page/${encodeURIComponent('project atlas')}` });

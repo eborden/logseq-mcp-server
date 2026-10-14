@@ -100,7 +100,6 @@ async function main() {
     ['explore_network depth=1', 'logseq_explore_network', { page: subject, max_depth: 1 }],
     ['explore_network depth=2', 'logseq_explore_network', { page: subject, max_depth: 2 }],
     ['explore_context', 'logseq_explore_context', { page: subject }],
-    ['explore_context (references_offset)', 'logseq_explore_context', { page: subject, max_references: 10, references_offset: 10 }],
     ['find_blocks (text)', 'logseq_find_blocks', { text: subject.slice(0, 4), limit: 10 }],
     ['find_blocks (text + 7-day period)', 'logseq_find_blocks', { text: subject.slice(0, 4), ...dr, limit: 10 }],
     ['find_blocks (period alone, last_n 7)', 'logseq_find_blocks', { last_n: 7, limit: 10 }],
@@ -144,7 +143,6 @@ async function main() {
     ...(aliased
       ? ([
           ['explore_context (aliased page)', 'logseq_explore_context', { page: aliased }],
-          ['explore_context (aliased page, references_offset)', 'logseq_explore_context', { page: aliased, max_references: 10, references_offset: 10 }],
           ['explore_timeline (aliased page)', 'logseq_explore_timeline', { page: aliased }],
           ['explore_network depth=1 (aliased page)', 'logseq_explore_network', { page: aliased, max_depth: 1 }],
           ['explore_network depth=2 (aliased page)', 'logseq_explore_network', { page: aliased, max_depth: 2 }],
@@ -224,6 +222,11 @@ async function main() {
       // On another graph the page is not found: an error, no cursor, and the line says so.
       { tool: 'logseq_get_page', label: 'get_page full (quartz log', args: { page: 'quartz log', detail: 'full' }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
       { tool: 'logseq_get_block', label: 'get_block children (part 1', args: { uuid: '0088f1a0-0000-4000-8000-000000000b01', include_children: true }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      // #555: the context of the most-linked page (the fixture's hub has more of every list than a page holds), with and
+      // without `resolve_refs`, which a hit still runs for the blocks and references of the page it sends. A graph
+      // whose page fits one page of each list has no second page, and the line says so.
+      { tool: 'logseq_explore_context', label: 'explore_context (subject', args: { page: subject }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      { tool: 'logseq_explore_context', label: 'explore_context (subject, resolve_refs', args: { page: subject, resolve_refs: true }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
     ];
     const another = await startRustServer(choice.rustBinary, config, true);
     try {
