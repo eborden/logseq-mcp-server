@@ -70,7 +70,7 @@ fn page_row(day: &Day) -> Value {
 }
 
 fn block_row(day: &Day, spec: &Spec) -> Value {
-    json!([{"id": spec.id, "uuid": uuid(spec.id), "content": format!("{} {}", spec.id, "x".repeat(spec.length)), "page": {"id": day.page}, "parent": {"id": spec.parent}, "left": {"id": spec.left}}])
+    json!([{"id": spec.id, "uuid": uuid(spec.id), "content": format!("{} {}", spec.id, "x".repeat(spec.length)), "page": {"id": day.page}, "parent": {"id": spec.parent}, "left": {"id": spec.left}, "refs": [{"id": 900, "name": "project atlas", "original-name": "Project Atlas", "journal?": false}]}])
 }
 
 /// A LogSeq that answers the two queries of a period from `graph`.
@@ -542,7 +542,9 @@ async fn a_token_that_is_not_a_cursor_of_this_tool_is_refused_before_any_call() 
         (made(explore_timeline::NAME, json!({"start_date": 20250101}), at.clone()), "not a timeline this tool reads"),
         (made(explore_timeline::NAME, json!({"start_date": 20250131, "end_date": 20250101}), at.clone()), "not a timeline this tool reads"),
         (made(explore_timeline::NAME, json!({"page": "  "}), at.clone()), "not a timeline this tool reads"),
-        (made(explore_timeline::NAME, json!({"page": "a", "cursor": "again"}), at), "not a timeline this tool reads"),
+        (made(explore_timeline::NAME, json!({"page": "a", "cursor": "again"}), at.clone()), "not a timeline this tool reads"),
+        (made(explore_timeline::NAME, json!({"start_date": 20250101, "end_date": 20250131, "newest_first": "yes"}), at.clone()), "not a timeline this tool reads"),
+        (made(explore_timeline::NAME, json!({"start_date": 20250101, "end_date": 20250131, "newest_first": 1}), at), "not a timeline this tool reads"),
     ];
     for (token, reason) in tokens {
         let error = call(&logseq, &snapshots(), json!({"cursor": token})).await.unwrap_err();
@@ -568,4 +570,42 @@ async fn an_infrastructure_error_on_a_miss_is_the_error_of_the_call_and_never_an
     let down = mock_logseq(vec![]).await;
     let error = call(&down, &Snapshots::new(1_760_000_999_999), json!({"cursor": cursor_of(&first)})).await.unwrap_err();
     assert!(matches!(error, ToolError::Logseq(_)), "{error}");
+}
+
+#[tokio::test]
+async fn a_week_cut_between_two_pages_has_the_same_period_on_both_and_every_block_once() {
+    // 2025-01-06 and 2025-01-07 are in one week, 2025-01-15 in a later one: pages of 70 cut the first week
+    let days = vec![flat_day(20250106, 1000, 60, 10), flat_day(20250107, 2000, 60, 10), flat_day(20250115, 3000, 20, 10)];
+    let all: Vec<String> = days.iter().flat_map(|day| day.blocks.iter().map(|spec| uuid(spec.id))).collect();
+    let logseq = logseq_holding(&graph(days)).await;
+    let snapshots = snapshots();
+    let first = call(&logseq, &snapshots, with(period(), json!({"max_blocks": 70, "group_by": "week"}))).await.unwrap();
+    let second = call(&logseq, &snapshots, json!({"cursor": cursor_of(&first)})).await.unwrap();
+    let periods = |page: &Value| page["entries"].as_array().unwrap().iter().map(|entry| entry["period"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+    assert_eq!(periods(&first), ["2025-W01"]);
+    assert_eq!(periods(&second), ["2025-W01", "2025-W03"], "the week cut between the pages is on both");
+    assert!(second.get("nextCursor").is_none(), "70 and 70 of 140 blocks: the second page is the last");
+    let mut read = uuids(&first);
+    read.extend(uuids(&second));
+    assert_eq!(read, all, "every block once");
+    assert_eq!(methods(&logseq).len(), 2, "the week grouping costs no call");
+    // the same for a month
+    let month = call(&logseq, &snapshots, with(period(), json!({"max_blocks": 70, "group_by": "month"}))).await.unwrap();
+    let next = call(&logseq, &snapshots, json!({"cursor": cursor_of(&month)})).await.unwrap();
+    assert_eq!((month["entries"][0]["period"].clone(), next["entries"][0]["period"].clone()), (json!("202501"), json!("202501")));
+}
+
+#[tokio::test]
+async fn a_page_after_the_first_carries_no_tip_block() {
+    let (held, _) = four_days();
+    let logseq = logseq_holding(&held).await;
+    let snapshots = snapshots();
+    let blocks = |result: &rmcp::model::CallToolResult| serde_json::to_value(result).unwrap()["content"].as_array().unwrap().len();
+    // every block links one page, so the roll-up has a top concept and the first page a tip
+    let first = explore_timeline::call(&client(&logseq), true, NOW, &snapshots, arguments(with(period(), json!({"max_blocks": 100})))).await.unwrap();
+    assert_eq!(blocks(&first), 2, "the first page has its tip");
+    let text = serde_json::to_value(&first).unwrap()["content"][0]["text"].as_str().unwrap().to_owned();
+    let cursor = serde_json::from_str::<Value>(&text).unwrap()["nextCursor"].as_str().unwrap().to_owned();
+    let second = explore_timeline::call(&client(&logseq), true, NOW, &snapshots, arguments(json!({"cursor": cursor}))).await.unwrap();
+    assert_eq!(blocks(&second), 1, "one content block: the result, with no tip");
 }
