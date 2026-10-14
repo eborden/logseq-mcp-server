@@ -39,9 +39,9 @@ logseq_find_pages(limit=1000)
 
 Every page together is the candidate set, and on a large graph that takes more than one call. Each entry is `{ name, aliases? }`: `name` is the page, and `aliases` holds its other names (an `alias::` on the page), left off when it has none. An alias is never listed as a page of its own, so a term equal to one is a candidate for the page that lists it, and `total` counts pages, not aliases. Read the entries from each result as it arrives and keep them in context. Don't save a result to a file.
 
-- **`hasMore: true`:** call again with the `offset` the `pages_truncated` warning names, and add the names to the ones you have. A server that doesn't page the list sends no `hasMore`, so its one call is the whole listing.
+- **`hasMore: true`:** call again with only the `nextCursor`, and add the names to the ones you have. A server that doesn't page the list sends no `hasMore`, so its one call is the whole listing.
 - **`pages_unavailable` warning:** LogSeq sent no page list, so `pages: []` means the list is unknown, not that the graph is empty. Stop the pass and tell the requester. Don't classify against an empty or partial listing.
-- **`total` changed between calls:** pages were added or removed while you paged, and the offsets no longer line up. Drop the names you have and page again from offset 0, once. If `total` changes during that second pass too, finish the second pass and use its names. Say in the report that the graph changed while you read it, so the listing may be missing a page.
+- **`total` changed between calls:** pages were added or removed while you paged (a `cursor_stale` warning says so too). Drop the names you have and page again from the first call, once. If `total` changes during that second pass too, finish the second pass and use its names. Say in the report that the graph changed while you read it, so the listing may be missing a page.
 
 Do not guess at page names, and do not assume a concept has a page because it plainly deserves one. This listing is also what tells you a term has zero candidates, which is a skip and not a question. A cut listing turns a term that has a page into one that seems to have none, which is why the steps above insist on every page.
 

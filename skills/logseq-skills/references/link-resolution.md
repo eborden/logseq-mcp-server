@@ -23,7 +23,7 @@ LogSeq matches `[[X]]` to a page by name, **case-insensitively but not fuzzily**
 
 A page that is referenced but never given content exists in LogSeq's database with **no file on disk**. One real graph carries 621 pages against 149 page files, so more than three quarters of its pages are file-less. Deciding a page does not exist because `pages/<Title>.md` is missing will wrongly skip most of the graph's vocabulary, and the error is invisible: it looks like a conservative decision not to link.
 
-Page through `find_pages` until you hold every page: `limit: 1000`, then the `offset` the warning names while `hasMore` is true. Stop on `pages_unavailable`, and restart once if `total` changes. Step 2 of the workflow has the details. Read the entries in context and use the page names and each page's `aliases` as the candidate set. An alias isn't a page of its own, so it appears only under the page that declares it, and under every page that declares it.
+Page through `find_pages` until you hold every page: `limit: 1000`, then the `nextCursor` of each result, passed alone, while `hasMore` is true. Stop on `pages_unavailable`, and restart once if `total` changes. Step 2 of the workflow has the details. Read the entries in context and use the page names and each page's `aliases` as the candidate set. An alias isn't a page of its own, so it appears only under the page that declares it, and under every page that declares it.
 
 ### Substring bracketing
 
