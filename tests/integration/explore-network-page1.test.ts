@@ -27,12 +27,20 @@ describe('explore_network: the first page is the result the capped walk gave', (
     expect(Object.keys(recorded).sort()).toEqual(PAGE1_CASES.map(c => c.name).sort());
   });
 
-  for (const { name, page, maxDepth, ...caps } of PAGE1_CASES) {
+  for (const { name, page, maxDepth, sizeCut, ...caps } of PAGE1_CASES) {
     it(`${name}: the same nodes, depths and edges`, async () => {
       const got = projectPage1(await exploreNetwork(client, page, maxDepth, caps));
       const want = recorded[name];
-      expect(got.nodes).toEqual(want.nodes);
-      expect(got.edges).toEqual(want.edges);
+      if (!sizeCut) {
+        expect(got.nodes).toEqual(want.nodes);
+        expect(got.edges).toEqual(want.edges);
+        return;
+      }
+      // Cut to the budget: a prefix of the old pages, at most a few fewer, with the edges among the pages it holds
+      expect(got.nodes).toEqual(want.nodes.slice(0, got.nodes.length));
+      expect(want.nodes.length - got.nodes.length).toBeLessThanOrEqual(3);
+      const kept = new Set(got.nodes.map(([node]) => node));
+      expect(got.edges).toEqual(want.edges.filter(([from, to]) => kept.has(from) && kept.has(to)));
     });
   }
 });

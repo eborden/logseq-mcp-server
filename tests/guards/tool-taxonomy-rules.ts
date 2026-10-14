@@ -85,7 +85,9 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
     'compact',
     'cursor',
   ],
-  logseq_explore_network: ['page', 'to', 'max_depth', 'max_nodes', 'max_fanout', 'expand_journals', 'with_snippets', 'format'],
+  // ADR-0038 adds `cursor` to `explore_network` (the walk without `to`): the walk runs to 500 pages and `max_nodes` is the size of a
+  // page, read to the end with it (#556). `page` stays, optional beside a cursor (BR-0008).
+  logseq_explore_network: ['page', 'to', 'max_depth', 'max_nodes', 'max_fanout', 'expand_journals', 'with_snippets', 'format', 'cursor'],
   // ADR-0038 adds `cursor` to `explore_timeline`: its blocks across the days are read to the end with it, and `max_blocks`
   // is the page size (#554). `page` and the period stay, optional beside a cursor.
   logseq_explore_timeline: [
