@@ -75,15 +75,21 @@ pub fn encode(cursor: &Cursor) -> String {
     URL_SAFE_NO_PAD.encode(payload)
 }
 
-/// The token a tool made, or an [`InvalidParameter`] for one that isn't. `tool` is the name of the tool that reads it:
-/// a token another tool made is refused, since its arguments are that tool's.
-pub fn decode(token: &str, tool: &str) -> Result<Cursor, InvalidParameter> {
-    let refuse = |reason: &str| InvalidParameter {
+/// The refusal of a token: `reason` says what is wrong with it. A tool uses it for what only it can tell once the
+/// token is decoded (a position that is not an index, arguments it does not take).
+pub fn invalid(token: &str, tool: &str, reason: &str) -> InvalidParameter {
+    InvalidParameter {
         param: "cursor".to_owned(),
         value: shown(token),
         expected: format!("the nextCursor of a result of {tool}, as it was sent ({reason})"),
         example: Some("cursor: \"<nextCursor>\"".to_owned()),
-    };
+    }
+}
+
+/// The token a tool made, or an [`InvalidParameter`] for one that isn't. `tool` is the name of the tool that reads it:
+/// a token another tool made is refused, since its arguments are that tool's.
+pub fn decode(token: &str, tool: &str) -> Result<Cursor, InvalidParameter> {
+    let refuse = |reason: &str| invalid(token, tool, reason);
     let bytes = URL_SAFE_NO_PAD.decode(token).map_err(|_| refuse("this is not a cursor: it is not base64url text"))?;
     let payload: Value = serde_json::from_slice(&bytes).map_err(|_| refuse("this is not a cursor: its content is not what a cursor holds"))?;
     match payload.get("v").and_then(Value::as_u64) {

@@ -92,7 +92,8 @@ pub struct PagedCut<'a> {
     pub total: usize,
     /// What else the caller can do: narrow, or make the entries smaller. Said after the cut
     pub advice: &'a str,
-    /// A raise of the page size, offered beside the cursor: "Or set limit to 240 ...". The model chooses
+    /// A raise of the page size, offered beside the cursor, as a phrase that starts with a verb and ends with a
+    /// full stop: "set limit to 240 for a larger page." The model chooses between it and the cursor
     pub raise: Option<String>,
     /// A cursor reads on, so `howToFetchAll` leads with it
     pub has_next: bool,
@@ -105,6 +106,12 @@ fn range(start: usize, kept: usize) -> String {
         1 => (start + 1).to_string(),
         _ => format!("{}-{}", start + 1, start + kept),
     }
+}
+
+/// A phrase as a sentence: its first letter in capitals.
+fn sentence(phrase: &str) -> String {
+    let mut chars = phrase.chars();
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
 }
 
 /// The warning of a page that ends before its list does. `howToFetchAll` leads with the cursor when there is one, then
@@ -123,9 +130,10 @@ pub fn paged_warning(cut: PagedCut<'_>) -> ResultWarning {
         }
     };
     let how_to_fetch_all = match (has_next, raise) {
-        (true, Some(raise)) => Some(format!("{NEXT_PAGE} {raise}")),
+        (true, Some(raise)) => Some(format!("{NEXT_PAGE} Or {raise}")),
         (true, None) => Some(NEXT_PAGE.to_owned()),
-        (false, raise) => raise,
+        (false, Some(raise)) => Some(sentence(&raise)),
+        (false, None) => None,
     };
     ResultWarning { code: code.to_owned(), message, how_to_fetch_all }
 }
@@ -344,7 +352,7 @@ mod tests {
         assert_eq!(warning.code, "results_truncated");
         assert_eq!(warning.message, "Showing 29-56 of 90 matching blocks.");
         assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Pass nextCursor as cursor, with no other argument, to read the next page."));
-        let with_raise = paged_warning(PagedCut { raise: Some("Or set limit to 90.".into()), advice: "Narrow the filters.", ..cut(Cut::Count) });
+        let with_raise = paged_warning(PagedCut { raise: Some("set limit to 90.".into()), advice: "Narrow the filters.", ..cut(Cut::Count) });
         assert_eq!(with_raise.message, "Showing 29-56 of 90 matching blocks. Narrow the filters.");
         assert_eq!(
             with_raise.how_to_fetch_all.as_deref(),
@@ -368,7 +376,7 @@ mod tests {
     #[test]
     fn a_page_with_no_cursor_offers_only_the_raise_and_a_page_of_nothing_is_a_zero() {
         // a limit of 0: nothing is shown, no cursor can read on, and the raise is the one way
-        let warning = paged_warning(PagedCut { start: 0, kept: 0, has_next: false, raise: Some("Set limit to 5.".into()), ..cut(Cut::Count) });
+        let warning = paged_warning(PagedCut { start: 0, kept: 0, has_next: false, raise: Some("set limit to 5.".into()), ..cut(Cut::Count) });
         assert_eq!(warning.message, "Showing 0 of 90 matching blocks.");
         assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set limit to 5."));
         assert_eq!(paged_warning(PagedCut { has_next: false, ..cut(Cut::Count) }).how_to_fetch_all, None);

@@ -19,6 +19,7 @@ use crate::dates::Clock;
 use crate::instructions::SERVER_INSTRUCTIONS;
 use crate::prompts;
 use crate::resources;
+use crate::snapshots::Snapshots;
 use crate::tool::{error_result, into_result};
 use crate::tools;
 
@@ -37,11 +38,16 @@ pub struct LogseqServer {
     tips_enabled: bool,
     /// Where the tools read "now" from: the system, or the instant `LOGSEQ_MCP_NOW` fixes
     clock: Clock,
+    /// The lists the cursor tools kept for their later pages (ADR-0038): one owner, shared by every clone of the server
+    snapshots: Arc<Snapshots>,
 }
 
 impl LogseqServer {
     pub fn new(client: LogseqClient, tips_enabled: bool) -> Self {
-        LogseqServer { client: Arc::new(client), tips_enabled, clock: Clock::System }
+        // The start time is half of every snapshot key, so it is the system's, never a fixed clock's: a restarted
+        // server must not hand out a key a client still holds
+        let started = Clock::System.now_ms().max(0) as u64;
+        LogseqServer { client: Arc::new(client), tips_enabled, clock: Clock::System, snapshots: Arc::new(Snapshots::new(started)) }
     }
 
     /// The same server reading "now" from `clock`.
@@ -51,7 +57,7 @@ impl LogseqServer {
     }
 
     async fn dispatch(&self, request: CallToolRequestParams) -> CallToolResult {
-        match tools::call(request.name.as_ref(), &self.client, self.tips_enabled, self.clock, request.arguments).await {
+        match tools::call(request.name.as_ref(), &self.client, self.tips_enabled, self.clock, &self.snapshots, request.arguments).await {
             Some(outcome) => into_result(outcome),
             None => error_result(&format!("Unknown tool: {}", request.name)),
         }

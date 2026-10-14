@@ -153,8 +153,8 @@ pub enum Clock {
 }
 
 impl Clock {
-    /// Milliseconds since 1970-01-01 UTC.
-    fn now_ms(self) -> i64 {
+    /// Milliseconds since 1970-01-01 UTC. The server also reads it once at startup, for the start time its cursors carry.
+    pub fn now_ms(self) -> i64 {
         match self {
             Clock::Fixed(ms) => ms,
             Clock::System => match SystemTime::now().duration_since(UNIX_EPOCH) {

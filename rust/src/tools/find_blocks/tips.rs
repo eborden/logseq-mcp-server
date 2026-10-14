@@ -21,7 +21,7 @@ pub struct Others {
 
 /// Tips for a finished search: for a miss, a shorter word and a page-name search (when the search had a `text`) or a
 /// reminder of how the `others` match; otherwise a read of the page or topic most results are on. `matches` is
-/// `totals.matches`, which tells a real miss from `limit: 0`, which also returns nothing, and from an `offset` past the
+/// `totals.matches`, which tells a real miss from `limit: 0`, which also returns nothing, and from a cursor past the
 /// last match.
 pub fn find_tips(text: Option<&str>, others: Others, results: &[Value], matches: Option<usize>) -> Vec<String> {
     let mut tips = Vec::new();
@@ -141,7 +141,7 @@ mod tests {
             find_tips(None, three, &[], Some(0)),
             ["No match. A property value must equal the stored text, a period covers journal blocks only, and a link is a [[link]] or a #tag, not plain words, and every links_to page is needed: loosen a filter."]
         );
-        // matches that an offset skipped past are no miss
+        // matches that a cursor read past are no miss
         assert!(find_tips(None, Others::default(), &[], Some(4)).is_empty());
     }
 

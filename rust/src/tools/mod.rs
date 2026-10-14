@@ -8,6 +8,7 @@ use rmcp::model::{CallToolResult, JsonObject, Tool};
 use crate::client::LogseqClient;
 use crate::dates::Clock;
 use crate::errors::ToolError;
+use crate::snapshots::Snapshots;
 
 pub mod check_links;
 pub mod explore_context;
@@ -42,6 +43,7 @@ pub async fn call(
     client: &LogseqClient,
     tips_enabled: bool,
     clock: Clock,
+    snapshots: &Snapshots,
     arguments: Option<JsonObject>,
 ) -> Option<Result<CallToolResult, ToolError>> {
     match name {
@@ -49,7 +51,7 @@ pub async fn call(
         explore_context::NAME => Some(explore_context::call(client, tips_enabled, arguments).await),
         explore_network::NAME => Some(explore_network::call(client, tips_enabled, arguments).await),
         explore_timeline::NAME => Some(explore_timeline::call(client, tips_enabled, clock, arguments).await),
-        find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, arguments).await),
+        find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, snapshots, arguments).await),
         find_pages::NAME => Some(find_pages::call(client, tips_enabled, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
         get_current::NAME => Some(get_current::call(client, tips_enabled, arguments).await),
