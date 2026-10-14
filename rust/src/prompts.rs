@@ -254,6 +254,9 @@ pub fn resolve_month(month: Option<&str>, today: CalendarDate) -> Result<MonthRa
 const READ_ONLY_NOTE: &str =
     "The logseq_* tools only read. Show the result here; write it into the graph only if I ask and you have file access.";
 
+/// A full page longer than the character budget comes back a page of blocks at a time (ADR-0038, #552).
+const FULL_PAGE_NOTE: &str = "A long page comes back a page of blocks at a time: while hasMore is true, call again with only its nextCursor as cursor.";
+
 /// What a summary's `Signals` section may hold.
 struct SummaryBudget {
     words: &'static str,
@@ -297,7 +300,7 @@ fn build_weekly_summary(args: &Arguments, today: CalendarDate) -> Result<String,
         String::new(),
         "Steps:".to_owned(),
         format!("1. logseq_explore_timeline with start_date {start}, end_date {end} and max_blocks 200 (a bigger result can be saved to a file and never shown to you; the cut keeps the oldest days first). If the result has summary.topConcepts, use it to pick the threads to read closely. While it has a blocks_truncated or result_size_truncated warning, follow its howToFetchAll, which leads with this call: again with the same end_date, the max_blocks you last used and the start_date the warning gives (the first day not shown, or the day the cut fell inside, which repeats its kept blocks, so read it from the start). If the first day alone fills the cap, the warning names that day's block count: query that day alone at it when it is about 300 or less, then keep paging from the next day at max_blocks 200; a bigger day may come back saved, so read it in pieces with logseq_find_blocks (start_date and end_date set to that day; while its hasMore is true, call it again with only its nextCursor as cursor). If it still doesn't fit, or a result comes back saved to a file, don't open the file or raise the cap: lower it (and keep the lower cap for the pages after), or read the day in pieces with logseq_find_blocks, and say in the gist that part of that day went unread."),
-        format!(r#"2. For trend context, logseq_find_pages with text "Weekly", then logseq_get_page (detail "full") on the 2 or 3 most recent. {} Read them for trends only, not for style."#, newest_last(3)),
+        format!(r#"2. For trend context, logseq_find_pages with text "Weekly", then logseq_get_page (detail "full") on the 2 or 3 most recent. {FULL_PAGE_NOTE} {} Read them for trends only, not for style."#, newest_last(3)),
         "3. Find what is still open: look for TODO, DOING and NOW blocks in the week (and any closed since) with logseq_find_blocks. Report only items still open.".to_owned(),
         "4. Write the summary.".to_owned(),
         String::new(),
@@ -319,7 +322,7 @@ fn build_monthly_summary(args: &Arguments, today: CalendarDate) -> Result<String
         "A monthly summary diffs weeks against earlier months. Listing what happened is the failure mode.".to_owned(),
         String::new(),
         "Steps:".to_owned(),
-        format!(r#"1. logseq_find_pages with text "Weekly {month}", then logseq_get_page (detail "full") on each. If a week is missing, say so; do not invent it."#),
+        format!(r#"1. logseq_find_pages with text "Weekly {month}", then logseq_get_page (detail "full") on each. {FULL_PAGE_NOTE} If a week is missing, say so; do not invent it."#),
         format!(r#"2. logseq_find_pages with text "Monthly", then logseq_get_page on the 1 or 2 most recent, for trajectory context only. {}"#, newest_last(2)),
         format!("3. Spot-check the busiest days in the raw journal: logseq_explore_timeline with start_date {start}, end_date {end}, include_content false, top_concepts_limit 20 and max_blocks 500 for the shape (its snippets can stop early at that cap, and the first page's summary still covers the whole month), then a narrow range with content and max_blocks 200 for any day a weekly flagged. While either call has a blocks_truncated or result_size_truncated warning, follow its howToFetchAll, which leads with this call: again with the same arguments (max_blocks as you last used it) and the start_date it gives (the first day not shown, or the day the cut fell inside, which repeats its kept blocks), until a result has no warning or you have what the step needs. Say in the gist if weeks after a cut went unread. If one day alone fills the cap, the warning names that day's block count: query it alone at that count when it is about 300 or less (500 with include_content false), then keep paging from the next day. If it still doesn't fit, or a result is saved to a file, don't open the file or raise the cap: read the day in pieces with logseq_find_blocks (start_date and end_date set to that day; while its hasMore is true, call it again with only its nextCursor as cursor), and say in the gist that part of that day went unread."),
         "4. For each candidate signal, state its trajectory against earlier months in the text: escalating, improving, unchanged, resolved or new. A candidate with no trajectory gets merged or dropped.".to_owned(),
