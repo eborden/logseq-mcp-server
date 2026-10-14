@@ -170,7 +170,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Explore a page or period over time: blocks by day (group_by week or month), with summary.topConcepts. Give page (its blocks and blocks linking to it), a period (start_date + end_date, last_n days or preset), or both; a period leaves out non-journal pages.\n\n**Can't find:** text matches (logseq_find_blocks), days with no journal, or blocks past max_blocks (see hasMore).",
+    "description": "Explore a page or period over time: blocks by day (group_by week or month), with summary.topConcepts. Give page (its blocks and blocks linking to it), a period (start_date + end_date, last_n days or preset), or both; a period leaves out non-journal pages. Pages of max_blocks; hasMore: send only cursor=nextCursor.\n\n**Can't find:** text matches (logseq_find_blocks) or days with no journal.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -236,10 +236,14 @@
           "type": "boolean"
         },
         "max_blocks": {
-          "description": "Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000",
+          "description": "Page size: blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000",
           "default": 200,
           "type": "integer",
           "minimum": 0
+        },
+        "cursor": {
+          "description": "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)",
+          "type": "string"
         }
       }
     }
