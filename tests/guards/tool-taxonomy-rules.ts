@@ -68,7 +68,8 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
   logseq_get_graph: [],
   // ADR-0038 (one forward-only cursor for paging) takes `offset` off `find_blocks` and `find_pages` and adds `cursor`:
   // ADR-0037 can't carry a pointer, so its `limit` and `offset` vocabulary stays as written, and each paged tool moves to
-  // `limit` (the page size) and `cursor` in its own step (#528). `explore_context` still pages by `references_offset`.
+  // `limit` (the page size) and `cursor` in its own step (#528). `explore_context` took `cursor` and lost `references_offset` in #555:
+  // its `max_*` caps are the page size of each list, and `page` stays, optional beside a cursor (BR-0008).
   logseq_find_pages: ['text', 'names', 'property', 'value', 'limit', 'format', 'cursor'],
   logseq_find_blocks: ['text', 'page', 'links_to', 'property', 'value', ...PERIOD, 'limit', 'include_context', 'slim_results', 'cursor'],
   // `include_temporal_context` is the one toggle kept as today (#493). The ADR-0037 row says "its caps", read loosely to cover it (maintainer, #519).
@@ -77,11 +78,11 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
     'max_blocks',
     'max_related_pages',
     'max_references',
-    'references_offset',
     'include_temporal_context',
     'resolve_refs',
     'format',
     'compact',
+    'cursor',
   ],
   logseq_explore_network: ['page', 'to', 'max_depth', 'max_nodes', 'max_fanout', 'expand_journals', 'with_snippets', 'format'],
   logseq_explore_timeline: [
