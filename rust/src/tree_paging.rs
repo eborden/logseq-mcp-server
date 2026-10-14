@@ -101,7 +101,9 @@ impl Tree {
                 if !first {
                     result.remove("resolvedFrom");
                 }
-                if !pieces.is_empty() || !first {
+                // A page that has no `children` key had no blocks, or none LogSeq answered: it stays so. One that has
+                // it keeps it, empty when the tree shrank below the position, which says the page was read
+                if !pieces.is_empty() || result.contains_key("children") {
                     result.insert("children".into(), Value::Array(pieces));
                 }
             }
