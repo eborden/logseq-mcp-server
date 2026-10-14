@@ -19,7 +19,7 @@
 //! The blocks, nested ones counted, are a list the cursor reads to the end (ADR-0038, #554): `max_blocks` (default 200,
 //! at most 1000) is the page size, and a page is also cut to the character budget (#485). A cut page carries
 //! `nextCursor`, and a call with only that `cursor` reads the next page from the snapshot the first call kept (no LogSeq
-//! call) or, when it is gone, with the first page's calls. A day cut between two pages is on both with the same `date`,
+//! call, except the `resolve_refs` queries for the blocks of the page) or, when it is gone, with the first page's calls. A day cut between two pages is on both with the same `date`,
 //! and `summary` is on the first page only. A `null` answer to a lookup is not an empty one (BR-0011): the result
 //! carries a warning, never an empty list.
 //!
@@ -200,7 +200,12 @@ impl Resume {
             args.cursor.is_none() && args.last_n.is_none() && args.preset.is_none() && (args.page.is_some() || args.start_date.is_some())
         });
         let args = args.ok_or_else(|| invalid(token, NAME, "its arguments are not a timeline this tool reads"))?;
-        let newest_first = cursor.args.get("newest_first").and_then(Value::as_bool).unwrap_or(false);
+        // Present, it is a bool: a token whose order is not one is refused, never read as the other order
+        let newest_first = match cursor.args.get("newest_first") {
+            None => false,
+            Some(Value::Bool(newest)) => *newest,
+            Some(_) => return Err(invalid(token, NAME, "its arguments are not a timeline this tool reads")),
+        };
         let anchor = cursor.anchor.clone();
         Ok((args, Resume { cursor, at, anchor, newest_first, token: token.to_owned() }))
     }
@@ -407,7 +412,7 @@ fn entries_value(entries: &[Entry], args: &Args) -> Vec<Value> {
 }
 
 /// What a first call reads, before it is cut into pages: every entry, and what the result says besides them. It is what
-/// a snapshot keeps, so the pages after the first need no LogSeq call (ADR-0038).
+/// a snapshot keeps, so the pages after the first need no LogSeq call to read the list (ADR-0038; `resolve_refs` still queries for the blocks of the page).
 struct Timeline {
     /// Every entry, before any cut: days oldest first (newest first for `last_n` with no page), the undated one last
     entries: Vec<Entry>,
@@ -499,7 +504,7 @@ async fn read_timeline(client: &LogseqClient, args: &Args, period: Option<Period
     Ok(Timeline { entries, keys, warnings, answered, date_range, summary: Value::Object(summary), top_concept })
 }
 
-/// One page of the timeline: the list from the snapshot a cursor names (no LogSeq call) or from [`read_timeline`], where
+/// One page of the timeline: the list from the snapshot a cursor names (no LogSeq call to read the list) or from [`read_timeline`], where
 /// the page starts (with `cursor_stale` when the list moved between pages), the most blocks of the `max_blocks` that fit
 /// the character budget (never fewer than one, BR-0007), and the result with its `nextCursor`.
 ///
@@ -559,8 +564,9 @@ async fn read_page(client: &LogseqClient, snapshots: &Snapshots, args: &Args, re
     }
 
     let first = resume.is_none();
-    // A warning of the read itself (a ref past the depth limit) may offer a way of its own to fetch what it left out
-    let offered = timeline.warnings.iter().chain(&resolved_warnings).any(|warning| warning.how_to_fetch_all.is_some());
+    // A warning of this page's `resolve_refs` (a ref past the depth limit) may offer a way of its own to fetch what it left
+    // out. The warnings the list was read with offer none, so a last page is `hasMore` only for what it resolved itself
+    let offered = resolved_warnings.iter().any(|warning| warning.how_to_fetch_all.is_some());
     let words = Words { nested, newest_first, requested: args.max_blocks };
     // The text of the page with its first `kept` blocks, ending as `cut` says
     let text_for = |kept: usize, cut: Option<Cut>| -> String {
