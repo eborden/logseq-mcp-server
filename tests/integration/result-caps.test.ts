@@ -51,6 +51,7 @@ import { connectMcp } from './helpers/server-under-test.js';
 
 interface Meta {
   hasMore: boolean;
+  nextCursor?: string;
   warnings: Array<{ code: string; message: string; howToFetchAll?: string }>;
   totals?: Record<string, number>;
 }
@@ -117,35 +118,54 @@ describe('result caps (#61)', () => {
       ).toBeLessThan(MAX_SEARCH_LIMIT);
     });
 
-    it('the default cuts below the maximum and offers the raise that fits the character budget, which returns that many hits', async () => {
+    it('the default cuts at the limit and leads with the cursor, which reads on, and offers the raise beside it', async () => {
       const { results, meta } = await search();
 
       expect(results).toHaveLength(DEFAULT_SEARCH_LIMIT);
       expect(meta.totals).toEqual({ matches });
       expect(meta.warnings.map(w => w.code)).toEqual(['results_truncated']);
-      // Every match is ~60,000 characters (#506), so "get all" would be cut: the next page leads, and the raise offered
-      // is the most that fits. hasMore is true because a parameter really fetches that many
-      const sizeCut = (await search(MAX_SEARCH_LIMIT)).results.length;
-      expect(sizeCut).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
-      expect(sizeCut).toBeLessThan(matches);
+      // The cursor leads (ADR-0038), and hasMore is true because it is there. The raise is the alternative: every match,
+      // which is past the character budget (#506), so what it returns is cut again with a cursor of its own
       expect(meta.hasMore).toBe(true);
-      const how = meta.warnings[0].howToFetchAll!;
-      expect(how).toMatch(new RegExp(`^Set offset to ${DEFAULT_SEARCH_LIMIT} for the next page\\. Or set limit to \\d+ to get \\d+ of ${matches}\\.`));
-      expect(how).not.toMatch(/get all/);
+      expect(meta.nextCursor).toEqual(expect.any(String));
+      expect(meta.warnings[0].message).toBe(`Showing 1-${DEFAULT_SEARCH_LIMIT} of ${matches} matching blocks.`);
+      expect(meta.warnings[0].howToFetchAll).toBe(
+        `Pass nextCursor as cursor, with no other argument, to read the next page. Or set limit to ${matches} for a larger page (a result holds at most 30000 characters).`
+      );
       expectNoSuggestionPast(meta, 'limit', MAX_SEARCH_LIMIT);
-      // The size cut's own warning is longer than a limit cut's, so it keeps a hit or two fewer than the raise offered
-      const fitting = Number(how.match(/Or set limit to (\d+) to get/)![1]);
-      expect(fitting).toBeGreaterThanOrEqual(sizeCut);
-      expect(fitting).toBeLessThanOrEqual(sizeCut + 3);
 
-      // Following it returns that many hits with no size cut, and the next limit up is cut back to about the same count
-      const raised = await search(fitting);
-      expect(raised.results).toHaveLength(fitting);
-      expect(raised.meta.warnings.map(w => w.code)).not.toContain('result_size_truncated');
-      const beyond = await search(fitting + 1);
-      expect(beyond.results.length).toBeLessThanOrEqual(fitting);
-      expect(beyond.results.length).toBeGreaterThanOrEqual(fitting - 3);
-      expect(beyond.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
+      const raised = await search(matches);
+      expect(raised.results.length).toBeGreaterThan(DEFAULT_SEARCH_LIMIT);
+      expect(raised.results.length).toBeLessThan(matches);
+      expect(raised.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
+      expect(raised.meta.hasMore).toBe(true);
+      expect(raised.meta.nextCursor).toEqual(expect.any(String));
+    });
+
+    it('reads every match once through the cursor, newest first, in pages that each fit the character budget', { timeout: 120_000 }, async () => {
+      let page = await search(MAX_SEARCH_LIMIT);
+      const uuids: string[] = [];
+      let pages = 0;
+      for (;;) {
+        expect([...page.text].length + [...page.metaText].length, `page ${pages + 1} fits the budget`).toBeLessThanOrEqual(30000);
+        uuids.push(...(page.results as Array<{ uuid: string }>).map(block => block.uuid));
+        pages += 1;
+        if (!page.meta.nextCursor) break;
+        expect(page.meta.hasMore).toBe(true);
+        const next = await call('logseq_find_blocks', { cursor: page.meta.nextCursor });
+        page = {
+          text: next.content[0].text,
+          metaText: next.content[1].text,
+          results: JSON.parse(next.content[0].text) as unknown[],
+          meta: (JSON.parse(next.content[1].text) as { meta: Meta }).meta,
+        };
+        expect(page.meta.totals, 'every page counts every match').toEqual({ matches });
+      }
+      expect(pages).toBeGreaterThan(2);
+      expect(uuids).toHaveLength(matches);
+      expect(new Set(uuids).size, 'no block is on two pages').toBe(matches);
+      expect(page.meta.hasMore, 'the last page is whole').toBe(false);
+      expect(page.meta.warnings).toEqual([]);
     });
 
     it('the maximum asks for every match, the character budget cuts it, and a limit above it clamps to the same blocks', async () => {
@@ -153,8 +173,8 @@ describe('result caps (#61)', () => {
       const above = await search(1000);
 
       // The count cap cuts nothing here (matches < 500). Every match is ~60,000 characters, past the budget (#506),
-      // so the one cut is the size cut: it says so alone, names the total, offers no larger limit, and names the next
-      // page, so hasMore is true
+      // so the one cut is the size cut: it says so alone, names the total, offers no larger limit, and leads with the
+      // cursor, so hasMore is true
       const sent = [...atMax.text].length + [...atMax.metaText].length;
       expect(sent, 'the budget is in characters').toBeLessThanOrEqual(30000);
       // ...and it keeps what fits: a regression that over-cuts keeps far fewer than the ~160 hits of 30,000 characters
@@ -162,10 +182,17 @@ describe('result caps (#61)', () => {
       expect(atMax.results.length).toBeLessThan(matches);
       expect(atMax.meta).toMatchObject({ hasMore: true, totals: { matches } });
       expect(atMax.meta.warnings.map(w => w.code)).toEqual(['result_size_truncated']);
-      expect(atMax.meta.warnings[0].howToFetchAll).toBe(`Set offset to ${atMax.results.length} for the next page.`);
-      expect(atMax.meta.warnings[0].message).toMatch(new RegExp(`^Showing ${atMax.results.length} of ${matches} matching blocks`));
+      expect(atMax.meta.warnings[0].howToFetchAll).toBe('Pass nextCursor as cursor, with no other argument, to read the next page.');
+      expect(atMax.meta.warnings[0].message).toMatch(new RegExp(`^Showing 1-${atMax.results.length} of ${matches} matching blocks`));
+      expect(atMax.meta.nextCursor).toEqual(expect.any(String));
       expect(above.text).toBe(atMax.text);
-      expect(above.meta).toEqual(atMax.meta);
+      // the same page, and a cursor that says the same: it differs only in the snapshot it names
+      const saying = (cursor: string) => {
+        const { snapshot, ...rest } = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+        expect(snapshot).toEqual({ started: expect.any(Number), n: expect.any(Number) });
+        return rest;
+      };
+      expect({ ...above.meta, nextCursor: saying(above.meta.nextCursor!) }).toEqual({ ...atMax.meta, nextCursor: saying(atMax.meta.nextCursor!) });
     });
   });
 
@@ -695,15 +722,17 @@ describe('result caps (#61)', () => {
         }
         expect(body.meta.warnings!.map(w => w.code), label).toEqual(['results_truncated']);
         expect(body.meta.totals, label).toEqual({ matches: total });
-        // The next page leads, and the raise is the alternative; with nothing shown there is no next page
-        expect(body.meta.hasMore, label).toBe(true);
+        // The cursor leads, and the raise is the alternative; with nothing shown there is no cursor to read on with, so
+        // hasMore is false and the raise is the one way
+        const raise = `set limit to ${total} for a larger page (a result holds at most 30000 characters).`;
+        expect(body.meta.hasMore, label).toBe(limit > 0);
         expect(body.meta.warnings![0].howToFetchAll, label).toBe(
           limit === 0
-            ? `Set limit to ${total} (or higher) to get all ${total}.`
-            : `Set offset to ${limit} for the next page. Or set limit to ${total} (or higher) to get all ${total} in one call.`
+            ? `S${raise.slice(1)}`
+            : `Pass nextCursor as cursor, with no other argument, to read the next page. Or ${raise}`
         );
         expectNoSuggestionPast(body.meta as Meta, 'limit', MAX_PROPERTY_LIMIT);
-        expect(body.meta.warnings![0].message, label).toContain(`Showing ${limit} of ${total} matching blocks`);
+        expect(body.meta.warnings![0].message, label).toContain(`Showing ${limit === 1 ? '1' : limit === 0 ? '0' : `1-${limit}`} of ${total} matching blocks`);
       }
     });
   });
