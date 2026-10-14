@@ -207,8 +207,8 @@ Expected results, measured against a live instance (#118) with the code at the t
 
 | Call | Result |
 |---|---|
-| `explore_network` depth 1, defaults | 16 nodes (root + 15), exactly `neighbour-both-01..10` and `neighbour-in-01..05` (the only pages with 2 references, 15 of them, equal to `max_fanout`), `truncated` and `hasMore` true, one `network_truncated` warning |
-| `explore_network` depth 2, defaults | 50 nodes (1 + 15 + 34 `fringe-*`), `truncated` true. The `max_nodes` cap bites, the 15 kept pages reach all 40 fringe pages |
+| `explore_network` depth 1, defaults | 16 nodes (root + 15), exactly `neighbour-both-01..10` and `neighbour-in-01..05` (the only pages with 2 references, 15 of them, equal to `max_fanout`), `truncated` true, `hasMore` false (no cursor: the walk fits a page), one `network_truncated` warning that offers a higher `max_fanout` (#556) |
+| `explore_network` depth 2, defaults | page 1: 50 nodes (1 + 15 + 34 `fringe-*`), `truncated` true, `hasMore` true and a `nextCursor` to the last 6 `fringe-*` pages (the walk has 56, `max_nodes` is the page size, #556). The 15 kept pages reach all 40 fringe pages |
 | depth 1, `max_nodes` 500, `max_fanout` 100 (the most an MCP client can ask for) | 101 nodes (the fanout cap keeps 100 of 121 candidates), `truncated` true. The journal ranks last, so it is dropped |
 | depth 1, `maxNodes` 500, `maxFanout` `Infinity` (library call only) | 122 nodes (the hub, 120 neighbours, the journal), `truncated` false. The journal is a depth-1 node |
 | depth 2, same caps | 162 nodes (+40 `fringe-*`). The journal is a leaf: its 30 topics are not reached |
