@@ -172,6 +172,23 @@ describe('each taxonomy rule can fail', () => {
     expect(taxonomyViolations([tool], [conforming.name], allowed)).toEqual([expect.stringContaining('already conforms')]);
   });
 
+  // #539: each call site of toolViolations in taxonomyViolations has to pass the injected list. The default list lacks
+  // `sort_by` on logseq_find_pages, so a call that dropped the argument would read the default and report it.
+  describe('both call sites pass the injected allowed list', () => {
+    const tool = { ...conforming, inputSchema: { properties: { text: {}, sort_by: {} } } };
+    const injected = { [conforming.name]: ['text', 'sort_by'] };
+
+    it('the check of a tool that is not allowlisted reads the injected list', () => {
+      expect(violations(tool), 'the default list does not allow sort_by').not.toEqual([]);
+      expect(taxonomyViolations([tool], [], injected)).toEqual([]);
+    });
+
+    it('the stale check of an allowlisted tool reads the injected list', () => {
+      expect(taxonomyViolations([tool], [conforming.name])).toEqual([]);
+      expect(taxonomyViolations([tool], [conforming.name], injected)).toEqual([expect.stringContaining('already conforms')]);
+    });
+  });
+
   it('fails a stale allowance', () => {
     expect(taxonomyViolations([conforming], ['logseq_get_concept_evolution'])).toEqual([
       expect.stringContaining('V1_TOOL_ALLOWANCES lists logseq_get_concept_evolution'),
