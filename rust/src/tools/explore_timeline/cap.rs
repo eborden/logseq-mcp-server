@@ -115,7 +115,7 @@ impl Words {
     /// cursor reads on (the warning's `howToFetchAll` names it).
     pub fn advice(&self, size_cut: bool) -> String {
         let continues = if self.nested {
-            "A day cut between two pages is on both with the same date, and a block that starts a page under another block names it in ancestors."
+            "A day cut between two pages is on both with the same date, a block marked childrenTruncated lost children that the next page starts with, and a block that starts a page under another block names it in ancestors."
         } else {
             "A day cut between two pages is on both with the same date."
         };
@@ -255,7 +255,8 @@ mod tests {
         assert_eq!(words.what(), "blocks (nested ones counted; oldest day first)");
         let newest = Words { nested: false, newest_first: true, requested: 200 };
         assert_eq!(newest.what(), "blocks (top-level only; newest day first)");
-        assert!(words.advice(false).contains("names it in ancestors") && !newest.advice(false).contains("ancestors"));
+        assert!(words.advice(false).contains("names it in ancestors") && words.advice(false).contains("childrenTruncated"));
+        assert!(!newest.advice(false).contains("ancestors") && !newest.advice(false).contains("childrenTruncated"));
         assert!(words.advice(true).contains("No parameter raises the size limit."));
         assert!(Words { requested: 5000, ..words }.advice(false).contains("capped at its maximum of 1000"));
     }
