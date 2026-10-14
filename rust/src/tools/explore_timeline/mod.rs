@@ -16,13 +16,16 @@
 //! when no page is given, as `query_by_date_range` did for its N most recent journals; with a page the entries are
 //! always oldest first. `group_by` week or month joins the entries of a week or month into one, after the cuts.
 //!
-//! The blocks are cut by `max_blocks` (nested ones counted, the entries in order, `cap.rs`) and then to the character
-//! budget (#485); a raise of `max_blocks` is offered only where the raised result fits. A `null` answer to a lookup is
-//! not an empty one (BR-0011): the result carries a warning, never an empty list.
+//! The blocks, nested ones counted, are a list the cursor reads to the end (ADR-0038, #554): `max_blocks` (default 200,
+//! at most 1000) is the page size, and a page is also cut to the character budget (#485). A cut page carries
+//! `nextCursor`, and a call with only that `cursor` reads the next page from the snapshot the first call kept (no LogSeq
+//! call) or, when it is gone, with the first page's calls. A day cut between two pages is on both with the same `date`,
+//! and `summary` is on the first page only. A `null` answer to a lookup is not an empty one (BR-0011): the result
+//! carries a warning, never an empty list.
 //!
 //! The directory holds what only this tool uses: its queries, the answers it reads, the two ways to fetch the days
-//! (`journals.rs`, `mentions.rs`), the day and week arithmetic (`days.rs`), the roll-up of top concepts, the `max_blocks`
-//! cut and its warnings, and its tip. What it shares is outside: the period (`period`), the date presets and clock
+//! (`journals.rs`, `mentions.rs`), the day and week arithmetic (`days.rs`), the roll-up of top concepts, the pages of
+//! blocks and the words of their warning (`cap.rs`), and its tip. What it shares is outside: the period (`period`), the date presets and clock
 //! (`dates`), the block budget (`block_budget`), the block trees (`block_tree`), the alias groups, the page resolver,
 //! `resolve_refs`, slim output and `ResultMeta`.
 
@@ -36,6 +39,7 @@ mod top_concepts;
 mod wire;
 
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
@@ -44,21 +48,24 @@ use serde_json::{Map, Value};
 
 use crate::args::{YyyyMmDd, parse_args};
 use crate::block_budget::count_blocks;
-use crate::budget::size;
 use crate::client::LogseqClient;
+use crate::cursor::{Anchor, Cursor, Position, decode, encode, invalid};
 use crate::dates::{CalendarDate, Clock, DatePreset};
 use crate::entity::page_display_name;
 use crate::errors::{InvalidParameter, ToolError};
 use crate::meta::ResultWarning;
+use crate::paging::{Cut, PagedCut, page_of, paged_warning, refuse_with_cursor, resume_at, serve, stale_warning};
 use crate::period::{Period, Selection, resolve_period};
 use crate::resolve_refs::resolve_block_refs;
 use crate::slim::{DEFAULT_SLIM_RESULTS, to_slim_block};
+use crate::snapshots::{Snapshots, resident_weight};
 use crate::snippet::{first_chars, first_non_blank_line};
 use crate::tips::tips_content;
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tool::{CursorSchema, input_schema, read_only_annotations, success_result};
 use crate::tools::find_blocks::scope::check_names;
+use crate::budget::size;
 
-use self::cap::{BlockCut, MAX_BLOCKS, Raises, TruncationOptions, blocks_truncated, cap_entries, day_count, fits_with_margin, write_within_budget};
+use self::cap::{MAX_BLOCKS, Words, day_count, keys_of, slice_entries};
 use self::days::period_key;
 use self::tips::date_range_tips;
 use self::top_concepts::{ConceptRef, DEFAULT_TOP_CONCEPTS_LIMIT, concept_value, roll_up_top_concepts};
@@ -69,8 +76,8 @@ pub use self::days::GroupBy;
 pub const NAME: &str = "logseq_explore_timeline";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Explore a page or period over time: blocks by day (group_by week or month), with summary.topConcepts. Give page (its blocks and blocks linking to it), a period (start_date + end_date, last_n days or preset), or both; a period leaves out non-journal pages.\n\n\
-**Can't find:** text matches (logseq_find_blocks), days with no journal, or blocks past max_blocks (see hasMore).";
+const DESCRIPTION: &str = "Explore a page or period over time: blocks by day (group_by week or month), with summary.topConcepts. Give page (its blocks and blocks linking to it), a period (start_date + end_date, last_n days or preset), or both; a period leaves out non-journal pages. Pages of max_blocks; hasMore: send only cursor=nextCursor.\n\n\
+**Can't find:** text matches (logseq_find_blocks) or days with no journal.";
 
 /// Longest first-line snippet of the outline, in characters (code points), ellipsis included.
 const SNIPPET_LENGTH: usize = 80;
@@ -124,9 +131,12 @@ pub struct Args {
     /// Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)
     #[serde(default)]
     pub resolve_refs: bool,
-    /// Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000
+    /// Page size: blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000
     #[serde(default = "default_max_blocks")]
     pub max_blocks: u64,
+    // No doc comment: the shared description is the type's (`CursorSchema`), and a doc comment would replace it
+    #[schemars(with = "Option<CursorSchema>")]
+    pub cursor: Option<String>,
 }
 
 /// A count a `u32` holds: a larger one is as good as the largest, since `last_n` only ever counts back that many days.
@@ -141,10 +151,21 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Explore Timeline"))
 }
 
-/// A call: arguments read, the timeline, then the tip.
-pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = parse_args::<Args>(arguments.as_ref())?;
-    let result = explore_timeline(client, &args, clock.today()).await?;
+/// A call: arguments read, a page of the timeline, then the tip.
+///
+/// A call with a `cursor` takes no other argument: they are in the token (ADR-0038). It reads the next page of the
+/// blocks a first call listed, from the snapshot that call kept or, when it is gone, with the calls the first page made.
+pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, snapshots: &Snapshots, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
+    let asked = parse_args::<Args>(arguments.as_ref())?;
+    let (args, resume) = match asked.cursor.clone() {
+        Some(token) => {
+            refuse_with_cursor::<Args>(arguments.as_ref())?;
+            let (args, resume) = Resume::read(&token)?;
+            (args, Some(resume))
+        }
+        None => (asked, None),
+    };
+    let result = read_page(client, snapshots, &args, resume.as_ref(), clock.today(), Instant::now()).await?;
     let mut content = vec![ContentBlock::text(result.json)];
     if tips_enabled {
         if let Some(tips) = tips_content(&date_range_tips(result.top_concept.as_deref())) {
@@ -152,6 +173,65 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, argum
         }
     }
     Ok(success_result(content))
+}
+
+/// What a cursor says about where to read on, decoded and checked against this tool: the index of the first block of the
+/// next page and the key of the last one the page before sent. The arguments come back as [`Args`], parsed again like
+/// any other (ADR-0038: nothing in a token is trusted).
+struct Resume {
+    cursor: Cursor,
+    /// The place of the first block of the next page, in the list as the first call read it
+    at: usize,
+    anchor: Anchor,
+    /// The list is newest day first (`last_n` with no page), which the dates a token stores can't say
+    newest_first: bool,
+    /// The token as sent, for a refusal
+    token: String,
+}
+
+impl Resume {
+    fn read(token: &str) -> Result<(Args, Resume), InvalidParameter> {
+        let cursor = decode(token, NAME)?;
+        let Position::Index { at } = cursor.position else {
+            return Err(invalid(token, NAME, "this is not a cursor of this tool: its position is not one block"));
+        };
+        // A token holds the period as dates, a page or both, and no cursor of its own
+        let args = parse_args::<Args>(Some(&cursor.args)).ok().filter(|args| {
+            args.cursor.is_none() && args.last_n.is_none() && args.preset.is_none() && (args.page.is_some() || args.start_date.is_some())
+        });
+        let args = args.ok_or_else(|| invalid(token, NAME, "its arguments are not a timeline this tool reads"))?;
+        let newest_first = cursor.args.get("newest_first").and_then(Value::as_bool).unwrap_or(false);
+        let anchor = cursor.anchor.clone();
+        Ok((args, Resume { cursor, at, anchor, newest_first, token: token.to_owned() }))
+    }
+
+    /// A token whose arguments no longer make a timeline: the same refusal as one that doesn't parse.
+    fn refuse(&self, reason: &str) -> InvalidParameter {
+        invalid(&self.token, NAME, reason)
+    }
+}
+
+/// The arguments of a timeline as a cursor carries them: what the call asked, with a `last_n` or a preset as the dates it
+/// meant (so a page read again after midnight reads the same days), and the order `last_n` lists in. Read again by [`Args`].
+/// What is the default is left out, and `max_blocks` is stored as the page size that is read.
+fn stored_arguments(args: &Args, period: Option<Period>, newest_first: bool) -> Map<String, Value> {
+    let mut stored = Map::new();
+    let mut put = |key: &str, value: Option<Value>| {
+        if let Some(value) = value {
+            stored.insert(key.to_owned(), value);
+        }
+    };
+    put("page", args.page.as_ref().map(|page| Value::from(page.as_str())));
+    put("start_date", period.map(|period| Value::from(period.start)));
+    put("end_date", period.map(|period| Value::from(period.end)));
+    put("group_by", args.group_by.map(|group| Value::from(match group { GroupBy::Day => "day", GroupBy::Week => "week", GroupBy::Month => "month" })));
+    put("slim_results", (!args.slim_results).then_some(Value::Bool(false)));
+    put("include_content", (!args.include_content).then_some(Value::Bool(false)));
+    put("top_concepts_limit", (args.top_concepts_limit != u64::from(DEFAULT_TOP_CONCEPTS_LIMIT)).then(|| Value::from(args.top_concepts_limit)));
+    put("resolve_refs", args.resolve_refs.then_some(Value::Bool(true)));
+    put("max_blocks", (args.max_blocks != DEFAULT_MAX_BLOCKS).then(|| Value::from(args.max_blocks.min(MAX_BLOCKS as u64))));
+    put("newest_first", newest_first.then_some(Value::Bool(true)));
+    stored
 }
 
 /// One entry of a result: a journal day (its date, its page and the blocks on it as trees), or the blocks that have no
@@ -203,14 +283,14 @@ fn snippet_of(block: &Value) -> String {
     }
 }
 
-/// `{"hasMore":..,"warnings":[..],"totals":{..}}` as keys of the result: `hasMore` is true when any
-/// warning offers a way to fetch the rest, and `totals` (what there was before a cut) comes only
-/// with a cut.
-fn meta_parts(warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> Vec<(&'static str, Value)> {
-    let mut parts = vec![
-        ("hasMore", Value::Bool(warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()))),
-        ("warnings", serde_json::to_value(warnings).expect("warnings serialize")),
-    ];
+/// `hasMore`, `nextCursor` and `warnings` as keys of the result, then `totals` (what there was before a cut, only with a
+/// cut): `hasMore` is true when a `nextCursor` reads on, or any warning offers a way to fetch the rest (BR-0013).
+fn meta_parts(warnings: &[ResultWarning], next: Option<&str>, totals: Option<(usize, usize)>) -> Vec<(&'static str, Value)> {
+    let mut parts = vec![("hasMore", Value::Bool(next.is_some() || warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())))];
+    if let Some(next) = next {
+        parts.push(("nextCursor", Value::from(next)));
+    }
+    parts.push(("warnings", serde_json::to_value(warnings).expect("warnings serialize")));
     if let Some((blocks, days)) = totals {
         parts.push(("totals", Value::Object(Map::from_iter([("blocks".to_owned(), Value::from(blocks)), ("days".to_owned(), Value::from(days))]))));
     }
@@ -325,129 +405,194 @@ fn entries_value(entries: &[Entry], args: &Args) -> Vec<Value> {
         .collect()
 }
 
-/// What the result writes besides its entries and its meta: the keys of what was answered, and the range and summary.
-struct Frame {
+/// What a first call reads, before it is cut into pages: every entry, and what the result says besides them. It is what
+/// a snapshot keeps, so the pages after the first need no LogSeq call (ADR-0038).
+struct Timeline {
+    /// Every entry, before any cut: days oldest first (newest first for `last_n` with no page), the undated one last
+    entries: Vec<Entry>,
+    /// The key of each block of the list the cursor reads, in its order
+    keys: Vec<Anchor>,
+    /// The alias group's warnings, then the ones for a `null` answer: every page repeats them
+    warnings: Vec<ResultWarning>,
+    /// What the server worked out from the request, as keys of the result: `page`, `resolvedFrom`, `resolvedAliases`
     answered: Vec<(&'static str, Value)>,
     date_range: Option<Value>,
+    /// `totalDays`, `totalBlocks` and `topConcepts` of every block found, which the first page carries (#61)
     summary: Value,
+    /// `summary.topConcepts[0].name`
+    top_concept: Option<String>,
 }
 
-/// The text of the result for some entries, the warnings and the `totals`, which the character budget measures (#485).
-/// The meta comes only with something to say, so output below the cap is unchanged; resolving refs always brings it.
-fn write(frame: &Frame, args: &Args, entries: &[Entry], warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> String {
+impl Timeline {
+    /// What the snapshot weighs for the cache's bounds: the length of the JSON of the blocks, scaled to the memory a list
+    /// of `Value`s takes ([`resident_weight`]).
+    fn weight(&self) -> usize {
+        let json_len: usize = self.entries.iter().flat_map(|entry| entry.blocks.iter()).map(|block| block.to_string().len()).sum();
+        resident_weight(json_len)
+    }
+}
+
+/// The text of one page of the result: what was answered and the range, the meta (`hasMore`, `nextCursor`, `warnings`,
+/// `totals`) when there is something to say, the `summary` on the first page only, then the entries (BR-0013). The meta
+/// comes only with something to say, so a result that fits one page is unchanged; resolving refs always brings it.
+fn write(timeline: &Timeline, args: &Args, first: bool, entries: &[Entry], warnings: &[ResultWarning], next: Option<&str>, totals: Option<(usize, usize)>) -> String {
     let always_meta = args.include_content && args.resolve_refs;
-    let mut parts: Vec<(&str, Value)> = frame.answered.iter().map(|(key, value)| (*key, value.clone())).collect();
-    if let Some(range) = &frame.date_range {
+    let mut parts: Vec<(&str, Value)> = timeline.answered.iter().map(|(key, value)| (*key, value.clone())).collect();
+    if let Some(range) = &timeline.date_range {
         parts.push(("dateRange", range.clone()));
     }
-    if always_meta || !warnings.is_empty() {
-        parts.extend(meta_parts(warnings, totals));
+    if always_meta || !warnings.is_empty() || next.is_some() {
+        parts.extend(meta_parts(warnings, next, totals));
     }
-    parts.push(("summary", frame.summary.clone()));
+    if first {
+        parts.push(("summary", timeline.summary.clone()));
+    }
     parts.push(("entries", Value::Array(entries_value(entries, args))));
     object_of(parts).to_string()
 }
 
 /// Explore a page or a period over time: a period alone gives the journal days in it, a page the days its blocks and
-/// the blocks that link to it are on, and both the page's days inside the period.
+/// the blocks that link to it are on, and both the page's days inside the period. This is the first page of the result,
+/// read without the cursor's snapshots; [`call`] is the tool.
 ///
 /// Fails with [`ToolError::InvalidParameter`] if neither is given, the period is missing, ambiguous or invalid, or the
 /// page name is blank, before any LogSeq call is made. A page that is missing or ambiguous fails with
 /// [`ToolError::PageNotFound`] or [`ToolError::AmbiguousPage`]. `today` is the local calendar day a `last_n` or a preset
 /// counts from.
 pub async fn explore_timeline(client: &LogseqClient, args: &Args, today: CalendarDate) -> Result<TimelineResult, ToolError> {
-    let selection = Selection {
-        start_date: args.start_date.map(|day| day.0),
-        end_date: args.end_date.map(|day| day.0),
-        last_n: args.last_n.map(saturate),
-        preset: args.preset,
-    };
-    let period = resolve_period(selection, today)?;
-    let page = args.page.as_deref();
-    check_names(page, None)?;
-    if page.is_none() && period.is_none() {
-        return Err(nothing_asked().into());
-    }
+    read_page(client, &Snapshots::new(0), args, None, today, Instant::now()).await
+}
 
-    // `last_n` with no page lists the newest days first, so a cap keeps the most recent
-    let newest_first = page.is_none() && args.last_n.is_some();
+/// Everything a first call reads, with the calls it has always made: the page resolved, then its blocks and mentions, or
+/// the journal days of the period. The summary describes every block found (#61), so a cut result still shows what it was
+/// about.
+async fn read_timeline(client: &LogseqClient, args: &Args, period: Option<Period>, newest_first: bool) -> Result<Timeline, ToolError> {
+    let page = args.page.as_deref();
     let found = match (page, period) {
         (Some(name), period) => mentions::fetch(client, name, period, args.top_concepts_limit > 0).await?,
         (None, Some(period)) => journals::fetch(client, period, newest_first).await?,
-        (None, None) => unreachable!("a call with neither a page nor a period was refused above"),
+        (None, None) => unreachable!("a call with neither a page nor a period was refused before"),
     };
-    let Found { entries: all_entries, mut refs_by_block, warnings: found_warnings, answered, span, group } = found;
+    let Found { entries, mut refs_by_block, warnings, answered, span, group } = found;
 
     // The days the result covers: the period, or for a page with no period the span of its dated blocks
     let range = period.map(|Period { start, end }| (start, end)).or(span);
     let date_range = range.map(|(start, end)| object_of(vec![("start", Value::from(start)), ("end", Value::from(end))]));
-    let (range_start, range_end) = range.unwrap_or((0, 0));
 
-    // The summary describes every block found, cut or not (#61), so a cut result still shows what it was about
-    let total_blocks: usize = all_entries.iter().map(|entry| entry.blocks.len()).sum();
+    let total_blocks: usize = entries.iter().map(|entry| entry.blocks.len()).sum();
     let mut summary = Map::new();
-    summary.insert("totalDays".to_owned(), Value::from(day_count(&all_entries)));
+    summary.insert("totalDays".to_owned(), Value::from(day_count(&entries)));
     summary.insert("totalBlocks".to_owned(), Value::from(total_blocks));
     let top = if args.top_concepts_limit > 0 {
         for concepts in refs_by_block.values_mut() {
             concepts.retain(|concept| !group.contains(&concept.id));
         }
-        let top = roll_up_top_concepts(all_entries.iter().map(|entry| (entry.date, entry.blocks.as_slice())), &refs_by_block, args.top_concepts_limit);
+        let top = roll_up_top_concepts(entries.iter().map(|entry| (entry.date, entry.blocks.as_slice())), &refs_by_block, args.top_concepts_limit);
         summary.insert("topConcepts".to_owned(), Value::Array(top.iter().map(concept_value).collect()));
         top
     } else {
         Vec::new()
     };
     let top_concept = top.first().map(|concept| concept.name.clone());
-    let frame = Frame { answered, date_range, summary: Value::Object(summary) };
+    let keys = keys_of(&entries, args.include_content);
+    Ok(Timeline { entries, keys, warnings, answered, date_range, summary: Value::Object(summary), top_concept })
+}
 
-    let options = TruncationOptions {
-        nested: args.include_content,
-        newest_first,
-        start: range_start,
-        end: range_end,
-        requested: args.max_blocks,
-        with_page: page.is_some(),
-        // a period leaves out the mentions on non-journal pages, so there are none to lose
-        has_undated: period.is_none() && all_entries.iter().any(|entry| entry.date.is_none() && !entry.blocks.is_empty()),
+/// One page of the timeline: the list from the snapshot a cursor names (no LogSeq call) or from [`read_timeline`], where
+/// the page starts (with `cursor_stale` when the list moved between pages), the most blocks of the `max_blocks` that fit
+/// the character budget (never fewer than one, BR-0007), and the result with its `nextCursor`.
+///
+/// `resolve_refs` runs over the blocks of the page only, so a page costs at most the 2 queries it always did. The
+/// token carries the arguments, and the snapshot is served only to a call whose arguments equal them.
+async fn read_page(client: &LogseqClient, snapshots: &Snapshots, args: &Args, resume: Option<&Resume>, today: CalendarDate, now: Instant) -> Result<TimelineResult, ToolError> {
+    // A token whose arguments no longer make a timeline is a bad token, whatever the arguments say
+    let refuse = |error: InvalidParameter| match resume {
+        Some(resume) => resume.refuse("its arguments are not a timeline this tool reads"),
+        None => error,
     };
-
-    // Cap the blocks (#61) on data already fetched, so it adds no API call. At or below the cap
-    // nothing changes. What comes after (resolving refs, slimming) sees only the kept blocks.
-    let cap = args.max_blocks.min(MAX_BLOCKS as u64) as usize;
-    let cut: Option<BlockCut> = cap_entries(&all_entries, cap, args.include_content);
-    let mut warnings: Vec<ResultWarning> = found_warnings;
-    if let Some(cut) = &cut {
-        // Whether a raise of `max_blocks` would fit the character budget, measured on the entries before the cap
-        let fits = |raised: &[Entry]| fits_with_margin(size(&write(&frame, args, raised, &warnings, None)));
-        let raises = Raises { all: &all_entries, nested: args.include_content, fits: &fits };
-        let warning = blocks_truncated(cut, cap, &options, &raises);
-        warnings.push(warning);
+    let selection = Selection {
+        start_date: args.start_date.map(|day| day.0),
+        end_date: args.end_date.map(|day| day.0),
+        last_n: args.last_n.map(saturate),
+        preset: args.preset,
+    };
+    let period = resolve_period(selection, today).map_err(refuse)?;
+    let page = args.page.as_deref();
+    check_names(page, None).map_err(refuse)?;
+    if page.is_none() && period.is_none() {
+        return Err(refuse(nothing_asked()).into());
     }
-    let (entries, totals) = match cut {
-        Some(cut) => (cut.entries.clone(), Some((cut.total, day_count(&all_entries)))),
-        None => (all_entries, None),
+
+    // `last_n` with no page lists the newest days first
+    let newest_first = resume.map_or_else(|| page.is_none() && args.last_n.is_some(), |resume| resume.newest_first);
+    // The arguments the list was built from: the cursor's own, byte for byte, so the snapshot it names is the one asked for
+    let stored = resume.map_or_else(|| stored_arguments(args, period, newest_first), |resume| resume.cursor.args.clone());
+    let served = serve::<Timeline, ToolError, _>(snapshots, resume.map(|resume| &resume.cursor.snapshot), &stored, now, || read_timeline(client, args, period, newest_first)).await?;
+    let timeline = &*served.list;
+    let nested = args.include_content;
+    let total = timeline.keys.len();
+    let (start, stale) = match resume {
+        None => (0, None),
+        Some(resume) => {
+            let resumed = resume_at(total, resume.at, |at| timeline.keys[at] == resume.anchor, || timeline.keys.iter().position(|key| *key == resume.anchor).map(|at| at + 1));
+            (resumed.start, resumed.stale)
+        }
     };
 
-    // Opt-in (#18): resolve once over every returned block, whatever the number of days. Only the
-    // kept blocks: each block resolves on its own, so their output is the same, and the batched
-    // queries never carry the refs of blocks the `max_blocks` cap cut. The character budget (#485) cuts after
-    // this, on the resolved text, so they may carry refs of blocks it then drops: the same calls as before.
-    let mut entries = entries;
-    if args.include_content && args.resolve_refs {
-        let roots: Vec<Value> = entries.iter().flat_map(|entry| entry.blocks.iter().cloned()).collect();
+    // The blocks the page could hold: `max_blocks` of them, before the budget cuts. Refs are resolved for these, as they
+    // were for the blocks `max_blocks` kept before the cursor, and the budget cuts after, on the resolved text
+    let page_size = args.max_blocks.min(MAX_BLOCKS as u64) as usize;
+    let reach = page_size.min(total - start);
+    let mut page_entries = slice_entries(&timeline.entries, start, reach, total, nested);
+    let mut resolved_warnings: Vec<ResultWarning> = Vec::new();
+    if nested && args.resolve_refs {
+        let roots: Vec<Value> = page_entries.iter().flat_map(|entry| entry.blocks.iter().cloned()).collect();
         let resolved = resolve_block_refs(client, &roots).await?;
         let mut offset = 0;
-        for entry in &mut entries {
+        for entry in &mut page_entries {
             let len = entry.blocks.len();
             entry.blocks = resolved.blocks[offset..offset + len].to_vec();
             offset += len;
         }
-        warnings.extend(resolved.warnings);
+        resolved_warnings = resolved.warnings;
     }
 
-    let json = write_within_budget(&entries, &warnings, totals, &options, |entries, warnings, totals| write(&frame, args, entries, warnings, totals));
-    Ok(TimelineResult { json, top_concept })
+    let first = resume.is_none();
+    let words = Words { nested, newest_first, requested: args.max_blocks };
+    // The text of the page with its first `kept` blocks, ending as `cut` says
+    let text_for = |kept: usize, cut: Option<Cut>| -> String {
+        let entries = slice_entries(&page_entries, 0, kept, reach, nested);
+        let next = (cut.is_some() && kept > 0).then(|| {
+            encode(&Cursor::new(NAME, stored.clone(), Position::Index { at: start + kept }, timeline.keys[start + kept - 1].clone(), served.key))
+        });
+        let mut warnings = timeline.warnings.clone();
+        warnings.extend(resolved_warnings.iter().cloned());
+        warnings.extend(stale.map(|stale| stale_warning(stale, "blocks")));
+        if let Some(cut) = cut {
+            warnings.push(paged_warning(PagedCut {
+                count_code: "blocks_truncated",
+                cut,
+                what: &words.what(),
+                start,
+                kept,
+                total,
+                advice: &words.advice(matches!(cut, Cut::Size { .. })),
+                raise: (kept == 0).then(|| words.raise()),
+                has_next: next.is_some(),
+            }));
+        }
+        let totals = cut.map(|_| (total, day_count(&timeline.entries)));
+        write(timeline, args, first, &entries, &warnings, next.as_deref(), totals)
+    };
+    // How a page of `kept` blocks would end, for measuring it: by the page size when it holds all it could, else by size
+    let guess = |kept: usize| (start + kept < total).then_some(if kept == reach { Cut::Count } else { Cut::Size { oversize: false } });
+    let page = page_of(total, start, page_size, |kept| size(&text_for(kept, guess(kept))));
+    // A list that fits one page needs no snapshot, and a hit is kept already
+    if page.next().is_some() {
+        served.keep(snapshots, &stored, timeline.weight(), now);
+    }
+    let json = text_for(page.kept, page.cut);
+    Ok(TimelineResult { json, top_concept: first.then(|| timeline.top_concept.clone()).flatten() })
 }
 
 #[cfg(test)]
@@ -481,8 +626,9 @@ mod tests {
                 "resolve_refs": {"type": "boolean", "default": false, "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2)"},
                 "max_blocks": {
                     "type": "integer", "minimum": 0, "default": 200,
-                    "description": "Max blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000"
+                    "description": "Page size: blocks across all days, nested ones counted (top-level with include_content false), default 200, max 1000"
                 },
+                "cursor": {"type": "string", "description": crate::tool::CURSOR_DESCRIPTION},
             },
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
@@ -527,7 +673,8 @@ mod tests {
         sweep::<Args>(base.clone(), "include_content", Takes::Flag, false);
         sweep::<Args>(base.clone(), "top_concepts_limit", Takes::Count(0), false);
         sweep::<Args>(base.clone(), "resolve_refs", Takes::Flag, false);
-        sweep::<Args>(base, "max_blocks", Takes::Count(0), false);
+        sweep::<Args>(base.clone(), "max_blocks", Takes::Count(0), false);
+        sweep::<Args>(base, "cursor", Takes::Text, false);
     }
 
     /// The words `preset` takes, as the schema lists them.
@@ -550,6 +697,7 @@ mod tests {
                 top_concepts_limit: 10,
                 resolve_refs: false,
                 max_blocks: 200,
+                cursor: None,
             }
         );
         assert_eq!(serde_json::from_value::<Args>(json!({"last_n": 7})).unwrap(), args);
@@ -648,23 +796,29 @@ mod tests {
     fn a_day_is_written_as_an_integer_and_the_meta_leaves_out_totals_unless_there_was_a_cut() {
         assert_eq!(Value::from(20250101_i64).to_string(), "20250101");
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) };
-        let parts = meta_parts(&[warning], Some((9, 2)));
+        let parts = meta_parts(&[warning], None, Some((9, 2)));
         assert_eq!(
             object_of(parts).to_string(),
             r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#
         );
-        assert_eq!(object_of(meta_parts(&[], None)).to_string(), r#"{"hasMore":false,"warnings":[]}"#);
+        assert_eq!(object_of(meta_parts(&[], None, None)).to_string(), r#"{"hasMore":false,"warnings":[]}"#);
+        // a cursor makes hasMore true and sits right after it (BR-0013)
+        assert_eq!(object_of(meta_parts(&[], Some("abc"), None)).to_string(), r#"{"hasMore":true,"nextCursor":"abc","warnings":[]}"#);
     }
 
     fn day(date: i64, name: &str, blocks: Vec<Value>) -> Entry {
         Entry { date: Some(date), page: json!({"id": date, "original-name": name, "journal-day": date}), blocks }
     }
 
-    fn frame(answered: Vec<(&'static str, Value)>, with_range: bool) -> Frame {
-        Frame {
+    fn frame(answered: Vec<(&'static str, Value)>, with_range: bool) -> Timeline {
+        Timeline {
+            entries: Vec::new(),
+            keys: Vec::new(),
+            warnings: Vec::new(),
             answered,
             date_range: with_range.then(|| json!({"start": 20250101, "end": 20250131})),
             summary: json!({"totalDays": 1, "totalBlocks": 1}),
+            top_concept: None,
         }
     }
 
@@ -677,19 +831,22 @@ mod tests {
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: None };
         let entries = [day(20250101, "Jan 1st, 2025", vec![block("a")])];
         let answered = vec![("page", json!("atlas")), ("resolvedFrom", json!({"name": "atlas"})), ("resolvedAliases", json!(["Atlas"]))];
-        let text = write(&frame(answered, true), &all_args(), &entries, &[warning.clone()], Some((9, 2)));
+        let text = write(&frame(answered, true), &all_args(), true, &entries, &[warning.clone()], Some("abc"), Some((9, 2)));
         let value: Value = serde_json::from_str(&text).unwrap();
-        // what was answered, what must not be missed (the flags, the warnings, the counts, the overview), then the data
-        assert_eq!(keys(&value), ["page", "resolvedFrom", "resolvedAliases", "dateRange", "hasMore", "warnings", "totals", "summary", "entries"]);
+        // what was answered, what must not be missed (the flags, the cursor, the warnings, the counts, the overview), then the data
+        assert_eq!(keys(&value), ["page", "resolvedFrom", "resolvedAliases", "dateRange", "hasMore", "nextCursor", "warnings", "totals", "summary", "entries"]);
         // a period alone has no page; with nothing to say there is no meta
-        let quiet = write(&frame(vec![], true), &all_args(), &entries, &[], None);
+        let quiet = write(&frame(vec![], true), &all_args(), true, &entries, &[], None, None);
         assert_eq!(keys(&serde_json::from_str::<Value>(&quiet).unwrap()), ["dateRange", "summary", "entries"]);
         // a page with no dated mention has no range
-        let bare = write(&frame(vec![("page", json!("atlas"))], false), &all_args(), &[], &[warning], None);
+        let bare = write(&frame(vec![("page", json!("atlas"))], false), &all_args(), true, &[], &[warning.clone()], None, None);
         assert_eq!(keys(&serde_json::from_str::<Value>(&bare).unwrap()), ["page", "hasMore", "warnings", "summary", "entries"]);
+        // a page after the first has no summary, and keeps what was answered and the range
+        let later = write(&frame(vec![("page", json!("atlas"))], true), &all_args(), false, &entries, &[warning], None, None);
+        assert_eq!(keys(&serde_json::from_str::<Value>(&later).unwrap()), ["page", "dateRange", "hasMore", "warnings", "entries"]);
         // resolving refs always brings the meta
         let resolving = Args { resolve_refs: true, ..all_args() };
-        let text = write(&frame(vec![], true), &resolving, &entries, &[], None);
+        let text = write(&frame(vec![], true), &resolving, true, &entries, &[], None, None);
         assert_eq!(keys(&serde_json::from_str::<Value>(&text).unwrap()), ["dateRange", "hasMore", "warnings", "summary", "entries"]);
     }
 
