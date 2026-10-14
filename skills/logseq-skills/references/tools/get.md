@@ -25,11 +25,11 @@ Get a page by name, with `detail` choosing how much of it.
 
 **Use when:** you know the page name and want its content. For related pages and what links to it, use `logseq_explore_context`. For pages by keyword, `logseq_find_blocks` or `logseq_find_pages`.
 
-**Returns:** `detail` `page` and `full` give the page entity. `full` adds its blocks as nested `children` (the key is absent when the page has no blocks, and also when LogSeq sent no answer for them: a `page_blocks_unavailable` warning says so, and that page is not known to be empty, so retry before you report it empty); only `outline` calls them `blocks`. `detail` `outline` gives `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`: `snippet` is the first line cut to 80 characters and `childCount` counts direct children only. It costs 2 LogSeq calls however long the page is, and is about 98% smaller than `full` on a long page.
+**Returns:** `detail` `page` and `full` give the page entity. `full` adds its blocks as nested `children` (the key is absent when the page has no blocks, and also when LogSeq sent no answer for them: a `page_blocks_unavailable` warning says so, and that page is not known to be empty, so retry before you report it empty); only `outline` calls them `blocks`. `detail` `outline` gives `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`: `snippet` is the first line cut to 80 characters and `childCount` counts direct children only. It costs 2 LogSeq calls however long the page is, and is about 98% smaller than `full` on a long page. It lists 200 top-level blocks at a time: a longer page carries `nextCursor` (pass it alone as `cursor`, with `hasMore` true) until the last page.
 
 **Not found:** a missing page is an error with the closest names, so retry with one of them or use `logseq_find_pages` with `text`. A name that matches several pages comes back as `{ ambiguous: true, candidates }`: pick one by its exact name.
 
-**A long page:** `detail` `full` has no block cap, only the 30,000-character budget (`results-and-limits.md`), and nothing pages a tree. Read the outline first.
+**A long page:** `detail` `full` has no block cap, only the 30,000-character budget (`results-and-limits.md`), and a cut page reads on with its `nextCursor`. Read the outline first.
 
 **Example 1.** "What does my project atlas page say about the first release?" A short page, read it whole.
 
