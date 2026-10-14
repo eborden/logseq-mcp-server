@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 1.0.0 was the first release, so its entry has no earlier release to compare against. The 2.0.0 entry is a hard cut and opens with a migration note.
 
-## [2.0.0] - Unreleased
+## [2.0.0] - 2026-10-14
 
 v2.0.0 is a hard cut with no deprecation window (ADR-0037). The 16 v1 tools become 10, each named `logseq_<type>_<object>` with a type of `get`, `find`, `explore` or `check`, and every page parameter is `page`. There are no known external callers of v1, so nothing is kept as an alias beyond the few named below. A caller of the tools (the `logseq-skills` plugin skills are already rewritten for v2) should read the migration note first. `rust/Cargo.toml`, `package.json` and the plugin manifests all read 2.0.0.
 
