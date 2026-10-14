@@ -78,6 +78,12 @@ A call that sends only a retired name for a required parameter (`topic_name`, `c
 - `find_blocks` with an empty `text` and no other filter is refused (v1 `search_blocks` with `query: ""` matched every block). Beside another filter an empty `text` is ignored. Whitespace is text.
 - `explore_network` with `to` refuses `max_nodes`, `max_fanout`, `expand_journals` and `with_snippets` instead of ignoring them.
 
+**Paging (pending: #528 and ADR-0038, not shipped yet; confirm each line against the released behaviour before tagging).** The paging parameters in this note are replaced before 2.0.0 ships.
+
+- `offset` (`find_blocks`, `find_pages`; v1 `list_pages` had it too) and `references_offset` (`explore_context`) are removed. Every tool that cuts a list takes an optional `cursor` and returns `nextCursor` (absent on the last page) instead, and `hasMore` is true exactly when `nextCursor` is present. The count caps (`limit`, `max_blocks`, `max_references`, `max_related_pages`, `max_nodes`) stay, as the page size.
+- A call with a `cursor` takes no other argument: the arguments are in the token. So `page` (and `uuid`) are optional on the tools that take a cursor, which is the exception to BR-0008's "the canonical parameter stays required". A caller that sends `offset` or `references_offset` to v2 has it silently ignored, like any retired parameter.
+- Cursors are forward only and opaque. A cap raise is no longer the only way past a cut, because a result of any size can be read in pages.
+
 **Dropped capabilities.**
 
 - **Multi-topic context.** `get_context_for_query` is gone, with its topic extraction from a question, `max_topics` and `max_search_results`. Make one `explore_context` call per page (they run in parallel and give smaller answers), and use `find_blocks` with `text` for keywords.
