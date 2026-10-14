@@ -38,6 +38,17 @@ export const PAGE1_CASES: Page1Case[] = [
   { name: 'journal topic depth 2, expand journals', page: 'journal-topic-01', maxDepth: 2, expandJournals: true },
   { name: 'journal topic depth 2, expand journals, fanout 100', page: 'journal-topic-01', maxDepth: 2, expandJournals: true, maxFanout: 100 },
   { name: 'bob depth 2', page: 'bob', maxDepth: 2 },
+  // The old cap changed the frontier of the next depth, not just the tail of the result: a page size below the depth-1 count
+  { name: 'hub depth 2, 10 nodes', page: 'hub central', maxDepth: 2, maxNodes: 10 },
+  { name: 'hub depth 3, 10 nodes, fanout 100', page: 'hub central', maxDepth: 3, maxNodes: 10, maxFanout: 100 },
+  { name: 'bob depth 2, 5 nodes', page: 'bob', maxDepth: 2, maxNodes: 5 },
+  // an aliased root is one node and its depth 1 is one grouped query
+  { name: 'aliased root depth 2', page: 'project atlas', maxDepth: 2 },
+  { name: 'aliased root depth 1, with snippets', page: 'project atlas', maxDepth: 1, withSnippets: true },
+  { name: 'aliased root depth 2, 4 nodes', page: 'project atlas', maxDepth: 2, maxNodes: 4 },
+  // snippets are asked at depth 1 only, whatever the depth of the walk
+  { name: 'hub depth 2, with snippets', page: 'hub central', maxDepth: 2, withSnippets: true },
+  { name: 'bob depth 0', page: 'bob', maxDepth: 0 },
 ];
 
 /** A result as the pin keeps it: the nodes and the edges between them, by page name. */
