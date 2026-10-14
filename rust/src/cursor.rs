@@ -38,6 +38,20 @@ pub enum Position {
 pub enum Anchor {
     Id(i64),
     Text(String),
+    /// One anchor per section of `explore_context`: the last block, reference and related page a page sent, each by its
+    /// `:db/id`, or none for a section that has sent nothing yet. Only that tool reads it.
+    Sections(SectionAnchors),
+}
+
+/// The anchors of the three lists of `explore_context`, as [`Position::Sections`] has their positions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SectionAnchors {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub related: Option<i64>,
 }
 
 /// Which snapshot a token was made from: the server process that made it (its start time in milliseconds) and a
@@ -156,6 +170,18 @@ mod tests {
     fn a_position_in_sections_and_an_anchor_that_is_text_round_trip() {
         let sections = Cursor { position: Position::Sections { blocks: 50, references: 20, related: 0 }, anchor: Anchor::Text("a-uuid".into()), ..cursor() };
         assert_eq!(decode(&encode(&sections), TOOL).unwrap(), sections);
+    }
+
+    #[test]
+    fn one_anchor_per_section_round_trips_and_leaves_out_a_section_that_has_sent_nothing() {
+        let anchors = SectionAnchors { blocks: Some(7), references: None, related: Some(9) };
+        let sections = Cursor { position: Position::Sections { blocks: 50, references: 0, related: 10 }, anchor: Anchor::Sections(anchors), ..cursor() };
+        let bytes = URL_SAFE_NO_PAD.decode(encode(&sections)).unwrap();
+        assert!(String::from_utf8(bytes).unwrap().contains(r#""anchor":{"blocks":7,"related":9}"#));
+        assert_eq!(decode(&encode(&sections), TOOL).unwrap(), sections);
+        // none sent: an empty object, which reads back as the same
+        let none = Cursor { anchor: Anchor::Sections(SectionAnchors::default()), ..sections };
+        assert_eq!(decode(&encode(&none), TOOL).unwrap(), none);
     }
 
     #[test]
