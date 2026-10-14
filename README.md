@@ -131,7 +131,7 @@ Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The s
 ### Context Building (2)
 | Tool | Purpose |
 |------|---------|
-| `explore_context` | Explore one page in one call: its blocks, related pages and the blocks that link to it (references, most-linking pages first, paged with `references_offset`) |
+| `explore_context` | Explore one page in one call: its blocks, related pages and the blocks that link to it (references, most-linking pages first), read to the end with a cursor |
 | `get_current` | What the user has open in LogSeq right now |
 
 ### Temporal Queries (1)
