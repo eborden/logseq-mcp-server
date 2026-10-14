@@ -21,12 +21,12 @@ Explore one page in a single call: its blocks, the pages that link to it and the
 | `max_related_pages` | integer | 10 | Pages that link to it. 0 leaves them out |
 | `max_references` | integer | 20 | Reference blocks (blocks elsewhere that link to the page) |
 | `references_offset` | integer | 0 | Reference blocks to skip, to read the next page of them |
-| `include_temporal_context` | boolean | true | Adds `temporalContext` for a journal page |
+| `include_temporal_context` | boolean | true | Adds `temporalContext` to the result: `{ isJournal: false }` for an ordinary page, `{ isJournal: true, date }` (YYYYMMDD) for a journal page. `false` leaves it out |
 | `resolve_refs` | boolean | false | Adds `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s in the blocks and references, two levels deep |
 | `format` | `json`, `markdown` | `json` | `markdown` shows the blocks as a tree, related pages as links and references grouped by source page, about 75% smaller. Block uuids appear only with `compact` |
 | `compact` | boolean | false | Each block becomes `{ uuid, snippet }` (first line, 80 characters). Read one in full with `logseq_get_block`. It skips `resolve_refs`, with a warning |
 
-**Returns:** `page` (as you wrote it; `resolvedFrom` says when it was an alias, a date or a namespace leaf), `hasMore`, `warnings` and `totals` (`blocks`, `relatedPages`, `references`: the real counts before any cap), then `summary` (with `pageProperties`), `mainPage` (the page entity and its properties), `directBlocks`, `relatedPages` (each `{ page, relationshipType }`, once, in LogSeq's order, not ranked), `references` (each `{ block, sourcePage }`) and `temporalContext`.
+**Returns:** `page` (as you wrote it; `resolvedFrom` says when it was an alias, a date or a namespace leaf), `hasMore`, `warnings` and `totals` (`blocks`, `relatedPages`, `references`: the real counts before any cap), then `summary` (with `pageProperties`), `mainPage` (the page entity and its properties), `directBlocks`, `relatedPages` (each `{ page, relationshipType }`, once, in LogSeq's order, not ranked), `references` (each `{ block, sourcePage }`) and `temporalContext` (on every page, not only journals).
 
 **References are ranked** by how many blocks on their source page link the page, most first, ties by lowercase page name. The first one listed is on the page that links the topic most, which answers "what connects to this" without raising anything. A page and its aliases count as one topic. The ranking counts linking blocks, not importance: a blocker can sit on a page with one linking block, so read on with `references_offset` only when the question needs every referrer.
 
