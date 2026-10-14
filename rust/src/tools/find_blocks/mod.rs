@@ -520,7 +520,7 @@ impl View {
             (true, false) => " include_context: false and slim_results: true make each hit smaller.",
             (false, true) => "",
         };
-        format!("The oldest matches are the ones left out (newest first). Narrow the filters to read fewer.{richer} No parameter raises the size limit.")
+        format!("The oldest matches are the ones left out (newest first). Narrow the filters to read fewer.{richer}")
     }
 
     /// A raise of `limit` to offer beside the cursor, on the first page only (a cursor call can't change it). It is
@@ -1050,7 +1050,7 @@ mod tests {
         let mut found = view(Vec::new(), 0);
         assert_eq!(
             found.size_advice(),
-            "The oldest matches are the ones left out (newest first). Narrow the filters to read fewer. No parameter raises the size limit."
+            "The oldest matches are the ones left out (newest first). Narrow the filters to read fewer."
         );
         found.include_context = true;
         assert!(found.size_advice().contains(" include_context: false makes each hit smaller."));

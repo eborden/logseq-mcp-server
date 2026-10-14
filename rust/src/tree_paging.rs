@@ -211,7 +211,7 @@ impl Spec {
     }
 
     /// What a reader can do about a result cut for its size: what the next page starts with, and how to read less. The
-    /// cursor reads on (the warning's `howToFetchAll` names it), and no parameter raises the size limit.
+    /// cursor reads on (the warning's `howToFetchAll` names it).
     fn advice(&self) -> String {
         let (left_out, continues) = match (self.root, self.markdown) {
             (Root::Page, false) => (
@@ -232,8 +232,8 @@ impl Spec {
             ),
         };
         let read_less = match self.root {
-            Root::Page => "No parameter raises the size limit. To read less, list the top-level blocks with detail \"outline\" and read one with logseq_get_block and include_children.",
-            Root::Block => "No parameter raises the size limit. To read less, read a block below this one with logseq_get_block and include_children, or find blocks by their text with logseq_find_blocks.",
+            Root::Page => "To read less, list the top-level blocks with detail \"outline\" and read one with logseq_get_block and include_children.",
+            Root::Block => "To read less, read a block below this one with logseq_get_block and include_children, or find blocks by their text with logseq_find_blocks.",
         };
         format!("{left_out} {continues} {read_less}")
     }
@@ -509,7 +509,7 @@ mod tests {
         assert!(advice(Root::Block, false).contains("continued: true"));
         assert!(advice(Root::Page, false).contains("detail \"outline\"") && advice(Root::Block, true).contains("logseq_get_block"));
         for text in [advice(Root::Page, false), advice(Root::Page, true), advice(Root::Block, false), advice(Root::Block, true)] {
-            assert!(text.contains("No parameter raises the size limit"), "{text}");
+            assert!(!text.contains("No parameter raises"), "{text}");
         }
     }
 
