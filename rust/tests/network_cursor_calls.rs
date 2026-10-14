@@ -59,21 +59,41 @@ fn root_page() -> Value {
     json!([[{"id": ROOT, "uuid": uuid(ROOT), "name": "project atlas", "original-name": "Project Atlas", "file": {"id": 5010}}, "name"]])
 }
 
-/// What the mock answers: the root to the resolver, and to a connected-pages query the links of each page of its frontier,
-/// each with a `degree` row (3 pages, so none is a roll-up).
-fn answer(world: &World, request: &Value) -> Value {
+/// The root as a page that has an alias (the stub 11): its alias group is one node and its depth 1 is one grouped query.
+fn aliased_root_page() -> Value {
+    json!([[{"id": ROOT, "uuid": uuid(ROOT), "name": "project atlas", "original-name": "Project Atlas", "file": {"id": 5010}, "alias": [{"id": 11}]}, "name"]])
+}
+
+/// What the mock answers: the root to the resolver (with an alias when `aliased`), the alias group to its query, and to a
+/// connected-pages query the links of each page of its frontier, each with a `degree` row (3 pages, so none is a roll-up;
+/// 41 for a page named `Hub ...`, which is). A query that asks for snippets gets the text cell on every row.
+fn answer(world: &World, aliased: bool, request: &Value) -> Value {
     let args = request["args"].as_array().unwrap();
     if args.len() > 1 {
-        return root_page();
+        return if aliased { aliased_root_page() } else { root_page() };
     }
+    let query = args[0].as_str().unwrap();
+    let grouped = query.contains("[[?source ?group]");
+    if !grouped && !query.contains("?source") {
+        return json!([[ROOT, {"id": ROOT, "name": "project atlas", "original-name": "Project Atlas"}], [ROOT, {"id": 11, "name": "atlas", "original-name": "Atlas"}]]);
+    }
+    let snippets = query.contains("(max ?key)");
     let world = world.lock().unwrap();
+    let sources = if grouped { vec![ROOT] } else { frontier_of(query) };
     let mut rows = Vec::new();
-    for source in frontier_of(args[0].as_str().unwrap()) {
+    for source in sources {
         for link in world.get(&source).map_or(&[][..], Vec::as_slice) {
             let lower = link.name.to_lowercase();
-            rows.push(json!([source, link.to, lower, link.name, link.journal, "outbound", link.count]));
+            let mut outbound = vec![json!(source), json!(link.to), json!(lower), json!(link.name), json!(link.journal), json!("outbound"), json!(link.count)];
+            let mut degree = vec![json!(source), json!(link.to), json!(lower), json!(link.name), json!(false), json!("degree"), json!(if link.name.starts_with("Hub") { 41 } else { 3 })];
+            if snippets {
+                let text = format!("Note on {}", link.name);
+                outbound.push(json!([1, text.len(), text]));
+                degree.push(json!([1, 0, ""]));
+            }
+            rows.push(Value::Array(outbound));
             if !link.journal {
-                rows.push(json!([source, link.to, lower, link.name, false, "degree", 3]));
+                rows.push(Value::Array(degree));
             }
         }
     }
@@ -82,7 +102,12 @@ fn answer(world: &World, request: &Value) -> Value {
 
 async fn logseq_holding(world: &World) -> MockLogseq {
     let world = Arc::clone(world);
-    mock_logseq_answering(move |request| answer(&world, request)).await
+    mock_logseq_answering(move |request| answer(&world, false, request)).await
+}
+
+async fn logseq_holding_an_aliased_root(world: &World) -> MockLogseq {
+    let world = Arc::clone(world);
+    mock_logseq_answering(move |request| answer(&world, true, request)).await
 }
 
 fn arguments(value: Value) -> Option<rmcp::model::JsonObject> {
@@ -458,6 +483,74 @@ async fn a_markdown_walk_is_read_to_the_end_with_each_page_in_markdown_and_its_o
     assert_eq!(pages, 3);
     assert!(!text.contains("hasMore: true"), "the last page has no more");
     assert_eq!(methods(&logseq).len(), 2);
+}
+
+// ---- an aliased root, snippets and roll-ups across pages
+
+#[tokio::test]
+async fn an_aliased_root_is_one_node_and_names_its_aliases_on_every_page_and_a_miss_makes_the_same_three_calls() {
+    let world = star(90, 10);
+    let logseq = logseq_holding_an_aliased_root(&world).await;
+    let shared = snapshots();
+    let first = call(&logseq, &shared, json!({"page": "Project Atlas", "max_depth": 1, "max_nodes": 40, "max_fanout": 100})).await.unwrap();
+    // the resolver, the alias group, and the one grouped query of depth 1
+    assert_eq!(methods(&logseq).len(), 3);
+    assert!(args_of(&logseq, 2)[0].as_str().unwrap().contains("[(ground [[10 10] [11 10]]) [[?source ?group] ...]]"));
+    assert_eq!(first["resolvedAliases"], json!(["Atlas", "Project Atlas"]));
+    assert_eq!(ids(&first).len(), 40);
+
+    // a hit: nothing asked, the aliases ride on the page
+    let second = call(&logseq, &shared, json!({"cursor": cursor_of(&first)})).await.unwrap();
+    assert_eq!((methods(&logseq).len(), second["resolvedAliases"].clone()), (3, json!(["Atlas", "Project Atlas"])));
+    // a miss: the first page's three calls again, with the same inputs
+    let third = call(&logseq, &Snapshots::new(77), json!({"cursor": cursor_of(&second)})).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 6);
+    assert_eq!((args_of(&logseq, 3), args_of(&logseq, 4), args_of(&logseq, 5)), (args_of(&logseq, 0), args_of(&logseq, 1), args_of(&logseq, 2)));
+    assert_eq!(third["resolvedAliases"], json!(["Atlas", "Project Atlas"]));
+    assert_eq!(ids(&third), neighbour_ids(1079, 11));
+    // the alias group is one node: the stub is not a page of the walk
+    assert!(ids(&first).iter().chain(&ids(&second)).chain(&ids(&third)).all(|id| *id != 11));
+}
+
+#[tokio::test]
+async fn with_snippets_the_snippet_rides_on_the_page_that_carries_the_edge_of_the_root() {
+    let world = star(90, 10);
+    let logseq = logseq_holding(&world).await;
+    let shared = snapshots();
+    let first = call(&logseq, &shared, json!({"page": "Project Atlas", "max_depth": 1, "max_nodes": 40, "max_fanout": 100, "with_snippets": true})).await.unwrap();
+    let second = call(&logseq, &shared, json!({"cursor": cursor_of(&first)})).await.unwrap();
+    for (page, first_id) in [(&first, 1000), (&second, 1039)] {
+        let edges = page["edges"].as_array().unwrap();
+        assert!(!edges.is_empty());
+        // every edge of the root is on the page of its other end, with that page's own snippet
+        for edge in edges {
+            let to = edge["to"].as_i64().unwrap();
+            assert!(to >= first_id, "{edge}");
+            assert_eq!(edge["snippet"], format!("Note on {}", name_of(to - 1000, 10)));
+        }
+    }
+    assert_eq!(first["edges"].as_array().unwrap().len() + second["edges"].as_array().unwrap().len(), 79);
+    assert_eq!(methods(&logseq).len(), 2, "snippets ride in the same calls, and the second page is a hit");
+}
+
+#[tokio::test]
+async fn the_roll_up_warning_of_a_later_page_names_only_the_roll_ups_on_it() {
+    // 60 topical pages and two roll-ups, which rank after every topical page: the last two pages of the walk
+    let world = star(60, 10);
+    world.lock().unwrap().get_mut(&ROOT).unwrap().extend([link(2000, "Hub A", 1), link(2001, "Hub B", 1)]);
+    let logseq = logseq_holding(&world).await;
+    let shared = snapshots();
+    let first = call(&logseq, &shared, json!({"page": "Project Atlas", "max_depth": 2, "max_nodes": 31, "max_fanout": 100})).await.unwrap();
+    assert!(!warning_codes(&first).contains(&"hub_pages_not_expanded".to_owned()), "no roll-up is on the first page");
+    let second = call(&logseq, &shared, json!({"cursor": cursor_of(&first)})).await.unwrap();
+    let third = call(&logseq, &shared, json!({"cursor": cursor_of(&second)})).await.unwrap();
+    let message = |page: &Value| page["warnings"].as_array().unwrap().iter().find(|w| w["code"] == "hub_pages_not_expanded").map(|w| w["message"].as_str().unwrap().to_owned());
+    let on_second = message(&second).expect("Hub A is on the second page");
+    assert!(on_second.starts_with("1 page links more than 30 pages") && on_second.contains("Hub A (41 pages)") && !on_second.contains("Hub B"), "{on_second}");
+    let on_third = message(&third).expect("Hub B is on the third page");
+    assert!(on_third.contains("Hub B (41 pages)") && !on_third.contains("Hub A"), "{on_third}");
+    assert!(ids(&second).contains(&2000) && ids(&third) == [2001]);
+    assert!(third.get("nextCursor").is_none());
 }
 
 // ---- what a token may be
