@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import {
   docViolations,
   exactKindOf,
+  type DiskReads,
   FIRST_VERSION_TOOL_NAMES,
   FORMER_TOOL_NAMES,
   REMOVED_BEFORE_V1_TOOL_NAMES,
@@ -562,5 +563,38 @@ describe('the tool-path rule is case-exact on disk (#539 self-test)', () => {
     expect(docViolations([doc, map], [], options)).toEqual([
       'doc.md:2: "rust/src/tools/Get_Page/" names the directory rust/src/tools/Get_Page/, which does not exist',
     ]);
+  });
+
+  // The disk above is the real one, so these tests can only fail where the disk ignores case. A fake disk that does
+  // (its statSync finds a path whatever the case, as macOS does) makes them fail on every platform if the exact match goes.
+  describe('on a disk whose stat ignores case (a fake, so it holds on Linux CI too)', () => {
+    const tree: Record<string, 'dir' | 'file'> = { '/t/get_page': 'dir', '/t/get_page/outline': 'dir', '/t/get_page/mod.rs': 'file', '/t/mod.rs': 'file', '/t': 'dir' };
+    const fake: DiskReads = {
+      readdirSync: dir => {
+        if (tree[dir] !== 'dir') throw new Error(`ENOTDIR: ${dir}`);
+        return Object.keys(tree).filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/')).map(p => p.slice(dir.length + 1));
+      },
+      statSync: path => {
+        const key = Object.keys(tree).find(p => p.toLowerCase() === path.toLowerCase());
+        if (!key) throw new Error(`ENOENT: ${path}`);
+        return { isDirectory: () => tree[key] === 'dir', isFile: () => tree[key] === 'file' };
+      },
+    };
+    const kind = exactKindOf('/t', fake);
+
+    it('finds the exact case', () => {
+      expect(kind('get_page')).toBe('dir');
+      expect(kind('get_page/outline')).toBe('dir');
+      expect(kind('get_page/mod.rs')).toBe('file');
+    });
+
+    it('misses a wrong case at any segment, though the fake stat would find it', () => {
+      expect(fake.statSync('/t/Get_Page').isDirectory(), 'the fake disk ignores case').toBe(true);
+      for (const rel of ['Get_Page', 'GET_PAGE/outline', 'get_page/Outline', 'get_page/Mod.rs', 'Mod.rs']) expect(kind(rel), rel).toBeNull();
+    });
+
+    it('misses a path through a file', () => {
+      expect(kind('mod.rs/outline')).toBeNull();
+    });
   });
 });
