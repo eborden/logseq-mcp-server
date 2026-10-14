@@ -87,7 +87,7 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 | | `same_page` | With `to`: the two names are one page (a page and its alias) |
 | | `frontier_truncated` | With `to`: a hop reached more than 500 pages and expanded only some, so "no path" may be a false negative |
 | | `links_unavailable` | LogSeq gave no answer for a hop. It is not "no path" and not "no links" |
-| `explore_timeline` | `blocks_truncated` | More blocks than `max_blocks`. `howToFetchAll` leads with a paging call from the first day not shown. If one day fills the cap, it offers that day alone, only when it fits |
+| `explore_timeline` | `blocks_truncated`, `result_size_truncated` | A page ended at `max_blocks` or at the budget. `nextCursor` reads on (`hasMore` is true), and a call with it takes no other argument. Only the first page has `summary` |
 | | `result_size_truncated` | Whole blocks dropped from the tail. After a size cut the paging call names where to read on |
 | | `journals_unavailable`, `blocks_unavailable`, `page_blocks_unavailable`, `page_unavailable`, `mentions_unavailable` | LogSeq answered null for that part: the result is partial, never empty |
 | | `alias_set_truncated`, `alias_lookup_unavailable` | Not every alias is covered |

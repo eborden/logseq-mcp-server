@@ -72,7 +72,7 @@ If the explore call says there is no such page, look the name up (`logseq_find_p
 {"page": "project atlas", "group_by": "month"}
 ```
 
-Read `dateRange`, the entries in order (oldest first) and `summary.topConcepts`. Gaps between entries are periods with nothing said. Check `warnings`: `blocks_truncated` means later months are missing, and `howToFetchAll` names the call that continues.
+Read `dateRange`, the entries in order (oldest first) and `summary.topConcepts`. Gaps between entries are periods with nothing said. Check `warnings`: `blocks_truncated` means later months are missing, and `nextCursor` reads on (pass it alone as `cursor` while `hasMore` is true).
 
 2. Find the block where the decision was made.
 

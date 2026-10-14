@@ -144,7 +144,7 @@ At least one of `page` or a period is required, and a period is exactly one of `
 {"preset": "last_week"}
 ```
 
-Read `summary.topConcepts` first for the themes, then `entries` day by day (oldest first). Check `warnings`: `blocks_truncated` means days are missing from the end, and `howToFetchAll` names the `start_date` to continue from. A day with no journal page has no entry, so a missing day is not a day with nothing written. Next call: `logseq_explore_context` on a top concept, or the paging call the warning names.
+Read `summary.topConcepts` first for the themes, then `entries` day by day (oldest first). Check `warnings`: `blocks_truncated` means days are missing from the end, and `nextCursor` reads on: pass it alone as `cursor` while `hasMore` is true (only the first page has `summary`). A day with no journal page has no entry, so a missing day is not a day with nothing written. Next call: `logseq_explore_context` on a top concept, or the cursor call.
 
 **Example 2.** "How has my thinking on Rust changed this year?" A page, grouped by month.
 
