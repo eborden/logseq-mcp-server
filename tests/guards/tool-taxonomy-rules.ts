@@ -68,7 +68,10 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
   logseq_get_current: [],
   logseq_get_graph: [],
   logseq_find_pages: ['text', 'names', 'property', 'value', ...PAGING, 'format'],
-  logseq_find_blocks: ['text', 'page', 'links_to', 'property', 'value', ...PERIOD, ...PAGING, 'include_context', 'slim_results'],
+  // ADR-0038 (one forward-only cursor for paging) takes `offset` off `find_blocks` and adds `cursor`: ADR-0037 can't carry
+  // a pointer, so its `limit` and `offset` vocabulary stays as written, and each paged tool moves to `limit` (the page
+  // size) and `cursor` in its own step (#528). `find_pages` and `explore_context` still page by `offset`.
+  logseq_find_blocks: ['text', 'page', 'links_to', 'property', 'value', ...PERIOD, 'limit', 'include_context', 'slim_results', 'cursor'],
   // `include_temporal_context` is the one toggle kept as today (#493). The ADR-0037 row says "its caps", read loosely to cover it (maintainer, #519).
   logseq_explore_context: [
     'page',
