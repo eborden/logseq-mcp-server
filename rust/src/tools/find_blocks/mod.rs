@@ -300,7 +300,8 @@ fn stored_arguments(args: &Args, filters: &Filters) -> Map<String, Value> {
     );
     put("start_date", filters.period.map(|period| json!(period.start)));
     put("end_date", filters.period.map(|period| json!(period.end)));
-    put("limit", Some(json!(args.limit)));
+    // The limit that is read: a larger one is clamped (so the same search with 600 and with 500 has one token)
+    put("limit", Some(json!(args.limit.min(MAX_FIND_LIMIT))));
     put("include_context", Some(json!(args.include_context)));
     put("slim_results", Some(json!(args.slim_results)));
     stored
@@ -1386,6 +1387,19 @@ mod tests {
             let later = Filters::from_args(&again, CalendarDate { year: 2025, month: 4, day: 20 }).unwrap();
             assert_eq!(later.period, Some(period), "{arguments}");
         }
+    }
+
+    #[test]
+    fn a_limit_above_the_maximum_is_stored_as_the_maximum() {
+        let stored = |limit: u64| {
+            let args = parse_args::<Args>(json!({"text": "x", "limit": limit}).as_object()).unwrap();
+            let filters = Filters::from_args(&args, CalendarDate { year: 2025, month: 3, day: 12 }).unwrap();
+            stored_arguments(&args, &filters)
+        };
+        assert_eq!(stored(600), stored(500));
+        assert_eq!(stored(600)["limit"], 500);
+        assert_eq!(stored(0)["limit"], 0);
+        assert_eq!(stored(499)["limit"], 499);
     }
 
     #[test]
