@@ -14,6 +14,7 @@ test: `rust/src/params.rs`
 test: `tests/guards/tool-list.test.ts`
 test: `rust/tests/parity.rs`
 test: `rust/tests/get_page_block_cursor_calls.rs` (`get_page` and `get_block`, the first tools with a required canonical name that take a `cursor`: a call with neither the name nor a `cursor` is refused before any call, `{cursor, <alias>}` is refused on the alias-folded arguments, and an alias alone is a call that works)
+test: `rust/tests/context_cursor_calls.rs` (`explore_context`, another tool with a required canonical name that takes a `cursor`: a call with neither the name nor a `cursor` is refused before any call, and `{cursor, <alias>}` is refused on the alias-folded arguments)
 
 Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity test, `rust/tests/parity.rs`, holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
 
@@ -28,3 +29,4 @@ Tests pin that a conflicting alias and canonical value is refused, that the alia
 | 2026-10-14 | Statement: the canonical name stays `required` except on a tool that takes a `cursor` (ADR-0038), where a cursor call carries the arguments in its token. The implementation, and the exception in the guard, land with the cursor core task (#528); no tool takes a `cursor` yet, so every canonical name is still `required`. | #546 |
 | 2026-10-14 | Mechanical enforcement: the `none-yet` line points at the migration of `get_page` and `get_block` (#552), the first tool with a required canonical name that takes a `cursor`, instead of the cursor core (#528), whose tool, `find_blocks`, has none. The Statement is unchanged. | #560 |
 | 2026-10-14 | Mechanical enforcement: the tests of `get_page` and `get_block`, the first tools with a required canonical name that take a `cursor`, replace the `none-yet: #552` line, and the `required` check of `tests/guards/tool-list.test.ts` takes the exception for a tool that takes a `cursor`. Additive; the Statement is unchanged. | #565 |
+| 2026-10-14 | Mechanical enforcement: the tests of `explore_context`, whose `page` is optional beside a `cursor` like `get_page` and `get_block`, join the `test:` lines. Additive; the Statement is unchanged. | #568 |
