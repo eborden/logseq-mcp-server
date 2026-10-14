@@ -11,19 +11,19 @@
 //! first (`scope.rs`): one resolver query per distinct name, then one alias-group query for all of them, or none when
 //! no page has an alias link. The match runs inside LogSeq
 //! (`re-pattern` / `re-find` over the text with its metacharacters escaped; `:block/properties` for the property),
-//! results are sorted here, newest first (highest block id), and cut to `offset` and `limit`, since Datalog here has no
-//! `:limit`.
+//! results are sorted here, newest first (highest block id), since Datalog here has no `:limit`.
 //!
-//! `call` then cuts the hits to the character budget (#506, `crate::budget`), the oldest first, and says so with a
-//! `result_size_truncated` warning that takes the place of the `limit` warning. Both warnings name the `offset` that
-//! reads on from where the cut fell, so the rest of a long result can always be fetched, a page at a time (BR-0006). The warning of a `limit` cut offers a
-//! raise only when the raised result fits the budget, which the hits already read show exactly (slim, or full
-//! without `include_context`) or as an upper bound (`include_context`, whose pages are read for the hits kept only).
-//! `find_blocks_with_meta`, the library function, applies no budget.
+//! The whole match list is read in that one query and cut here into pages (ADR-0038). A page holds at most `limit`
+//! hits and at most the character budget (#506, `crate::budget`), the oldest hits last, and when hits are left it
+//! carries a `nextCursor` and says so with a `results_truncated` (the count) or `result_size_truncated` (the budget)
+//! warning (BR-0006). A call with only that `cursor` reads the next page: from the snapshot the first call kept, with
+//! no LogSeq call (`include_context` still reads the pages of the hits it sends), or, when the snapshot is gone,
+//! with the first page's calls, resuming by block id after the last hit sent (`cursor_stale` says when the list moved).
+//! `find_blocks_with_meta`, the library function, reads the first page only and applies no budget.
 //!
 //! This directory holds everything only the finder uses: its query (`queries.rs`), the answers it
 //! reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside it: slim
-//! output, entity fields, the truncation warnings and the tool helpers.
+//! output, entity fields, the paging helpers (`crate::paging`) and the tool helpers.
 
 mod queries;
 pub mod scope;
@@ -31,6 +31,7 @@ mod tips;
 mod wire;
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
@@ -38,20 +39,22 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::args::{Scalar, YyyyMmDd, parse_args};
-use crate::budget::{BUDGET_CHARS, Fit, fit, size};
+use crate::budget::{BUDGET_CHARS, size};
 use crate::client::LogseqClient;
+use crate::cursor::{Anchor, Cursor, Position, SnapshotKey, decode, encode, invalid};
 use crate::dates::{CalendarDate, Clock, DatePreset};
 use crate::edn::PageId;
 use crate::entity::{id_of, page_display_name};
 use crate::errors::{InvalidParameter, ToolError};
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::pages_by_ids::pages_by_ids;
+use crate::paging::{Cut, PagedCut, Stale, page_of, paged_warning, refuse_with_cursor, resume_at, serve, stale_warning};
+use crate::period::{Period, Selection, resolve_period};
 use crate::property::{PropertyFilter, property_filter};
 use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
-use crate::tool::{input_schema, read_only_annotations, success_result};
-use crate::period::{Period, Selection, resolve_period};
-use crate::truncation::{CappedTruncation, Paging, SizeCut, blocks_inline_max, capped_truncation_warning, size_truncation_warning};
+use crate::snapshots::Snapshots;
+use crate::tool::{CursorSchema, input_schema, read_only_annotations, success_result};
 
 use self::queries::Match;
 use self::scope::{Notes, Scope, check_names, resolve_scope};
@@ -62,20 +65,19 @@ pub const NAME: &str = "logseq_find_blocks";
 /// Results returned when `limit` is absent.
 pub const DEFAULT_FIND_LIMIT: u64 = 100;
 
-/// Most results one call returns (#61). A larger `limit` is clamped to it. The library function reports a cut at the
-/// maximum by a `results_truncated` warning with no `howToFetchAll`; through `call`, 500 hits are always past the
-/// character budget (a slim hit is at least ~60 characters), so the size cut (`result_size_truncated`) takes that
-/// place (#506).
+/// Most results one page holds (#61). A larger `limit` is clamped to it. Through `call`, 500 hits are always past the
+/// character budget (a slim hit is at least ~60 characters), so the size cut (`result_size_truncated`) takes the place
+/// of the count cut there (#506), and the cursor reads on from where it fell.
 pub const MAX_FIND_LIMIT: u64 = 500;
 
 /// The code of the warning for a result cut at `limit`.
 const COUNT_CUT: &str = "results_truncated";
 
-/// How to reach matches past the maximum: no parameter fetches them.
-const NARROWER: &str = "Narrow the filters to see the rest.";
+/// What the list holds, as a warning says it.
+const WHAT: &str = "matching blocks";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). Pages by limit (max 500) and offset: check hasMore.\n\n\
+const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). limit (max 500) sizes a page: while hasMore, call again with only cursor=nextCursor.\n\n\
 **Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_explore_network).";
 
 fn default_limit() -> u64 {
@@ -114,18 +116,18 @@ pub struct Args {
     pub last_n: Option<u64>,
     /// Named period in local time; weeks run Monday to Sunday
     pub preset: Option<DatePreset>,
-    /// Maximum number of results to return (default: 100, max: 500)
+    /// Page size: most results per call (default: 100, max: 500)
     #[serde(default = "default_limit")]
     pub limit: u64,
-    /// Results to skip, newest first; shifts if the graph changes
-    #[serde(default)]
-    pub offset: u64,
     /// Include semantic context (page, references, tags)
     #[serde(default)]
     pub include_context: bool,
     /// Slim blocks (default). false returns full entities
     #[serde(default = "default_slim_results")]
     pub slim_results: bool,
+    // No doc comment: the shared description is the type's (`CursorSchema`), and a doc comment would replace it
+    #[schemars(with = "Option<CursorSchema>")]
+    pub cursor: Option<String>,
 }
 
 /// A count a `u32` holds: a larger one is as good as the largest, since `last_n` only ever counts back that many days.
@@ -241,209 +243,274 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Find Blocks"))
 }
 
-/// A call: arguments read, the search, then its meta and tips. The character budget (#506, #485) is applied here, to
-/// the two content blocks the call sends, so the library function the search is read through stays uncut.
-pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = parse_args::<Args>(arguments.as_ref())?;
-    let filters = Filters::from_args(&args, clock.today())?;
-    // The pages, resolved after every argument is checked, so a refusal makes no call
-    let scope = resolve_scope(client, args.page.as_deref(), args.links_to.as_deref().unwrap_or_default()).await?;
-    let filters = filters.scoped(scope);
-    let text = filters.text.as_deref();
-    let searched = search(client, &filters, args.limit, args.offset, args.include_context, args.slim_results).await?.with_raise(tips_enabled, text);
-    let (results, meta) = fit_to_budget(&searched, tips_enabled, text);
+/// What a cursor says about where to read on, once decoded and checked against this tool: the hit the last page ended
+/// with and the index of the next one. The arguments come back as [`Args`], parsed again like any other (ADR-0038:
+/// nothing in a token is trusted).
+struct Resume {
+    cursor: Cursor,
+    /// The index of the first hit of the next page, in the list as the first call read it
+    at: usize,
+    /// The id of the last block the page before sent
+    anchor: i64,
+    /// The token as sent, for a refusal
+    token: String,
+}
+
+impl Resume {
+    fn read(token: &str) -> Result<(Args, Resume), InvalidParameter> {
+        let cursor = decode(token, NAME)?;
+        let Position::Index { at } = cursor.position else {
+            return Err(invalid(token, NAME, "this is not a cursor of this tool: its position is not one hit"));
+        };
+        let Anchor::Id(anchor) = cursor.anchor else {
+            return Err(invalid(token, NAME, "this is not a cursor of this tool: its last hit is not a block id"));
+        };
+        // The arguments the token holds are read as any call's are. A cursor holds none of its own
+        let args = parse_args::<Args>(Some(&cursor.args)).ok().filter(|args| args.cursor.is_none());
+        let args = args.ok_or_else(|| invalid(token, NAME, "its arguments are not ones this tool takes"))?;
+        Ok((args, Resume { cursor, at, anchor, token: token.to_owned() }))
+    }
+
+    /// A token whose arguments no longer make a search: the same refusal as one that doesn't parse.
+    fn refuse(&self, reason: &str) -> InvalidParameter {
+        invalid(&self.token, NAME, reason)
+    }
+}
+
+/// The arguments of a search as a cursor carries them: what the call asked, with a `last_n` or a preset as the dates it
+/// meant, so a page read again after midnight reads the same days (ADR-0038). Read again by [`Args`].
+fn stored_arguments(args: &Args, filters: &Filters) -> Map<String, Value> {
+    let mut stored = Map::new();
+    let mut put = |key: &str, value: Option<Value>| {
+        if let Some(value) = value {
+            stored.insert(key.to_owned(), value);
+        }
+    };
+    put("text", args.text.as_ref().map(|text| json!(text)));
+    put("page", args.page.as_ref().map(|page| json!(page)));
+    put("links_to", args.links_to.as_ref().map(|names| json!(names)));
+    put("property", args.property.as_ref().map(|property| json!(property)));
+    put(
+        "value",
+        args.value.as_ref().map(|value| match value {
+            Scalar::Text(text) => json!(text),
+            Scalar::Number(number) => json!(number),
+            Scalar::Flag(flag) => json!(flag),
+        }),
+    );
+    put("start_date", filters.period.map(|period| json!(period.start)));
+    put("end_date", filters.period.map(|period| json!(period.end)));
+    put("limit", Some(json!(args.limit)));
+    put("include_context", Some(json!(args.include_context)));
+    put("slim_results", Some(json!(args.slim_results)));
+    stored
+}
+
+/// What a search read: every matching block, newest first, and what resolving the pages of the call found. This is the
+/// list a cursor pages, and what a snapshot keeps.
+struct Listing {
+    /// `None` when LogSeq answered `null`: the search was not answered (BR-0011)
+    matches: Option<Vec<Value>>,
+    /// How the pages of the call were read
+    notes: Notes,
+    /// What the blocks were asked to be ([`Filters::describe`]), for the warning of a search that was not answered
+    asked: String,
+}
+
+impl Listing {
+    /// What the snapshot weighs, in bytes of JSON: what the matches would be written as.
+    fn weight(&self) -> usize {
+        self.matches.iter().flatten().map(|block| block.to_string().len()).sum()
+    }
+}
+
+/// A call: arguments read, the list read (from the snapshot a cursor names, or from LogSeq), then one page of it with
+/// its meta and tips. The character budget (#506, #485) is applied here, to the two content blocks the call sends, so
+/// the library function the search is read through stays uncut.
+///
+/// A call with a `cursor` takes no other argument: they are in the token. The page it reads starts where the token's
+/// position says, if the last hit the page before sent is just before it, and otherwise right after that hit in block
+/// order, with a `cursor_stale` warning (BR-0006).
+pub async fn call(client: &LogseqClient, tips_enabled: bool, clock: Clock, snapshots: &Snapshots, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
+    let asked = parse_args::<Args>(arguments.as_ref())?;
+    let now = Instant::now();
+    let (args, resume) = match asked.cursor.clone() {
+        Some(token) => {
+            refuse_with_cursor::<Args>(arguments.as_ref())?;
+            let (args, resume) = Resume::read(&token)?;
+            (args, Some(resume))
+        }
+        None => (asked, None),
+    };
+    let filters = Filters::from_args(&args, clock.today()).map_err(|error| resume.as_ref().map_or(error, |resume| resume.refuse("its arguments are not a search this tool makes")))?;
+    // The arguments the list was built from: the cursor's own, byte for byte, so the snapshot it names is the one asked for
+    let stored = match &resume {
+        Some(resume) => resume.cursor.args.clone(),
+        None => stored_arguments(&args, &filters),
+    };
+    let served = serve(snapshots, resume.as_ref().map(|resume| &resume.cursor.snapshot), &stored, now, || listing_of(client, &args, &filters)).await?;
+    let listing = &*served.list;
+    let first_page = resume.is_none();
+    let Some(matches) = &listing.matches else {
+        let (results, meta) = unavailable_texts(listing, first_page);
+        return Ok(success_result(vec![ContentBlock::text(results), ContentBlock::text(meta)]));
+    };
+
+    let total = matches.len();
+    let (start, stale) = match &resume {
+        None => (0, None),
+        Some(resume) => {
+            // The list is newest first, so the hits after the anchor are the first ones with a lower id: found by key,
+            // which holds when the list gained a newer hit, or lost the anchor itself, since the last page
+            let resumed = resume_at(total, resume.at, |at| block_id(&matches[at]) == resume.anchor, || Some(matches.partition_point(|block| block_id(block) >= resume.anchor)));
+            (resumed.start, resumed.stale)
+        }
+    };
+    let page_size = args.limit.min(MAX_FIND_LIMIT) as usize;
+    // Context is read for the hits the page holds, before the budget cuts them: one call per page
+    let reach = page_size.min(total - start);
+    let (results, context_missing) = hits_of(client, &matches[start..start + reach], args.include_context, args.slim_results).await?;
+    let view = View {
+        anchors: matches[start..start + reach].iter().map(block_id).collect(),
+        results,
+        notes: listing.notes.clone(),
+        first_page,
+        stale,
+        start,
+        total,
+        page_size,
+        include_context: args.include_context,
+        slim_results: args.slim_results,
+        context_missing,
+        others: Others { property: filters.property.is_some(), period: filters.period.is_some(), page: args.page.is_some(), links_to: args.links_to.is_some() },
+        text: filters.text.clone(),
+        tips_enabled,
+        token: Some(Token { args: stored.clone(), key: served.key }),
+    };
+    let page = page_of(total, start, page_size, |kept| view.size(kept));
+    // A list that fits one page needs no snapshot, and a hit is kept already
+    if page.next().is_some() {
+        served.keep(snapshots, &stored, listing.weight(), now);
+    }
+    let (results, meta) = view.texts(page.kept, page.cut);
     Ok(success_result(vec![ContentBlock::text(results), ContentBlock::text(meta)]))
 }
 
-/// A cut by the character budget: how many hits were kept, and whether even those are over it (BR-0007).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SizeCutTo {
-    kept: usize,
-    oversize: bool,
+/// The list of a first call, or of a cursor whose snapshot is gone: the pages named are resolved, then the one search
+/// runs. These are the first page's calls and no more, so no call ceiling rises (ADR-0038).
+async fn listing_of(client: &LogseqClient, args: &Args, filters: &Filters) -> Result<Listing, ToolError> {
+    // The pages, resolved after every argument is checked, so a refusal makes no call
+    let scope = resolve_scope(client, args.page.as_deref(), args.links_to.as_deref().unwrap_or_default()).await?;
+    read_listing(client, &filters.clone().scoped(scope)).await
 }
 
-/// What the search read, before anything is said about it: the hits kept by `limit`, as results, and what the
-/// warnings need.
-struct Searched {
-    /// Slim blocks, or full ones with `slim_results: false`, from `offset` on and already cut to `limit`
+/// The one search, with the pages of `filters` resolved.
+async fn read_listing(client: &LogseqClient, filters: &Filters) -> Result<Listing, ToolError> {
+    Ok(Listing { matches: find(client, filters).await?, notes: filters.scope.notes.clone(), asked: filters.describe() })
+}
+
+/// The two content blocks of a search LogSeq did not answer: `[]` and the warning, which is no `howToFetchAll`, so
+/// there is nothing to read on (BR-0011). No total is claimed, and no tip.
+fn unavailable_texts(listing: &Listing, first_page: bool) -> (String, String) {
+    let meta = unavailable_meta(listing);
+    (
+        "[]".to_owned(),
+        json!({ "meta": meta_object(&listing.notes, first_page, &meta, &[]) }).to_string(),
+    )
+}
+
+fn unavailable_meta(listing: &Listing) -> ResultMeta {
+    let mut warnings = listing.notes.warnings.clone();
+    warnings.push(search_unavailable(&listing.asked));
+    ResultMeta::paged(warnings, &[], None)
+}
+
+/// The `meta` object: how the pages were read (`resolvedFrom`, `resolvedAliases`) first, then what must not be missed
+/// (`hasMore`, `nextCursor`, `warnings`, `totals`), then the tips (BR-0013). How the pages were read is said on the
+/// first page only: it describes the request, which the pages after it carry in the cursor.
+fn meta_object(notes: &Notes, first_page: bool, meta: &ResultMeta, tips: &[String]) -> Map<String, Value> {
+    let mut object = Map::new();
+    if first_page {
+        object.extend(notes.resolved_from_value().map(|from| ("resolvedFrom".to_owned(), from)));
+        object.extend(notes.resolved_aliases_value().map(|aliases| ("resolvedAliases".to_owned(), aliases)));
+    }
+    let Value::Object(counted) = serde_json::to_value(meta).expect("a result meta serializes") else { unreachable!("a result meta is an object") };
+    object.extend(counted);
+    if !tips.is_empty() {
+        object.insert("tips".into(), json!(tips));
+    }
+    object
+}
+
+/// What a page's cursor is made from: the arguments of the call and the snapshot its list was kept as.
+struct Token {
+    args: Map<String, Value>,
+    key: SnapshotKey,
+}
+
+/// One page of hits, and everything its warnings, cursor and tips are made from.
+struct View {
+    /// The hits the page could hold, as results: slim, or full with `slim_results: false`, with their context
     results: Vec<Value>,
-    /// Matching blocks before `offset` and `limit`
+    /// The block id of each of `results`, which is what a cursor names its last hit by
+    anchors: Vec<i64>,
+    notes: Notes,
+    /// Whether this is the first page of a list, which says how its pages were read
+    first_page: bool,
+    stale: Option<Stale>,
+    /// The index of the first of `results` in the list
+    start: usize,
+    /// Matching blocks in all
     total: usize,
-    /// The matches skipped before `results` start: the `offset` asked for, or `total` when it asked for more
-    offset: usize,
-    limit: u64,
+    /// The most hits a page holds: `limit`, clamped
+    page_size: usize,
     include_context: bool,
     slim_results: bool,
     /// LogSeq answered `null` to the page lookup of `include_context`
     context_missing: bool,
-    /// LogSeq answered `null` to the search itself: what the blocks were asked to be ([`Filters::describe`]), for the
-    /// warning (BR-0011)
-    unavailable_for: Option<String>,
-    /// When `limit` cut the hits: every hit the search could return from `offset` (up to [`MAX_FIND_LIMIT`]) as a result
-    /// without `context`, which the raise advice measures. Empty when `limit` cut nothing.
-    plain: Vec<Value>,
     /// The filters besides `text`, for the tip of a miss
     others: Others,
-    /// What resolving the pages of the call found: which names were not exact, the groups searched, the alias warnings
-    notes: Notes,
-    /// What the warning of a `limit` cut says about raising it, once measured ([`Searched::with_raise`])
-    raise: Raise,
+    text: Option<String>,
+    tips_enabled: bool,
+    /// What the next page's cursor carries. None for the library function, which has no snapshots to name
+    token: Option<Token>,
 }
 
-/// What the warning of a `limit` cut says about raising `limit`, given the character budget (BR-0006: a
-/// `howToFetchAll` is a promise).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Raise {
-    /// Not measured, or the raise to every hit fits: the usual `limit` warning
-    Unchecked,
-    /// A larger `limit` returns more hits, up to `limit`. `exact` is false with `include_context`, whose pages are
-    /// read for the hits kept only, so `limit` is an upper bound and the result may be cut earlier.
-    Offer { limit: usize, exact: bool },
-    /// No larger `limit` returns more hits: they would not fit the budget
-    NoMore,
-}
-
-impl Searched {
-    /// The matches from `offset` on: what a cut leaves out counts against these, not against the ones skipped.
-    fn remaining(&self) -> usize {
-        self.total.saturating_sub(self.offset)
-    }
-
-    /// What the results are of, as a warning says it: the matches, and from which one when some were skipped.
-    fn what(&self) -> String {
-        if self.offset > 0 { format!("matching blocks from offset {}", self.offset) } else { "matching blocks".to_owned() }
-    }
-
-    /// How to read on past the `shown` hits of this result: the `offset` that starts where they end (BR-0006). None for
-    /// a result with no hit, since an offset that does not move reads nothing on.
-    fn next_page(&self, shown: usize) -> Option<String> {
-        (shown > 0).then(|| format!("Set offset to {} for the next page.", self.offset + shown))
-    }
-
-    /// The warnings of the result holding the first `cut.kept` hits, or all of them without a cut. A size cut counts
-    /// the hits against every match from `offset`, so it replaces the count cap's warning: that one would offer a larger
-    /// `limit`, which returns the same first hits cut the same way (BR-0006). Its `howToFetchAll` is the next page.
-    fn warnings(&self, cut: Option<SizeCutTo>) -> Vec<ResultWarning> {
-        // What was said about the pages comes first: it is about how the request was read, before what came back
-        let mut warnings = self.notes.warnings.clone();
-        if let Some(asked) = &self.unavailable_for {
-            warnings.push(search_unavailable(asked));
-            return warnings;
-        }
-        let shown = cut.map_or(self.results.len(), |cut| cut.kept);
-        match cut {
-            Some(SizeCutTo { kept, oversize }) => warnings.push(size_truncation_warning(SizeCut {
-                what: &self.what(),
-                kept,
-                total: self.remaining(),
-                oversize,
-                advice: &self.size_advice(),
-                how_to_fetch_all: self.next_page(kept),
-            })),
-            None if self.remaining() > self.results.len() => warnings.push(self.count_warning(shown)),
-            None => {}
-        }
-        if self.context_missing {
-            warnings.push(context_unavailable(shown));
-        }
-        warnings
-    }
-
-    /// The warning of a `limit` cut that kept `shown` hits. The next page is always there to fetch, so it leads;
-    /// raising `limit` is the alternative, offered only where the raised result fits the character budget (otherwise it
-    /// would be cut again and the offer would promise hits it cannot give).
-    fn count_warning(&self, shown: usize) -> ResultWarning {
-        let (remaining, what) = (self.remaining(), self.what());
-        let next = self.next_page(shown);
-        // "Set limit to ..." alone, or as the alternative to the next page
-        let lead = next.as_ref().map_or("Set".to_owned(), |next| format!("{next} Or set"));
-        match self.raise {
-            Raise::Unchecked => capped_truncation_warning(CappedTruncation {
-                what: &what,
-                shown,
-                total: remaining,
-                param: "limit",
-                max: MAX_FIND_LIMIT as usize,
-                narrower: NARROWER,
-                requested: Some(self.limit),
-                code: COUNT_CUT,
-                inline_max: Some(blocks_inline_max(self.include_context, self.slim_results)),
-                paging: next.map(|next| Paging { param: "offset", next }),
-            }),
-            Raise::NoMore => ResultWarning {
-                code: COUNT_CUT.to_owned(),
-                message: format!(
-                    "Showing {shown} of {remaining} {what}: a result holds at most {BUDGET_CHARS} characters, so no larger limit fits in that. \
-                     Page through the rest with offset. {NARROWER}"
-                ),
-                how_to_fetch_all: next,
-            },
-            Raise::Offer { limit, exact } => ResultWarning {
-                code: COUNT_CUT.to_owned(),
-                message: format!("Showing {shown} of {remaining} {what}. Page through the rest with offset."),
-                how_to_fetch_all: Some(if exact {
-                    format!(
-                        "{lead} limit to {limit} to get {limit} of {remaining}. That is the most that fits: a result holds at most {BUDGET_CHARS} characters, and more hits would be cut. {NARROWER}"
-                    )
-                } else {
-                    format!(
-                        "{lead} limit to {limit} to get up to {limit} of {remaining}. Each hit comes with its context, which is read for the hits kept only, \
-                         so the result may be cut to {BUDGET_CHARS} characters before that. {NARROWER}"
-                    )
-                }),
-            },
-        }
-    }
-
-    /// The raise `limit` can honestly offer, measured on the hits already read: the most hits (up to the maximum)
-    /// whose result, as `call` would send it for that `limit`, fits the budget. That result carries the warning of its
-    /// own `limit` cut, which is as long as the one measured here, so a `limit` of that many hits comes back whole and
-    /// the hit after it would not fit. Exact for hits without `context`; with `include_context` the hits are measured
-    /// without it, so the count is an upper bound. Only a `limit` cut has one.
-    fn with_raise(mut self, tips_enabled: bool, text: Option<&str>) -> Searched {
-        let kept = self.results.len();
-        if self.remaining() <= kept || self.plain.is_empty() {
-            return self;
-        }
-        let reachable = self.plain.len();
-        // the result of a `limit` of `hits`: those hits, and the warning that more were left
-        let at_limit = |hits: usize| Searched {
-            results: self.plain[..hits].to_vec(),
-            total: self.total,
-            offset: self.offset,
-            limit: hits as u64,
-            include_context: self.include_context,
-            slim_results: self.slim_results,
-            context_missing: false,
-            unavailable_for: None,
-            plain: Vec::new(),
-            others: self.others,
-            notes: self.notes.clone(),
-            raise: Raise::Offer { limit: reachable, exact: !self.include_context },
-        };
-        let most = match fit(reachable, 1, |hits| at_limit(hits).size_with(tips_enabled, text, hits)) {
-            Fit::Whole => reachable,
-            Fit::Cut { kept, .. } => kept,
-        };
-        self.raise = if most <= kept {
-            Raise::NoMore
-        } else if most >= reachable && !self.include_context {
-            Raise::Unchecked
+impl View {
+    /// How the page ends when it holds the first `kept` of its hits: not at all when it reaches the last hit of the
+    /// list, by the page size when it holds all it could, by the budget otherwise.
+    fn cut_at(&self, kept: usize) -> Option<Cut> {
+        if self.start + kept >= self.total {
+            None
+        } else if kept == self.results.len() {
+            Some(Cut::Count)
         } else {
-            Raise::Offer { limit: most, exact: !self.include_context }
-        };
-        self
+            Some(Cut::Size { oversize: false })
+        }
     }
 
-    /// The length of the result holding the first `kept` hits (all of them when `kept` is the number of hits).
-    fn size_with(&self, tips_enabled: bool, text: Option<&str>, kept: usize) -> usize {
-        let (results, meta) = self.texts(tips_enabled, text, (kept < self.results.len()).then_some(SizeCutTo { kept, oversize: false }));
+    /// The length of the result holding the first `kept` hits, as `call` would send it (what the budget measures).
+    fn size(&self, kept: usize) -> usize {
+        let (results, meta) = self.texts(kept, self.cut_at(kept));
         size(&results) + size(&meta)
     }
 
-    /// What a reader can do about a result cut for its size. No parameter raises the budget, but `offset` reads on
-    /// (the warning's `howToFetchAll` names it), and a narrower filter makes less to read; richer hits are bigger ones,
-    /// so the settings that make them are named.
+    /// Whether the page, held to `kept` hits and ending as `cut` says, has a cursor to read on with. A page of no hit
+    /// has none: a cursor that does not move reads nothing on.
+    fn has_next(&self, kept: usize, cut: Option<Cut>) -> bool {
+        cut.is_some() && kept > 0 && self.token.is_some()
+    }
+
+    /// The cursor that starts at the hit after the first `kept`, which the last of them names.
+    fn next_cursor(&self, kept: usize, cut: Option<Cut>) -> Option<String> {
+        let token = self.token.as_ref().filter(|_| self.has_next(kept, cut))?;
+        let anchor = Anchor::Id(self.anchors[kept - 1]);
+        Some(encode(&Cursor::new(NAME, token.args.clone(), Position::Index { at: self.start + kept }, anchor, token.key)))
+    }
+
+    /// What a reader can do about a result cut for its size. No parameter raises the budget, and the cursor reads on
+    /// (the warning's `howToFetchAll` names it), but a narrower filter makes less to read, and richer hits are bigger
+    /// ones, so the settings that make them are named.
     fn size_advice(&self) -> String {
         let richer = match (self.include_context, self.slim_results) {
             (true, true) => " include_context: false makes each hit smaller.",
@@ -451,47 +518,59 @@ impl Searched {
             (true, false) => " include_context: false and slim_results: true make each hit smaller.",
             (false, true) => "",
         };
-        format!("The oldest matches are the ones left out (newest first). Read on with offset, or narrow the filters.{richer} No parameter raises the size limit.")
+        format!("The oldest matches are the ones left out (newest first). Narrow the filters to read fewer.{richer} No parameter raises the size limit.")
     }
 
-    /// The meta of the result holding the first `cut.kept` hits (all of them without a cut).
-    fn meta(&self, cut: Option<SizeCutTo>) -> ResultMeta {
-        let warnings = self.warnings(cut);
-        match self.unavailable_for {
-            Some(_) => ResultMeta::new(warnings, &[]),
-            None => ResultMeta::new(warnings, &[("matches", self.total)]),
+    /// A raise of `limit` to offer beside the cursor, on the first page only (a cursor call can't change it). It is
+    /// always an honest offer, since a result that is too large for the budget is cut again and carries a cursor of its own.
+    fn raise(&self, cut: Cut) -> Option<String> {
+        let more = self.total.min(MAX_FIND_LIMIT as usize);
+        (cut == Cut::Count && self.first_page && more > self.page_size)
+            .then(|| format!("set limit to {more} for a larger page (a result holds at most {BUDGET_CHARS} characters)."))
+    }
+
+    /// The warnings of the page holding the first `kept` hits: how the pages were read, a list that moved, the cut,
+    /// and the context that was not read, in that order.
+    fn warnings(&self, kept: usize, cut: Option<Cut>) -> Vec<ResultWarning> {
+        // What was said about the pages comes first: it is about how the request was read, before what came back
+        let mut warnings = self.notes.warnings.clone();
+        warnings.extend(self.stale.map(|stale| stale_warning(stale, WHAT)));
+        if let Some(cut) = cut {
+            let advice = match cut {
+                Cut::Size { .. } => self.size_advice(),
+                Cut::Count if self.page_size == 0 => "limit is 0, so no hit is returned.".to_owned(),
+                Cut::Count => String::new(),
+            };
+            warnings.push(paged_warning(PagedCut {
+                count_code: COUNT_CUT,
+                cut,
+                what: WHAT,
+                start: self.start,
+                kept,
+                total: self.total,
+                advice: &advice,
+                raise: self.raise(cut),
+                has_next: self.has_next(kept, Some(cut)),
+            }));
         }
-    }
-
-    /// The two content blocks of the call with the first `cut.kept` hits, all of them without a cut: the results,
-    /// then the meta with its tips. The tips read the hits that are sent.
-    fn texts(&self, tips_enabled: bool, text: Option<&str>, cut: Option<SizeCutTo>) -> (String, String) {
-        let sent = &self.results[..cut.map_or(self.results.len(), |cut| cut.kept)];
-        // No tip for a search LogSeq did not answer: "No match" would say what the warning says it can't
-        let tips = if tips_enabled && self.unavailable_for.is_none() { find_tips(text, self.others, sent, Some(self.total)) } else { Vec::new() };
-        // BR-0013: how the pages were read (`resolvedFrom`, `resolvedAliases`) first, then what must not be missed
-        // (`hasMore`, `warnings`, `totals`), then the tips
-        let mut meta = Map::new();
-        meta.extend(self.notes.resolved_from_value().map(|from| ("resolvedFrom".to_owned(), from)));
-        meta.extend(self.notes.resolved_aliases_value().map(|aliases| ("resolvedAliases".to_owned(), aliases)));
-        let Value::Object(counted) = serde_json::to_value(self.meta(cut)).expect("a result meta serializes") else { unreachable!("a result meta is an object") };
-        meta.extend(counted);
-        if !tips.is_empty() {
-            meta.insert("tips".into(), json!(tips));
+        if self.context_missing {
+            warnings.push(context_unavailable(kept));
         }
-        (serde_json::to_string(sent).expect("results serialize"), json!({ "meta": meta }).to_string())
+        warnings
     }
-}
 
-/// The two content blocks as they are when their text fits the character budget, else with the first hits that do.
-/// The unit is a hit: it is never cut inside its text (BR-0007), so a first hit over the budget comes back alone,
-/// and the warning says so. The budget counts both blocks, the tips included.
-fn fit_to_budget(searched: &Searched, tips_enabled: bool, text: Option<&str>) -> (String, String) {
-    let total = searched.results.len();
-    let texts = |cut: Option<SizeCutTo>| searched.texts(tips_enabled, text, cut);
-    match fit(total, 1, |kept| searched.size_with(tips_enabled, text, kept)) {
-        Fit::Whole => texts(None),
-        Fit::Cut { kept, oversize } => texts(Some(SizeCutTo { kept, oversize })),
+    /// The meta of the page holding the first `kept` hits.
+    fn meta(&self, kept: usize, cut: Option<Cut>) -> ResultMeta {
+        ResultMeta::paged(self.warnings(kept, cut), &[("matches", self.total)], self.next_cursor(kept, cut))
+    }
+
+    /// The two content blocks of the page holding the first `kept` hits: the results, then the meta with its tips. The
+    /// tips read the hits that are sent.
+    fn texts(&self, kept: usize, cut: Option<Cut>) -> (String, String) {
+        let sent = &self.results[..kept];
+        let tips = if self.tips_enabled { find_tips(self.text.as_deref(), self.others, sent, Some(self.total)) } else { Vec::new() };
+        let meta = self.meta(kept, cut);
+        (serde_json::to_string(sent).expect("results serialize"), json!({ "meta": meta_object(&self.notes, self.first_page, &meta, &tips) }).to_string())
     }
 }
 
@@ -514,6 +593,54 @@ impl SearchResults {
     pub fn matches(&self) -> Option<usize> {
         self.meta.totals.get("matches").and_then(Value::as_u64).map(|matches| matches as usize)
     }
+}
+
+
+/// Find the blocks that match `filters`: the first page of results and their meta (`totals.matches` is the number of
+/// matching blocks before `limit`, and a `results_truncated` warning says what `limit` to use to get more). When
+/// LogSeq answers `null` the results are `[]` and the meta carries a `search_unavailable` warning, with no
+/// `totals.matches` since none is known (BR-0011, #415); no matches is an empty `results` and no warning.
+///
+/// `limit` is clamped to [`MAX_FIND_LIMIT`]. This is the search before the character budget and before the cursor,
+/// which only [`call`] applies (#506, ADR-0038): it reads the first page of the list and keeps no snapshot, so a cut
+/// carries no `nextCursor` (`hasMore` is false) and its warning offers the raise of `limit` alone.
+pub async fn find_blocks_with_meta(client: &LogseqClient, filters: &Filters, limit: u64, include_context: bool, slim_results: bool) -> Result<SearchResults, ToolError> {
+    let listing = read_listing(client, filters).await?;
+    let Some(matches) = &listing.matches else { return Ok(SearchResults { results: Vec::new(), meta: unavailable_meta(&listing) }) };
+    let page_size = limit.min(MAX_FIND_LIMIT) as usize;
+    let shown = page_size.min(matches.len());
+    let (results, context_missing) = hits_of(client, &matches[..shown], include_context, slim_results).await?;
+    let view = View {
+        anchors: matches[..shown].iter().map(block_id).collect(),
+        results,
+        notes: listing.notes.clone(),
+        first_page: true,
+        stale: None,
+        start: 0,
+        total: matches.len(),
+        page_size,
+        include_context,
+        slim_results,
+        context_missing,
+        others: filters.others(),
+        text: None,
+        tips_enabled: false,
+        token: None,
+    };
+    let meta = view.meta(shown, view.cut_at(shown));
+    Ok(SearchResults { results: view.results, meta })
+}
+
+/// The hits of a page as results: slim, or full with `slim_results: false`, each with its `context` when asked. The
+/// context of the hits is read for these hits only (one call), so the lookup never covers a hit of another page.
+async fn hits_of(client: &LogseqClient, blocks: &[Value], include_context: bool, slim_results: bool) -> Result<(Vec<Value>, bool), ToolError> {
+    let (contexts, context_missing) = if include_context { with_page_context(client, blocks).await? } else { (blocks.iter().map(|_| None).collect(), false) };
+    let results = blocks
+        .iter()
+        .zip(&contexts)
+        .map(|(block, context)| if slim_results { slim_result(block, context.as_ref()) } else { full_result(block, context.as_ref()) })
+        .collect();
+    Ok((results, context_missing))
 }
 
 /// A block's id as the sort reads it (`b.id - a.id`).
@@ -662,86 +789,12 @@ async fn find(client: &LogseqClient, filters: &Filters) -> Result<Option<Vec<Val
     Ok(Some(matches))
 }
 
-/// Find the blocks that match `filters`: the results and their meta (`totals.matches` is the number of
-/// matching blocks before `limit`, and a `results_truncated` warning says what `limit` to use to get
-/// them all). When LogSeq answers `null` the results are `[]` and the meta carries a `search_unavailable`
-/// warning, with no `totals.matches` since none is known (BR-0011, #415); no matches is an empty `results` and no
-/// warning.
-///
-/// `limit` is clamped to [`MAX_FIND_LIMIT`]. The warning never suggests a value above
-/// it, and a cut at the maximum carries no `howToFetchAll`, so `hasMore` is false there (BR-0006). This is the
-/// search before the character budget, which only [`call`] applies (#506): a result of this function can be longer
-/// than the budget, and its `limit` warning does not account for that. Through `call` a cut at the maximum is always
-/// a size cut, and a `limit` warning offers only a raise the budget allows.
-pub async fn find_blocks_with_meta(
-    client: &LogseqClient,
-    filters: &Filters,
-    limit: u64,
-    offset: u64,
-    include_context: bool,
-    slim_results: bool,
-) -> Result<SearchResults, ToolError> {
-    let searched = search(client, filters, limit, offset, include_context, slim_results).await?;
-    let meta = searched.meta(None);
-    Ok(SearchResults { results: searched.results, meta })
-}
-
-/// The search of [`find_blocks_with_meta`], before the warnings are worded and the character budget applied
-/// (only [`call`] applies it, #506). API calls: 1, or 2 with `include_context`.
-async fn search(
-    client: &LogseqClient,
-    filters: &Filters,
-    limit: u64,
-    offset: u64,
-    include_context: bool,
-    slim_results: bool,
-) -> Result<Searched, ToolError> {
-    // Newest first (highest block id first)
-    let Some(mut matches) = find(client, filters).await? else {
-        return Ok(Searched {
-            results: Vec::new(),
-            total: 0,
-            offset: 0,
-            limit,
-            include_context,
-            slim_results,
-            context_missing: false,
-            unavailable_for: Some(filters.describe()),
-            plain: Vec::new(),
-            others: filters.others(),
-            notes: filters.scope.notes.clone(),
-            raise: Raise::Unchecked,
-        });
-    };
-    let total = matches.len();
-    // An offset past the last match reads nothing, and is no more than the end
-    let offset = usize::try_from(offset).unwrap_or(usize::MAX).min(total);
-    let mut matches = matches.split_off(offset);
-    let kept = limit.min(MAX_FIND_LIMIT) as usize;
-    // The hits `limit` leaves out, up to the maximum, for the raise advice to measure (no call: they are in hand)
-    let beyond: Vec<Value> = if matches.len() > kept { matches[kept..matches.len().min(MAX_FIND_LIMIT as usize)].to_vec() } else { Vec::new() };
-    matches.truncate(kept);
-
-    // Page context only for the blocks kept, so the lookup never covers cut ones
-    let (contexts, context_missing) = if include_context { with_page_context(client, &matches).await? } else { (matches.iter().map(|_| None).collect(), false) };
-
-    let results = matches
-        .iter()
-        .zip(&contexts)
-        .map(|(block, context)| if slim_results { slim_result(block, context.as_ref()) } else { full_result(block, context.as_ref()) })
-        .collect();
-    let plain = if beyond.is_empty() {
-        Vec::new()
-    } else {
-        matches.iter().chain(&beyond).map(|block| if slim_results { slim_result(block, None) } else { full_result(block, None) }).collect()
-    };
-    Ok(Searched { results, total, offset, limit, include_context, slim_results, context_missing, unavailable_for: None, plain, others: filters.others(), notes: filters.scope.notes.clone(), raise: Raise::Unchecked })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::budget::BUDGET_CHARS;
+    use crate::cursor::decode;
+    use crate::paging::{NEXT_PAGE, Page};
     use crate::tool::testing::{meaning, schema_of};
 
     #[test]
@@ -793,13 +846,42 @@ mod tests {
         );
     }
 
-    fn searched(results: Vec<Value>, total: usize) -> Searched {
-        Searched { results, total, offset: 0, limit: 100, include_context: false, slim_results: true, context_missing: false, unavailable_for: None, plain: Vec::new(), others: Others::default(), notes: Notes::default(), raise: Raise::Unchecked }
+    const KEY: SnapshotKey = SnapshotKey { started: 1_760_000_000_000, n: 7 };
+
+    fn token_args() -> Map<String, Value> {
+        json!({"text": "x", "limit": 100, "include_context": false, "slim_results": true}).as_object().cloned().unwrap()
+    }
+
+    /// A first page whose hits are `results`, out of `total` matches, with a cursor to read on and no tips.
+    fn view(results: Vec<Value>, total: usize) -> View {
+        View {
+            anchors: (0..results.len() as i64).map(|n| 1000 - n).collect(),
+            results,
+            notes: Notes::default(),
+            first_page: true,
+            stale: None,
+            start: 0,
+            total,
+            page_size: 100,
+            include_context: false,
+            slim_results: true,
+            context_missing: false,
+            others: Others::default(),
+            text: Some("x".to_owned()),
+            tips_enabled: false,
+            token: Some(Token { args: token_args(), key: KEY }),
+        }
     }
 
     /// A slim hit whose content is `length` characters.
     fn hit(length: usize) -> Value {
         json!({"uuid": "u", "content": "x".repeat(length)})
+    }
+
+    /// The page the budget and the page size make of a view, and the two texts it sends.
+    fn paged(view: &View) -> ((String, String), Page) {
+        let page = page_of(view.total, view.start, view.page_size, |kept| view.size(kept));
+        (view.texts(page.kept, page.cut), page)
     }
 
     fn chars(texts: &(String, String)) -> usize {
@@ -810,14 +892,21 @@ mod tests {
         serde_json::from_str::<Value>(&texts.1).unwrap()["meta"].clone()
     }
 
+    fn sent(texts: &(String, String)) -> Vec<Value> {
+        serde_json::from_str(&texts.0).unwrap()
+    }
+
     #[test]
     fn an_empty_search_and_a_result_under_the_budget_are_sent_as_the_search_made_them() {
-        let empty = fit_to_budget(&searched(Vec::new(), 0), true, Some("x"));
-        assert_eq!(empty.0, "[]");
-        assert_eq!(meta_of(&empty), json!({"hasMore": false, "warnings": [], "totals": {"matches": 0}, "tips": [empty_tip()]}));
-        let small = searched(vec![hit(10), hit(20)], 2);
-        assert_eq!(fit_to_budget(&small, false, Some("x")), small.texts(false, Some("x"), None));
-        assert_eq!(small.texts(false, Some("x"), None).1, r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":2}}}"#);
+        let empty = View { tips_enabled: true, ..view(Vec::new(), 0) };
+        let (texts, page) = paged(&empty);
+        assert_eq!(texts.0, "[]");
+        assert_eq!(page, Page { start: 0, kept: 0, cut: None });
+        assert_eq!(meta_of(&texts), json!({"hasMore": false, "warnings": [], "totals": {"matches": 0}, "tips": [empty_tip()]}));
+        let small = view(vec![hit(10), hit(20)], 2);
+        let (texts, page) = paged(&small);
+        assert_eq!((page.kept, page.cut), (2, None));
+        assert_eq!(texts.1, r#"{"meta":{"hasMore":false,"warnings":[],"totals":{"matches":2}}}"#);
     }
 
     fn empty_tip() -> String {
@@ -826,122 +915,140 @@ mod tests {
 
     #[test]
     fn a_result_exactly_at_the_budget_is_untouched_and_one_character_over_is_cut() {
-        let frame = chars(&searched(vec![hit(10), hit(10), hit(0)], 3).texts(false, Some("x"), None));
-        let exact = searched(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame)], 3);
-        let texts = fit_to_budget(&exact, false, Some("x"));
+        let frame = chars(&view(vec![hit(10), hit(10), hit(0)], 3).texts(3, None));
+        let exact = view(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame)], 3);
+        let (texts, page) = paged(&exact);
         assert_eq!(chars(&texts), BUDGET_CHARS);
-        assert_eq!(texts, exact.texts(false, Some("x"), None));
+        assert_eq!((page.kept, page.cut), (3, None));
         assert_eq!(meta_of(&texts)["warnings"], json!([]));
 
-        let over = searched(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame + 1)], 3);
-        let texts = fit_to_budget(&over, false, Some("x"));
+        let over = view(vec![hit(10), hit(10), hit(BUDGET_CHARS - frame + 1)], 3);
+        let (texts, page) = paged(&over);
         assert!(chars(&texts) <= BUDGET_CHARS);
-        assert_eq!(serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len(), 2);
+        assert_eq!((page.kept, sent(&texts).len()), (2, 2));
         assert_eq!(meta_of(&texts)["warnings"][0]["code"], "result_size_truncated");
     }
 
     #[test]
-    fn a_cut_keeps_the_most_hits_that_fit_with_its_warning_and_the_newest_first() {
+    fn a_cut_keeps_the_most_hits_that_fit_with_its_warning_and_cursor_and_the_newest_first() {
         let hits: Vec<Value> = (0..400).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(200)})).collect();
-        let found = searched(hits, 400);
-        let texts = fit_to_budget(&found, false, Some("x"));
+        let found = View { page_size: 400, ..view(hits, 400) };
+        let (texts, page) = paged(&found);
         assert!(chars(&texts) <= BUDGET_CHARS);
-        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
+        let kept = page.kept;
         assert!(kept > 1 && kept < 400);
-        // one more hit would not have fit
-        let one_more = found.texts(false, Some("x"), Some(SizeCutTo { kept: kept + 1, oversize: false }));
-        assert!(chars(&one_more) > BUDGET_CHARS);
+        // one more hit would not have fit, with its warning and the cursor that names it
+        assert!(found.size(kept + 1) > BUDGET_CHARS);
         let meta = meta_of(&texts);
-        // no parameter raises the size limit, but the next page reads on from where the cut fell
         assert_eq!(meta["hasMore"], true);
+        assert!(meta["nextCursor"].is_string());
         assert_eq!(meta["totals"], json!({"matches": 400}));
         let message = meta["warnings"][0]["message"].as_str().unwrap();
-        assert!(message.starts_with(&format!("Showing {kept} of 400 matching blocks: the result was cut to fit 30000 characters")), "{message}");
-        assert_eq!(meta["warnings"][0]["howToFetchAll"], format!("Set offset to {kept} for the next page."));
+        assert!(message.starts_with(&format!("Showing 1-{kept} of 400 matching blocks: the result was cut to fit 30000 characters")), "{message}");
+        assert_eq!(meta["warnings"][0]["howToFetchAll"], NEXT_PAGE);
         assert!(!message.contains("Even those"));
         // the hits are the first ones, whole
-        assert_eq!(serde_json::from_str::<Vec<Value>>(&texts.0).unwrap(), found.results[..kept]);
+        assert_eq!(sent(&texts), found.results[..kept]);
     }
 
     #[test]
-    fn a_single_hit_over_the_budget_is_returned_alone_and_the_first_of_many_says_so() {
-        let one = fit_to_budget(&searched(vec![hit(40_000)], 1), false, Some("x"));
-        assert_eq!(serde_json::from_str::<Vec<Value>>(&one.0).unwrap().len(), 1);
+    fn a_single_hit_over_the_budget_is_returned_alone_and_the_first_of_many_says_so_and_moves_the_cursor_past_it() {
+        let (one, page) = paged(&view(vec![hit(40_000)], 1));
+        assert_eq!((sent(&one).len(), page.cut), (1, None));
         assert_eq!(meta_of(&one)["warnings"], json!([]));
 
-        let first_over = fit_to_budget(&searched(vec![hit(40_000), hit(5), hit(5)], 3), false, Some("x"));
-        assert_eq!(serde_json::from_str::<Vec<Value>>(&first_over.0).unwrap().len(), 1);
+        let (first_over, page) = paged(&view(vec![hit(40_000), hit(5), hit(5)], 3));
+        assert_eq!((sent(&first_over).len(), page.next()), (1, Some(1)));
         let meta = meta_of(&first_over);
         assert_eq!(meta["warnings"][0]["code"], "result_size_truncated");
         assert!(meta["warnings"][0]["message"].as_str().unwrap().contains("Showing 1 of 3 matching blocks"));
         assert!(meta["warnings"][0]["message"].as_str().unwrap().contains("Even those are over that size"));
+        let cursor = decode(meta["nextCursor"].as_str().unwrap(), NAME).unwrap();
+        assert_eq!(cursor.position, Position::Index { at: 1 });
     }
 
     #[test]
-    fn a_size_cut_replaces_the_limit_warning_that_would_offer_a_larger_limit() {
-        // 300 matches, `limit` kept 200 of 100 characters each (a limit cut that offers a raise), and the size
-        // cuts that to fewer: no larger `limit` returns more, so the only warning is the size one (BR-0006)
-        let found = searched((0..200).map(|_| hit(200)).collect(), 300);
-        let limit_only = found.meta(None);
-        assert_eq!(limit_only.warnings[0].code, "results_truncated");
-        assert!(limit_only.has_more, "a limit cut below the maximum offers a raise");
-        let texts = fit_to_budget(&found, false, Some("x"));
+    fn a_page_size_cut_is_the_count_warning_with_the_cursor_first_and_the_raise_beside_it_on_the_first_page_only() {
+        let hits: Vec<Value> = (0..100).map(|_| hit(10)).collect();
+        let found = View { page_size: 100, ..view(hits, 400) };
+        let (texts, page) = paged(&found);
+        assert_eq!((page.kept, page.cut), (100, Some(Cut::Count)));
         let meta = meta_of(&texts);
-        let codes: Vec<&str> = meta["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect();
-        assert_eq!(codes, ["result_size_truncated"]);
         assert_eq!(meta["hasMore"], true);
-        assert_eq!(meta["totals"]["matches"], 300);
-        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
-        // the next page starts where the kept hits end, which is before where `limit` would have cut
-        assert_eq!(meta["warnings"][0]["howToFetchAll"], format!("Set offset to {kept} for the next page."));
-        assert!(meta["warnings"][0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 300 matching blocks")));
+        let warning = &meta["warnings"][0];
+        assert_eq!(warning["code"], "results_truncated");
+        assert_eq!(warning["message"], "Showing 1-100 of 400 matching blocks.");
+        assert_eq!(
+            warning["howToFetchAll"],
+            format!("{NEXT_PAGE} Or set limit to 400 for a larger page (a result holds at most 30000 characters).")
+        );
+        // a page after the first can't change `limit`, and a limit at the maximum has nothing to raise to
+        let later = View { start: 100, first_page: false, ..view((0..100).map(|_| hit(10)).collect(), 400) };
+        assert_eq!(meta_of(&paged(&later).0)["warnings"][0]["howToFetchAll"], NEXT_PAGE);
+        assert_eq!(meta_of(&paged(&later).0)["warnings"][0]["message"], "Showing 101-200 of 400 matching blocks.");
+        let widest = View { page_size: 500, ..view((0..500).map(|_| hit(10)).collect(), 900) };
+        assert_eq!(meta_of(&paged(&widest).0)["warnings"][0]["howToFetchAll"], NEXT_PAGE);
+        // exactly `limit` matches is no cut
+        let exact = View { page_size: 100, ..view((0..100).map(|_| hit(10)).collect(), 100) };
+        assert_eq!(meta_of(&paged(&exact).0)["warnings"], json!([]));
+    }
+
+    #[test]
+    fn a_limit_of_zero_shows_nothing_has_no_cursor_and_offers_the_raise_alone() {
+        let nothing = View { page_size: 0, ..view(Vec::new(), 5) };
+        let (texts, page) = paged(&nothing);
+        assert_eq!((texts.0.as_str(), page.kept, page.next()), ("[]", 0, None));
+        let meta = meta_of(&texts);
+        // nothing reads on with a cursor, so hasMore is false, and the warning still says how to see the hits
+        assert_eq!(meta["hasMore"], false);
+        assert!(meta.get("nextCursor").is_none());
+        assert_eq!(meta["totals"], json!({"matches": 5}));
+        assert_eq!(meta["warnings"][0]["code"], "results_truncated");
+        assert_eq!(meta["warnings"][0]["message"], "Showing 0 of 5 matching blocks. limit is 0, so no hit is returned.");
+        assert_eq!(meta["warnings"][0]["howToFetchAll"], "Set limit to 5 for a larger page (a result holds at most 30000 characters).");
     }
 
     #[test]
     fn a_missing_context_warning_counts_the_hits_that_are_sent() {
-        let mut found = searched((0..200).map(|_| hit(300)).collect(), 200);
-        found.context_missing = true;
-        let whole = found.meta(None);
+        let found = View { context_missing: true, page_size: 200, ..view((0..200).map(|_| hit(300)).collect(), 200) };
+        let whole = found.meta(200, None);
         assert!(whole.warnings[0].message.contains("the 200 result block(s)"));
-        let texts = fit_to_budget(&found, false, Some("x"));
-        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
-        assert!(kept < 200);
+        let (texts, page) = paged(&found);
+        assert!(page.kept < 200);
         let meta = meta_of(&texts);
         assert_eq!(meta["warnings"][1]["code"], "context_unavailable");
-        assert!(meta["warnings"][1]["message"].as_str().unwrap().contains(&format!("the {kept} result block(s)")));
+        assert!(meta["warnings"][1]["message"].as_str().unwrap().contains(&format!("the {} result block(s)", page.kept)));
     }
 
     #[test]
     fn the_budget_counts_the_tips_and_a_tip_reads_the_hits_that_are_sent() {
         let hits: Vec<Value> = (0..400).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(200), "pageName": if n < 100 { "Old Page" } else { "Other Page" }})).collect();
-        let found = searched(hits, 400);
-        let texts = fit_to_budget(&found, true, Some("x"));
+        let found = View { tips_enabled: true, page_size: 400, ..view(hits, 400) };
+        let (texts, _) = paged(&found);
         assert!(chars(&texts) <= BUDGET_CHARS);
         let meta = meta_of(&texts);
         assert_eq!(meta["tips"].as_array().unwrap().len(), 1);
         // it matches what the tip tool says of the hits that are sent
-        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap();
-        assert_eq!(meta["tips"][0], json!(find_tips(Some("x"), Others::default(), &kept, Some(400))[0]));
+        assert_eq!(meta["tips"][0], json!(find_tips(Some("x"), Others::default(), &sent(&texts), Some(400))[0]));
     }
 
     #[test]
     fn a_search_that_found_nothing_to_read_keeps_its_unavailable_warning_and_no_total() {
-        let mut found = searched(Vec::new(), 0);
-        found.unavailable_for = Some("x".into());
-        let texts = fit_to_budget(&found, true, Some("x"));
+        let listing = Listing { matches: None, notes: Notes::default(), asked: "contain \"x\"".to_owned() };
+        let texts = unavailable_texts(&listing, true);
         assert_eq!(texts.0, "[]");
         let meta = meta_of(&texts);
         assert_eq!(meta["warnings"][0]["code"], "search_unavailable");
-        assert_eq!(meta["totals"], json!({}));
-        assert!(meta.get("tips").is_none());
+        assert_eq!((meta["totals"].clone(), meta["hasMore"].clone()), (json!({}), json!(false)));
+        assert!(meta.get("tips").is_none() && meta.get("nextCursor").is_none());
     }
 
     #[test]
     fn the_advice_names_what_makes_a_hit_smaller_only_when_the_search_asked_for_more() {
-        let mut found = searched(Vec::new(), 0);
+        let mut found = view(Vec::new(), 0);
         assert_eq!(
             found.size_advice(),
-            "The oldest matches are the ones left out (newest first). Read on with offset, or narrow the filters. No parameter raises the size limit."
+            "The oldest matches are the ones left out (newest first). Narrow the filters to read fewer. No parameter raises the size limit."
         );
         found.include_context = true;
         assert!(found.size_advice().contains(" include_context: false makes each hit smaller."));
@@ -951,188 +1058,81 @@ mod tests {
         assert!(found.size_advice().contains(" slim_results: true makes each hit smaller."));
     }
 
-    /// A search whose `limit` kept the first `kept` of `reachable` hits (each `length` characters) out of `total` matches.
-    fn limited(kept: usize, reachable: usize, total: usize, length: usize) -> Searched {
-        let plain: Vec<Value> = (0..reachable).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(length)})).collect();
-        Searched { results: plain[..kept].to_vec(), total, limit: kept as u64, plain, ..searched(Vec::new(), total) }
-    }
-
-    fn count_warning_of(found: Searched) -> ResultWarning {
-        let found = found.with_raise(false, Some("x"));
-        let shown = found.results.len();
-        found.count_warning(shown)
-    }
-
     #[test]
-    fn a_raise_that_fits_the_budget_keeps_the_usual_warning() {
-        // 30 hits of ~100 characters in all: raising `limit` to 30 returns them all, so "get all 30" is true
-        let warning = count_warning_of(limited(10, 30, 30, 100));
-        assert_eq!(warning.code, "results_truncated");
-        assert_eq!(warning.message, "Showing 10 of 30 matching blocks. Page through the rest with offset.");
-        assert_eq!(
-            warning.how_to_fetch_all.as_deref(),
-            Some("Set offset to 10 for the next page. Or set limit to 30 (or higher) to get all 30 in one call."),
-            "{warning:?}"
-        );
-        // and the warning is the one the library function gives, byte for byte
-        let library = limited(10, 30, 30, 100).meta(None);
-        assert_eq!(serde_json::to_value(&library.warnings[0]).unwrap(), serde_json::to_value(&warning).unwrap());
-    }
-
-    #[test]
-    fn a_raise_past_the_budget_offers_only_what_fits() {
-        // 200 hits of 300 characters (~65,000): 30 are kept, and raising to 200 would be cut to the most that fit
-        let found = limited(30, 200, 200, 300).with_raise(false, Some("x"));
-        let Raise::Offer { limit, exact: true } = found.raise else { panic!("{:?}", found.raise) };
-        assert!(limit > 30 && limit < 200, "{limit}");
-        // that many fit and one more does not, as the call would send them
-        let raised = Searched { results: found.plain[..limit].to_vec(), ..limited(limit, 200, 200, 300) };
-        assert!(raised.size_with(false, Some("x"), limit) <= BUDGET_CHARS);
-        let more = Searched { results: found.plain[..limit + 1].to_vec(), ..limited(limit + 1, 200, 200, 300) };
-        assert!(more.size_with(false, Some("x"), limit + 1) > BUDGET_CHARS);
-        let warning = found.count_warning(30);
-        assert_eq!(warning.code, "results_truncated");
-        assert_eq!(warning.message, "Showing 30 of 200 matching blocks. Page through the rest with offset.");
-        let how = warning.how_to_fetch_all.unwrap();
-        assert!(
-            how.starts_with(&format!(
-                "Set offset to 30 for the next page. Or set limit to {limit} to get {limit} of 200. That is the most that fits: a result holds at most 30000 characters"
-            )),
-            "{how}"
-        );
-        assert!(!how.contains("get all"));
-    }
-
-    #[test]
-    fn when_no_larger_limit_fits_the_warning_offers_the_next_page_alone() {
-        // 95 hits of 300 characters are ~30,000 characters: 95 are kept and no `limit` returns more
-        let found = limited(95, 300, 300, 300);
-        assert!(found.size_with(false, Some("x"), 95) > BUDGET_CHARS - 600, "the kept hits are near the budget");
-        let found = found.with_raise(false, Some("x"));
-        let shown = found.results.len();
-        let warning = found.count_warning(shown);
-        assert_eq!(found.raise, Raise::NoMore, "{warning:?}");
-        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set offset to 95 for the next page."));
-        assert!(warning.message.contains("no larger limit fits in that"), "{}", warning.message);
-        assert!(!warning.message.contains("Set limit"), "no raise is offered: {}", warning.message);
-        assert!(found.meta(None).has_more, "the next page can be fetched");
-    }
-
-    #[test]
-    fn more_than_the_maximum_in_matches_never_offers_the_maximum() {
-        // 700 matches, 500 reachable, 100 kept: 500 hits can't fit, so "Set limit to 500 (the maximum)" is never said
-        let warning = count_warning_of(limited(100, 500, 700, 200));
-        assert!(!warning.how_to_fetch_all.clone().unwrap_or_default().contains("500"), "{warning:?}");
-        assert!(!warning.message.contains("get 500"));
-        let found = limited(100, 500, 700, 200).with_raise(false, Some("x"));
-        assert!(matches!(found.raise, Raise::Offer { limit, .. } if limit > 100 && limit < 500), "{:?}", found.raise);
-    }
-
-    #[test]
-    fn a_raise_with_context_is_an_upper_bound_and_never_promises_all() {
-        // 30 small hits would fit without context, but context is read for the hits kept only: "up to", never "all"
-        let mut found = limited(10, 30, 30, 100);
-        found.include_context = true;
-        let found = found.with_raise(false, Some("x"));
-        assert_eq!(found.raise, Raise::Offer { limit: 30, exact: false });
-        let how = found.count_warning(10).how_to_fetch_all.unwrap();
-        assert!(how.starts_with("Set offset to 10 for the next page. Or set limit to 30 to get up to 30 of 30."), "{how}");
-        assert!(how.contains("may be cut to 30000 characters"), "{how}");
-        assert!(!how.contains("get all"));
-        // hits that don't fit even without context never will with it
-        let mut full = limited(95, 300, 300, 300);
-        full.include_context = true;
-        assert_eq!(full.with_raise(false, Some("x")).raise, Raise::NoMore);
-    }
-
-    #[test]
-    fn a_search_with_no_limit_cut_has_no_raise_to_measure() {
-        let found = searched(vec![hit(5), hit(5)], 2).with_raise(true, Some("x"));
-        assert_eq!(found.raise, Raise::Unchecked);
-        assert!(found.meta(None).warnings.is_empty());
-    }
-
-    /// A search whose `offset` skipped `offset` of the `total` matches and whose `limit` kept `kept` hits of `length`
-    /// characters, with `reachable` hits from the offset on in hand for the raise advice.
-    fn paged(offset: usize, kept: usize, reachable: usize, total: usize, length: usize) -> Searched {
-        Searched { offset, ..limited(kept, reachable, total, length) }
-    }
-
-    #[test]
-    fn an_offset_counts_a_limit_cut_against_the_matches_from_it_and_names_the_next_page() {
-        // 400 matches, 120 skipped, 50 of the 280 left are shown: "get all" would mean those 280, not 400
-        let found = paged(120, 50, 280, 400, 100).with_raise(false, Some("x"));
-        let warning = found.count_warning(50);
-        assert_eq!(warning.code, "results_truncated");
-        assert_eq!(warning.message, "Showing 50 of 280 matching blocks from offset 120. Page through the rest with offset.");
-        let how = warning.how_to_fetch_all.unwrap();
-        assert!(how.starts_with("Set offset to 170 for the next page. Or set limit to "), "{how}");
-        assert!(how.contains(" of 280."), "{how}");
-        // the totals still count every match, skipped ones included
-        assert_eq!(found.meta(None).totals["matches"], 400);
-    }
-
-    #[test]
-    fn an_offset_that_reaches_the_end_has_no_warning_and_one_past_it_is_the_end() {
-        // the last 5 of 125 matches, and the offset that is exactly the total: neither is a cut
-        let last = paged(120, 5, 5, 125, 100);
-        assert_eq!(last.remaining(), 5);
-        assert!(last.meta(None).warnings.is_empty());
-        let end = Searched { offset: 125, ..searched(Vec::new(), 125) };
-        assert_eq!(end.remaining(), 0);
-        let meta = end.meta(None);
-        assert!(meta.warnings.is_empty() && !meta.has_more);
-        assert_eq!(meta.totals["matches"], 125);
-        // and with the tips on, an empty page that skipped real matches is no miss
-        assert_eq!(meta_of(&fit_to_budget(&end, true, Some("x")))["tips"], json!(null));
-    }
-
-    #[test]
-    fn a_size_cut_with_an_offset_reads_on_from_the_offset_plus_the_hits_kept() {
-        let hits: Vec<Value> = (0..400).map(|n| json!({"uuid": format!("u{n}"), "content": "x".repeat(200)})).collect();
-        let found = Searched { offset: 25, ..searched(hits, 425) };
-        let texts = fit_to_budget(&found, false, Some("x"));
-        let kept = serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len();
-        assert!(kept > 1 && kept < 400);
+    fn the_next_cursor_names_the_next_hit_and_the_last_one_sent_and_the_last_page_has_none() {
+        let hits: Vec<Value> = (0..100).map(|_| hit(10)).collect();
+        let (texts, page) = paged(&View { start: 200, first_page: false, ..view(hits, 450) });
+        assert_eq!(page.next(), Some(300));
         let meta = meta_of(&texts);
-        assert_eq!(meta["hasMore"], true);
-        assert_eq!(meta["totals"], json!({"matches": 425}));
-        let warning = &meta["warnings"][0];
-        assert_eq!(warning["code"], "result_size_truncated");
-        assert!(
-            warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 400 matching blocks from offset 25: the result was cut to fit 30000 characters")),
-            "{warning}"
-        );
-        assert_eq!(warning["howToFetchAll"], format!("Set offset to {} for the next page.", 25 + kept));
+        let cursor = decode(meta["nextCursor"].as_str().unwrap(), NAME).unwrap();
+        // the 100 hits ended with the block of id 901 (1000 - 99), so that is the anchor
+        assert_eq!(cursor, Cursor::new(NAME, token_args(), Position::Index { at: 300 }, Anchor::Id(901), KEY));
+        // the last page, and the library function's page, have none
+        let last = View { start: 400, first_page: false, ..view((0..50).map(|_| hit(10)).collect(), 450) };
+        assert!(meta_of(&paged(&last).0).get("nextCursor").is_none());
+        let library = View { token: None, ..view((0..100).map(|_| hit(10)).collect(), 450) };
+        let meta = library.meta(100, library.cut_at(100));
+        assert!(!meta.has_more && meta.next_cursor.is_none());
+        assert!(meta.warnings[0].how_to_fetch_all.as_deref().unwrap().starts_with("Set limit to 450"));
     }
 
     #[test]
-    fn a_result_with_no_hit_has_no_next_page_to_name() {
-        let found = paged(0, 0, 30, 30, 100).with_raise(false, Some("x"));
-        assert_eq!(found.next_page(0), None);
-        let warning = found.count_warning(0);
-        // `limit: 0` shows nothing: raising it is the only way on, and the warning says so
-        assert!(warning.how_to_fetch_all.as_deref().unwrap().starts_with("Set limit to 30 (or higher) to get all 30"), "{warning:?}");
+    fn the_warnings_come_in_order_how_the_pages_were_read_a_list_that_moved_the_cut_and_the_context() {
+        let notes = Notes { warnings: vec![ResultWarning::new("alias_lookup_unavailable", "m".into())], ..Notes::default() };
+        let found = View { notes, stale: Some(Stale::Moved), context_missing: true, page_size: 2, ..view(vec![hit(5), hit(5)], 9) };
+        let codes: Vec<String> = found.warnings(2, Some(Cut::Count)).into_iter().map(|warning| warning.code).collect();
+        assert_eq!(codes, ["alias_lookup_unavailable", "cursor_stale", "results_truncated", "context_unavailable"]);
     }
 
     #[test]
     fn the_budget_counts_characters_not_bytes_through_this_tool() {
         // hits of "é" (2 bytes each): exactly the budget in characters, well over it in bytes
         let accented = |length: usize| json!({"uuid": "u", "content": "é".repeat(length)});
-        let frame = chars(&searched(vec![accented(10), accented(10), accented(0)], 3).texts(false, Some("x"), None));
-        let exact = searched(vec![accented(10), accented(10), accented(BUDGET_CHARS - frame)], 3);
-        let texts = fit_to_budget(&exact, false, Some("x"));
+        let frame = chars(&view(vec![accented(10), accented(10), accented(0)], 3).texts(3, None));
+        let exact = view(vec![accented(10), accented(10), accented(BUDGET_CHARS - frame)], 3);
+        let (texts, _) = paged(&exact);
         assert_eq!(chars(&texts), BUDGET_CHARS);
         assert!(texts.0.len() + texts.1.len() > BUDGET_CHARS + 15_000, "{} bytes", texts.0.len() + texts.1.len());
-        assert_eq!(texts, exact.texts(false, Some("x"), None), "at the budget in characters, so untouched");
         assert_eq!(meta_of(&texts)["warnings"], json!([]));
 
         // one more character is a cut, and what is kept is at most the budget in characters
-        let over = searched(vec![accented(10), accented(10), accented(BUDGET_CHARS - frame + 1)], 3);
-        let texts = fit_to_budget(&over, false, Some("x"));
+        let over = view(vec![accented(10), accented(10), accented(BUDGET_CHARS - frame + 1)], 3);
+        let (texts, _) = paged(&over);
         assert!(chars(&texts) <= BUDGET_CHARS);
-        assert_eq!(serde_json::from_str::<Vec<Value>>(&texts.0).unwrap().len(), 2);
+        assert_eq!(sent(&texts).len(), 2);
         assert_eq!(meta_of(&texts)["warnings"][0]["code"], "result_size_truncated");
+    }
+
+    #[test]
+    fn how_the_pages_were_read_leads_the_meta_of_the_first_page_only_and_the_alias_warnings_stay() {
+        let notes = Notes {
+            resolved_from: vec![scope::ResolvedFrom { name: "al".into(), matched_by: crate::errors::MatchedBy::Alias, resolved_to: "Alice".into() }],
+            resolved_aliases: vec![("Alice".into(), vec!["Al".into(), "Alice".into()])],
+            warnings: vec![ResultWarning::new("alias_lookup_unavailable", "m".into())],
+        };
+        let found = View { notes: notes.clone(), tips_enabled: true, text: None, ..view(vec![hit(10)], 1) };
+        let meta = meta_of(&found.texts(1, None));
+        let keys: Vec<&str> = meta.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "tips"]);
+        assert_eq!(meta["resolvedFrom"], json!([{"name": "al", "matchedBy": "alias", "resolvedTo": "Alice"}]));
+        assert_eq!(meta["resolvedAliases"], json!({"Alice": ["Al", "Alice"]}));
+        assert_eq!(meta["warnings"][0]["code"], "alias_lookup_unavailable");
+        // a page after the first says how the request was read nowhere (the cursor holds it), but a warning that the
+        // search may be incomplete is not about the request and stays
+        let later = View { notes, first_page: false, ..view(vec![hit(10)], 1) };
+        let meta = meta_of(&later.texts(1, None));
+        assert_eq!(meta.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["hasMore", "warnings", "totals"]);
+        assert_eq!(meta["warnings"][0]["code"], "alias_lookup_unavailable");
+        // no pages named: the meta is the one it always was
+        let plain = meta_of(&view(vec![hit(10)], 1).texts(1, None));
+        assert_eq!(plain.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["hasMore", "warnings", "totals"]);
+        // a search that was not answered keeps the alias warning beside its own, and claims no total
+        let unanswered = Listing { matches: None, notes: found.notes.clone(), asked: "x".into() };
+        let meta = meta_of(&unavailable_texts(&unanswered, true));
+        assert_eq!(meta["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["alias_lookup_unavailable", "search_unavailable"]);
+        assert_eq!(meta["totals"], json!({}));
+        assert!(meta.get("resolvedFrom").is_some());
+        assert!(meta_of(&unavailable_texts(&unanswered, false)).get("resolvedFrom").is_none());
     }
 
     #[test]
@@ -1160,14 +1160,16 @@ mod tests {
                     "enum": ["today", "yesterday", "this_week", "last_week", "this_month", "last_month", "this_year", "year_to_date"],
                     "description": "Named period in local time; weeks run Monday to Sunday"
                 },
-                "limit": {"type": "integer", "minimum": 0, "default": 100, "description": "Maximum number of results to return (default: 100, max: 500)"},
-                "offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Results to skip, newest first; shifts if the graph changes"},
+                "limit": {"type": "integer", "minimum": 0, "default": 100, "description": "Page size: most results per call (default: 100, max: 500)"},
                 "include_context": {"type": "boolean", "default": false, "description": "Include semantic context (page, references, tags)"},
                 "slim_results": {"type": "boolean", "default": true, "description": "Slim blocks (default). false returns full entities"},
+                "cursor": {"type": "string", "description": crate::tool::CURSOR_DESCRIPTION},
             },
             "required": [],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
+        // there is no `offset`: a cursor reads on (ADR-0038)
+        assert!(schema_of::<Args>()["properties"].get("offset").is_none());
     }
 
     #[test]
@@ -1197,9 +1199,9 @@ mod tests {
                 last_n: None,
                 preset: None,
                 limit: 100,
-                offset: 0,
                 include_context: false,
-                slim_results: true
+                slim_results: true,
+                cursor: None
             }
         );
         assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
@@ -1223,6 +1225,8 @@ mod tests {
             parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': \"a\"\n\nExpected: a number, not a string\nExample: limit: 5"
         );
+        // `offset` went with the cursor (ADR-0038): it is an unknown field now, which every tool ignores
+        assert!(parse_args::<Args>(json!({"text": "x", "offset": 5}).as_object()).is_ok());
     }
 
     #[test]
@@ -1239,9 +1243,9 @@ mod tests {
         sweep::<Args>(base.clone(), "last_n", Takes::Count(1), false);
         sweep::<Args>(base.clone(), "preset", Takes::Words(&DATE_PRESET_WORDS), false);
         sweep::<Args>(base.clone(), "limit", Takes::Count(0), false);
-        sweep::<Args>(base.clone(), "offset", Takes::Count(0), false);
         sweep::<Args>(base.clone(), "include_context", Takes::Flag, false);
-        sweep::<Args>(base, "slim_results", Takes::Flag, false);
+        sweep::<Args>(base.clone(), "slim_results", Takes::Flag, false);
+        sweep::<Args>(base, "cursor", Takes::Text, false);
     }
 
     /// The words `preset` takes, as the schema lists them.
@@ -1359,29 +1363,79 @@ mod tests {
         assert_eq!(wanted.links_to.iter().map(|ids| ids[0].get()).collect::<Vec<_>>(), [2, 3]);
     }
 
+    // ---- the cursor: what a token holds, and what a call reads back from it
+
+    fn resume_of(arguments: Value) -> (Args, Resume) {
+        let args = parse_args::<Args>(arguments.as_object()).unwrap();
+        let filters = Filters::from_args(&args, CalendarDate { year: 2025, month: 3, day: 12 }).unwrap();
+        let cursor = Cursor::new(NAME, stored_arguments(&args, &filters), Position::Index { at: 100 }, Anchor::Id(4242), KEY);
+        Resume::read(&encode(&cursor)).unwrap()
+    }
+
     #[test]
-    fn how_the_pages_were_read_leads_the_meta_and_the_alias_warnings_lead_the_warnings() {
-        let notes = Notes {
-            resolved_from: vec![scope::ResolvedFrom { name: "al".into(), matched_by: crate::errors::MatchedBy::Alias, resolved_to: "Alice".into() }],
-            resolved_aliases: vec![("Alice".into(), vec!["Al".into(), "Alice".into()])],
-            warnings: vec![ResultWarning::new("alias_lookup_unavailable", "m".into())],
-        };
-        let found = Searched { notes, ..searched(vec![hit(10)], 1) };
-        let texts = found.texts(true, None, None);
-        let meta = meta_of(&texts);
-        let keys: Vec<&str> = meta.as_object().unwrap().keys().map(String::as_str).collect();
-        assert_eq!(keys, ["resolvedFrom", "resolvedAliases", "hasMore", "warnings", "totals", "tips"]);
-        assert_eq!(meta["resolvedFrom"], json!([{"name": "al", "matchedBy": "alias", "resolvedTo": "Alice"}]));
-        assert_eq!(meta["resolvedAliases"], json!({"Alice": ["Al", "Alice"]}));
-        assert_eq!(meta["warnings"][0]["code"], "alias_lookup_unavailable");
-        // no pages named: the meta is the one it always was
-        let plain = meta_of(&searched(vec![hit(10)], 1).texts(false, None, None));
-        assert_eq!(plain.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["hasMore", "warnings", "totals"]);
-        // a search that was not answered keeps the alias warning beside its own, and claims no total
-        let mut unanswered = Searched { notes: found.notes.clone(), ..searched(Vec::new(), 0) };
-        unanswered.unavailable_for = Some("x".into());
-        let meta = meta_of(&unanswered.texts(true, None, None));
-        assert_eq!(meta["warnings"].as_array().unwrap().iter().map(|w| w["code"].as_str().unwrap()).collect::<Vec<_>>(), ["alias_lookup_unavailable", "search_unavailable"]);
-        assert_eq!(meta["totals"], json!({}));
+    fn a_period_given_as_last_n_or_a_preset_is_stored_as_its_dates_and_read_back_as_the_same_search() {
+        for arguments in [json!({"text": "x", "last_n": 7}), json!({"text": "x", "preset": "last_week"}), json!({"text": "x", "start_date": 20250301, "end_date": 20250307})] {
+            let args = parse_args::<Args>(arguments.as_object()).unwrap();
+            let filters = Filters::from_args(&args, CalendarDate { year: 2025, month: 3, day: 12 }).unwrap();
+            let stored = stored_arguments(&args, &filters);
+            assert!(stored.get("last_n").is_none() && stored.get("preset").is_none(), "{stored:?}");
+            let period = filters.period.unwrap();
+            assert_eq!((stored["start_date"].clone(), stored["end_date"].clone()), (json!(period.start), json!(period.end)));
+            // read again a month later, the same days (a `last_n` stored as 7 would now be another week)
+            let (again, _) = resume_of(arguments.clone());
+            let later = Filters::from_args(&again, CalendarDate { year: 2025, month: 4, day: 20 }).unwrap();
+            assert_eq!(later.period, Some(period), "{arguments}");
+        }
+    }
+
+    #[test]
+    fn every_argument_survives_the_token() {
+        let arguments = json!({
+            "text": "importer", "page": "Project Atlas", "links_to": ["Alice", "Bob"], "property": "status", "value": "doing",
+            "last_n": 3, "limit": 25, "include_context": true, "slim_results": false
+        });
+        let (args, resume) = resume_of(arguments);
+        assert_eq!(
+            args,
+            Args {
+                text: Some("importer".into()),
+                page: Some("Project Atlas".into()),
+                links_to: Some(vec!["Alice".into(), "Bob".into()]),
+                property: Some("status".into()),
+                value: Some(Scalar::Text("doing".into())),
+                start_date: Some(YyyyMmDd(20250310)),
+                end_date: Some(YyyyMmDd(20250312)),
+                last_n: None,
+                preset: None,
+                limit: 25,
+                include_context: true,
+                slim_results: false,
+                cursor: None
+            }
+        );
+        assert_eq!((resume.at, resume.anchor, resume.cursor.snapshot), (100, 4242, KEY));
+        // a number and a flag as the value, which the property filter reads as text
+        for (value, text) in [(json!(3), "3"), (json!(true), "true")] {
+            let (args, _) = resume_of(json!({"property": "n", "value": value}));
+            assert_eq!(args.value.unwrap().to_js_string(), text);
+        }
+    }
+
+    #[test]
+    fn a_token_this_tool_cannot_read_is_refused_by_the_cursor_and_not_by_a_parameter_it_never_sent() {
+        let good = Cursor::new(NAME, token_args(), Position::Index { at: 1 }, Anchor::Id(5), KEY);
+        let refused = |cursor: Cursor| Resume::read(&encode(&cursor)).err().map(|error| (error.param, error.expected));
+        assert!(refused(good.clone()).is_none());
+        let (param, expected) = refused(Cursor { position: Position::Sections { blocks: 1, references: 0, related: 0 }, ..good.clone() }).unwrap();
+        assert!(param == "cursor" && expected.contains("its position is not one hit"), "{expected}");
+        assert!(refused(Cursor { anchor: Anchor::Text("u".into()), ..good.clone() }).unwrap().1.contains("its last hit is not a block id"));
+        // arguments that parse as no call of this tool, and one that holds a cursor of its own
+        let bad_limit = json!({"text": "x", "limit": "many"}).as_object().cloned().unwrap();
+        assert!(refused(Cursor { args: bad_limit, ..good.clone() }).unwrap().1.contains("its arguments are not ones this tool takes"));
+        let nested = json!({"text": "x", "cursor": "abc"}).as_object().cloned().unwrap();
+        assert!(refused(Cursor { args: nested, ..good.clone() }).unwrap().1.contains("its arguments are not ones this tool takes"));
+        // and a token another tool made, or no token at all
+        assert!(refused(Cursor { tool: "logseq_find_pages".into(), ..good }).unwrap().1.contains("made by another tool"));
+        assert!(Resume::read("not a cursor").is_err());
     }
 }

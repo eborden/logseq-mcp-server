@@ -12,6 +12,7 @@ use logseq_mcp_server::client::LogseqClient;
 use logseq_mcp_server::config::Config;
 use logseq_mcp_server::dates::Clock;
 use logseq_mcp_server::errors::ToolError;
+use logseq_mcp_server::snapshots::Snapshots;
 use logseq_mcp_server::tools::find_blocks;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -125,7 +126,7 @@ fn count_resolvers(logseq: &MockLogseq) -> usize {
 
 /// The two content blocks of a call: the results, then the meta.
 async fn run(logseq: &MockLogseq, tips: bool, args: Value) -> Result<(Vec<Value>, Value), ToolError> {
-    let result = find_blocks::call(&client(logseq), tips, NOW, arguments(args)).await?;
+    let result = find_blocks::call(&client(logseq), tips, NOW, &Snapshots::new(1), arguments(args)).await?;
     let content = serde_json::to_value(&result).unwrap()["content"].clone();
     let results: Vec<Value> = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
     let meta: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
