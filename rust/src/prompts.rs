@@ -257,6 +257,9 @@ const READ_ONLY_NOTE: &str =
 /// A full page longer than the character budget comes back a page of blocks at a time (ADR-0038, #552).
 const FULL_PAGE_NOTE: &str = "A long page comes back a page of blocks at a time: while hasMore is true, call again with only its nextCursor as cursor.";
 
+/// A page's context longer than a page of each list or the character budget comes back a page at a time (ADR-0038, #555).
+const CONTEXT_NOTE: &str = "A busy page comes back a page at a time: while hasMore is true, call again with only its nextCursor as cursor.";
+
 /// What a summary's `Signals` section may hold.
 struct SummaryBudget {
     words: &'static str,
@@ -341,7 +344,7 @@ fn build_continue_on(args: &Arguments, _today: CalendarDate) -> Result<String, E
         format!("Help me continue where I left off on {t} in my LogSeq graph."),
         String::new(),
         "Steps:".to_owned(),
-        format!("1. logseq_explore_context with page {t} (include_temporal_context true). If no page matches, try logseq_find_pages with text, or logseq_find_blocks for the words."),
+        format!("1. logseq_explore_context with page {t} (include_temporal_context true). {CONTEXT_NOTE} If no page matches, try logseq_find_pages with text, or logseq_find_blocks for the words."),
         format!("2. logseq_find_blocks for {t}, limit 10, to catch recent mentions in journals that the page itself lacks. Results are newest first."),
         "3. Note any TODO or DOING blocks that mention it, and how old they are.".to_owned(),
         String::new(),
@@ -358,7 +361,7 @@ fn build_what_do_i_know(args: &Arguments, _today: CalendarDate) -> Result<String
         skill_note("research assistant"),
         String::new(),
         "Steps:".to_owned(),
-        format!("1. logseq_explore_context with page {t} for the page, its blocks, related pages and references. If the topic spans several pages, call it once per page, in parallel."),
+        format!("1. logseq_explore_context with page {t} for the page, its blocks, related pages and references. {CONTEXT_NOTE} If the topic spans several pages, call it once per page, in parallel."),
         format!("2. logseq_find_blocks for {t} (limit 15) for mentions outside the main page. Search is literal, so try one or two spelling variants if it comes back thin."),
         "3. logseq_explore_context on the one or two most relevant related pages to follow the connections, in parallel.".to_owned(),
         String::new(),
