@@ -93,7 +93,7 @@ Page 1 of `explore_network` equals today's result for the same arguments, apart 
 
 ## Status
 
-proposed
+accepted
 
 Date: 2026-10-13
 
