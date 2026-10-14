@@ -55,7 +55,9 @@ async fn logseq_holding(held: &Shared) -> MockLogseq {
         if text.contains("(or-join [?page ?b]") {
             held.lock().unwrap().as_deref().map_or(Value::Null, rows)
         } else {
-            json!([[pulled_page(), "name"]])
+            // the name "atlas" is an alias of the page, anything else is its name
+            let via = if request["args"][1] == "\"atlas\"" { "alias" } else { "name" };
+            json!([[pulled_page(), via]])
         }
     })
     .await
@@ -192,6 +194,20 @@ async fn an_outline_several_times_the_page_size_is_read_to_the_end_with_every_bl
     assert_eq!((body["hasMore"].clone(), body.get("warnings").map(|w| w.as_array().unwrap().len())), (json!(false), Some(0)));
     assert_eq!(uuids_of(&body).len(), 50);
     assert_eq!(methods(&logseq).len(), 2, "the pages after the first made no call");
+}
+
+#[tokio::test]
+async fn an_outline_asked_by_an_alias_keeps_the_alias_in_its_cursor_and_says_where_it_came_from_on_every_page() {
+    let held = blocks(450, 10);
+    let logseq = logseq_holding(&held).await;
+    let first = outline(&logseq, &snapshots(), json!({"page": "atlas", "detail": "outline"})).await.unwrap();
+    let from = json!({"name": "atlas", "matchedBy": "alias", "resolvedTo": "Project Atlas"});
+    assert_eq!((first["page"].clone(), first["resolvedFrom"].clone()), (json!("Project Atlas"), from.clone()));
+    assert_eq!(decode(&cursor_of(&first), get_page::NAME).unwrap().args["page"], "atlas");
+    // a miss resolves the alias again with page 1's two calls
+    let second = outline(&logseq, &Snapshots::new(1), json!({"cursor": cursor_of(&first)})).await.unwrap();
+    assert_eq!(methods(&logseq).len(), 4);
+    assert_eq!((uuids_of(&second)[0].clone(), second["resolvedFrom"].clone()), (uuid(201), from));
 }
 
 #[tokio::test]
