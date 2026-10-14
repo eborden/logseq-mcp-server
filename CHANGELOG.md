@@ -60,7 +60,7 @@ A call that sends only a retired name for a required parameter (`topic_name`, `c
 | `search_by_relationship` `topic_a` | `find_blocks` `page` (for `references`), or `explore_network` `page` (for `connected-within`) |
 | `search_by_relationship` `topic_b` | `find_blocks` `links_to` (a list of 1 to 5 pages), or `explore_network` `to` |
 | `search_by_relationship` `relationship_type` | Gone. The mode is the tool |
-| `search_by_relationship` `max_distance` | `explore_network` `max_depth` (at most 3 with `to`; v1 had no cap) |
+| `search_by_relationship` `max_distance` | `explore_network` `max_depth` (default 2, at most 3 in every mode; v1 `max_distance` had no cap, so a larger value is now capped at 3) |
 | `search_by_relationship` `limit` | `find_blocks` `limit` (default 100, v1 was 50), or gone with `explore_network` `to` |
 | `build_context` `topic_name` | `explore_context` `page` |
 | `get_backlinks` `page_name` | `explore_context` `page` |
@@ -201,5 +201,6 @@ A call that sends only a retired name for a required parameter (`topic_name`, `c
 
 - The unused `node-fetch` dependency. The client uses the global `fetch`.
 
+<!-- Placeholder: replace this with the v2.0.0 tag link when tagging (#499) -->
 [2.0.0]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/eborden/logseq-mcp-server/releases/tag/v1.0.0

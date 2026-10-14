@@ -5,8 +5,8 @@ import { connectMcpToApi } from '../../scripts/lib/rust-server.js';
 const readJson = (path: string) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf-8'));
 
 // The Rust server reports its Cargo package version (rust/src/server.rs), and this keeps it equal to
-// package.json, so one number names the server, the npm package and the plugin until #355 and #350 change how
-// it ships.
+// package.json, the plugin manifest and the marketplace entry, so one number names the server, the tooling package
+// and the plugin (the launcher fetches the binary for the plugin's own version, ADR-0035).
 describe('server version (#46, #356)', () => {
   const pkg = readJson('../../package.json');
 
