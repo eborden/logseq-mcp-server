@@ -6,7 +6,8 @@
 //!   every other value equal, and every JSON tool result minified.
 //! - [`same_text`] and [`same_tool_text`] are the places that decide whether two result texts match. A tool
 //!   result's JSON text (`content`) is compared by deep equality (the maintainer's decision on #371): object
-//!   key order is ignored, array order is kept, numbers compare by value. Every other text is compared byte for
+//!   key order is ignored, array order is kept, numbers compare by value, and a `nextCursor` (ADR-0038) compares by
+//!   what its token says without the snapshot it names, which differs between runs ([`same_cursor`]). Every other text is compared byte for
 //!   byte: a markdown result (`format: "markdown"`), a TOON result (`format: "toon"`, BR-0014), a prompt's messages, a resource read, and the frame of a
 //!   page-not-found message outside the closest names. Nothing else compares text.
 //! - [`minified_failures`] holds every JSON tool result to ADR-0009 separately, so deep equality can't let
@@ -19,6 +20,8 @@
 
 use std::collections::BTreeSet;
 
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 
 use super::cases::{Canned, Case};
@@ -68,11 +71,47 @@ fn json_container(text: &str) -> Option<Value> {
 }
 
 /// Whether two texts of a tool result's `content` are the same: by deep equality when both are JSON (key
-/// order ignored, array order kept, numbers by value), byte for byte otherwise (markdown, TOON).
+/// order ignored, array order kept, numbers by value, a `nextCursor` by what it says), byte for byte otherwise
+/// (markdown, TOON).
 pub fn same_tool_text(expected: &str, actual: &str) -> bool {
     match (json_container(expected), json_container(actual)) {
+        (Some(want), Some(got)) => values_equal_in_result(&want, &got),
+        _ => same_text(expected, actual),
+    }
+}
+
+/// What a cursor token says (ADR-0038), apart from the snapshot it names: the token is base64url of a JSON payload,
+/// and the payload's `snapshot` is a counter and the start time of the server process that made it, which differ
+/// between runs and between cases (the counter depends on which case ran first). The rest, the version, the tool, its
+/// arguments, the position and the anchor, is what the result promises. `None` for text that is not a token, which is
+/// then compared byte for byte.
+fn cursor_meaning(token: &str) -> Option<Value> {
+    let bytes = URL_SAFE_NO_PAD.decode(token).ok()?;
+    let mut payload: Value = serde_json::from_slice(&bytes).ok()?;
+    payload.as_object_mut()?.remove("snapshot")?;
+    Some(payload)
+}
+
+/// Whether two `nextCursor` tokens say the same: [`cursor_meaning`] equal, or the same bytes.
+pub fn same_cursor(expected: &str, actual: &str) -> bool {
+    match (cursor_meaning(expected), cursor_meaning(actual)) {
         (Some(want), Some(got)) => values_equal(&want, &got),
         _ => same_text(expected, actual),
+    }
+}
+
+/// [`values_equal`] for the JSON of a tool result: the same, but a `nextCursor` string is compared by [`same_cursor`].
+fn values_equal_in_result(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter().all(|(key, v)| match (key.as_str(), v, y.get(key)) {
+                    ("nextCursor", Value::String(want), Some(Value::String(got))) => same_cursor(want, got),
+                    (_, _, other) => other.is_some_and(|w| values_equal_in_result(v, w)),
+                })
+        }
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(v, w)| values_equal_in_result(v, w)),
+        _ => values_equal(a, b),
     }
 }
 
