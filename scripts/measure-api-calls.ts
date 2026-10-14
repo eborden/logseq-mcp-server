@@ -219,7 +219,7 @@ async function main() {
     };
     const paged: Paged[] = [
       { tool: 'logseq_find_blocks', label: 'find_blocks (500', args: { text: subject.slice(0, 1), limit: 500 }, cursorOf: cursorIn(1, (value) => value?.meta?.nextCursor) },
-      { tool: 'logseq_find_pages', label: 'find_pages (1000', args: { limit: 1000 }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      { tool: 'logseq_find_pages', label: 'find_pages (100', args: { limit: 100 }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
     ];
     const another = await startRustServer(choice.rustBinary, config, true);
     try {
