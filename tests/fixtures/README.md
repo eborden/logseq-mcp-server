@@ -216,7 +216,7 @@ Expected results, measured against a live instance (#118) with the code at the t
 | `explore_network` on `journal-topic-01`, depth 2, defaults | 2 nodes: itself and the journal (a leaf) |
 | same, `expand_journals` true | 17 nodes (the journal, then 15 of its 29 other topics: `max_fanout` 15 bites, and `hub central`, which links 70 pages, is a roll-up and ranks after every topic), `truncated` true. Add `max_fanout` 100 for 32 nodes (the journal, 29 other topics, `hub central`), `truncated` false |
 | `explore_context` on the hub | 50 of 71 blocks, 20 of 66 references, 10 of 61 related pages; totals `blocks` 71, `references` 66, `relatedPages` 61; `hasMore` true with `blocks_truncated`, `references_truncated` and `related_pages_truncated`. The references are a prefix of the full ranking (see "Fixed by ranking") |
-| `explore_context` on the hub, `references_offset` 20, 40 and 60 | the next 20 of the 66 references, then 20, then the last 6: `references_truncated` says "Showing 20 of 46 references from offset 20" and names `references_offset` 40, and the last page has no `references_truncated`. At 66 or more no reference and no warning about them |
+| `explore_context` on the hub, read to the end with its cursor | 7 pages (the blocks 50 + 21, the references 20 + 20 + 20 + 6, the related pages 10 x 6 + 1; `tests/integration/context-cursor.test.ts`): each list once, each ending on its own page. `references_truncated` says "Showing 21-40 of 66 references." on the second page, and the last page has no `nextCursor`, no `hasMore` and no warning |
 | `get_page` on the hub, with children | 71 children |
 | `explore_network` with `to`: `alice` to `project atlas`, `max_depth` 2 | 1 hop: `Alice`, `project atlas`; one edge of count 2 (one block each way), and `resolvedAliases.to` is `atlas`, `project atlas` |
 | same, `Alice` to `Bob`, and `Bob` to `Alice`, `max_depth` 1 | 1 hop, one edge of count 1: Alice's block links Bob, so it is a `reference` from Alice and a `backlink` when asked from Bob |
@@ -260,7 +260,7 @@ written `Row N on [[popular topic]]`, and the target has no file.
 
 `explore_context` on `popular topic`: 14 references on 2 source pages. `busy source`'s 12 come first and then `light source`'s 2
 (ranked by linking blocks, #178), and the default `max_references` of 20 holds all 14, so there is no `references_truncated`.
-`max_references` 10 keeps the first 10 of `busy source`'s, with `references_offset` 10 for the last 2 of them and the 2 of
+`max_references` 10 keeps the first 10 of `busy source`'s, with the `nextCursor` for the last 2 of them and the 2 of
 `light source`.
 
 The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
