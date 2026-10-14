@@ -13,7 +13,7 @@ An alias that leaked into the advertised schema, or replaced a required canonica
 test: `rust/src/params.rs`
 test: `tests/guards/tool-list.test.ts`
 test: `rust/tests/parity.rs`
-none-yet: #552 (`find_blocks` has no canonical name that is `required`, so the cursor core needs no exception; the first tool that does, `get_page` and `get_block`, gives the `required` check of `tests/guards/tool-list.test.ts` its exception for a tool that takes a `cursor`, and tests that a call with neither the canonical name nor a `cursor` is refused)
+none-yet: #552 (`find_blocks` has no canonical name that is `required`, so the cursor core needs no exception; the first tool that does, `get_page` and `get_block`, gives the `required` check of `tests/guards/tool-list.test.ts` its exception for a tool that takes a `cursor`, and tests that a call with neither the canonical name nor a `cursor` is refused, and that `refuse_with_cursor` refuses `{cursor, <alias>}` on the alias-folded arguments)
 
 Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity test, `rust/tests/parity.rs`, holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
 
