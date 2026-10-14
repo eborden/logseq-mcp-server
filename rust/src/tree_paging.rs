@@ -94,41 +94,57 @@ impl Tree {
     /// The first `kept` entries from place `start`, as the page or the block that holds them, without the completeness
     /// keys. `first` is whether this is the first page of the read: only it says how a page name was resolved.
     fn slice(&self, start: usize, kept: usize, first: bool) -> Map<String, Value> {
-        let mut result = self.base.clone();
+        // The keys other than `children` are copied (the tree under it is not), and `children` takes the sliced blocks in
+        // its place, or last when the tree had none
+        let rebuilt = |drop: &str, mut children: Option<Vec<Value>>, only_if_there: bool| {
+            let mut result = Map::new();
+            let mut placed = false;
+            for (key, value) in &self.base {
+                if key == "children" {
+                    if let Some(pieces) = children.take() {
+                        result.insert(key.clone(), Value::Array(pieces));
+                        placed = true;
+                    }
+                } else if key != drop {
+                    result.insert(key.clone(), value.clone());
+                }
+            }
+            if !placed && !only_if_there {
+                if let Some(pieces) = children.take() {
+                    result.insert("children".into(), Value::Array(pieces));
+                }
+            }
+            result
+        };
         match self.root {
             Root::Page => {
                 let pieces = slice_blocks(self.children(), start, kept);
-                if !first {
-                    result.remove("resolvedFrom");
-                }
                 // A page that has no `children` key had no blocks, or none LogSeq answered: it stays so. One that has
                 // it keeps it, empty when the tree shrank below the position, which says the page was read
-                if !pieces.is_empty() || result.contains_key("children") {
-                    result.insert("children".into(), Value::Array(pieces));
-                }
+                let has = self.base.contains_key("children");
+                rebuilt(if first { "" } else { "resolvedFrom" }, (!pieces.is_empty() || has).then_some(pieces), false)
             }
             Root::Block if start == 0 => {
                 let own = self.children();
                 let pieces = slice_blocks(own, 0, kept.saturating_sub(1));
                 let lost = pieces.len() < own.len();
-                if result.contains_key("children") {
-                    result.insert("children".into(), Value::Array(pieces));
-                }
+                let mut result = rebuilt("", Some(pieces), true);
                 if lost {
                     result.insert("childrenTruncated".into(), Value::Bool(true));
                 }
+                result
             }
             Root::Block => {
                 let pieces = slice_blocks(self.children(), start - 1, kept);
-                result = Map::new();
+                let mut result = Map::new();
                 if let Some(uuid) = self.base.get("uuid") {
                     result.insert("uuid".into(), uuid.clone());
                 }
                 result.insert("continued".into(), Value::Bool(true));
                 result.insert("children".into(), Value::Array(pieces));
+                result
             }
         }
-        result
     }
 }
 
@@ -316,8 +332,8 @@ where
     let view = View { spec, tree, start, first: resume.is_none(), stale, args, key: served.key };
     let sent = |kept: usize| texts(&view.result(kept, view.cut_at(kept))).iter().map(|text| size(text)).sum::<usize>();
     let page = page_of(total, start, usize::MAX, sent);
-    // A tree that fits one page needs no snapshot, and a hit is kept already
-    if page.next().is_some() {
+    // A tree that fits one page needs no snapshot, and a hit is kept already (its weight is not worked out again)
+    if page.next().is_some() && !served.hit {
         served.keep(snapshots, args, tree.weight(), now);
     }
     Ok(texts(&view.result(page.kept, page.cut)))
