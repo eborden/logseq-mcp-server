@@ -43,7 +43,7 @@ describe('the character budget of the get and find tools (#507)', () => {
     return { text: result.content[0].text, sent, body: JSON.parse(result.content[0].text) as Meta & Record<string, any> };
   }
 
-  it('cuts the hub at its largest caps to the budget, from the last reference, and names the offset that reads on', async () => {
+  it('cuts the hub at its largest caps to the budget, from the last reference, and reads the rest with the cursor', async () => {
     const caps = { page: 'hub central', max_blocks: 500, max_references: 500, max_related_pages: 500 };
     const { body, sent } = await call('logseq_explore_context', caps);
     expect(sent).toBeLessThanOrEqual(BUDGET);
@@ -58,16 +58,24 @@ describe('the character budget of the get and find tools (#507)', () => {
     expect((body.warnings ?? []).map(w => w.code)).toEqual(['result_size_truncated']);
     const size = body.warnings![0];
     expect(body.hasMore).toBe(true);
-    expect(size.howToFetchAll).toBe(
-      `Set references_offset to ${body.references.length} for the next references. Pass max_blocks 0 and max_related_pages 0 to leave out what is already read.`
-    );
+    expect(size.howToFetchAll).toBe('Pass nextCursor as cursor, with no other argument, to read the next page.');
+    expect(typeof body.nextCursor).toBe('string');
 
-    // reading on from there finds every reference left, with nothing repeated
-    const next = await call('logseq_explore_context', { ...caps, max_blocks: 0, max_related_pages: 0, references_offset: body.references.length });
-    const ids = [...body.references, ...next.body.references].map(reference => reference.block.id);
+    // reading on finds every reference and related page left, with nothing repeated and the blocks not read again
+    const pages = [body];
+    while (pages[pages.length - 1].nextCursor) {
+      const next = await call('logseq_explore_context', { cursor: pages[pages.length - 1].nextCursor });
+      expect(next.sent).toBeLessThanOrEqual(BUDGET);
+      pages.push(next.body);
+      expect(pages.length, 'a cursor that never ends').toBeLessThan(10);
+    }
+    const ids = pages.flatMap(page => page.references.map(reference => reference.block.id));
     expect(ids).toHaveLength(66);
     expect(new Set(ids).size).toBe(66);
-    expect(next.body.warnings?.map(w => w.code)).not.toContain('references_truncated');
+    expect(pages.flatMap(page => page.relatedPages)).toHaveLength(61);
+    expect(pages.slice(1).every(page => page.directBlocks.length === 0)).toBe(true);
+    const last = pages[pages.length - 1];
+    expect([last.hasMore, last.nextCursor, last.warnings ?? []]).toEqual([false, undefined, []]);
   });
 
   it('leaves the hub page, its outline and its first block under the budget as they were', async () => {

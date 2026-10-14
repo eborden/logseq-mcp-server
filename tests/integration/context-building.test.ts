@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { exploreContext } from './helpers/tools.js';
+import { exploreContext, exploreContextNext } from './helpers/tools.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
@@ -80,10 +80,11 @@ describe('logseq_explore_context', () => {
     expect(result.totals).toEqual({ blocks: 8, relatedPages: 14, references: 24 });
     expect(result.hasMore).toBe(true);
     expect(result.warnings.map(w => w.code)).toEqual(['references_truncated', 'related_pages_truncated']);
-    // the cut references name the offset that reads on
+    // the cut references lead with the cursor, and offer the raise beside it
     expect(result.warnings[0].howToFetchAll).toBe(
-      'Set references_offset to 20 for the next page. Or set max_references to 24 (or higher) to get all 24 in one call.'
+      'Pass nextCursor as cursor, with no other argument, to read the next page. Or set max_references to 24 (or higher) to get all 24 in one call.'
     );
+    expect(result.nextCursor).toEqual(expect.any(String));
   });
 
   it('cuts every list on the hub and reports the totals', async () => {
@@ -97,56 +98,54 @@ describe('logseq_explore_context', () => {
     ]);
   });
 
-  describe('references_offset', () => {
-    it('pages through every reference once, in the order of one call that holds them all', async () => {
-      const all = await exploreContext(client, 'project atlas', { maxReferences: 100 });
+  describe('the cursor', () => {
+    it('reads every reference once, in the order of one call that holds them all', async () => {
+      const all = await exploreContext(client, 'project atlas', { maxReferences: 100, maxRelatedPages: 100 });
       const ids = (result: any): number[] => result.references.map((reference: any) => reference.block.id);
       expect(ids(all)).toHaveLength(24);
+      expect(all.nextCursor).toBeUndefined();
       // the ranking puts the 7 blocks of the busiest page first, and a page's blocks together
       expect(sources(all).slice(0, 7)).toEqual(Array(7).fill('jan 6th, 2025'));
 
-      const pages = [
-        await exploreContext(client, 'project atlas', { maxReferences: 10, referencesOffset: 0 }),
-        await exploreContext(client, 'project atlas', { maxReferences: 10, referencesOffset: 10 }),
-        await exploreContext(client, 'project atlas', { maxReferences: 10, referencesOffset: 20 }),
-      ];
+      const first = await exploreContext(client, 'project atlas', { maxReferences: 10 });
+      const second = await exploreContextNext(client, first.nextCursor!);
+      const third = await exploreContextNext(client, second.nextCursor!);
+      const pages = [first, second, third];
       expect(pages.map(page => page.references.length)).toEqual([10, 10, 4]);
       expect(pages.flatMap(ids)).toEqual(ids(all));
-      // every page carries the same totals, and the blocks and related pages it was asked for
+      // every page carries the same totals
       for (const page of pages) expect(page.totals).toEqual({ blocks: 8, relatedPages: 14, references: 24 });
+      // the 8 blocks and the first 10 of the 14 related pages are on the first page; the other 4 pages are on the second
+      expect(pages.map(page => [page.directBlocks.length, page.relatedPages.length])).toEqual([[8, 10], [0, 4], [0, 0]]);
 
-      // the first two say where to read on, and the last has no references warning
-      expect(pages[0].warnings[0]).toMatchObject({
-        code: 'references_truncated',
-        message: 'Showing 10 of 24 references. Page through the rest with references_offset.',
-      });
-      expect(pages[1].warnings[0]).toMatchObject({
-        code: 'references_truncated',
-        message: 'Showing 10 of 14 references from offset 10. Page through the rest with references_offset.',
-      });
-      expect(pages[1].warnings[0].howToFetchAll).toMatch(/^Set references_offset to 20 for the next page\./);
-      expect(pages[2].warnings.map(w => w.code)).not.toContain('references_truncated');
-    });
-
-    it('reads nothing, and says nothing was cut, at or past the last reference', async () => {
-      for (const referencesOffset of [24, 25, 1000]) {
-        const result = await exploreContext(client, 'project atlas', { referencesOffset });
-        expect(result.references).toEqual([]);
-        expect(result.totals.references).toBe(24);
-        expect(result.warnings.map(w => w.code)).not.toContain('references_truncated');
-      }
+      // the first two say where to read on, and the last has no references warning, no cursor and no hasMore
+      expect(first.warnings[0]).toMatchObject({ code: 'references_truncated', message: 'Showing 1-10 of 24 references.' });
+      expect(second.warnings.map(w => w.code)).toEqual(['references_truncated']);
+      expect(second.warnings[0].message).toBe('Showing 11-20 of 24 references.');
+      expect(second.warnings[0].howToFetchAll).toBe('Pass nextCursor as cursor, with no other argument, to read the next page.');
+      expect(third.warnings).toEqual([]);
+      expect([third.hasMore, third.nextCursor]).toEqual([false, undefined]);
+      // how the request was read is said on the first page only
+      expect(first.resolvedAliases).toEqual(['atlas', 'project atlas']);
+      expect(second.resolvedAliases).toBeUndefined();
     });
 
     it('lets a later page leave the blocks and the related pages out', async () => {
-      const result = await exploreContext(client, 'hub central', { referencesOffset: 20, maxBlocks: 0, maxRelatedPages: 0 });
+      const first = await exploreContext(client, 'hub central', { maxBlocks: 0, maxRelatedPages: 0 });
+      const second = await exploreContextNext(client, first.nextCursor!);
 
-      expect(result.directBlocks).toEqual([]);
-      expect(result.relatedPages).toEqual([]);
-      expect(result.references).toHaveLength(20);
-      expect(result.totals).toEqual({ blocks: 71, relatedPages: 61, references: 66 });
-      expect(result.warnings.find(w => w.code === 'references_truncated')?.message).toBe(
-        'Showing 20 of 46 references from offset 20. Page through the rest with references_offset.'
-      );
+      expect(second.directBlocks).toEqual([]);
+      expect(second.relatedPages).toEqual([]);
+      expect(second.references).toHaveLength(20);
+      expect(second.totals).toEqual({ blocks: 71, relatedPages: 61, references: 66 });
+      expect(second.warnings.find(w => w.code === 'references_truncated')?.message).toBe('Showing 21-40 of 66 references.');
+    });
+
+    it('refuses another argument beside a cursor, and a token that is not one, before any read', async () => {
+      const first = await exploreContext(client, 'hub central');
+      await expect(exploreContextNext(client, first.nextCursor!, { max_blocks: 3 })).rejects.toThrow(/Invalid parameter 'max_blocks'/);
+      await expect(exploreContextNext(client, first.nextCursor!, { page: 'Bob' })).rejects.toThrow(/Invalid parameter 'page'/);
+      await expect(exploreContextNext(client, 'not a token!')).rejects.toThrow(/Invalid parameter 'cursor'/);
     });
   });
 

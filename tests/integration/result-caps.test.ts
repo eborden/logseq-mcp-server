@@ -41,7 +41,7 @@ import { connectMcp } from './helpers/server-under-test.js';
  * caps through MCP (the same code, a smaller bound), and the Rust unit tests feed the tool
  * 1,001 blocks for the cut at the maximum.
  * explore_context's references have no maximum, only the character budget (#485), which the parity cases hold with larger
- * stubs (`over the character budget the references that fit are kept and references_offset reads on`). Its references are
+ * stubs (`over the character budget the references that fit are kept and the cursor reads on`). Its references are
  * ranked by linking blocks (#178), so the pages a cut keeps are the same names on every run.
  * find_blocks' default of 100 and maximum of 500 are out of reach for a property filter, and for a page with links_to,
  * too: no property value sits on more than a few fixture blocks, and no pair of fixture pages returns more than a
@@ -554,7 +554,7 @@ describe('result caps (#61)', () => {
     });
   });
 
-  describe('logseq_explore_context max_references and references_offset (default 20 and 0)', () => {
+  describe('logseq_explore_context max_references (default 20) and the cursor that reads the rest', () => {
     // The hub: 66 references on 61 source pages (60 pages and a journal), none over 2 per page.
     // The crowded topic: 14 references on 2 source pages, one with 12 linking blocks and one with 2. A project
     // with an alias takes the alias-group query (#69) instead of the Editor call.
@@ -575,6 +575,13 @@ describe('result caps (#61)', () => {
       return { text: result.content[0].text, body: JSON.parse(result.content[0].text) as ContextBody };
     }
 
+    /** The next page of a context: a call with the `nextCursor` of the page before and no other argument (ADR-0038). */
+    async function referencesNext(cursor: string): Promise<{ text: string; body: ContextBody }> {
+      const result = await call('logseq_explore_context', { cursor });
+      return { text: result.content[0].text, body: JSON.parse(result.content[0].text) as ContextBody };
+    }
+
+    const NEXT_PAGE = 'Pass nextCursor as cursor, with no other argument, to read the next page.';
     const uuids = (body: ContextBody) => body.references.map(reference => reference.block.uuid);
     const pageNames = (body: ContextBody) => body.references.map(reference => reference.sourcePage.name);
     const cut = (body: ContextBody) => body.warnings.filter(warning => warning.code === 'references_truncated');
@@ -605,52 +612,51 @@ describe('result caps (#61)', () => {
       ]);
       expect(uuids(body)).toEqual(uuids(full).slice(0, DEFAULT_MAX_REFERENCES));
       expect(cut(body)).toHaveLength(1);
-      expect(cut(body)[0].message).toBe('Showing 20 of 66 references. Page through the rest with references_offset.');
+      expect(cut(body)[0].message).toBe('Showing 1-20 of 66 references.');
     });
 
-    it('pages through the references with references_offset, every page the next slice of the same ranking', async () => {
+    it('reads the references to the end with the cursor, every page the next slice of the same ranking', async () => {
       const { body: full } = await references(HUB, { max_references: 500 });
       expect(full.totals.references).toBe(66);
-      // Nothing is cut at the largest cap, so there is no warning about the references
+      // Nothing is cut at the largest cap, so there is no warning about the references and no cursor
       expect(cut(full)).toEqual([]);
+      expect(full.nextCursor).toBeUndefined();
 
       for (const size of [1, 7, DEFAULT_MAX_REFERENCES, 65, 66, 100]) {
         const joined: string[] = [];
-        let offset = 0;
+        let page = await references(HUB, { max_references: size });
         let pages = 0;
         for (;;) {
-          const { body } = await references(HUB, { max_references: size, references_offset: offset });
-          const label = `max_references ${size} at offset ${offset}`;
-          expect(body.totals.references, label).toBe(66);
-          expect(body.references.length, label).toBe(Math.min(size, 66 - offset));
-          joined.push(...uuids(body));
+          const label = `max_references ${size}, page ${pages + 1}`;
+          expect(page.body.totals.references, label).toBe(66);
+          expect(page.body.references.length, label).toBe(Math.min(size, 66 - joined.length));
+          joined.push(...uuids(page.body));
           pages++;
-          offset += body.references.length;
-          if (offset >= 66) {
-            expect(cut(body), `${label}: the last page has no warning about the references`).toEqual([]);
+          if (joined.length >= 66) {
+            expect(cut(page.body), `${label}: the last page has no warning about the references`).toEqual([]);
+            expect(page.body.nextCursor, label).toBeUndefined();
+            expect(page.body.hasMore, label).toBe(false);
             break;
           }
-          // Every other page says where the next one starts, and only that page of the rest is named
-          expect(cut(body), label).toHaveLength(1);
-          expect(body.hasMore, label).toBe(true);
-          expect(cut(body)[0].howToFetchAll, label).toMatch(new RegExp(`^Set references_offset to ${offset} for the next page\\.`));
+          // Every other page says where to read on, with the cursor first
+          expect(cut(page.body), label).toHaveLength(1);
+          expect(page.body.hasMore, label).toBe(true);
+          expect(cut(page.body)[0].howToFetchAll, label).toMatch(new RegExp(`^${NEXT_PAGE}`));
+          page = await referencesNext(page.body.nextCursor!);
+          expect(pages, 'a cursor that never ends').toBeLessThan(70);
         }
         expect(joined, `max_references ${size}: the pages join into the full ranking, nothing skipped or repeated`).toEqual(uuids(full));
         expect(pages, `max_references ${size}`).toBe(Math.ceil(66 / size));
       }
     });
 
-    it('reads nothing, and says nothing was cut, from the last reference on, and a cap of 0 only offers the raise', async () => {
-      for (const references_offset of [66, 67, 5000]) {
-        const { body } = await references(HUB, { references_offset });
-        expect(body.references, `offset ${references_offset}`).toEqual([]);
-        expect(body.totals.references).toBe(66);
-        expect(cut(body), `offset ${references_offset}`).toEqual([]);
-      }
+    it('offers the raise only for a cap of 0, which leaves the references out and never makes a cursor', async () => {
       const { body } = await references(HUB, { max_references: 0 });
       expect(body.references).toEqual([]);
+      expect(body.totals.references).toBe(66);
+      expect(body.nextCursor).toBeUndefined();
       expect(cut(body)).toHaveLength(1);
-      expect(cut(body)[0].howToFetchAll).toBe('Set max_references to 66 (or higher) to get all 66.');
+      expect(cut(body)[0].howToFetchAll).toBe('Set max_references to 66 (or higher) to get all 66 in one call.');
     });
 
     it('puts the page with the most linking blocks first, and pages its blocks like any others', async () => {
@@ -663,10 +669,10 @@ describe('result caps (#61)', () => {
       // The default cap holds all 14, so nothing is cut; a smaller one pages
       expect(cut((await references(CROWDED)).body)).toEqual([]);
       const first = await references(CROWDED, { max_references: 10 });
-      const second = await references(CROWDED, { max_references: 10, references_offset: 10 });
+      const second = await referencesNext(first.body.nextCursor!);
       expect([...uuids(first.body), ...uuids(second.body)]).toEqual(uuids(full));
       expect(pageNames(second.body)).toEqual(['busy source', 'busy source', 'light source', 'light source']);
-      expect(cut(first.body)[0].howToFetchAll).toMatch(/^Set references_offset to 10 for the next page\./);
+      expect(cut(first.body)[0].howToFetchAll).toMatch(new RegExp(`^${NEXT_PAGE}`));
       expect(cut(second.body)).toEqual([]);
     });
 
@@ -685,9 +691,9 @@ describe('result caps (#61)', () => {
 
       const fewer = await references(ALIASED, { max_references: 12 });
       expect(uuids(fewer.body)).toEqual(uuids(full).slice(0, 12));
-      expect(cut(fewer.body)[0].message).toBe('Showing 12 of 24 references. Page through the rest with references_offset.');
+      expect(cut(fewer.body)[0].message).toBe('Showing 1-12 of 24 references.');
       expect((fewer.body as { resolvedAliases?: string[] }).resolvedAliases, 'the alias group is still reported').toBeDefined();
-      const rest = await references(ALIASED, { max_references: 12, references_offset: 12 });
+      const rest = await referencesNext(fewer.body.nextCursor!);
       expect([...uuids(fewer.body), ...uuids(rest.body)]).toEqual(uuids(full));
     });
   });
