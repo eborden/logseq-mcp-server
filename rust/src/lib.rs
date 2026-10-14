@@ -44,6 +44,7 @@ pub mod resolve_refs;
 pub mod resources;
 pub mod server;
 pub mod slim;
+pub mod snapshots;
 pub mod snippet;
 pub mod tips;
 pub mod tool;
