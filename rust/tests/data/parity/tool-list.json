@@ -106,7 +106,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Explore how a page connects: linked pages as nodes and edges, both directions, max_depth hops, one edge per pair with a reference count. With to, the shortest link path to a second page.\n\n**Caps:** 50 pages, 15 new per page; journals and roll-ups (over 30 links) rank last, unexpanded. If truncated is true, see warnings.\n**Can't find:** unlinked pages, or what pages say (logseq_explore_context).",
+    "description": "Explore a page's links as nodes and edges, both directions, max_depth hops, one edge per pair with a count. With to, the shortest link path to another page.\n\n**Caps:** max_nodes pages per call (max 500), 15 new per page; journals, roll-ups (over 30 links) rank last. hasMore: send only cursor=nextCursor. truncated: see warnings.\n**Can't find:** unlinked pages, or page text (logseq_explore_context).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -125,7 +125,7 @@
           "minimum": 0
         },
         "max_nodes": {
-          "description": "Maximum pages in the network, root included (default: 50, max: 500). Not with to",
+          "description": "Page size: most pages per call, root included (default: 50, max: 500). Not with to",
           "default": 50,
           "type": "integer",
           "minimum": 1
@@ -153,11 +153,12 @@
             "json",
             "markdown"
           ]
+        },
+        "cursor": {
+          "description": "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)",
+          "type": "string"
         }
-      },
-      "required": [
-        "page"
-      ]
+      }
     }
   },
   {
