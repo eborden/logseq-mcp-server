@@ -28,7 +28,7 @@ Each list pages in its own unit. Every call below keeps the other arguments the 
 
 | Tool | Cap (default, max) | Read on with | Order of what is kept |
 |------|--------------------|--------------|-----------------------|
-| `logseq_find_blocks` | `limit` (100, 500) | `offset` | newest first (highest block id, about creation order, not the journal's date) |
+| `logseq_find_blocks` | `limit` (100, 500) | `cursor` (the `nextCursor` of the result, passed alone) | newest first (highest block id, about creation order, not the journal's date) |
 | `logseq_find_pages` | `limit` (200, 1000) | `offset` | A to Z by name |
 | `logseq_explore_context` | `max_blocks` (50), `max_related_pages` (10), `max_references` (20) | `references_offset` for the references. Blocks and related pages have no offset | blocks in page order; references ranked by how many blocks on their source page link the topic, most first, ties by page name; related pages in LogSeq's order |
 | `logseq_explore_network` | `max_nodes` (50, 500), `max_fanout` (15, 100), `max_depth` (2, 3) | a higher cap, when the warning offers one | the pages nearest the root; the deepest are cut first and the root is always kept |
@@ -39,7 +39,7 @@ Each list pages in its own unit. Every call below keeps the other arguments the 
 
 A larger value than a maximum is clamped, not rejected, and the warning says so. At a maximum there is no `howToFetchAll`, unless the tool pages (`offset`, `references_offset`, a date), in which case `hasMore` stays true.
 
-`offset` and `references_offset` read a list that shifts if the graph changes between calls, so a long walk can repeat or skip a hit.
+`offset` and `references_offset` read a list that shifts if the graph changes between calls, so a long walk can repeat or skip a hit. A `find_blocks` cursor reads the list its first call saw for up to a minute, then reads again from the last block it sent, and says `cursor_stale` if the list moved.
 
 When a warning offers a raise ("set `limit` to 250"), it is offered only when the raised result is estimated to fit the budget below. Following the `offset` is usually cheaper than the raise. A raise may carry the note "A result this large may be saved to a file by the host instead of shown; the server can't tell": see Host limits.
 
@@ -53,7 +53,7 @@ When a warning offers a raise ("set `limit` to 250"), it is offered only when th
 - leaves a result under the budget exactly as it was
 - never drops a failure: `check_links` cuts only `refs.resolved`, never `ok`, `unresolved`, `ambiguous` or `refsPreserved`, and `find_pages` never cuts its `names` answers
 
-Whether `hasMore` is true after a size cut depends on the tool. `find_blocks` and `find_pages` name the `offset` that starts where the kept entries end, so it is true. `explore_context` names a `references_offset` when it dropped only references. `explore_timeline` names the call that reads on from the cut. `get_page` and `get_block` have no way to page a tree, so `hasMore` stays false and the warning names the outline and `logseq_get_block`. `explore_network` says to narrow the walk.
+Whether `hasMore` is true after a size cut depends on the tool. `find_blocks` returns a `nextCursor` and `find_pages` names the `offset` that starts where the kept entries end, so it is true. `explore_context` names a `references_offset` when it dropped only references. `explore_timeline` names the call that reads on from the cut. `get_page` and `get_block` have no way to page a tree, so `hasMore` stays false and the warning names the outline and `logseq_get_block`. `explore_network` says to narrow the walk.
 
 ## Warning codes by tool
 
@@ -61,8 +61,8 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 
 | Tool | Code | What it means and what to do |
 |------|------|-------------------------------|
-| `find_blocks` | `results_truncated` | More blocks match than `limit` keeps. "Showing N of M". Follow `offset` from the warning |
-| | `result_size_truncated` | The blocks `limit` kept don't fit the budget, so the oldest are cut. Follow `offset` |
+| `find_blocks` | `results_truncated` | More blocks match than `limit` keeps. "Showing 1-N of M". Pass the `nextCursor` alone |
+| | `result_size_truncated` | The blocks `limit` kept don't fit the budget, so the oldest are cut. Pass the `nextCursor` alone |
 | | `search_unavailable`, `context_unavailable` | No answer from LogSeq for the search, or for the pages `include_context` asked for |
 | | `alias_set_truncated`, `alias_lookup_unavailable` | Some names of a page were not searched. The result may be partial |
 | `find_pages` | `pages_truncated` | The list was cut at `limit`. Follow `offset` |

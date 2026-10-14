@@ -112,7 +112,7 @@ A type is chosen by what you already have, and it is the second word of the tool
 | Type | You have | Tools | Returns |
 |------|----------|-------|---------|
 | `get` | The thing: a page name, a block uuid, "the page that's open" | `logseq_get_page`, `logseq_get_block`, `logseq_get_current`, `logseq_get_graph` | That one thing, or not-found with the closest names. Never a list |
-| `find` | Criteria, not the thing | `logseq_find_blocks`, `logseq_find_pages` | A flat list, paged with `limit` and `offset` |
+| `find` | Criteria, not the thing | `logseq_find_blocks`, `logseq_find_pages` | A flat list, paged with `limit` and `offset` (`find_pages`) or a `cursor` (`find_blocks`) |
 | `explore` | A starting point, and you want what surrounds it | `logseq_explore_context`, `logseq_explore_network`, `logseq_explore_timeline` | A structured result for synthesis: what is said about it, how it connects, how it changed |
 | `check` | A change you are about to write | `logseq_check_links` | A verdict. Read-only |
 
