@@ -106,7 +106,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Explore a page's links as nodes and edges, both directions, max_depth hops, one edge per pair with a count. With to, the shortest link path to another page.\n\n**Caps:** max_nodes pages per call (max 500), 15 new per page; journals, roll-ups (over 30 links) rank last. hasMore: send only cursor=nextCursor. truncated: see warnings.\n**Can't find:** unlinked pages, or page text (logseq_explore_context).",
+    "description": "Explore a page's links as nodes and edges, both ways, max_depth hops, an edge per pair with a count. With to, the shortest path to another page.\n\n**Caps:** max_nodes per call (max 500), 15 new per page; journals, roll-ups (over 30 links) last. hasMore: send only cursor=nextCursor. truncated: rules dropped pages, see warnings.\n**Can't find:** unlinked pages, or page text (logseq_explore_context).",
     "inputSchema": {
       "type": "object",
       "properties": {

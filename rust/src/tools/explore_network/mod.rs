@@ -86,8 +86,8 @@ pub use self::warning::{MAX_FANOUT_LIMIT, MAX_NODES_LIMIT};
 pub const NAME: &str = "logseq_explore_network";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Explore a page's links as nodes and edges, both directions, max_depth hops, one edge per pair with a count. With to, the shortest link path to another page.\n\n\
-**Caps:** max_nodes pages per call (max 500), 15 new per page; journals, roll-ups (over 30 links) rank last. hasMore: send only cursor=nextCursor. truncated: see warnings.\n\
+const DESCRIPTION: &str = "Explore a page's links as nodes and edges, both ways, max_depth hops, an edge per pair with a count. With to, the shortest path to another page.\n\n\
+**Caps:** max_nodes per call (max 500), 15 new per page; journals, roll-ups (over 30 links) last. hasMore: send only cursor=nextCursor. truncated: rules dropped pages, see warnings.\n\
 **Can't find:** unlinked pages, or page text (logseq_explore_context).";
 
 /// Parameter aliases (BR-0008): not in the schema, so they cost nothing in `tools/list`.
