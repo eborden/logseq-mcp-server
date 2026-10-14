@@ -41,7 +41,7 @@ A larger value than a maximum is clamped, not rejected, and the warning says so.
 
 `references_offset` reads a list that shifts if the graph changes between calls, so a long walk can repeat or skip a hit. A `find_blocks` or `find_pages` cursor reads the list its first call saw for up to a minute, then reads again from the last block it sent, and says `cursor_stale` if the list moved.
 
-When a warning offers a raise ("set `limit` to 250"), it is offered only when the raised result is estimated to fit the budget below. Following the `nextCursor` is usually cheaper than the raise. A raise may carry the note "A result this large may be saved to a file by the host instead of shown; the server can't tell": see Host limits.
+When a warning offers a raise ("set `limit` to 250"), `find_blocks` and `find_pages` offer it beside the cursor without measuring it: a raised page that is too large is cut again and carries a cursor of its own. The `explore_*` raises (`max_blocks`, `max_related_pages`, `max_nodes`, `max_fanout`) are still offered only when the raised result is estimated to fit the budget below. Following the `nextCursor` is usually cheaper than the raise. A raise may carry the note "A result this large may be saved to a file by the host instead of shown; the server can't tell": see Host limits.
 
 ## The character budget
 
