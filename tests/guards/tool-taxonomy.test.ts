@@ -4,7 +4,6 @@ import {
   ALLOWED_PARAMETERS,
   taxonomyViolations,
   V1_PARAMETER_NAMES,
-  V1_TOOL_ALLOWANCES,
   TYPE_VERBS,
   type TaxonomyTool,
 } from './tool-taxonomy-rules.js';
@@ -16,24 +15,18 @@ import {
  * `logseq_<type>_<object>` with a type of get, find, explore or check; every description opens with its type's verb; and
  * no parameter uses a v1 name for a concept that v2 shares. Since #519 a positive list holds it as well: every parameter
  * must be one ADR-0037's vocabulary and surface table gives that tool (ALLOWED_PARAMETERS), so a new name fails even when
- * the forbidden list of v1 names does not know it. The forbidden list stays, for its clearer error on a retired name. The 16 v1 tools are exempt through V1_TOOL_ALLOWANCES, and
- * each rename PR (#489 to #495) deletes its own entries. A stale entry fails, so the list can only shrink to empty.
- * Follows the DESCRIPTION_ALLOWANCES pattern of ADR-0016.
+ * the forbidden list of v1 names does not know it. The forbidden list stays, for its clearer error on a retired name. The 16 v1 tools were exempt through V1_TOOL_ALLOWANCES while the renames (#489 to #495)
+ * landed; the list was empty and the constant removed with the v2.0.0 release prep (#499), so every recorded tool is held
+ * to the rules. `taxonomyViolations` keeps its `allowances` argument, which the tests below use to prove each rule can
+ * fail and a stale entry is reported.
  */
 
 const TOOL_LIST_FILE = new URL('../../rust/tests/data/parity/tool-list.json', import.meta.url);
 const recorded = JSON.parse(readFileSync(TOOL_LIST_FILE, 'utf-8')) as TaxonomyTool[];
 
 describe('tool taxonomy (ADR-0037)', () => {
-  it('holds the recorded tool list to the naming rules, apart from the allowlisted v1 tools', () => {
-    expect(taxonomyViolations(recorded, V1_TOOL_ALLOWANCES)).toEqual([]);
-  });
-
-  it('has no entry for a v1 tool that already conforms, so the rules run on it now', () => {
-    for (const name of ['logseq_check_links', 'logseq_explore_context', 'logseq_explore_network', 'logseq_explore_timeline', 'logseq_find_pages', 'logseq_find_blocks', 'logseq_get_page', 'logseq_get_block', 'logseq_get_current', 'logseq_get_graph']) {
-      expect(V1_TOOL_ALLOWANCES, name).not.toContain(name);
-    }
-    expect(V1_TOOL_ALLOWANCES).toHaveLength(0);
+  it('holds every tool of the recorded list to the naming rules', () => {
+    expect(taxonomyViolations(recorded, [])).toEqual([]);
   });
 
   it('has an entry in the allowed parameters for every recorded tool, and for no other', () => {
@@ -44,10 +37,6 @@ describe('tool taxonomy (ADR-0037)', () => {
     for (const [tool, parameters] of Object.entries(ALLOWED_PARAMETERS)) {
       for (const parameter of parameters) expect(V1_PARAMETER_NAMES, `${tool} ${parameter}`).not.toContain(parameter);
     }
-  });
-
-  it('lists each allowance once', () => {
-    expect(new Set(V1_TOOL_ALLOWANCES).size).toBe(V1_TOOL_ALLOWANCES.length);
   });
 });
 
