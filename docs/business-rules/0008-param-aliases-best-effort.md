@@ -13,7 +13,7 @@ An alias that leaked into the advertised schema, or replaced a required canonica
 test: `rust/src/params.rs`
 test: `tests/guards/tool-list.test.ts`
 test: `rust/tests/parity.rs`
-none-yet: #552 (`find_blocks` has no canonical name that is `required`, so the cursor core needs no exception; the first tool that does, `get_page` and `get_block`, gives the `required` check of `tests/guards/tool-list.test.ts` its exception for a tool that takes a `cursor`, and tests that a call with neither the canonical name nor a `cursor` is refused, and that `refuse_with_cursor` refuses `{cursor, <alias>}` on the alias-folded arguments)
+test: `rust/tests/get_page_block_cursor_calls.rs` (`get_page` and `get_block`, the first tools with a required canonical name that take a `cursor`: a call with neither the name nor a `cursor` is refused before any call, `{cursor, <alias>}` is refused on the alias-folded arguments, and an alias alone is a call that works)
 
 Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity test, `rust/tests/parity.rs`, holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
 
@@ -27,3 +27,4 @@ Tests pin that a conflicting alias and canonical value is refused, that the alia
 | 2026-10-08 | Mechanical enforcement: the parity check the recorded `tools/list` is held to is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
 | 2026-10-14 | Statement: the canonical name stays `required` except on a tool that takes a `cursor` (ADR-0038), where a cursor call carries the arguments in its token. The implementation, and the exception in the guard, land with the cursor core task (#528); no tool takes a `cursor` yet, so every canonical name is still `required`. | #546 |
 | 2026-10-14 | Mechanical enforcement: the `none-yet` line points at the migration of `get_page` and `get_block` (#552), the first tool with a required canonical name that takes a `cursor`, instead of the cursor core (#528), whose tool, `find_blocks`, has none. The Statement is unchanged. | #560 |
+| 2026-10-14 | Mechanical enforcement: the tests of `get_page` and `get_block`, the first tools with a required canonical name that take a `cursor`, replace the `none-yet: #552` line, and the `required` check of `tests/guards/tool-list.test.ts` takes the exception for a tool that takes a `cursor`. Additive; the Statement is unchanged. | #552 |
