@@ -4,7 +4,8 @@
 //! - `full`: the page with its blocks, optionally with their `((uuid))` refs and `{{embed}}`s resolved. This is what
 //!   `include_children: true` was before v2.
 //! - `outline`: the page's top-level blocks as a uuid, a first line and a child count, from [`outline`]. This is what
-//!   the tool `logseq_get_page_outline` was before v2, and its result is unchanged.
+//!   the tool `logseq_get_page_outline` was before v2. A page with more top-level blocks than one page holds is read to
+//!   the end with the cursor too (ADR-0038, #553).
 //!
 //! Calls (`page` and `full`): 1 for the exact name of a page that has a file (`logseq.Editor.getPage` alone, no
 //! resolver), and 1 more with `full` (`getPageBlocksTree`), 2 in all. A name that isn't such a
@@ -69,7 +70,7 @@ use self::tips::page_tips;
 pub const NAME: &str = "logseq_get_page";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks; hasMore: send only cursor=nextCursor) or outline (top-level blocks: uuid, first line, child count).\n\n\
+const DESCRIPTION: &str = "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count). hasMore: send only cursor=nextCursor.\n\n\
 **Use when:** you know the page name.\n\
 **Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages).\n\
 **Alternatives:** logseq_explore_context adds related pages and what links here.";
@@ -161,7 +162,7 @@ fn needs_page() -> ToolError {
 ///
 /// A call with a `cursor` takes no other argument (they are in the token, ADR-0038), and is refused as such on the
 /// arguments after the aliases are folded, so `{ cursor, name }` is not a cursor alone (BR-0008). It reads the next
-/// page of the blocks of a full page. A call with neither `page` nor `cursor` is refused here, not by the schema.
+/// page of the blocks of a full page, or of an outline. A call with neither `page` nor `cursor` is refused here, not by the schema.
 pub async fn call(client: &LogseqClient, tips_enabled: bool, snapshots: &Snapshots, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
     let asked = parse_args::<Args>(arguments.as_ref())?;

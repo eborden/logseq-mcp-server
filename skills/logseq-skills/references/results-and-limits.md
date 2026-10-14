@@ -33,7 +33,7 @@ Each list pages in its own unit. Every call below keeps the other arguments the 
 | `logseq_explore_context` | `max_blocks` (50), `max_related_pages` (10), `max_references` (20): the page size of each list | `cursor` (the `nextCursor` of the result, passed alone), which continues all three lists | blocks in page order; references ranked by how many blocks on their source page link the topic, most first, ties by page name; related pages in LogSeq's order |
 | `logseq_explore_network` | `max_nodes` (50, 500), `max_fanout` (15, 100), `max_depth` (2, 3) | a higher cap, when the warning offers one | the pages nearest the root; the deepest are cut first and the root is always kept |
 | `logseq_explore_timeline` | `max_blocks` (200, 1000), nested blocks counted | the `start_date` the warning names | oldest day first, except `last_n` with no `page`, which is newest first; with a `page`, blocks on non-journal pages come last |
-| `logseq_get_page` with `detail` `outline` | 200 top-level blocks | `logseq_get_block` on a uuid, or `logseq_find_blocks` with `text` | page order |
+| `logseq_get_page` with `detail` `outline` | 200 top-level blocks | `cursor` (the `nextCursor` of the result, passed alone) | page order |
 | `logseq_get_page` with `detail` `full`, `logseq_get_block` with `include_children` | none, only the budget | `cursor` (the `nextCursor` of the result, passed alone) | document order, nested blocks counted |
 | `logseq_check_links` | 500 distinct terms in `after` | nothing: check the text in parts | `refs.resolved` only, by term |
 
@@ -53,7 +53,7 @@ When a warning offers a raise ("set `limit` to 250"), `find_blocks`, `find_pages
 - leaves a result under the budget exactly as it was
 - never drops a failure: `check_links` cuts only `refs.resolved`, never `ok`, `unresolved`, `ambiguous` or `refsPreserved`, and `find_pages` never cuts its `names` answers
 
-Whether `hasMore` is true after a size cut depends on the tool. `find_blocks`, `find_pages` and `explore_context` return a `nextCursor`, so it is true. `explore_timeline` names the call that reads on from the cut. `get_page` and `get_block` have no way to page a tree, so `hasMore` stays false and the warning names the outline and `logseq_get_block`. `explore_network` says to narrow the walk.
+Whether `hasMore` is true after a size cut depends on the tool. `find_blocks`, `find_pages`, `explore_context` and the outline of `get_page` return a `nextCursor`, so it is true. `explore_timeline` names the call that reads on from the cut. `get_page` and `get_block` have no way to page a tree, so `hasMore` stays false and the warning names the outline and `logseq_get_block`. `explore_network` says to narrow the walk.
 
 ## Warning codes by tool
 
@@ -68,10 +68,10 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 | `find_pages` | `pages_truncated` | The list was cut at `limit`. Pass the `nextCursor` alone |
 | | `result_size_truncated` | Whole pages cut from the tail, in name order. Pass the `nextCursor` alone |
 | | `pages_unavailable` | LogSeq sent no page list: the list is unknown, not empty, and no name was answered |
-| `get_page` | `result_size_truncated` | `detail` `full`: blocks past the budget were left out, a kept block that lost children has `childrenTruncated: true`. Pass the `nextCursor` alone: the next page starts with those children, each naming in `ancestors` the blocks it sits under. `detail` `outline`: top-level blocks cut. No `howToFetchAll` |
+| `get_page` | `result_size_truncated` | `detail` `full`: blocks past the budget were left out, a kept block that lost children has `childrenTruncated: true`. Pass the `nextCursor` alone: the next page starts with those children, each naming in `ancestors` the blocks it sits under. `detail` `outline`: top-level blocks cut. Pass the `nextCursor` alone |
 | | `outline_unavailable` | `detail` `outline`: LogSeq sent no answer for the page's blocks, so an empty outline may not mean the page has no blocks. Retry |
 | | `page_blocks_unavailable` | `detail` `full`: no answer for the block tree, so the page comes back without its blocks. Retry |
-| | `outline_truncated` | An outline holds at most 200 top-level blocks. Read the rest with `logseq_get_block` or `logseq_find_blocks` |
+| | `outline_truncated` | `detail` `outline`: more than 200 top-level blocks. "Showing 1-200 of M". Pass the `nextCursor` alone |
 | `get_block` | `result_size_truncated` | With `include_children`, a very large subtree was cut. Pass the `nextCursor` alone: the next page is `{ uuid, continued: true, children }` |
 | `get_current` | `page_names_unavailable` | The pages of the focused or selected blocks couldn't be looked up. With `page: null` it is not "no page is open". Retry |
 | | `result_size_truncated` | A selection of a few hundred blocks was cut. Select fewer, or read the page with `logseq_get_page` |

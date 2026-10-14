@@ -525,7 +525,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks; hasMore: send only cursor=nextCursor) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages).\n**Alternatives:** logseq_explore_context adds related pages and what links here.",
+    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count). hasMore: send only cursor=nextCursor.\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages).\n**Alternatives:** logseq_explore_context adds related pages and what links here.",
     "inputSchema": {
       "type": "object",
       "properties": {
