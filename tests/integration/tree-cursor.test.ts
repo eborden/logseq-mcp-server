@@ -33,6 +33,7 @@ interface Result {
   originalName?: string;
   continued?: boolean;
   children?: Block[];
+  childrenTruncated?: boolean;
   hasMore?: boolean;
   nextCursor?: string;
   warnings?: Array<{ code: string; message: string; howToFetchAll?: string }>;
@@ -98,7 +99,7 @@ describe('a tree larger than the budget is read to the end with its cursor (#552
   it('reads the page to the end in JSON with every block once, in document order, and no page over the budget', async () => {
     const pages = await readToTheEnd('logseq_get_page', { page: 'quartz log', detail: 'full' });
     expect(pages.length).toBeGreaterThanOrEqual(4);
-    expect(flatten(pages.flatMap(page => page.children)).map(firstLine)).toEqual(bullets());
+    expect(flatten(pages.flatMap(page => page.children ?? [])).map(firstLine)).toEqual(bullets());
     for (const [at, page] of pages.entries()) {
       expect(page.originalName, 'the page entity is the frame of every page').toBe('quartz log');
       if (at < pages.length - 1) {
