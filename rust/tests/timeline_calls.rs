@@ -32,6 +32,7 @@ fn args() -> Args {
         top_concepts_limit: 10,
         resolve_refs: false,
         max_blocks: 200,
+        cursor: None,
     }
 }
 
@@ -345,7 +346,8 @@ async fn max_blocks_cuts_the_page_in_order_with_the_undated_last_and_costs_no_ca
     // the undated blocks come after the five days, so this cut keeps days only
     assert_eq!(result["entries"][2]["date"], 20250303);
     assert_eq!(result["hasMore"], true);
-    assert!(result["warnings"][0]["howToFetchAll"].as_str().unwrap().starts_with("Call again with the same page, start_date 20250304, the same end_date (20250305)"));
+    assert_eq!(result["warnings"][0]["howToFetchAll"], "Pass nextCursor as cursor, with no other argument, to read the next page.");
+    assert!(result["nextCursor"].is_string());
 }
 
 #[tokio::test]
@@ -413,7 +415,7 @@ async fn the_unavailable_warnings_come_in_call_order_before_the_cut_and_beside_i
     let (result, _) = about_a_page(vec![root(), tree(), json!(null), json!(null)], Args { max_blocks: 1, ..of_page("Project Atlas") }).await;
     assert_eq!(codes(&result), ["page_unavailable", "mentions_unavailable", "blocks_truncated"]);
     assert_eq!(result["totals"]["blocks"], 2);
-    // the cut falls among the blocks with no day, which no date reaches: a raise is the only way, and it fits
+    // the cut falls among the blocks with no day: the cursor reads on
     assert_eq!(result["hasMore"], true);
 }
 

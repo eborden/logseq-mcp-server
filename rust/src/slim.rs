@@ -84,6 +84,10 @@ pub fn to_slim_block(block: &Map<String, Value>, page_name: &str) -> Map<String,
     if let Some(refs) = block.get("resolvedRefs").filter(|refs| refs.as_array().is_some_and(|items| !items.is_empty())) {
         slim.insert("resolvedRefs".into(), refs.clone());
     }
+    // Only on a block that starts a page of a cursor under a block of an earlier page (#554): it names where the block sits
+    if let Some(ancestors) = block.get("ancestors").filter(|ancestors| ancestors.as_array().is_some_and(|items| !items.is_empty())) {
+        slim.insert("ancestors".into(), ancestors.clone());
+    }
     // Only when max_blocks cut some of the children, so a cut block is not read as a leaf
     if block.get("childrenTruncated").is_some_and(is_truthy) {
         slim.insert("childrenTruncated".into(), Value::Bool(true));
@@ -209,6 +213,15 @@ mod tests {
             r#"{"uuid":"u","content":"TODO ship [[Project Atlas]] #urgent","pageName":"My Page","properties":{"status":"open"},"marker":"TODO","tags":["urgent"],"pageRefs":["Project Atlas"]}"#
         );
         assert_eq!(slim(json!({"uuid": "u", "content": "x", "marker": ""}), "  "), r#"{"uuid":"u","content":"x"}"#);
+    }
+
+    #[test]
+    fn ancestors_of_a_block_that_starts_a_page_stay_and_an_empty_list_is_left_out() {
+        assert_eq!(
+            slim(json!({"uuid": "u", "content": "a", "ancestors": [{"uuid": "p", "snippet": "parent"}], "children": []}), ""),
+            r#"{"uuid":"u","content":"a","ancestors":[{"uuid":"p","snippet":"parent"}]}"#
+        );
+        assert_eq!(slim(json!({"uuid": "u", "content": "a", "ancestors": []}), ""), r#"{"uuid":"u","content":"a"}"#);
     }
 
     #[test]

@@ -50,7 +50,7 @@ pub async fn call(
         check_links::NAME => Some(check_links::call(client, tips_enabled, arguments).await),
         explore_context::NAME => Some(explore_context::call(client, tips_enabled, snapshots, arguments).await),
         explore_network::NAME => Some(explore_network::call(client, tips_enabled, arguments).await),
-        explore_timeline::NAME => Some(explore_timeline::call(client, tips_enabled, clock, arguments).await),
+        explore_timeline::NAME => Some(explore_timeline::call(client, tips_enabled, clock, snapshots, arguments).await),
         find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, snapshots, arguments).await),
         find_pages::NAME => Some(find_pages::call(client, tips_enabled, snapshots, arguments).await),
         get_block::NAME => Some(get_block::call(client, tips_enabled, snapshots, arguments).await),
