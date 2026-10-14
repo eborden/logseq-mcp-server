@@ -28,7 +28,7 @@
 //! its position (`cursor_stale` says when a list moved). `resolve_refs` runs for the blocks and references of the page
 //! being sent, whether the context came from LogSeq or from the snapshot.
 //!
-//! `resolvedFrom` and `resolvedAliases` say how the request was read, and so are on the first page only. The
+//! `resolvedFrom`, `resolvedAliases` and `summary` are on the first page only (maintainer, #568). The
 //! warnings about the read itself (an alias group that was cut, a part LogSeq did not answer) are repeated on every
 //! page.
 //!
@@ -465,6 +465,8 @@ pub struct TopicContext {
     /// `resolve_refs` warning makes of its own
     pub next_cursor: Option<String>,
     has_more: bool,
+    /// Whether `summary` is written: on the first page only (maintainer, #568)
+    with_summary: bool,
 }
 
 /// One related page as the result shows it.
@@ -511,7 +513,8 @@ struct TopicContextOutput<'a> {
     resolved_aliases: Option<&'a [String]>,
     #[serde(flatten)]
     completeness: Completeness<'a>,
-    summary: ContextSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<ContextSummary>,
     #[serde(rename = "mainPage")]
     main_page: &'a Value,
     #[serde(rename = "directBlocks")]
@@ -537,12 +540,12 @@ impl TopicContext {
             resolved_from: self.resolved_from.as_ref(),
             resolved_aliases: self.resolved_aliases.as_deref(),
             completeness: Completeness { has_more: self.has_more, next_cursor: self.next_cursor.as_deref(), warnings: &self.warnings, totals: self.totals },
-            summary: ContextSummary {
+            summary: self.with_summary.then(|| ContextSummary {
                 total_blocks: self.direct_blocks.len(),
                 total_related_pages: self.related_pages.len(),
                 total_references: self.references.len(),
                 page_properties: page_properties(&self.main_page),
-            },
+            }),
             main_page: &self.main_page,
             direct_blocks: &self.direct_blocks,
             related_pages: self.related_pages.iter().map(|page| RelatedPage { page, relationship_type: "inbound" }).collect(),
@@ -716,6 +719,7 @@ impl<'a> View<'a> {
             warnings,
             totals: Totals { blocks: self.list.blocks.len(), related_pages: self.list.related_pages.len(), references: self.list.references.len() },
             has_more: has_next || offers,
+            with_summary: self.first_page,
             next_cursor,
         }
     }
@@ -1081,6 +1085,18 @@ mod tests {
         assert_eq!(last.next_cursor, None);
         // every page says which page it is of, and what the totals were
         assert_eq!((last.page.as_str(), last.totals), ("atlas", first.totals));
+    }
+
+    #[test]
+    fn the_summary_is_on_the_first_page_only() {
+        let list = list_of(5, 50, 3, 10);
+        let first = first_page(&list, Caps::default());
+        assert!(first.to_value().get("summary").is_some());
+        let second = page_after(&list, Caps::default(), first.next_cursor.as_deref());
+        let value = second.to_value();
+        assert!(value.get("summary").is_none());
+        // the rest of a later page is as before: the page, its totals and its main page
+        assert_eq!(keys(&value), ["page", "hasMore", "nextCursor", "warnings", "totals", "mainPage", "directBlocks", "relatedPages", "references", "temporalContext"]);
     }
 
     #[test]
@@ -1459,6 +1475,7 @@ mod tests {
             totals: Totals { blocks: 9, related_pages: 1, references: 1 },
             next_cursor: Some("abc".into()),
             has_more: true,
+            with_summary: true,
         }
     }
 
