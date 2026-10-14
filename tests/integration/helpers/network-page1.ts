@@ -18,6 +18,11 @@ export interface Page1Case {
   maxFanout?: number;
   expandJournals?: boolean;
   withSnippets?: boolean;
+  /**
+   * The capped walk was cut to the 30,000-character budget (#485): the first page is then a prefix of it, since the page
+   * is cut to fit the budget with its own warnings and cursor, which are longer, so it may hold a few pages less.
+   */
+  sizeCut?: boolean;
 }
 
 export const PAGE1_CASES: Page1Case[] = [
@@ -25,8 +30,8 @@ export const PAGE1_CASES: Page1Case[] = [
   { name: 'hub depth 2, defaults', page: 'hub central', maxDepth: 2 },
   { name: 'hub depth 3, defaults', page: 'hub central', maxDepth: 3 },
   { name: 'hub depth 1, 500 nodes, fanout 100', page: 'hub central', maxDepth: 1, maxNodes: 500, maxFanout: 100 },
-  { name: 'hub depth 2, 500 nodes, fanout 100', page: 'hub central', maxDepth: 2, maxNodes: 500, maxFanout: 100 },
-  { name: 'hub depth 2, 500 nodes, fanout 100, expand journals', page: 'hub central', maxDepth: 2, maxNodes: 500, maxFanout: 100, expandJournals: true },
+  { name: 'hub depth 2, 500 nodes, fanout 100', page: 'hub central', maxDepth: 2, maxNodes: 500, maxFanout: 100, sizeCut: true },
+  { name: 'hub depth 2, 500 nodes, fanout 100, expand journals', page: 'hub central', maxDepth: 2, maxNodes: 500, maxFanout: 100, expandJournals: true, sizeCut: true },
   { name: 'hub depth 2, 30 nodes', page: 'hub central', maxDepth: 2, maxNodes: 30 },
   { name: 'hub depth 2, 120 nodes, fanout 40', page: 'hub central', maxDepth: 2, maxNodes: 120, maxFanout: 40 },
   { name: 'hub depth 1, with snippets', page: 'hub central', maxDepth: 1, withSnippets: true },
