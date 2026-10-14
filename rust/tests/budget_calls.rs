@@ -45,24 +45,26 @@ fn neighbours(count: i64, length: usize) -> Value {
 async fn a_network_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_extra_call() {
     let args = json!({"page": "Project Atlas", "max_depth": 1});
     let logseq = mock_logseq(vec![root(), neighbours(10, 50)]).await;
-    let small = explore_network::call(&client(&logseq), true, arguments(args.clone())).await.unwrap();
+    let small = explore_network::call(&client(&logseq), true, &Snapshots::new(1), arguments(args.clone())).await.unwrap();
     assert!(!text_of(&small, 0).contains("result_size_truncated"));
     assert_eq!(methods(&logseq), [DATALOG, DATALOG]);
 
     // 40 neighbours with 1,000-character names: 40,000 characters of names alone
     let logseq = mock_logseq(vec![root(), neighbours(40, 1000)]).await;
-    let big = explore_network::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "max_depth": 1, "max_fanout": 100}))).await.unwrap();
+    let big = explore_network::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "max_depth": 1, "max_fanout": 100}))).await.unwrap();
     // the cut reads no more than the walk does
     assert_eq!(methods(&logseq), [DATALOG, DATALOG]);
     assert_eq!(args_of(&logseq, 1).len(), 1);
     let text = text_of(&big, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     let value: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(value["truncated"], true);
-    assert_eq!(value["hasMore"], false);
+    // `truncated` is the walk's rules: 40 neighbours under a fanout of 100 left none out. The cursor reads the rest (ADR-0038)
+    assert_eq!(value["truncated"], false);
+    assert_eq!(value["hasMore"], true);
+    assert!(value["nextCursor"].is_string());
     let warnings = value["warnings"].as_array().unwrap();
     assert_eq!(warnings.last().unwrap()["code"], "result_size_truncated");
-    // the root and the nearest pages stay, and an edge never points at a page that was cut
+    // the root and the first pages stay, and an edge never points at a page that was cut
     let ids: Vec<i64> = value["nodes"].as_array().unwrap().iter().map(|node| node["id"].as_i64().unwrap()).collect();
     assert_eq!(ids[0], 10);
     assert!(ids.len() > 1 && ids.len() < 41, "{}", ids.len());
@@ -77,6 +79,7 @@ async fn a_network_in_markdown_is_cut_to_the_budget_with_the_warning_in_its_foot
     let result = explore_network::call(
         &client(&logseq),
         true,
+        &Snapshots::new(1),
         arguments(json!({"page": "Project Atlas", "max_depth": 1, "max_fanout": 100, "format": "markdown"})),
     )
     .await
