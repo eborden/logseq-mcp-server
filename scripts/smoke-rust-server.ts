@@ -59,7 +59,7 @@ const TOOL_CALLS: ToolCall[] = [
   { name: 'logseq_get_block', args: { uuid: '0088f1a0-0000-4000-8000-000000000001' } },
   { name: 'logseq_find_blocks', label: 'by text', args: { text: 'launch checklist', limit: 5 } },
   { name: 'logseq_find_blocks', label: 'by property', args: { property: 'status', value: 'active' } },
-  { name: 'logseq_find_blocks', label: 'by period, text and offset', args: { text: 'importer', start_date: 20250101, end_date: 20250131, limit: 2, offset: 1 } },
+  { name: 'logseq_find_blocks', label: 'by period and text, a page of 2', args: { text: 'importer', start_date: 20250101, end_date: 20250131, limit: 2 } },
   { name: 'logseq_explore_context', args: { page: 'project atlas' } },
   { name: 'logseq_explore_context', label: 'references from an offset', args: { page: 'Bob', max_references: 1, references_offset: 1 } },
   { name: 'logseq_explore_network', args: { page: 'Alice', max_depth: 2 } },
@@ -193,6 +193,19 @@ async function main(): Promise<void> {
         return call.readsClock(parsed) ? undefined : 'wrong date';
       });
     }
+
+    // ADR-0038: the nextCursor of a cut result reads the next page, from the snapshot the first call kept (no LogSeq call)
+    await check('tools/call logseq_find_blocks (the cursor reads the next page)', async () => {
+      const first = (await mcp.callTool({ name: 'logseq_find_blocks', arguments: { text: 'importer', limit: 3 } })) as { isError?: boolean; content?: Content };
+      const meta = JSON.parse(first.content?.[1]?.text ?? 'null') as { meta?: { hasMore?: boolean; nextCursor?: string } } | null;
+      const cursor = meta?.meta?.nextCursor;
+      if (!cursor || meta?.meta?.hasMore !== true) return 'no nextCursor on a cut result';
+      const next = (await mcp.callTool({ name: 'logseq_find_blocks', arguments: { cursor } })) as { isError?: boolean; content?: Content };
+      const problem = toolProblem(next);
+      if (problem) return problem;
+      const hits = JSON.parse(next.content?.[0]?.text ?? 'null') as unknown;
+      return Array.isArray(hits) && hits.length > 0 ? undefined : 'no hits on the next page';
+    });
 
     await check('resources/read logseq://page/{name}', async () => {
       const { contents } = await mcp.readResource({ uri: `logseq://page/${encodeURIComponent('project atlas')}` });
