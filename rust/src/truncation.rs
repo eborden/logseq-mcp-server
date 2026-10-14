@@ -22,17 +22,6 @@ pub const INLINE_NETWORK_NODES: usize = 200;
 /// Listed pages (`find_pages`), counting aliased entries at about twice a plain one.
 pub const INLINE_PAGES: usize = 800;
 
-/// The inline maximum for a list of blocks that may come back with
-/// `include_context` or unslimmed (`slim_results: false`).
-pub fn blocks_inline_max(context: bool, slim: bool) -> usize {
-    match (context, slim) {
-        (true, false) => 65,
-        (true, true) => 120,
-        (false, false) => 125,
-        (false, true) => INLINE_BLOCKS,
-    }
-}
-
 /// The note ` <LARGE_RESULT_NOTE>` when a call that returns `items` items goes past
 /// `inline_max`, else nothing. No `inline_max` means the caller makes no claim.
 pub fn large_result_note(items: usize, inline_max: Option<usize>) -> String {
@@ -97,13 +86,5 @@ mod tests {
         });
         assert!(alone.message.contains("Even those are over that size, whether from the entry or from the result around it: an entry is never cut inside its text. Read it"), "{}", alone.message);
         assert_eq!(alone.how_to_fetch_all.as_deref(), Some("Call again with start_date 20250102."));
-    }
-
-    #[test]
-    fn inline_estimates_follow_context_and_slimness() {
-        assert_eq!(
-            [blocks_inline_max(false, true), blocks_inline_max(true, true), blocks_inline_max(false, false), blocks_inline_max(true, false)],
-            [200, 120, 125, 65]
-        );
     }
 }
