@@ -77,7 +77,7 @@ const COUNT_CUT: &str = "results_truncated";
 const WHAT: &str = "matching blocks";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). limit (max 500) sizes a page: while hasMore, call again with only cursor=nextCursor.\n\n\
+const DESCRIPTION: &str = "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). Pages of limit (max 500); hasMore: send only cursor=nextCursor.\n\n\
 **Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_explore_network).";
 
 fn default_limit() -> u64 {
