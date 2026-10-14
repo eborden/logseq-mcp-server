@@ -103,7 +103,7 @@ pub async fn outline_result(client: &LogseqClient, read: Read<'_>) -> Result<Cal
         }
         _ => (0, None),
     };
-    let view = View { listing, start, stale, tips_enabled, format, token: Some(Token { args: stored.clone(), key: served.key }) };
+    let view = View { listing, start, first: resume.is_none(), stale, tips_enabled, format, token: Some(Token { args: stored.clone(), key: served.key }) };
     let paged = page_of(total, start, MAX_OUTLINE_BLOCKS, |kept| view.size(kept));
     // A list that fits one page needs no snapshot, and a hit is kept already
     if paged.next().is_some() {
@@ -155,6 +155,9 @@ struct View<'a> {
     listing: &'a Listing,
     /// The index of the first block of this page in the list
     start: usize,
+    /// This is the first page of a read: only it says how the page name was resolved (`resolvedFrom`), as in the other
+    /// paged tools. The completeness keys are on every page
+    first: bool,
     stale: Option<Stale>,
     tips_enabled: bool,
     format: Option<ListFormat>,
@@ -223,7 +226,7 @@ impl View<'_> {
     fn outline(&self, kept: usize, cut: Option<Cut>) -> PageOutline {
         PageOutline {
             page: self.listing.page.clone(),
-            resolved_from: self.listing.resolved_from.clone(),
+            resolved_from: if self.first { self.listing.resolved_from.clone() } else { None },
             blocks: self.listing.entries[self.start..self.start + kept].to_vec(),
             meta: ResultMeta::paged(self.warnings(kept, cut), &[("blocks", self.total())], self.next_cursor(kept, cut)),
         }
@@ -358,7 +361,7 @@ async fn listing_of(client: &LogseqClient, page_name: &str) -> Result<Listing, T
 /// and [`ToolError::AmbiguousPage`] (with the candidates) if several do.
 pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<PageOutline, ToolError> {
     let listing = listing_of(client, page_name).await?;
-    let view = View { listing: &listing, start: 0, stale: None, tips_enabled: false, format: None, token: None };
+    let view = View { listing: &listing, start: 0, first: true, stale: None, tips_enabled: false, format: None, token: None };
     let kept = MAX_OUTLINE_BLOCKS.min(view.total());
     Ok(view.outline(kept, view.cut_at(kept)))
 }
@@ -475,7 +478,7 @@ mod tests {
 
     fn view(listing: &Listing, start: usize, format: Option<ListFormat>) -> View<'_> {
         let token = Token { args: json!({"page": "Atlas", "detail": "outline"}).as_object().cloned().unwrap(), key: SnapshotKey { started: 1, n: 1 } };
-        View { listing, start, stale: None, tips_enabled: true, format, token: Some(token) }
+        View { listing, start, first: start == 0, stale: None, tips_enabled: true, format, token: Some(token) }
     }
 
     /// The page the call would send from `start`: its outline and how many characters it takes.

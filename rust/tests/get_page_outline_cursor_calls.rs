@@ -197,7 +197,7 @@ async fn an_outline_several_times_the_page_size_is_read_to_the_end_with_every_bl
 }
 
 #[tokio::test]
-async fn an_outline_asked_by_an_alias_keeps_the_alias_in_its_cursor_and_says_where_it_came_from_on_every_page() {
+async fn an_outline_asked_by_an_alias_keeps_the_alias_in_its_cursor_and_says_where_it_came_from_on_page_1_only() {
     let held = blocks(450, 10);
     let logseq = logseq_holding(&held).await;
     let first = outline(&logseq, &snapshots(), json!({"page": "atlas", "detail": "outline"})).await.unwrap();
@@ -207,7 +207,10 @@ async fn an_outline_asked_by_an_alias_keeps_the_alias_in_its_cursor_and_says_whe
     // a miss resolves the alias again with page 1's two calls
     let second = outline(&logseq, &Snapshots::new(1), json!({"cursor": cursor_of(&first)})).await.unwrap();
     assert_eq!(methods(&logseq).len(), 4);
-    assert_eq!((uuids_of(&second)[0].clone(), second["resolvedFrom"].clone()), (uuid(201), from));
+    // a page after the first does not repeat it (the maintainer's ruling on #551); its frame is still the page's name
+    assert_eq!(uuids_of(&second)[0], uuid(201));
+    assert!(second.get("resolvedFrom").is_none(), "{second}");
+    assert_eq!(second["page"], "Project Atlas");
 }
 
 #[tokio::test]
