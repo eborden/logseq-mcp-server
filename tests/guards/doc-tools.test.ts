@@ -1,8 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { readFileSync, statSync } from 'fs';
+import { afterAll, describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { fileURLToPath } from 'url';
 import {
   docViolations,
+  exactKindOf,
   FIRST_VERSION_TOOL_NAMES,
   FORMER_TOOL_NAMES,
   REMOVED_BEFORE_V1_TOOL_NAMES,
@@ -112,15 +115,8 @@ const BARE_CONTEXTS: Readonly<Record<string, string>> = {};
 
 const TOOLS_DIR = new URL('rust/src/tools/', ROOT);
 
-/** What `rel` (relative to rust/src/tools) is on disk, as the path rule reads it. */
-const kindOf: ToolPathOptions['kindOf'] = rel => {
-  try {
-    const stat = statSync(fileURLToPath(new URL(rel, TOOLS_DIR)));
-    return stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : null;
-  } catch {
-    return null;
-  }
-};
+/** What `rel` (relative to rust/src/tools) is on disk, as the path rule reads it. Case-exact on every platform (#539). */
+const kindOf: ToolPathOptions['kindOf'] = exactKindOf(fileURLToPath(TOOLS_DIR));
 
 /** The file map of rust/README.md: the row that lists the tool directories, found by the start of its line. */
 const FILE_MAP = { path: 'rust/README.md', rowStart: '| `src/tools/<tool>/` |' };
@@ -163,6 +159,12 @@ describe('the live docs name only real tools (#503)', () => {
     expect(kindOf('mod.rs')).toBe('file');
     expect(kindOf('no_such_tool')).toBeNull();
     expect(kindOf('get_page/outline'), 'a nested directory is found').toBe('dir');
+  });
+
+  it('finds the real tool directories by their exact case only', () => {
+    expect(kindOf('Explore_Network'), 'the same name in another case is a miss').toBeNull();
+    expect(kindOf('get_page/Outline')).toBeNull();
+    expect(kindOf('MOD.RS')).toBeNull();
   });
 
   it('names only recorded tools, real tool paths and validates every json tool= example', () => {
@@ -514,5 +516,51 @@ describe('the tool-path rule can fail (#520 self-test)', () => {
 
   it('checks no path when the option is absent (the skills guard path)', () => {
     expect(run('`rust/src/tools/get_widget/`\n', 'doc.md', { toolPaths: undefined })).toEqual([]);
+  });
+});
+
+// The tool-path rule reads the disk case-exactly (#539): a doc that writes `Get_Page/` finds the directory on a
+// case-insensitive disk (macOS) with a plain stat, and fails on Linux CI. A made-up tree on disk proves the exact match.
+describe('the tool-path rule is case-exact on disk (#539 self-test)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'doc-tools-case-'));
+  mkdirSync(join(root, 'get_page', 'outline'), { recursive: true });
+  writeFileSync(join(root, 'mod.rs'), '');
+  writeFileSync(join(root, 'get_page', 'mod.rs'), '');
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  const onDisk = exactKindOf(root);
+
+  it('finds a directory, a nested directory and a file when the case is exact', () => {
+    expect(onDisk('get_page')).toBe('dir');
+    expect(onDisk('get_page/outline')).toBe('dir');
+    expect(onDisk('get_page/mod.rs')).toBe('file');
+    expect(onDisk('mod.rs')).toBe('file');
+  });
+
+  it('misses a name in the wrong case at any segment', () => {
+    expect(onDisk('Get_Page')).toBeNull();
+    expect(onDisk('GET_PAGE/outline')).toBeNull();
+    expect(onDisk('get_page/Outline')).toBeNull();
+    expect(onDisk('get_page/Mod.rs')).toBeNull();
+    expect(onDisk('Mod.rs')).toBeNull();
+  });
+
+  it('misses a name that is absent, and a path through a file', () => {
+    expect(onDisk('get_thing')).toBeNull();
+    expect(onDisk('mod.rs/outline')).toBeNull();
+  });
+
+  it('fails a doc that names a wrong-case directory, with the doc, the line and the directory', () => {
+    const options: DocOptions = {
+      nonToolTokens: {},
+      historyMarker: HISTORY_MARKER,
+      formerToolNames: [],
+      bareContexts: {},
+      toolPaths: { kindOf: onDisk, fileMap: { path: 'map.md', rowStart: '| `src/tools/<tool>/` |' } },
+    };
+    const map = { path: 'map.md', text: '| `src/tools/<tool>/` | Today: `get_page/` |\n' };
+    const doc = { path: 'doc.md', text: 'ok\nSee `rust/src/tools/Get_Page/` here.\n' };
+    expect(docViolations([doc, map], [], options)).toEqual([
+      'doc.md:2: "rust/src/tools/Get_Page/" names the directory rust/src/tools/Get_Page/, which does not exist',
+    ]);
   });
 });
