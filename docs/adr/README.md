@@ -54,7 +54,7 @@ One row per ADR, sorted by number. See [Format rules](#format-rules) for what ea
 | [0035-native-binary-release-on-github-releases](0035-native-binary-release-on-github-releases.md) | Release the Rust server as native binaries on GitHub Releases, started by one thin launcher | accepted |
 | [0036-pypi-wheels-from-the-release-binaries](0036-pypi-wheels-from-the-release-binaries.md) | Publish the release binaries to PyPI as platform wheels built from the GitHub Release | accepted |
 | [0037-tool-taxonomy-get-find-explore-check](0037-tool-taxonomy-get-find-explore-check.md) | Name tools by four types (get, find, explore, check) with one parameter vocabulary, in a v2.0.0 hard cut | accepted |
-| [0038-one-forward-only-cursor-for-paging](0038-one-forward-only-cursor-for-paging.md) | Page every cut result with one forward-only opaque cursor | proposed |
+| [0038-one-forward-only-cursor-for-paging](0038-one-forward-only-cursor-for-paging.md) | Page every cut result with one forward-only opaque cursor | accepted |
 
 ## File naming rule
 
