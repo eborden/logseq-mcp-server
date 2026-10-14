@@ -17,6 +17,29 @@ pub fn read_only_annotations(title: &str) -> ToolAnnotations {
     ToolAnnotations::with_title(title).read_only(true).destructive(false).idempotent(true).open_world(false)
 }
 
+/// What every tool that pages says its `cursor` is (ADR-0038). One wording, so the tools pay for it once: the cursor
+/// is the `nextCursor` of the previous result, and a call with it takes no other argument.
+pub const CURSOR_DESCRIPTION: &str = "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)";
+
+/// The schema of a tool's `cursor` parameter: a string with [`CURSOR_DESCRIPTION`]. A tool declares the field as
+/// `#[schemars(with = "Option<CursorSchema>")] pub cursor: Option<String>`, with no doc comment of its own (schemars
+/// would write that over the shared description).
+pub struct CursorSchema;
+
+impl JsonSchema for CursorSchema {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Cursor".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type": "string", "description": CURSOR_DESCRIPTION})
+    }
+}
+
 /// A tool's `inputSchema`, generated from the type its arguments are parsed into, so the two
 /// can't drift apart (ADR-0019). The schema is schemars' own (draft 2020-12, `null` in an
 /// `Option`'s type, `format` on numbers). The parity harness compares schemas by meaning (#292), so
@@ -297,6 +320,26 @@ mod tests {
             meaning(&schema),
             meaning(&json!({"type": "object", "properties": {"max_depth": {"type": "integer", "minimum": 0}}}))
         );
+    }
+
+    /// A tool that pages: its `cursor` is the shared one.
+    #[derive(Deserialize, JsonSchema)]
+    #[allow(dead_code)]
+    struct PagedArgs {
+        text: Option<String>,
+        #[schemars(with = "Option<CursorSchema>")]
+        cursor: Option<String>,
+    }
+
+    #[test]
+    fn a_cursor_parameter_is_an_optional_string_with_the_one_shared_description() {
+        let schema = schema_of::<PagedArgs>();
+        assert_eq!(schema["properties"]["cursor"]["description"], CURSOR_DESCRIPTION);
+        assert_eq!(meaning(&schema)["properties"]["cursor"], json!({"type": "string", "description": CURSOR_DESCRIPTION}));
+        assert!(schema.get("required").is_none_or(|required| required.as_array().is_some_and(Vec::is_empty)), "{schema}");
+        assert!(schema.get("$defs").is_none() && !schema.to_string().contains("$ref"));
+        // about 100 characters a tool pays for (ADR-0016)
+        assert!(CURSOR_DESCRIPTION.len() <= 110, "{}", CURSOR_DESCRIPTION.len());
     }
 
     fn args(value: Value) -> Option<JsonObject> {
