@@ -182,10 +182,10 @@ export function taxonomyViolations(
     const tool = byName.get(entry);
     if (!tool) {
       violations.push(
-        `V1_TOOL_ALLOWANCES lists ${entry}, which is not in the recorded tool list. Delete the entry (the rename PR that removed the tool does it).`
+        `An allowance lists ${entry}, which is not in the recorded tool list. Delete the entry (the rename PR that removed the tool does it).`
       );
     } else if (toolViolations(tool, allowed).length === 0) {
-      violations.push(`${entry} already conforms to ADR-0037. Delete its V1_TOOL_ALLOWANCES entry.`);
+      violations.push(`${entry} already conforms to ADR-0037. Delete its allowance entry.`);
     }
   }
 

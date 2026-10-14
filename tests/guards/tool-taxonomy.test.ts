@@ -180,13 +180,13 @@ describe('each taxonomy rule can fail', () => {
 
   it('fails a stale allowance', () => {
     expect(taxonomyViolations([conforming], ['logseq_get_concept_evolution'])).toEqual([
-      expect.stringContaining('V1_TOOL_ALLOWANCES lists logseq_get_concept_evolution'),
+      expect.stringContaining('An allowance lists logseq_get_concept_evolution'),
     ]);
   });
 
   it('fails an allowlisted tool that already conforms, so its entry is deleted', () => {
     expect(violations(conforming, [conforming.name])).toEqual([
-      `${conforming.name} already conforms to ADR-0037. Delete its V1_TOOL_ALLOWANCES entry.`,
+      `${conforming.name} already conforms to ADR-0037. Delete its allowance entry.`,
     ]);
   });
 
