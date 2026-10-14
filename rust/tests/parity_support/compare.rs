@@ -81,7 +81,7 @@ pub fn same_tool_text(expected: &str, actual: &str) -> bool {
     }
 }
 
-/// The footer line of a markdown result that carries the cursor (`crate::markdown`): `nextCursor: <token>`.
+/// The footer line of a markdown result that carries the cursor (`crate::markdown`): `nextCursor: <token>`, right after `hasMore: true`.
 const CURSOR_LINE: &str = "nextCursor: ";
 
 /// [`same_text`], but a footer line `nextCursor: <token>` is compared by [`same_cursor`], as the `nextCursor` of a JSON
@@ -92,10 +92,13 @@ fn same_text_with_cursor(expected: &str, actual: &str) -> bool {
         return true;
     }
     let (want, got): (Vec<&str>, Vec<&str>) = (expected.split('\n').collect(), actual.split('\n').collect());
+    // Only the footer's own line counts: the one right after its `hasMore:` line (`crate::markdown`), so a block line that
+    // happens to start with the same words is held to the bytes like any other
+    let after_has_more = |lines: &[&str], at: usize| at > 0 && lines[at - 1].starts_with("hasMore: ");
     want.len() == got.len()
-        && want.iter().zip(&got).all(|(w, g)| match (w.strip_prefix(CURSOR_LINE), g.strip_prefix(CURSOR_LINE)) {
-            (Some(want_token), Some(got_token)) => same_cursor(want_token, got_token),
-            _ => w == g,
+        && (0..want.len()).all(|at| match (want[at].strip_prefix(CURSOR_LINE), got[at].strip_prefix(CURSOR_LINE)) {
+            (Some(want_token), Some(got_token)) if after_has_more(&want, at) && after_has_more(&got, at) => same_cursor(want_token, got_token),
+            _ => want[at] == got[at],
         })
 }
 
