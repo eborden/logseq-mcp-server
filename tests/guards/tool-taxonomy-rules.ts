@@ -67,10 +67,10 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
   logseq_get_block: ['uuid', 'include_children', 'resolve_refs', 'format', 'cursor'],
   logseq_get_current: [],
   logseq_get_graph: [],
-  // ADR-0038 (one forward-only cursor for paging) takes `offset` off `find_blocks` and `find_pages` and adds `cursor`:
-  // ADR-0037 can't carry a pointer, so its `limit` and `offset` vocabulary stays as written, and each paged tool moves to
-  // `limit` (the page size) and `cursor` in its own step (#528). `explore_context` took `cursor` and lost `references_offset` in #555:
-  // its `max_*` caps are the page size of each list, and `page` stays, optional beside a cursor (BR-0008).
+  // ADR-0038 (one forward-only cursor for paging) took `offset` off `find_blocks` and `find_pages` and added `cursor`:
+  // ADR-0037's `limit` and `offset` vocabulary stays as written, but each paged tool moved to `limit` (the page size)
+  // and `cursor` (#528). `explore_context` took `cursor` and lost `references_offset` in #555: its `max_*` caps
+  // are the page size of each list, and `page` stays, optional beside a cursor (BR-0008).
   logseq_find_pages: ['text', 'names', 'property', 'value', 'limit', 'format', 'cursor'],
   logseq_find_blocks: ['text', 'page', 'links_to', 'property', 'value', ...PERIOD, 'limit', 'include_context', 'slim_results', 'cursor'],
   // `include_temporal_context` is the one toggle kept as today (#493). The ADR-0037 row says "its caps", read loosely to cover it (maintainer, #519).
