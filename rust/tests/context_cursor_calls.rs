@@ -36,12 +36,16 @@ struct Graph {
     sources: usize,
     per_source: usize,
     reference_length: usize,
+    /// A source page of 3 blocks, named to rank first and listed by LogSeq last
+    extra_source: bool,
+    /// Source pages (by number) that are not there
+    removed_sources: Vec<i64>,
 }
 
 type Held = Arc<Mutex<Graph>>;
 
 fn held(blocks: usize, sources: usize, per_source: usize) -> Held {
-    Arc::new(Mutex::new(Graph { blocks, first_block: 1000, removed_blocks: Vec::new(), block_length: 250, sources, per_source, reference_length: 120 }))
+    Arc::new(Mutex::new(Graph { blocks, first_block: 1000, removed_blocks: Vec::new(), block_length: 250, sources, per_source, reference_length: 120, extra_source: false, removed_sources: Vec::new() }))
 }
 
 fn atlas() -> Value {
@@ -58,14 +62,16 @@ fn block_rows(graph: &Graph) -> Value {
 
 fn linked_references(graph: &Graph) -> Value {
     let text = "r".repeat(graph.reference_length);
+    // (page id, name, id of its first block): the numbered sources, then the extra one
+    let extra = graph.extra_source.then(|| (1999, "aaa extra".to_owned(), 4000));
     json!((0..graph.sources as i64)
-        .map(|source| {
-            let page = json!({"id": 2000 + source, "name": format!("source {source:03}"), "originalName": format!("Source {source:03}")});
+        .filter(|source| !graph.removed_sources.contains(source))
+        .map(|source| (2000 + source, format!("source {source:03}"), 3000 + source * 100))
+        .chain(extra)
+        .map(|(page_id, name, first_block)| {
+            let page = json!({"id": page_id, "name": name, "originalName": name});
             let blocks: Vec<Value> = (0..graph.per_source as i64)
-                .map(|n| {
-                    let id = 3000 + source * 100 + n;
-                    json!({"id": id, "uuid": uuid(id), "content": format!("Links [[Project Atlas]] {text}"), "page": {"id": 2000 + source}})
-                })
+                .map(|n| json!({"id": first_block + n, "uuid": uuid(first_block + n), "content": format!("Links [[Project Atlas]] {text}"), "page": {"id": page_id}}))
                 .collect();
             json!([page, blocks])
         })
@@ -282,6 +288,56 @@ async fn a_context_that_lost_the_last_block_sent_resumes_at_the_position_and_say
     assert_eq!(block_ids(&second)[0], 1051);
 }
 
+/// How many `cursor_stale` warnings a page holds, and the message of the first.
+fn stale_of(page: &Value) -> (usize, String) {
+    let stale: Vec<&Value> = page["warnings"].as_array().unwrap().iter().filter(|warning| warning["code"] == "cursor_stale").collect();
+    (stale.len(), stale.first().map_or(String::new(), |warning| warning["message"].as_str().unwrap().to_owned()))
+}
+
+#[tokio::test]
+async fn a_reference_that_moved_is_said_of_the_references_alone_and_resumes_after_the_last_one_sent() {
+    let held = more_than_a_page();
+    let first = call(&logseq_holding(&held).await, &snapshots(), json!({"page": "Project Atlas"})).await.unwrap();
+    // the last reference sent is 3601 (the second block of the seventh source page)
+    assert_eq!(reference_ids(&first).last(), Some(&3601));
+    // a source page that ranks first by name is listed last by LogSeq: the references shift by 3, the related pages
+    // keep their positions, and the blocks do not change
+    let moved = Graph { extra_source: true, ..held.lock().unwrap().clone() };
+    let rebuilt = logseq_holding(&Arc::new(Mutex::new(moved))).await;
+    let second = call(&rebuilt, &Snapshots::new(2), json!({"cursor": cursor_of(&first)})).await.unwrap();
+    let (count, message) = stale_of(&second);
+    assert_eq!(count, 1, "{second}");
+    assert!(message.starts_with("The references changed since the page before was read"), "{message}");
+    assert_eq!(reference_ids(&second)[0], 3602, "right after the last one sent");
+}
+
+#[tokio::test]
+async fn a_related_page_that_is_gone_is_said_of_the_related_pages_alone() {
+    let held = more_than_a_page();
+    let first = call(&logseq_holding(&held).await, &snapshots(), json!({"page": "Project Atlas"})).await.unwrap();
+    assert_eq!(related_ids(&first).last(), Some(&2009));
+    // the last related page sent goes, with its blocks, which sat after the references' position
+    let gone = Graph { removed_sources: vec![9], ..held.lock().unwrap().clone() };
+    let rebuilt = logseq_holding(&Arc::new(Mutex::new(gone))).await;
+    let second = call(&rebuilt, &Snapshots::new(2), json!({"cursor": cursor_of(&first)})).await.unwrap();
+    let (count, message) = stale_of(&second);
+    assert_eq!(count, 1, "{second}");
+    assert!(message.starts_with("The related pages changed since the page before was read") && message.contains("is gone"), "{message}");
+    assert_eq!(related_ids(&second)[0], 2011, "the page starts at the position in the list as it is now, which the page that went had before it");
+}
+
+#[tokio::test]
+async fn a_chain_of_refs_past_the_depth_limit_keeps_has_more_true_with_no_cursor() {
+    let block = json!([{"id": 1000, "uuid": uuid(1000), "content": format!("See (({}))", uuid(2)), "page": {"id": 10}, "parent": {"id": 10}, "left": {"id": 10}}]);
+    let target = |id: i64, content: String| json!([{"id": id, "uuid": uuid(id), "content": content, "left": {"id": 10}, "parent": {"id": 10}, "page": {"id": 10, "name": "project atlas", "original-name": "Project Atlas"}}]);
+    let logseq = mock_logseq(vec![atlas(), json!([block]), json!([]), json!([target(2, format!("mid (({}))", uuid(3)))]), json!([target(3, format!("end (({}))", uuid(4)))])]).await;
+    let page = call(&logseq, &snapshots(), json!({"page": "Project Atlas", "resolve_refs": true})).await.unwrap();
+    assert!(page.get("nextCursor").is_none());
+    assert_eq!(page["hasMore"], true, "the warning offers a way of its own");
+    let warning = page["warnings"].as_array().unwrap().iter().find(|warning| warning["code"] == "refs_depth_limit").expect("the depth limit is said");
+    assert!(warning["howToFetchAll"].is_string());
+}
+
 #[tokio::test]
 async fn a_context_that_shrank_below_the_position_is_an_empty_page_and_not_an_error() {
     let held = more_than_a_page();
@@ -305,7 +361,7 @@ fn held_with(blocks: usize, sources: usize, per_source: usize) -> Held {
 #[tokio::test]
 async fn the_budget_drops_related_pages_then_references_then_blocks_and_every_entry_is_still_read_once() {
     // 100 blocks of 700 characters (~70,000), 30 references and 10 related pages: several pages by size
-    let held = Arc::new(Mutex::new(Graph { blocks: 100, first_block: 1000, removed_blocks: Vec::new(), block_length: 700, sources: 10, per_source: 3, reference_length: 120 }));
+    let held = Arc::new(Mutex::new(Graph { blocks: 100, first_block: 1000, removed_blocks: Vec::new(), block_length: 700, sources: 10, per_source: 3, reference_length: 120, extra_source: false, removed_sources: Vec::new() }));
     let logseq = logseq_holding(&held).await;
     let pages = read_to_the_end(&logseq, &snapshots(), json!({"page": "Project Atlas", "max_blocks": 100, "max_references": 100, "max_related_pages": 100})).await;
     assert!(pages.len() >= 3, "{} pages", pages.len());
@@ -324,7 +380,7 @@ async fn the_budget_drops_related_pages_then_references_then_blocks_and_every_en
 
 #[tokio::test]
 async fn a_block_over_the_budget_is_returned_alone_and_the_cursor_moves_past_it() {
-    let held = Arc::new(Mutex::new(Graph { blocks: 3, first_block: 1000, removed_blocks: Vec::new(), block_length: 40_000, sources: 0, per_source: 0, reference_length: 10 }));
+    let held = Arc::new(Mutex::new(Graph { blocks: 3, first_block: 1000, removed_blocks: Vec::new(), block_length: 40_000, sources: 0, per_source: 0, reference_length: 10, extra_source: false, removed_sources: Vec::new() }));
     let logseq = logseq_holding(&held).await;
     let pages = read_to_the_end(&logseq, &snapshots(), json!({"page": "Project Atlas"})).await;
     assert_eq!(pages.len(), 3);
@@ -373,19 +429,26 @@ async fn an_empty_page_is_one_page_with_no_cursor() {
 // ---- the formats
 
 #[tokio::test]
-async fn markdown_carries_the_cursor_in_its_footer_and_a_group_of_references_may_be_cut_between_pages() {
+async fn markdown_carries_the_cursor_in_its_footer_of_every_page_but_the_last_and_a_group_of_references_may_be_cut_between_pages() {
     let logseq = logseq_holding(&held(5, 4, 12)).await;
     let snapshots = snapshots();
-    let first = call_text(&logseq, &snapshots, json!({"page": "Project Atlas", "format": "markdown", "max_references": 20})).await.unwrap();
-    let cursor = first.lines().find_map(|line| line.strip_prefix("nextCursor: ")).expect("the footer has the cursor").to_owned();
-    assert!(first.contains("hasMore: true"));
-    let second = call_text(&logseq, &snapshots, json!({"cursor": cursor})).await.unwrap();
-    assert_eq!(methods(&logseq).len(), 3, "the second page is read from the snapshot");
-    // the 12 blocks of the third source page are 4 on the first page and 8 on the second: its header is on both
-    // (the sources rank by their number of linking blocks, then by name, so the order is the names')
-    let header = "[[Source 001]]";
-    assert!(first.matches(header).count() >= 1 && second.matches(header).count() >= 1, "{second}");
-    assert!(second.contains("hasMore") || !second.contains("nextCursor"), "the last pages say so");
+    let mut pages = vec![call_text(&logseq, &snapshots, json!({"page": "Project Atlas", "format": "markdown", "max_references": 20})).await.unwrap()];
+    let cursor_line = |text: &str| text.lines().find_map(|line| line.strip_prefix("nextCursor: ")).map(str::to_owned);
+    while let Some(cursor) = cursor_line(pages.last().unwrap()) {
+        assert!(pages.len() < 10, "a cursor that never ends");
+        // the footer says there is more, and its token is one this tool made
+        assert!(pages.last().unwrap().contains("hasMore: true"));
+        assert_eq!(decode(&cursor, "logseq_explore_context").unwrap().tool, "logseq_explore_context");
+        pages.push(call_text(&logseq, &snapshots, json!({"cursor": cursor})).await.unwrap());
+    }
+    assert_eq!(pages.len(), 3, "48 references, 20 at a time");
+    assert_eq!(methods(&logseq).len(), 3, "the later pages are read from the snapshot");
+    // the last page has neither line
+    let last = pages.last().unwrap();
+    assert!(!last.contains("hasMore: true") && !last.contains("nextCursor: "), "{last}");
+    // the 12 blocks of the second source page are 8 on the first page and 4 on the second: its header is on both
+    let header = "[[source 001]]";
+    assert!(pages[0].matches(header).count() >= 1 && pages[1].matches(header).count() >= 1, "{}", pages[1]);
 }
 
 #[tokio::test]

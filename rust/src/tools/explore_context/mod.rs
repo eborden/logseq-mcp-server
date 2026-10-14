@@ -26,7 +26,7 @@
 //! (`crate::snapshots`), so a call with only the cursor reads the next page from memory, with no LogSeq call; a snapshot
 //! that is gone is built again with the first page's calls, and the last entry of each list sent is checked against
 //! its position (`cursor_stale` says when a list moved). `resolve_refs` runs for the blocks and references of the page
-//! being sent, whether the context came from LogSeq or from the snapshot.
+//! being sent, whether the context came from LogSeq or from the snapshot. It runs over the blocks and references the page sizes take, before the budget measures the page (the resolved text is part of what is sent), so entries the size cut then drops were resolved for nothing; the cost stays at most 2 queries, and the next page resolves them again.
 //!
 //! `resolvedFrom`, `resolvedAliases` and `summary` are on the first page only (maintainer, #568). The
 //! warnings about the read itself (an alias group that was cut, a part LogSeq did not answer) are repeated on every
