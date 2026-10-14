@@ -17,6 +17,7 @@ pub mod block_tree;
 pub mod client;
 pub mod compact;
 pub mod config;
+pub mod cursor;
 pub mod dates;
 pub mod edn;
 pub mod entity;

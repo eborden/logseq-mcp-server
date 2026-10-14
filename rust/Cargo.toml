@@ -49,6 +49,13 @@ nucleo-matcher = { version = "0.3.1", default-features = false, features = ["uni
 # pins that order and this crate's output.
 toon-format = { version = "0.6.1", default-features = false }
 
+# The cursor token (ADR-0038, `src/cursor.rs`): base64url without padding (`URL_SAFE_NO_PAD`) of the token's JSON.
+# base64 is the maintained crate for it (marshallpierce/rust-base64, MIT OR Apache-2.0, the repo is MIT, ADR-0023;
+# 1.7 billion downloads), so nothing is hand-rolled. The default features (`std`) are the only ones on. 0.22.1 is
+# already locked under reqwest, so this adds no build and no download: it takes that locked version, not the 0.23.1
+# that hyper-util pulls in for itself.
+base64 = "0.22"
+
 # The local calendar day (`localtime_r`), which no standard library function gives. Already in the tree (tokio, mio and socket2 use it),
 # at the locked version, so it adds no build and no download. Unix only: elsewhere the date is UTC.
 [target.'cfg(unix)'.dependencies]
