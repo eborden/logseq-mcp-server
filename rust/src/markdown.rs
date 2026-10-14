@@ -136,6 +136,15 @@ struct Walk {
     left: usize,
     cut: bool,
     options: OutlineOptions,
+    /// The `[under: ...]` line of the last block that had one, so a run of blocks under the same ones says it once
+    last_under: Option<String>,
+}
+
+/// The blocks a block of a page that starts inside a subtree sits under (`ancestors`, `crate::block_budget::slice_blocks`),
+/// as `A > B` with their first lines, outermost first. None for a block that sits at the top.
+fn under_of(block: &Map<String, Value>) -> Option<String> {
+    let names: Vec<&str> = block.get("ancestors")?.as_array()?.iter().filter_map(|ancestor| ancestor.get("snippet")?.as_str()).collect();
+    (!names.is_empty()).then(|| names.join(" > "))
 }
 
 impl Walk {
@@ -149,7 +158,17 @@ impl Walk {
             if self.options.skip_pre_blocks && is_pre_block(block) {
                 continue;
             }
-            let text = bullet_text(block, depth, &self.options);
+            let mut text = bullet_text(block, depth, &self.options);
+            // A block that starts a page inside a subtree says where it sits, before its bullet, once for a run of them
+            match under_of(block) {
+                Some(under) if self.last_under.as_ref() != Some(&under) => {
+                    text = format!("{}[under: {under}]\n{text}", "\t".repeat(depth));
+                    self.last_under = Some(under);
+                }
+                Some(_) => {}
+                None if depth == 0 => self.last_under = None,
+                None => {}
+            }
             let size = length(&text) + 1;
             if size > self.left {
                 self.cut = true;
@@ -174,7 +193,7 @@ impl Walk {
 /// through `cut`; the caller owns the notice. Children that are not block objects (unfetched
 /// `["uuid", "<id>"]` tuples) are skipped.
 pub fn render_outline(blocks: &[Value], options: OutlineOptions) -> Outline {
-    let mut walk = Walk { out: Vec::new(), left: options.max_chars.unwrap_or(usize::MAX), cut: false, options };
+    let mut walk = Walk { out: Vec::new(), left: options.max_chars.unwrap_or(usize::MAX), cut: false, options, last_under: None };
     walk.walk(blocks, 0);
     Outline { lines: walk.out, cut: walk.cut }
 }
@@ -327,6 +346,13 @@ pub fn render_block(block: &Value) -> String {
         Some(uuid) => format!("# Block (({uuid}))"),
         None => "# Block".to_owned(),
     };
+    // A page of a block after the first (`continued: true`, #552) holds only blocks below it: they are the outline, with
+    // no bullet for the block, whose body the first page sent
+    if block.get("continued") == Some(&Value::Bool(true)) {
+        let children: &[Value] = block.get("children").and_then(Value::as_array).map_or(&[], Vec::as_slice);
+        let outline = render_outline(children, OutlineOptions::default());
+        return format!("{heading} (continued)\n\n{}\n", outline.lines.join("\n"));
+    }
     let outline = render_outline(std::slice::from_ref(block), OutlineOptions::default());
     format!("{heading}\n\n{}\n", outline.lines.join("\n"))
 }
@@ -656,6 +682,53 @@ mod tests {
         assert_eq!(render_block(&block), format!("# Block (({UUID_A}))\n\n- parent\n\t- kid\n"));
         assert_eq!(render_block(&json!({"content": "x"})), "# Block\n\n- x\n");
         assert_eq!(render_block(&json!({"uuid": " ", "content": "x"})), "# Block\n\n- x\n");
+    }
+
+    #[test]
+    fn a_block_that_starts_a_page_inside_a_subtree_says_what_it_sits_under_before_its_bullet_and_once_for_a_run() {
+        let under_a_c = json!([{"uuid": "ua", "snippet": "a first"}, {"uuid": "uc", "snippet": "c first"}]);
+        let blocks = json!([
+            {"content": "d", "ancestors": under_a_c},
+            {"content": "e\nmore", "ancestors": under_a_c, "children": [{"content": "f"}]},
+            {"content": "g", "ancestors": [{"snippet": "a first"}]},
+            {"content": "h"},
+            {"content": "i", "ancestors": [{"snippet": "a first"}]},
+        ]);
+        assert_eq!(
+            outline(blocks),
+            [
+                "[under: a first > c first]\n- d",
+                "- e\n  more",
+                "\t- f",
+                "[under: a first]\n- g",
+                "- h",
+                // the run was broken by a block at the top level, so it is said again
+                "[under: a first]\n- i",
+            ]
+        );
+        // a block with no snippets to name is under nothing worth saying
+        assert_eq!(outline(json!([{"content": "x", "ancestors": []}, {"content": "y", "ancestors": [{"uuid": "u"}]}])), ["- x", "- y"]);
+    }
+
+    #[test]
+    fn the_under_line_counts_against_the_characters_a_cut_outline_keeps() {
+        let blocks = json!([{"content": "d", "ancestors": [{"snippet": "a first"}]}, {"content": "e"}]);
+        let all = render_outline(blocks.as_array().unwrap(), OutlineOptions::default());
+        assert_eq!(all.lines.join("\n").chars().count(), "[under: a first]\n- d\n- e".chars().count());
+        // a cap of 22 holds the first bullet with its line (21 with the line break) and not the second: without the line
+        // counted, both bullets (8 characters) would fit
+        let cut = render_outline(blocks.as_array().unwrap(), OutlineOptions { max_chars: Some(22), ..Default::default() });
+        assert!(cut.cut, "{:?}", cut.lines);
+        assert_eq!(cut.lines, ["[under: a first]\n- d"]);
+    }
+
+    #[test]
+    fn a_later_page_of_a_block_is_its_blocks_alone_under_a_continued_heading() {
+        let block = json!({"uuid": UUID_A, "continued": true, "children": [{"content": "kid", "children": [{"content": "grandkid"}]}, {"content": "next", "ancestors": [{"snippet": "kid"}]}]});
+        assert_eq!(render_block(&block), format!("# Block (({UUID_A})) (continued)\n\n- kid\n\t- grandkid\n[under: kid]\n- next\n"));
+        // `continued` that is not true is no continuation
+        let not = json!({"uuid": UUID_A, "continued": false, "content": "parent"});
+        assert_eq!(render_block(&not), format!("# Block (({UUID_A}))\n\n- parent\n"));
     }
 
     fn warning(code: Option<&str>, message: &str, how: Option<&str>) -> FooterWarning {
