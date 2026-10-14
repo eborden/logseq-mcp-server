@@ -543,7 +543,7 @@ impl View<'_> {
     /// What a reader can do about a result cut for its size. No parameter raises the budget, and the cursor reads on
     /// (the warning's `howToFetchAll` names it), but a narrower filter makes less to read.
     fn size_advice(&self) -> String {
-        format!("The last pages in name order are left out. {NARROWER} No parameter raises the size limit.")
+        format!("The last pages in name order are left out. {NARROWER}")
     }
 
     /// A raise of `limit` to offer beside the cursor, on the first page only (a cursor call can't change it). It is

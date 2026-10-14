@@ -204,7 +204,7 @@ impl View<'_> {
         let mut warnings: Vec<ResultWarning> = self.stale.map(|stale| stale_warning(stale, WHAT)).into_iter().collect();
         if let Some(cut) = cut {
             let advice = match cut {
-                Cut::Size { .. } => "The last top-level blocks are left out. No parameter raises the size limit: read a block with logseq_get_block and its uuid.",
+                Cut::Size { .. } => "The last top-level blocks are left out. To read less, read a block with logseq_get_block and its uuid.",
                 Cut::Count => "",
             };
             warnings.push(paged_warning(PagedCut {

@@ -120,13 +120,17 @@ impl Words {
             "A day cut between two pages is on both with the same date."
         };
         let limit = if size_cut {
-            "No parameter raises the size limit."
+            ""
         } else if self.requested > MAX_BLOCKS as u64 {
             "max_blocks is the page size, capped at its maximum of 1000, so the rest is on the next page."
         } else {
             "max_blocks is the page size (at most 1000)."
         };
-        format!("{continues} {limit} To read less, narrow the period.")
+        if limit.is_empty() {
+            format!("{continues} To read less, narrow the period.")
+        } else {
+            format!("{continues} {limit} To read less, narrow the period.")
+        }
     }
 
     /// The way on of a page that holds no block and so has no cursor (a `max_blocks` of 0): the page size is the only one.
@@ -257,7 +261,7 @@ mod tests {
         assert_eq!(newest.what(), "blocks (top-level only; newest day first)");
         assert!(words.advice(false).contains("names it in ancestors") && words.advice(false).contains("childrenTruncated"));
         assert!(!newest.advice(false).contains("ancestors") && !newest.advice(false).contains("childrenTruncated"));
-        assert!(words.advice(true).contains("No parameter raises the size limit."));
+        assert!(!words.advice(true).contains("No parameter raises") && !words.advice(true).contains("max_blocks is"));
         assert!(Words { requested: 5000, ..words }.advice(false).contains("capped at its maximum of 1000"));
     }
 }
