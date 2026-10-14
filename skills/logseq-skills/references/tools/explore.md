@@ -4,7 +4,7 @@ You have a starting point, a page or a period, and want what surrounds it: what 
 
 | Tool | Question it answers | Takes |
 |------|---------------------|-------|
-| `logseq_explore_context` | What do I know about this page, and what links to it? | `page`, caps, `references_offset`, `resolve_refs`, `format`, `compact` |
+| `logseq_explore_context` | What do I know about this page, and what links to it? | `page`, caps, `resolve_refs`, `format`, `compact`, `cursor` |
 | `logseq_explore_network` | How does this page connect to others, or to a second page? | `page`, `to`, `max_depth`, `max_nodes`, `max_fanout`, `expand_journals`, `with_snippets`, `format` |
 | `logseq_explore_timeline` | What happened in a period, or how did this page change? | `page`, a period, `group_by`, `max_blocks`, `top_concepts_limit`, `include_content`, `slim_results`, `resolve_refs` |
 
@@ -16,19 +16,21 @@ Explore one page in a single call: its blocks, the pages that link to it and the
 
 | Parameter | Type | Default | What it does |
 |-----------|------|---------|--------------|
-| `page` | string, required | | Page name, alias or ISO date. `name` and `page_name` are accepted for it, but send `page` |
-| `max_blocks` | integer | 50 | Blocks of the page itself. 20 is enough to orient. 0 leaves them out |
-| `max_related_pages` | integer | 10 | Pages that link to it. 0 leaves them out |
-| `max_references` | integer | 20 | Reference blocks (blocks elsewhere that link to the page) |
-| `references_offset` | integer | 0 | Reference blocks to skip, to read the next page of them |
+| `page` | string, required unless `cursor` | | Page name, alias or ISO date. `name` and `page_name` are accepted for it, but send `page` |
+| `max_blocks` | integer | 50 | Blocks of the page itself per page of the result. 20 is enough to orient. 0 leaves them out |
+| `max_related_pages` | integer | 10 | Pages that link to it, per page of the result. 0 leaves them out |
+| `max_references` | integer | 20 | Reference blocks (blocks elsewhere that link to the page), per page of the result |
 | `include_temporal_context` | boolean | true | Adds `temporalContext` to the result: `{ isJournal: false }` for an ordinary page, `{ isJournal: true, date }` (YYYYMMDD) for a journal page. `false` leaves it out |
 | `resolve_refs` | boolean | false | Adds `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s in the blocks and references, two levels deep |
 | `format` | `json`, `markdown` | `json` | `markdown` shows the blocks as a tree, related pages as links and references grouped by source page, about 75% smaller. Block uuids appear only with `compact` |
 | `compact` | boolean | false | Each block becomes `{ uuid, snippet }` (first line, 80 characters). Read one in full with `logseq_get_block`. It skips `resolve_refs`, with a warning |
+| `cursor` | string | | The `nextCursor` of the previous result, passed alone: the next page of the blocks, references and related pages. No other argument goes with it (they are in the token) |
 
-**Returns:** `page` (as you wrote it; `resolvedFrom` says when it was an alias, a date or a namespace leaf), `hasMore`, `warnings` and `totals` (`blocks`, `relatedPages`, `references`: the real counts before any cap), then `summary` (with `pageProperties`), `mainPage` (the page entity and its properties), `directBlocks`, `relatedPages` (each `{ page, relationshipType }`, once, in LogSeq's order, not ranked), `references` (each `{ block, sourcePage }`) and `temporalContext` (on every page, not only journals).
+**Returns:** `page` (as you wrote it; `resolvedFrom` says when it was an alias, a date or a namespace leaf, on the first page only), `hasMore`, `nextCursor` (when `hasMore` is true), `warnings` and `totals` (`blocks`, `relatedPages`, `references`: the real counts before any cap), then `summary` (with `pageProperties`), `mainPage` (the page entity and its properties), `directBlocks`, `relatedPages` (each `{ page, relationshipType }`, once, in LogSeq's order, not ranked), `references` (each `{ block, sourcePage }`) and `temporalContext` (on every page, not only journals).
 
-**References are ranked** by how many blocks on their source page link the page, most first, ties by lowercase page name. The first one listed is on the page that links the topic most, which answers "what connects to this" without raising anything. A page and its aliases count as one topic. The ranking counts linking blocks, not importance: a blocker can sit on a page with one linking block, so read on with `references_offset` only when the question needs every referrer.
+**References are ranked** by how many blocks on their source page link the page, most first, ties by lowercase page name. The first one listed is on the page that links the topic most, which answers "what connects to this" without raising anything. A page and its aliases count as one topic. The ranking counts linking blocks, not importance: a blocker can sit on a page with one linking block, so read on with the cursor only when the question needs every referrer.
+
+**A busy page comes back a page at a time.** Each call returns up to `max_blocks` blocks, `max_references` references and `max_related_pages` related pages, cut to 30,000 characters from the tail (related pages first, then references, then blocks). While `hasMore` is true, call again with only the `nextCursor`: the next page continues each of the three lists where it stopped, a list that is read to its end is simply empty, and `max_blocks: 0` (or either of the other two) leaves a list out of every page. The warning may also offer a higher cap, as the other way: the cursor is usually cheaper.
 
 **Cost:** 3 LogSeq calls (4 when the page has an alias), about 3k to 8k tokens at the defaults. It already includes the page's content and its references, so don't follow it with `logseq_get_page`, `logseq_find_blocks` or a second look at the links.
 
@@ -50,13 +52,13 @@ Read `directBlocks` for what the page says, `references` for what the rest of th
 
 Read the `snippet` of each block and reference, and the `sourcePage` names: recent threads are on journal pages. Compact keeps this cheap when blocks are long. Next call: `logseq_explore_timeline` with `page` and `last_n` for what happened with Alice lately, and `logseq_get_block` on any snippet that needs its full text.
 
-**Example 3.** "What else links to Project Atlas?" The first call returned `references_truncated` with `hasMore: true`.
+**Example 3.** "What else links to Project Atlas?" The first call returned `references_truncated` with `hasMore: true` and a `nextCursor`.
 
 ```json tool=logseq_explore_context
-{"page": "project atlas", "max_blocks": 0, "max_related_pages": 0, "references_offset": 20}
+{"cursor": "<the nextCursor of the previous result>"}
 ```
 
-Read the next references. The ranking is the same on every call, so the pages join with nothing repeated. With `max_blocks` and `max_related_pages` at 0 the result still carries `blocks_truncated` and `related_pages_truncated` warnings (and `hasMore: true`) for what you left out on purpose: ignore those two and read `references_truncated`, which is absent on the last page. Stop when the question is answered: only a blocker hunt or a count needs every referrer.
+Read the next references (and the blocks and related pages the first page did not hold). The ranking is the same on every page, so they join with nothing repeated. Pass nothing but the cursor: the arguments are in it. The last page has no `nextCursor`. Stop when the question is answered: only a blocker hunt or a count needs every referrer. To read only the references, start with `max_blocks` and `max_related_pages` at 0: the result then carries `blocks_truncated` and `related_pages_truncated` warnings for what you left out on purpose, so ignore those two and read `references_truncated`.
 
 ## logseq_explore_network
 
