@@ -102,7 +102,8 @@ describe('explore_network: roll-up pages stay leaves, and edges can say why', ()
     expect(leaf.warnings[0].message).toContain('hub central (70 pages)');
     expect(leaf.warnings[0].howToFetchAll).toContain('expand_journals');
     expect(leaf.warnings[0].howToFetchAll).toMatch(/adds at least \d+ pages/);
-    expect(leaf.hasMore).toBe(true);
+    // a raise beside no cursor: `hasMore` is the cursor's alone (ADR-0038)
+    expect(leaf.hasMore).toBe(false);
 
     const walked = await exploreNetwork(client, 'neighbour-out-01', 2, { expandJournals: true });
     const walkedNames: string[] = walked.nodes.map((n: { name: string }) => n.name);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { exploreNetwork, exploreNetworkPath } from './helpers/tools.js';
+import { exploreNetwork, exploreNetworkNext, exploreNetworkPath } from './helpers/tools.js';
 import { PageNotFoundError } from './helpers/errors.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
@@ -78,12 +78,15 @@ describe('Graph Traversal Tools Integration Tests', () => {
       expect(result.nodes.map(n => n.name).sort()).toEqual(
         ['hub central', ...range('neighbour-both', 10), ...range('neighbour-in', 5)].sort()
       );
+      // the fanout rule left pages out: `truncated` says so, and its raise sits in the warning. No cursor, so no `hasMore`
       expect(result.truncated).toBe(true);
-      expect(result.hasMore).toBe(true);
+      expect(result.hasMore).toBe(false);
+      expect(result.nextCursor).toBeUndefined();
       expect(result.warnings.map(w => w.code)).toEqual(['network_truncated']);
+      expect(result.warnings[0].howToFetchAll).toMatch(/^Set max_fanout higher/);
     });
 
-    it('depth 2 with the defaults stops at max_nodes 50', async () => {
+    it('depth 2 with the defaults is a page of 50 and a cursor to the last 6 fringe pages', async () => {
       const result = await exploreNetwork(client, 'hub central', 2);
 
       expect(result.nodes).toHaveLength(50);
@@ -91,8 +94,21 @@ describe('Graph Traversal Tools Integration Tests', () => {
       expect(result.nodes.filter(n => n.depth === 1)).toHaveLength(15);
       expect(result.nodes.filter(n => n.depth === 2)).toHaveLength(34);
       expect(result.nodes.filter(n => n.depth === 2).every(n => n.name.startsWith('fringe-'))).toBe(true);
+      // the fanout rule left 105 neighbours out of the walk, which has 56 pages: the cursor reads the other 6
       expect(result.truncated).toBe(true);
-      expect(result.warnings.map(w => w.code)).toEqual(['network_truncated']);
+      expect(result.hasMore).toBe(true);
+      expect(typeof result.nextCursor).toBe('string');
+      expect(result.warnings.map(w => w.code)).toEqual(['network_truncated', 'pages_truncated']);
+      expect(result.warnings[1].message).toBe('Showing 1-50 of 56 pages.');
+
+      const last = await exploreNetworkNext(client, result.nextCursor);
+      expect(last.nodes).toHaveLength(6);
+      expect(last.nodes.every(n => n.depth === 2 && n.name.startsWith('fringe-'))).toBe(true);
+      expect(last).toMatchObject({ truncated: true, hasMore: false });
+      expect(last.nextCursor).toBeUndefined();
+      // no page twice
+      const names = [...result.nodes, ...last.nodes].map(n => n.name);
+      expect(new Set(names).size).toBe(56);
     });
 
     it('depth 1 at the largest caps a client can ask for keeps 100 of 121 candidates', async () => {
