@@ -184,6 +184,14 @@ export async function exploreNetwork(
   ).value;
 }
 
+/**
+ * The next page of a `logseq_explore_network` walk (ADR-0038): a call with the `nextCursor` of the page before and no other
+ * argument. `others` is for a test that sends one beside it, which the tool refuses.
+ */
+export async function exploreNetworkNext(client: LogseqClient, cursor: string, others: Record<string, unknown> = {}): Promise<Json> {
+  return (await callTool(client, 'logseq_explore_network', { cursor, ...others })).value;
+}
+
 /** `logseq_explore_network` with `to`: the shortest path of links from `page` to `to`, as nodes and edges. */
 export async function exploreNetworkPath(client: LogseqClient, page: string, to: string, maxDepth?: number): Promise<Json> {
   return (await callTool(client, 'logseq_explore_network', { page, to, max_depth: maxDepth })).value;
