@@ -119,12 +119,18 @@ describe('tools/list guardrails', () => {
       }
     });
 
-    it('keeps the canonical parameter required on every aliased tool, and advertises no alias', () => {
+    it('keeps the canonical parameter required on every aliased tool but one that takes a cursor, and advertises no alias', () => {
       for (const [name, { canonical, aliases }] of Object.entries(PARAM_ALIASES)) {
         const tool = tools.find(t => t.name === name);
         expect(tool, `${name} is a recorded tool`).toBeDefined();
-        expect(tool!.inputSchema?.required, `${name}: ${canonical} stays required`).toContain(canonical);
         const advertised = Object.keys(tool!.inputSchema?.properties ?? {});
+        // BR-0008, ADR-0038: a call with a `cursor` carries no other argument, so on a tool that takes one the canonical
+        // name is optional in the schema (the handler refuses a call with neither), and everywhere else it stays required
+        if (advertised.includes('cursor')) {
+          expect(tool!.inputSchema?.required ?? [], `${name}: ${canonical} is optional beside a cursor`).not.toContain(canonical);
+        } else {
+          expect(tool!.inputSchema?.required, `${name}: ${canonical} stays required`).toContain(canonical);
+        }
         expect(advertised, `${name} advertises ${canonical}`).toContain(canonical);
         for (const alias of aliases) {
           expect(advertised, `${name} must not advertise the alias ${alias} (BR-0008)`).not.toContain(alias);
