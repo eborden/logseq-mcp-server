@@ -8,6 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq, uuid};
 use logseq_mcp_server::budget::{BUDGET_CHARS, size};
+use logseq_mcp_server::snapshots::Snapshots;
 use logseq_mcp_server::tools::{check_links, explore_context, find_pages, get_block, get_page};
 use serde_json::{Value, json};
 
@@ -228,8 +229,13 @@ fn pages(count: i64, length: usize) -> Value {
 }
 
 async fn find(answer: Value, args: Value) -> (Value, Value) {
+    find_in(&Snapshots::new(1), answer, args).await
+}
+
+/// A call against the snapshots of one server, answered by `answer` as the one `getAllPages` call.
+async fn find_in(snapshots: &Snapshots, answer: Value, args: Value) -> (Value, Value) {
     let logseq = mock_logseq(vec![answer]).await;
-    let result = find_pages::call(&client(&logseq), true, arguments(args)).await.unwrap();
+    let result = find_pages::call(&client(&logseq), true, snapshots, arguments(args)).await.unwrap();
     assert_eq!(methods(&logseq), [ALL_PAGES], "the cut reads no more than the list does");
     let body: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     let tips = serde_json::to_value(&result).unwrap()["content"].as_array().unwrap().get(1).map_or(Value::Null, |block| block["text"].clone());
@@ -238,22 +244,27 @@ async fn find(answer: Value, args: Value) -> (Value, Value) {
 }
 
 #[tokio::test]
-async fn a_thousand_pages_of_long_names_are_cut_to_the_budget_and_the_next_page_is_named() {
+async fn a_thousand_pages_of_long_names_are_cut_to_the_budget_and_the_cursor_reads_on() {
     // 1,000 pages of ~70-character names: ~85,000 characters at the largest limit
-    let (body, _) = find(pages(1000, 60), json!({"limit": 1000})).await;
+    let snapshots = Snapshots::new(1);
+    let (body, _) = find_in(&snapshots, pages(1000, 60), json!({"limit": 1000})).await;
     let kept = body["pages"].as_array().unwrap().len();
     assert!(kept > 100 && kept < 1000, "{kept}");
     assert_eq!(body["total"], 1000);
     assert_eq!(body["hasMore"], true);
     let warning = &body["warnings"][0];
     assert_eq!(warning["code"], "result_size_truncated");
-    assert_eq!(warning["howToFetchAll"], format!("Set offset to {kept} for the next page."));
+    assert_eq!(warning["howToFetchAll"], "Pass nextCursor as cursor, with no other argument, to read the next page.");
     assert_eq!(body["pages"][0]["name"], format!("00000{}", "p".repeat(60)));
 
-    // that offset reads on from the next page, and the pages of the two reads are every page once
-    let (next, _) = find(pages(1000, 60), json!({"limit": 1000, "offset": kept})).await;
+    // the cursor reads on from the next page, from the snapshot: no LogSeq call, and the pages of the two reads are every page once
+    let logseq = mock_logseq(vec![]).await;
+    let result = find_pages::call(&client(&logseq), true, &snapshots, arguments(json!({"cursor": body["nextCursor"]}))).await.unwrap();
+    assert!(methods(&logseq).is_empty());
+    let next: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert_eq!(next["pages"][0]["name"], format!("{kept:05}{}", "p".repeat(60)));
-    assert!(next["warnings"][0]["message"].as_str().unwrap().contains(&format!("of {} pages from offset {kept}", 1000 - kept)));
+    assert!(next["warnings"][0]["message"].as_str().unwrap().starts_with(&format!("Showing {}-", kept + 1)), "{}", next["warnings"][0]["message"]);
+    assert!(next["warnings"][0]["message"].as_str().unwrap().contains(" of 1000 pages"));
 }
 
 #[tokio::test]
@@ -261,28 +272,25 @@ async fn a_short_list_and_a_list_of_short_names_are_left_alone() {
     let (body, _) = find(pages(300, 20), json!({"limit": 1000})).await;
     assert_eq!(body["pages"].as_array().unwrap().len(), 300);
     assert!(body.get("warnings").is_none());
-    // the default limit of 200 over a graph of 300: the usual limit warning, which says a larger limit gets them all
+    // the default limit of 200 over a graph of 300: the usual limit warning, which leads with the cursor and says a larger limit gets them all
     let (body, _) = find(pages(300, 20), json!({})).await;
     assert_eq!(body["warnings"][0]["code"], "pages_truncated");
-    assert!(body["warnings"][0]["howToFetchAll"].as_str().unwrap().contains("to get all 300 in one call"));
+    assert!(body["warnings"][0]["howToFetchAll"].as_str().unwrap().contains("Or set limit to 300 for a larger page"));
 }
 
 #[tokio::test]
-async fn a_limit_cut_offers_a_raise_only_where_the_raised_list_fits() {
-    // 600 pages of ~75 characters: 200 fit, all 600 do not
+async fn a_limit_cut_always_offers_the_raise_beside_the_cursor_since_a_larger_page_is_cut_and_paged_again() {
+    // 600 pages of ~75 characters: 200 fit, all 600 do not. The raise is still offered: its page is cut to fit and carries a cursor
     let (body, _) = find(pages(600, 60), json!({})).await;
     assert_eq!(body["pages"].as_array().unwrap().len(), 200);
     let warning = &body["warnings"][0];
     assert_eq!(warning["code"], "pages_truncated");
     let how = warning["howToFetchAll"].as_str().unwrap();
-    assert!(how.starts_with("Set offset to 200 for the next page. Or set limit to "), "{how}");
-    assert!(how.contains("That is the most that fits") && !how.contains("get all"), "{how}");
-    let offered: usize = how.split("Or set limit to ").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
-    assert!(offered > 200 && offered < 600, "{how}");
-    // the offered limit returns that many pages
-    let (body, _) = find(pages(600, 60), json!({"limit": offered})).await;
-    assert_eq!(body["pages"].as_array().unwrap().len(), offered);
-    assert_eq!(body["warnings"][0]["code"], "pages_truncated");
+    assert!(how.starts_with("Pass nextCursor as cursor, with no other argument, to read the next page. Or set limit to 600 "), "{how}");
+    let (body, _) = find(pages(600, 60), json!({"limit": 600})).await;
+    assert!(body["pages"].as_array().unwrap().len() < 600);
+    assert_eq!(body["warnings"][0]["code"], "result_size_truncated");
+    assert_eq!(body["hasMore"], true);
 }
 
 #[tokio::test]
@@ -291,7 +299,7 @@ async fn a_list_in_toon_is_measured_as_toon() {
     let (json_body, _) = find(pages(1000, 20), json!({"limit": 1000})).await;
     assert!(json_body["pages"].as_array().unwrap().len() < 1000);
     let logseq = mock_logseq(vec![pages(1000, 20)]).await;
-    let result = find_pages::call(&client(&logseq), true, arguments(json!({"limit": 1000, "format": "toon"}))).await.unwrap();
+    let result = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"limit": 1000, "format": "toon"}))).await.unwrap();
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     assert!(!text.contains("result_size_truncated"));
