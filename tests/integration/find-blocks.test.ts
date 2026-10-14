@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { findBlocks, findBlocksWithMeta } from './helpers/tools.js';
+import { findBlocks, findBlocksNext, findBlocksWithMeta } from './helpers/tools.js';
 import { InvalidParameterError } from './helpers/errors.js';
 import { connectFixture } from './helpers/fixture-client.js';
 
 /**
- * find_blocks (#491): the filters that combine (text, property with value, a period), and offset, against the
+ * find_blocks (#491): the filters that combine (text, property with value, a period), and the cursor, against the
  * fixture graph, with exact counts from known pages (tests/fixtures/README.md, "Journals, tasks, tags and nesting" and
  * "Properties"). The journals those counts come from are all dated 2025 or earlier, so no assertion depends on today.
  * Read-only.
@@ -135,51 +135,58 @@ describe('find_blocks: text, property and period together', () => {
     });
   });
 
-  describe('offset', () => {
+  describe('cursor', () => {
+    /** The pages of a search, read with the cursor of each until a page has none. */
+    async function pagesOf(filters: Parameters<typeof findBlocksWithMeta>[1], limit: number) {
+      const pages = [await findBlocksWithMeta(client, filters, { limit })];
+      while (pages[pages.length - 1].meta.nextCursor) {
+        pages.push(await findBlocksNext(client, pages[pages.length - 1].meta.nextCursor));
+      }
+      return pages;
+    }
+
     it('pages through a result newest first, with no hit on two pages and none lost', async () => {
       const all = await found({ text: 'importer' });
       expect(all).toHaveLength(11);
       const ids = all.map(hit => hit.id);
       expect(ids, 'newest first').toEqual([...ids].sort((a, b) => b - a));
 
-      const pages: Hit[][] = [];
-      for (const offset of [0, 4, 8]) {
-        const { results, meta } = await findBlocksWithMeta(client, { text: 'importer' }, { limit: 4, offset });
-        pages.push(results as Hit[]);
-        expect(meta.totals, 'the total counts every match, skipped ones included').toEqual({ matches: 11 });
-        if (offset < 8) {
+      const pages = await pagesOf({ text: 'importer' }, 4);
+      expect(pages.map(page => (page.results as Hit[]).length)).toEqual([4, 4, 3]);
+      for (const [n, { meta }] of pages.entries()) {
+        expect(meta.totals, 'the total counts every match, the pages before it included').toEqual({ matches: 11 });
+        if (n < 2) {
           expect(meta.hasMore).toBe(true);
-          expect(meta.warnings[0].howToFetchAll).toMatch(new RegExp(`^Set offset to ${offset + 4} for the next page\\.`));
+          expect(meta.warnings[0].howToFetchAll).toMatch(/^Pass nextCursor as cursor, with no other argument, to read the next page\./);
+          expect(meta.warnings[0].message).toBe(`Showing ${n * 4 + 1}-${n * 4 + 4} of 11 matching blocks.`);
         } else {
           expect(meta.hasMore, 'the last page is whole').toBe(false);
+          expect(meta.nextCursor).toBeUndefined();
           expect(meta.warnings).toEqual([]);
         }
       }
-      expect(pages.map(page => page.length)).toEqual([4, 4, 3]);
-      expect(pages.flat().map(hit => hit.id)).toEqual(ids);
+      expect(pages.flatMap(page => (page.results as Hit[]).map(hit => hit.id))).toEqual(ids);
     });
 
-    it('reads nothing at or past the last match, and says so without calling it a miss', async () => {
-      for (const offset of [11, 12, 500]) {
-        const { results, meta } = await findBlocksWithMeta(client, { text: 'importer' }, { offset });
-        expect(results, `offset ${offset}`).toEqual([]);
-        expect(meta, `offset ${offset}`).toMatchObject({ hasMore: false, warnings: [], totals: { matches: 11 } });
-      }
+    it('refuses a cursor beside any other argument, and a token that is not one, as an invalid parameter', async () => {
+      const first = await findBlocksWithMeta(client, { text: 'importer' }, { limit: 4 });
+      const cursor = first.meta.nextCursor as string;
+      await expect(findBlocksNext(client, cursor, { text: 'importer' })).rejects.toThrow(InvalidParameterError);
+      await expect(findBlocksNext(client, cursor, { limit: 4 })).rejects.toThrow(InvalidParameterError);
+      await expect(findBlocksNext(client, 'not a cursor')).rejects.toThrow(InvalidParameterError);
     });
 
     it('pages a period and a property result the same way', async () => {
-      const first = await findBlocksWithMeta(client, { startDate: 20250101, endDate: 20250131 }, { limit: 10 });
-      const second = await findBlocksWithMeta(client, { startDate: 20250101, endDate: 20250131 }, { limit: 10, offset: 10 });
-      const third = await findBlocksWithMeta(client, { startDate: 20250101, endDate: 20250131 }, { limit: 10, offset: 20 });
-      const ids = [first, second, third].flatMap(page => (page.results as Hit[]).map(hit => hit.id));
-      expect(ids).toHaveLength(30);
+      const period = await pagesOf({ startDate: 20250101, endDate: 20250131 }, 10);
+      expect(period.map(page => (page.results as Hit[]).length)).toEqual([10, 10, 10]);
+      const ids = period.flatMap(page => (page.results as Hit[]).map(hit => hit.id));
       expect(new Set(ids).size).toBe(30);
-      expect(second.meta.warnings[0].message).toMatch(/^Showing 10 of 20 matching blocks from offset 10\./);
-      expect(third.meta.warnings).toEqual([]);
+      expect(period[1].meta.warnings[0].message).toBe('Showing 11-20 of 30 matching blocks.');
+      expect(period[2].meta.warnings).toEqual([]);
 
-      const byType = await findBlocksWithMeta(client, { property: 'type', value: 'project' }, { limit: 1, offset: 1 });
-      expect((byType.results as Hit[]).length).toBe(1);
-      expect(byType.meta.totals).toEqual({ matches: 3 });
+      const byType = await pagesOf({ property: 'type', value: 'project' }, 1);
+      expect(byType.map(page => (page.results as Hit[]).length)).toEqual([1, 1, 1]);
+      expect(byType[2].meta.totals).toEqual({ matches: 3 });
     });
   });
 });

@@ -125,7 +125,6 @@ export interface BlockFilters {
 /** How a `logseq_find_blocks` result is paged and shaped. */
 export interface BlockPaging {
   limit?: number;
-  offset?: number;
   includeContext?: boolean;
   slimResults?: boolean;
 }
@@ -147,7 +146,6 @@ export async function findBlocksWithMeta(
     last_n: filters.lastN,
     preset: filters.preset,
     limit: paging.limit,
-    offset: paging.offset,
     include_context: paging.includeContext ?? false,
     slim_results: paging.slimResults ?? false,
   });
@@ -156,6 +154,15 @@ export async function findBlocksWithMeta(
 
 export async function findBlocks(client: LogseqClient, filters: BlockFilters, paging: BlockPaging = {}): Promise<Json> {
   return (await findBlocksWithMeta(client, filters, paging)).results;
+}
+
+/**
+ * The next page of a `logseq_find_blocks` result (ADR-0038): a call with the `nextCursor` of the page before and no other
+ * argument. `others` is for a test that sends one beside it, which the tool refuses.
+ */
+export async function findBlocksNext(client: LogseqClient, cursor: string, others: Record<string, unknown> = {}): Promise<{ results: Json; meta: Json }> {
+  const { value, meta } = await callTool(client, 'logseq_find_blocks', { cursor, ...others });
+  return { results: value, meta };
 }
 
 /** The walk of `logseq_explore_network` without `to`: the pages linked to `page` as nodes and edges. */
