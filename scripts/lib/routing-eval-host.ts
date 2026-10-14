@@ -1,6 +1,7 @@
 // How scripts/routing-eval.ts sets up its sessions (#487): the options and their bounds, the `claude` arguments and
 // environment that keep the model to this server's tools, and the temp files. Kept apart from the runner so
 // tests/guards/routing-eval.test.ts can pin the bounds and the isolation without a model or an instance.
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -196,9 +197,17 @@ export async function loadSkillText(dir: string): Promise<string> {
   const raw = await readFile(path, 'utf8').catch(() => {
     throw new Error(`--skill ${dir} has no readable SKILL.md`);
   });
-  const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+  // LF or CRLF, and a closing fence that ends the file
+  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '').trim();
   if (body === '') throw new Error(`${path} has no body after its front matter`);
+  // Front matter that was not stripped (an opening fence with no closing one) would be measured as body text
+  if (/^---\r?\n/.test(body)) throw new Error(`${path} starts with a front matter fence that never closes`);
   return body;
+}
+
+/** A short hash of the body a run was given, so a saved run says which skill text it measured */
+export function skillHash(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 12);
 }
 
 /** The model host's environment: the caller's, without the server settings, and with CLAUDE.md files and auto-memory off. */

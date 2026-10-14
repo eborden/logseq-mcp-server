@@ -43,7 +43,7 @@ import {
   type SessionStatus,
   type Surface,
 } from './lib/routing-eval.js';
-import { assertOutPathSafe, claudeArgs, hostEnv, loadSkillText, parseOptions, prepareHarness, USAGE, type Harness, type Options } from './lib/routing-eval-host.js';
+import { assertOutPathSafe, claudeArgs, hostEnv, loadSkillText, parseOptions, skillHash, prepareHarness, USAGE, type Harness, type Options } from './lib/routing-eval-host.js';
 import { parseSavedRun, reconcile, SAVED_RUN_VERSION, scoringHash, textHash } from './lib/routing-eval-saved.js';
 import { requireFixtureGraph } from '../tests/integration/helpers/fixture-graph.js';
 import { assertNotPersonalLogseq, resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
@@ -131,6 +131,8 @@ interface RunInfo {
   stoppedEarly: boolean;
   models: Set<string>;
   questionCount: number;
+  /** What the skill line says: the hash of the body, 'none', or 'not recorded' for a saved run that predates the field */
+  skill: string;
 }
 
 function printAggregates(a: Aggregates, options: Options, info: RunInfo): void {
@@ -138,7 +140,7 @@ function printAggregates(a: Aggregates, options: Options, info: RunInfo): void {
   console.log('\nRouting eval');
   line('surface', a.surface);
   line('model', [...info.models].join(', ') || 'unknown');
-  line('skill', options.skill ? 'SKILL.md body added to the system prompt' : 'none');
+  line('skill', info.skill);
   line('questions x runs', `${info.questionCount} x ${info.runs}`);
   line('sessions counted', `${a.sessions} of ${info.planned} planned (${a.failed} failed and left out, ${a.timedOut} timed out, ${a.capped} stopped at ${options.maxCalls} calls)`);
   if (a.failed > 0 || info.stoppedEarly || a.sessions < info.planned) {
@@ -182,7 +184,7 @@ async function rescore(options: Options, selected: Question[], all: Question[], 
   const surface = options.surface ?? saved.surface;
   const result = aggregate(surface, selected, reconciled.sessions);
   const planned = options.only.length > 0 ? reconciled.sessions.length : saved.planned;
-  printAggregates(result, options, { planned, runs, stoppedEarly: saved.stoppedEarly, models: new Set(saved.models), questionCount: selected.length });
+  printAggregates(result, options, { planned, runs, stoppedEarly: saved.stoppedEarly, models: new Set(saved.models), questionCount: selected.length, skill: saved.skillHash ? `SKILL.md body ${saved.skillHash}` : 'none, or not recorded' });
   if (saved.stoppedEarly || result.failed > 0) process.exitCode = 1;
 }
 
@@ -214,6 +216,8 @@ async function main(): Promise<void> {
       `${options.maxCalls} logseq calls, ${options.timeoutMs / 1000}s and $${options.maxBudgetUsd}; the run stops starting ` +
       `sessions at $${options.maxTotalUsd} in all (worst case $${Math.min(planned * options.maxBudgetUsd, options.maxTotalUsd + options.concurrency * options.maxBudgetUsd).toFixed(2)})`
   );
+  // A bad --skill fails the dry run too, since the dry run is what checks the plan
+  const skillText = options.skill ? await loadSkillText(options.skill) : undefined;
   if (options.dryRun) {
     for (const question of questions) console.log(`  ${question.id.padEnd(20)}${question.expected_type.padEnd(9)}${question.intent}`);
     console.log('Dry run: no instance contacted, no model called.');
@@ -228,7 +232,6 @@ async function main(): Promise<void> {
   if (options.binary) process.env[RUST_BINARY_ENV] = options.binary;
   requireRustBinary();
 
-  const skillText = options.skill ? await loadSkillText(options.skill) : undefined;
   const harness = await prepareHarness(config, rustBinaryPath());
   const env = hostEnv(process.env);
   const onSignal = () => {
@@ -283,10 +286,10 @@ async function main(): Promise<void> {
   if (!surface) throw new Error('No session reported the tool list, so the surface is unknown. Pass --surface v1 or --surface v2.');
   if (surfaces.size > 1) throw new Error('The sessions saw both a v1 and a v2 tool list. Pass --surface to score one.');
   const aggregates = aggregate(surface, questions, records);
-  printAggregates(aggregates, options, { planned, runs: options.runs, stoppedEarly, models, questionCount: questions.length });
+  printAggregates(aggregates, options, { planned, runs: options.runs, stoppedEarly, models, questionCount: questions.length, skill: skillText === undefined ? 'none' : `SKILL.md body ${skillHash(skillText)}` });
   if (stoppedEarly) console.log(`STOPPED EARLY: ${records.length} of ${planned} sessions ran (spent $${spent.toFixed(2)} against --max-total-usd ${options.maxTotalUsd}, or the host kept failing).`);
   if (options.out) {
-    const saved = { version: SAVED_RUN_VERSION, surface, models: [...models], textHash: textHash(all), scoringHash: scoringHash(all), planned, stoppedEarly, aggregates, sessions: records };
+    const saved = { version: SAVED_RUN_VERSION, surface, models: [...models], textHash: textHash(all), scoringHash: scoringHash(all), ...(skillText !== undefined ? { skillHash: skillHash(skillText) } : {}), planned, stoppedEarly, aggregates, sessions: records };
     await writeFile(options.out, JSON.stringify(saved, null, 2), { mode: 0o600 });
     console.log(`\nWrote ${options.out}. It holds the arguments the model sent: keep it local, never commit or post it.`);
   }
