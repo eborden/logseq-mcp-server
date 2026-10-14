@@ -270,6 +270,23 @@ fn the_footer_cursor_of_a_markdown_result_is_compared_by_what_it_says_without_it
     other["position"]["at"] = json!(101);
     assert_eq!(compare_results(&recorded, &markdown_with(&token(&other), "w"), &[]).len(), 1);
     assert_eq!(compare_results(&recorded, &markdown_with(&token(&cursor_payload(json!({"started": 1, "n": 1}))), "x"), &[]).len(), 1);
+    // each field of the token the footer line holds is compared, not only the position
+    let edits: [(&str, fn(&mut Value)); 6] = [
+        ("the version", |payload| payload["v"] = json!(2)),
+        ("the tool", |payload| payload["tool"] = json!("logseq_find_pages")),
+        ("the arguments", |payload| payload["args"]["limit"] = json!(50)),
+        ("the position", |payload| payload["position"]["at"] = json!(101)),
+        ("the anchor", |payload| payload["anchor"] = json!(4243)),
+        ("a new field", |payload| payload["extra"] = json!(true)),
+    ];
+    for (what, edit) in edits {
+        let mut payload = cursor_payload(json!({"started": 1, "n": 1}));
+        edit(&mut payload);
+        assert_eq!(compare_results(&recorded, &markdown_with(&token(&payload), "w"), &[]).len(), 1, "{what} passed");
+    }
+    // a line that starts with the same words but is not the footer's (no `hasMore:` line before it) is held to the bytes
+    let body_line = |snapshot: Value| text_result(&format!("- a block\nnextCursor: {}\n", token(&cursor_payload(snapshot))));
+    assert_eq!(compare_results(&body_line(json!({"started": 1, "n": 1})), &body_line(json!({"started": 2, "n": 1})), &[]).len(), 1);
     // text that is no token is held to the bytes, and a line that only looks like the footer line further in is not one
     assert_eq!(compare_results(&markdown_with("not a token", "w"), &markdown_with("not a token", "w"), &[]), Vec::<String>::new());
     assert_eq!(compare_results(&markdown_with("not a token", "w"), &markdown_with("another", "w"), &[]).len(), 1);
