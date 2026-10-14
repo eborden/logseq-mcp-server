@@ -43,7 +43,7 @@ fn all_uuids(blocks: &[Value]) -> Vec<String> {
 async fn a_full_page_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_no_extra_call() {
     let small: Vec<Value> = (1..=5).map(|id| block(id, 100, 2)).collect();
     let logseq = mock_logseq(vec![editor_page(), json!(small)]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
     let page: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert!(page.get("warnings").is_none() && page.get("hasMore").is_none(), "{page}");
     assert_eq!(page["children"], json!(small));
@@ -51,23 +51,24 @@ async fn a_full_page_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_n
     // 30 blocks of 1,000 characters with 2 children of 1,000 each: ~90,000 characters
     let big: Vec<Value> = (1..=30).map(|id| block(id, 1000, 2)).collect();
     let logseq = mock_logseq(vec![editor_page(), json!(big)]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
     // the cut reads no more than the page does
     assert_eq!(methods(&logseq), [PAGE, TREE]);
     assert_eq!(args_of(&logseq, 1), [json!("Project Atlas")]);
     let (page_text, tips) = (text_of(&result, 0), text_of(&result, 1));
     assert!(size(&page_text) + size(&tips) <= BUDGET_CHARS, "{}", size(&page_text) + size(&tips));
     let page: Value = serde_json::from_str(&page_text).unwrap();
-    // `hasMore` and `warnings` come last, there is no way to fetch the rest by a parameter, and the page keeps its other keys
-    assert_eq!(page["hasMore"], false);
+    // `hasMore`, `nextCursor` and `warnings` come last, and the warning says to pass the cursor (ADR-0038, #552)
+    assert_eq!(page["hasMore"], true);
+    assert!(page["nextCursor"].as_str().is_some_and(|cursor| !cursor.is_empty()));
     let warnings = page["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0]["code"], "result_size_truncated");
-    assert!(warnings[0].get("howToFetchAll").is_none());
+    assert_eq!(warnings[0]["howToFetchAll"], "Pass nextCursor as cursor, with no other argument, to read the next page.");
     let message = warnings[0]["message"].as_str().unwrap();
     assert!(message.starts_with("Showing ") && message.contains(" of 90 blocks of the page (nested ones counted"), "{message}");
     assert!(message.contains("detail \"outline\"") && message.contains("logseq_get_block"), "{message}");
-    assert_eq!(page.as_object().unwrap().keys().rev().take(2).collect::<Vec<_>>(), ["warnings", "hasMore"]);
+    assert_eq!(page.as_object().unwrap().keys().rev().take(3).collect::<Vec<_>>(), ["warnings", "nextCursor", "hasMore"]);
     // the first blocks in page order are kept, whole, and the last block kept says it lost children when it did
     let kept = all_uuids(page["children"].as_array().unwrap());
     let sent: Vec<String> = all_uuids(&big);
@@ -79,7 +80,7 @@ async fn a_full_page_under_the_budget_is_unchanged_and_one_over_it_is_cut_with_n
 async fn a_full_page_in_markdown_is_cut_to_the_budget_with_the_warning_in_its_footer() {
     let big: Vec<Value> = (1..=30).map(|id| block(id, 1000, 2)).collect();
     let logseq = mock_logseq(vec![editor_page(), json!(big)]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "full", "format": "markdown"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "full", "format": "markdown"}))).await.unwrap();
     assert_eq!(methods(&logseq), [PAGE, TREE]);
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
@@ -93,14 +94,14 @@ async fn a_full_page_in_markdown_is_cut_to_the_budget_with_the_warning_in_its_fo
 async fn one_block_over_the_budget_is_kept_alone_and_a_page_of_one_is_not_cut() {
     // a single block of 40,000 characters: nothing to cut, so it is returned whole with no warning
     let logseq = mock_logseq(vec![editor_page(), json!([block(1, 40_000, 0)])]).await;
-    let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), false, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
     let page: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert!(page.get("warnings").is_none());
     assert_eq!(page["children"].as_array().unwrap().len(), 1);
 
     // the first of three is 40,000 characters: it is kept alone, and the warning says that even it is over
     let logseq = mock_logseq(vec![editor_page(), json!([block(1, 40_000, 0), block(2, 10, 0), block(3, 10, 0)])]).await;
-    let result = get_page::call(&client(&logseq), false, arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), false, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "full"}))).await.unwrap();
     let page: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert_eq!(page["children"].as_array().unwrap().len(), 1);
     let message = page["warnings"][0]["message"].as_str().unwrap();
@@ -113,7 +114,7 @@ async fn a_page_without_its_blocks_is_never_cut() {
     let mut properties = editor_page();
     properties["properties"] = json!({"notes": "z".repeat(40_000)});
     let logseq = mock_logseq(vec![properties]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas"}))).await.unwrap();
     let page: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert!(page.get("warnings").is_none());
     assert_eq!(methods(&logseq), [PAGE]);
@@ -313,18 +314,19 @@ async fn a_list_in_toon_is_measured_as_toon() {
 async fn a_block_with_children_over_the_budget_is_cut_and_one_without_is_left_alone() {
     let subtree = |children: i64| json!({"id": 5, "uuid": uuid(5), "content": "Parent", "page": {"id": 10}, "children": (1..=children).map(|n| block(500 + n, 1000, 0)).collect::<Vec<_>>()});
     let logseq = mock_logseq(vec![subtree(5)]).await;
-    let small = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "include_children": true}))).await.unwrap();
+    let small = get_block::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"uuid": uuid(5), "include_children": true}))).await.unwrap();
     assert!(!text_of(&small, 0).contains("result_size_truncated"));
 
     // 60 children of 1,000 characters: ~60,000 characters
     let logseq = mock_logseq(vec![subtree(60)]).await;
-    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "include_children": true}))).await.unwrap();
+    let result = get_block::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"uuid": uuid(5), "include_children": true}))).await.unwrap();
     assert_eq!(methods(&logseq), ["logseq.Editor.getBlock"]);
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     let cut: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(cut["childrenTruncated"], true);
-    assert_eq!(cut["hasMore"], false);
+    assert_eq!(cut["hasMore"], true);
+    assert!(cut["nextCursor"].is_string());
     assert_eq!(cut["warnings"][0]["code"], "result_size_truncated");
     let kept = cut["children"].as_array().unwrap().len();
     assert!(kept > 10 && kept < 60, "{kept}");
@@ -334,7 +336,7 @@ async fn a_block_with_children_over_the_budget_is_cut_and_one_without_is_left_al
     huge["content"] = json!("x".repeat(40_000));
     huge["children"] = json!([["uuid", uuid(501)], ["uuid", uuid(502)]]);
     let logseq = mock_logseq(vec![huge.clone()]).await;
-    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5)}))).await.unwrap();
+    let result = get_block::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"uuid": uuid(5)}))).await.unwrap();
     assert_eq!(serde_json::from_str::<Value>(&text_of(&result, 0)).unwrap(), huge);
 }
 
@@ -342,7 +344,7 @@ async fn a_block_with_children_over_the_budget_is_cut_and_one_without_is_left_al
 async fn a_block_with_children_in_markdown_is_cut_with_the_warning_in_its_footer() {
     let children: Vec<Value> = (1..=60).map(|n| block(500 + n, 1000, 0)).collect();
     let logseq = mock_logseq(vec![json!({"id": 5, "uuid": uuid(5), "content": "Parent", "page": {"id": 10}, "children": children})]).await;
-    let result = get_block::call(&client(&logseq), true, arguments(json!({"uuid": uuid(5), "include_children": true, "format": "markdown"}))).await.unwrap();
+    let result = get_block::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"uuid": uuid(5), "include_children": true, "format": "markdown"}))).await.unwrap();
     let text = text_of(&result, 0);
     assert!(size(&text) <= BUDGET_CHARS, "{}", size(&text));
     assert!(text.contains("result_size_truncated: Showing "), "{}", &text[text.len().saturating_sub(500)..]);
@@ -372,7 +374,7 @@ fn resolved_root() -> Value {
 async fn an_outline_of_two_hundred_full_lines_is_cut_to_the_budget_and_a_short_one_is_not() {
     // 200 blocks of 80-character lines: the cap of 200 alone leaves ~31,000 characters
     let logseq = mock_logseq(vec![resolved_root(), outline_answer(200, 80)]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();
     assert_eq!(methods(&logseq), [DATALOG, DATALOG]);
     let (outline, tips) = (text_of(&result, 0), text_of(&result, 1));
     assert!(size(&outline) + size(&tips) <= BUDGET_CHARS, "{}", size(&outline) + size(&tips));
@@ -387,7 +389,7 @@ async fn an_outline_of_two_hundred_full_lines_is_cut_to_the_budget_and_a_short_o
     assert!(warnings[0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 200 top-level blocks")));
 
     let logseq = mock_logseq(vec![resolved_root(), outline_answer(200, 20)]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();
     let outline: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert_eq!(outline["blocks"].as_array().unwrap().len(), 200);
     assert_eq!(outline["warnings"], json!([]));
@@ -396,7 +398,7 @@ async fn an_outline_of_two_hundred_full_lines_is_cut_to_the_budget_and_a_short_o
 #[tokio::test]
 async fn an_outline_in_toon_is_measured_as_toon() {
     let logseq = mock_logseq(vec![resolved_root(), outline_answer(200, 80)]).await;
-    let result = get_page::call(&client(&logseq), true, arguments(json!({"page": "Project Atlas", "detail": "outline", "format": "toon"}))).await.unwrap();
+    let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "outline", "format": "toon"}))).await.unwrap();
     let (outline, tips) = (text_of(&result, 0), text_of(&result, 1));
     assert!(size(&outline) + size(&tips) <= BUDGET_CHARS);
     // the keys are written once in TOON, so what it sends is judged as TOON and not as the JSON it replaces

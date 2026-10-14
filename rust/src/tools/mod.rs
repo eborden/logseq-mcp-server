@@ -53,10 +53,10 @@ pub async fn call(
         explore_timeline::NAME => Some(explore_timeline::call(client, tips_enabled, clock, arguments).await),
         find_blocks::NAME => Some(find_blocks::call(client, tips_enabled, clock, snapshots, arguments).await),
         find_pages::NAME => Some(find_pages::call(client, tips_enabled, snapshots, arguments).await),
-        get_block::NAME => Some(get_block::call(client, tips_enabled, arguments).await),
+        get_block::NAME => Some(get_block::call(client, tips_enabled, snapshots, arguments).await),
         get_current::NAME => Some(get_current::call(client, tips_enabled, arguments).await),
         get_graph::NAME => Some(get_graph::call(client, tips_enabled, arguments).await),
-        get_page::NAME => Some(get_page::call(client, tips_enabled, arguments).await),
+        get_page::NAME => Some(get_page::call(client, tips_enabled, snapshots, arguments).await),
         _ => None,
     }
 }
