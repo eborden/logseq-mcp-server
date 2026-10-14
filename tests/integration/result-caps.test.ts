@@ -291,7 +291,7 @@ describe('result caps (#61)', () => {
         expect(codes[0], label).toBe('blocks_truncated');
         expect(body.totals!.blocks, label).toBeGreaterThanOrEqual(total);
         // a way on is named only when a call reads on; `max_blocks` is never raised past the maximum
-        expect(body.hasMore ?? false, label).toBe(advice(body).length > 0);
+        expect(body.hasMore, label).toBe(advice(body).length > 0);
         expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
         for (const warning of body.warnings!) {
           expect(warning.howToFetchAll ?? '', `${label}: no search_term`).not.toContain('search_term');
@@ -352,24 +352,19 @@ describe('result caps (#61)', () => {
         const how = advice(body)[0].howToFetchAll!;
         const keptDays = body.entries.map(entry => entry.date).filter((date): date is number => date !== null);
         const named = /start_date (\d+)/.exec(how);
-        if (keptDays.length === days.length) {
-          // Every dated day is kept and the rest have no day: the way on is a raise of max_blocks, never a date
-          expect(named, `${label}: no date reaches what is left: ${how}`).toBeNull();
-          expect(how, label).toBe(`Set max_blocks to ${total} (or higher) to get all ${total}.`);
-        } else {
+        if (how.includes('repeats its kept blocks')) {
+          // Cut inside a day: the call starts at that day, the last one kept, and says it repeats what was kept
           expect(named, `${label}: a date to read on from: ${how}`).not.toBeNull();
-          const day = Number(named![1]);
-          const last = keptDays[keptDays.length - 1];
-          expect(days, `${label}: the day named is a day with mentions`).toContain(day);
-          if (how.includes('repeats its kept blocks')) {
-            // Cut inside a day: the call starts at that day and says it repeats what was kept
-            expect(day, `${label}: the day cut in is the last kept day`).toBe(last);
-          } else {
-            // Cut between days: the day named is a later day than any kept, so it differs from the first kept one too
-            expect(keptDays, `${label}: the day named is not one already kept`).not.toContain(day);
-            expect(day, `${label}: the day named is after the last kept day`).toBeGreaterThan(last);
-            expect(day, `${label}: the day named is not the first kept day`).not.toBe(keptDays[0]);
-          }
+          expect(Number(named![1]), `${label}: the day cut in is the last kept day`).toBe(keptDays[keptDays.length - 1]);
+        } else if (named) {
+          // Cut between days: the day named is the next one dropped, the first day not read. That is a later day than any
+          // kept, so it differs from the first kept one too
+          expect(keptDays.length, `${label}: a date is named only while a dated day is left`).toBeLessThan(days.length);
+          expect(Number(named[1]), `${label}: the day named is the first day not kept: ${how}`).toBe(days[keptDays.length]);
+        } else {
+          // Every dated day is kept whole and the rest have no day: the way on is a raise of max_blocks, never a date
+          expect(keptDays, `${label}: every dated day is kept`).toEqual(days);
+          expect(how, label).toBe(`Set max_blocks to ${total} (or higher) to get all ${total}.`);
         }
       }
     });
