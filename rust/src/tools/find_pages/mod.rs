@@ -18,7 +18,7 @@
 //! made, resuming at the first page named after the last one sent (`cursor_stale` says when the list moved). A page is
 //! never cut inside its names (BR-0007), so a first page over the budget comes back alone and the cursor moves past it.
 //! The `names` answers are the request as the server read it: page 1 carries them, never cut, and the pages after it
-//! don't repeat them ([`NAMES_ON_CONTINUATION`]). A list under the budget and the limit is as it was, byte for byte.
+//! don't repeat them: they describe the request, which page 1 said and the token carries (maintainer, #551: "No need to repeat them."). A list under the budget and the limit is as it was, byte for byte.
 //!
 //! This directory holds everything only the finder uses: the answer it reads (`wire.rs`) and its tip
 //! (`tips.rs`).
@@ -74,11 +74,6 @@ const WHAT: &str = "pages";
 
 /// What a warning says to see fewer pages: the three filters that narrow the list.
 const NARROWER: &str = "Narrow text, names or property to see the rest.";
-
-/// Whether a page read with a cursor repeats the `names` answers. They describe the request, which page 1 already
-/// said and the token carries, so the pages after it leave them out (the maintainer's recommendation on #551, in the
-/// brief; one switch to flip if it is not wanted).
-const NAMES_ON_CONTINUATION: bool = false;
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
 const DESCRIPTION: &str = "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each gets its page, or null + closest names); property + value (page property). limit max 1000; hasMore: send only cursor=nextCursor.\n\n\
@@ -589,7 +584,7 @@ impl View<'_> {
             return FindPagesResult { names: None, pages: Vec::new(), total: 0, warnings: vec![warning.clone()], next_cursor: None };
         }
         FindPagesResult {
-            names: if self.first_page || NAMES_ON_CONTINUATION { self.listing.names.clone() } else { None },
+            names: if self.first_page { self.listing.names.clone() } else { None },
             pages: self.listing.pages[self.start..self.start + kept].to_vec(),
             total: self.total(),
             warnings: self.warnings(kept, cut),
@@ -1083,7 +1078,6 @@ mod tests {
         let later = view_at(&found, 2, 2).result(2, Some(Cut::Count));
         assert!(later.names.is_none(), "the names describe the request, which page 1 said and the token holds");
         assert!(!later.to_value().as_object().unwrap().contains_key("names"));
-        assert!(!NAMES_ON_CONTINUATION);
     }
 
     #[test]
