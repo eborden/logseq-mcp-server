@@ -2,7 +2,7 @@
 
 ## Statement
 
-Parameter aliases (`resolve_param_aliases` in `rust/src/params.rs`) are handler-only, unadvertised, and only for parameters that mean exactly the same. A conflicting alias and canonical value is an `InvalidParameter` error. Aliases are best-effort, not a contract: a client that validates against `inputSchema` rejects an alias-only call before it reaches the server, and the model never sees them. They are no substitute for canonical names. Tips and docs always use the canonical name, and the canonical name stays `required`.
+Parameter aliases (`resolve_param_aliases` in `rust/src/params.rs`) are handler-only, unadvertised, and only for parameters that mean exactly the same. A conflicting alias and canonical value is an `InvalidParameter` error. Aliases are best-effort, not a contract: a client that validates against `inputSchema` rejects an alias-only call before it reaches the server, and the model never sees them. They are no substitute for canonical names. Tips and docs always use the canonical name, and the canonical name stays `required`. The one exception is a tool that takes a `cursor` ([ADR-0038 (one-forward-only-cursor-for-paging)](../adr/0038-one-forward-only-cursor-for-paging.md)): a call with a `cursor` carries its arguments in the token and takes no other, so the canonical name is optional in the schema there, and the handler refuses a call with neither it nor a `cursor`. The aliases stay handler-only. No tool takes a `cursor` yet; the cursor core task (#528) adds it.
 
 ## Rationale
 
@@ -13,6 +13,7 @@ An alias that leaked into the advertised schema, or replaced a required canonica
 test: `rust/src/params.rs`
 test: `tests/guards/tool-list.test.ts`
 test: `rust/tests/parity.rs`
+none-yet: #528 (the cursor core gives the `required` check of `tests/guards/tool-list.test.ts` its exception for a tool that takes a `cursor`, and tests that a call with neither the canonical name nor a `cursor` is refused)
 
 Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity test, `rust/tests/parity.rs`, holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
 
@@ -24,3 +25,4 @@ Tests pin that a conflicting alias and canonical value is refused, that the alia
 | 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertions for the canonical parameter and the absent aliases. | #370 |
 | 2026-10-08 | Statement: the TypeScript path and error name (`src/utils/param-aliases.ts`, `InvalidParameterError`) are the Rust crate's (`rust/src/params.rs`, `InvalidParameter`). The rule is unchanged. | #372 |
 | 2026-10-08 | Mechanical enforcement: the parity check the recorded `tools/list` is held to is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
+| 2026-10-14 | Statement: the canonical name stays `required` except on a tool that takes a `cursor` (ADR-0038), where a cursor call carries the arguments in its token. The implementation, and the exception in the guard, land with the cursor core task (#528); no tool takes a `cursor` yet, so every canonical name is still `required`. | #546 |
