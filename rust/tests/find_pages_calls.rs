@@ -8,6 +8,7 @@ mod common;
 
 use common::{args_of, client, methods, mock_logseq};
 use logseq_mcp_server::errors::ToolError;
+use logseq_mcp_server::snapshots::Snapshots;
 use logseq_mcp_server::tools::find_pages;
 use rmcp::model::{CallToolResult, JsonObject};
 use serde_json::{Value, json};
@@ -51,7 +52,7 @@ fn listed(body: &Value) -> Vec<&str> {
 
 async fn find(args: Value) -> (CallToolResult, Vec<String>) {
     let logseq = mock_logseq(vec![graph()]).await;
-    let result = find_pages::call(&client(&logseq), true, arguments(args)).await.unwrap();
+    let result = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(args)).await.unwrap();
     let calls = methods(&logseq);
     assert_eq!(args_of(&logseq, 0), Vec::<Value>::new());
     (result, calls)
@@ -203,7 +204,7 @@ async fn what_cannot_be_read_is_refused_before_any_call() {
         (json!({"value": ["x"], "property": "status"}), "Invalid parameter 'value': [\"x\"]\n\nExpected: a string, a number or a boolean, not an array\nExample: value: \"...\""),
     ] {
         let logseq = mock_logseq(vec![]).await;
-        let error = find_pages::call(&client(&logseq), true, arguments(args.clone())).await.unwrap_err();
+        let error = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(args.clone())).await.unwrap_err();
         assert!(matches!(error, ToolError::InvalidParameter(_)), "{args}: {error}");
         assert_eq!(error.to_string(), message, "{args}");
         assert!(methods(&logseq).is_empty(), "{args}");
@@ -214,7 +215,7 @@ async fn what_cannot_be_read_is_refused_before_any_call() {
 async fn fifty_one_names_are_refused_and_never_cut() {
     let logseq = mock_logseq(vec![]).await;
     let names: Vec<String> = (1..=51).map(|n| format!("Page {n}")).collect();
-    let error = find_pages::call(&client(&logseq), true, arguments(json!({"names": names}))).await.unwrap_err();
+    let error = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"names": names}))).await.unwrap_err();
     assert!(error.to_string().starts_with("Invalid parameter 'names': [\"Page 1\""), "{error}");
     assert!(error.to_string().ends_with("\n\nExpected: at most 50 items\nExample: names: [\"...\"]"), "{error}");
     assert!(methods(&logseq).is_empty());
@@ -223,7 +224,7 @@ async fn fifty_one_names_are_refused_and_never_cut() {
 #[tokio::test]
 async fn a_null_page_list_answers_no_name_and_says_it_is_unavailable() {
     let logseq = mock_logseq(vec![json!(null)]).await;
-    let result = find_pages::call(&client(&logseq), true, arguments(json!({"names": ["alice"], "property": "status", "value": "x"}))).await.unwrap();
+    let result = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"names": ["alice"], "property": "status", "value": "x"}))).await.unwrap();
     let body = body(&result);
     // no page list is no answer to a name: nothing says a page is missing
     assert!(body.get("names").is_none(), "{body}");
@@ -235,17 +236,17 @@ async fn a_null_page_list_answers_no_name_and_says_it_is_unavailable() {
 #[tokio::test]
 async fn an_infrastructure_error_reaches_the_caller_and_is_no_empty_answer() {
     let logseq = mock_logseq(vec![]).await;
-    let error = find_pages::call(&client(&logseq), true, arguments(json!({"names": ["alice"]}))).await.unwrap_err();
+    let error = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"names": ["alice"]}))).await.unwrap_err();
     assert!(matches!(error, ToolError::Logseq(_)), "{error}");
 }
 
 #[tokio::test]
 async fn a_page_list_that_is_not_a_list_is_an_error_naming_where() {
     let logseq = mock_logseq(vec![json!({"pages": []})]).await;
-    let error = find_pages::call(&client(&logseq), true, arguments(json!({"names": ["alice"]}))).await.unwrap_err();
+    let error = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"names": ["alice"]}))).await.unwrap_err();
     assert!(error.to_string().contains("answer: expected a list, got an object"), "{error}");
     let logseq = mock_logseq(vec![json!([{"id": 1, "name": "a", "properties": 5}])]).await;
-    let error = find_pages::call(&client(&logseq), true, arguments(json!({"property": "a", "value": "b"}))).await.unwrap_err();
+    let error = find_pages::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"property": "a", "value": "b"}))).await.unwrap_err();
     assert!(error.to_string().contains("answer[0].properties: expected an object, got a number"), "{error}");
 }
 
@@ -261,12 +262,21 @@ async fn the_v1_name_contains_is_ignored_like_every_unknown_argument() {
 }
 
 #[tokio::test]
-async fn limit_and_offset_cut_the_pages_and_leave_every_name_answered() {
-    let (result, _) = find(json!({"names": ["alice", "bob", "carol", "Dave"], "limit": 1, "offset": 1})).await;
+async fn limit_cuts_the_pages_leaves_every_name_answered_and_reads_on_with_a_cursor() {
+    let (result, _) = find(json!({"names": ["alice", "bob", "carol", "Dave"], "limit": 1})).await;
     let body = body(&result);
-    assert_eq!(listed(&body), ["Bob"]);
+    assert_eq!(listed(&body), ["Alice"]);
     assert_eq!(body["total"], 3);
     assert_eq!(body["names"].as_array().unwrap().len(), 4, "the names are not paged");
     assert_eq!(body["warnings"][0]["code"], "pages_truncated");
     assert_eq!(body["hasMore"], true);
+    assert!(body["nextCursor"].is_string());
+}
+
+#[tokio::test]
+async fn the_v1_offset_is_ignored_like_every_unknown_argument() {
+    // `offset` went with the cursor (ADR-0038)
+    let (result, calls) = find(json!({"offset": 2, "limit": 2})).await;
+    assert_eq!(calls, ONE_CALL);
+    assert_eq!(listed(&body(&result)), ["Alice", "Bob"]);
 }

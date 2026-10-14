@@ -74,8 +74,8 @@ fn methods(logseq: &MockLogseq) -> Vec<String> {
     logseq.seen.lock().unwrap().iter().map(|call| call["method"].as_str().unwrap().to_owned()).collect()
 }
 
-fn find_args(text: Option<&str>, limit: u64, offset: u64) -> find_pages::Args {
-    find_pages::Args { text: text.map(str::to_owned), names: None, property: None, value: None, limit, offset, format: None }
+fn find_args(text: Option<&str>, limit: u64) -> find_pages::Args {
+    find_pages::Args { text: text.map(str::to_owned), names: None, property: None, value: None, limit, format: None, cursor: None }
 }
 
 /// The filters of a search for `text` alone.
@@ -117,7 +117,7 @@ async fn the_page_list_costs_one_call_whatever_the_filter_the_window_or_the_alia
         {"id": 3, "name": "ali", "originalName": "Ali", "alias": [{"id": 1}]},
         {"id": 4, "name": "bob", "originalName": "Bob", "file": {"id": 10}}
     ]);
-    for args in [find_args(None, 200, 0), find_args(Some("ali"), 1, 0), find_args(None, 1, 1), find_args(None, 0, 0)] {
+    for args in [find_args(None, 200), find_args(Some("ali"), 1), find_args(None, 0)] {
         let logseq = mock_logseq(vec![pages.clone()]).await;
         find_pages::find_pages(&client(&logseq), &args).await.unwrap();
         assert_eq!(methods(&logseq), ["logseq.Editor.getAllPages"], "{args:?}");
@@ -128,9 +128,9 @@ async fn the_page_list_costs_one_call_whatever_the_filter_the_window_or_the_alia
 #[tokio::test]
 async fn a_null_page_list_is_not_an_empty_one() {
     let logseq = mock_logseq(vec![json!(null)]).await;
-    let result = find_pages::find_pages(&client(&logseq), &find_args(None, 200, 0)).await.unwrap();
+    let result = find_pages::find_pages(&client(&logseq), &find_args(None, 200)).await.unwrap();
     assert!(result.pages.is_empty());
-    assert_eq!(result.warning.unwrap().code, "pages_unavailable");
+    assert_eq!(result.warnings[0].code, "pages_unavailable");
 }
 
 #[tokio::test]

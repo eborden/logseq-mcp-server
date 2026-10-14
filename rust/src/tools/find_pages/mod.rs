@@ -3,17 +3,22 @@
 //! `text` (a substring of a name or alias), `names` (exact names or aliases, each answered with its page, or
 //! with `null` and the closest names) and `property` with `value` (a page property).
 //!
-//! Calls: 1 (`logseq.Editor.getAllPages`), whatever the filter, `limit`, `offset`, number of names or number
+//! Calls: 1 (`logseq.Editor.getAllPages`), whatever the filter, `limit`, number of names or number
 //! of aliases. The `alias` ids, `file` and `properties` ride on every page entity, so the alias groups are
-//! folded here (#171), the names are resolved here, the property is matched here, and the window is cut here.
-//! Resolving a name does the name and alias routes of the page resolver (BR-0010) over that one answer. The
+//! folded here (#171), the names are resolved here, the property is matched here, and the list is cut into pages
+//! here. Resolving a name does the name and alias routes of the page resolver (BR-0010) over that one answer. The
 //! namespace-leaf and ISO-date routes are not part of it: they find a page by something other than a name it
 //! has, and a journal is no page of this tool.
 //!
-//! [`call`] also cuts the list to the character budget (#507, #485): at the largest `limit`, 1,000 pages of ordinary names
-//! run past it. Whole pages are cut from the tail, in name order, and the `result_size_truncated` warning names the
-//! `offset` that reads on, so `hasMore` is true. The `names` answers are the frame of the result and are never cut. A
-//! raise of `limit` is offered only where the raised list fits. A list under the budget is as it was, byte for byte.
+//! The whole matching list is read in that one call and cut here into pages (ADR-0038, #551). A page holds at most
+//! `limit` pages and at most the character budget (#507, #485, `crate::budget`), the last in name order left out, and
+//! when pages are left it carries a `nextCursor` and says so with a `pages_truncated` (the count) or
+//! `result_size_truncated` (the budget) warning (BR-0006). A call with only that `cursor` reads the next page: from the
+//! snapshot the first call kept, with no LogSeq call, or, when the snapshot is gone, with the one call the first page
+//! made, resuming at the first page named after the last one sent (`cursor_stale` says when the list moved). A page is
+//! never cut inside its names (BR-0007), so a first page over the budget comes back alone and the cursor moves past it.
+//! The `names` answers are the request as the server read it: page 1 carries them, never cut, and the pages after it
+//! don't repeat them ([`NAMES_ON_CONTINUATION`]). A list under the budget and the limit is as it was, byte for byte.
 //!
 //! This directory holds everything only the finder uses: the answer it reads (`wire.rs`) and its tip
 //! (`tips.rs`).
@@ -23,26 +28,29 @@ mod wire;
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 
 use crate::args::{Scalar, parse_args};
+use crate::budget::{BUDGET_CHARS, size};
 use crate::client::LogseqClient;
+use crate::cursor::{Anchor, Cursor, Position, SnapshotKey, decode, encode, invalid};
 use crate::errors::{InvalidParameter, MAX_CANDIDATES, ToolError};
 use crate::fuzzy;
 use crate::js;
 use crate::meta::ResultWarning;
 use crate::order;
 use crate::output_format::ListFormat;
+use crate::paging::{Cut, PagedCut, Stale, page_of, paged_warning, refuse_with_cursor, resume_at, serve, stale_warning};
 use crate::property::{PropertyFilter, has_property};
 use crate::resolve::MAX_SUGGESTIONS;
+use crate::snapshots::{Snapshots, resident_weight};
 use crate::tips::{non_empty, tips_value};
-use crate::tool::{input_schema, read_only_annotations, result_value, success_result};
-use crate::budget::{BUDGET_CHARS, Fit, fit, size};
-use crate::truncation::{CappedTruncation, INLINE_PAGES, Paging, SizeCut, capped_truncation_warning, size_truncation_warning};
+use crate::tool::{CursorSchema, input_schema, read_only_annotations, result_value, success_result};
 
 use self::tips::find_pages_tips;
 use self::wire::ListedEntity;
@@ -54,16 +62,27 @@ pub const DEFAULT_FIND_PAGES_LIMIT: u64 = 200;
 /// Most names one call looks up. More is refused by `parse_args`, never cut, so no name goes unanswered (BR-0006).
 pub const MAX_NAMES: usize = 50;
 
-/// Most pages one call returns. A larger `limit` is clamped to it, and `offset` reaches the pages
-/// past it, so a cut at the maximum still has a `howToFetchAll`.
+/// Most pages one page of the result holds. A larger `limit` is clamped to it, and the cursor reaches the pages past
+/// it.
 pub const MAX_FIND_PAGES_LIMIT: u64 = 1000;
+
+/// The code of the warning for a result cut at `limit`.
+const COUNT_CUT: &str = "pages_truncated";
+
+/// What the list holds, as a warning says it.
+const WHAT: &str = "pages";
 
 /// What a warning says to see fewer pages: the three filters that narrow the list.
 const NARROWER: &str = "Narrow text, names or property to see the rest.";
 
+/// Whether a page read with a cursor repeats the `names` answers. They describe the request, which page 1 already
+/// said and the token carries, so the pages after it leave them out (the maintainer's recommendation on #551, in the
+/// brief; one switch to flip if it is not wanted).
+const NAMES_ON_CONTINUATION: bool = false;
+
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property).\n\n\
-**Can't find:** journals (logseq_explore_timeline), block text (logseq_find_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.";
+const DESCRIPTION: &str = "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property). Pages of limit (max 1000); hasMore: send only cursor=nextCursor.\n\n\
+**Can't find:** journals (logseq_explore_timeline) or block text (logseq_find_blocks). Warning pages_unavailable: list unknown, not empty.";
 
 fn default_limit() -> u64 {
     DEFAULT_FIND_PAGES_LIMIT
@@ -83,14 +102,14 @@ pub struct Args {
     #[serde(default)]
     #[schemars(with = "Scalar")]
     pub value: Option<Scalar>,
-    /// Max pages (default: 200, max: 1000)
+    /// Page size: most pages per call (default: 200, max: 1000)
     #[serde(default = "default_limit")]
     pub limit: u64,
-    /// Pages to skip, in name order; shifts if the graph changes
-    #[serde(default)]
-    pub offset: u64,
     /// json (default), or toon text: a list's keys once, not on every row
     pub format: Option<ListFormat>,
+    // No doc comment: the shared description is the type's (`CursorSchema`), and a doc comment would replace it
+    #[schemars(with = "Option<CursorSchema>")]
+    pub cursor: Option<String>,
 }
 
 /// The tool as `tools/list` shows it.
@@ -100,12 +119,130 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Find Pages"))
 }
 
-/// A call: arguments read, the list, then its tip.
-pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
-    let args = parse_args::<Args>(arguments.as_ref())?;
-    let searched = search(client, &args).await?;
-    let result = fit_to_budget(&searched, narrowed(&args), tips_enabled, args.format);
-    Ok(success_result(texts_of(&result, narrowed(&args), tips_enabled, args.format)?.into_iter().map(ContentBlock::text).collect()))
+/// What a cursor says about where to read on, once decoded and checked against this tool: the page the last page
+/// ended with and the index of the next one. The arguments come back as [`Args`], parsed again like any other
+/// (ADR-0038: nothing in a token is trusted).
+struct Resume {
+    cursor: Cursor,
+    /// The index of the first page of the next page, in the list as the first call read it
+    at: usize,
+    /// The name (lowercase, the key the list is sorted by) of the last page the page before sent
+    anchor: String,
+    /// The token as sent, for a refusal
+    token: String,
+}
+
+impl Resume {
+    fn read(token: &str) -> Result<(Args, Resume), InvalidParameter> {
+        let cursor = decode(token, NAME)?;
+        let Position::Index { at } = cursor.position else {
+            return Err(invalid(token, NAME, "this is not a cursor of this tool: its position is not one page"));
+        };
+        let Anchor::Text(anchor) = cursor.anchor.clone() else {
+            return Err(invalid(token, NAME, "this is not a cursor of this tool: its last page is not a name"));
+        };
+        // The arguments the token holds are read as any call's are. A cursor holds none of its own
+        let args = parse_args::<Args>(Some(&cursor.args)).ok().filter(|args| args.cursor.is_none());
+        let args = args.ok_or_else(|| invalid(token, NAME, "its arguments are not ones this tool takes"))?;
+        Ok((args, Resume { cursor, at, anchor, token: token.to_owned() }))
+    }
+
+    /// A token whose arguments no longer make a search: the same refusal as one that doesn't parse.
+    fn refuse(&self, reason: &str) -> InvalidParameter {
+        invalid(&self.token, NAME, reason)
+    }
+}
+
+/// The arguments of a search as a cursor carries them: what the call asked, with `limit` as it is read (a larger one is
+/// clamped, so the same search with 2000 and with 1000 has one token). Read again by [`Args`].
+fn stored_arguments(args: &Args) -> Map<String, Value> {
+    let mut stored = Map::new();
+    let mut put = |key: &str, value: Option<Value>| {
+        if let Some(value) = value {
+            stored.insert(key.to_owned(), value);
+        }
+    };
+    put("text", args.text.as_ref().map(|text| json!(text)));
+    put("names", args.names.as_ref().map(|names| json!(names)));
+    put("property", args.property.as_ref().map(|property| json!(property)));
+    put(
+        "value",
+        args.value.as_ref().map(|value| match value {
+            Scalar::Text(text) => json!(text),
+            Scalar::Number(number) => json!(number),
+            Scalar::Flag(flag) => json!(flag),
+        }),
+    );
+    put("limit", Some(json!(args.limit.min(MAX_FIND_PAGES_LIMIT))));
+    put(
+        "format",
+        args.format.map(|format| match format {
+            ListFormat::Json => json!("json"),
+            ListFormat::Toon => json!("toon"),
+        }),
+    );
+    stored
+}
+
+/// A call: arguments read, the list read (from the snapshot a cursor names, or from LogSeq), then one page of it with
+/// its tip. The character budget (#507, #485) is applied here, to the text the call sends.
+///
+/// A call with a `cursor` takes no other argument: they are in the token. The page it reads starts where the token's
+/// position says, if the last page the page before sent is just before it, and otherwise right after that page in name
+/// order, with a `cursor_stale` warning (BR-0006).
+pub async fn call(client: &LogseqClient, tips_enabled: bool, snapshots: &Snapshots, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
+    let asked = parse_args::<Args>(arguments.as_ref())?;
+    let now = Instant::now();
+    let (args, resume) = match asked.cursor.clone() {
+        Some(token) => {
+            refuse_with_cursor::<Args>(arguments.as_ref())?;
+            let (args, resume) = Resume::read(&token)?;
+            (args, Some(resume))
+        }
+        None => (asked, None),
+    };
+    // refused before any call
+    let property = property_filter(&args).map_err(|error| resume.as_ref().map_or(error, |resume| resume.refuse("its arguments are not a search this tool makes")))?;
+    // The arguments the list was built from: the cursor's own, byte for byte, so the snapshot it names is the one asked for
+    let stored = match &resume {
+        Some(resume) => resume.cursor.args.clone(),
+        None => stored_arguments(&args),
+    };
+    let served = serve(snapshots, resume.as_ref().map(|resume| &resume.cursor.snapshot), &stored, now, || listing_of(client, &args, property.as_ref())).await?;
+    let listing = &*served.list;
+    let total = listing.pages.len();
+    let (start, stale) = match &resume {
+        None => (0, None),
+        Some(resume) => {
+            // The list is in name order, so the pages after the anchor are the first ones with a name after it: found by
+            // key, which holds when the list gained a page before the position, or lost the anchor itself
+            let resumed = resume_at(
+                total,
+                resume.at,
+                |at| listing.keys[at] == resume.anchor,
+                || Some(listing.keys.partition_point(|key| order::by_name(key, &resume.anchor) != Ordering::Greater)),
+            );
+            (resumed.start, resumed.stale)
+        }
+    };
+    let view = View {
+        listing,
+        start,
+        page_size: args.limit.min(MAX_FIND_PAGES_LIMIT) as usize,
+        stale,
+        first_page: resume.is_none(),
+        narrowed: narrowed(&args),
+        tips_enabled,
+        format: args.format,
+        token: Some(Token { args: stored.clone(), key: served.key }),
+    };
+    let page = page_of(total, start, view.page_size, |kept| view.size(kept));
+    // A list that fits one page needs no snapshot, and a hit is kept already
+    if page.next().is_some() {
+        served.keep(snapshots, &stored, listing.weight(), now);
+    }
+    let texts = view.texts(page.kept, page.cut)?;
+    Ok(success_result(texts.into_iter().map(ContentBlock::text).collect()))
 }
 
 /// Whether the call narrowed the list: a `text` that isn't blank, any `names`, or a `property`. A blank `text` is no
@@ -140,29 +277,35 @@ pub struct NameAnswer {
     pub suggestions: Vec<String>,
 }
 
-/// `hasMore` and `warnings` are present only when LogSeq returned no page list (`null`) or `limit`
-/// cut the list. A result that holds every matching page from `offset` on, including a genuinely
-/// empty graph, carries neither. `names` is present only when `names` was asked for and LogSeq returned a page
-/// list: no list is no answer to a name (BR-0011), so none is given.
+/// One page of the result. `hasMore`, `nextCursor` and `warnings` are present only when a warning applies: LogSeq
+/// returned no page list (`null`), the list was cut, or it moved between two pages. A result that holds every matching
+/// page from where it starts, including a genuinely empty graph, carries none. `names` is present only when `names`
+/// was asked for, LogSeq returned a page list and this is the first page: no list is no answer to a name (BR-0011), so
+/// none is given.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindPagesResult {
     pub names: Option<Vec<NameAnswer>>,
     pub pages: Vec<ListedPage>,
-    /// Every matching canonical page, before `offset` and `limit`. An alias is not a page of its own
+    /// Every matching canonical page, before the window. An alias is not a page of its own
     pub total: usize,
-    pub warning: Option<ResultWarning>,
+    pub warnings: Vec<ResultWarning>,
+    /// The cursor that reads the next page: there exactly when `hasMore` is true (ADR-0038)
+    pub next_cursor: Option<String>,
 }
 
-/// The completeness keys that come with a warning, the one warning in a list.
+/// The completeness keys that come with a warning.
 #[derive(Serialize)]
 struct Completeness<'a> {
     #[serde(rename = "hasMore")]
     has_more: bool,
-    warnings: [&'a ResultWarning; 1],
+    #[serde(rename = "nextCursor", skip_serializing_if = "Option::is_none")]
+    next_cursor: Option<&'a str>,
+    warnings: &'a [ResultWarning],
 }
 
 /// A result as written, in BR-0013's order: how each name was read (`names`, the server's reading of the request),
-/// then how many pages there were (`total`), then `hasMore` and `warnings` when a warning applies, then the `pages`.
+/// then how many pages there were (`total`), then `hasMore`, `nextCursor` and `warnings` when a warning applies, then
+/// the `pages`.
 #[derive(Serialize)]
 struct FindPagesOutput<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -176,10 +319,11 @@ struct FindPagesOutput<'a> {
 impl FindPagesResult {
     /// The result in BR-0013's key order.
     pub fn to_value(&self) -> Value {
+        let applies = !self.warnings.is_empty() || self.next_cursor.is_some();
         result_value(&FindPagesOutput {
             names: self.names.as_deref(),
             total: self.total,
-            completeness: self.warning.as_ref().map(|warning| Completeness { has_more: warning.how_to_fetch_all.is_some(), warnings: [warning] }),
+            completeness: applies.then(|| Completeness { has_more: self.next_cursor.is_some(), next_cursor: self.next_cursor.as_deref(), warnings: &self.warnings }),
             pages: &self.pages,
         })
     }
@@ -296,191 +440,185 @@ fn answer_names(names: &[String], entries: &[Entry<'_>], pages: &[&ListedEntity]
     (answers, found)
 }
 
-/// Non-journal pages in name order, `offset` pages in, at most `limit` of them (#61). Each page
-/// carries its aliases, which use no `limit` slots (#171). `text` matches the page's name
-/// or any alias, and returns the page with all its aliases. `names` keeps the pages one of the names finds,
-/// and `property` with `value` the pages that have the property; all three AND together. `total` counts every
-/// matching page, whatever `offset` and `limit` are. When pages remain after the ones returned, a `pages_truncated`
-/// warning says how to get them: raise `limit` when that fits under the maximum, and set `offset`
-/// to the next page in any case, so `hasMore` is true.
+/// Non-journal pages in name order, at most `limit` of them (#61). Each page carries its aliases, which use no
+/// `limit` slots (#171). `text` matches the page's name or any alias, and returns the page with all its aliases.
+/// `names` keeps the pages one of the names finds, and `property` with `value` the pages that have the property; all
+/// three AND together. `total` counts every matching page, whatever `limit` is. When pages remain after the ones
+/// returned, a `pages_truncated` warning says so and offers the raise of `limit` that is the one way on without a
+/// cursor: the library function reads the first page only and keeps no snapshot, so it carries no `nextCursor`.
 ///
 /// `names` answers each name against every non-journal page, not only the pages the other filters keep, so a name
 /// that finds a page the other filters drop is still a name that has a page.
 ///
-/// This is the list before the character budget (#507), which only [`call`] applies: a result of this function can be
-/// longer than the budget, and its `pages_truncated` warning does not account for that.
+/// This is the first page before the character budget (#507), which only [`call`] applies.
 pub async fn find_pages(client: &LogseqClient, args: &Args) -> Result<FindPagesResult, ToolError> {
-    Ok(search(client, args).await?.result())
+    let property = property_filter(args)?;
+    let listing = listing_of(client, args, property.as_ref()).await?;
+    let view = View {
+        listing: &listing,
+        start: 0,
+        page_size: args.limit.min(MAX_FIND_PAGES_LIMIT) as usize,
+        stale: None,
+        first_page: true,
+        narrowed: narrowed(args),
+        tips_enabled: false,
+        format: None,
+        token: None,
+    };
+    let shown = view.page_size.min(listing.pages.len());
+    Ok(view.result(shown, view.cut_at(shown)))
 }
 
-/// What the search read, before the window is cut and the warnings are worded: every matching page from `offset`
-/// on, up to the most one call can return, so the character budget can measure a raise of `limit` on pages in hand.
-struct Searched {
+/// What a search read: every matching page in name order, and how the names were answered. This is the list a cursor
+/// pages, and what a snapshot keeps.
+struct Listing {
+    /// The answers to `names`; `None` without `names`, and when there is no list to answer from
     names: Option<Vec<NameAnswer>>,
     /// The warning of a page list LogSeq did not answer (BR-0011): the list is empty, and no name is answered
     unavailable: Option<ResultWarning>,
-    /// The matching pages from `offset` on, at most [`MAX_FIND_PAGES_LIMIT`] of them
-    reach: Vec<ListedPage>,
-    /// Every matching page, before `offset` and `limit`
-    total: usize,
-    offset: usize,
-    /// `limit` as the caller sent it, and clamped to the maximum
-    requested: u64,
-    limit: usize,
+    /// Every matching page, in name order
+    pages: Vec<ListedPage>,
+    /// The key each of `pages` is sorted by (its lowercase name), which a cursor names its last page by
+    keys: Vec<String>,
 }
 
-impl Searched {
-    /// The pages `limit` keeps.
-    fn window(&self) -> usize {
-        self.limit.min(self.reach.len())
+impl Listing {
+    /// What the snapshot weighs for the cache's bounds: the length of the JSON of the list, scaled to the memory
+    /// it takes ([`resident_weight`]).
+    fn weight(&self) -> usize {
+        let length = |text: serde_json::Result<String>| text.map_or(0, |text| text.len());
+        resident_weight(length(serde_json::to_string(&self.pages)) + self.names.as_ref().map_or(0, |names| length(serde_json::to_string(names))))
+    }
+}
+
+/// What a cursor is made from: the arguments of the call and the snapshot its list was kept as.
+struct Token {
+    args: Map<String, Value>,
+    key: SnapshotKey,
+}
+
+/// One page of the list, and everything its warnings, cursor and tip are made from.
+struct View<'a> {
+    listing: &'a Listing,
+    /// The index of the first page of this page in the list
+    start: usize,
+    /// The most pages a page holds: `limit`, clamped
+    page_size: usize,
+    stale: Option<Stale>,
+    /// Whether this is the first page of a list, which says what it carries of the request (the `names`, the raise)
+    first_page: bool,
+    narrowed: bool,
+    tips_enabled: bool,
+    format: Option<ListFormat>,
+    /// What the next page's cursor carries. None for the library function, which has no snapshots to name
+    token: Option<Token>,
+}
+
+impl View<'_> {
+    /// Matching pages in all.
+    fn total(&self) -> usize {
+        self.listing.pages.len()
     }
 
-    /// The result holding the first `shown` pages, with the warning for the pages that remain after them, if any. `cut`
-    /// is `Some(oversize)` for a result the character budget cut to `shown` pages, which says so in place of the
-    /// `limit` warning; `raise` words the `limit` warning.
-    fn result_of(&self, shown: usize, cut: Option<bool>, raise: Raise) -> FindPagesResult {
-        if let Some(warning) = &self.unavailable {
-            return FindPagesResult { names: None, pages: Vec::new(), total: 0, warning: Some(warning.clone()) };
-        }
-        let pages = self.reach[..shown].to_vec();
-        let warning = (self.offset.saturating_add(shown) < self.total).then(|| match cut {
-            Some(oversize) => self.size_warning(shown, oversize),
-            None => self.count_warning(shown, raise),
-        });
-        FindPagesResult { names: self.names.clone(), pages, total: self.total, warning }
-    }
-
-    /// The result the list makes before the character budget.
-    fn result(&self) -> FindPagesResult {
-        self.result_of(self.window(), None, Raise::Unchecked)
-    }
-
-    /// The pages that remain from `offset`, which a warning counts against.
-    fn remaining(&self) -> usize {
-        self.total.saturating_sub(self.offset)
-    }
-
-    /// What the pages are, as a warning says it: from which one when some were skipped.
-    fn what(&self) -> String {
-        if self.offset > 0 { format!("pages from offset {}", self.offset) } else { "pages".to_owned() }
-    }
-
-    /// How to read on past the `shown` pages of this result: the `offset` that starts where they end. None for a
-    /// result with no page, since an offset that does not move reads nothing on.
-    fn next_page(&self, shown: usize) -> Option<String> {
-        (shown > 0).then(|| format!("Set offset to {} for the next page.", self.offset + shown))
-    }
-
-    /// The `pages_truncated` warning of a `limit` cut that kept `shown` pages. A raise of `limit` is offered only where
-    /// the raised result fits the character budget (BR-0006: a `howToFetchAll` is a promise).
-    fn count_warning(&self, shown: usize, raise: Raise) -> ResultWarning {
-        let (remaining, what, next) = (self.remaining(), self.what(), self.next_page(shown));
-        match raise {
-            Raise::Unchecked => pages_truncated(shown, self.total, self.offset, self.requested),
-            Raise::NoMore => ResultWarning {
-                code: "pages_truncated".to_owned(),
-                message: format!(
-                    "Showing {shown} of {remaining} {what}: a result holds at most {BUDGET_CHARS} characters, so no larger limit fits in that. \
-                     Page through the rest with offset. {NARROWER}"
-                ),
-                how_to_fetch_all: next,
-            },
-            Raise::Offer(limit) => ResultWarning {
-                code: "pages_truncated".to_owned(),
-                message: format!("Showing {shown} of {remaining} {what}. Page through the rest with offset."),
-                how_to_fetch_all: Some(format!(
-                    "{} limit to {limit} to get {limit} of {remaining}. That is the most that fits: a result holds at most {BUDGET_CHARS} characters, \
-                     and more pages would be cut. {NARROWER}",
-                    next.map_or("Set".to_owned(), |next| format!("{next} Or set"))
-                )),
-            },
-        }
-    }
-
-    /// The `result_size_truncated` warning of a result cut to `shown` pages. It counts the pages against every page
-    /// from `offset`, so it replaces the `limit` warning, whose larger `limit` would return the same first pages cut
-    /// the same way. Its `howToFetchAll` is the next page.
-    fn size_warning(&self, shown: usize, oversize: bool) -> ResultWarning {
-        size_truncation_warning(SizeCut {
-            what: &self.what(),
-            kept: shown,
-            total: self.remaining(),
-            oversize,
-            advice: &format!("The last pages in name order are left out. Read on with offset, or narrow the list. {NARROWER} No parameter raises the size limit."),
-            how_to_fetch_all: self.next_page(shown),
-        })
-    }
-
-    /// The raise of `limit` a `pages_truncated` warning can honestly offer, measured on the pages already read: the most
-    /// pages (up to the maximum) whose result, as a call with that `limit` would send it, fits the budget. That result
-    /// carries the warning of its own `limit` cut, which says no larger limit fits, so a `limit` of that many pages comes
-    /// back whole and the page after it would not fit. Only a `limit` cut that a larger `limit` could widen has one.
-    fn raise(&self, size_of: &impl Fn(&FindPagesResult) -> usize) -> Raise {
-        let window = self.window();
-        let reachable = self.reach.len();
-        if self.unavailable.is_some() || self.offset.saturating_add(window) >= self.total || reachable <= window {
-            return Raise::Unchecked;
-        }
-        let most = match fit(reachable, 1, |pages| size_of(&self.result_of(pages, None, Raise::NoMore))) {
-            Fit::Whole => reachable,
-            Fit::Cut { kept, .. } => kept,
-        };
-        if most <= window {
-            Raise::NoMore
-        } else if most >= reachable {
-            Raise::Unchecked
+    /// How the page ends when it holds the first `kept` pages it could: not at all when it reaches the last page of the
+    /// list, by the page size when it holds all it could, by the budget otherwise.
+    fn cut_at(&self, kept: usize) -> Option<Cut> {
+        if self.start + kept >= self.total() {
+            None
+        } else if kept == self.page_size.min(self.total() - self.start) {
+            Some(Cut::Count)
         } else {
-            Raise::Offer(most)
+            Some(Cut::Size { oversize: false })
         }
     }
-}
 
-/// What the warning of a `limit` cut says about raising `limit`, given the character budget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Raise {
-    /// Not measured, or the raise to every page fits: the usual `limit` warning
-    Unchecked,
-    /// A larger `limit` returns more pages, up to `limit`
-    Offer(usize),
-    /// No larger `limit` returns more pages: they would not fit the budget
-    NoMore,
-}
+    /// Whether the page, held to `kept` pages and ending as `cut` says, has a cursor to read on with. A page of no
+    /// page has none: a cursor that does not move reads nothing on.
+    fn has_next(&self, kept: usize, cut: Option<Cut>) -> bool {
+        cut.is_some() && kept > 0 && self.token.is_some()
+    }
 
-/// What the call sends for `result`: the list, then its tip. Each is written in `format`.
-fn texts_of(result: &FindPagesResult, narrowed: bool, tips_enabled: bool, format: Option<ListFormat>) -> Result<Vec<String>, ToolError> {
-    let mut texts = vec![ListFormat::text(format, &result.to_value())?];
-    if tips_enabled {
-        let first = result.pages.first().map(|page| page.name.as_str());
-        if let Some(tips) = tips_value(&find_pages_tips(narrowed, first)) {
-            texts.push(ListFormat::text(format, &tips)?);
+    /// The cursor that starts at the page after the first `kept`, which the last of them names.
+    fn next_cursor(&self, kept: usize, cut: Option<Cut>) -> Option<String> {
+        let token = self.token.as_ref().filter(|_| self.has_next(kept, cut))?;
+        let anchor = Anchor::Text(self.listing.keys[self.start + kept - 1].clone());
+        Some(encode(&Cursor::new(NAME, token.args.clone(), Position::Index { at: self.start + kept }, anchor, token.key)))
+    }
+
+    /// What a reader can do about a result cut for its size. No parameter raises the budget, and the cursor reads on
+    /// (the warning's `howToFetchAll` names it), but a narrower filter makes less to read.
+    fn size_advice(&self) -> String {
+        format!("The last pages in name order are left out. {NARROWER} No parameter raises the size limit.")
+    }
+
+    /// A raise of `limit` to offer beside the cursor, on the first page only (a cursor call can't change it). It is
+    /// always an honest offer, since a result that is too large for the budget is cut again and carries a cursor of its own.
+    fn raise(&self, cut: Cut) -> Option<String> {
+        let more = self.total().min(MAX_FIND_PAGES_LIMIT as usize);
+        (cut == Cut::Count && self.first_page && more > self.page_size)
+            .then(|| format!("set limit to {more} for a larger page (a result holds at most {BUDGET_CHARS} characters)."))
+    }
+
+    /// The warnings of the page holding the first `kept` pages: a list that moved, then the cut.
+    fn warnings(&self, kept: usize, cut: Option<Cut>) -> Vec<ResultWarning> {
+        let mut warnings: Vec<ResultWarning> = self.stale.map(|stale| stale_warning(stale, WHAT)).into_iter().collect();
+        if let Some(cut) = cut {
+            let advice = match cut {
+                Cut::Size { .. } => self.size_advice(),
+                Cut::Count if self.page_size == 0 => "limit is 0, so no page is returned.".to_owned(),
+                Cut::Count => String::new(),
+            };
+            warnings.push(paged_warning(PagedCut {
+                count_code: COUNT_CUT,
+                cut,
+                what: WHAT,
+                start: self.start,
+                kept,
+                total: self.total(),
+                advice: &advice,
+                raise: self.raise(cut),
+                has_next: self.has_next(kept, Some(cut)),
+            }));
+        }
+        warnings
+    }
+
+    /// The result holding the first `kept` pages of this page, ending as `cut` says.
+    fn result(&self, kept: usize, cut: Option<Cut>) -> FindPagesResult {
+        if let Some(warning) = &self.listing.unavailable {
+            return FindPagesResult { names: None, pages: Vec::new(), total: 0, warnings: vec![warning.clone()], next_cursor: None };
+        }
+        FindPagesResult {
+            names: if self.first_page || NAMES_ON_CONTINUATION { self.listing.names.clone() } else { None },
+            pages: self.listing.pages[self.start..self.start + kept].to_vec(),
+            total: self.total(),
+            warnings: self.warnings(kept, cut),
+            next_cursor: self.next_cursor(kept, cut),
         }
     }
-    Ok(texts)
-}
 
-/// The result as it is when the text it sends fits the character budget (#507, #485), else with the first pages that do.
-/// The unit is a page with its aliases: it is never cut inside its names (BR-0007), so a first page over the budget
-/// comes back alone, and the warning says so. The `names` answers are the frame of the result and are never cut (BR-0006:
-/// no name goes unanswered), so a list of names whose answers alone are over the budget comes back with one page.
-fn fit_to_budget(searched: &Searched, narrowed: bool, tips_enabled: bool, format: Option<ListFormat>) -> FindPagesResult {
-    let size_of = |result: &FindPagesResult| texts_of(result, narrowed, tips_enabled, format).map_or(0, |texts| texts.iter().map(|text| size(text)).sum());
-    let raise = searched.raise(&size_of);
-    let window = searched.window();
-    let size_at = |kept: usize| size_of(&searched.result_of(kept, (kept < window).then_some(false), raise));
-    match fit(window, 1, size_at) {
-        Fit::Whole => searched.result_of(window, None, raise),
-        Fit::Cut { kept, oversize } => searched.result_of(kept, Some(oversize), raise),
+    /// What the call sends for the first `kept` pages: the list, then its tip. Each is written in `format`.
+    fn texts(&self, kept: usize, cut: Option<Cut>) -> Result<Vec<String>, ToolError> {
+        let result = self.result(kept, cut);
+        let mut texts = vec![ListFormat::text(self.format, &result.to_value())?];
+        if self.tips_enabled {
+            let first = result.pages.first().map(|page| page.name.as_str());
+            if let Some(tips) = tips_value(&find_pages_tips(self.narrowed, first)) {
+                texts.push(ListFormat::text(self.format, &tips)?);
+            }
+        }
+        Ok(texts)
+    }
+
+    /// The length of the result holding the first `kept` pages, as `call` would send it (what the budget measures).
+    fn size(&self, kept: usize) -> usize {
+        self.texts(kept, self.cut_at(kept)).map_or(0, |texts| texts.iter().map(|text| size(text)).sum())
     }
 }
 
-/// Reads the page list and applies every filter, the window of `offset` and `limit` aside.
-async fn search(client: &LogseqClient, args: &Args) -> Result<Searched, ToolError> {
-    let requested = args.limit;
-    let limit = requested.min(MAX_FIND_PAGES_LIMIT) as usize;
-    let offset = usize::try_from(args.offset).unwrap_or(usize::MAX);
-    // refused before any call
-    let property = property_filter(args)?;
-
+/// The list of a first call, or of a cursor whose snapshot is gone: the one `getAllPages` call, then every filter
+/// applied. These are the first page's calls and no more, so no call ceiling rises (ADR-0038).
+async fn listing_of(client: &LogseqClient, args: &Args, property: Option<&PropertyFilter>) -> Result<Listing, ToolError> {
     let answer = client.call_api(wire::METHOD, &[]).await?;
     // `null` is not `[]` (BR-0011). An empty array is a graph with no pages. `null` may mean no graph
     // is open or LogSeq is re-indexing, so the empty list is reported with a warning instead of
@@ -488,7 +626,7 @@ async fn search(client: &LogseqClient, args: &Args) -> Result<Searched, ToolErro
     // exist, so the warning has no `howToFetchAll` (the retry advice is in the message). A name has no
     // answer either: "no page" would say the page is missing.
     let Some(all_pages) = wire::pages(&answer)? else {
-        return Ok(Searched {
+        return Ok(Listing {
             names: None,
             unavailable: Some(ResultWarning::new(
                 "pages_unavailable",
@@ -497,11 +635,8 @@ async fn search(client: &LogseqClient, args: &Args) -> Result<Searched, ToolErro
                  Retry in a moment, or call logseq_get_graph to check which graph is open."
                     .to_owned(),
             )),
-            reach: Vec::new(),
-            total: 0,
-            offset,
-            requested,
-            limit,
+            pages: Vec::new(),
+            keys: Vec::new(),
         });
     };
 
@@ -527,40 +662,18 @@ async fn search(client: &LogseqClient, args: &Args) -> Result<Searched, ToolErro
             entry.page.name.to_lowercase().contains(lower) || entry.aliases.iter().any(|alias| alias.name.to_lowercase().contains(lower))
         }) && named.as_ref().is_none_or(|found| found.contains(&at))
             && property
-                .as_ref()
                 .is_none_or(|filter| entry.page.properties.as_ref().is_some_and(|properties| has_property(properties, &filter.key, &filter.value)))
     });
 
-    let listed: Vec<ListedPage> = entries
+    let keys = entries.iter().map(|entry| entry.page.name.clone()).collect();
+    let pages = entries
         .iter()
         .map(|entry| ListedPage {
             name: entry.page.display_name.clone(),
             aliases: entry.aliases.iter().map(|alias| alias.display_name.clone()).collect(),
         })
         .collect();
-
-    let total = listed.len();
-    let reach: Vec<ListedPage> = listed.into_iter().skip(offset).take(MAX_FIND_PAGES_LIMIT as usize).collect();
-    Ok(Searched { names, unavailable: None, reach, total, offset, requested, limit })
-}
-
-/// The `pages_truncated` warning for `shown` pages from `offset` of `total`. Counted from `offset`,
-/// so "get all N" means the N pages from there on. Paging leads (#196): `howToFetchAll` starts with
-/// the next offset whenever there is one, and raising `limit` is the alternative. With limit 0 there
-/// is no next offset, because it would not move, so only raising limit is suggested.
-fn pages_truncated(shown: usize, total: usize, offset: usize, requested: u64) -> ResultWarning {
-    capped_truncation_warning(CappedTruncation {
-        what: &if offset > 0 { format!("pages from offset {offset}") } else { "pages".to_owned() },
-        shown,
-        total: total - offset,
-        param: "limit",
-        max: MAX_FIND_PAGES_LIMIT as usize,
-        narrower: NARROWER,
-        requested: Some(requested),
-        code: "pages_truncated",
-        inline_max: Some(INLINE_PAGES),
-        paging: (shown > 0).then(|| Paging { param: "offset", next: format!("Set offset to {} for the next page.", offset + shown) }),
-    })
+    Ok(Listing { names, unavailable: None, pages, keys })
 }
 
 #[cfg(test)]
@@ -774,129 +887,256 @@ mod tests {
         assert!(!has(&stub), "a page with no properties has none");
     }
 
-    /// A search that read `count` pages of `length` characters each, asked for `limit` of them from `offset`.
-    fn searched(count: usize, length: usize, limit: usize, offset: usize) -> Searched {
-        let page = |n: usize| ListedPage { name: format!("{n:05}{}", "p".repeat(length)), aliases: Vec::new() };
-        let reach: Vec<ListedPage> = (offset..count).take(MAX_FIND_PAGES_LIMIT as usize).map(page).collect();
-        Searched { names: None, unavailable: None, reach, total: count, offset, requested: limit as u64, limit: limit.min(MAX_FIND_PAGES_LIMIT as usize) }
+    // ---- a page of the list
+
+    use crate::budget::BUDGET_CHARS;
+    use crate::paging::Page;
+
+    const KEY: SnapshotKey = SnapshotKey { started: 1_760_000_000_000, n: 3 };
+    const NEXT_PAGE: &str = "Pass nextCursor as cursor, with no other argument, to read the next page.";
+
+    /// The key a page named `name` is sorted by.
+    fn key_of(name: &str) -> String {
+        name.to_lowercase()
     }
 
-    fn budgeted(searched: &Searched) -> FindPagesResult {
-        fit_to_budget(searched, false, true, None)
+    /// A list of pages with these names, in the order given, with no aliases.
+    fn listing_of_names(names: impl IntoIterator<Item = String>) -> Listing {
+        let names: Vec<String> = names.into_iter().collect();
+        Listing { names: None, unavailable: None, keys: names.iter().map(|name| key_of(name)).collect(), pages: names.into_iter().map(|name| ListedPage { name, aliases: Vec::new() }).collect() }
     }
 
-    fn sent(result: &FindPagesResult) -> usize {
-        texts_of(result, false, true, None).unwrap().iter().map(|text| size(text)).sum()
+    /// A list of `count` pages whose names are `length` characters long, in name order.
+    fn list(count: usize, length: usize) -> Listing {
+        listing_of_names((0..count).map(|n| format!("{n:05}{}", "p".repeat(length))))
+    }
+
+    /// The page of `listing` that starts at `start`, with at most `limit` pages, as `call` would read it.
+    fn view_at(listing: &Listing, start: usize, limit: usize) -> View<'_> {
+        View {
+            listing,
+            start,
+            page_size: limit.min(MAX_FIND_PAGES_LIMIT as usize),
+            stale: None,
+            first_page: start == 0,
+            narrowed: false,
+            tips_enabled: true,
+            format: None,
+            token: Some(Token { args: json!({"limit": limit}).as_object().cloned().unwrap(), key: KEY }),
+        }
+    }
+
+    /// The page the page size and the budget make of what `view` reads, and its result.
+    fn paged(view: &View<'_>) -> (Page, FindPagesResult) {
+        let page = page_of(view.total(), view.start, view.page_size, |kept| view.size(kept));
+        (page, view.result(page.kept, page.cut))
+    }
+
+    /// The length of what the call sends for that page.
+    fn sent(view: &View<'_>, page: &Page) -> usize {
+        view.texts(page.kept, page.cut).unwrap().iter().map(|text| size(text)).sum()
     }
 
     #[test]
-    fn a_list_under_the_budget_is_what_the_search_made_with_the_warning_it_always_had() {
-        let small = searched(300, 20, 200, 0);
-        assert_eq!(budgeted(&small), small.result());
-        assert_eq!(small.result().warning.unwrap().code, "pages_truncated");
-        let empty = searched(0, 20, 200, 0);
-        assert_eq!(budgeted(&empty), empty.result());
+    fn a_list_under_the_page_size_and_the_budget_is_one_page_with_no_warning_and_no_cursor() {
+        let small = list(150, 20);
+        let (page, result) = paged(&view_at(&small, 0, 200));
+        assert_eq!((page.kept, page.cut), (150, None));
+        assert_eq!((result.warnings.clone(), result.next_cursor.clone(), result.total), (vec![], None, 150));
+        assert_eq!(keys(&result.to_value()), ["total", "pages"]);
+        let empty = list(0, 20);
+        let (page, result) = paged(&view_at(&empty, 0, 200));
+        assert_eq!((page.kept, page.cut, result.warnings.len(), result.next_cursor), (0, None, 0, None));
     }
 
     #[test]
-    fn a_thousand_pages_of_long_names_are_cut_to_the_budget_and_the_next_page_is_the_way_on() {
-        let big = searched(1500, 60, 1000, 0);
-        assert!(sent(&big.result()) > BUDGET_CHARS);
-        let cut = budgeted(&big);
-        assert!(sent(&cut) <= BUDGET_CHARS, "{}", sent(&cut));
-        let kept = cut.pages.len();
+    fn a_list_exactly_at_the_limit_has_no_cursor_and_one_page_more_has_one() {
+        for (count, cursor) in [(200, false), (201, true)] {
+            let list = list(count, 20);
+            let (page, result) = paged(&view_at(&list, 0, 200));
+            assert_eq!((page.kept, result.next_cursor.is_some(), result.warnings.len()), (200, cursor, usize::from(cursor)), "{count} pages");
+        }
+    }
+
+    #[test]
+    fn a_count_cut_leads_with_the_cursor_and_offers_the_raise_beside_it_on_the_first_page() {
+        let long = list(300, 20);
+        let (page, result) = paged(&view_at(&long, 0, 200));
+        assert_eq!((page.kept, page.cut), (200, Some(Cut::Count)));
+        let warning = &result.warnings[0];
+        assert_eq!((warning.code.as_str(), warning.message.as_str()), ("pages_truncated", "Showing 1-200 of 300 pages."));
+        assert_eq!(
+            warning.how_to_fetch_all.as_deref(),
+            Some(format!("{NEXT_PAGE} Or set limit to 300 for a larger page (a result holds at most {BUDGET_CHARS} characters).").as_str())
+        );
+        // the cursor names the next page and the last one sent, by the key the list is sorted by
+        let cursor = decode(result.next_cursor.as_deref().unwrap(), NAME).unwrap();
+        assert_eq!(cursor, Cursor::new(NAME, json!({"limit": 200}).as_object().cloned().unwrap(), Position::Index { at: 200 }, Anchor::Text(long.keys[199].clone()), KEY));
+        assert_eq!(result.to_value()["hasMore"], true);
+        // `hasMore` and `nextCursor` come right after the total, before the warnings and the pages (BR-0013)
+        assert_eq!(keys(&result.to_value()), ["total", "hasMore", "nextCursor", "warnings", "pages"]);
+    }
+
+    #[test]
+    fn the_pages_after_the_first_offer_no_raise_since_a_cursor_call_cannot_change_the_limit() {
+        let long = list(300, 20);
+        let (_, second) = paged(&view_at(&long, 100, 100));
+        let warning = &second.warnings[0];
+        assert_eq!(warning.message, "Showing 101-200 of 300 pages.");
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some(NEXT_PAGE));
+    }
+
+    #[test]
+    fn a_size_cut_keeps_the_most_pages_that_fit_and_says_the_budget_not_a_raise() {
+        let big = list(1500, 60);
+        let view = view_at(&big, 0, 1000);
+        let (page, result) = paged(&view);
+        let kept = page.kept;
         assert!(kept > 100 && kept < 1000, "{kept}");
+        assert_eq!(page.cut, Some(Cut::Size { oversize: false }));
+        assert!(sent(&view, &page) <= BUDGET_CHARS, "{}", sent(&view, &page));
         // one more page would not fit, and the pages kept are the first in name order
-        assert!(sent(&big.result_of(kept + 1, Some(false), Raise::Unchecked)) > BUDGET_CHARS);
-        assert_eq!(cut.pages[..], big.reach[..kept]);
-        let warning = cut.warning.unwrap();
+        assert!(view.size(kept + 1) > BUDGET_CHARS);
+        assert_eq!(result.pages[..], big.pages[..kept]);
+        let warning = &result.warnings[0];
         assert_eq!(warning.code, "result_size_truncated");
-        assert_eq!(warning.how_to_fetch_all.as_deref(), Some(format!("Set offset to {kept} for the next page.").as_str()));
-        assert!(warning.message.starts_with(&format!("Showing {kept} of 1500 pages: the result was cut to fit 30000 characters")), "{}", warning.message);
-        assert_eq!(cut.total, 1500);
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some(NEXT_PAGE), "a larger limit would be cut the same way, so none is offered");
+        assert!(warning.message.starts_with(&format!("Showing 1-{kept} of 1500 pages: the result was cut to fit 30000 characters")), "{}", warning.message);
+        assert!(warning.message.contains("The last pages in name order are left out. Narrow text, names or property to see the rest."), "{}", warning.message);
+        assert_eq!(result.total, 1500);
     }
 
     #[test]
-    fn a_size_cut_counts_from_the_offset_and_reads_on_after_the_pages_it_kept() {
-        let big = searched(2000, 60, 1000, 400);
-        let cut = budgeted(&big);
-        let kept = cut.pages.len();
-        let warning = cut.warning.unwrap();
-        assert!(warning.message.starts_with(&format!("Showing {kept} of 1600 pages from offset 400:")), "{}", warning.message);
-        assert_eq!(warning.how_to_fetch_all.as_deref(), Some(format!("Set offset to {} for the next page.", 400 + kept).as_str()));
+    fn a_page_in_the_middle_counts_from_where_it_starts_and_reads_on_after_the_pages_it_kept() {
+        let big = list(2000, 60);
+        let view = view_at(&big, 400, 1000);
+        let (page, result) = paged(&view);
+        let warning = &result.warnings[0];
+        assert!(warning.message.starts_with(&format!("Showing 401-{} of 2000 pages:", 400 + page.kept)), "{}", warning.message);
+        let cursor = decode(result.next_cursor.as_deref().unwrap(), NAME).unwrap();
+        assert_eq!((cursor.position, cursor.anchor), (Position::Index { at: 400 + page.kept }, Anchor::Text(big.keys[400 + page.kept - 1].clone())));
+        assert_eq!(result.pages[0], big.pages[400]);
     }
 
     #[test]
-    fn a_raise_that_fits_the_budget_keeps_the_usual_warning() {
-        // 300 pages of ~80 characters: the 200 shown are cut by the limit, all 300 fit
-        let small = searched(300, 60, 200, 0);
-        assert!(sent(&searched(300, 60, 300, 0).result()) <= BUDGET_CHARS);
-        let result = budgeted(&small);
-        assert_eq!(result.warning, small.result().warning);
-        assert_eq!(result.pages.len(), 200);
+    fn reading_page_after_page_covers_a_list_several_times_the_budget_once_and_each_page_fits() {
+        let big = list(1500, 60);
+        let (mut start, mut seen, mut pages) = (0, Vec::new(), 0);
+        loop {
+            let view = view_at(&big, start, 1000);
+            let (page, result) = paged(&view);
+            assert!(sent(&view, &page) <= BUDGET_CHARS, "page {pages}");
+            seen.extend(result.pages.iter().map(|page| page.name.clone()));
+            pages += 1;
+            match page.next() {
+                Some(next) => start = next,
+                None => break,
+            }
+        }
+        assert_eq!(seen, big.pages.iter().map(|page| page.name.clone()).collect::<Vec<_>>());
+        assert!(pages >= 3, "{pages}");
     }
 
     #[test]
-    fn a_raise_past_the_budget_offers_only_what_fits_and_that_limit_comes_back_whole() {
-        let big = searched(600, 60, 200, 0);
-        assert!(sent(&searched(600, 60, 600, 0).result()) > BUDGET_CHARS);
-        let result = budgeted(&big);
-        assert_eq!(result.pages.len(), 200);
-        let warning = result.warning.unwrap();
-        assert_eq!(warning.code, "pages_truncated");
-        let how = warning.how_to_fetch_all.unwrap();
-        assert!(how.starts_with("Set offset to 200 for the next page. Or set limit to "), "{how}");
-        assert!(!how.contains("get all") && how.contains("That is the most that fits"), "{how}");
-        let offered: usize = how.split("Or set limit to ").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
-        assert!(offered > 200 && offered < 600, "{how}");
-        // the offered limit comes back whole, and one more is cut to it
-        let at = budgeted(&searched(600, 60, offered, 0));
-        assert_eq!(at.pages.len(), offered);
-        assert_eq!(at.warning.as_ref().unwrap().code, "pages_truncated");
-        assert!(sent(&at) <= BUDGET_CHARS);
-        // the size cut's own warning is longer than a limit cut's, so one more than offered keeps a page or so fewer
-        let past = budgeted(&searched(600, 60, offered + 1, 0));
-        assert_eq!(past.warning.as_ref().unwrap().code, "result_size_truncated");
-        assert!(past.pages.len() <= offered && past.pages.len() + 4 >= offered, "{} of {offered}", past.pages.len());
-        assert!(sent(&past) <= BUDGET_CHARS);
+    fn a_page_over_the_budget_is_returned_alone_and_the_cursor_moves_past_it() {
+        // the first page in name order is 40,000 characters long; the two after it are small
+        let giant = listing_of_names([format!("a{}", "x".repeat(40_000)), "b".to_owned(), "c".to_owned()]);
+        let view = view_at(&giant, 0, 200);
+        let (page, result) = paged(&view);
+        assert_eq!((page.kept, page.cut), (1, Some(Cut::Size { oversize: true })));
+        assert!(result.warnings[0].message.contains("Even those are over that size"), "{}", result.warnings[0].message);
+        assert_eq!(page.next(), Some(1));
+        let (page, result) = paged(&view_at(&giant, 1, 200));
+        assert_eq!((page.kept, page.cut, result.next_cursor), (2, None, None));
     }
 
     #[test]
-    fn a_limit_at_the_largest_that_fits_offers_no_larger_limit() {
-        let first = budgeted(&searched(1200, 60, 200, 0));
-        let how = first.warning.unwrap().how_to_fetch_all.unwrap();
-        let offered: usize = how.split("Or set limit to ").nth(1).unwrap().split(' ').next().unwrap().parse().unwrap();
-        // the call at that limit has nothing larger to offer, and the next page is its way on
-        let at = budgeted(&searched(1200, 60, offered, 0));
-        assert_eq!(at.pages.len(), offered);
-        let warning = at.warning.unwrap();
-        assert_eq!(warning.code, "pages_truncated");
-        assert!(warning.message.contains("so no larger limit fits in that"), "{}", warning.message);
-        assert_eq!(warning.how_to_fetch_all.as_deref(), Some(format!("Set offset to {offered} for the next page.").as_str()));
+    fn a_limit_of_zero_shows_no_page_and_has_no_cursor_only_the_raise() {
+        let five = list(5, 20);
+        let (page, result) = paged(&view_at(&five, 0, 0));
+        assert_eq!((page.kept, page.cut, result.next_cursor.clone()), (0, Some(Cut::Count), None));
+        let warning = &result.warnings[0];
+        assert_eq!(warning.message, "Showing 0 of 5 pages. limit is 0, so no page is returned.");
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some(format!("Set limit to 5 for a larger page (a result holds at most {BUDGET_CHARS} characters).").as_str()));
+        assert_eq!(result.to_value()["hasMore"], false, "nothing reads on, so hasMore is false whatever the raise offers");
     }
 
     #[test]
-    fn the_names_are_the_frame_and_are_never_cut() {
-        let mut found = searched(3, 20, 200, 0);
+    fn the_names_are_the_frame_of_the_first_page_and_are_never_cut() {
+        let mut found = list(3, 20);
         let answer = |n: usize| NameAnswer { name: format!("{n}{}", "q".repeat(1000)), page: None, candidates: Vec::new(), candidate_count: None, suggestions: vec!["s".repeat(500); 3] };
         found.names = Some((0..50).map(answer).collect());
-        let result = budgeted(&found);
+        let (page, result) = paged(&view_at(&found, 0, 200));
         // the 50 answers are over the budget by themselves: all stay, with one page, and the warning says that even that is over
         assert_eq!(result.names.as_ref().unwrap().len(), 50);
-        assert_eq!(result.pages.len(), 1);
-        assert!(result.warning.unwrap().message.contains("Even those are over that size"));
+        assert_eq!((page.kept, page.cut), (1, Some(Cut::Size { oversize: true })));
+        assert!(result.warnings[0].message.contains("Even those are over that size"));
+        assert!(result.next_cursor.is_some());
+    }
+
+    #[test]
+    fn a_page_read_with_a_cursor_does_not_repeat_the_names_answers() {
+        let mut found = list(5, 20);
+        found.names = Some(vec![NameAnswer { name: "x".into(), page: None, candidates: Vec::new(), candidate_count: None, suggestions: Vec::new() }]);
+        let first = view_at(&found, 0, 2).result(2, Some(Cut::Count));
+        assert_eq!(first.names.as_ref().map(Vec::len), Some(1));
+        let later = view_at(&found, 2, 2).result(2, Some(Cut::Count));
+        assert!(later.names.is_none(), "the names describe the request, which page 1 said and the token holds");
+        assert!(!later.to_value().as_object().unwrap().contains_key("names"));
+        assert!(!NAMES_ON_CONTINUATION);
+    }
+
+    #[test]
+    fn a_page_list_nobody_answered_is_one_warning_with_nothing_to_read_on_and_no_stale_warning() {
+        let unavailable = Listing { names: None, unavailable: Some(ResultWarning::new("pages_unavailable", "m".into())), pages: Vec::new(), keys: Vec::new() };
+        let mut view = view_at(&unavailable, 0, 200);
+        view.stale = Some(Stale::Gone);
+        let (page, result) = paged(&view);
+        assert_eq!((page.kept, page.cut, result.total, result.next_cursor.clone()), (0, None, 0, None));
+        assert_eq!(result.warnings.iter().map(|warning| warning.code.as_str()).collect::<Vec<_>>(), ["pages_unavailable"]);
+        assert_eq!(result.to_value()["hasMore"], false);
+    }
+
+    #[test]
+    fn a_list_that_moved_says_so_before_the_cut() {
+        let long = list(300, 20);
+        let mut view = view_at(&long, 100, 100);
+        view.stale = Some(Stale::Moved);
+        let (_, result) = paged(&view);
+        assert_eq!(result.warnings.iter().map(|warning| warning.code.as_str()).collect::<Vec<_>>(), ["cursor_stale", "pages_truncated"]);
+    }
+
+    #[test]
+    fn the_anchor_is_found_by_name_order_after_pages_came_or_went_before_it() {
+        // the key the resume looks for: the first key that sorts after the anchor
+        let names = ["alice", "bob", "carol", "dave", "erin"].map(str::to_owned);
+        let after = |anchor: &str| names.partition_point(|key| order::by_name(key, anchor) != Ordering::Greater);
+        assert_eq!(after("carol"), 3);
+        assert_eq!(after("caroline"), 3, "the anchor is gone: the first page after where it was");
+        assert_eq!(after("aaron"), 0);
+        assert_eq!(after("zed"), 5);
     }
 
     #[test]
     fn toon_and_json_are_each_measured_as_they_are_sent() {
-        let found = searched(1000, 20, 1000, 0);
-        let json = size(&texts_of(&found.result(), false, false, None).unwrap()[0]);
-        let toon = size(&texts_of(&found.result(), false, false, Some(ListFormat::Toon)).unwrap()[0]);
+        let found = list(1000, 20);
+        let json = size(&view_at(&found, 0, 1000).texts(1000, None).unwrap()[0]);
+        let toon_view = View { format: Some(ListFormat::Toon), tips_enabled: false, ..view_at(&found, 0, 1000) };
+        let toon = size(&toon_view.texts(1000, None).unwrap()[0]);
         assert!(toon < json, "{toon} {json}");
         // with the budget between the two sizes, JSON is cut and TOON is not
         assert!(json > BUDGET_CHARS && toon < BUDGET_CHARS, "json {json}, toon {toon}");
-        assert_eq!(fit_to_budget(&found, false, false, Some(ListFormat::Toon)), found.result());
-        assert!(fit_to_budget(&found, false, false, None).pages.len() < 1000);
+        assert_eq!(paged(&toon_view).0, Page { start: 0, kept: 1000, cut: None });
+        assert!(paged(&view_at(&found, 0, 1000)).0.kept < 1000);
+    }
+
+    #[test]
+    fn a_toon_page_carries_the_cursor_in_the_same_keys_as_json() {
+        let long = list(300, 20);
+        let view = View { format: Some(ListFormat::Toon), tips_enabled: false, ..view_at(&long, 0, 200) };
+        let (page, result) = paged(&view);
+        let text = &view.texts(page.kept, page.cut).unwrap()[0];
+        assert!(text.contains("hasMore: true") && text.contains(&format!("nextCursor: {}", result.next_cursor.as_deref().unwrap())), "{text}");
     }
 
     #[test]
@@ -913,7 +1153,8 @@ mod tests {
             names: None,
             pages: vec![ListedPage { name: "Alice".into(), aliases: vec!["Al".into()] }, ListedPage { name: "Bob".into(), aliases: vec![] }],
             total: 2,
-            warning: None,
+            warnings: vec![],
+            next_cursor: None,
         };
         assert_eq!(plain.to_value().to_string(), r#"{"total":2,"pages":[{"name":"Alice","aliases":["Al"]},{"name":"Bob"}]}"#);
         assert_eq!(keys(&plain.to_value()), ["total", "pages"]);
@@ -921,45 +1162,98 @@ mod tests {
             names: None,
             pages: vec![],
             total: 3,
-            warning: Some(ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }),
+            warnings: vec![ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) }],
+            next_cursor: Some("abc".into()),
         };
         assert_eq!(
             cut.to_value().to_string(),
-            r#"{"total":3,"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"pages":[]}"#
+            r#"{"total":3,"hasMore":true,"nextCursor":"abc","warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"pages":[]}"#
         );
-        assert_eq!(keys(&cut.to_value()), ["total", "hasMore", "warnings", "pages"]);
-        // a warning with no way to fetch more says so
-        let no_more = FindPagesResult { warning: Some(ResultWarning::new("c", "m".into())), ..cut };
-        assert_eq!(no_more.to_value()["hasMore"], false);
+        assert_eq!(keys(&cut.to_value()), ["total", "hasMore", "nextCursor", "warnings", "pages"]);
+        // a warning and no cursor: hasMore is false whatever the warning offers, and there is no nextCursor
+        let no_cursor = FindPagesResult { next_cursor: None, ..cut.clone() };
+        assert_eq!(no_cursor.to_value()["hasMore"], false);
+        assert_eq!(keys(&no_cursor.to_value()), ["total", "hasMore", "warnings", "pages"]);
         // the server's reading of the names comes first, as the echo of the request does (BR-0013)
         let named = FindPagesResult {
             names: Some(vec![NameAnswer { name: "bob".into(), page: Some("Bob".into()), candidates: vec![], candidate_count: None, suggestions: vec![] }]),
             pages: vec![ListedPage { name: "Bob".into(), aliases: vec![] }],
             total: 1,
-            warning: None,
+            warnings: vec![],
+            next_cursor: None,
         };
         assert_eq!(named.to_value().to_string(), r#"{"names":[{"name":"bob","page":"Bob"}],"total":1,"pages":[{"name":"Bob"}]}"#);
         assert_eq!(keys(&named.to_value()), ["names", "total", "pages"]);
-        let named_and_cut = FindPagesResult { warning: cut.warning.clone(), ..named };
-        assert_eq!(keys(&named_and_cut.to_value()), ["names", "total", "hasMore", "warnings", "pages"]);
+        let named_and_cut = FindPagesResult { warnings: cut.warnings.clone(), next_cursor: cut.next_cursor.clone(), ..named };
+        assert_eq!(keys(&named_and_cut.to_value()), ["names", "total", "hasMore", "nextCursor", "warnings", "pages"]);
+    }
+
+    // ---- the cursor: what a token holds, and what a call reads back from it
+
+    fn token_args() -> Map<String, Value> {
+        json!({"text": "atlas", "limit": 200}).as_object().cloned().unwrap()
+    }
+
+    fn cursor_with(change: impl FnOnce(&mut Cursor)) -> String {
+        let mut cursor = Cursor::new(NAME, token_args(), Position::Index { at: 200 }, Anchor::Text("project atlas".into()), KEY);
+        change(&mut cursor);
+        encode(&cursor)
     }
 
     #[test]
-    fn a_cut_names_the_next_offset_and_a_raise_of_the_limit() {
-        let warning = pages_truncated(2, 5, 0, 2);
-        assert_eq!(warning.code, "pages_truncated");
-        assert_eq!(warning.message, "Showing 2 of 5 pages. Page through the rest with offset.");
-        assert_eq!(
-            warning.how_to_fetch_all.as_deref(),
-            Some("Set offset to 2 for the next page. Or set limit to 5 (or higher) to get all 5 in one call.")
-        );
-        let later = pages_truncated(2, 9, 3, 2);
-        assert_eq!(later.message, "Showing 2 of 6 pages from offset 3. Page through the rest with offset.");
-        assert!(later.how_to_fetch_all.unwrap().starts_with("Set offset to 5 for the next page."));
-        // limit 0 shows nothing, so there is no next offset and only a raise of the limit is suggested
-        let none = pages_truncated(0, 4, 0, 0);
-        assert_eq!(none.message, "Showing 0 of 4 pages.");
-        assert_eq!(none.how_to_fetch_all.as_deref(), Some("Set limit to 4 (or higher) to get all 4."));
+    fn a_token_made_for_this_tool_is_read_back_as_the_arguments_it_holds() {
+        let (args, resume) = Resume::read(&cursor_with(|_| {})).unwrap();
+        assert_eq!((args.text.as_deref(), args.limit, args.cursor), (Some("atlas"), 200, None));
+        assert_eq!((resume.at, resume.anchor.as_str(), resume.cursor.snapshot), (200, "project atlas", KEY));
+    }
+
+    #[test]
+    fn a_token_this_tool_cannot_read_is_refused_by_the_cursor_and_not_by_a_parameter_it_never_sent() {
+        let refused = |token: String| Resume::read(&token).err().map(|error| (error.param, error.expected));
+        let (param, expected) = refused(cursor_with(|cursor| cursor.position = Position::Sections { blocks: 1, references: 0, related: 0 })).unwrap();
+        assert!(param == "cursor" && expected.contains("its position is not one page"), "{expected}");
+        let (_, expected) = refused(cursor_with(|cursor| cursor.anchor = Anchor::Id(7))).unwrap();
+        assert!(expected.contains("its last page is not a name"), "{expected}");
+        // arguments that parse as no call of this tool, and one that holds a cursor of its own
+        let (_, expected) = refused(cursor_with(|cursor| cursor.args = json!({"limit": "many"}).as_object().cloned().unwrap())).unwrap();
+        assert!(expected.contains("its arguments are not ones this tool takes"), "{expected}");
+        let (_, expected) = refused(cursor_with(|cursor| cursor.args = json!({"text": "x", "cursor": "abc"}).as_object().cloned().unwrap())).unwrap();
+        assert!(expected.contains("its arguments are not ones this tool takes"), "{expected}");
+        // another tool's token, and text that is no token at all
+        assert!(refused(cursor_with(|cursor| cursor.tool = "logseq_find_blocks".into())).is_some());
+        assert!(Resume::read("not a cursor").is_err());
+    }
+
+    #[test]
+    fn the_arguments_a_cursor_stores_read_back_as_the_search_that_made_it_with_the_limit_clamped() {
+        let sent = json!({"text": "atlas", "names": ["Alice"], "property": "status", "value": 3, "limit": 5000, "format": "toon"});
+        let args = parse_args::<Args>(sent.as_object()).unwrap();
+        let stored = stored_arguments(&args);
+        assert_eq!(Value::Object(stored.clone()), json!({"text": "atlas", "names": ["Alice"], "property": "status", "value": 3.0, "limit": 1000, "format": "toon"}));
+        let back = parse_args::<Args>(Some(&stored)).unwrap();
+        assert_eq!(back, Args { limit: 1000, ..args });
+        // nothing that was not asked for is stored, apart from the limit that is read
+        assert_eq!(Value::Object(stored_arguments(&parse_args::<Args>(None).unwrap())), json!({"limit": 200}));
+    }
+
+    #[test]
+    fn a_stored_value_of_each_kind_reads_back_as_that_kind() {
+        for value in [json!("active"), json!(3.0), json!(true)] {
+            let args = parse_args::<Args>(json!({"property": "p", "value": value}).as_object()).unwrap();
+            let back = parse_args::<Args>(Some(&stored_arguments(&args))).unwrap();
+            assert_eq!(back.value, args.value);
+        }
+    }
+
+    #[test]
+    fn a_snapshot_weighs_the_length_of_its_json_at_the_resident_factor() {
+        let one = list(1, 100);
+        let json_len = serde_json::to_string(&one.pages).unwrap().len();
+        assert_eq!(one.weight(), crate::snapshots::resident_weight(json_len));
+        assert!(list(100, 100).weight() > list(10, 100).weight());
+        let mut with_names = list(1, 100);
+        with_names.names = Some(vec![NameAnswer { name: "x".into(), page: None, candidates: Vec::new(), candidate_count: None, suggestions: Vec::new() }]);
+        assert!(with_names.weight() > one.weight());
     }
 
     #[test]
@@ -972,13 +1266,15 @@ mod tests {
                 "names": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 50, "description": "Page names or aliases to look up exactly, ignoring case (1 to 50)"},
                 "property": {"type": "string", "description": "Page property to match (letters, digits, \"-\" and \"_\"; createdAt and created-at are equivalent). Needs value"},
                 "value": {"anyOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}], "description": "Exact value of the property. A multi-value property matches if any one value equals it. Needs property"},
-                "limit": {"type": "integer", "minimum": 0, "default": 200, "description": "Max pages (default: 200, max: 1000)"},
-                "offset": {"type": "integer", "minimum": 0, "default": 0, "description": "Pages to skip, in name order; shifts if the graph changes"},
+                "limit": {"type": "integer", "minimum": 0, "default": 200, "description": "Page size: most pages per call (default: 200, max: 1000)"},
                 "format": {"type": "string", "enum": ["json", "toon"], "description": "json (default), or toon text: a list's keys once, not on every row"},
+                "cursor": {"type": "string", "description": crate::tool::CURSOR_DESCRIPTION},
             },
             "required": [],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
+        // there is no `offset`: a cursor reads on (ADR-0038)
+        assert!(schema_of::<Args>()["properties"].get("offset").is_none());
     }
 
     #[test]
@@ -1002,9 +1298,9 @@ mod tests {
     #[test]
     fn the_arguments_read_as_the_schema_defaults_say() {
         let defaults = parse_args::<Args>(None).unwrap();
-        assert_eq!(defaults, Args { text: None, names: None, property: None, value: None, limit: 200, offset: 0, format: None });
+        assert_eq!(defaults, Args { text: None, names: None, property: None, value: None, limit: 200, format: None, cursor: None });
         assert_eq!(serde_json::from_value::<Args>(json!({})).unwrap(), defaults);
-        let bad = json!({"limit": 2.5, "offset": -1});
+        let bad = json!({"limit": 2.5, "cursor": -1});
         assert_eq!(
             parse_args::<Args>(bad.as_object()).unwrap_err().to_string(),
             "Invalid parameter 'limit': 2.5\n\nExpected: an integer, not a fraction\nExample: limit: 5"
@@ -1019,6 +1315,6 @@ mod tests {
         sweep::<Args>(json!({}), "property", Takes::Text, false);
         sweep::<Args>(json!({}), "value", Takes::Scalar, false);
         sweep::<Args>(json!({}), "limit", Takes::Count(0), false);
-        sweep::<Args>(json!({}), "offset", Takes::Count(0), false);
+        sweep::<Args>(json!({}), "cursor", Takes::Text, false);
     }
 }
