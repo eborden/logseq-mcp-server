@@ -94,7 +94,7 @@ pub fn network_truncated_warning(f: TruncationFacts) -> ResultWarning {
     let fanout_bit = f.dropped_by_fanout > 0;
     let budget_bit = f.dropped_by_budget > 0;
     let fanout_at_max = f.max_fanout >= MAX_FANOUT_LIMIT;
-    let mut message = format!("Kept {} pages; at least {} more connected pages were dropped.", f.kept, f.dropped);
+    let mut message = format!("The walk holds {} pages; at least {} more connected pages were dropped.", f.kept, f.dropped);
     if fanout_bit {
         let at_max = if fanout_at_max { ", its maximum" } else { "" };
         message.push_str(&format!(" max_fanout limits the new pages one page may add ({}{at_max}).", f.max_fanout));
@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(warning.code, "network_truncated");
         assert_eq!(
             warning.message,
-            "Kept 120 pages; at least 10 more connected pages were dropped. max_fanout limits the new pages one page may add (15)."
+            "The walk holds 120 pages; at least 10 more connected pages were dropped. max_fanout limits the new pages one page may add (15)."
         );
         assert_eq!(
             warning.how_to_fetch_all.as_deref(),
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(warning.how_to_fetch_all, None);
         assert_eq!(
             warning.message,
-            "Kept 120 pages; at least 10 more connected pages were dropped. max_fanout limits the new pages one page may add (100, its maximum). \
+            "The walk holds 120 pages; at least 10 more connected pages were dropped. max_fanout limits the new pages one page may add (100, its maximum). \
              No parameter fetches the rest. To narrow the walk instead, lower max_depth or set expand_journals to false so journal pages stay leaves."
         );
     }
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(warning.how_to_fetch_all, None);
         assert_eq!(
             warning.message,
-            "Kept 500 pages; at least 20 more connected pages were dropped. The walk stops at 500 pages. No parameter fetches the rest. \
+            "The walk holds 500 pages; at least 20 more connected pages were dropped. The walk stops at 500 pages. No parameter fetches the rest. \
              To narrow the walk instead, lower max_depth."
         );
     }
