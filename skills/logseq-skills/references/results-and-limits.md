@@ -53,7 +53,7 @@ When a warning offers a raise ("set `limit` to 250"), `find_blocks`, `find_pages
 - leaves a result under the budget exactly as it was
 - never drops a failure: `check_links` cuts only `refs.resolved`, never `ok`, `unresolved`, `ambiguous` or `refsPreserved`, and `find_pages` never cuts its `names` answers
 
-Whether `hasMore` is true after a size cut depends on the tool. `find_blocks`, `find_pages`, `explore_context` and the outline of `get_page` return a `nextCursor`, so it is true. `explore_timeline` names the call that reads on from the cut. `get_page` and `get_block` have no way to page a tree, so `hasMore` stays false and the warning names the outline and `logseq_get_block`. `explore_network` says to narrow the walk.
+Whether `hasMore` is true after a size cut depends on the tool. `find_blocks`, `find_pages`, `explore_context`, `get_page` (`full` and `outline`) and `get_block` (with `include_children`) return a `nextCursor`, so it is true. `explore_timeline` names the call that reads on from the cut. `explore_network` says to narrow the walk.
 
 ## Warning codes by tool
 
