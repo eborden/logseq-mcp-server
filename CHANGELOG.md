@@ -4,13 +4,120 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-1.0.0 is the first release, so there is no earlier release to compare against. Everything below ships in it.
+1.0.0 was the first release, so its entry has no earlier release to compare against. The 2.0.0 entry is a hard cut and opens with a migration note.
 
-## [Unreleased]
+## [2.0.0] - Unreleased
+
+v2.0.0 is a hard cut with no deprecation window (ADR-0037). The 16 v1 tools become 10, each named `logseq_<type>_<object>` with a type of `get`, `find`, `explore` or `check`, and every page parameter is `page`. There are no known external callers of v1, so nothing is kept as an alias beyond the few named below. A caller of the tools (the `logseq-skills` plugin skills are already rewritten for v2) should read the migration note first. `rust/Cargo.toml`, `package.json` and the plugin manifests all read 2.0.0.
+
+### Migration note: v1 to v2
+
+**An old call does not always fail.** Unknown arguments are ignored in every tool (BR-0008), so a call that still sends a retired parameter is refused only when that leaves a required parameter missing. These three succeed silently with a different result:
+
+- `logseq_get_page` with `include_children: true` succeeds (`page_name` is read as an alias of `page`) but returns the page **without its blocks and with no warning**. Use `detail: "full"`.
+- `logseq_find_pages` with `name_contains` succeeds and returns the **unfiltered** list (up to 200 pages, paged by `offset`). `name_contains` is now `text`.
+- `logseq_explore_timeline` with `search_term` (or `concept_name`, or `max_entries`) succeeds when the call also has a period, as an **unfiltered period read** (the default 200 blocks, and no `max_entries` cap). With no period it is refused with `Invalid parameter 'page or period': none given`. A `search_term` that was free text is `logseq_find_blocks` with `text` and the same period (`start_date` with `end_date`, `last_n` or `preset`). A `search_term` that was a page name is `page`. This is the retired parameter most likely to be hit: a replay of old calls found that some now get a refusal or a smaller result, and that text-only mentions and nested children no longer come back in page mode.
+
+A call that sends only a retired name for a required parameter (`topic_name`, `concept_name`, `topic_a`) is refused with `Invalid parameter 'page': missing`. A `logseq_find_blocks` call that sends `query`, or `property_key` with `property_value`, has no filter and is refused as such.
+
+**Tools.** Every v1 tool and what replaces it:
+
+| v1 tool | v2 replacement |
+|---|---|
+| `logseq_get_page` | `logseq_get_page` (`page_name` is now `page`; `include_children: true` is `detail: "full"`) |
+| `logseq_get_page_outline` | `logseq_get_page` with `detail: "outline"` |
+| `logseq_get_block` | `logseq_get_block` (`block_uuid` is now `uuid`) |
+| `logseq_get_current_context` | `logseq_get_current` (renamed, no parameters) |
+| `logseq_get_graph_info` | `logseq_get_graph` (renamed, no parameters) |
+| `logseq_list_pages` | `logseq_find_pages` (`name_contains` is now `text`; adds `names`, `property` and `value`) |
+| `logseq_search_blocks` | `logseq_find_blocks` with `text` |
+| `logseq_query_by_property` | `logseq_find_blocks` with `property` and `value` |
+| `logseq_search_by_relationship`, `references` | `logseq_find_blocks` with `page` (topic A) and `links_to` (topic B, up to 5 pages) |
+| `logseq_search_by_relationship`, `connected-within` | `logseq_explore_network` with `to` (the path between the pages, not their blocks) |
+| `logseq_search_by_relationship`, `referenced-by` and `in-pages-linking-to` | Dropped (see below) |
+| `logseq_build_context` | `logseq_explore_context` |
+| `logseq_get_backlinks` | `logseq_explore_context` with `max_blocks: 0` and `max_related_pages: 0` |
+| `logseq_get_context_for_query` | Dropped. Call `logseq_explore_context` once per page (in parallel for several), and `logseq_find_blocks` for keywords |
+| `logseq_get_concept_network` | `logseq_explore_network` |
+| `logseq_get_concept_evolution` | `logseq_explore_timeline` with `page` |
+| `logseq_query_by_date_range` | `logseq_explore_timeline` with a period |
+| `logseq_check_links` | `logseq_check_links` (unchanged) |
+
+**Parameters.** Every renamed or removed parameter. A parameter that is not listed is unchanged. The only aliases are `name` and `page_name` for `page` (on `get_page`, `explore_context` and `explore_network`) and `block_uuid` for `uuid` (on `get_block`). There are no `topic`, `concept` or `property_name` aliases, and the find tools and `explore_timeline` take none, since nothing is required on them.
+
+| v1 tool and parameter | v2 tool and parameter |
+|---|---|
+| `get_page` `page_name` | `get_page` `page` |
+| `get_page` `include_children` | `get_page` `detail: "full"` (`detail` is `page`, the default, `full` or `outline`) |
+| `get_page_outline` `page_name` | `get_page` `page` with `detail: "outline"` |
+| `get_page_outline` `format` (`json`, `toon`) | `get_page` `format` with `detail: "outline"` (`toon` only for the outline, `markdown` only for `page` and `full`; a mismatch is an `InvalidParameter`, and so is `resolve_refs` with the outline) |
+| `get_block` `block_uuid` | `get_block` `uuid` |
+| `list_pages` `name_contains` | `find_pages` `text` |
+| `search_blocks` `query` | `find_blocks` `text` |
+| `query_by_property` `property_key` | `find_blocks` `property` |
+| `query_by_property` `property_value` | `find_blocks` `value` |
+| `search_by_relationship` `topic_a` | `find_blocks` `page` (for `references`), or `explore_network` `page` (for `connected-within`) |
+| `search_by_relationship` `topic_b` | `find_blocks` `links_to` (a list of 1 to 5 pages), or `explore_network` `to` |
+| `search_by_relationship` `relationship_type` | Gone. The mode is the tool |
+| `search_by_relationship` `max_distance` | `explore_network` `max_depth` (at most 3 with `to`; v1 had no cap) |
+| `search_by_relationship` `limit` | `find_blocks` `limit` (default 100, v1 was 50), or gone with `explore_network` `to` |
+| `build_context` `topic_name` | `explore_context` `page` |
+| `get_backlinks` `page_name` | `explore_context` `page` |
+| `get_backlinks` `max_pages` and `max_blocks_per_page` | `explore_context` `max_references` and `references_offset` (`max_pages: P, max_blocks_per_page: B` is about `max_references: P*B`; the ranking keeps a page's blocks together, so a page-by-page cap has no exact equal) |
+| `get_context_for_query` `query`, `max_topics`, `max_search_results` | Gone with the tool |
+| `get_concept_network` `concept_name` | `explore_network` `page` |
+| `get_concept_evolution` `concept_name` | `explore_timeline` `page` |
+| `get_concept_evolution` `max_entries` | `explore_timeline` `max_blocks` (default 200, v1 was 100; nested blocks count) |
+| `get_concept_evolution` `start_date` or `end_date` alone | `explore_timeline` needs both, or `last_n`, or `preset`. A lone bound, or a bound of 0, is refused |
+| `query_by_date_range` `search_term` | `find_blocks` `text` with the same period, or `explore_timeline` `page` |
+
+**Behaviour changes in parameters that kept their name.**
+
+- `last_n` (on `explore_timeline` and `find_blocks`) is the last N calendar days ending today, in no call of its own. In v1 `query_by_date_range` took the N most recent journals that exist. A daily journal sees no difference; a journal with gaps returns fewer than N days. Presets and explicit dates are unchanged.
+- With a `page` and a period, `explore_timeline` leaves out blocks on non-journal pages, which have no day in the period. With a `page` and no period they come last, in an entry with `date: null`.
+- `find_blocks` with an empty `text` and no other filter is refused (v1 `search_blocks` with `query: ""` matched every block). Beside another filter an empty `text` is ignored. Whitespace is text.
+- `explore_network` with `to` refuses `max_nodes`, `max_fanout`, `expand_journals` and `with_snippets` instead of ignoring them.
+
+**Dropped capabilities.**
+
+- **Multi-topic context.** `get_context_for_query` is gone, with its topic extraction from a question, `max_topics` and `max_search_results`. Make one `explore_context` call per page (they run in parallel and give smaller answers), and use `find_blocks` with `text` for keywords.
+- **The `referenced-by` and `in-pages-linking-to` modes** of `search_by_relationship`. Nothing replaces them.
+- **The blocks of two pages in one call** (`connected-within`). `explore_network` with `to` returns the path as nodes and edges. For the blocks, call `explore_context` or `find_blocks` with `page` and `links_to`.
+- **Page-by-page backlink caps** (`max_pages`, `max_blocks_per_page`): see the parameter table.
+- **The whole-word match of a page's other alias names** that `search_term` did on a page name. `explore_timeline` with `page` matches blocks that link the page under any alias.
+
+**Result shape changes.**
+
+- **Character budget (new on every list tool).** `explore_context`, `explore_network`, `explore_timeline`, `find_blocks`, `find_pages`, `get_page` (`full` and `outline`), `get_block` with `include_children`, `get_current` and `check_links` (its resolved refs only) cut their main list from the tail, whole entries only, to at most 30,000 characters (ADR-0011), after the count caps. The cut is a `result_size_truncated` warning, and `hasMore` is true where a call can read on (the warning names the call). A result under the budget is unchanged. v1 results of 50,000 to 110,000 characters, which a host may save to a file instead of showing, are now cut. There is no parameter to raise the budget.
+- **`find_pages`.** When `names` is sent the result gains a `names` key, first: one entry per name in the order sent, `{ name, page }`, or `page: null` with `suggestions` (closest names) or `candidates` (several pages declare the alias). Names are answered over every non-journal page, whatever the other filters keep. A name matches by exact name or alias only: an ISO date or a namespace leaf, which `get_page` resolves, answers `null` here.
+- **`find_blocks`, from `query_by_property`.** Blocks and pages carry LogSeq's own key spelling (`created-at`, `properties-order`, `original-name`) where v1 camelCased them (`createdAt`, `propertiesOrder`, `originalName`). Results are newest first by block id (v1 was page id, then block id, ascending). The warning `property_query_unavailable` is now `search_unavailable`.
+- **`find_blocks`, from `search_by_relationship` `references`.** Blocks are slim by default and newest first (v1 kept LogSeq's order), with `totals.matches` and a `resolvedFrom` list, and no `query` or `relationshipType` echo.
+- **`explore_context`, from `build_context`.** The result key `topic` is `page`. The references are the same set, now ranked most-linking source page first, and paged with `references_offset`.
+- **`explore_context`, from `get_backlinks`.** The result is no longer a bare `[page, blocks]` array with a trailing `meta` block. `references` is a flat list of `{ block, sourcePage }` (the blocks of one page sit together), and `hasMore`, `warnings` and `totals` come first. `max_blocks: 0` leaves the blocks out of the result, but the page's blocks are still read.
+- **`explore_network`, from `get_concept_network`.** The first result key `concept` is `page`. The `network_truncated` advice is worded differently, and offers a raise of `max_nodes` or `max_fanout` only when the raised network is estimated to fit the budget. A page that links more than 30 pages (a roll-up page) is a leaf that ranks after every other page, as journals do, and is named in a `hub_pages_not_expanded` warning; `expand_journals` now covers both.
+- **`explore_network` with `to`, from `search_by_relationship` `connected-within`.** The result is the path: `{ page, to, resolvedFrom?, resolvedAliases?, hops?, hasMore, warnings, nodes, edges }`, with `nodes` in path order and `depth` 0 to `hops`. `resolvedFrom` and `resolvedAliases` are keyed `page` and `to`, not `topicA` and `topicB`. Warnings: `same_topic` is `same_page`, `hop_unavailable` is `links_unavailable`, `page_blocks_unavailable` is gone, `frontier_truncated` is kept, and `no_path_within` is new (a miss was an empty `results`).
+- **`explore_timeline`, from `query_by_date_range`.** `dateRange`, `entries`, `summary` (`totalDays`, `totalBlocks`, `topConcepts`), `totals`, `hasMore` and `warnings` are as they were, with the key order of BR-0013. `summary.searchTerm` and the `search_term` alias warnings are gone.
+- **`explore_timeline`, from `get_concept_evolution`.** `concept` is `page`. `timeline[{ date, blocks }]` is `entries` (the same days, now with `pageName`; the blocks on non-journal pages are an entry with `date: null`, last). `groupedTimeline` is gone: `group_by` week or month makes the entries `{ period, blocks }` instead of adding a copy of every block. `summary.totalMentions` is `summary.totalBlocks`, `journalMentions` is the dated entries, `nonJournalMentions` is the `date: null` entry's blocks, and `summary.dateRange { earliest, latest }` is the top-level `dateRange { start, end }`. `totals.mentions` is `totals.blocks`, and `entries_truncated` is `blocks_truncated`. Blocks are slim by default (BR-0012); `slim_results: false` returns full entities as before. `summary.topConcepts` is new for a page: it counts the pages that the blocks linking to it also link, not the links inside the page's own blocks.
+
+### Added
+
+- **`logseq_find_pages`** takes `names` (1 to 50 exact names or aliases, each answered with its page or `null` plus the closest names) and `property` with `value` (a page property). Both ride on the one `getAllPages` call.
+- **`logseq_find_blocks`** takes `page` (the blocks on a page and its aliases), `links_to` (blocks that link every one of 1 to 5 pages), a period (`start_date` with `end_date`, `last_n` or `preset`) and `offset`. The filters AND in one query, and a cut result names the `offset` that reads on.
+- **`logseq_explore_network`** takes `to` (the shortest link path to a second page) and `with_snippets` (the first line of one linking block on each edge of the root).
+- **`logseq_explore_context`** takes `references_offset`.
+- **`logseq_explore_timeline`** takes `page` with or without a period, and `group_by` for both.
+- **Four tool types.** `get` (you name it), `find` (criteria in, hits out), `explore` (what it is, how it connects, how it changed) and `check` (before writing). Parameter names come from one vocabulary that guard tests hold.
 
 ### Changed
 
+- The server instructions route by the four types, with one line for each second-brain question. The prompts and the guide resource name the v2 tools.
+- The `logseq-skills` skills are rewritten for v2: a reference for each tool type with JSON examples that a guard test checks against the recorded tool list, and second-brain recipes.
 - The README documents the `uvx logseq-mcp-server` install. The 1.0.0 wheels (macOS arm64 and x86_64, Linux x86_64) are on PyPI and carry the same binary as the GitHub Release. There is no Windows or Linux arm64 wheel (ADR-0036).
+- The tool-list size budget (`TOOL_LIST_BUDGET_CHARS`) is lowered to the measured size of the 10 tools plus about 15% (ADR-0016).
+
+### Removed
+
+- The tools that were merged or renamed into the v2 tools: see the table above. Nothing keeps the v1 names.
 
 ## [1.0.0] - 2026-10-09
 
@@ -81,5 +188,5 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - The unused `node-fetch` dependency. The client uses the global `fetch`.
 
-[Unreleased]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...HEAD
+[2.0.0]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/eborden/logseq-mcp-server/releases/tag/v1.0.0
