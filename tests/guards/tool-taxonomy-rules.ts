@@ -85,6 +85,8 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
     'cursor',
   ],
   logseq_explore_network: ['page', 'to', 'max_depth', 'max_nodes', 'max_fanout', 'expand_journals', 'with_snippets', 'format'],
+  // ADR-0038 adds `cursor` to `explore_timeline`: its blocks across the days are read to the end with it, and `max_blocks`
+  // is the page size (#554). `page` and the period stay, optional beside a cursor.
   logseq_explore_timeline: [
     'page',
     ...PERIOD,
@@ -94,6 +96,7 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
     'include_content',
     'slim_results',
     'resolve_refs',
+    'cursor',
   ],
   logseq_check_links: ['before', 'after'],
 };
