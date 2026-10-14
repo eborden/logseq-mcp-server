@@ -40,37 +40,31 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Explore one page: its blocks, related pages and references (blocks linking to it, most-linking pages first; page with references_offset).\n\n**Use when:** researching a topic with a page, or what links to it.\n**Can't find:** topics with no page (logseq_find_blocks), or anything past the caps (hasMore).\n**Alternatives:** logseq_get_page (content only), logseq_explore_network (structure only).",
+    "description": "Explore one page: its blocks, related pages and references (blocks linking to it, most-linking pages first). max_* are page sizes; hasMore: send only cursor=nextCursor.\n\n**Use when:** researching a topic with a page, or what links to it.\n**Can't find:** topics with no page (logseq_find_blocks).\n**Alternatives:** logseq_get_page (content only), logseq_explore_network (structure only).",
     "inputSchema": {
       "type": "object",
       "properties": {
         "page": {
-          "description": "Page to explore (name, alias or ISO date)",
+          "description": "Page to explore (name, alias or ISO date). Required unless cursor is given",
           "type": "string"
         },
         "max_blocks": {
-          "description": "Maximum number of blocks to include (default: 50)",
+          "description": "Blocks per page (default: 50)",
           "default": 50,
           "type": "integer",
           "minimum": 0
         },
         "max_related_pages": {
-          "description": "Maximum number of related pages to include (default: 10)",
+          "description": "Related pages per page (default: 10)",
           "default": 10,
           "type": "integer",
           "minimum": 0
         },
         "max_references": {
-          "description": "Maximum number of reference blocks to include (default: 20)",
+          "description": "Reference blocks per page (default: 20)",
           "default": 20,
           "type": "integer",
           "minimum": 0
-        },
-        "references_offset": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 0,
-          "description": "Reference blocks to skip, most-linking pages first (default: 0)"
         },
         "include_temporal_context": {
           "description": "Include temporal context for journal pages (default: true)",
@@ -94,11 +88,12 @@
           "description": "Block snippets and uuids, no bodies. Read one with logseq_get_block",
           "default": false,
           "type": "boolean"
+        },
+        "cursor": {
+          "type": "string",
+          "description": "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)"
         }
-      },
-      "required": [
-        "page"
-      ]
+      }
     }
   },
   {
