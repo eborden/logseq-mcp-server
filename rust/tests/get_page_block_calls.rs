@@ -455,7 +455,7 @@ async fn an_outline_of_a_page_with_no_blocks_is_an_empty_list_and_an_unreadable_
 }
 
 #[tokio::test]
-async fn an_outline_cut_at_the_cap_says_how_to_read_the_rest_with_the_v2_parameters() {
+async fn an_outline_cut_at_the_cap_says_how_to_read_the_rest_with_the_cursor() {
     let mut rows: Vec<Value> = Vec::new();
     for i in 0..201 {
         rows.push(outline_block(1000 + i, 10, if i == 0 { 10 } else { 1000 + i - 1 }, "entry"));
@@ -464,9 +464,11 @@ async fn an_outline_cut_at_the_cap_says_how_to_read_the_rest_with_the_v2_paramet
     let result = get_page::call(&client(&logseq), false, &Snapshots::new(1), arguments(json!({"page": "bob", "detail": "outline"}))).await.unwrap();
     let value: Value = serde_json::from_str(&text_of(&result, 0)).unwrap();
     assert_eq!(value["blocks"].as_array().unwrap().len(), 200);
-    assert_eq!(value["hasMore"], json!(false));
+    assert_eq!(value["hasMore"], json!(true));
+    assert!(value["nextCursor"].is_string());
+    assert_eq!(value["totals"]["blocks"], json!(201));
     assert_eq!(value["warnings"][0]["code"], "outline_truncated");
-    assert!(value["warnings"][0]["message"].as_str().unwrap().ends_with("so it does not read the rest."));
+    assert_eq!(value["warnings"][0]["howToFetchAll"], "Pass nextCursor as cursor, with no other argument, to read the next page.");
 }
 
 #[tokio::test]
