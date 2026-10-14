@@ -220,6 +220,10 @@ async function main() {
     const paged: Paged[] = [
       { tool: 'logseq_find_blocks', label: 'find_blocks (500', args: { text: subject.slice(0, 1), limit: 500 }, cursorOf: cursorIn(1, (value) => value?.meta?.nextCursor) },
       { tool: 'logseq_find_pages', label: 'find_pages (100', args: { limit: 100 }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      // #552: the two tree reads, on the fixture's long page and its first section (`tests/fixtures/README.md`, "A long page").
+      // On another graph the page is not found: an error, no cursor, and the line says so.
+      { tool: 'logseq_get_page', label: 'get_page full (quartz log', args: { page: 'quartz log', detail: 'full' }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      { tool: 'logseq_get_block', label: 'get_block children (part 1', args: { uuid: '0088f1a0-0000-4000-8000-000000000b01', include_children: true }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
     ];
     const another = await startRustServer(choice.rustBinary, config, true);
     try {
