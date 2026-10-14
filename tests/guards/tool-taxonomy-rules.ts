@@ -53,9 +53,6 @@ export const V1_PARAMETER_NAMES = [
 /** The period of ADR-0037 ("Period"): exactly one of `start_date` with `end_date`, `last_n` or `preset`. Shared by `find_blocks` and `explore_timeline`. */
 const PERIOD = ['start_date', 'end_date', 'last_n', 'preset'];
 
-/** `limit` and `offset` page the main list of every `find` tool (ADR-0037, "One parameter vocabulary"). */
-const PAGING = ['limit', 'offset'];
-
 /**
  * The positive list of ADR-0037 (#519): the parameters each tool may advertise, from the "One parameter vocabulary" and
  * "The v2 surface" table of the ADR. A name is tied to the tools the table gives it, so a shared name on a tool the table
@@ -67,10 +64,10 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
   logseq_get_block: ['uuid', 'include_children', 'resolve_refs', 'format'],
   logseq_get_current: [],
   logseq_get_graph: [],
-  logseq_find_pages: ['text', 'names', 'property', 'value', ...PAGING, 'format'],
-  // ADR-0038 (one forward-only cursor for paging) takes `offset` off `find_blocks` and adds `cursor`: ADR-0037 can't carry
-  // a pointer, so its `limit` and `offset` vocabulary stays as written, and each paged tool moves to `limit` (the page
-  // size) and `cursor` in its own step (#528). `find_pages` and `explore_context` still page by `offset`.
+  // ADR-0038 (one forward-only cursor for paging) takes `offset` off `find_blocks` and `find_pages` and adds `cursor`:
+  // ADR-0037 can't carry a pointer, so its `limit` and `offset` vocabulary stays as written, and each paged tool moves to
+  // `limit` (the page size) and `cursor` in its own step (#528). `explore_context` still pages by `references_offset`.
+  logseq_find_pages: ['text', 'names', 'property', 'value', 'limit', 'format', 'cursor'],
   logseq_find_blocks: ['text', 'page', 'links_to', 'property', 'value', ...PERIOD, 'limit', 'include_context', 'slim_results', 'cursor'],
   // `include_temporal_context` is the one toggle kept as today (#493). The ADR-0037 row says "its caps", read loosely to cover it (maintainer, #519).
   logseq_explore_context: [
