@@ -338,6 +338,19 @@ async fn a_list_exactly_at_the_page_size_has_no_cursor_and_one_more_block_has() 
 }
 
 #[tokio::test]
+async fn a_page_size_of_zero_shows_nothing_has_no_cursor_and_offers_the_raise_alone() {
+    let (held, _) = four_days();
+    let logseq = logseq_holding(&held).await;
+    let page = call(&logseq, &snapshots(), with(period(), json!({"max_blocks": 0}))).await.unwrap();
+    assert_eq!(block_count(&page), 0);
+    assert!(page.get("nextCursor").is_none(), "a cursor that does not move reads nothing on");
+    // the raise is a way to fetch, but it is no cursor, so hasMore stays false
+    assert_eq!(page["hasMore"], false);
+    assert_eq!(page["warnings"][0]["howToFetchAll"], "Set max_blocks above 0 to read blocks.");
+    assert_eq!(page["summary"]["totalBlocks"], 240);
+}
+
+#[tokio::test]
 async fn a_block_over_the_budget_is_returned_alone_and_the_cursor_moves_past_it() {
     let mut day = flat_day(20250101, 1000, 3, 10);
     day.blocks[0].length = 40_000;
