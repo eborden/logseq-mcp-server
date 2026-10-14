@@ -207,6 +207,18 @@ async function main(): Promise<void> {
       return Array.isArray(hits) && hits.length > 0 ? undefined : 'no hits on the next page';
     });
 
+    // ADR-0038 (#551): the same for the page list, whose nextCursor is in its one object
+    await check('tools/call logseq_find_pages (the cursor reads the next page)', async () => {
+      const first = (await mcp.callTool({ name: 'logseq_find_pages', arguments: { limit: 3 } })) as { isError?: boolean; content?: Content };
+      const page = JSON.parse(first.content?.[0]?.text ?? 'null') as { hasMore?: boolean; nextCursor?: string } | null;
+      if (!page?.nextCursor || page.hasMore !== true) return 'no nextCursor on a cut result';
+      const next = (await mcp.callTool({ name: 'logseq_find_pages', arguments: { cursor: page.nextCursor } })) as { isError?: boolean; content?: Content };
+      const problem = toolProblem(next);
+      if (problem) return problem;
+      const pages = (JSON.parse(next.content?.[0]?.text ?? 'null') as { pages?: unknown[] } | null)?.pages;
+      return Array.isArray(pages) && pages.length > 0 ? undefined : 'no pages on the next page';
+    });
+
     await check('resources/read logseq://page/{name}', async () => {
       const { contents } = await mcp.readResource({ uri: `logseq://page/${encodeURIComponent('project atlas')}` });
       const text = contents[0] && 'text' in contents[0] ? contents[0].text : undefined;

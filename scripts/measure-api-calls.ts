@@ -196,30 +196,42 @@ async function main() {
       console.log(`${label.padEnd(30)} calls=${String(proxy.total()).padEnd(5)} ${ms}ms${nodes}${flag}   ${byMethod}`);
     }
 
-    // ADR-0038 (#550): a search of many matches read in pages, counted in calls and bytes. Page 1 makes the search's
-    // calls. A later page with its cursor in the same server reads the snapshot page 1 kept (a hit: no call). The same
-    // cursor in a second server, which holds no snapshot, makes page 1's calls again (a miss). Bytes are the characters
-    // of the content blocks the call sent.
+    // ADR-0038 (#550, #551): a list read in pages, counted in calls and bytes. Page 1 makes the tool's calls. A later page
+    // with its cursor in the same server reads the snapshot page 1 kept (a hit: no call). The same cursor in a second
+    // server, which holds no snapshot, makes page 1's calls again (a miss). Bytes are the characters of the content
+    // blocks the call sent. `find_blocks` carries its `nextCursor` in the second content block (the meta), `find_pages`
+    // in its one object.
     const sent = (result: { content?: Array<{ text?: string }> }) => (result.content ?? []).reduce((total, block) => total + (block.text ?? '').length, 0);
-    const read = async (server: typeof rust, label: string, args: Args) => {
-      server.proxy!.reset();
-      const result = (await server.mcp.callTool({ name: 'logseq_find_blocks', arguments: args })) as { content?: Array<{ text?: string }>; isError?: boolean };
-      const byMethod = [...server.proxy!.calls.entries()].map(([m, n]) => `${m.replace('logseq.', '')}=${n}`).join(' ');
-      console.log(`${label.padEnd(30)} calls=${String(server.proxy!.total()).padEnd(5)} bytes=${sent(result)}${result.isError ? ' isError' : ''}   ${byMethod}`);
+    type Paged = { tool: string; label: string; args: Args; cursorOf: (result: { content?: Array<{ text?: string }> }) => string | undefined };
+    const cursorIn = (block: number, path: (value: any) => string | undefined) => (result: { content?: Array<{ text?: string }> }) => {
       try {
-        return (JSON.parse(result.content?.[1]?.text ?? '') as { meta?: { nextCursor?: string } }).meta?.nextCursor;
+        return path(JSON.parse(result.content?.[block]?.text ?? ''));
       } catch {
         return undefined;
       }
     };
+    const read = async (server: typeof rust, label: string, tool: string, args: Args, cursorOf: Paged['cursorOf']) => {
+      server.proxy!.reset();
+      const result = (await server.mcp.callTool({ name: tool, arguments: args })) as { content?: Array<{ text?: string }>; isError?: boolean };
+      const byMethod = [...server.proxy!.calls.entries()].map(([m, n]) => `${m.replace('logseq.', '')}=${n}`).join(' ');
+      console.log(`${label.padEnd(30)} calls=${String(server.proxy!.total()).padEnd(5)} bytes=${sent(result)}${result.isError ? ' isError' : ''}   ${byMethod}`);
+      return cursorOf(result);
+    };
+    const paged: Paged[] = [
+      { tool: 'logseq_find_blocks', label: 'find_blocks (500', args: { text: subject.slice(0, 1), limit: 500 }, cursorOf: cursorIn(1, (value) => value?.meta?.nextCursor) },
+      { tool: 'logseq_find_pages', label: 'find_pages (1000', args: { limit: 1000 }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+    ];
     const another = await startRustServer(choice.rustBinary, config, true);
     try {
-      const cursor = await read(rust, 'find_blocks (500, page 1)', { text: subject.slice(0, 1), limit: 500 });
-      if (cursor) {
-        await read(rust, 'find_blocks (cursor, a hit)', { cursor });
-        await read(another, 'find_blocks (cursor, a miss)', { cursor });
-      } else {
-        console.log('find_blocks (500, page 1)     no nextCursor: this search has no second page on this graph');
+      for (const { tool, label, args, cursorOf } of paged) {
+        const name = tool.replace('logseq_', '');
+        const cursor = await read(rust, `${label}, page 1)`, tool, args, cursorOf);
+        if (cursor) {
+          await read(rust, `${name} (cursor, a hit)`, tool, { cursor }, cursorOf);
+          await read(another, `${name} (cursor, a miss)`, tool, { cursor }, cursorOf);
+        } else {
+          console.log(`${label}, page 1)`.padEnd(30) + ' no nextCursor: this call has no second page on this graph');
+        }
       }
     } finally {
       await another.close();
