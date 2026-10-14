@@ -344,6 +344,8 @@ pub struct FooterWarning {
 pub struct FooterMeta {
     pub warnings: Vec<FooterWarning>,
     pub has_more: bool,
+    /// The cursor that reads the next page (ADR-0038), shown right after `hasMore`
+    pub next_cursor: Option<String>,
     pub tips: Vec<String>,
 }
 
@@ -367,7 +369,12 @@ impl FooterMeta {
                     .collect()
             })
             .unwrap_or_default();
-        FooterMeta { warnings, has_more: result.get("hasMore") == Some(&Value::Bool(true)), tips: tips.to_vec() }
+        FooterMeta {
+            warnings,
+            has_more: result.get("hasMore") == Some(&Value::Bool(true)),
+            next_cursor: text(result.get("nextCursor")),
+            tips: tips.to_vec(),
+        }
     }
 }
 
@@ -379,6 +386,7 @@ impl FooterMeta {
 /// Warnings:
 /// - blocks_truncated: Showing 50 of 80 blocks. Set max_blocks to 80 (or higher) to get all 80.
 /// hasMore: true
+/// nextCursor: eyJ2IjoxLCJ0b29sIjoi...
 /// Tips:
 /// - logseq_explore_context {"page":"Alice"}
 /// ```
@@ -394,6 +402,9 @@ pub fn render_footer(meta: &FooterMeta) -> String {
     }
     if meta.has_more {
         lines.push("hasMore: true".to_owned());
+    }
+    if let Some(cursor) = &meta.next_cursor {
+        lines.push(format!("nextCursor: {cursor}"));
     }
     if !meta.tips.is_empty() {
         lines.push("Tips:".to_owned());
@@ -662,11 +673,12 @@ mod tests {
         let meta = FooterMeta {
             warnings: vec![warning(Some("blocks_truncated"), "Showing 5 of 9 blocks.", Some("Set max_blocks to 9.")), warning(None, "w", None)],
             has_more: true,
+            next_cursor: Some("eyJ2IjoxfQ".to_owned()),
             tips: vec!["t".to_owned()],
         };
         assert_eq!(
             render_footer(&meta).split('\n').collect::<Vec<_>>(),
-            ["---", "Warnings:", "- blocks_truncated: Showing 5 of 9 blocks. Set max_blocks to 9.", "- w", "hasMore: true", "Tips:", "- t"]
+            ["---", "Warnings:", "- blocks_truncated: Showing 5 of 9 blocks. Set max_blocks to 9.", "- w", "hasMore: true", "nextCursor: eyJ2IjoxfQ", "Tips:", "- t"]
         );
         let tips = FooterMeta { tips: vec![r#"logseq_explore_context {"page":"Alice"}"#.to_owned()], ..Default::default() };
         assert_eq!(render_footer(&tips), "---\nTips:\n- logseq_explore_context {\"page\":\"Alice\"}");
@@ -688,7 +700,13 @@ mod tests {
         let meta = FooterMeta::of_result(&result, &["t".to_owned()]);
         assert_eq!(meta.warnings, [warning(Some("refs_truncated"), "m", Some("do it")), warning(None, "n", None)]);
         assert!(meta.has_more);
+        assert_eq!(meta.next_cursor, None);
         assert_eq!(FooterMeta::of_result(&json!({"hasMore": "true", "warnings": {}}), &[]), FooterMeta::default());
+        // the cursor that reads on is the result's own `nextCursor`; an empty one or one that is no text is none
+        let paged = json!({"hasMore": true, "nextCursor": "eyJ2IjoxfQ", "warnings": []});
+        assert_eq!(FooterMeta::of_result(&paged, &[]).next_cursor.as_deref(), Some("eyJ2IjoxfQ"));
+        assert_eq!(FooterMeta::of_result(&json!({"nextCursor": ""}), &[]).next_cursor, None);
+        assert_eq!(FooterMeta::of_result(&json!({"nextCursor": 5}), &[]).next_cursor, None);
     }
 
     fn outline_with(blocks: Value, options: OutlineOptions) -> Vec<String> {

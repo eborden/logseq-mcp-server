@@ -1,7 +1,8 @@
 //! `ResultMeta`: how a result says it was cut or partial (BR-0006), and the structured result an
 //! ambiguous page name returns.
 //!
-//! Key order is part of the output (ADR-0009): `hasMore`, `warnings`, then `totals`.
+//! Key order is part of the output (ADR-0009, BR-0013): `hasMore`, `nextCursor` when there is one, `warnings`, then
+//! `totals`.
 
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -14,7 +15,8 @@ use crate::tool::result_value;
 pub struct ResultWarning {
     pub code: String,
     pub message: String,
-    /// A way to get the rest. Its presence is what makes `hasMore` true.
+    /// A way to get the rest. Its presence is what makes `hasMore` true, except for a tool that pages with the cursor,
+    /// where `hasMore` is whether `nextCursor` is there (it leads this text, and a cap raise may follow it).
     #[serde(rename = "howToFetchAll", skip_serializing_if = "Option::is_none")]
     pub how_to_fetch_all: Option<String>,
 }
@@ -25,24 +27,38 @@ impl ResultWarning {
     }
 }
 
-/// `hasMore` is derived from the warnings, true when any of them offers a way
-/// to fetch the rest, so it can't be set without one.
+/// What a result says about being complete. For a tool that pages with the cursor ([`ResultMeta::paged`], ADR-0038),
+/// `hasMore` is true exactly when `nextCursor` is there. For a tool that has not moved to it yet
+/// ([`ResultMeta::new`]), `hasMore` is derived from the warnings, true when any of them offers a way to fetch the rest,
+/// so it can't be set without one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResultMeta {
     #[serde(rename = "hasMore")]
     pub has_more: bool,
+    /// The cursor that reads the next page: there exactly when `has_more` is true and the tool pages with it, and
+    /// absent on the last page (ADR-0038)
+    #[serde(rename = "nextCursor", skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
     pub warnings: Vec<ResultWarning>,
     /// Counts of what there was in total, by name
     pub totals: Map<String, Value>,
 }
 
 impl ResultMeta {
+    /// The meta of a tool that has no cursor yet: `hasMore` follows the warnings.
     pub fn new(warnings: Vec<ResultWarning>, totals: &[(&str, usize)]) -> Self {
         ResultMeta {
             has_more: warnings.iter().any(|warning| warning.how_to_fetch_all.is_some()),
+            next_cursor: None,
             warnings,
             totals: totals.iter().map(|(name, count)| ((*name).to_owned(), json!(count))).collect(),
         }
+    }
+
+    /// The meta of a page of a list read with the cursor: `hasMore` is true exactly when there is a `next_cursor`,
+    /// whatever the warnings offer (a cap raise beside the cursor never makes it true by itself).
+    pub fn paged(warnings: Vec<ResultWarning>, totals: &[(&str, usize)], next_cursor: Option<String>) -> Self {
+        ResultMeta { has_more: next_cursor.is_some(), next_cursor, ..ResultMeta::new(warnings, totals) }
     }
 }
 
@@ -92,6 +108,27 @@ mod tests {
             serde_json::to_string(&plain).unwrap(),
             r#"{"hasMore":false,"warnings":[{"code":"a","message":"m"}],"totals":{"blocks":4}}"#
         );
+    }
+
+    #[test]
+    fn a_paged_meta_has_more_exactly_when_it_has_a_cursor_whatever_the_warnings_offer() {
+        let raise = || ResultWarning { how_to_fetch_all: Some("Set limit to 9.".into()), ..ResultWarning::new("results_truncated", "m".into()) };
+        // a raise on offer and no cursor: nothing reads on, so `hasMore` is false
+        let none = ResultMeta::paged(vec![raise()], &[("matches", 9)], None);
+        assert!(!none.has_more && none.next_cursor.is_none());
+        assert_eq!(
+            serde_json::to_string(&none).unwrap(),
+            r#"{"hasMore":false,"warnings":[{"code":"results_truncated","message":"m","howToFetchAll":"Set limit to 9."}],"totals":{"matches":9}}"#
+        );
+        // a cursor and no warning at all: `hasMore` is true
+        let some = ResultMeta::paged(vec![], &[("matches", 9)], Some("abc".into()));
+        assert!(some.has_more);
+        // `nextCursor` comes right after `hasMore`, before the warnings and the totals (BR-0013)
+        assert_eq!(serde_json::to_string(&some).unwrap(), r#"{"hasMore":true,"nextCursor":"abc","warnings":[],"totals":{"matches":9}}"#);
+        // the meta of a tool with no cursor keeps deriving `hasMore` from its warnings and never writes the key
+        let legacy = ResultMeta::new(vec![raise()], &[]);
+        assert!(legacy.has_more);
+        assert!(!serde_json::to_string(&legacy).unwrap().contains("nextCursor"));
     }
 
     #[test]

@@ -92,7 +92,7 @@ fn cut_outline(outline: &PageOutline, kept: usize, oversize: bool) -> PageOutlin
     let has_more = warnings.iter().any(|warning| warning.how_to_fetch_all.is_some());
     PageOutline {
         blocks: outline.blocks[..kept].to_vec(),
-        meta: ResultMeta { has_more, warnings, totals: outline.meta.totals.clone() },
+        meta: ResultMeta { has_more, next_cursor: None, warnings, totals: outline.meta.totals.clone() },
         ..outline.clone()
     }
 }
