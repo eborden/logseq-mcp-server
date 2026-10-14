@@ -196,7 +196,7 @@ describe('result caps (#61)', () => {
     });
   });
 
-  describe('logseq_find_pages limit and offset (default 200, max 1000)', () => {
+  describe('logseq_find_pages limit and cursor (default 200, max 1000)', () => {
     interface ListBody extends Partial<Meta> {
       pages: Array<{ name: string; aliases?: string[] }>;
       total: number;
@@ -209,7 +209,7 @@ describe('result caps (#61)', () => {
     /** Same names in the same order. Compared as a boolean so a failure prints no page names. */
     const same = (a: ListBody['pages'], b: ListBody['pages']) => JSON.stringify(a) === JSON.stringify(b);
 
-    it('cuts at the default, clamps to the maximum, and pages through every page with offset', { timeout: 120_000 }, async () => {
+    it('cuts at the default, clamps to the maximum, and reads every page once with the cursor', { timeout: 120_000 }, async () => {
       const first = await list({});
       expect(first.warnings?.map(w => w.code) ?? [], 'a page list is available').not.toContain('pages_unavailable');
       expect(
@@ -218,11 +218,15 @@ describe('result caps (#61)', () => {
           'so the cap was never tested. Use a graph with more pages; see tests/integration/setup.md'
       ).toBeGreaterThan(DEFAULT_FIND_PAGES_LIMIT);
 
-      // The default: 200 pages, the cut reported, and the next offset named
+      // The default: 200 pages, the cut reported, and the cursor leading (ADR-0038) with the raise beside it
       expect(first.pages.length).toBe(DEFAULT_FIND_PAGES_LIMIT);
       expect(first.hasMore).toBe(true);
+      expect(first.nextCursor).toEqual(expect.any(String));
       expect(first.warnings!.map(w => w.code)).toEqual(['pages_truncated']);
-      expect(first.warnings![0].howToFetchAll).toContain(`offset to ${DEFAULT_FIND_PAGES_LIMIT} for the next page`);
+      expect(first.warnings![0].message).toBe(`Showing 1-${DEFAULT_FIND_PAGES_LIMIT} of ${first.total} pages.`);
+      expect(first.warnings![0].howToFetchAll).toBe(
+        `Pass nextCursor as cursor, with no other argument, to read the next page. Or set limit to ${Math.min(first.total, MAX_FIND_PAGES_LIMIT)} for a larger page (a result holds at most 30000 characters).`
+      );
       expectNoSuggestionPast(first as Meta, 'limit', MAX_FIND_PAGES_LIMIT);
 
       // At and above the maximum: never more than 1000, and the same pages either way
@@ -233,33 +237,54 @@ describe('result caps (#61)', () => {
         expect(body.total, `${label}: total counts every page`).toBe(first.total);
         if (first.total > MAX_FIND_PAGES_LIMIT) {
           expectNoSuggestionPast(body as Meta, 'limit', MAX_FIND_PAGES_LIMIT);
-          // Cut at the maximum: the next offset still fetches the rest
+          // Cut at the maximum: the cursor still reads the rest
           expect(body.hasMore, label).toBe(true);
-          expect(body.warnings![0].message, label).toContain(`maximum of ${MAX_FIND_PAGES_LIMIT}`);
-          expect(body.warnings![0].howToFetchAll, label).toBe(`Set offset to ${MAX_FIND_PAGES_LIMIT} for the next page.`);
+          expect(body.nextCursor, label).toEqual(expect.any(String));
         } else {
           expect(body.hasMore, label).toBeUndefined();
+          expect(body.nextCursor, label).toBeUndefined();
           expect(body.warnings, label).toBeUndefined();
         }
       }
       expect(same(above.pages, atMax.pages), 'limit 5000 returns the pages limit 1000 does').toBe(true);
       expect(same(first.pages, atMax.pages.slice(0, DEFAULT_FIND_PAGES_LIMIT)), 'the default page is the first 200').toBe(true);
 
-      // Following each warning's offset visits every page once, and the last page has no warning
-      const seen: string[] = [];
-      let offset = 0;
-      for (let calls = 0; calls < 50; calls++) {
-        const body = await list({ limit: MAX_FIND_PAGES_LIMIT, offset });
-        expect(body.total, `offset ${offset}: total counts every page`).toBe(first.total);
+      // Following each nextCursor visits every page once, in name order, and the last page has no cursor and no warning
+      const seen: string[] = [...first.pages.map(page => page.name)];
+      let body = first;
+      let pages = 1;
+      while (body.nextCursor) {
+        expect(body.hasMore).toBe(true);
+        body = await list({ cursor: body.nextCursor });
+        expect(body.total, `page ${pages + 1}: total counts every page`).toBe(first.total);
         seen.push(...body.pages.map(page => page.name));
-        if (!body.hasMore) {
-          expect(body.warnings, `offset ${offset}: the last page has no warning`).toBeUndefined();
-          break;
-        }
-        offset = Number(body.warnings![0].howToFetchAll!.match(/Set offset to (\d+) for the next page/)![1]);
+        pages += 1;
+        expect(pages, 'a cursor that never ends').toBeLessThan(50);
       }
+      expect(body.hasMore, 'the last page is whole').toBeUndefined();
+      expect(body.warnings, 'the last page has no warning').toBeUndefined();
+      expect(pages).toBeGreaterThan(1);
       expect(seen.length, 'paging returns every page').toBe(first.total);
       expect(new Set(seen).size, 'paging returns no page twice').toBe(first.total);
+      expect(same(seen.slice(0, atMax.pages.length).map(name => ({ name })), atMax.pages.map(page => ({ name: page.name }))), 'the cursor reads the same list limit 1000 does').toBe(true);
+    });
+
+    it('refuses a cursor beside another argument, and a token that is not one, before reading the graph', async () => {
+      const first = await list({});
+      const refused = async (args: Record<string, unknown>) => {
+        const result = (await mcp.callTool({ name: 'logseq_find_pages', arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
+        return { isError: result.isError === true, text: result.content[0].text };
+      };
+      for (const other of [{ text: 'a' }, { limit: 5 }, { names: ['alice'] }, { format: 'json' }]) {
+        const result = await refused({ cursor: first.nextCursor, ...other });
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain('left out when cursor is given');
+      }
+      for (const cursor of ['not a cursor', '', first.nextCursor!.slice(0, 10)]) {
+        const result = await refused({ cursor });
+        expect(result.isError, JSON.stringify(cursor)).toBe(true);
+        expect(result.text).toContain("Invalid parameter 'cursor'");
+      }
     });
   });
 

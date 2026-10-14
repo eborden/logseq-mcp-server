@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { findPages } from './helpers/tools.js';
+import { findPages, findPagesNext } from './helpers/tools.js';
 import type { FindPagesResult } from './helpers/types.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
 import { InvalidParameterError } from './helpers/errors.js';
@@ -174,16 +174,24 @@ describe('logseq_find_pages names and page properties, against the fixture graph
       ]);
     });
 
-    it('AND with text, and limit and offset page the pages and never the names', async () => {
+    it('AND with text, and limit and the cursor page the pages and never the names', async () => {
       const text = await findPages(client, { text: 'cascade', property: 'type', value: 'project' });
       expect(names(text)).toEqual(['project cascade']);
 
-      const page = await findPages(client, { names: ['alice', 'bob', 'carol', 'dave'], limit: 1, offset: 1 });
-      expect(names(page)).toEqual(['Bob']);
+      const page = await findPages(client, { names: ['alice', 'bob', 'carol', 'dave'], limit: 1 });
+      expect(names(page)).toEqual(['Alice']);
       expect(page.total).toBe(3);
       expect(page.hasMore).toBe(true);
+      expect(page.nextCursor).toEqual(expect.any(String));
       expect(page.warnings?.map(warning => warning.code)).toEqual(['pages_truncated']);
       expect(page.names).toHaveLength(4);
+
+      // the pages after the first read on from the token, which holds the names: they are answered once, on page 1
+      const next = await findPagesNext(client, page.nextCursor);
+      expect(names(next)).toEqual(['Bob']);
+      expect(next.total).toBe(3);
+      expect(next.names).toBeUndefined();
+      expect(next.hasMore).toBe(true);
     });
   });
 });

@@ -267,7 +267,6 @@ export async function findPages(
     property?: string;
     value?: string | number | boolean;
     limit?: number;
-    offset?: number;
   }
 ): Promise<Json> {
   return (
@@ -277,9 +276,16 @@ export async function findPages(
       property: options?.property,
       value: options?.value,
       limit: options?.limit,
-      offset: options?.offset,
     })
   ).value;
+}
+
+/**
+ * The next page of a `logseq_find_pages` result (ADR-0038): a call with the `nextCursor` of the page before and no other
+ * argument. `others` is for a test that sends one beside it, which the tool refuses.
+ */
+export async function findPagesNext(client: LogseqClient, cursor: string, others: Record<string, unknown> = {}): Promise<Json> {
+  return (await callTool(client, 'logseq_find_pages', { cursor, ...others })).value;
 }
 
 export async function checkLinks(client: LogseqClient, before: string, after: string): Promise<Json> {
