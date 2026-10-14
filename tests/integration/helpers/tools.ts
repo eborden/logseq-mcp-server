@@ -194,7 +194,6 @@ export interface ExploreOptions {
   maxBlocks?: number;
   maxRelatedPages?: number;
   maxReferences?: number;
-  referencesOffset?: number;
   includeTemporalContext?: boolean;
   resolveRefs?: boolean;
 }
@@ -206,11 +205,18 @@ export async function exploreContext(client: LogseqClient, page: string, options
       max_blocks: options?.maxBlocks,
       max_related_pages: options?.maxRelatedPages,
       max_references: options?.maxReferences,
-      references_offset: options?.referencesOffset,
       include_temporal_context: options?.includeTemporalContext,
       resolve_refs: options?.resolveRefs,
     })
   ).value;
+}
+
+/**
+ * The next page of a `logseq_explore_context` result (ADR-0038): a call with the `nextCursor` of the page before and no
+ * other argument. `others` is for a test that sends one beside it, which the tool refuses.
+ */
+export async function exploreContextNext(client: LogseqClient, cursor: string, others: Record<string, unknown> = {}): Promise<Json> {
+  return (await callTool(client, 'logseq_explore_context', { cursor, ...others })).value;
 }
 
 export interface TimelineQuery {
