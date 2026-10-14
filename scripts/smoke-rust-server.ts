@@ -263,6 +263,17 @@ async function main(): Promise<void> {
       if (problem) return problem;
       const page = JSON.parse(next.content?.[0]?.text ?? 'null') as { references?: unknown[] } | null;
       return Array.isArray(page?.references) && page.references.length > 0 ? undefined : 'no references on the next page';
+
+    // ADR-0038 (#556): the walk of a page read in pages of 5, whose nextCursor is in its one object
+    await check('tools/call logseq_explore_network (the cursor reads the next pages)', async () => {
+      const first = (await mcp.callTool({ name: 'logseq_explore_network', arguments: { page: 'hub central', max_depth: 2, max_nodes: 5 } })) as { isError?: boolean; content?: Content };
+      const walk = JSON.parse(first.content?.[0]?.text ?? 'null') as { hasMore?: boolean; nextCursor?: string } | null;
+      if (!walk?.nextCursor || walk.hasMore !== true) return 'no nextCursor on a cut walk';
+      const next = (await mcp.callTool({ name: 'logseq_explore_network', arguments: { cursor: walk.nextCursor } })) as { isError?: boolean; content?: Content };
+      const problem = toolProblem(next);
+      if (problem) return problem;
+      const nodes = (JSON.parse(next.content?.[0]?.text ?? 'null') as { nodes?: unknown[] } | null)?.nodes;
+      return Array.isArray(nodes) && nodes.length > 0 ? undefined : 'no pages on the next page';
     });
 
     await check('resources/read logseq://page/{name}', async () => {
