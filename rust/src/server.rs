@@ -26,9 +26,8 @@ use crate::tools;
 /// The server name `serverInfo` reports.
 pub const SERVER_NAME: &str = "logseq-mcp-server";
 
-/// The package's `version` in `Cargo.toml`, 1.0.0, as the first release of the server was. Cargo owns it
-/// now; `tests/rust-guards/version.test.ts` keeps it equal to package.json and the plugin manifest until
-/// #355 changes how the server ships.
+/// The package's `version` in `Cargo.toml`. Cargo owns it; `tests/rust-guards/version.test.ts` keeps it equal to
+/// package.json and the plugin manifest.
 pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Clone)]
