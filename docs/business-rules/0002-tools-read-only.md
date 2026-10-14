@@ -4,7 +4,7 @@
 
 Every tool is declared read-only (`readOnlyHint: true`) and never writes to the graph. Keep each tool's other hints accurate. Most are idempotent, but `logseq_get_current` reads the live editor state and is declared `idempotentHint: false`. Adding a tool that writes to the graph is a contract change that needs the maintainer's sign-off.
 
-Every tool call can be repeated safely. The result depends only on LogSeq's state: the graph, or, for `logseq_get_current`, what is open in the editor. The server keeps no hidden progress and no cursor state, and it never writes. If a tool needs paging, it uses explicit parameters (`limit` and `offset`) or an opaque cursor token that carries everything the next page needs ([ADR-0038 (one-forward-only-cursor-for-paging)](../adr/0038-one-forward-only-cursor-for-paging.md)), rather than a server-side cursor.
+Every tool call can be repeated safely. The result depends only on LogSeq's state: the graph, or, for `logseq_get_current`, what is open in the editor. The server keeps no hidden progress and no cursor state, and it never writes. If a tool needs paging, it uses an opaque cursor token that carries everything the next page needs ([ADR-0038 (one-forward-only-cursor-for-paging)](../adr/0038-one-forward-only-cursor-for-paging.md)), rather than a server-side cursor.
 
 ## Rationale
 
