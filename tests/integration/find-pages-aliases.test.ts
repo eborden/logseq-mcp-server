@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { LogseqClient } from '../../scripts/lib/logseq-api.js';
-import { findPages } from './helpers/tools.js';
+import { findPages, findPagesNext } from './helpers/tools.js';
 import { MAX_FIND_PAGES_LIMIT } from './helpers/caps.js';
 import type { FindPagesResult, PageEntity } from './helpers/types.js';
 import { connectFixture, recordCalls } from './helpers/fixture-client.js';
@@ -96,15 +96,18 @@ describe('logseq_find_pages nests aliases (#171), against the fixture graph', ()
     });
   });
 
-  it('limit takes pages, not aliases, and offset continues at the next page', async () => {
+  it('limit takes pages, not aliases, and the cursor continues at the next page', async () => {
     const start = names(all).indexOf('project atlas');
-    const window = await findPages(client, { limit: 1, offset: start });
+    const window = await findPages(client, { limit: start + 1 });
 
-    expect(window.pages).toEqual([{ name: 'project atlas', aliases: ['atlas'] }]);
+    // the page that ends the window is the one with an alias: the alias used no slot of the limit
+    expect(window.pages).toHaveLength(start + 1);
+    expect(window.pages[start]).toEqual({ name: 'project atlas', aliases: ['atlas'] });
     expect(window.total).toBe(all.total);
     expect(window.hasMore).toBe(true);
+    expect(window.nextCursor).toEqual(expect.any(String));
     expect(window.warnings?.map(warning => warning.code)).toEqual(['pages_truncated']);
-    expect((await findPages(client, { limit: 1, offset: start + 1 })).pages[0]).toEqual(all.pages[start + 1]);
+    expect((await findPagesNext(client, window.nextCursor)).pages[0]).toEqual(all.pages[start + 1]);
   });
 
   it('makes one API call, with or without a filter', async () => {

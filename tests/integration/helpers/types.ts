@@ -70,5 +70,6 @@ export interface FindPagesResult {
   pages: Array<{ name: string; aliases?: string[] }>;
   total: number;
   hasMore?: boolean;
+  nextCursor?: string;
   warnings?: Array<{ code: string; message: string; howToFetchAll?: string; [key: string]: Json }>;
 }
