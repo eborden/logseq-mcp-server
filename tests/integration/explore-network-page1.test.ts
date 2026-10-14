@@ -38,7 +38,8 @@ describe('explore_network: the first page is the result the capped walk gave', (
       }
       // Cut to the budget: a prefix of the old pages, at most a few fewer, with the edges among the pages it holds
       expect(got.nodes).toEqual(want.nodes.slice(0, got.nodes.length));
-      expect(want.nodes.length - got.nodes.length).toBeLessThanOrEqual(3);
+      // exactly the page its own cursor and warning take: a regression in the length accounting would show here
+      expect(want.nodes.length - got.nodes.length).toBe(1);
       const kept = new Set(got.nodes.map(([node]) => node));
       expect(got.edges).toEqual(want.edges.filter(([from, to]) => kept.has(from) && kept.has(to)));
     });
