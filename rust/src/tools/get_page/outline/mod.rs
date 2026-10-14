@@ -83,7 +83,7 @@ pub async fn outline_result(client: &LogseqClient, read: Read<'_>) -> Result<Cal
         None => None,
         Some(resume) => match &resume.cursor.anchor {
             Anchor::Text(uuid) => Some(uuid.as_str()),
-            Anchor::Id(_) => return Err(resume.refuse(super::NAME, "this is not a cursor of the outline: its last block is not a uuid").into()),
+            Anchor::Id(_) | Anchor::Sections(_) => return Err(resume.refuse(super::NAME, "this is not a cursor of the outline: its last block is not a uuid").into()),
         },
     };
     let served = serve(snapshots, resume.map(|resume| &resume.cursor.snapshot), stored, now, || listing_of(client, page)).await?;
