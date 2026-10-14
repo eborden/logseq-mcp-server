@@ -56,6 +56,46 @@ pub async fn mock_logseq(answers: Vec<Value>) -> MockLogseq {
     MockLogseq { api_url, seen }
 }
 
+/// A LogSeq that answers each request with `answer(request)`, however many there are, and records them. For a test that
+/// makes more calls than it wants to count in advance, or whose answer depends on what is asked. It stops with the test.
+pub async fn mock_logseq_answering(answer: impl Fn(&Value) -> Value + Send + 'static) -> MockLogseq {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_url = format!("http://{}", listener.local_addr().unwrap());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&seen);
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let body = loop {
+                let mut chunk = [0u8; 8192];
+                let n = socket.read(&mut chunk).await.unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let length = head
+                        .lines()
+                        .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ").map(str::to_owned))
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                        .unwrap_or(0);
+                    if body.len() >= length {
+                        break body.to_owned();
+                    }
+                }
+            };
+            let request: Value = serde_json::from_str(&body).unwrap();
+            let reply = answer(&request).to_string();
+            recorded.lock().unwrap().push(request);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    MockLogseq { api_url, seen }
+}
+
 pub fn client(logseq: &MockLogseq) -> LogseqClient {
     LogseqClient::new(&Config { api_url: logseq.api_url.clone(), auth_token: "t".into(), timeout_ms: Some(5000), tips: None })
 }
