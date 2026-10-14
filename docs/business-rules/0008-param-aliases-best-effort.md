@@ -15,6 +15,7 @@ test: `tests/guards/tool-list.test.ts`
 test: `rust/tests/parity.rs`
 test: `rust/tests/get_page_block_cursor_calls.rs` (`get_page` and `get_block`, the first tools with a required canonical name that take a `cursor`: a call with neither the name nor a `cursor` is refused before any call, `{cursor, <alias>}` is refused on the alias-folded arguments, and an alias alone is a call that works)
 test: `rust/tests/context_cursor_calls.rs` (`explore_context`, another tool with a required canonical name that takes a `cursor`: a call with neither the name nor a `cursor` is refused before any call, and `{cursor, <alias>}` is refused on the alias-folded arguments)
+test: `rust/tests/network_cursor_calls.rs` (`explore_network`, whose `page` is optional beside a `cursor` too: a call with neither is refused before any call, `{cursor, name}` is refused on the alias-folded arguments, and an alias alone is a call that works)
 
 Tests pin that a conflicting alias and canonical value is refused, that the alias is folded into the canonical name, and `tests/guards/tool-list.test.ts` asserts that the recorded `tools/list` (which the parity test, `rust/tests/parity.rs`, holds the server to) keeps the canonical name `required` for every aliased tool and advertises no alias, checking its table of aliases against the `ALIASES` constants in `rust/src/tools`.
 

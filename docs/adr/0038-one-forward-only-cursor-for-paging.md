@@ -110,4 +110,6 @@ Date: 2026-10-13
 - test: `rust/src/snapshots.rs` (the cache's bounds in count, bytes and age, and that it serves only the arguments it was built from)
 - test: `rust/tests/find_blocks_cursor_calls.rs` (a hit costs 0 calls, a miss costs page 1's calls, a stale anchor says `cursor_stale`, a cut list is read to the end, and a bad token or a cursor beside another argument is refused before any call; `find_blocks` is the first tool on the cursor, #550)
 - test: `tests/guards/tool-taxonomy-rules.ts` (`ALLOWED_PARAMETERS` gives `find_blocks` a `cursor` and no `offset`; each tool's migration edits its own entry, so this guard is the `test:` for "no `offset`" tool by tool)
-- none-yet: #556 (the `explore_network` page 1 pin, written before its walk changes; the migrations of `find_pages`, the trees, `explore_timeline` and `explore_context`, #551 to #555, each add the cursor tests of their own tool)
+- test: `rust/tests/network_cursor_calls.rs` (`explore_network` without `to`, #556: the walk runs to 500 pages and `max_nodes` is the page size; a hit costs 0 calls, a miss page 1's calls, a stale anchor says `cursor_stale`, a walk several times the budget is read to the end with every page and edge once, and a bad token or a cursor beside another argument is refused before any call)
+- test: `tests/integration/explore-network-page1.test.ts` (page 1 of the walk equals the capped walk's nodes, depths and edges on the hub fixture, written before the walk changed)
+- none-yet: #553 (the migration of the page outline adds the cursor tests of its own tool)
