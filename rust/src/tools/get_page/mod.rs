@@ -24,15 +24,23 @@
 //! `format` and `resolve_refs` each fit only some `detail`s (`check_combination`): an outline takes `json` or
 //! `toon` and no `resolve_refs`, a page or a full page takes `json` or `markdown`.
 //!
-//! A full page has no count cap, so [`call`] cuts it to the character budget (#507, #485): its blocks, nested ones
-//! counted, in page order, until the text it sends is at most `BUDGET_CHARS`. A block is never cut inside its text
-//! (BR-0007), and a kept block that lost children says so with `childrenTruncated`. No parameter pages a page, so
-//! the `result_size_truncated` warning has no `howToFetchAll`; it names the outline and `logseq_get_block`. A page
-//! under the budget, and a `page` or `outline` result, are as they were.
+//! A full page has no count cap, so [`call`] cuts it to the character budget (#507, #485) and reads the rest with a
+//! cursor (ADR-0038, #552): its blocks, nested ones counted, in page order, until the text it sends is at most
+//! `BUDGET_CHARS`. A block is never cut inside its text (BR-0007), and a kept block that lost children says so with
+//! `childrenTruncated`. A cut page carries `nextCursor` and a `result_size_truncated` warning whose `howToFetchAll` says
+//! to pass it, and the page after it, read from the snapshot the first call kept (no LogSeq call) or, when the snapshot
+//! is gone, with the calls the first page made, starts at the next block. A page that starts inside a subtree names
+//! the blocks it sits under (`ancestors`, `crate::tree_paging`). A page under the budget, and a `page` or `outline`
+//! result, are as they were.
+//!
+//! A call with a `cursor` takes no other argument, and `page` is optional in the schema for that reason (BR-0008): the
+//! handler refuses a call with neither.
 
 pub mod outline;
 mod tips;
 pub mod wire;
+
+use std::time::Instant;
 
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, Tool};
 use schemars::JsonSchema;
@@ -46,24 +54,22 @@ use crate::js;
 use crate::markdown::{FooterMeta, PageRenderOptions, render_page, with_footer};
 use crate::meta::ResultWarning;
 use crate::output_format::ListFormat;
+use crate::paging::refuse_with_cursor;
 use crate::params::{ParamAliases, resolve_param_aliases};
 use crate::resolve::{ResolvedPage, require_page};
 use crate::resolve_refs::{resolve_block_refs, with_meta};
+use crate::snapshots::Snapshots;
 use crate::tips::tips_content;
-use crate::tool::{input_schema, read_only_annotations, success_result};
+use crate::tool::{CursorSchema, input_schema, read_only_annotations, success_result};
+use crate::tree_paging::{Resume, Root, Spec, Tree, read};
 
-use crate::block_budget::{Budget, count_blocks, take_blocks};
-use crate::budget::{Fit, fit, size};
-use crate::resolve_refs::push_warning;
-use crate::truncation::{SizeCut, size_truncation_warning};
-
-use self::outline::{MAX_OUTLINE_BLOCKS, outline_result};
+use self::outline::outline_result;
 use self::tips::page_tips;
 
 pub const NAME: &str = "logseq_get_page";
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n\
+const DESCRIPTION: &str = "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks; hasMore: send only cursor=nextCursor) or outline (top-level blocks: uuid, first line, child count).\n\n\
 **Use when:** you know the page name.\n\
 **Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages).\n\
 **Alternatives:** logseq_explore_context adds related pages and what links here.";
@@ -95,7 +101,7 @@ pub enum PageFormat {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Args {
     /// Page name, alias, or ISO date (2025-01-01) for a journal
-    pub page: String,
+    pub page: Option<String>,
     /// page (default): the page itself. full: adds its blocks, nested. outline: top-level blocks as uuid, first line and child count
     pub detail: Option<Detail>,
     /// Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2). Not for outline
@@ -103,6 +109,9 @@ pub struct Args {
     pub resolve_refs: bool,
     /// json (default). markdown for page and full, toon for outline
     pub format: Option<PageFormat>,
+    // No doc comment: the shared description is the type's (`CursorSchema`), and a doc comment would replace it
+    #[schemars(with = "Option<CursorSchema>")]
+    pub cursor: Option<String>,
 }
 
 /// The tool as `tools/list` shows it.
@@ -112,23 +121,68 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Get Page"))
 }
 
+/// What a cursor stands for once its arguments are read: a call that reads the blocks of a page.
+fn paged_args(token: &Resume) -> Result<Args, InvalidParameter> {
+    let args = parse_args::<Args>(Some(&token.cursor.args)).ok().filter(|args| args.cursor.is_none() && args.page.is_some() && args.detail == Some(Detail::Full));
+    args.filter(|args| check_combination(Detail::Full, args.format, args.resolve_refs).is_ok())
+        .ok_or_else(|| token.refuse(NAME, "its arguments are not a read of the blocks of a page"))
+}
+
+/// The arguments of a full page as a cursor carries them: what the call asked, read again by [`Args`].
+fn stored_arguments(args: &Args, page: &str) -> Map<String, Value> {
+    let mut stored = Map::new();
+    stored.insert("page".into(), json!(page));
+    stored.insert("detail".into(), json!("full"));
+    if args.resolve_refs {
+        stored.insert("resolve_refs".into(), json!(true));
+    }
+    match args.format {
+        Some(PageFormat::Json) => stored.insert("format".into(), json!("json")),
+        Some(PageFormat::Markdown) => stored.insert("format".into(), json!("markdown")),
+        Some(PageFormat::Toon) | None => None,
+    };
+    stored
+}
+
+/// The refusal of a call with neither a page nor a cursor, before any LogSeq call (BR-0008).
+fn needs_page() -> ToolError {
+    ToolError::InvalidParameter(InvalidParameter {
+        param: "page".to_owned(),
+        value: "missing".to_owned(),
+        expected: "a string (required unless cursor is given)".to_owned(),
+        example: Some("page: \"...\"".to_owned()),
+    })
+}
+
 /// A call: aliases folded, arguments read, the combination of `detail`, `format` and `resolve_refs` checked before
 /// any LogSeq call, then the page, then its tips.
-pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
+///
+/// A call with a `cursor` takes no other argument (they are in the token, ADR-0038), and is refused as such on the
+/// arguments after the aliases are folded, so `{ cursor, name }` is not a cursor alone (BR-0008). It reads the next
+/// page of the blocks of a full page. A call with neither `page` nor `cursor` is refused here, not by the schema.
+pub async fn call(client: &LogseqClient, tips_enabled: bool, snapshots: &Snapshots, arguments: Option<JsonObject>) -> Result<CallToolResult, ToolError> {
     let arguments = resolve_param_aliases(ALIASES, arguments)?;
-    let args = parse_args::<Args>(arguments.as_ref())?;
+    let asked = parse_args::<Args>(arguments.as_ref())?;
+    let (args, resume) = match asked.cursor.clone() {
+        Some(token) => {
+            refuse_with_cursor::<Args>(arguments.as_ref())?;
+            let resume = Resume::read(&token, NAME)?;
+            (paged_args(&resume)?, Some(resume))
+        }
+        None => (asked, None),
+    };
+    let Some(page_name) = args.page.as_deref() else { return Err(needs_page()) };
     let detail = args.detail.unwrap_or(Detail::Page);
     check_combination(detail, args.format, args.resolve_refs)?;
     if detail == Detail::Outline {
         let format = (args.format == Some(PageFormat::Toon)).then_some(ListFormat::Toon);
-        return outline_result(client, tips_enabled, &args.page, format).await;
+        return outline_result(client, tips_enabled, page_name, format).await;
     }
     let full = detail == Detail::Full;
-    let page = get_page(client, &args.page, full, args.resolve_refs).await?;
-    let tips = if tips_enabled { page_tips(&page, &args.page, full) } else { Vec::new() };
-    // The text the call sends, which the character budget measures (#507): the page, then its tips
+    // The text the call sends for a page, which the character budget measures (#507): the page, then its tips
     let markdown = args.format == Some(PageFormat::Markdown);
     let texts = |page: &Value| -> Vec<String> {
+        let tips = if tips_enabled { page_tips(page, page_name, full) } else { Vec::new() };
         if markdown {
             let body = render_page(page, PageRenderOptions { blocks_fetched: full, ..Default::default() });
             return vec![with_footer(body, &FooterMeta::of_result(page, &tips))];
@@ -137,49 +191,17 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, arguments: Option<J
         texts.extend(tips_content(&tips));
         texts
     };
-    let page = if full { fit_to_budget(page, &texts, markdown) } else { page };
-    Ok(success_result(texts(&page).into_iter().map(ContentBlock::text).collect()))
-}
-
-/// The page as it is when its text fits the character budget (#507, #485), else with the first blocks that do, nested
-/// ones counted, in page order. A block is never cut inside its text (BR-0007), so a first block over the budget
-/// comes back alone, and the warning says so.
-fn fit_to_budget(page: Value, texts: &impl Fn(&Value) -> Vec<String>, markdown: bool) -> Value {
-    let total = page.get("children").and_then(Value::as_array).map_or(0, |blocks| count_blocks(blocks));
-    let size_of = |kept: usize| -> usize {
-        let sent = if kept < total { cut_page(&page, kept, total, false, markdown) } else { page.clone() };
-        texts(&sent).iter().map(|text| size(text)).sum()
-    };
-    match fit(total, 1, size_of) {
-        Fit::Whole => page,
-        Fit::Cut { kept, oversize } => cut_page(&page, kept, total, oversize, markdown),
+    if !full {
+        let page = get_page(client, page_name, false, args.resolve_refs).await?;
+        return Ok(success_result(texts(&page).into_iter().map(ContentBlock::text).collect()));
     }
-}
-
-/// The page cut to its first `kept` blocks of `total` (nested ones counted, in page order), with the
-/// `result_size_truncated` warning and `hasMore` worked out again. Every key keeps its place, and `hasMore` and
-/// `warnings` come last when the page had none.
-fn cut_page(page: &Value, kept: usize, total: usize, oversize: bool, markdown: bool) -> Value {
-    let Value::Object(fields) = page else { return page.clone() };
-    let blocks = fields.get("children").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
-    let mut budget = Budget::new(kept);
-    let first = take_blocks(blocks, &mut budget);
-    let mut cut = fields.clone();
-    cut.insert("children".into(), Value::Array(first));
-    // Markdown writes no marker for a block that lost children, so it names none
-    let lost = if markdown { "the last blocks kept may have lost some of their children" } else { "a kept block marked childrenTruncated lost some of its children" };
-    let warning = size_truncation_warning(SizeCut {
-        what: "blocks of the page (nested ones counted, in page order)",
-        kept,
-        total,
-        oversize,
-        advice: &format!(
-            "The last blocks are left out, and {lost}. A page can't be paged and no parameter raises this limit: \
-             list its top-level blocks with detail \"outline\" (at most {MAX_OUTLINE_BLOCKS}), then read one with logseq_get_block and include_children."
-        ),
-        how_to_fetch_all: None,
-    });
-    Value::Object(push_warning(cut, &warning))
+    // A full page is cut to the budget and read to the end with the cursor. The token carries the arguments, so a
+    // snapshot is served only to a call that asks for the page it was built from
+    let stored = resume.as_ref().map_or_else(|| stored_arguments(&args, page_name), |resume| resume.cursor.args.clone());
+    let spec = Spec { tool: NAME, root: Root::Page, markdown };
+    let build = || async { Ok::<_, ToolError>(Tree::new(Root::Page, get_page(client, page_name, true, args.resolve_refs).await?)) };
+    let sent = read(snapshots, resume.as_ref(), &stored, &spec, Instant::now(), build, &texts).await?;
+    Ok(success_result(sent.into_iter().map(ContentBlock::text).collect()))
 }
 
 /// Refuses what `detail` can't take, naming what it can. The outline has no block bodies to resolve, so
@@ -313,8 +335,8 @@ mod tests {
                 "detail": {"type": "string", "enum": ["page", "full", "outline"], "description": "page (default): the page itself. full: adds its blocks, nested. outline: top-level blocks as uuid, first line and child count"},
                 "resolve_refs": {"type": "boolean", "default": false, "description": "Add resolvedContent/resolvedRefs for ((uuid)) refs and {{embed}}s (depth 2). Not for outline"},
                 "format": {"type": "string", "enum": ["json", "markdown", "toon"], "description": "json (default). markdown for page and full, toon for outline"},
+                "cursor": {"type": "string", "description": crate::tool::CURSOR_DESCRIPTION},
             },
-            "required": ["page"],
         });
         assert_eq!(meaning(&schema_of::<Args>()), meaning(&pinned));
     }
@@ -343,15 +365,15 @@ mod tests {
         for alias in ["name", "page_name"] {
             let folded = resolve_param_aliases(ALIASES, args(json!({alias: "Atlas", "resolve_refs": true}))).unwrap();
             let read = parse_args::<Args>(folded.as_ref()).unwrap();
-            assert_eq!((read.page.as_str(), read.detail, read.resolve_refs), ("Atlas", None, true), "{alias}");
+            assert_eq!((read.page.as_deref(), read.detail, read.resolve_refs), (Some("Atlas"), None, true), "{alias}");
         }
         // the first bad argument in schema order is the one reported
         let error = parse_args::<Args>(args(json!({"page": "a", "detail": "all", "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'detail': \"all\""), "{error}");
         let error = parse_args::<Args>(args(json!({"page": "a", "detail": "full", "format": "xml"})).as_ref()).unwrap_err();
         assert!(error.to_string().starts_with("Invalid parameter 'format': \"xml\""), "{error}");
-        let error = parse_args::<Args>(args(json!({"detail": "full"})).as_ref()).unwrap_err();
-        assert!(error.to_string().starts_with("Invalid parameter 'page': missing"), "{error}");
+        // `page` is optional in the schema, so a call without it parses: the handler refuses it (BR-0008)
+        assert_eq!(parse_args::<Args>(args(json!({"detail": "full"})).as_ref()).unwrap().page, None);
         // the v1 parameter is gone: it is ignored, as every unknown argument is, and the page comes without its blocks
         let read = parse_args::<Args>(args(json!({"page": "a", "include_children": true})).as_ref()).unwrap();
         assert_eq!(read.detail, None);
@@ -361,10 +383,11 @@ mod tests {
     fn every_argument_takes_what_it_says_and_nothing_else() {
         use crate::args::testing::{Takes, sweep};
         let base = json!({"page": "Atlas"});
-        sweep::<Args>(json!({}), "page", Takes::Text, true);
+        sweep::<Args>(json!({}), "page", Takes::Text, false);
         sweep::<Args>(base.clone(), "detail", Takes::Words(&["page", "full", "outline"]), false);
         sweep::<Args>(base.clone(), "resolve_refs", Takes::Flag, false);
-        sweep::<Args>(base, "format", Takes::Words(&["json", "markdown", "toon"]), false);
+        sweep::<Args>(base.clone(), "format", Takes::Words(&["json", "markdown", "toon"]), false);
+        sweep::<Args>(base, "cursor", Takes::Text, false);
     }
 
     #[test]
@@ -404,75 +427,61 @@ mod tests {
         assert!(both.starts_with("Invalid parameter 'resolve_refs'"), "{both}");
     }
 
-    /// A page whose blocks are `count` top-level ones of `length` characters, each with one child of the same length.
-    fn page_of(count: usize, length: usize) -> Value {
-        let block = |n: usize| {
-            json!({"uuid": format!("u{n}"), "content": "x".repeat(length), "children": [{"uuid": format!("c{n}"), "content": "y".repeat(length), "children": []}]})
-        };
-        json!({"id": 1, "originalName": "Atlas", "children": (0..count).map(block).collect::<Vec<_>>()})
-    }
-
-    fn json_text(page: &Value) -> Vec<String> {
-        vec![page.to_string()]
+    #[test]
+    fn a_call_with_neither_a_page_nor_a_cursor_is_refused_with_the_missing_page_named() {
+        let error = needs_page().to_string();
+        assert_eq!(error, "Invalid parameter 'page': missing\n\nExpected: a string (required unless cursor is given)\nExample: page: \"...\"");
     }
 
     #[test]
-    fn a_full_page_at_the_budget_is_untouched_and_one_character_over_is_cut() {
-        use crate::budget::BUDGET_CHARS;
-        // pad the content of the last block so that the page's text is exactly the budget
-        let mut page = page_of(10, 100);
-        let base = size(&page.to_string());
-        page["children"][9]["content"] = json!("x".repeat(100 + BUDGET_CHARS - base));
-        assert_eq!(size(&page.to_string()), BUDGET_CHARS);
-        assert_eq!(fit_to_budget(page.clone(), &json_text, false), page);
-        page["children"][9]["content"] = json!("x".repeat(100 + BUDGET_CHARS - base + 1));
-        let cut = fit_to_budget(page.clone(), &json_text, false);
-        assert_ne!(cut, page);
-        assert!(size(&cut.to_string()) <= BUDGET_CHARS);
+    fn a_cursor_with_an_alias_of_the_page_is_not_a_cursor_alone() {
+        // BR-0008: the aliases are folded first, so `{ cursor, name }` is `{ cursor, page }` and the page can't change
+        for alias in ["name", "page_name"] {
+            let args = json!({"cursor": "abc", alias: "Atlas"}).as_object().cloned();
+            let folded = resolve_param_aliases(ALIASES, args).unwrap();
+            let error = refuse_with_cursor::<Args>(folded.as_ref()).unwrap_err();
+            assert_eq!((error.param.as_str(), error.value.as_str()), ("page", "\"Atlas\""), "{alias}");
+        }
+        let alone = resolve_param_aliases(ALIASES, json!({"cursor": "abc"}).as_object().cloned()).unwrap();
+        assert!(refuse_with_cursor::<Args>(alone.as_ref()).is_ok());
+    }
+
+    fn resume_with(args: Value) -> Resume {
+        use crate::cursor::{Anchor, Cursor, Position, SnapshotKey, encode};
+        let cursor = Cursor::new(NAME, args.as_object().cloned().unwrap(), Position::Index { at: 3 }, Anchor::Text("u".into()), SnapshotKey { started: 1, n: 1 });
+        Resume::read(&encode(&cursor), NAME).unwrap()
     }
 
     #[test]
-    fn a_cut_keeps_the_first_blocks_in_page_order_and_marks_the_last_one_that_lost_children() {
-        let page = page_of(40, 1000);
-        let cut = fit_to_budget(page.clone(), &json_text, false);
-        assert!(size(&cut.to_string()) <= crate::budget::BUDGET_CHARS);
-        let blocks = cut["children"].as_array().unwrap();
-        // 80 blocks with their children, ~2,000 characters per top-level block: about 14 fit
-        assert!(blocks.len() > 5 && blocks.len() < 40, "{}", blocks.len());
-        assert_eq!(blocks[0], page["children"][0]);
-        // one more block would not fit, and the warning counts nested blocks
-        let kept = count_blocks(blocks);
-        assert!(size(&cut_page(&page, kept + 1, 80, false, false).to_string()) > crate::budget::BUDGET_CHARS);
-        let warning = &cut["warnings"][0];
-        assert_eq!(warning["code"], "result_size_truncated");
-        assert!(warning["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 80 blocks of the page (nested ones counted, in page order)")));
-        assert_eq!(cut["hasMore"], false);
-        let keys: Vec<&String> = cut.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["id", "originalName", "children", "hasMore", "warnings"]);
+    fn a_cursor_stands_only_for_the_blocks_of_a_full_page_and_its_arguments_read_as_a_call_does() {
+        let full = json!({"page": "Atlas", "detail": "full", "resolve_refs": true, "format": "markdown"});
+        let args = paged_args(&resume_with(full)).unwrap();
+        assert_eq!((args.page.as_deref(), args.detail, args.resolve_refs, args.format), (Some("Atlas"), Some(Detail::Full), true, Some(PageFormat::Markdown)));
+        // not a full page, no page, a format the page doesn't take, a cursor inside the cursor
+        for args in [
+            json!({"page": "Atlas"}),
+            json!({"page": "Atlas", "detail": "outline"}),
+            json!({"detail": "full"}),
+            json!({"page": "Atlas", "detail": "full", "format": "toon"}),
+            json!({"page": "Atlas", "detail": "full", "cursor": "abc"}),
+            json!({"page": 5, "detail": "full"}),
+        ] {
+            let error = paged_args(&resume_with(args.clone())).err().unwrap_or_else(|| panic!("{args}"));
+            assert_eq!(error.param, "cursor", "{args}");
+            assert!(error.expected.contains("its arguments are not a read of the blocks of a page"), "{error}");
+        }
     }
 
     #[test]
-    fn a_cut_keeps_the_warnings_a_page_already_had_and_the_marker_of_a_block_that_lost_children() {
-        let mut page = page_of(40, 1000);
-        page["hasMore"] = json!(false);
-        page["warnings"] = json!([{"code": "ref_unresolved", "message": "m"}]);
-        let cut = fit_to_budget(page, &json_text, false);
-        let codes: Vec<&str> = cut["warnings"].as_array().unwrap().iter().map(|warning| warning["code"].as_str().unwrap()).collect();
-        assert_eq!(codes, ["ref_unresolved", "result_size_truncated"]);
-        let keys: Vec<&String> = cut.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["id", "originalName", "children", "hasMore", "warnings"]);
-        // a block is cut between its own children: with 1,000-character blocks the cut can fall between a block and its child
-        let last = cut["children"].as_array().unwrap().last().unwrap();
-        let lost = last["children"].as_array().unwrap().is_empty();
-        assert_eq!(last.get("childrenTruncated").is_some(), lost);
-    }
-
-    #[test]
-    fn a_page_with_no_blocks_or_one_block_is_never_cut() {
-        let empty = json!({"id": 1, "originalName": "Atlas"});
-        assert_eq!(fit_to_budget(empty.clone(), &json_text, false), empty);
-        let one = json!({"id": 1, "children": [{"uuid": "u", "content": "x".repeat(40_000), "children": []}]});
-        assert_eq!(fit_to_budget(one.clone(), &json_text, false), one);
+    fn the_arguments_a_cursor_carries_are_the_call_that_made_it_and_read_back_to_it() {
+        let args = parse_args::<Args>(json!({"page": " Atlas ", "detail": "full", "resolve_refs": true, "format": "markdown"}).as_object()).unwrap();
+        let stored = stored_arguments(&args, " Atlas ");
+        assert_eq!(Value::Object(stored.clone()).to_string(), r#"{"page":" Atlas ","detail":"full","resolve_refs":true,"format":"markdown"}"#);
+        let again = parse_args::<Args>(Some(&stored)).unwrap();
+        assert_eq!((again.page.as_deref(), again.detail, again.resolve_refs, again.format), (Some(" Atlas "), Some(Detail::Full), true, Some(PageFormat::Markdown)));
+        // what is the default is left out
+        let plain = parse_args::<Args>(json!({"page": "a", "detail": "full"}).as_object()).unwrap();
+        assert_eq!(Value::Object(stored_arguments(&plain, "a")).to_string(), r#"{"page":"a","detail":"full"}"#);
     }
 
     #[test]

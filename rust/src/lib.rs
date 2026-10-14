@@ -51,5 +51,6 @@ pub mod tips;
 pub mod tool;
 pub mod toon;
 pub mod tools;
+pub mod tree_paging;
 pub mod truncation;
 pub mod wire;
