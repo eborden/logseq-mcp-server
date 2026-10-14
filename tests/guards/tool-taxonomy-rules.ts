@@ -105,15 +105,6 @@ export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
- * The v1 tools that break a rule, exempt until their rename lands (#489 to #495). A rename PR deletes the entry of each
- * tool it renames or merges away, and of each tool it leaves conforming (`get_page` and `get_block` keep their names):
- * an entry whose name is gone from the recorded list, or whose tool already passes every rule, fails the guard. The
- * tools that conform (`check_links`, since #489 `get_page`, `get_block`, `get_current` and `get_graph`, since #490 `find_pages`, since #493 `explore_context`, since #494 `explore_network`, and since #495 `explore_timeline`) have no entry, so the
- * rules run on them now. The last entries went with #495, so the list is empty. The plan (#500) is done when the constant is gone.
- */
-export const V1_TOOL_ALLOWANCES: readonly string[] = [];
-
-/**
  * Every parameter name a schema advertises: the top-level `properties`, and those under the branches of `oneOf`, `anyOf`
  * and `allOf`, to any depth of composition, so a schema that nests parameters in a branch cannot skirt the rules. A
  * `properties` nested inside a property is a value's shape, not a parameter, and is not read.
