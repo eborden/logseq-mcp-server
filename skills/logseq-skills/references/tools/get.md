@@ -18,13 +18,13 @@ Get a page by name, with `detail` choosing how much of it.
 | Parameter | Type | Default | What it does |
 |-----------|------|---------|--------------|
 | `page` | string, required | | Page name (any case), an alias, or an ISO date (`2025-01-01`) for a journal. `name` and `page_name` are accepted for it, but send `page` |
-| `detail` | `page`, `full`, `outline` | `page` | `page`: the page and its properties, no blocks. `full`: adds its blocks, nested. `outline`: its top-level blocks as `{ uuid, snippet, childCount }`, no bodies |
+| `detail` | `page`, `full`, `outline` | `page` | `page`: the page and its properties, no blocks. `full`: adds its blocks, nested, under `children`. `outline`: its top-level blocks as `{ uuid, snippet, childCount }`, no bodies |
 | `resolve_refs` | boolean | false | Adds `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s, two levels deep. Refused with `detail` `outline` |
 | `format` | `json`, `markdown`, `toon` | `json` | `markdown` for `page` and `full` (plain text, about 80% smaller on a long page). `toon` for `outline` only. Any other combination is refused with an error naming the valid ones |
 
 **Use when:** you know the page name and want its content. For related pages and what links to it, use `logseq_explore_context`. For pages by keyword, `logseq_find_blocks` or `logseq_find_pages`.
 
-**Returns:** `detail` `page` and `full` give the page entity (`full` adds nested `blocks`). `detail` `outline` gives `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`: `snippet` is the first line cut to 80 characters and `childCount` counts direct children only. It costs 2 LogSeq calls however long the page is, and is about 98% smaller than `full` on a long page.
+**Returns:** `detail` `page` and `full` give the page entity. `full` adds its blocks as nested `children` (the key is absent when the page has no blocks); only `outline` calls them `blocks`. `detail` `outline` gives `{ page, blocks: [{ uuid, snippet, childCount }], hasMore, warnings, totals }`: `snippet` is the first line cut to 80 characters and `childCount` counts direct children only. It costs 2 LogSeq calls however long the page is, and is about 98% smaller than `full` on a long page.
 
 **Not found:** a missing page is an error with the closest names, so retry with one of them or use `logseq_find_pages` with `text`. A name that matches several pages comes back as `{ ambiguous: true, candidates }`: pick one by its exact name.
 
@@ -36,7 +36,7 @@ Get a page by name, with `detail` choosing how much of it.
 {"page": "project atlas", "detail": "full"}
 ```
 
-Read the nested `blocks` for the answer. If `warnings` holds `result_size_truncated`, the page was longer than the budget: the tail blocks are missing and a kept block with `childrenTruncated: true` lost children. Next call: the outline below, then `logseq_get_block` on the blocks you pick.
+Read the nested `children` for the answer (each block has its own `children`). If `warnings` holds `result_size_truncated`, the page was longer than the budget: the tail blocks are missing and a kept block with `childrenTruncated: true` lost children. Next call: the outline below, then `logseq_get_block` on the blocks you pick.
 
 **Example 2.** "What's on my long meeting notes page about the budget?" Don't read it whole.
 
