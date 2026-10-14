@@ -246,11 +246,14 @@ describe('result caps (#61)', () => {
       summary: { totalDays: number; totalBlocks: number };
     }
 
-    async function timeline(max?: number): Promise<{ text: string; body: PageBody }> {
-      const args = max === undefined ? { page: PAGE } : { page: PAGE, max_blocks: max };
+    async function timeline(max?: number, extra: Record<string, unknown> = {}, page = PAGE): Promise<{ text: string; body: PageBody }> {
+      const args = max === undefined ? { page, ...extra } : { page, max_blocks: max, ...extra };
       const text = (await call('logseq_explore_timeline', args)).content[0].text;
       return { text, body: JSON.parse(text) as PageBody };
     }
+
+    /** The warnings that name a call which reads on: what `hasMore` has to agree with (#521). */
+    const advice = (body: PageBody) => (body.warnings ?? []).filter(warning => warning.howToFetchAll !== undefined);
 
     /** Every block of the entries, nested ones counted: the unit `max_blocks` cuts in. */
     const count = (blocks: Array<{ children?: unknown[] }>): number =>
@@ -270,6 +273,11 @@ describe('result caps (#61)', () => {
       const dates = atMax.body.entries.map(entry => entry.date);
       expect(dates.slice(0, -1).every(date => date !== null)).toBe(true);
       expect(dates.at(-1)).toBeNull();
+      // Nothing is cut at the maximum on the slim default (#521): every block found is here, and there is no way on to name
+      expect(total, 'the maximum keeps every block the summary counts').toBe(atMax.body.summary.totalBlocks);
+      expect(atMax.body.warnings).toBeUndefined();
+      expect(atMax.body.totals).toBeUndefined();
+      expect(atMax.body.hasMore).toBeUndefined();
 
       // A value above the maximum is clamped to it, not rejected
       expect((await timeline(5000)).text).toBe(atMax.text);
@@ -283,7 +291,7 @@ describe('result caps (#61)', () => {
         expect(codes[0], label).toBe('blocks_truncated');
         expect(body.totals!.blocks, label).toBeGreaterThanOrEqual(total);
         // a way on is named only when a call reads on; `max_blocks` is never raised past the maximum
-        expect(body.hasMore, label).toBe(body.warnings!.some(warning => warning.howToFetchAll !== undefined));
+        expect(body.hasMore ?? false, label).toBe(advice(body).length > 0);
         expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
         for (const warning of body.warnings!) {
           expect(warning.howToFetchAll ?? '', `${label}: no search_term`).not.toContain('search_term');
@@ -292,6 +300,78 @@ describe('result caps (#61)', () => {
 
       // At the cap exactly, the count cap cuts nothing
       expect((await timeline(total)).text).toBe(atMax.text);
+    });
+
+    it('cut by the character budget at the maximum, the hub has no dated day left to read on from, so hasMore is false and nothing is named', async () => {
+      // The full output (BR-0012) is larger than the slim default, so the budget bites on the hub even at the maximum
+      const atMax = await timeline(MAX_DATE_RANGE_BLOCKS, { slim_results: false });
+      const { body } = atMax;
+      const total = body.summary.totalBlocks;
+      expect(total, 'the fixture hub holds more blocks than the budget keeps in full output. See tests/fixtures/README.md').toBeGreaterThan(100);
+      expect([...atMax.text].length, 'the budget is in characters').toBeLessThanOrEqual(30000);
+      expect(kept(body), 'the budget keeps fewer blocks than there are').toBeLessThan(total);
+      expect(kept(body), 'a cut keeps a block').toBeGreaterThan(0);
+
+      // The cut is the budget's alone: the count cap is at the maximum, which the hub is under
+      expect(body.warnings!.map(warning => warning.code)).toEqual(['result_size_truncated']);
+      expect(body.warnings![0].message).toContain(`Showing ${kept(body)} of ${total} blocks`);
+      expect(body.totals).toEqual({ blocks: total, days: body.summary.totalDays });
+
+      // Every dated day is kept whole, so what is left is the blocks on non-journal pages, which no date reaches:
+      // no call reads on, hasMore is false and no warning names one
+      const dated = body.entries.map(entry => entry.date).filter(date => date !== null);
+      expect(dated, 'every dated day is kept').toHaveLength(body.summary.totalDays);
+      expect(body.entries.at(-1)?.date, 'the cut falls among the blocks on non-journal pages').toBeNull();
+      expect(body.warnings![0].message).toContain('non-journal pages');
+      expect(advice(body)).toEqual([]);
+      expect(body.hasMore, 'hasMore is false: no parameter reads on').toBe(false);
+
+      // A value above the maximum is clamped to it, and the same cut comes back
+      expect((await timeline(5000, { slim_results: false })).text).toBe(atMax.text);
+    });
+
+    it('names a later day, never a kept one, exactly when a call reads on, and a raise at the end of the dated days', async () => {
+      // The aliased project is linked on several days, and a page with days and blocks of its own on non-journal pages
+      const ALIASED = 'project atlas';
+      const atMax = await timeline(MAX_DATE_RANGE_BLOCKS, {}, ALIASED);
+      const total = kept(atMax.body);
+      const days = atMax.body.entries.map(entry => entry.date).filter(date => date !== null);
+      expect(days.length, 'the aliased project needs mentions on at least 4 days. See tests/fixtures/README.md').toBeGreaterThanOrEqual(4);
+      expect(atMax.body.entries.at(-1)?.date, 'and blocks on non-journal pages, in the entry with no date').toBeNull();
+      expect(total, 'the fixture must stay under the maximum for this test to see every block').toBeLessThan(MAX_DATE_RANGE_BLOCKS);
+      // No cut at the maximum, so there is nothing to read on from
+      expect(atMax.body.warnings).toBeUndefined();
+      expect(atMax.body.hasMore).toBeUndefined();
+
+      for (let max = 1; max < total; max++) {
+        const { body } = await timeline(max, {}, ALIASED);
+        const label = `max_blocks ${max}`;
+        expect(body.warnings!.map(warning => warning.code), label).toEqual(['blocks_truncated']);
+        expect(body.hasMore, label).toBe(true);
+        expect(advice(body), `${label}: a way on is named`).toHaveLength(1);
+        const how = advice(body)[0].howToFetchAll!;
+        const keptDays = body.entries.map(entry => entry.date).filter((date): date is number => date !== null);
+        const named = /start_date (\d+)/.exec(how);
+        if (keptDays.length === days.length) {
+          // Every dated day is kept and the rest have no day: the way on is a raise of max_blocks, never a date
+          expect(named, `${label}: no date reaches what is left: ${how}`).toBeNull();
+          expect(how, label).toBe(`Set max_blocks to ${total} (or higher) to get all ${total}.`);
+        } else {
+          expect(named, `${label}: a date to read on from: ${how}`).not.toBeNull();
+          const day = Number(named![1]);
+          const last = keptDays[keptDays.length - 1];
+          expect(days, `${label}: the day named is a day with mentions`).toContain(day);
+          if (how.includes('repeats its kept blocks')) {
+            // Cut inside a day: the call starts at that day and says it repeats what was kept
+            expect(day, `${label}: the day cut in is the last kept day`).toBe(last);
+          } else {
+            // Cut between days: the day named is a later day than any kept, so it differs from the first kept one too
+            expect(keptDays, `${label}: the day named is not one already kept`).not.toContain(day);
+            expect(day, `${label}: the day named is after the last kept day`).toBeGreaterThan(last);
+            expect(day, `${label}: the day named is not the first kept day`).not.toBe(keptDays[0]);
+          }
+        }
+      }
     });
   });
 
