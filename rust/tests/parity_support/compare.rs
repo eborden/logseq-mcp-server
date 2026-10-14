@@ -7,7 +7,8 @@
 //! - [`same_text`] and [`same_tool_text`] are the places that decide whether two result texts match. A tool
 //!   result's JSON text (`content`) is compared by deep equality (the maintainer's decision on #371): object
 //!   key order is ignored, array order is kept, numbers compare by value, and a `nextCursor` (ADR-0038) compares by
-//!   what its token says without the snapshot it names, which differs between runs ([`same_cursor`]). Every other text is compared byte for
+//!   what its token says without the snapshot it names, which differs between runs ([`same_cursor`]); the footer line `nextCursor: <token>` of
+//!   a markdown result is compared the same way, line by line. Every other text is compared byte for
 //!   byte: a markdown result (`format: "markdown"`), a TOON result (`format: "toon"`, BR-0014), a prompt's messages, a resource read, and the frame of a
 //!   page-not-found message outside the closest names. Nothing else compares text.
 //! - [`minified_failures`] holds every JSON tool result to ADR-0009 separately, so deep equality can't let
@@ -76,8 +77,26 @@ fn json_container(text: &str) -> Option<Value> {
 pub fn same_tool_text(expected: &str, actual: &str) -> bool {
     match (json_container(expected), json_container(actual)) {
         (Some(want), Some(got)) => values_equal_in_result(&want, &got),
-        _ => same_text(expected, actual),
+        _ => same_text_with_cursor(expected, actual),
     }
+}
+
+/// The footer line of a markdown result that carries the cursor (`crate::markdown`): `nextCursor: <token>`.
+const CURSOR_LINE: &str = "nextCursor: ";
+
+/// [`same_text`], but a footer line `nextCursor: <token>` is compared by [`same_cursor`], as the `nextCursor` of a JSON
+/// result is (ADR-0038): its snapshot differs between runs. Every other line, and the order and number of lines, is
+/// compared byte for byte.
+fn same_text_with_cursor(expected: &str, actual: &str) -> bool {
+    if same_text(expected, actual) {
+        return true;
+    }
+    let (want, got): (Vec<&str>, Vec<&str>) = (expected.split('\n').collect(), actual.split('\n').collect());
+    want.len() == got.len()
+        && want.iter().zip(&got).all(|(w, g)| match (w.strip_prefix(CURSOR_LINE), g.strip_prefix(CURSOR_LINE)) {
+            (Some(want_token), Some(got_token)) => same_cursor(want_token, got_token),
+            _ => w == g,
+        })
 }
 
 /// What a cursor token says (ADR-0038), apart from the snapshot it names: the token is base64url of a JSON payload,

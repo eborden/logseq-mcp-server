@@ -255,6 +255,31 @@ fn a_next_cursor_that_says_something_else_is_a_failure_in_each_field_it_holds() 
     assert_eq!(compare_results(&recorded, &changed, &[]).len(), 1);
 }
 
+/// A markdown result whose footer carries `cursor` (what `FooterMeta` writes after `hasMore`).
+fn markdown_with(cursor: &str, warning: &str) -> Value {
+    text_result(&format!("# Atlas\n\n- a block\n\n---\nWarnings:\n- {warning}\nhasMore: true\nnextCursor: {cursor}\n"))
+}
+
+#[test]
+fn the_footer_cursor_of_a_markdown_result_is_compared_by_what_it_says_without_its_snapshot() {
+    let recorded = markdown_with(&token(&cursor_payload(json!({"started": 1_760_000_000_000_u64, "n": 1}))), "w");
+    let again = markdown_with(&token(&cursor_payload(json!({"started": 1_760_999_999_999_u64, "n": 7}))), "w");
+    assert_eq!(compare_results(&recorded, &again, &[]), Vec::<String>::new());
+    // a cursor that says something else is a failure, and so is any other line that differs
+    let mut other = cursor_payload(json!({"started": 1, "n": 1}));
+    other["position"]["at"] = json!(101);
+    assert_eq!(compare_results(&recorded, &markdown_with(&token(&other), "w"), &[]).len(), 1);
+    assert_eq!(compare_results(&recorded, &markdown_with(&token(&cursor_payload(json!({"started": 1, "n": 1}))), "x"), &[]).len(), 1);
+    // text that is no token is held to the bytes, and a line that only looks like the footer line further in is not one
+    assert_eq!(compare_results(&markdown_with("not a token", "w"), &markdown_with("not a token", "w"), &[]), Vec::<String>::new());
+    assert_eq!(compare_results(&markdown_with("not a token", "w"), &markdown_with("another", "w"), &[]).len(), 1);
+    let inline = |snapshot: Value| text_result(&format!("see nextCursor: {}\n", token(&cursor_payload(snapshot))));
+    assert_eq!(compare_results(&inline(json!({"started": 1, "n": 1})), &inline(json!({"started": 2, "n": 1})), &[]).len(), 1);
+    // an extra line is a difference, whatever the cursor says
+    let longer = text_result(&format!("{}extra\n", recorded["content"][0]["text"].as_str().unwrap()));
+    assert_eq!(compare_results(&recorded, &longer, &[]).len(), 1);
+}
+
 #[test]
 fn any_key_the_recorded_server_did_not_send_is_a_failure() {
     let result = text_result(r#"{"page":"Alice"}"#);
@@ -475,7 +500,7 @@ fn a_changed_bound_type_enum_value_required_field_or_description_fails_with_its_
         ("bound", with_schema(&tools, "logseq_check_links", |s| s["properties"]["after"]["maxLength"] = json!(50001)), "logseq_check_links.inputSchema.properties.after.maxLength: expected 50000, got 50001"),
         ("type", with_schema(&tools, "logseq_explore_context", |s| s["properties"]["max_blocks"]["type"] = json!("number")), "logseq_explore_context.inputSchema.properties.max_blocks.type: expected \"integer\", got \"number\""),
         ("enum value", with_schema(&tools, "logseq_get_block", |s| s["properties"]["format"]["enum"] = json!(["json", "md"])), "logseq_get_block.inputSchema.properties.format.enum[1]: expected \"markdown\", got \"md\""),
-        ("required field", with_schema(&tools, "logseq_explore_context", |s| s["required"] = json!([])), "logseq_explore_context.inputSchema.required: expected [\"page\"], got []"),
+        ("required field", with_schema(&tools, "logseq_check_links", |s| s["required"] = json!([])), "logseq_check_links.inputSchema.required: expected [\"after\",\"before\"], got []"),
         ("parameter description", with_schema(&tools, "logseq_explore_context", |s| {
             let text = s["properties"]["max_blocks"]["description"].as_str().unwrap().to_owned();
             s["properties"]["max_blocks"]["description"] = json!(format!("{text}!"));
@@ -565,10 +590,10 @@ fn a_property_named_format_and_a_null_on_a_required_property_still_count() {
         assert_eq!(failures.len(), 1, "{name}: {failures:?}");
         assert!(failures[0].starts_with(&format!("{name}.inputSchema.properties.format.description: expected \"")) && failures[0].ends_with(", got \"other\""), "{name}: {failures:?}");
     }
-    let nullable = with_schema(&tools, "logseq_explore_context", |s| s["properties"]["page"]["type"] = json!(["string", "null"]));
+    let nullable = with_schema(&tools, "logseq_check_links", |s| s["properties"]["after"]["type"] = json!(["string", "null"]));
     assert_eq!(
         compare_tool_lists(&tools, &nullable),
-        vec!["logseq_explore_context.inputSchema.properties.page.type: expected \"string\", got [\"string\",\"null\"]".to_owned()]
+        vec!["logseq_check_links.inputSchema.properties.after.type: expected \"string\", got [\"string\",\"null\"]".to_owned()]
     );
 }
 
