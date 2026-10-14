@@ -219,6 +219,24 @@ async function main(): Promise<void> {
       return Array.isArray(pages) && pages.length > 0 ? undefined : 'no pages on the next page';
     });
 
+    // ADR-0038 (#552): a tree larger than the budget (the fixture's `quartz log` page and its first section), whose
+    // nextCursor is in the top-level object, read on with the cursor alone. A later page of a block is its frame
+    for (const [label, first, frame] of [
+      ['logseq_get_page (the cursor reads the next blocks of a full page)', { name: 'logseq_get_page', arguments: { page: 'quartz log', detail: 'full' } }, 'children'],
+      ['logseq_get_block (the cursor reads the next children of a block)', { name: 'logseq_get_block', arguments: { uuid: '0088f1a0-0000-4000-8000-000000000b01', include_children: true } }, 'continued'],
+    ] as const) {
+      await check(`tools/call ${label}`, async () => {
+        const one = (await mcp.callTool(first)) as { isError?: boolean; content?: Content };
+        const body = JSON.parse(one.content?.[0]?.text ?? 'null') as { hasMore?: boolean; nextCursor?: string } | null;
+        if (!body?.nextCursor || body.hasMore !== true) return 'no nextCursor on a cut tree';
+        const next = (await mcp.callTool({ name: first.name, arguments: { cursor: body.nextCursor } })) as { isError?: boolean; content?: Content };
+        const problem = toolProblem(next);
+        if (problem) return problem;
+        const page = JSON.parse(next.content?.[0]?.text ?? 'null') as Record<string, unknown> | null;
+        return page && frame in page && Array.isArray(page.children) && page.children.length > 0 ? undefined : `no blocks on the next page (${frame})`;
+      });
+    }
+
     await check('resources/read logseq://page/{name}', async () => {
       const { contents } = await mcp.readResource({ uri: `logseq://page/${encodeURIComponent('project atlas')}` });
       const text = contents[0] && 'text' in contents[0] ? contents[0].text : undefined;
