@@ -19,7 +19,9 @@ test: `rust/src/truncation.rs`
 test: `rust/src/meta.rs`
 reviewer: Any new cap, limit or maximum on a tool result reports through `ResultMeta`.
 reviewer: A tool that has moved to the cursor pages every list it can cut with `cursor` and `nextCursor`.
-none-yet: #528 (the cursor core and each tool's migration add the tests: `hasMore` is true exactly when `nextCursor` is present, a cut list reads to the end by repeated calls, and a rebuilt page that finds the list changed carries `cursor_stale`)
+test: `rust/tests/find_blocks_cursor_calls.rs` (`find_blocks`, the first tool on the cursor: `hasMore` is true exactly when `nextCursor` is present, a cut list reads to the end by repeated calls, and a rebuilt page that finds the list changed carries `cursor_stale`)
+test: `rust/src/paging.rs` (the anchor check and the `cursor_stale` warning)
+none-yet: #551 (each tool after `find_blocks` moves to the cursor with the same tests of its own list, #551 to #556)
 
 ## Changelog
 
@@ -31,3 +33,4 @@ none-yet: #528 (the cursor core and each tool's migration add the tests: `hasMor
 | 2026-10-08 | Statement: the paths and helper names of the TypeScript server (`src/types.ts`, `metaContent`, `src/utils/result-meta.ts`) are the Rust crate's. The rule is unchanged. | #372 |
 | 2026-10-13 | The example of a tool with a bare array and a second `meta` block is `find_blocks`, since `get_backlinks` went (ADR-0037). Nothing else changed. | #529 |
 | 2026-10-14 | Adds the cursor paragraph decided by ADR-0038: a cut result is read to the end with `cursor` and `nextCursor`, `hasMore` is true exactly when `nextCursor` is present, and `cursor_stale` is a warning, never a silent gap. The `offset` and raise paragraphs stay what `main` does until each tool moves; the implementation lands with the cursor core task and the tool PRs (#528). | #546 |
+| 2026-10-14 | Mechanical enforcement: the cursor tests of `find_blocks`, the first tool on the cursor, replace the `none-yet: #528` line; the remaining `none-yet` points at the next tool's migration. Additive; the Statement is unchanged. | #550 |
