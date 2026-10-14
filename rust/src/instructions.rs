@@ -14,7 +14,7 @@ Types: get (you name it), find (criteria in, hits out), explore (what it is, how
 - what happened in a period, or how a page changed: logseq_explore_timeline
 - how two pages connect: logseq_explore_network with to
 - keywords, blocks linking to pages, a block property: logseq_find_blocks
-- unsure of a page name, or a page property: logseq_find_pages
+- a page name you lack, or a page property: logseq_find_pages
 - before writing links: logseq_check_links
 - a named page or block: logseq_get_page, logseq_get_block; this page: logseq_get_current; long page: logseq_get_page detail outline, then logseq_get_block
 
