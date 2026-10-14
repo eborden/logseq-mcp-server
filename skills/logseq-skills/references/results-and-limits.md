@@ -31,7 +31,7 @@ Each list pages in its own unit. Every call below keeps the other arguments the 
 | `logseq_find_blocks` | `limit` (100, 500) | `cursor` (the `nextCursor` of the result, passed alone) | newest first (highest block id, about creation order, not the journal's date) |
 | `logseq_find_pages` | `limit` (200, 1000) | `cursor` (the `nextCursor` of the result, passed alone) | A to Z by name |
 | `logseq_explore_context` | `max_blocks` (50), `max_related_pages` (10), `max_references` (20): the page size of each list | `cursor` (the `nextCursor` of the result, passed alone), which continues all three lists | blocks in page order; references ranked by how many blocks on their source page link the topic, most first, ties by page name; related pages in LogSeq's order |
-| `logseq_explore_network` | `max_nodes` (50, 500), `max_fanout` (15, 100), `max_depth` (2, 3) | a higher cap, when the warning offers one | the pages nearest the root; the deepest are cut first and the root is always kept |
+| `logseq_explore_network` | `max_nodes` (50, 500) is the size of a page of a walk that holds up to 500 pages; `max_fanout` (15, 100) and `max_depth` (2, 3) decide what is in the walk | `cursor` (the `nextCursor` of the result, passed alone). A higher `max_fanout` follows more pages from each page | the order the walk admitted the pages: by depth, then most-linked first, journals and roll-ups last at each depth; the root is always first |
 | `logseq_explore_timeline` | `max_blocks` (200, 1000), nested blocks counted | the `start_date` the warning names | oldest day first, except `last_n` with no `page`, which is newest first; with a `page`, blocks on non-journal pages come last |
 | `logseq_get_page` with `detail` `outline` | 200 top-level blocks | `cursor` (the `nextCursor` of the result, passed alone) | page order |
 | `logseq_get_page` with `detail` `full`, `logseq_get_block` with `include_children` | none, only the budget | `cursor` (the `nextCursor` of the result, passed alone) | document order, nested blocks counted |
@@ -39,21 +39,21 @@ Each list pages in its own unit. Every call below keeps the other arguments the 
 
 A larger value than a maximum is clamped, not rejected, and the warning says so. At a maximum there is no `howToFetchAll`, unless the tool pages (`cursor`, a date), in which case `hasMore` stays true.
 
-A `find_blocks`, `find_pages`, `explore_context`, `get_page` (`detail` `full`) or `get_block` cursor reads the list its first call saw for up to a minute, then reads again from the last entry it sent, and says `cursor_stale` if the list moved.
+A `find_blocks`, `find_pages`, `explore_context`, `explore_network`, `get_page` (`detail` `full`) or `get_block` cursor reads the list its first call saw for up to a minute, then reads again from the last entry it sent, and says `cursor_stale` if the list moved.
 
-When a warning offers a raise ("set `limit` to 250"), `find_blocks`, `find_pages` and `explore_context` (`max_blocks`, `max_references`, `max_related_pages`) offer it beside the cursor without measuring it, on the first page only: a raised page that is too large is cut again and carries a cursor of its own. The `explore_timeline` (`max_blocks`) and `explore_network` (`max_nodes`, `max_fanout`) raises are still offered only when the raised result is estimated to fit the budget below. Following the `nextCursor` is usually cheaper than the raise. A raise may carry the note "A result this large may be saved to a file by the host instead of shown; the server can't tell": see Host limits.
+When a warning offers a raise ("set `limit` to 250"), `find_blocks`, `find_pages` and `explore_context` (`max_blocks`, `max_references`, `max_related_pages`) offer it beside the cursor without measuring it, on the first page only: a raised page that is too large is cut again and carries a cursor of its own. The `explore_timeline` (`max_blocks`) raise is still offered only when the raised result is estimated to fit the budget below. `explore_network` offers a larger `max_nodes` beside its cursor the same way, and its `max_fanout` raise sits in `network_truncated` without a claim that it fits: that raise is a different walk, not a later page, so it never makes `hasMore` true. Following the `nextCursor` is usually cheaper than the raise. A raise may carry the note "A result this large may be saved to a file by the host instead of shown; the server can't tell": see Host limits.
 
 ## The character budget
 
 `find_blocks`, `find_pages`, `get_page`, `get_block` (with `include_children`), `get_current`, `explore_context`, `explore_network`, `explore_timeline` and `check_links` cut a result to **30,000 characters**, after the count caps. The cut:
 
-- drops whole entries from the tail (a hit, a page, a block, the deepest network pages), never text inside one. A single entry over the budget comes back alone
+- drops whole entries from the tail (a hit, a page, a block, the last pages of the walk), never text inside one. A single entry over the budget comes back alone
 - says so with a `result_size_truncated` warning, "Showing N of M ...", and costs no extra LogSeq call
 - has no parameter that raises it. `include_context`, `slim_results: false` and `resolve_refs` make each entry bigger, so fewer fit
 - leaves a result under the budget exactly as it was
 - never drops a failure: `check_links` cuts only `refs.resolved`, never `ok`, `unresolved`, `ambiguous` or `refsPreserved`, and `find_pages` never cuts its `names` answers
 
-Whether `hasMore` is true after a size cut depends on the tool. `find_blocks`, `find_pages`, `explore_context`, `get_page` (`full` and `outline`) and `get_block` (with `include_children`) return a `nextCursor`, so it is true. `explore_timeline` names the call that reads on from the cut. `explore_network` says to narrow the walk.
+Whether `hasMore` is true after a size cut depends on the tool. `find_blocks`, `find_pages`, `explore_context`, `explore_network`, `get_page` (`full` and `outline`) and `get_block` (with `include_children`) return a `nextCursor`, so it is true. `explore_timeline` names the call that reads on from the cut.
 
 ## Warning codes by tool
 
@@ -80,9 +80,11 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 | | `backlinks_unavailable`, `page_blocks_unavailable` | No answer for that part. Not "nothing links here" |
 | | `blocks_truncated`, `related_pages_truncated`, `references_truncated` with that cap set to 0 | Expected: a list you turned off is reported as cut, with only the raise as `howToFetchAll` and no cursor for it. Read the warnings of the lists you kept |
 | | `resolve_refs_ignored_in_compact` | `compact` skips `resolve_refs`. Set `compact` false to get resolved text |
-| `explore_network` | `network_truncated` | The caps dropped pages. A raise of `max_nodes` or `max_fanout` is named only when the larger network fits. Otherwise lower `max_depth` or start from a more specific page |
-| | `hub_pages_not_expanded` | Roll-up pages (pages that link more than 30 pages) were shown as leaves while depth was left, so what they link is not in the network. The message names them. `howToFetchAll` says to set `expand_journals`, only when it is estimated to fit. Otherwise start from the roll-up page itself and read its links |
-| | `result_size_truncated` | The network was cut deepest first. Narrow the walk |
+| `explore_network` | `network_truncated` | A rule of the walk left pages out: `max_fanout`, or the walk's limit of 500 pages. `truncated` is true on every page. `howToFetchAll` offers a higher `max_fanout`, beside the cursor, without saying it fits. At the maximum, lower `max_depth` or start from a more specific page |
+| | `pages_truncated` | `max_nodes` pages were sent and the walk has more. Read on with `nextCursor` |
+| | `cursor_stale` | The walk changed since the page before it was read: the page resumed after the last page sent, or where the cursor said, and may miss or repeat a page |
+| | `hub_pages_not_expanded` | Roll-up pages (pages that link more than 30 pages) were shown as leaves while depth was left, so what they link is not in the network. The message names them. `howToFetchAll` says to set `expand_journals` and how many pages that adds at least, when it would add any. Otherwise start from the roll-up page itself and read its links |
+| | `result_size_truncated` | The page was cut to the budget, whole pages in the order of the walk. Read on with `nextCursor` |
 | | `no_path_within` | With `to`: no path within the depth reached. One more hop is offered when it could find one |
 | | `same_page` | With `to`: the two names are one page (a page and its alias) |
 | | `frontier_truncated` | With `to`: a hop reached more than 500 pages and expanded only some, so "no path" may be a false negative |
