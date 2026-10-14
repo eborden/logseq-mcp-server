@@ -53,7 +53,7 @@ use crate::period::{Period, Selection, resolve_period};
 use crate::property::{PropertyFilter, property_filter};
 use crate::resolve::RETRY_ADVICE;
 use crate::slim::{DEFAULT_SLIM_RESULTS, extract_page_refs, extract_tags, to_slim_block, to_slim_page};
-use crate::snapshots::Snapshots;
+use crate::snapshots::{Snapshots, resident_weight};
 use crate::tool::{CursorSchema, input_schema, read_only_annotations, success_result};
 
 use self::queries::Match;
@@ -319,9 +319,10 @@ struct Listing {
 }
 
 impl Listing {
-    /// What the snapshot weighs, in bytes of JSON: what the matches would be written as.
+    /// What the snapshot weighs for the cache's bounds: the matches' JSON length, scaled to the memory a list of
+    /// `Value`s takes ([`resident_weight`]).
     fn weight(&self) -> usize {
-        self.matches.iter().flatten().map(|block| block.to_string().len()).sum()
+        resident_weight(self.matches.iter().flatten().map(|block| block.to_string().len()).sum())
     }
 }
 
@@ -1387,6 +1388,14 @@ mod tests {
             let later = Filters::from_args(&again, CalendarDate { year: 2025, month: 4, day: 20 }).unwrap();
             assert_eq!(later.period, Some(period), "{arguments}");
         }
+    }
+
+    #[test]
+    fn a_snapshot_is_declared_at_the_memory_its_matches_take_and_nothing_is_declared_for_no_answer() {
+        let block = json!({"id": 1, "uuid": "u", "content": "x"});
+        let listing = Listing { matches: Some(vec![block.clone(), block.clone()]), notes: Notes::default(), asked: String::new() };
+        assert_eq!(listing.weight(), 2 * block.to_string().len() * crate::snapshots::VALUE_RESIDENT_FACTOR);
+        assert_eq!(Listing { matches: None, ..listing }.weight(), 0);
     }
 
     #[test]

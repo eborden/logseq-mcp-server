@@ -36,6 +36,17 @@ pub const MAX_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
 /// shows LogSeq as it was at most a minute ago.
 pub const MAX_AGE: Duration = Duration::from_secs(60);
 
+/// What the bytes a tool declares stand for: the resident size of the list, not the length of its JSON. A list of
+/// `serde_json::Value`s (an IndexMap and owned key strings per object) took about 13 times its JSON length in memory
+/// when 8 MiB of small blocks were parsed (resident size before and after, #550, reported on #528), and about 3 times
+/// for blocks with longer text. [`resident_weight`] applies the larger, so the bounds below are about memory.
+pub const VALUE_RESIDENT_FACTOR: usize = 13;
+
+/// The bytes to declare for a list of `Value`s whose JSON is `json_len` bytes long.
+pub fn resident_weight(json_len: usize) -> usize {
+    json_len.saturating_mul(VALUE_RESIDENT_FACTOR)
+}
+
 /// The bounds of a [`Snapshots`]. The server uses [`Limits::STARTING`]; a test builds a smaller one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
@@ -212,6 +223,14 @@ mod tests {
 
     fn served(snapshots: &Snapshots, key: &SnapshotKey, text: &str, now: Instant) -> Option<Vec<usize>> {
         snapshots.get::<Vec<usize>>(key, &args(text), now).map(|list| (*list).clone())
+    }
+
+    #[test]
+    fn a_list_of_values_is_declared_at_its_resident_size_and_never_overflows() {
+        assert_eq!(resident_weight(1000), 13_000);
+        assert_eq!(resident_weight(usize::MAX), usize::MAX);
+        // 8 MiB per snapshot is then about 630 KiB of JSON
+        assert!(resident_weight(630 * 1024) <= MAX_SNAPSHOT_BYTES && resident_weight(640 * 1024) > MAX_SNAPSHOT_BYTES);
     }
 
     #[test]
