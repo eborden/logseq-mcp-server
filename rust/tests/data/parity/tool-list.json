@@ -449,7 +449,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get one block by UUID, optionally with its children. UUIDs come from other results and from ((uuid)) refs in content.\n\n**Can't find:** blocks by text (logseq_find_blocks) or by numeric id. For a whole page use logseq_get_page.",
+    "description": "Get one block by UUID, optionally with its children (hasMore: send only cursor=nextCursor). UUIDs come from other results and from ((uuid)) refs in content.\n\n**Can't find:** blocks by text (logseq_find_blocks) or by numeric id. For a whole page use logseq_get_page.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -474,11 +474,12 @@
             "json",
             "markdown"
           ]
+        },
+        "cursor": {
+          "description": "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)",
+          "type": "string"
         }
-      },
-      "required": [
-        "uuid"
-      ]
+      }
     }
   },
   {
@@ -525,7 +526,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages).\n**Alternatives:** logseq_explore_context adds related pages and what links here.",
+    "description": "Get a page by name (case-insensitive). detail: page (default), full (adds its blocks; hasMore: send only cursor=nextCursor) or outline (top-level blocks: uuid, first line, child count).\n\n**Use when:** you know the page name.\n**Can't find:** pages by keyword (logseq_find_blocks, logseq_find_pages).\n**Alternatives:** logseq_explore_context adds related pages and what links here.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -555,11 +556,12 @@
             "markdown",
             "toon"
           ]
+        },
+        "cursor": {
+          "description": "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)",
+          "type": "string"
         }
-      },
-      "required": [
-        "page"
-      ]
+      }
     }
   }
 ]
