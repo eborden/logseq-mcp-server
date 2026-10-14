@@ -26,7 +26,8 @@ test: `rust/tests/get_page_block_cursor_calls.rs` (`get_page` with `detail: "ful
 test: `rust/tests/context_cursor_calls.rs` (`explore_context`, the fifth tool on the cursor: the same promises over its three lists, each exactly once and ending on its own page; `hasMore` is true exactly when `nextCursor` is present, except for the `refs_depth_limit` offer of `resolve_refs`; and a list left out with a page size of 0 never makes a cursor)
 test: `rust/tests/timeline_cursor_calls.rs` (`explore_timeline`, another tool on the cursor: the same promises, every block of a list several times the budget exactly once in order, a day cut between two pages on both pages with the same date, and a page size of 0 offers its raise alone with `hasMore` false. A cursor read makes no LogSeq call to read the list. `resolve_refs` still queries for the blocks of the page it sends, up to 2.)
 test: `rust/tests/get_page_outline_cursor_calls.rs` (`get_page` with `detail: "outline"`, on the cursor too: the same promises over the top-level blocks, a list of 450 read to the end with each block once and the last page without a cursor, exactly at the page size, a cut by the budget, JSON and TOON)
-none-yet: #556 (`explore_network` moves to the cursor with the same tests of its own list)
+test: `rust/tests/network_cursor_calls.rs` (`explore_network` without `to`, on the cursor: the walk runs to 500 pages and `max_nodes` is the page size; the same promises, every page and every edge of a walk several times the budget once, a rule's `max_fanout` raise beside the cursor that never makes `hasMore` true, and `truncated` true on every page that a rule left pages out of)
+test: `tests/integration/explore-network-page1.test.ts` (page 1 of the `explore_network` walk holds the pages, depths and edges the capped walk sent, on the hub fixture)
 
 ## Changelog
 
@@ -44,3 +45,4 @@ none-yet: #556 (`explore_network` moves to the cursor with the same tests of its
 | 2026-10-14 | Mechanical enforcement: the cursor tests of `explore_context`, the fifth tool on the cursor, replace the `none-yet: #553` line; the remaining `none-yet` points at the next tools' migrations. Additive; the Statement is unchanged. | #568 |
 | 2026-10-14 | Mechanical enforcement: the cursor tests of `explore_timeline`, another tool on the cursor, are added beside the others, and the `none-yet` line now names only `explore_network`. Additive; the Statement is unchanged. | #566 |
 | 2026-10-14 | Mechanical enforcement: adds the `test:` line for the cursor tests of `get_page` with `detail: "outline"`, which no `none-yet` line named. Additive; the Statement is unchanged. | #569 |
+| 2026-10-14 | Mechanical enforcement: the cursor tests of `explore_network`, the walk without `to`, and the page 1 pin replace the `none-yet: #556` line. Additive; the Statement is unchanged. | #567 |
