@@ -106,4 +106,8 @@ Date: 2026-10-13
 - test: `tests/guards/tool-list.test.ts` (the ADR-0016 budget and the recorded list hold the cost of `cursor` on each tool)
 - test: `rust/src/budget.rs` (`fit`, which measures each page against the 30,000 characters)
 - reviewer: A tool that can cut a list pages it with `cursor` and `nextCursor`, has no `offset` and offers no cap raise as the way on.
-- none-yet: #528 (the cursor core and each tool's migration add the guards: a token round trip, a hit costing 0 calls, a miss costing page 1's calls, and the `explore_network` page 1 pin. `ALLOWED_PARAMETERS` in `tests/guards/tool-taxonomy-rules.ts` drops `offset` and `references_offset` and gains `cursor` in the core PR, which makes that guard the `test:` for "no `offset`". The cursor core task issue replaces this reference once it is filed)
+- test: `rust/src/cursor.rs` (the token round trip and every refusal: a bad version, a payload that doesn't parse, a token of another tool)
+- test: `rust/src/snapshots.rs` (the cache's bounds in count, bytes and age, and that it serves only the arguments it was built from)
+- test: `rust/tests/find_blocks_cursor_calls.rs` (a hit costs 0 calls, a miss costs page 1's calls, a stale anchor says `cursor_stale`, a cut list is read to the end, and a bad token or a cursor beside another argument is refused before any call; `find_blocks` is the first tool on the cursor, #550)
+- test: `tests/guards/tool-taxonomy-rules.ts` (`ALLOWED_PARAMETERS` gives `find_blocks` a `cursor` and no `offset`; each tool's migration edits its own entry, so this guard is the `test:` for "no `offset`" tool by tool)
+- none-yet: #556 (the `explore_network` page 1 pin, written before its walk changes; the migrations of `find_pages`, the trees, `explore_timeline` and `explore_context`, #551 to #555, each add the cursor tests of their own tool)
