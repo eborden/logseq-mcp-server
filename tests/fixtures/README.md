@@ -338,17 +338,17 @@ creates **today's journal page** in its database when the graph opens, whether o
 the file, and its date changes every day. Exact assertions on page, journal or `find_pages`
 counts must exclude it, and date-range tests must use fixed windows that end before 2026.
 
-Measured total (#139, LogSeq 0.10.15 on a per-worktree instance, after the README moved out): the graph
-holds **268 pages** in `:block/name`, built-in pages and today's journal included. They are:
+Measured total (#139, re-measured with #552 on LogSeq 0.10.15, a per-worktree instance: `getAllPages`): the graph
+holds **297 pages** in `:block/name`, built-in pages and today's journal included. They are:
 
 | Part | Count |
 |---|---|
-| Pages with a file (`pages/` and `journals/`; 10 of them are journals) | 149 |
+| Pages with a file (`pages/` and `journals/`; 10 of them are journals) | 153 |
 | Built-in pages, none with a file (the 16 listed above) | 16 |
 | Today's journal | 1 |
-| Pages with no file: link targets, property keys, block-embed uuids, alias stubs, namespace parents | 102 |
+| Pages with no file: link targets, property keys, block-embed uuids, alias stubs, namespace parents | 127 |
 
-Without today's journal that is 267, and without the built-ins too, 251. There is no `readme` page and no
-`#NN` tag page, and no README among the 150 indexed files (149 pages plus `config.edn`). The number moves
+Without today's journal that is 296, and without the built-ins too, 280. There is no `readme` page and no
+`#NN` tag page, and no README among the 154 indexed files (153 pages plus `config.edn`). The number moves
 whenever a page, a property key or a block embed is added to the fixture, and nothing in the tests pins it,
 so the tests compute what they need rather than copy it (#90).
