@@ -488,33 +488,38 @@ export const REMOVED_BEFORE_V1_TOOL_NAMES: readonly string[] = ['get_entity_time
  */
 export const FORMER_TOOL_NAMES: readonly string[] = [...FIRST_VERSION_TOOL_NAMES, ...REMOVED_BEFORE_V1_TOOL_NAMES].sort();
 
+/** The two disk reads `exactKindOf` makes, so a test can stand in a disk whose `statSync` ignores case (macOS). */
+export type DiskReads = {
+  readdirSync: (dir: string) => string[];
+  statSync: (path: string) => { isDirectory(): boolean; isFile(): boolean };
+};
+
 /**
  * The `kindOf` of a tools directory at `root`, case-exact (#539). It reads each directory and matches the entry name as
  * written, so `Get_Page/` is a miss on a case-insensitive disk (macOS) as it is on Linux, where a stat alone would find it.
+ * `disk` is the real filesystem unless a self-test passes a fake. A path through a file ends at the next `readdirSync`,
+ * which throws on a file, so no directory check is needed between segments.
  */
-export function exactKindOf(root: string): ToolPathOptions['kindOf'] {
+export function exactKindOf(root: string, disk: DiskReads = { readdirSync: dir => readdirSync(dir), statSync }): ToolPathOptions['kindOf'] {
   return rel => {
     let dir = root;
     const parts = rel.split('/').filter(part => part !== '');
     for (const [i, part] of parts.entries()) {
-      let entries: string[];
       try {
-        entries = readdirSync(dir);
+        if (!disk.readdirSync(dir).includes(part)) return null;
+        dir = join(dir, part);
+        if (i < parts.length - 1) continue;
+        const stat = disk.statSync(dir);
+        return stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : null;
       } catch {
         return null;
       }
-      if (!entries.includes(part)) return null;
-      dir = join(dir, part);
-      let stat;
-      try {
-        stat = statSync(dir);
-      } catch {
-        return null;
-      }
-      if (i === parts.length - 1) return stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : null;
-      if (!stat.isDirectory()) return null;
     }
-    return parts.length === 0 && statSync(root).isDirectory() ? 'dir' : null;
+    try {
+      return disk.statSync(root).isDirectory() ? 'dir' : null;
+    } catch {
+      return null;
+    }
   };
 }
 
