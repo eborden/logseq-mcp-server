@@ -20,7 +20,7 @@ Types: get (you name it), find (criteria in, hits out), explore (what it is, how
 
 Reading results:
 - ((uuid)) is a block ref: logseq_get_block, or resolve_refs.
-- A warning means the result was cut or partial; read it before saying something doesn't exist. hasMore: true: howToFetchAll names the parameter for more; false: the warning says why.
+- A warning means the result was cut or partial; read it before saying something doesn't exist. hasMore: true: pass nextCursor as cursor; false: the warning says why.
 - Search is literal (no synonyms); traversal follows only [[links]] and #tags.
 - Tips in a trailing meta block are optional."##;
 
