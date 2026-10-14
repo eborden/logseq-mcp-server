@@ -60,8 +60,10 @@ const PERIOD = ['start_date', 'end_date', 'last_n', 'preset'];
  * table first, then here. Aliases are never in the advertised schema, so none is listed (BR-0008).
  */
 export const ALLOWED_PARAMETERS: Readonly<Record<string, readonly string[]>> = {
-  logseq_get_page: ['page', 'detail', 'resolve_refs', 'format'],
-  logseq_get_block: ['uuid', 'include_children', 'resolve_refs', 'format'],
+  // ADR-0038 adds `cursor` to `get_page` (for `detail: "full"`) and `get_block` (with `include_children`): the blocks of a
+  // tree larger than the budget are read to the end with it (#552). `page` and `uuid` stay, optional beside a cursor (BR-0008).
+  logseq_get_page: ['page', 'detail', 'resolve_refs', 'format', 'cursor'],
+  logseq_get_block: ['uuid', 'include_children', 'resolve_refs', 'format', 'cursor'],
   logseq_get_current: [],
   logseq_get_graph: [],
   // ADR-0038 (one forward-only cursor for paging) takes `offset` off `find_blocks` and `find_pages` and adds `cursor`:
