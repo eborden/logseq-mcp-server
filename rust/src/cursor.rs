@@ -45,6 +45,7 @@ pub enum Anchor {
 
 /// The anchors of the three lists of `explore_context`, as [`Position::Sections`] has their positions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SectionAnchors {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocks: Option<i64>,
@@ -180,8 +181,14 @@ mod tests {
         assert!(String::from_utf8(bytes).unwrap().contains(r#""anchor":{"blocks":7,"related":9}"#));
         assert_eq!(decode(&encode(&sections), TOOL).unwrap(), sections);
         // none sent: an empty object, which reads back as the same
-        let none = Cursor { anchor: Anchor::Sections(SectionAnchors::default()), ..sections };
+        let none = Cursor { anchor: Anchor::Sections(SectionAnchors::default()), ..sections.clone() };
         assert_eq!(decode(&encode(&none), TOOL).unwrap(), none);
+        // a foreign object is no anchor: a stray key is a bad token, not a list with nothing sent
+        for foreign in [json!({"foo": 1}), json!({"blocks": 7, "extra": true}), json!({"blocks": "7"})] {
+            let mut payload = serde_json::to_value(&sections).unwrap();
+            payload["anchor"] = foreign;
+            assert!(refusal(&token_of(&payload)).expected.contains("its content is not what a cursor holds"));
+        }
     }
 
     #[test]
