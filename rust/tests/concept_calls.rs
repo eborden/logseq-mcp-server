@@ -117,6 +117,11 @@ async fn a_missing_page_adds_the_suggestion_lookup_and_fails_with_the_closest_na
     assert!(matches!(&error, ToolError::PageNotFound(missing) if missing.suggestions == ["Project Atlas"]), "{error}");
 }
 
+/// Some warning of the network offers a way to fetch more: what `hasMore` was before the cursor made it the cursor's alone.
+fn offers_more(network: &logseq_mcp_server::tools::explore_network::Network) -> bool {
+    network.warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())
+}
+
 fn codes(warnings: &[logseq_mcp_server::meta::ResultWarning]) -> Vec<&str> {
     warnings.iter().map(|warning| warning.code.as_str()).collect()
 }
@@ -134,7 +139,7 @@ async fn a_null_answer_for_the_first_depth_is_a_links_unavailable_warning_not_an
     assert!(warning.message.contains("This does not mean those pages link to nothing."), "{}", warning.message);
     // nothing to fetch with a parameter, so no hasMore, and nothing was cut
     assert!(warning.how_to_fetch_all.is_none());
-    assert!(!network.truncated);
+    assert!(!offers_more(&network) && !network.truncated);
     assert_eq!(network.to_value()["hasMore"], false);
 
     // a real [] is a network with no links, and says nothing
@@ -163,7 +168,7 @@ async fn a_null_answer_at_a_later_depth_keeps_what_was_found_and_leaves_truncate
     // without a cap that bit, `truncated` stays false
     let quiet = mock_logseq(vec![root(), json!([row(10, 20, "Bob", false, "outbound", 2)]), json!(null)]).await;
     let network = explore_network(&client(&quiet), "Project Atlas", 3, Options::default()).await.unwrap();
-    assert!(!network.truncated);
+    assert!(!network.truncated && !offers_more(&network));
     assert_eq!(codes(&network.warnings), ["links_unavailable"]);
 }
 
@@ -183,7 +188,7 @@ async fn a_null_answer_for_the_aliased_first_depth_is_a_links_unavailable_warnin
     assert_eq!(network.resolved_aliases.as_deref(), Some(&["Atlas".to_owned(), "Project Atlas".to_owned()][..]));
     assert_eq!(codes(&network.warnings), ["links_unavailable"]);
     assert!(network.warnings[0].message.contains("depth 1"), "{}", network.warnings[0].message);
-    assert!(!network.truncated);
+    assert!(!network.truncated && !offers_more(&network));
 }
 
 /// A `degree` row: how many pages the connected page links.
@@ -228,6 +233,9 @@ async fn a_roll_up_ranks_after_the_topical_pages_and_is_a_leaf_that_a_warning_na
     // 4 pages are kept and the roll-up links 31: walking through it brings up to 15 more
     assert!(warning.how_to_fetch_all.as_deref().is_some_and(|how| how.starts_with("Set expand_journals to true")));
     assert!(warning.how_to_fetch_all.as_deref().is_some_and(|how| how.contains("adds at least 15 pages")), "{:?}", warning.how_to_fetch_all);
+    assert!(offers_more(&network));
+    // an offer is not a cursor: `hasMore` is the cursor's alone
+    assert_eq!(network.to_value()["hasMore"], false);
 }
 
 #[tokio::test]
@@ -244,7 +252,7 @@ async fn a_journal_is_no_roll_up_however_many_pages_it_links_and_a_journal_leaf_
     let warning = &network.warnings[0];
     assert!(warning.message.contains("Roll Up (31 pages)") && !warning.message.contains("Jan 1st"), "{}", warning.message);
     // `expand_journals` would also walk through the journal, which is not counted in what it brings: no offer
-    assert!(warning.how_to_fetch_all.is_none());
+    assert!(warning.how_to_fetch_all.is_none() && !offers_more(&network));
 }
 
 #[tokio::test]
@@ -276,7 +284,7 @@ async fn a_roll_up_at_the_last_depth_is_shown_and_needs_no_warning_since_nothing
     let network = explore_network(&client(&logseq), "Project Atlas", 1, Options::default()).await.unwrap();
     assert_eq!(methods(&logseq).len(), 2);
     assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B", "Roll Up"]);
-    assert!(network.warnings.is_empty());
+    assert!(network.warnings.is_empty() && !offers_more(&network));
 }
 
 #[tokio::test]
@@ -286,6 +294,10 @@ async fn a_cap_that_bites_drops_the_roll_up_first_and_the_warning_is_the_cap_s()
     assert_eq!(names(&network), ["Project Atlas", "Topic A", "Topic B"]);
     assert!(network.truncated);
     assert_eq!(codes(&network.warnings), ["network_truncated"]);
+    // the rule's raise is still offered, beside no cursor: the fanout cut network says how to follow more pages
+    assert!(offers_more(&network));
+    assert!(network.warnings[0].how_to_fetch_all.as_deref().is_some_and(|how| how.starts_with("Set max_fanout higher")));
+    assert_eq!(network.to_value()["hasMore"], false);
 }
 
 #[tokio::test]
@@ -294,7 +306,7 @@ async fn walking_through_a_roll_up_is_not_offered_when_it_would_bring_no_page() 
     let full = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 1), json!([])]).await;
     let network = explore_network(&client(&full), "Project Atlas", 2, Options { walk_limit: 4, ..Options::default() }).await.unwrap();
     assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded"]);
-    assert!(network.warnings[0].how_to_fetch_all.is_none() && !network.truncated);
+    assert!(!offers_more(&network) && !network.truncated);
 
     // the network already holds more pages than the roll-up links: all of them are in it
     let mut rows: Vec<Value> = (0..40).flat_map(|n| [row(10, 100 + n, &format!("Topic {n}"), false, "outbound", 1), degree(10, 100 + n, &format!("Topic {n}"), 2)]).collect();
@@ -303,7 +315,7 @@ async fn walking_through_a_roll_up_is_not_offered_when_it_would_bring_no_page() 
     let network = explore_network(&client(&held), "Project Atlas", 2, Options { max_fanout: 100, ..Options::default() }).await.unwrap();
     assert_eq!(network.nodes.len(), 42);
     assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded"]);
-    assert!(network.warnings[0].how_to_fetch_all.is_none());
+    assert!(!offers_more(&network));
 }
 
 #[tokio::test]
@@ -311,7 +323,7 @@ async fn walking_through_a_roll_up_is_not_offered_when_the_walk_did_not_get_to_t
     let logseq = mock_logseq(vec![root(), roll_up_rows(HUB_LINKS + 1), json!(null)]).await;
     let network = explore_network(&client(&logseq), "Project Atlas", 2, Options::default()).await.unwrap();
     assert_eq!(codes(&network.warnings), ["hub_pages_not_expanded", "links_unavailable"]);
-    assert!(network.warnings[0].how_to_fetch_all.is_none());
+    assert!(!offers_more(&network));
 }
 
 #[tokio::test]
