@@ -17,10 +17,6 @@ pub const INLINE_BLOCKS: usize = 200;
 pub const INLINE_REFERENCES: usize = 150;
 /// Related pages: a page and its direction.
 pub const INLINE_RELATED_PAGES: usize = 500;
-/// Concept network nodes, each with its edges.
-pub const INLINE_NETWORK_NODES: usize = 200;
-/// Listed pages (`find_pages`), counting aliased entries at about twice a plain one.
-pub const INLINE_PAGES: usize = 800;
 
 /// The note ` <LARGE_RESULT_NOTE>` when a call that returns `items` items goes past
 /// `inline_max`, else nothing. No `inline_max` means the caller makes no claim.
