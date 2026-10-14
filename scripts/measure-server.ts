@@ -60,8 +60,12 @@ export interface CountingProxy {
   calls: Map<string, number>;
   /** Bytes of the answers LogSeq sent since the last reset (the body only, before the binary parses it) */
   answerBytes(): number;
-  /** The size of each of those answers, in the order they came back */
-  answerSizes(): number[];
+  /**
+   * Each of those answers with a label: the method without its `logseq.` prefix and, for a Datalog query, the first
+   * 160 characters of its text (strings are bound as inputs, so the text holds no page name). An Editor call has no
+   * more than its method, since its arguments can be a page name.
+   */
+  answers(): Array<{ label: string; bytes: number }>;
   url: string;
   reset(): void;
   total(): number;
@@ -71,16 +75,23 @@ export interface CountingProxy {
 /** Forwards every request to `target` and counts the `method` of each JSON body. */
 export async function startCountingProxy(target: string): Promise<CountingProxy> {
   const calls = new Map<string, number>();
-  const answered: number[] = [];
+  const answered: Array<{ label: string; bytes: number }> = [];
   const upstream = target.replace(/\/+$/, '');
   const server: HttpServer = createHttpServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => {
       const body = Buffer.concat(chunks);
+      let label = 'unknown';
       try {
-        const method = (JSON.parse(body.toString('utf8')) as { method?: unknown }).method;
-        if (typeof method === 'string') calls.set(method, (calls.get(method) ?? 0) + 1);
+        const sent = JSON.parse(body.toString('utf8')) as { method?: unknown; args?: unknown };
+        const method = sent.method;
+        if (typeof method === 'string') {
+          calls.set(method, (calls.get(method) ?? 0) + 1);
+          label = method.replace(/^logseq\./, '');
+          const query = Array.isArray(sent.args) ? sent.args[0] : undefined;
+          if (method === 'logseq.DB.datascriptQuery' && typeof query === 'string') label += ` ${query.replace(/\s+/g, ' ').slice(0, 160)}`;
+        }
       } catch {
         // not JSON: forwarded as it is, and not counted
       }
@@ -92,7 +103,7 @@ export async function startCountingProxy(target: string): Promise<CountingProxy>
       fetch(upstream + (req.url ?? '/'), { method: req.method, headers, body: req.method === 'GET' ? undefined : body })
         .then(async answer => {
           const payload = Buffer.from(await answer.arrayBuffer());
-          answered.push(payload.length);
+          answered.push({ label, bytes: payload.length });
           res.writeHead(answer.status, { 'content-type': answer.headers.get('content-type') ?? 'application/json' });
           res.end(payload);
         })
@@ -106,8 +117,8 @@ export async function startCountingProxy(target: string): Promise<CountingProxy>
   const { port } = server.address() as AddressInfo;
   return {
     calls,
-    answerBytes: () => answered.reduce((a, b) => a + b, 0),
-    answerSizes: () => [...answered],
+    answerBytes: () => answered.reduce((sum, answer) => sum + answer.bytes, 0),
+    answers: () => [...answered],
     url: `http://127.0.0.1:${port}`,
     reset: () => {
       calls.clear();
