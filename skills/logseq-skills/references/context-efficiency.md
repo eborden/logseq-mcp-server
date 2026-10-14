@@ -54,7 +54,7 @@ If user provides explicit timeframe ("this week", "in November", "recently"):
 
 `explore_context` replaces manual aggregation chains. Don't follow it with:
 - `find_blocks` (already searched)
-- a separate look at what links to the page (its `references` are included, ranked, with `references_offset` for the rest)
+- a separate look at what links to the page (its `references` are included, ranked, with the cursor for the rest)
 - `get_page` (already retrieved)
 
 Only add follow-up queries if `explore_context` returns insufficient results. For several pages, call it once per page, in parallel, rather than once for all.
