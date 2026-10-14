@@ -264,9 +264,9 @@ written `Row N on [[popular topic]]`, and the target has no file.
 `light source`.
 
 The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
-`find_blocks`' maximum of 500 matches. The fixture holds 504 blocks, 478 of them with an `e` (26 without: 2 older ones, these 14
-and the 10 of the roll-up pages below). With an `e` in these 24 it would be 502. Keep new fixture blocks without the
-letter, or change that test.
+`find_blocks`' maximum of 500 matches. The fixture holds 605 blocks, 478 of them with an `e` (127 without: 2 older ones, these 14,
+the 10 of the roll-up pages below and the 101 of `quartz log`). With an `e` in these 24 it would be 502. Keep new fixture blocks
+without the letter, or change that test.
 
 ## Roll-up pages (#498)
 
@@ -296,6 +296,24 @@ while `hub central` links 70. The threshold of 30 sits between them, at twice th
 | depth 2, `max_fanout` 100, `expand_journals` true | 46 nodes: `rollup topic 30` joins, no warning |
 | `explore_network` on `neighbour-out-01`, depth 2, defaults | `hub central` (70 pages) is a depth-1 leaf, none of the `neighbour-in-NN` that only it reaches is in the result, and `hub_pages_not_expanded` offers `expand_journals`. With `expand_journals` the `neighbour-both-NN` and `neighbour-in-01` .. `05` that link it twice join |
 | `with_snippets` on `solo topic`, depth 2, `max_fanout` 100 | the same nodes, and the same 3 calls. The edges of the root carry a `snippet`: `Row A on [[solo topic]]` for each roll-up, and the root's own block, cut at 80 characters with `...`, for each `solo link NN`. Edges deeper than the root have none |
+
+## A long page (#552)
+
+`quartz log` (`pages/quartz log.md`) exists for the cursor of `get_page` with `detail: "full"` and of `get_block` with
+`include_children` (ADR-0038): a page whose full tree is several times the 30,000-character budget, so a call can only read it
+in pages. Nothing else reads it, and nothing links it. It has no page properties and no links, tags or `[[refs]]`, and no block
+holds the letter `e` (see "The crowded topic" above). 101 blocks, about 103,500 characters:
+
+| Blocks | Shape |
+|---|---|
+| `Quartz log, a long scroll of blocks in parts` | a short first block |
+| `Log part 1 holds 60 blocks`, id `0088f1a0-0000-4000-8000-000000000b01` | 60 children `Block 1-01` to `Block 1-60` of about 1,100 characters, and under `Block 1-02` 3 more, `Bit 1-02-1` to `Bit 1-02-3`, of about 500: a subtree of 64 blocks, about 70,000 characters, so `get_block` on it makes 3 pages |
+| `Log part 2 holds a chain`, id `0088f1a0-0000-4000-8000-000000000b02` | a subtree of 6 blocks, 3 levels deep (`Block 2-01`, its child `Block 2-01-a` with two children, and `Block 2-01-b`), about 6,200 characters sent: under the budget, so it is never cut |
+| `Block 3-01` to `Block 3-30` | 30 top-level blocks of about 1,000 characters |
+
+Read in pages the page makes 5 (about 29,000 characters each, the last 16,000), and the second starts inside `Log part 1`, so its blocks name it in `ancestors`. The tests
+(`tests/integration/tree-cursor.test.ts`) take the expected blocks from the bullets of this file, in order, and the block text
+names each block, so nothing is read from the instance to know what to expect.
 
 ## Files LogSeq writes when it opens the folder
 
