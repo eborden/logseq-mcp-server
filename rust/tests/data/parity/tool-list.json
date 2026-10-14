@@ -259,7 +259,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). Pages by limit (max 500) and offset: check hasMore.\n\n**Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_explore_network).",
+    "description": "Find blocks, newest first. Filters AND (one or more): text (substring, case-insensitive); page; links_to (1-5 pages; [[x]] or #x, not plain text); property + value (exact); period on journals (start_date + end_date, last_n days or preset). limit (max 500) sizes a page: while hasMore, call again with only cursor=nextCursor.\n\n**Can't find:** synonyms, stems, ranged values, or how pages connect (logseq_explore_network).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -338,18 +338,11 @@
           ]
         },
         "limit": {
-          "description": "Maximum number of results to return (default: 100, max: 500)",
+          "description": "Page size: most results per call (default: 100, max: 500)",
           "type": "integer",
           "format": "uint64",
           "minimum": 0,
           "default": 100
-        },
-        "offset": {
-          "description": "Results to skip, newest first; shifts if the graph changes",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0,
-          "default": 0
         },
         "include_context": {
           "description": "Include semantic context (page, references, tags)",
@@ -360,6 +353,10 @@
           "description": "Slim blocks (default). false returns full entities",
           "type": "boolean",
           "default": true
+        },
+        "cursor": {
+          "description": "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)",
+          "type": "string"
         }
       },
       "type": "object"
