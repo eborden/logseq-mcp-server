@@ -81,8 +81,8 @@ const NARROWER: &str = "Narrow text, names or property to see the rest.";
 const NAMES_ON_CONTINUATION: bool = false;
 
 /// The tool's description, as `tools/list` carries it (recorded in the `tool-list` golden, ADR-0034).
-const DESCRIPTION: &str = "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property). Pages of limit (max 1000); hasMore: send only cursor=nextCursor.\n\n\
-**Can't find:** journals (logseq_explore_timeline) or block text (logseq_find_blocks). Warning pages_unavailable: list unknown, not empty.";
+const DESCRIPTION: &str = "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each gets its page, or null + closest names); property + value (page property). limit max 1000; hasMore: send only cursor=nextCursor.\n\n\
+**Can't find:** journals (logseq_explore_timeline) or block text (logseq_find_blocks). pages_unavailable: list unknown, not empty.";
 
 fn default_limit() -> u64 {
     DEFAULT_FIND_PAGES_LIMIT

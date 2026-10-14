@@ -372,7 +372,7 @@
       "idempotentHint": true,
       "openWorldHint": false
     },
-    "description": "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each answered with its page, or null plus closest names); property + value (page property).\n\n**Can't find:** journals (logseq_explore_timeline), block text (logseq_find_blocks), or past 200 (use offset). Warning pages_unavailable: list unknown, not empty.",
+    "description": "Find non-journal pages as { name, aliases? }. Filters AND: text (substring of name or alias); names (up to 50, exact name or alias; each gets its page, or null + closest names); property + value (page property). limit max 1000; hasMore: send only cursor=nextCursor.\n\n**Can't find:** journals (logseq_explore_timeline) or block text (logseq_find_blocks). pages_unavailable: list unknown, not empty.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -417,18 +417,11 @@
           ]
         },
         "limit": {
-          "description": "Max pages (default: 200, max: 1000)",
+          "description": "Page size: most pages per call (default: 200, max: 1000)",
           "type": "integer",
           "format": "uint64",
           "minimum": 0,
           "default": 200
-        },
-        "offset": {
-          "description": "Pages to skip, in name order; shifts if the graph changes",
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0,
-          "default": 0
         },
         "format": {
           "description": "json (default), or toon text: a list's keys once, not on every row",
@@ -437,6 +430,10 @@
             "json",
             "toon"
           ]
+        },
+        "cursor": {
+          "description": "Read the next page: the nextCursor of the previous result, passed alone (the arguments are in the token)",
+          "type": "string"
         }
       },
       "type": "object"
