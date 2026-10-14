@@ -117,7 +117,7 @@ Each principle gives the rule, why it matters, how it looks in this repo, and th
 
 **Why.** MCP clients retry, and LLMs call the same tool twice. A read-only tool makes that harmless.
 
-**In this repo.** No tool keeps state between calls that its result depends on. The snapshot cache of [ADR-0038 (one-forward-only-cursor-for-paging)](adr/0038-one-forward-only-cursor-for-paging.md) is the one state, and a cursor call is still safe to repeat (BR-0002). If a future tool needs to write to the graph, stop and ask (hard rule 4).
+**In this repo.** No tool keeps state between calls. Once the cursor core task (#528) lands, the snapshot cache of [ADR-0038 (one-forward-only-cursor-for-paging)](adr/0038-one-forward-only-cursor-for-paging.md) is the one exception, and a cursor call is still safe to repeat (BR-0002). If a future tool needs to write to the graph, stop and ask (hard rule 4).
 
 ### 4.6 Bound resources and time
 

@@ -2,11 +2,11 @@
 
 ## Statement
 
-Parameter aliases (`resolve_param_aliases` in `rust/src/params.rs`) are handler-only, unadvertised, and only for parameters that mean exactly the same. A conflicting alias and canonical value is an `InvalidParameter` error. Aliases are best-effort, not a contract: a client that validates against `inputSchema` rejects an alias-only call before it reaches the server, and the model never sees them. They are no substitute for canonical names. Tips and docs always use the canonical name, and the canonical name stays `required`. The one exception is a tool that takes a `cursor` ([ADR-0038 (one-forward-only-cursor-for-paging)](../adr/0038-one-forward-only-cursor-for-paging.md)): a call with a `cursor` carries its arguments in the token and takes no other, so the canonical name is optional in the schema there, and the handler refuses a call with neither it nor a `cursor`. The aliases stay handler-only. No tool takes a `cursor` yet; the cursor core task (#528) adds it.
+Parameter aliases (`resolve_param_aliases` in `rust/src/params.rs`) are handler-only, unadvertised, and only for parameters that mean exactly the same. A conflicting alias and canonical value is an `InvalidParameter` error. Aliases are best-effort, not a contract: a client that validates against `inputSchema` rejects an alias-only call before it reaches the server where the canonical name is `required`, and the model never sees them. They are no substitute for canonical names. Tips and docs always use the canonical name, and the canonical name stays `required`. The one exception is a tool that takes a `cursor` ([ADR-0038 (one-forward-only-cursor-for-paging)](../adr/0038-one-forward-only-cursor-for-paging.md)): a call with a `cursor` carries its arguments in the token and takes no other, so the canonical name is optional in the schema there, and the handler refuses a call with neither it nor a `cursor`. On such a tool a call that leaves the name out gets a handler error, not a schema error, and an alias-only call passes the schema and works. The aliases stay handler-only. No tool takes a `cursor` yet; the cursor core task (#528) adds it.
 
 ## Rationale
 
-An alias that leaked into the advertised schema, or replaced a required canonical name, would make the contract depend on a convenience. Introduced with the aliases (#44).
+An alias that leaked into the advertised schema, or replaced a required canonical name, would make the contract depend on a convenience. Introduced with the aliases (#44). A tool that takes a `cursor` is the one exception: its canonical name is optional in the schema, so a cursor call can carry no other argument (ADR-0038).
 
 ## Mechanical enforcement
 
