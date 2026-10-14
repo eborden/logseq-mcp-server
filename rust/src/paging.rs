@@ -234,6 +234,10 @@ pub fn stale_warning(stale: Stale, what: &str) -> ResultWarning {
 /// tool that the call sent, in the order of its schema (`A` is the type the tool's arguments parse into), before any
 /// LogSeq call. `null` counts as absent, as everywhere. The arguments are read as they were sent, since a default and
 /// a value that was asked for look the same once parsed. A field the tool doesn't know is ignored, as in every tool.
+///
+/// A tool with parameter aliases (`resolve_param_aliases`) must call this on the arguments after the aliases are folded: an alias
+/// is not a property of the schema, so `{cursor, <alias>}` would otherwise pass as a cursor alone and the alias be ignored
+/// (BR-0008). `find_blocks` has none. The step of the first tool that does adds the test (#552).
 pub fn refuse_with_cursor<A: JsonSchema>(arguments: Option<&JsonObject>) -> Result<(), InvalidParameter> {
     let schema = input_schema::<A>();
     let others = schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|properties| properties.keys()).filter(|name| *name != "cursor");
