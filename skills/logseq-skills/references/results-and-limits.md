@@ -69,6 +69,8 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 | | `result_size_truncated` | Whole pages cut from the tail, in name order. Follow `offset` |
 | | `pages_unavailable` | LogSeq sent no page list: the list is unknown, not empty, and no name was answered |
 | `get_page` | `result_size_truncated` | `detail` `full`: blocks past the budget were left out, a kept block that lost children has `childrenTruncated: true`. `detail` `outline`: top-level blocks cut. No `howToFetchAll` |
+| | `outline_unavailable` | `detail` `outline`: LogSeq sent no answer for the page's blocks, so an empty outline may not mean the page has no blocks. Retry |
+| | `page_blocks_unavailable` | `detail` `full`: no answer for the block tree, so the page comes back without its blocks. Retry |
 | | `outline_truncated` | An outline holds at most 200 top-level blocks. Read the rest with `logseq_get_block` or `logseq_find_blocks` |
 | `get_block` | `result_size_truncated` | With `include_children`, a very large subtree was cut. Read a marked block below it by its own uuid |
 | `get_current` | `page_names_unavailable` | The pages of the focused or selected blocks couldn't be looked up. With `page: null` it is not "no page is open". Retry |
@@ -90,9 +92,12 @@ A code that sits on several tools means the same thing on each. `*_unavailable` 
 | | `journals_unavailable`, `blocks_unavailable`, `page_blocks_unavailable`, `page_unavailable`, `mentions_unavailable` | LogSeq answered null for that part: the result is partial, never empty |
 | | `alias_set_truncated`, `alias_lookup_unavailable` | Not every alias is covered |
 | `check_links` | `result_size_truncated` | Only `refs.resolved` was cut |
+| | `candidates_truncated` | An alias several pages declare lists only the most pages it can. The term is still ambiguous: ask which page was meant |
 | | `refs_unchecked` | LogSeq gave no answer, so no ref was checked. Don't report the pass as clean |
 
-An ambiguous page name is not an error: the result is `{ ambiguous: true, candidates, ... }` with an `ambiguous_page` warning. Pick a candidate by its exact `name` and call again.
+A tool that takes `resolve_refs` can add three more warnings. `refs_depth_limit`: refs more than two levels deep were left as written, and `howToFetchAll` says to read them with `logseq_get_block`. `refs_unavailable`: LogSeq gave no answer for some refs, so they stay unresolved and this is not "missing": retry. `embed_truncated`: an embed shows only part of what it embeds, and `howToFetchAll` names the call for the rest.
+
+An ambiguous page name is not an error: the result is `{ ambiguous: true, candidates, ... }` with an `ambiguous_page` warning. Pick a candidate by its exact `name` and call again. A `candidates_truncated` warning beside it says the list holds only the most the tool lists, and the rest can't be fetched in one call: name the page more exactly.
 
 ## Host limits
 

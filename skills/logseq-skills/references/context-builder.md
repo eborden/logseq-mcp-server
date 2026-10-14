@@ -8,7 +8,7 @@ Core principle: **name the page, then explore it.** `logseq_explore_context` for
 
 **When:** "What do I know about X?", "what links to X?", research for a topic.
 
-1. If you are not sure of the page name, look it up. Skip this when the user named the page.
+1. Only when the user gave no page name, or step 2 says there is no such page: look the name up. When the user named the page, start at step 2.
 
 ```json tool=logseq_find_pages
 {"text": "react"}
@@ -38,15 +38,7 @@ Read `totals.matches` for how many there are and each `pageName` for where. Next
 
 **When:** "I'm meeting Alice in ten minutes", "what's going on with the Atlas team".
 
-1. Check the page exists and which names it answers to. Skip when you are sure.
-
-```json tool=logseq_find_pages
-{"names": ["Alice"]}
-```
-
-Read `names`: the page, or `null` with close suggestions. Use the page's own `name`.
-
-2. Read the page and everything that links to it. These two calls are independent, so make them in parallel. Compact keeps the first one cheap.
+1. Read the page and everything that links to it. The user named the person, so call straight away: names resolve in any case or alias. These two calls are independent, so make them in parallel. Compact keeps the first one cheap.
 
 ```json tool=logseq_explore_context
 {"page": "Alice", "max_blocks": 20, "max_references": 15, "compact": true}
@@ -58,13 +50,15 @@ Read `names`: the page, or `null` with close suggestions. Use the page's own `na
 
 Read the snippets and `sourcePage` names of the first for standing context (role, projects, how they work). Read the timeline `entries` for the last 30 days, newest facts last, and `summary.topConcepts` for the projects that came up with them. With a period, blocks on non-journal pages are left out, which is why the first call is also needed.
 
-3. Find what is still open with them.
+2. Find what is still open with them.
 
 ```json tool=logseq_find_blocks
 {"text": "TODO", "links_to": ["Alice"], "limit": 10}
 ```
 
 Read each `content` and `pageName`. A task that mentions Alice only in plain words is not here: `links_to` matches links. Next call: `logseq_get_block` with a `uuid` and `include_children: true` for the context under a task.
+
+If the explore call says there is no such page, look the name up (`logseq_find_pages` with `names` or `text`) and retry with the page's own name.
 
 **Present:** who they are in the graph, what happened lately, open items, what to ask or raise. Quote actual content with its source page.
 
@@ -211,9 +205,17 @@ Read the day counts and snippets: a page with recent activity is not abandoned.
 
 ## Recipe 7: Who owns it, or which pages have a property
 
-**When:** "Who owns the importer?", "which vendors do we use", any ask for the value of a property or the pages that carry one.
+**When:** "Who owns the importer?" (a page you can name), or "which projects does Alice own", "which vendors do we use" (a property value you have).
 
-1. Pages that carry a page property (`owner:: Alice` at the top of a page):
+1. For the value of a property on a page you can name, read the page. Page properties are in its properties.
+
+```json tool=logseq_get_page
+{"page": "project atlas"}
+```
+
+Read `properties` (for example `owner`, `status`, `type`). Next call: `logseq_explore_context` when the answer needs more than the property, such as who the owner works with.
+
+2. For the pages that carry a property value you already have (`owner:: Alice` at the top of a page), search by it:
 
 ```json tool=logseq_find_pages
 {"property": "owner", "value": "Alice"}
@@ -224,14 +226,6 @@ Read `pages` and `total`. If it is empty, the property may be on a block and not
 ```json tool=logseq_find_blocks
 {"property": "owner", "value": "Alice", "limit": 10}
 ```
-
-2. For the value of a property on a page you can name, read the page. Page properties are in its properties.
-
-```json tool=logseq_get_page
-{"page": "importer"}
-```
-
-Read the properties of the page. Next call: `logseq_explore_context` when the answer needs more than the property.
 
 **Present:** the owner and where the fact is written (page, block). If two sources disagree, say so.
 

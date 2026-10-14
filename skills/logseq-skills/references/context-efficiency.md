@@ -59,7 +59,7 @@ If user provides explicit timeframe ("this week", "in November", "recently"):
 
 Only add follow-up queries if `explore_context` returns insufficient results. For several pages, call it once per page, in parallel, rather than once for all.
 
-#### 7. Keep Date-Range Results Small Enough to Be Shown
+### 7. Keep Date-Range Results Small Enough to Be Shown
 
 A host may not hand a large tool result to the model. Claude Code saves a result of about 50,000 characters or more to a file and shows the model only the first 2 KB, with the path. A result that is larger still can come back as an error that names the file. Either way the model gets no `summary`, `totals` or `warnings`, which sit at the end of the JSON, so a cut result looks like a complete one. Reading the file in slices pulls the whole result into context anyway. Other hosts have their own limits, and Claude Code's may be configurable, so plan for the smaller one.
 
