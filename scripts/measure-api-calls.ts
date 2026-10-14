@@ -223,6 +223,8 @@ async function main() {
       { tool: 'logseq_get_page', label: 'get_page full (quartz log', args: { page: 'quartz log', detail: 'full' }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
       // #553: the outline of the fixture's page with 450 top-level blocks ("A page with many top-level blocks")
       { tool: 'logseq_get_page', label: 'get_page outline (quartz outline', args: { page: 'quartz outline', detail: 'outline' }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
+      // #556: the walk to a depth of 2 in pages of 20: page 1 makes the walk's calls, a miss makes them again, a hit none
+      { tool: 'logseq_explore_network', label: 'explore_network depth 2 (20', args: { page: subject, max_depth: 2, max_nodes: 20 }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
       { tool: 'logseq_get_block', label: 'get_block children (part 1', args: { uuid: '0088f1a0-0000-4000-8000-000000000b01', include_children: true }, cursorOf: cursorIn(0, (value) => value?.nextCursor) },
       // #555: the context of the most-linked page (the fixture's hub has more of every list than a page holds), with and
       // without `resolve_refs`, which a hit still runs for the blocks and references of the page it sends. A graph
