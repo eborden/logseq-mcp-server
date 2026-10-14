@@ -182,6 +182,11 @@ impl Resume {
         Ok(Resume { cursor, at, token: token.to_owned() })
     }
 
+    /// The place of the first entry of the next page, in the list as the first call read it.
+    pub fn at(&self) -> usize {
+        self.at
+    }
+
     /// A token whose arguments are not a read of a tree: the same refusal as one that doesn't parse.
     pub fn refuse(&self, tool: &str, reason: &str) -> InvalidParameter {
         invalid(&self.token, tool, reason)

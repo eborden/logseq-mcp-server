@@ -647,7 +647,6 @@ async fn a_token_that_is_not_one_of_this_tools_is_refused_before_any_call() {
         ("an unknown version", page_token(&|cursor| cursor.v = 2)),
         ("sections position", page_token(&|cursor| cursor.position = Position::Sections { blocks: 1, references: 0, related: 0 })),
         ("a page that is no full read", token(get_page::NAME, json!({"page": "Project Atlas"}), &|_| {})),
-        ("an outline", token(get_page::NAME, json!({"page": "Project Atlas", "detail": "outline"}), &|_| {})),
         ("no page", token(get_page::NAME, json!({"detail": "full"}), &|_| {})),
         ("a format the page does not take", token(get_page::NAME, json!({"page": "a", "detail": "full", "format": "toon"}), &|_| {})),
         ("arguments that hold a cursor", token(get_page::NAME, json!({"page": "a", "detail": "full", "cursor": "abc"}), &|_| {})),

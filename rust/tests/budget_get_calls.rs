@@ -383,12 +383,14 @@ async fn an_outline_of_two_hundred_full_lines_is_cut_to_the_budget_and_a_short_o
     let outline: Value = serde_json::from_str(&outline).unwrap();
     let kept = outline["blocks"].as_array().unwrap().len();
     assert!(kept > 150 && kept < 200, "{kept}");
-    assert_eq!(outline["hasMore"], false);
+    // a cut outline reads on with a cursor (ADR-0038)
+    assert_eq!(outline["hasMore"], true);
+    assert!(outline["nextCursor"].is_string());
     assert_eq!(outline["totals"], json!({"blocks": 200}));
     let warnings = outline["warnings"].as_array().unwrap();
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0]["code"], "result_size_truncated");
-    assert!(warnings[0]["message"].as_str().unwrap().starts_with(&format!("Showing {kept} of 200 top-level blocks")));
+    assert!(warnings[0]["message"].as_str().unwrap().starts_with(&format!("Showing 1-{kept} of 200 top-level blocks")));
 
     let logseq = mock_logseq(vec![resolved_root(), outline_answer(200, 20)]).await;
     let result = get_page::call(&client(&logseq), true, &Snapshots::new(1), arguments(json!({"page": "Project Atlas", "detail": "outline"}))).await.unwrap();

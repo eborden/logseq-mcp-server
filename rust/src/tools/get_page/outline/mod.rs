@@ -1,10 +1,17 @@
 //! The `detail: "outline"` of `logseq_get_page`: a page's top-level blocks with a first-line snippet and a child
 //! count each, so a model can choose what to read with `logseq_get_block` instead of loading a long page whole.
-//! It was the tool `logseq_get_page_outline` before the v2 rename (ADR-0037, #489), and its result is unchanged.
+//! It was the tool `logseq_get_page_outline` before the v2 rename (ADR-0037, #489).
 //!
 //! Calls: 2 for an exact name, an alias or an ISO date (the page resolver, then one Datalog query
 //! for the blocks). A namespace-leaf name adds the resolver's leaf query; a missing page adds the
 //! suggestion lookup before it fails. Never one call per block.
+//!
+//! A result holds at most [`MAX_OUTLINE_BLOCKS`] top-level blocks and the 30,000-character budget. A page with more
+//! is read to the end with a cursor (ADR-0038, #553): the result carries `nextCursor`, `hasMore: true`, and an
+//! `outline_truncated` (the count) or `result_size_truncated` (the budget) warning whose `howToFetchAll` says to pass
+//! it. A call with only that `cursor` reads the next page: from the snapshot the first call kept (no LogSeq call) or,
+//! when the snapshot is gone, with the calls the first page made, resuming after the last block sent (found by its
+//! uuid), with a `cursor_stale` warning when the page moved. `totals.blocks` is every top-level block the page has.
 //!
 //! This directory holds everything only the outline uses: its query (`queries.rs`), the blocks it
 //! reads (`wire.rs`) and its tip (`tips.rs`). What it shares with other tools is outside it: the
@@ -15,36 +22,95 @@ mod tips;
 mod wire;
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::block_tree::order_siblings;
-use crate::budget::{Fit, fit, size};
+use crate::budget::size;
 use crate::client::LogseqClient;
+use crate::cursor::{Anchor, Cursor, Position, SnapshotKey, encode};
 use crate::edn::PageId;
 use crate::errors::{MatchedBy, ToolError};
 use crate::meta::{ResultMeta, ResultWarning};
 use crate::output_format::ListFormat;
+use crate::paging::{Cut, PagedCut, Stale, page_of, paged_warning, resume_at, serve, stale_warning};
 use crate::resolve::require_page;
+use crate::snapshots::{Snapshots, resident_weight};
 use crate::snippet::Snippet;
 use crate::tips::tips_value;
 use crate::tool::{result_value, success_result};
-use crate::truncation::{SizeCut, size_truncation_warning};
+use crate::tree_paging::Resume;
 
 use self::tips::{TipBlock, outline_tips};
 use self::wire::OutlineBlock;
 
-/// The outline of a page as a tool result: the outline, then its tip. `format` is the outline's own (`json`, the
-/// default, or `toon`), and the tip is written in the same one.
-pub async fn outline_result(
-    client: &LogseqClient,
-    tips_enabled: bool,
-    page: &str,
-    format: Option<ListFormat>,
-) -> Result<CallToolResult, ToolError> {
-    let outline = fit_to_budget(get_page_outline(client, page).await?, tips_enabled, format);
-    Ok(success_result(outline_texts(&outline, tips_enabled, format)?.into_iter().map(ContentBlock::text).collect()))
+/// What the list holds, plural, as a warning says it.
+const WHAT: &str = "top-level blocks";
+
+/// The code of the warning for a page cut by the page size.
+const COUNT_CUT: &str = "outline_truncated";
+
+/// Most top-level blocks one page of the outline holds. A page with more is cut, and a cursor reads the rest.
+pub const MAX_OUTLINE_BLOCKS: usize = 200;
+
+/// What a read of the outline needs from the call.
+pub struct Read<'a> {
+    pub tips_enabled: bool,
+    pub snapshots: &'a Snapshots,
+    /// The page name, as the call asked or as the cursor holds it
+    pub page: &'a str,
+    /// `json` (the default) or `toon`
+    pub format: Option<ListFormat>,
+    /// The arguments the list is built from, which a cursor carries: the first call's, or the token's own
+    pub stored: &'a Map<String, Value>,
+    /// The cursor the call carried, decoded
+    pub resume: Option<&'a Resume>,
+}
+
+/// One page of the outline of a page as a tool result: the outline, then its tip. `format` is the outline's own
+/// (`json`, the default, or `toon`), and the tip is written in the same one.
+///
+/// With a `resume` it is the page the cursor names, read from the snapshot an earlier call kept or built again with
+/// the calls the first page made, and starting at the block after the last one the page before sent.
+pub async fn outline_result(client: &LogseqClient, read: Read<'_>) -> Result<CallToolResult, ToolError> {
+    let Read { tips_enabled, snapshots, page, format, stored, resume } = read;
+    let now = Instant::now();
+    // Refused before any call: the last block a page sent is named by its uuid
+    let anchor = match resume {
+        None => None,
+        Some(resume) => match &resume.cursor.anchor {
+            Anchor::Text(uuid) => Some(uuid.as_str()),
+            Anchor::Id(_) => return Err(resume.refuse(super::NAME, "this is not a cursor of the outline: its last block is not a uuid").into()),
+        },
+    };
+    let served = serve(snapshots, resume.map(|resume| &resume.cursor.snapshot), stored, now, || listing_of(client, page)).await?;
+    let listing = &*served.list;
+    let total = listing.entries.len();
+    let (start, stale) = match (resume, anchor) {
+        (Some(resume), Some(anchor)) => {
+            // The block after the anchor is found by its uuid, so a block added or deleted before the position
+            // doesn't repeat or skip one; none is found when the anchor itself is gone
+            let resumed = resume_at(
+                total,
+                resume.at(),
+                |at| listing.entries[at].uuid == anchor,
+                || listing.entries.iter().position(|entry| entry.uuid == anchor).map(|at| at + 1),
+            );
+            (resumed.start, resumed.stale)
+        }
+        _ => (0, None),
+    };
+    let view = View { listing, start, stale, tips_enabled, format, token: Some(Token { args: stored.clone(), key: served.key }) };
+    let paged = page_of(total, start, MAX_OUTLINE_BLOCKS, |kept| view.size(kept));
+    // A list that fits one page needs no snapshot, and a hit is kept already
+    if paged.next().is_some() {
+        served.keep(snapshots, stored, listing.weight(), now);
+    }
+    let texts = view.texts(paged.kept, paged.cut)?;
+    Ok(success_result(texts.into_iter().map(ContentBlock::text).collect()))
 }
 
 /// The text of the content blocks a call sends for `outline`: the outline, then its tip.
@@ -60,45 +126,119 @@ fn outline_texts(outline: &PageOutline, tips_enabled: bool, format: Option<ListF
     Ok(texts)
 }
 
-/// The outline as it is when the text it sends fits the character budget (#507, #485), else with the first top-level
-/// blocks that do. The 200-block cap leaves a long outline of long snippets just over it: each entry is a 36-character
-/// uuid and a snippet of up to 80, so 200 of them are about 31,000 characters in JSON. An entry is never cut inside
-/// its text (BR-0007). No LogSeq call is made.
-fn fit_to_budget(outline: PageOutline, tips_enabled: bool, format: Option<ListFormat>) -> PageOutline {
-    let size_of = |kept: usize| -> usize {
-        let sent = if kept < outline.blocks.len() { cut_outline(&outline, kept, false) } else { outline.clone() };
-        outline_texts(&sent, tips_enabled, format).map_or(0, |texts| texts.iter().map(|text| size(text)).sum())
-    };
-    match fit(outline.blocks.len(), 1, size_of) {
-        Fit::Whole => outline,
-        Fit::Cut { kept, oversize } => cut_outline(&outline, kept, oversize),
+/// Every top-level block of a page in page order, and how the page was found: the list a cursor pages, and what a
+/// snapshot keeps.
+struct Listing {
+    page: String,
+    resolved_from: Option<ResolvedFrom>,
+    entries: Vec<OutlineEntry>,
+    /// LogSeq answered `null` for the blocks (BR-0011)
+    unavailable: bool,
+}
+
+impl Listing {
+    /// What the snapshot weighs for the cache's bounds: the length of the JSON of the list, scaled to the memory it
+    /// takes ([`resident_weight`]).
+    fn weight(&self) -> usize {
+        resident_weight(serde_json::to_string(&self.entries).map_or(0, |text| text.len()))
     }
 }
 
-/// The outline cut to its first `kept` top-level blocks, with the `result_size_truncated` warning in place of the
-/// `outline_truncated` one, which counted against the 200-block cap and said to read the rest with `detail` `full`.
-/// `totals.blocks` is still every top-level block the page has.
-fn cut_outline(outline: &PageOutline, kept: usize, oversize: bool) -> PageOutline {
-    let total = outline.meta.totals.get("blocks").and_then(serde_json::Value::as_u64).map_or(outline.blocks.len(), |total| total as usize);
-    let mut warnings: Vec<ResultWarning> = outline.meta.warnings.iter().filter(|warning| warning.code != "outline_truncated").cloned().collect();
-    warnings.push(size_truncation_warning(SizeCut {
-        what: "top-level blocks",
-        kept,
-        total,
-        oversize,
-        advice: "The last blocks are left out. The outline can't be paged and no parameter raises this limit: read a block with logseq_get_block and its uuid, or find a later one by its text with logseq_find_blocks.",
-        how_to_fetch_all: None,
-    }));
-    let has_more = warnings.iter().any(|warning| warning.how_to_fetch_all.is_some());
-    PageOutline {
-        blocks: outline.blocks[..kept].to_vec(),
-        meta: ResultMeta { has_more, next_cursor: None, warnings, totals: outline.meta.totals.clone() },
-        ..outline.clone()
-    }
+/// What a cursor is made from: the arguments of the call and the snapshot its list was kept as.
+struct Token {
+    args: Map<String, Value>,
+    key: SnapshotKey,
 }
 
-/// Most top-level blocks one outline lists. A page with more is cut, and the result says so.
-pub const MAX_OUTLINE_BLOCKS: usize = 200;
+/// One page of the list, and everything its warnings, cursor and tip are made from.
+struct View<'a> {
+    listing: &'a Listing,
+    /// The index of the first block of this page in the list
+    start: usize,
+    stale: Option<Stale>,
+    tips_enabled: bool,
+    format: Option<ListFormat>,
+    /// What the next page's cursor carries. None for the library function, which has no snapshots to name
+    token: Option<Token>,
+}
+
+impl View<'_> {
+    fn total(&self) -> usize {
+        self.listing.entries.len()
+    }
+
+    /// How the page ends when it holds the first `kept` blocks it could: not at all when it reaches the last block,
+    /// by the page size when it holds all it could, by the budget otherwise.
+    fn cut_at(&self, kept: usize) -> Option<Cut> {
+        if self.start + kept >= self.total() {
+            None
+        } else if kept == MAX_OUTLINE_BLOCKS.min(self.total() - self.start) {
+            Some(Cut::Count)
+        } else {
+            Some(Cut::Size { oversize: false })
+        }
+    }
+
+    /// Whether the page, held to `kept` blocks and ending as `cut` says, has a cursor to read on with. A page of no
+    /// block has none: a cursor that does not move reads nothing on.
+    fn has_next(&self, kept: usize, cut: Option<Cut>) -> bool {
+        cut.is_some() && kept > 0 && self.token.is_some()
+    }
+
+    /// The cursor that starts at the block after the first `kept`, which the last of them names by its uuid.
+    fn next_cursor(&self, kept: usize, cut: Option<Cut>) -> Option<String> {
+        let token = self.token.as_ref().filter(|_| self.has_next(kept, cut))?;
+        let anchor = Anchor::Text(self.listing.entries[self.start + kept - 1].uuid.clone());
+        Some(encode(&Cursor::new(super::NAME, token.args.clone(), Position::Index { at: self.start + kept }, anchor, token.key)))
+    }
+
+    /// The warnings of the page holding the first `kept` blocks: a list that moved, then the cut. A `null` answer is
+    /// the one warning, with no way to fetch more (BR-0006, BR-0011).
+    fn warnings(&self, kept: usize, cut: Option<Cut>) -> Vec<ResultWarning> {
+        if self.listing.unavailable {
+            return vec![blocks_unavailable()];
+        }
+        let mut warnings: Vec<ResultWarning> = self.stale.map(|stale| stale_warning(stale, WHAT)).into_iter().collect();
+        if let Some(cut) = cut {
+            let advice = match cut {
+                Cut::Size { .. } => "The last top-level blocks are left out. No parameter raises the size limit: read a block with logseq_get_block and its uuid.",
+                Cut::Count => "",
+            };
+            warnings.push(paged_warning(PagedCut {
+                count_code: COUNT_CUT,
+                cut,
+                what: WHAT,
+                start: self.start,
+                kept,
+                total: self.total(),
+                advice,
+                raise: None,
+                has_next: self.has_next(kept, Some(cut)),
+            }));
+        }
+        warnings
+    }
+
+    /// The outline holding the first `kept` blocks of this page, ending as `cut` says.
+    fn outline(&self, kept: usize, cut: Option<Cut>) -> PageOutline {
+        PageOutline {
+            page: self.listing.page.clone(),
+            resolved_from: self.listing.resolved_from.clone(),
+            blocks: self.listing.entries[self.start..self.start + kept].to_vec(),
+            meta: ResultMeta::paged(self.warnings(kept, cut), &[("blocks", self.total())], self.next_cursor(kept, cut)),
+        }
+    }
+
+    /// What the call sends for the first `kept` blocks: the outline, then its tip.
+    fn texts(&self, kept: usize, cut: Option<Cut>) -> Result<Vec<String>, ToolError> {
+        outline_texts(&self.outline(kept, cut), self.tips_enabled, self.format)
+    }
+
+    /// The length of the result holding the first `kept` blocks, as `call` would send it (what the budget measures).
+    fn size(&self, kept: usize) -> usize {
+        self.texts(kept, self.cut_at(kept)).map_or(0, |texts| texts.iter().map(|text| size(text)).sum())
+    }
+}
 
 /// One top-level block: enough to choose it, not to read it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -144,11 +284,11 @@ struct Top<'a> {
     block: &'a OutlineBlock,
 }
 
-/// The outline of the blocks the query pulled for `page_id`.
+/// The outline of the blocks the query pulled for `page_id`: every top-level block, in page order.
 ///
 /// Top-level blocks hang off the page; every other row is a child of one of them. A `null` cell
 /// is skipped, and so is a row with no parent: it is neither a top-level block nor a child.
-fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>, Vec<ResultWarning>, usize) {
+fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> Vec<OutlineEntry> {
     let mut top: Vec<Top<'_>> = Vec::new();
     let mut child_count: HashMap<i64, usize> = HashMap::new();
     for block in rows.iter().flatten() {
@@ -160,31 +300,14 @@ fn outline_of(page_id: i64, rows: &[Option<OutlineBlock>]) -> (Vec<OutlineEntry>
         }
     }
 
-    let ordered = order_siblings(top, |top| top.id, |top| top.left);
-    let total = ordered.len();
-    let shown = &ordered[..total.min(MAX_OUTLINE_BLOCKS)];
-
-    let mut warnings = Vec::new();
-    if total > shown.len() {
-        warnings.push(ResultWarning::new(
-            "outline_truncated",
-            format!(
-                "Showing the first {} of {} top-level blocks. \
-                 The outline has no way to page; read a block with logseq_get_block by its uuid, or find a later one by its text with logseq_find_blocks. Detail \"full\" is cut to 30000 characters too, so it does not read the rest.",
-                shown.len(),
-                total
-            ),
-        ));
-    }
-    let blocks = shown
+    order_siblings(top, |top| top.id, |top| top.left)
         .iter()
         .map(|top| OutlineEntry {
             uuid: top.block.uuid.clone(),
             snippet: Snippet::of(top.block.content.as_deref()),
             child_count: child_count.get(&top.id).copied().unwrap_or(0),
         })
-        .collect();
-    (blocks, warnings, total)
+        .collect()
 }
 
 /// The warning for a `null` answer to the page's blocks. `hasMore` stays false and there is no `howToFetchAll`:
@@ -199,14 +322,12 @@ fn blocks_unavailable() -> ResultWarning {
     )
 }
 
-/// A page's outline.
-///
-/// `page_name` is a page name, an alias, or an ISO date (`2025-01-01`) of a journal. When it was
-/// an alias, a date or a namespace leaf rather than an exact name, `resolvedFrom` says so.
+/// The list of a first call, or of a cursor whose snapshot is gone: the page resolved, then the one Datalog query for
+/// its blocks, every top-level block kept.
 ///
 /// Fails with [`ToolError::PageNotFound`] (guidance with the closest names) if no page matches,
 /// and [`ToolError::AmbiguousPage`] (with the candidates) if several do.
-pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<PageOutline, ToolError> {
+async fn listing_of(client: &LogseqClient, page_name: &str) -> Result<Listing, ToolError> {
     let resolved = require_page(client, page_name).await?;
     // The resolver pulls the page by :db/id, so it always has one (a page without it can't be queried)
     let raw_id = resolved.page.entity_id().ok_or(ToolError::PageWithoutId)?;
@@ -218,28 +339,36 @@ pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<
     // the data was unavailable. A real `[]` is a page with no blocks and carries no warning.
     let rows = wire::outline_rows(&answer)?;
     let unavailable = rows.is_none();
-
-    let (blocks, mut warnings, total) = outline_of(raw_id, &rows.unwrap_or_default());
-    if unavailable {
-        warnings.push(blocks_unavailable());
-    }
+    let entries = outline_of(raw_id, &rows.unwrap_or_default());
     let resolved_from = (resolved.matched_by != MatchedBy::Name).then(|| ResolvedFrom {
         name: page_name.to_owned(),
         matched_by: resolved.matched_by.as_str(),
         resolved_to: resolved.original_name.clone(),
     });
-    Ok(PageOutline {
-        page: resolved.original_name,
-        resolved_from,
-        blocks,
-        meta: ResultMeta::new(warnings, &[("blocks", total)]),
-    })
+    Ok(Listing { page: resolved.original_name, resolved_from, entries, unavailable })
+}
+
+/// A page's outline: the first page of it, as the tool sends it without the cursor. The library function keeps no
+/// snapshot and carries no `nextCursor`, and applies the page size but not the character budget (`outline_result` does).
+///
+/// `page_name` is a page name, an alias, or an ISO date (`2025-01-01`) of a journal. When it was
+/// an alias, a date or a namespace leaf rather than an exact name, `resolvedFrom` says so.
+///
+/// Fails with [`ToolError::PageNotFound`] (guidance with the closest names) if no page matches,
+/// and [`ToolError::AmbiguousPage`] (with the candidates) if several do.
+pub async fn get_page_outline(client: &LogseqClient, page_name: &str) -> Result<PageOutline, ToolError> {
+    let listing = listing_of(client, page_name).await?;
+    let view = View { listing: &listing, start: 0, stale: None, tips_enabled: false, format: None, token: None };
+    let kept = MAX_OUTLINE_BLOCKS.min(view.total());
+    Ok(view.outline(kept, view.cut_at(kept)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{Value, json};
+    use crate::cursor::decode;
+    use crate::paging::NEXT_PAGE;
+    use serde_json::json;
 
     fn rows(blocks: Vec<Value>) -> Vec<Option<OutlineBlock>> {
         let answer = Value::Array(blocks.into_iter().map(|b| json!([b])).collect());
@@ -267,11 +396,9 @@ mod tests {
             block(202, Some(101), 201, "child"),
             block(102, Some(10), 101, "b"),
         ]);
-        let (blocks, warnings, total) = outline_of(10, &rows);
+        let blocks = outline_of(10, &rows);
         assert_eq!(uuids(&blocks), ["u101", "u102", "u103"]);
         assert_eq!(blocks.iter().map(|b| b.child_count).collect::<Vec<_>>(), [2, 0, 0]);
-        assert!(warnings.is_empty());
-        assert_eq!(total, 3);
     }
 
     #[test]
@@ -284,20 +411,17 @@ mod tests {
             block(414, Some(41), 413, "after"),
             block(413, Some(41), 999, "orphan"),
         ]);
-        let (blocks, _, _) = outline_of(41, &rows);
-        assert_eq!(uuids(&blocks), ["u413", "u414", "u411", "u412"]);
+        assert_eq!(uuids(&outline_of(41, &rows)), ["u413", "u414", "u411", "u412"]);
     }
 
     #[test]
     fn two_siblings_with_one_left_keep_the_first_listed_in_the_chain() {
         let rows = rows(vec![block(2, Some(1), 1, "first"), block(3, Some(1), 1, "second")]);
         // both are heads (their left, the page, is no sibling), ordered by id
-        let (blocks, _, _) = outline_of(1, &rows);
-        assert_eq!(uuids(&blocks), ["u2", "u3"]);
+        assert_eq!(uuids(&outline_of(1, &rows)), ["u2", "u3"]);
         let chained = self::rows(vec![block(5, Some(1), 4, "a"), block(6, Some(1), 5, "b"), block(7, Some(1), 5, "c"), block(4, Some(1), 1, "head")]);
-        let (blocks, _, _) = outline_of(1, &chained);
         // 6 was listed before 7, so it follows 5; 7, which no chain reached, comes last
-        assert_eq!(uuids(&blocks), ["u4", "u5", "u6", "u7"]);
+        assert_eq!(uuids(&outline_of(1, &chained)), ["u4", "u5", "u6", "u7"]);
     }
 
     #[test]
@@ -309,8 +433,8 @@ mod tests {
             [block(403, Some(401), 401, "child")]
         ]);
         let rows = wire::outline_rows(&answer).unwrap().unwrap();
-        let (blocks, _, total) = outline_of(40, &rows);
-        assert_eq!((uuids(&blocks), blocks[0].child_count, total), (vec!["u401"], 1, 1));
+        let blocks = outline_of(40, &rows);
+        assert_eq!((uuids(&blocks), blocks[0].child_count), (vec!["u401"], 1));
     }
 
     #[test]
@@ -318,8 +442,7 @@ mod tests {
         let mut child = block(203, None, 103, "child");
         child["parent"] = json!(103);
         let rows = rows(vec![block(103, Some(10), 10, "top"), child]);
-        let (blocks, _, _) = outline_of(10, &rows);
-        assert_eq!(blocks[0].child_count, 1);
+        assert_eq!(outline_of(10, &rows)[0].child_count, 1);
     }
 
     #[test]
@@ -328,93 +451,141 @@ mod tests {
         top["parent"] = json!({"db/id": 10});
         let mut child = block(203, None, 103, "child");
         child["parent"] = json!({"db/id": 103});
-        let (blocks, _, total) = outline_of(10, &rows(vec![top, child]));
-        assert_eq!((uuids(&blocks), blocks[0].child_count, total), (vec!["u103"], 1, 1));
+        let blocks = outline_of(10, &rows(vec![top, child]));
+        assert_eq!((uuids(&blocks), blocks[0].child_count), (vec!["u103"], 1));
     }
 
     #[test]
-    fn more_than_the_cap_is_cut_and_said_so_without_a_way_to_fetch_the_rest() {
+    fn every_top_level_block_is_listed_past_the_page_size() {
         let many: Vec<Value> = (0..201).map(|i| block(1000 + i, Some(50), if i == 0 { 50 } else { 1000 + i - 1 }, "entry")).collect();
-        let (blocks, warnings, total) = outline_of(50, &rows(many));
-        assert_eq!((blocks.len(), total), (200, 201));
-        assert_eq!(blocks[199].uuid, "u1199");
-        let meta = ResultMeta::new(warnings, &[("blocks", total)]);
-        assert!(!meta.has_more);
-        assert_eq!(meta.warnings[0].code, "outline_truncated");
-        assert_eq!(
-            meta.warnings[0].message,
-            "Showing the first 200 of 201 top-level blocks. The outline has no way to page; read a block with logseq_get_block by its uuid, or find a later one by its text with logseq_find_blocks. Detail \"full\" is cut to 30000 characters too, so it does not read the rest."
-        );
+        let blocks = outline_of(50, &rows(many));
+        assert_eq!(blocks.len(), 201);
+        assert_eq!(blocks[200].uuid, "u1200");
     }
 
-    /// An outline of `count` top-level blocks whose first lines are `snippet` characters long.
-    fn outline_of_lines(count: usize, snippet: usize) -> PageOutline {
+    /// A list of `count` top-level blocks whose first lines are `snippet` characters long.
+    fn listing_of_lines(count: usize, snippet: usize) -> Listing {
         let entry = |n: usize| OutlineEntry {
             uuid: format!("00000000-0000-4000-8000-{n:012}"),
             snippet: Snippet::of(Some(&"w".repeat(snippet))),
             child_count: n % 3,
         };
-        PageOutline {
-            page: "Atlas".into(),
-            resolved_from: None,
-            blocks: (0..count).map(entry).collect(),
-            meta: ResultMeta::new(Vec::new(), &[("blocks", count)]),
+        Listing { page: "Atlas".into(), resolved_from: None, entries: (0..count).map(entry).collect(), unavailable: false }
+    }
+
+    fn view(listing: &Listing, start: usize, format: Option<ListFormat>) -> View<'_> {
+        let token = Token { args: json!({"page": "Atlas", "detail": "outline"}).as_object().cloned().unwrap(), key: SnapshotKey { started: 1, n: 1 } };
+        View { listing, start, stale: None, tips_enabled: true, format, token: Some(token) }
+    }
+
+    /// The page the call would send from `start`: its outline and how many characters it takes.
+    fn page_at(view: &View<'_>) -> (PageOutline, usize) {
+        let page = page_of(view.total(), view.start, MAX_OUTLINE_BLOCKS, |kept| view.size(kept));
+        (view.outline(page.kept, page.cut), view.size(page.kept))
+    }
+
+    fn token_at(outline: &PageOutline) -> crate::cursor::Cursor {
+        decode(outline.meta.next_cursor.as_deref().unwrap(), super::super::NAME).unwrap()
+    }
+
+    #[test]
+    fn a_list_exactly_at_the_page_size_is_one_page_and_one_more_has_a_cursor() {
+        for (count, cursor) in [(MAX_OUTLINE_BLOCKS, false), (MAX_OUTLINE_BLOCKS + 1, true)] {
+            let listing = listing_of_lines(count, 5);
+            let (outline, _) = page_at(&view(&listing, 0, None));
+            assert_eq!((outline.blocks.len(), outline.meta.next_cursor.is_some(), outline.meta.has_more), (MAX_OUTLINE_BLOCKS, cursor, cursor), "{count} blocks");
+            assert_eq!(outline.meta.warnings.len(), usize::from(cursor));
+            assert_eq!(outline.meta.totals["blocks"], count);
         }
     }
 
-    fn sent(outline: &PageOutline, format: Option<ListFormat>) -> usize {
-        outline_texts(outline, true, format).unwrap().iter().map(|text| size(text)).sum()
+    #[test]
+    fn a_count_cut_says_so_and_leads_with_the_cursor() {
+        let listing = listing_of_lines(MAX_OUTLINE_BLOCKS + 1, 5);
+        let (outline, _) = page_at(&view(&listing, 0, None));
+        let warning = &outline.meta.warnings[0];
+        assert_eq!(warning.code, "outline_truncated");
+        assert_eq!(warning.message, "Showing 1-200 of 201 top-level blocks.");
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some(NEXT_PAGE));
+        let cursor = token_at(&outline);
+        assert_eq!((cursor.position, cursor.anchor), (Position::Index { at: 200 }, Anchor::Text(listing.entries[199].uuid.clone())));
+        // the last page has neither cursor nor warning
+        let (last, _) = page_at(&view(&listing, 200, None));
+        assert_eq!((last.blocks.len(), last.meta.next_cursor, last.meta.has_more, last.meta.warnings.len()), (1, None, false, 0));
     }
 
     #[test]
-    fn two_hundred_entries_with_full_snippets_are_over_the_budget_and_under_it_with_short_ones() {
-        // the cap of 200 blocks alone does not keep an outline under 30,000 characters
-        let long = outline_of_lines(MAX_OUTLINE_BLOCKS, 80);
-        assert!(sent(&long, None) > crate::budget::BUDGET_CHARS, "{}", sent(&long, None));
-        let cut = fit_to_budget(long.clone(), true, None);
-        assert!(sent(&cut, None) <= crate::budget::BUDGET_CHARS);
-        let kept = cut.blocks.len();
-        assert!(kept > 150 && kept < MAX_OUTLINE_BLOCKS, "{kept}");
-        assert_eq!(cut.blocks[..], long.blocks[..kept]);
-        assert!(sent(&cut_outline(&long, kept + 1, false), None) > crate::budget::BUDGET_CHARS);
-        // a short outline, and an outline of short lines, are as they were
-        let short = outline_of_lines(MAX_OUTLINE_BLOCKS, 20);
-        assert_eq!(fit_to_budget(short.clone(), true, None), short);
-        assert_eq!(fit_to_budget(outline_of_lines(3, 80), true, None), outline_of_lines(3, 80));
+    fn two_hundred_entries_with_full_snippets_are_cut_to_the_budget_and_the_pages_read_to_the_end() {
+        // the page size alone does not keep an outline under 30,000 characters
+        let listing = listing_of_lines(MAX_OUTLINE_BLOCKS * 3, 80);
+        let mut start = 0;
+        let mut seen: Vec<String> = Vec::new();
+        let mut pages = 0;
+        loop {
+            let v = view(&listing, start, None);
+            let (outline, chars) = page_at(&v);
+            assert!(chars <= crate::budget::BUDGET_CHARS, "{chars}");
+            assert!(!outline.blocks.is_empty());
+            if pages == 0 {
+                assert!(outline.blocks.len() > 150 && outline.blocks.len() < MAX_OUTLINE_BLOCKS, "{}", outline.blocks.len());
+                assert_eq!(outline.meta.warnings[0].code, "result_size_truncated");
+            }
+            seen.extend(outline.blocks.iter().map(|entry| entry.uuid.clone()));
+            pages += 1;
+            match outline.meta.next_cursor.as_deref() {
+                None => break,
+                Some(_) => {
+                    let Position::Index { at } = token_at(&outline).position else { panic!("not an index") };
+                    assert_eq!(at, seen.len());
+                    start = at;
+                }
+            }
+        }
+        let all: Vec<String> = listing.entries.iter().map(|entry| entry.uuid.clone()).collect();
+        assert_eq!(seen, all);
+        assert!(pages > 3, "{pages}");
     }
 
     #[test]
-    fn a_cut_outline_says_so_in_place_of_the_cap_warning_and_counts_every_top_level_block() {
-        let mut long = outline_of_lines(MAX_OUTLINE_BLOCKS, 80);
-        // the page had 230 top-level blocks and the cap of 200 had cut it
-        long.meta = ResultMeta::new(
-            vec![ResultWarning::new("outline_truncated", "Showing the first 200 of 230 top-level blocks.".into())],
-            &[("blocks", 230)],
-        );
-        let cut = fit_to_budget(long, false, None);
-        let codes: Vec<&str> = cut.meta.warnings.iter().map(|warning| warning.code.as_str()).collect();
-        assert_eq!(codes, ["result_size_truncated"]);
-        let kept = cut.blocks.len();
-        assert!(cut.meta.warnings[0].message.starts_with(&format!("Showing {kept} of 230 top-level blocks: the result was cut to fit 30000 characters")), "{}", cut.meta.warnings[0].message);
-        assert!(!cut.meta.has_more);
-        assert_eq!(cut.meta.totals["blocks"], 230);
+    fn a_block_over_the_budget_comes_back_alone_and_the_cursor_moves_past_it() {
+        let mut listing = listing_of_lines(3, 5);
+        listing.entries[0].snippet = Snippet::of(Some(&"w".repeat(100)));
+        let v = view(&listing, 0, None);
+        // the least a page keeps is one block, whatever it weighs
+        let page = page_of(v.total(), 0, MAX_OUTLINE_BLOCKS, |kept| if kept == 0 { 0 } else { crate::budget::BUDGET_CHARS + kept });
+        assert_eq!(page.kept, 1);
+        assert_eq!(page.next(), Some(1));
+        let outline = v.outline(page.kept, page.cut);
+        assert!(outline.meta.next_cursor.is_some());
+    }
+
+    #[test]
+    fn a_stale_page_leads_with_the_cursor_stale_warning() {
+        let listing = listing_of_lines(5, 5);
+        let mut v = view(&listing, 2, None);
+        v.stale = Some(Stale::Moved);
+        let (outline, _) = page_at(&v);
+        assert_eq!(outline.meta.warnings[0].code, "cursor_stale");
+        assert_eq!(outline.blocks.len(), 3);
+        assert_eq!(outline.meta.next_cursor, None);
     }
 
     #[test]
     fn toon_is_measured_as_toon() {
-        // the same 200 entries in TOON are shorter, and may fit where JSON does not
-        let long = outline_of_lines(MAX_OUTLINE_BLOCKS, 80);
-        let toon = sent(&long, Some(ListFormat::Toon));
-        assert!(toon < sent(&long, None), "{toon}");
-        let fitted = fit_to_budget(long.clone(), true, Some(ListFormat::Toon));
-        assert_eq!(fitted == long, toon <= crate::budget::BUDGET_CHARS);
+        // the same entries in TOON are shorter, and may fit where JSON does not
+        let listing = listing_of_lines(MAX_OUTLINE_BLOCKS, 80);
+        let (json, json_chars) = page_at(&view(&listing, 0, None));
+        let (toon, toon_chars) = page_at(&view(&listing, 0, Some(ListFormat::Toon)));
+        assert!(toon_chars < json_chars, "{toon_chars} {json_chars}");
+        assert!(toon.blocks.len() >= json.blocks.len());
     }
 
     #[test]
     fn a_page_with_no_blocks_is_an_empty_outline() {
-        let (blocks, warnings, total) = outline_of(10, &[]);
-        assert!(blocks.is_empty() && warnings.is_empty());
-        assert_eq!(total, 0);
+        let listing = listing_of_lines(0, 5);
+        let (outline, _) = page_at(&view(&listing, 0, None));
+        assert!(outline.blocks.is_empty() && outline.meta.warnings.is_empty() && outline.meta.next_cursor.is_none() && !outline.meta.has_more);
+        assert_eq!(outline.meta.totals["blocks"], 0);
     }
 
     #[test]
@@ -425,7 +596,10 @@ mod tests {
         assert!(warning.message.contains("so the empty outline may not mean the page has no blocks"), "{}", warning.message);
         assert_eq!(warning.how_to_fetch_all, None);
         // No way to fetch more, so `hasMore` is false (BR-0006)
-        assert!(!ResultMeta::new(vec![warning], &[("blocks", 0)]).has_more);
+        let mut listing = listing_of_lines(0, 5);
+        listing.unavailable = true;
+        let (outline, _) = page_at(&view(&listing, 0, None));
+        assert_eq!((outline.meta.has_more, outline.meta.next_cursor, outline.meta.warnings.len()), (false, None, 1));
     }
 
     #[test]
@@ -440,5 +614,7 @@ mod tests {
             serde_json::to_string(&outline).unwrap(),
             r#"{"page":"Project Atlas","resolvedFrom":{"name":"atlas","matchedBy":"alias","resolvedTo":"Project Atlas"},"blocks":[{"uuid":"u1","snippet":"Hi","childCount":2}],"hasMore":false,"warnings":[],"totals":{"blocks":1}}"#
         );
+        let paged = PageOutline { meta: ResultMeta::paged(vec![], &[("blocks", 1)], Some("tok".into())), ..outline };
+        assert!(serde_json::to_string(&paged).unwrap().contains(r#""hasMore":true,"nextCursor":"tok","warnings":[]"#));
     }
 }

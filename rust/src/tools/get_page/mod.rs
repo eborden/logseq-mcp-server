@@ -63,7 +63,7 @@ use crate::tips::tips_content;
 use crate::tool::{CursorSchema, input_schema, read_only_annotations, success_result};
 use crate::tree_paging::{Resume, Root, Spec, Tree, read};
 
-use self::outline::outline_result;
+use self::outline::{Read, outline_result};
 use self::tips::page_tips;
 
 pub const NAME: &str = "logseq_get_page";
@@ -121,25 +121,27 @@ pub fn definition() -> Tool {
         .with_annotations(read_only_annotations("Get Page"))
 }
 
-/// What a cursor stands for once its arguments are read: a call that reads the blocks of a page.
+/// What a cursor stands for once its arguments are read: a call that reads the blocks of a page (`full`) or its
+/// outline.
 fn paged_args(token: &Resume) -> Result<Args, InvalidParameter> {
-    let args = parse_args::<Args>(Some(&token.cursor.args)).ok().filter(|args| args.cursor.is_none() && args.page.is_some() && args.detail == Some(Detail::Full));
-    args.filter(|args| check_combination(Detail::Full, args.format, args.resolve_refs).is_ok())
-        .ok_or_else(|| token.refuse(NAME, "its arguments are not a read of the blocks of a page"))
+    let args = parse_args::<Args>(Some(&token.cursor.args)).ok().filter(|args| args.cursor.is_none() && args.page.is_some());
+    args.filter(|args| matches!(args.detail, Some(Detail::Full | Detail::Outline)) && check_combination(args.detail.unwrap_or(Detail::Full), args.format, args.resolve_refs).is_ok())
+        .ok_or_else(|| token.refuse(NAME, "its arguments are not a read of the blocks or the outline of a page"))
 }
 
-/// The arguments of a full page as a cursor carries them: what the call asked, read again by [`Args`].
+/// The arguments of a full page or an outline as a cursor carries them: what the call asked, read again by [`Args`].
 fn stored_arguments(args: &Args, page: &str) -> Map<String, Value> {
     let mut stored = Map::new();
     stored.insert("page".into(), json!(page));
-    stored.insert("detail".into(), json!("full"));
+    stored.insert("detail".into(), json!(if args.detail == Some(Detail::Outline) { "outline" } else { "full" }));
     if args.resolve_refs {
         stored.insert("resolve_refs".into(), json!(true));
     }
     match args.format {
         Some(PageFormat::Json) => stored.insert("format".into(), json!("json")),
         Some(PageFormat::Markdown) => stored.insert("format".into(), json!("markdown")),
-        Some(PageFormat::Toon) | None => None,
+        Some(PageFormat::Toon) => stored.insert("format".into(), json!("toon")),
+        None => None,
     };
     stored
 }
@@ -176,7 +178,8 @@ pub async fn call(client: &LogseqClient, tips_enabled: bool, snapshots: &Snapsho
     check_combination(detail, args.format, args.resolve_refs)?;
     if detail == Detail::Outline {
         let format = (args.format == Some(PageFormat::Toon)).then_some(ListFormat::Toon);
-        return outline_result(client, tips_enabled, page_name, format).await;
+        let stored = resume.as_ref().map_or_else(|| stored_arguments(&args, page_name), |resume| resume.cursor.args.clone());
+        return outline_result(client, Read { tips_enabled, snapshots, page: page_name, format, stored: &stored, resume: resume.as_ref() }).await;
     }
     let full = detail == Detail::Full;
     // The text the call sends for a page, which the character budget measures (#507): the page, then its tips
@@ -457,19 +460,31 @@ mod tests {
         let full = json!({"page": "Atlas", "detail": "full", "resolve_refs": true, "format": "markdown"});
         let args = paged_args(&resume_with(full)).unwrap();
         assert_eq!((args.page.as_deref(), args.detail, args.resolve_refs, args.format), (Some("Atlas"), Some(Detail::Full), true, Some(PageFormat::Markdown)));
-        // not a full page, no page, a format the page doesn't take, a cursor inside the cursor
+        // an outline, in TOON as well
+        let outline = paged_args(&resume_with(json!({"page": "Atlas", "detail": "outline", "format": "toon"}))).unwrap();
+        assert_eq!((outline.detail, outline.format), (Some(Detail::Outline), Some(PageFormat::Toon)));
+        // not a full page or an outline, no page, a format the detail doesn't take, resolve_refs on an outline, a cursor
+        // inside the cursor
         for args in [
             json!({"page": "Atlas"}),
-            json!({"page": "Atlas", "detail": "outline"}),
+            json!({"page": "Atlas", "detail": "page"}),
             json!({"detail": "full"}),
             json!({"page": "Atlas", "detail": "full", "format": "toon"}),
+            json!({"page": "Atlas", "detail": "outline", "format": "markdown"}),
+            json!({"page": "Atlas", "detail": "outline", "resolve_refs": true}),
             json!({"page": "Atlas", "detail": "full", "cursor": "abc"}),
             json!({"page": 5, "detail": "full"}),
         ] {
             let error = paged_args(&resume_with(args.clone())).err().unwrap_or_else(|| panic!("{args}"));
             assert_eq!(error.param, "cursor", "{args}");
-            assert!(error.expected.contains("its arguments are not a read of the blocks of a page"), "{error}");
+            assert!(error.expected.contains("its arguments are not a read of the blocks or the outline of a page"), "{error}");
         }
+    }
+
+    #[test]
+    fn an_outline_cursor_carries_its_detail_and_its_toon_format() {
+        let args = parse_args::<Args>(json!({"page": "Atlas", "detail": "outline", "format": "toon"}).as_object()).unwrap();
+        assert_eq!(Value::Object(stored_arguments(&args, "Atlas")).to_string(), r#"{"page":"Atlas","detail":"outline","format":"toon"}"#);
     }
 
     #[test]
