@@ -278,9 +278,9 @@ fn summary_rules(budget: &SummaryBudget) -> String {
 }
 
 /// `logseq_find_pages` returns names A-Z, 200 per call (#61), so dated pages come oldest first and a
-/// long list cuts the newest. This says how to reach the last `n`.
+/// long list cuts the newest. This says how to reach the last `n`: the cursor reads on, page by page (ADR-0038, #551).
 fn newest_last(n: u32) -> String {
-    format!("Names come A-Z, oldest first: if hasMore is true, call again with offset set to total minus {n}.")
+    format!("Names come A-Z, oldest first, so the newest are last: while hasMore is true, call again with only its nextCursor as cursor. The last {n} names are the newest.")
 }
 
 fn skill_note(skill: &str) -> String {
