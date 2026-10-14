@@ -1,4 +1,4 @@
-import { readdirSync } from 'fs';
+import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -487,6 +487,36 @@ export const REMOVED_BEFORE_V1_TOOL_NAMES: readonly string[] = ['get_entity_time
  * rename removes it, to the first-version list if it was one of the 16, else to the removed-earlier list or a new one.
  */
 export const FORMER_TOOL_NAMES: readonly string[] = [...FIRST_VERSION_TOOL_NAMES, ...REMOVED_BEFORE_V1_TOOL_NAMES].sort();
+
+/**
+ * The `kindOf` of a tools directory at `root`, case-exact (#539). It reads each directory and matches the entry name as
+ * written, so `Get_Page/` is a miss on a case-insensitive disk (macOS) as it is on Linux, where a stat alone would find it.
+ */
+export function exactKindOf(root: string): ToolPathOptions['kindOf'] {
+  return rel => {
+    let dir = root;
+    const parts = rel.split('/').filter(part => part !== '');
+    for (const [i, part] of parts.entries()) {
+      let entries: string[];
+      try {
+        entries = readdirSync(dir);
+      } catch {
+        return null;
+      }
+      if (!entries.includes(part)) return null;
+      dir = join(dir, part);
+      let stat;
+      try {
+        stat = statSync(dir);
+      } catch {
+        return null;
+      }
+      if (i === parts.length - 1) return stat.isDirectory() ? 'dir' : stat.isFile() ? 'file' : null;
+      if (!stat.isDirectory()) return null;
+    }
+    return parts.length === 0 && statSync(root).isDirectory() ? 'dir' : null;
+  };
+}
 
 export function markdownFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
