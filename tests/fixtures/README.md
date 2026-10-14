@@ -264,8 +264,8 @@ written `Row N on [[popular topic]]`, and the target has no file.
 `light source`.
 
 The blocks avoid the letter `e` on purpose: `tests/integration/result-caps.test.ts` searches for `e` and expects fewer than
-`find_blocks`' maximum of 500 matches. The fixture holds 605 blocks, 478 of them with an `e` (127 without: 2 older ones, these 14,
-the 10 of the roll-up pages below and the 101 of `quartz log`). With an `e` in these 24 it would be 502. Keep new fixture blocks
+`find_blocks`' maximum of 500 matches. The fixture holds 1,145 blocks, 478 of them with an `e` (667 without: 2 older ones, these 14,
+the 10 of the roll-up pages below, the 101 of `quartz log` and the 540 of `quartz outline`). With an `e` in these 24 it would be 502. Keep new fixture blocks
 without the letter, or change that test.
 
 ## Roll-up pages (#498)
@@ -314,6 +314,24 @@ holds the letter `e` (see "The crowded topic" above). 101 blocks, about 103,500 
 Read in pages the page makes 5 (about 29,000 characters each, the last 16,000), and the second starts inside `Log part 1`, so its blocks name it in `ancestors`. The tests
 (`tests/integration/tree-cursor.test.ts`) take the expected blocks from the bullets of this file, in order, and the block text
 names each block, so nothing is read from the instance to know what to expect.
+
+## A page with many top-level blocks (#553)
+
+`quartz outline` (`pages/quartz outline.md`) exists for the cursor of `get_page` with `detail: "outline"` (ADR-0038): a page
+with more top-level blocks than one page of the outline holds (200), and more than fits the 30,000-character budget. Nothing
+else reads it, and nothing links it. It has no page properties and no links, and no block holds the letter `e` (see "The
+crowded topic" above). 540 blocks, 450 of them top-level:
+
+| Blocks | Shape |
+|---|---|
+| `Row 001` to `Row 200` | 200 top-level blocks with a first line of about 20 characters |
+| `Row 201` to `Row 450` | 250 top-level blocks with a first line of about 150 characters, cut to 80 in the outline |
+| `Bit 005`, `Bit 010` .. `Bit 450` | one child under each `Row` whose number is a multiple of 5 (90 in all), so its `childCount` is 1 and every other block's is 0 |
+
+The outline read in pages makes 3: the first holds `Row 001` to `Row 200` and is cut by the page size (`outline_truncated`), the
+second starts at `Row 201` and is cut by the budget (`result_size_truncated`, about 185 blocks), and the third holds the rest.
+The tests (`tests/integration/outline-cursor.test.ts`) take the expected blocks from the bullets of this file, in order, and the
+text of each names the block, so nothing is read from the instance to know what to expect.
 
 ## Files LogSeq writes when it opens the folder
 
