@@ -206,6 +206,42 @@ async fn naming_a_page_costs_its_resolver_again_on_a_miss_and_nothing_on_a_hit()
     assert_eq!(methods(&logseq).len(), 4);
 }
 
+// The maintainer's decision on #550: how the pages were read is said on the first page only, but a warning that the
+// search may be incomplete is not about the request, so every page repeats it, from the snapshot and from a rebuild
+#[tokio::test]
+async fn an_alias_lookup_warning_is_repeated_on_every_page_and_how_the_page_was_read_only_on_the_first() {
+    let atlas = json!({"id": 10, "name": "atlas", "original-name": "Atlas", "file": {"id": 5010}, "alias": [{"id": 11}]});
+    let logseq = mock_logseq_answering(move |request| {
+        let query = request["args"][0].as_str().unwrap_or("");
+        if query.contains(":in $ ?n :where (or-join [?n ?page ?via]") {
+            // "al" is an alias of Atlas, so the page was reached through an alias: that is said on page 1
+            json!([[atlas, "alias"]])
+        } else if query.starts_with("[:find ?start") {
+            json!(null)
+        } else {
+            Value::Array((1..=250).map(|id| hit_row(id, 100)).collect())
+        }
+    })
+    .await;
+    let snapshots = snapshots();
+    let (_, first) = call(&logseq, &snapshots, json!({"page": "al"})).await.unwrap();
+    assert_eq!(warning_codes(&first), ["alias_lookup_unavailable", "results_truncated"]);
+    assert!(first.get("resolvedFrom").is_some(), "page 1 says how the page was read: {first}");
+    let calls = methods(&logseq).len();
+
+    // a hit: the warning comes from the stored notes, and no call is made
+    let (_, hit) = call(&logseq, &snapshots, json!({"cursor": cursor_of(&first)})).await.unwrap();
+    assert_eq!(methods(&logseq).len(), calls);
+    assert_eq!(warning_codes(&hit), ["alias_lookup_unavailable", "results_truncated"]);
+    assert!(hit.get("resolvedFrom").is_none() && hit.get("resolvedAliases").is_none(), "{hit}");
+
+    // a miss: the rebuild asks again, gets no answer again, and says so again
+    let (_, miss) = call(&logseq, &Snapshots::new(2), json!({"cursor": cursor_of(&first)})).await.unwrap();
+    assert!(methods(&logseq).len() > calls);
+    assert_eq!(warning_codes(&miss), ["alias_lookup_unavailable", "results_truncated"]);
+    assert!(miss.get("resolvedFrom").is_none() && miss.get("resolvedAliases").is_none(), "{miss}");
+}
+
 // ---- a list that moved between the pages
 
 /// The first page of a search of 100 hits, limit 30: ids 100 down to 71, with a cursor to the hit of id 70.
