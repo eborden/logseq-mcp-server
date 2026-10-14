@@ -4,8 +4,8 @@ You already have the thing: a page name, a block uuid, "the page that's open". A
 
 | Tool | Takes | Returns |
 |------|-------|---------|
-| `logseq_get_page` | `page`, `detail`, `resolve_refs`, `format` | A page, its blocks, or its outline |
-| `logseq_get_block` | `uuid`, `include_children`, `resolve_refs`, `format` | One block, optionally with its subtree |
+| `logseq_get_page` | `page`, `detail`, `resolve_refs`, `format`, `cursor` | A page, its blocks, or its outline |
+| `logseq_get_block` | `uuid`, `include_children`, `resolve_refs`, `format`, `cursor` | One block, optionally with its subtree |
 | `logseq_get_current` | nothing | The open page, the block being edited, the selected blocks |
 | `logseq_get_graph` | nothing | The connected graph's name and path |
 
@@ -17,10 +17,11 @@ Get a page by name, with `detail` choosing how much of it.
 
 | Parameter | Type | Default | What it does |
 |-----------|------|---------|--------------|
-| `page` | string, required | | Page name (any case), an alias, or an ISO date (`2025-01-01`) for a journal. `name` and `page_name` are accepted for it, but send `page` |
+| `page` | string, required unless `cursor` is given | | Page name (any case), an alias, or an ISO date (`2025-01-01`) for a journal. `name` and `page_name` are accepted for it, but send `page` |
 | `detail` | `page`, `full`, `outline` | `page` | `page`: the page and its properties, no blocks. `full`: adds its blocks, nested, under `children`. `outline`: its top-level blocks as `{ uuid, snippet, childCount }`, no bodies |
 | `resolve_refs` | boolean | false | Adds `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s, two levels deep. Refused with `detail` `outline` |
 | `format` | `json`, `markdown`, `toon` | `json` | `markdown` for `page` and `full` (plain text, about 80% smaller on a long page). `toon` for `outline` only. Any other combination is refused with an error naming the valid ones |
+| `cursor` | string | | `detail` `full` only: the `nextCursor` of a cut page, passed alone (no other argument). It reads the next blocks |
 
 **Use when:** you know the page name and want its content. For related pages and what links to it, use `logseq_explore_context`. For pages by keyword, `logseq_find_blocks` or `logseq_find_pages`.
 
@@ -36,7 +37,7 @@ Get a page by name, with `detail` choosing how much of it.
 {"page": "project atlas", "detail": "full"}
 ```
 
-Read the nested `children` for the answer (each block has its own `children`). If `warnings` holds `result_size_truncated`, the page was longer than the budget: the tail blocks are missing and a kept block with `childrenTruncated: true` lost children. Next call: the outline below, then `logseq_get_block` on the blocks you pick.
+Read the nested `children` for the answer (each block has its own `children`). If `warnings` holds `result_size_truncated`, the page was longer than the budget: `hasMore` is true and `nextCursor` reads on. Call again with only that `nextCursor` as `cursor`, until it is gone. A block marked `childrenTruncated: true` continues at the top of the next page, and a block that sits under another one names it in `ancestors`. To read less, use the outline below, then `logseq_get_block` on the blocks you pick.
 
 **Example 2.** "What's on my long meeting notes page about the budget?" Don't read it whole.
 
@@ -60,14 +61,15 @@ Get one block by uuid, optionally with its children. Uuids come from other resul
 
 | Parameter | Type | Default | What it does |
 |-----------|------|---------|--------------|
-| `uuid` | string, required | | The block's uuid. `block_uuid` is accepted for it, but send `uuid` |
+| `uuid` | string, required unless `cursor` is given | | The block's uuid. `block_uuid` is accepted for it, but send `uuid` |
 | `include_children` | boolean | **false** | Adds the nested child blocks. Without it `children` are unfetched references |
 | `resolve_refs` | boolean | false | Adds `resolvedContent` and `resolvedRefs` for `((uuid))` refs and `{{embed}}`s, two levels deep |
 | `format` | `json`, `markdown` | `json` | `markdown` gives a `# Block ((uuid))` heading and the block with its children as bullets |
+| `cursor` | string | | With `include_children`: the `nextCursor` of a cut result, passed alone (no other argument). It reads the next blocks |
 
 **Use when:** you have a uuid from an outline, a search hit or a `((uuid))` ref. For blocks by text, `logseq_find_blocks`. There is no lookup by numeric id.
 
-**A cut subtree:** with `include_children`, a very large subtree is cut to the 30,000-character budget, in document order. A kept block that lost children carries `childrenTruncated: true`. Read a marked block below the one you asked for by its own uuid. Without `include_children` the result is one block and is never cut.
+**A cut subtree:** with `include_children`, a very large subtree is cut to the 30,000-character budget, in document order, and `nextCursor` reads on. Call again with only that `nextCursor` as `cursor`, until it is gone. A kept block that lost children carries `childrenTruncated: true`. The next page is `{ uuid, continued: true, children }` (the block's own text is not repeated): its children come first, and a block that sits below one of them names it in `ancestors`. Without `include_children` the result is one block and is never cut.
 
 **Example 1.** "Show me the block `0088f1a0-0000-4000-8000-000000000001` and what's under it."
 
