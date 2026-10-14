@@ -66,7 +66,7 @@ async fn a_long_page_is_cut_at_the_cap_and_the_notice_says_how_to_read_on() {
     let blocks: Vec<Value> = (0..40).map(|i| editor_block(100 + i, &format!("{i} {}", "x".repeat(2000)))).collect();
     let logseq = mock_logseq(vec![editor_page(10, "project atlas", "Project Atlas"), Value::Array(blocks)]).await;
     let text = text_of(&resources::read(&client(&logseq), "logseq://page/project%20atlas").await.unwrap());
-    let notice = format!("[Cut at {MAX_PAGE_CHARS} characters. The page continues. Use logseq_get_page or logseq_get_block for the rest.]");
+    let notice = format!("[Cut at {MAX_PAGE_CHARS} characters. The page continues. Read the rest in pages with logseq_get_page and detail \"full\", or one block with logseq_get_block.]");
     assert!(text.ends_with(&format!("\n\n{notice}\n")), "{}", &text[text.len() - 200..]);
     assert!(text.len() < MAX_PAGE_CHARS + 500);
 }

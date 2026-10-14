@@ -7,7 +7,7 @@ How to read what a tool sends back: warnings, `hasMore`, paging, the 30,000-char
 A tool never cuts a result silently. If a list was capped, cut to fit the budget or only partly read, the result says so in `warnings`. **Read `warnings` before you say a list is complete, a count is exact or something doesn't exist.**
 
 - `warnings` is a list of `{ code, message, howToFetchAll? }`. It is empty (or absent) when nothing was cut
-- `hasMore: true` means a parameter can read on, and `howToFetchAll` names it ("Set offset to 100 for the next page."). Follow it
+- `hasMore: true` means a call can read on: pass `nextCursor` as `cursor` and nothing else, and `howToFetchAll` says so. Follow it
 - `hasMore: false` with a warning means no parameter reads on. The message says why and how to narrow the request. Say the answer is partial
 - `totals` holds the real counts before any cut, so a small `limit` is also the cheap way to count
 - A warning ending in `_unavailable` means LogSeq sent no answer for that part. The empty list is unknown, not "nothing matches". Retry before you report a miss

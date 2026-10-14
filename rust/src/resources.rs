@@ -160,7 +160,7 @@ async fn read_page(client: &LogseqClient, uri: &str) -> Result<ReadResourceResul
     };
 
     // The one shared renderer (#43): the same text `logseq_get_page` returns with format: "markdown"
-    let cut_notice = format!("[Cut at {MAX_PAGE_CHARS} characters. The page continues. Use logseq_get_page or logseq_get_block for the rest.]");
+    let cut_notice = format!("[Cut at {MAX_PAGE_CHARS} characters. The page continues. Read the rest in pages with logseq_get_page and detail \"full\", or one block with logseq_get_block.]");
     let text = render_page(
         &page,
         PageRenderOptions { blocks_fetched: true, max_chars: Some(MAX_PAGE_CHARS), cut_notice: Some(&cut_notice), fallback_title: Some(&name) },
