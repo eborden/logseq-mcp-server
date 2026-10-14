@@ -27,7 +27,7 @@ pub const DEFAULT_MAX_BLOCKS: u64 = 200;
 pub const MAX_BLOCKS: usize = 1000;
 
 /// How a day is read in pieces when no call reads it whole.
-const IN_PIECES: &str = "logseq_find_blocks (start_date and end_date set to that day, with limit and offset)";
+const IN_PIECES: &str = "logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)";
 
 /// Said when a call that reads on by dates leaves out the blocks on non-journal pages (the page's own and the mentions), which have no day.
 const UNDATED_NOTE: &str = " Setting dates leaves out the blocks on non-journal pages.";
@@ -36,7 +36,7 @@ const UNDATED_NOTE: &str = " Setting dates leaves out the blocks on non-journal 
 const NO_DAY_FACT: &str = "The rest are blocks on non-journal pages (the page's own and those that link to it), which no dates reach.";
 
 /// How the blocks with no day are read: the page's own blocks by `page`, the blocks that link to it by `links_to`.
-const NO_DAY_WAY: &str = "logseq_find_blocks with page (its own blocks) or links_to (the blocks that link to it), with limit and offset";
+const NO_DAY_WAY: &str = "logseq_find_blocks with page (its own blocks) or links_to (the blocks that link to it), with limit, then its cursor to read on";
 
 /// Blocks an entry lists against the cap: nested ones too, or only top-level ones (the outline).
 fn listed_blocks(blocks: &[Value], nested: bool) -> usize {
@@ -156,7 +156,7 @@ impl TruncationOptions {
 
     /// How to narrow a result no call returns whole.
     fn narrow(&self) -> &'static str {
-        "Narrow the period, or read the blocks with logseq_find_blocks (with limit and offset)."
+        "Narrow the period, or read the blocks with logseq_find_blocks (with limit, then its cursor to read on)."
     }
 }
 
@@ -526,7 +526,7 @@ mod tests {
         assert_eq!(
             warning.message,
             "Showing 0 of 4 blocks (nested ones counted; oldest day first). No call returns them inside 30000 characters. \
-             Narrow the period, or read the blocks with logseq_find_blocks (with limit and offset)."
+             Narrow the period, or read the blocks with logseq_find_blocks (with limit, then its cursor to read on)."
         );
         // the same for the whole day at a higher cap
         let entries = [entry(20250101, vec![block(1, 5)]), entry(20250102, vec![block(2, 0)])];
@@ -537,14 +537,14 @@ mod tests {
             warning.how_to_fetch_all.as_deref(),
             Some(
                 "Call again with start_date 20250102, the same end_date (20250110) and the same max_blocks for the rest of the range, \
-                 or read day 20250101 in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."
+                 or read day 20250101 in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."
             )
         );
         // with no day after it, nothing reads it whole: no way to fetch, and the pieces are in the message
         let alone = [entry(20250101, vec![block(1, 5)])];
         let warning = truncated_with(&alone, 3, &options(true), &fits_never);
         assert_eq!(warning.how_to_fetch_all, None);
-        assert!(warning.message.ends_with("Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."), "{}", warning.message);
+        assert!(warning.message.ends_with("Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."), "{}", warning.message);
     }
 
     #[test]
@@ -607,12 +607,12 @@ mod tests {
         assert_eq!(
             warning.how_to_fetch_all.unwrap(),
             "Set max_blocks to 1000 (the maximum) with start_date 20250101 and end_date 20250101 to read 1000 of its 1200 blocks, \
-             or read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."
+             or read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."
         );
         // the raise to the maximum is not offered when a day of 1000 blocks would not fit the budget
         let warning = truncated_with(&[big_day(1200)], 200, &options(true), &fits_never);
         assert_eq!(warning.how_to_fetch_all, None);
-        assert!(warning.message.ends_with("Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."), "{}", warning.message);
+        assert!(warning.message.ends_with("Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."), "{}", warning.message);
         // at the maximum with no later day there is nothing to fetch
         let warning = truncated(&[big_day(1200)], 1000, &TruncationOptions { requested: 5000, ..options(true) });
         assert!(warning.how_to_fetch_all.is_none());
@@ -620,7 +620,7 @@ mod tests {
             warning.message,
             "Showing 1000 of 1200 blocks (nested ones counted; oldest day first; the entries end at 20250101): max_blocks is capped at its maximum of 1000 \
              (5000 was asked for), so the rest can't be fetched in one call. Day 20250101 holds 1200 blocks, more than the maximum of 1000, so no call can return it whole. \
-             Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."
+             Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."
         );
         // with a later day, page past it
         let entries = [big_day(1200), entry(20250102, vec![block(1, 0)])];
@@ -628,7 +628,7 @@ mod tests {
         assert_eq!(
             warning.how_to_fetch_all.unwrap(),
             "Call again with start_date 20250102, the same end_date (20250110) and the same max_blocks for the rest of the range, \
-             or read day 20250101 in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."
+             or read day 20250101 in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."
         );
     }
 
@@ -648,7 +648,7 @@ mod tests {
         let warning = truncated(&[big_day(1001)], 0, &options(true));
         assert_eq!(
             warning.how_to_fetch_all.unwrap(),
-            "Set max_blocks to 1000 (the maximum) to get 1000 of 1001. Narrow the period, or read the blocks with logseq_find_blocks (with limit and offset)."
+            "Set max_blocks to 1000 (the maximum) to get 1000 of 1001. Narrow the period, or read the blocks with logseq_find_blocks (with limit, then its cursor to read on)."
         );
     }
 
@@ -691,7 +691,7 @@ mod tests {
     #[test]
     fn a_raise_is_never_the_call_just_made_so_at_the_maximum_the_blocks_with_no_day_are_read_with_find_blocks() {
         let blocks = |first: i64, n: i64| (first..first + n).map(|id| block(id, 0)).collect::<Vec<_>>();
-        let read_with = "No call reads the rest in one go: read them with logseq_find_blocks with page (its own blocks) or links_to (the blocks that link to it), with limit and offset.";
+        let read_with = "No call reads the rest in one go: read them with logseq_find_blocks with page (its own blocks) or links_to (the blocks that link to it), with limit, then its cursor to read on.";
         // the cut falls among the blocks with no day, at the maximum
         let among = [entry(20250101, blocks(1, 1)), undated(blocks(10, 1100))];
         let warning = truncated(&among, 1000, &options(true));
@@ -705,7 +705,7 @@ mod tests {
         // below the maximum the raise is still offered
         let below = [entry(20250101, blocks(1, 500)), undated(blocks(2000, 505))];
         let warning = truncated(&below, 999, &options(true));
-        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_blocks to 1000 (the maximum) to get 1000 of 1005. Narrow the period, or read the blocks with logseq_find_blocks (with limit and offset)."));
+        assert_eq!(warning.how_to_fetch_all.as_deref(), Some("Set max_blocks to 1000 (the maximum) to get 1000 of 1005. Narrow the period, or read the blocks with logseq_find_blocks (with limit, then its cursor to read on)."));
     }
 
     #[test]
@@ -721,14 +721,14 @@ mod tests {
             too_large.how_to_fetch_all.as_deref(),
             Some(
                 "Call again with start_date 20250103, the same end_date (20250110) and the same max_blocks for the rest of the range, \
-                 or read day 20250102 in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."
+                 or read day 20250102 in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."
             )
         );
         assert!(too_large.message.contains("Day 20250102 holds 3 blocks, more than fit in 30000 characters, so no call can return it whole."), "{}", too_large.message);
         // with no day after it, nothing reads the day whole and no call is named
         let last = truncated_with(&entries[..2], 3, &options(true), &large);
         assert_eq!(last.how_to_fetch_all, None);
-        assert!(last.message.ends_with("Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit and offset)."), "{}", last.message);
+        assert!(last.message.ends_with("Read it in pieces with logseq_find_blocks (start_date and end_date set to that day, with limit, then its cursor to read on)."), "{}", last.message);
     }
 
     #[test]
