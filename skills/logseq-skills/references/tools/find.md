@@ -1,6 +1,6 @@
 # Find tools
 
-You have criteria, not the thing: a word, a property value, a period, a page it links to. A `find` tool returns a flat list of blocks or pages, newest first for blocks and A to Z for pages, paged with `limit` and `offset`, with a `totals` count and `warnings`. If the answer is what something is, how it connects or how it changed, it is an `explore` question instead.
+You have criteria, not the thing: a word, a property value, a period, a page it links to. A `find` tool returns a flat list of blocks or pages, newest first for blocks and A to Z for pages, paged with `limit` and a `cursor`, with a `totals` count and `warnings`. If the answer is what something is, how it connects or how it changed, it is an `explore` question instead.
 
 | Tool | Finds | Filters (all AND together) |
 |------|-------|----------------------------|
@@ -90,8 +90,8 @@ Find non-journal pages, A to Z, each as `{ name, aliases? }`. Use it to learn th
 | `names` | 1 to 50 strings | | Page names or aliases to look up exactly, ignoring case, in one call. Each is answered with its page, or with `null` and the closest names |
 | `property` | string | | A **page** property key (`vendor`, `created-by`). Needs `value`. Block properties are not matched: use `logseq_find_blocks` |
 | `value` | string, number or boolean | | The exact value of the property. A multi-value property matches on any one value. Needs `property` |
-| `limit` | integer | 200 | Most pages per call, max 1000 |
-| `offset` | integer | 0 | Matching pages to skip, in name order |
+| `limit` | integer | 200 | Page size: most pages per call, max 1000 |
+| `cursor` | string | | The `nextCursor` of the previous result, passed alone: the arguments are in the token |
 | `format` | `json`, `toon` | `json` | `toon` writes the list's keys once. A list of pages with aliases saves little |
 
 **Returns:** `{ pages: [{ name, aliases? }], total, names?, hasMore?, warnings? }`. `total` counts every matching page, aliases excluded, including those not returned. `names` is there only when `names` was sent: one `{ name, page }` per name in the order sent, with `page: null` and `suggestions` (the closest page names) when no page has that exact name or alias, or `candidates` when several pages declare that alias. `null` means no page with that exact name: a namespace leaf (`meetings` for `project/meetings`) or an ISO date answers `null` here, though `logseq_get_page` resolves both. `pages_unavailable` means the list is unknown, not empty.
@@ -128,4 +128,4 @@ Read `pages` and `total`. Next call: one `logseq_explore_context` per vendor pag
 {"limit": 1000, "format": "toon"}
 ```
 
-Read `pages`. While `hasMore` is true, call again with the `offset` the warning names. A large graph's list is several calls and a lot of context, so use `text` or `names` first.
+Read `pages`. While `hasMore` is true, call again with only the `nextCursor`. A large graph's list is several calls and a lot of context, so use `text` or `names` first.
