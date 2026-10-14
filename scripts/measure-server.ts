@@ -60,6 +60,8 @@ export interface CountingProxy {
   calls: Map<string, number>;
   /** Bytes of the answers LogSeq sent since the last reset (the body only, before the binary parses it) */
   answerBytes(): number;
+  /** The size of each of those answers, in the order they came back */
+  answerSizes(): number[];
   url: string;
   reset(): void;
   total(): number;
@@ -69,7 +71,7 @@ export interface CountingProxy {
 /** Forwards every request to `target` and counts the `method` of each JSON body. */
 export async function startCountingProxy(target: string): Promise<CountingProxy> {
   const calls = new Map<string, number>();
-  let answered = 0;
+  const answered: number[] = [];
   const upstream = target.replace(/\/+$/, '');
   const server: HttpServer = createHttpServer((req, res) => {
     const chunks: Buffer[] = [];
@@ -90,7 +92,7 @@ export async function startCountingProxy(target: string): Promise<CountingProxy>
       fetch(upstream + (req.url ?? '/'), { method: req.method, headers, body: req.method === 'GET' ? undefined : body })
         .then(async answer => {
           const payload = Buffer.from(await answer.arrayBuffer());
-          answered += payload.length;
+          answered.push(payload.length);
           res.writeHead(answer.status, { 'content-type': answer.headers.get('content-type') ?? 'application/json' });
           res.end(payload);
         })
@@ -104,11 +106,12 @@ export async function startCountingProxy(target: string): Promise<CountingProxy>
   const { port } = server.address() as AddressInfo;
   return {
     calls,
-    answerBytes: () => answered,
+    answerBytes: () => answered.reduce((a, b) => a + b, 0),
+    answerSizes: () => [...answered],
     url: `http://127.0.0.1:${port}`,
     reset: () => {
       calls.clear();
-      answered = 0;
+      answered.length = 0;
     },
     total: () => [...calls.values()].reduce((a, b) => a + b, 0),
     close: () =>

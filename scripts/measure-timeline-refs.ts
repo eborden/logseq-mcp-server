@@ -12,7 +12,7 @@
  * ~/.logseq-mcp/config.json and refuses a config on port 12315 before any network call (BR-0001).
  *
  * Output per page and limit: the LogSeq calls the tool made, the bytes LogSeq answered with (before the binary parses
- * them), the bytes of the result and the number of blocks in the result's totals. Read-only.
+ * them), the bytes of the result and the size of each LogSeq answer (the mentions query is the one that grows) and `summary.totalBlocks`. Read-only.
  */
 import { loadConfig } from './lib/logseq-api.js';
 import { assertNotPersonalLogseq, resolveFixtureConfigPath } from '../tests/integration/helpers/instance-config.js';
@@ -23,6 +23,7 @@ const LIMITS = [10, 0] as const;
 interface Sample {
   calls: number;
   answerBytes: number;
+  answerSizes: number[];
   resultBytes: number;
   blocks: unknown;
 }
@@ -47,13 +48,14 @@ async function main() {
     const blocks = result.content ?? [];
     let total: unknown;
     try {
-      total = (JSON.parse(blocks[0]?.text ?? '') as { totals?: { blocks?: unknown } }).totals?.blocks;
+      total = (JSON.parse(blocks[0]?.text ?? '') as { summary?: { totalBlocks?: unknown } }).summary?.totalBlocks;
     } catch {
       // not JSON: no count
     }
     return {
       calls: proxy.total(),
       answerBytes: proxy.answerBytes(),
+      answerSizes: proxy.answerSizes(),
       resultBytes: blocks.reduce((sum, block) => sum + Buffer.byteLength(block.text ?? ''), 0),
       blocks: total
     };
@@ -66,7 +68,7 @@ async function main() {
       for (const limit of LIMITS) {
         const sample = await one(page, limit);
         rows.set(limit, sample);
-        console.log(`  top_concepts_limit ${String(limit).padEnd(2)} calls ${sample.calls}   logseq answer ${sample.answerBytes} B   result ${sample.resultBytes} B   blocks ${sample.blocks}`);
+        console.log(`  top_concepts_limit ${String(limit).padEnd(2)} calls ${sample.calls}   logseq answer ${sample.answerBytes} B (per call ${sample.answerSizes.join(' + ')})   result ${sample.resultBytes} B   blocks ${sample.blocks}`);
       }
       const [withRefs, without] = LIMITS.map(limit => rows.get(limit)!);
       console.log(`  extra at limit 10: logseq answer ${withRefs.answerBytes - without.answerBytes} B (x${(withRefs.answerBytes / without.answerBytes).toFixed(2)}), result ${withRefs.resultBytes - without.resultBytes} B\n`);
