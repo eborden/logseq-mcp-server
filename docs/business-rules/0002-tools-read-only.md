@@ -4,7 +4,7 @@
 
 Every tool is declared read-only (`readOnlyHint: true`) and never writes to the graph. Keep each tool's other hints accurate. Most are idempotent, but `logseq_get_current` reads the live editor state and is declared `idempotentHint: false`. Adding a tool that writes to the graph is a contract change that needs the maintainer's sign-off.
 
-Every tool call can be repeated safely. The result depends only on LogSeq's state: the graph, or, for `logseq_get_current`, what is open in the editor. The server keeps no hidden progress and no cursor, and it never writes. If a tool needs paging, it uses explicit `limit` and `offset` parameters rather than a server-side cursor.
+Every tool call can be repeated safely. The result depends only on LogSeq's state: the graph, or, for `logseq_get_current`, what is open in the editor. The server keeps no hidden progress and no cursor state, and it never writes. If a tool needs paging, it uses explicit parameters (`limit` and `offset`) or an opaque cursor token that carries everything the next page needs ([ADR-0038 (one-forward-only-cursor-for-paging)](../adr/0038-one-forward-only-cursor-for-paging.md)), rather than a server-side cursor.
 
 ## Rationale
 
@@ -25,3 +25,4 @@ The recorded `tools/list` test fails unless every tool sets `readOnlyHint: true`
 | 2026-10-05 | Restated as a hard rule and a re-runnable-calls principle in the foundations doc. | #38 |
 | 2026-10-08 | Mechanical enforcement: the annotation tests of the TypeScript server are replaced by the guard over the recorded tool list and the Rust server's own test. Statement unchanged. The Rust test of the live list now checks every annotation, not only `readOnlyHint`. | #370 |
 | 2026-10-12 | The tool name in the Statement follows the rename of `logseq_get_current_context` to `logseq_get_current` (ADR-0037). Nothing else changed. | #517 |
+| 2026-10-14 | Statement: "no cursor" reads "no cursor state", and paging may use a stateless cursor token (ADR-0038) as well as explicit parameters. A token that carries its own arguments is not a server-side cursor; the rule's promises (read-only, no hidden progress, safe to repeat) are unchanged. The token lands with the cursor core task (#528); until then the tools page with `limit` and `offset`. | #546 |
