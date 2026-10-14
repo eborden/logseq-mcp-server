@@ -56,6 +56,13 @@ interface Meta {
   totals?: Record<string, number>;
 }
 
+/** What a cursor says, without the snapshot it names, which differs from one call to the next. */
+const saying = (cursor: string) => {
+  const { snapshot, ...rest } = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+  expect(snapshot).toEqual({ started: expect.any(Number), n: expect.any(Number) });
+  return rest;
+};
+
 describe('result caps (#61)', () => {
   let mcp: Client;
   let client: LogseqClient;
@@ -187,11 +194,6 @@ describe('result caps (#61)', () => {
       expect(atMax.meta.nextCursor).toEqual(expect.any(String));
       expect(above.text).toBe(atMax.text);
       // the same page, and a cursor that says the same: it differs only in the snapshot it names
-      const saying = (cursor: string) => {
-        const { snapshot, ...rest } = JSON.parse(Buffer.from(cursor, 'base64url').toString());
-        expect(snapshot).toEqual({ started: expect.any(Number), n: expect.any(Number) });
-        return rest;
-      };
       expect({ ...above.meta, nextCursor: saying(above.meta.nextCursor!) }).toEqual({ ...atMax.meta, nextCursor: saying(atMax.meta.nextCursor!) });
     });
   });
@@ -307,6 +309,18 @@ describe('result caps (#61)', () => {
     /** The warnings that name a call which reads on: what `hasMore` has to agree with (#521). */
     const advice = (body: PageBody) => (body.warnings ?? []).filter(warning => warning.howToFetchAll !== undefined);
 
+    /** The pages of a read, from the first result to the one with no `nextCursor`, each a call with only the cursor (ADR-0038). */
+    async function readToEnd(first: PageBody): Promise<PageBody[]> {
+      const pages = [first];
+      while (pages[pages.length - 1].nextCursor) {
+        expect(pages.length, 'following the cursor ends').toBeLessThan(200);
+        const text = (await call('logseq_explore_timeline', { cursor: pages[pages.length - 1].nextCursor })).content[0].text;
+        expect([...text].length, 'a page is inside the budget').toBeLessThanOrEqual(30000);
+        pages.push(JSON.parse(text) as PageBody);
+      }
+      return pages;
+    }
+
     /** Every block of the entries, nested ones counted: the unit `max_blocks` cuts in. */
     const count = (blocks: Array<{ children?: unknown[] }>): number =>
       blocks.reduce((sum, block) => sum + 1 + count((block.children ?? []) as Array<{ children?: unknown[] }>), 0);
@@ -342,8 +356,10 @@ describe('result caps (#61)', () => {
         const codes = body.warnings!.map(warning => warning.code);
         expect(codes[0], label).toBe('blocks_truncated');
         expect(body.totals!.blocks, label).toBeGreaterThanOrEqual(total);
-        // a way on is named only when a call reads on; `max_blocks` is never raised past the maximum
-        expect(body.hasMore, label).toBe(advice(body).length > 0);
+        // the cursor reads on, and `max_blocks` is never raised past the maximum
+        expect(body.hasMore, label).toBe(true);
+        expect(body.nextCursor, label).toEqual(expect.any(String));
+        expect(advice(body)[0].howToFetchAll, label).toBe('Pass nextCursor as cursor, with no other argument, to read the next page.');
         expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
         for (const warning of body.warnings!) {
           expect(warning.howToFetchAll ?? '', `${label}: no search_term`).not.toContain('search_term');
@@ -354,7 +370,7 @@ describe('result caps (#61)', () => {
       expect((await timeline(total)).text).toBe(atMax.text);
     });
 
-    it('cut by the character budget at the maximum, the hub has no dated day left to read on from, so hasMore is false and nothing is named', async () => {
+    it('cut by the character budget at the maximum, the cursor reads the rest: every block once, no page over the budget', async () => {
       // The full output (BR-0012) is larger than the slim default, so the budget bites on the hub even at the maximum
       const atMax = await timeline(MAX_DATE_RANGE_BLOCKS, { slim_results: false });
       const { body } = atMax;
@@ -366,23 +382,32 @@ describe('result caps (#61)', () => {
 
       // The cut is the budget's alone: the count cap is at the maximum, which the hub is under
       expect(body.warnings!.map(warning => warning.code)).toEqual(['result_size_truncated']);
-      expect(body.warnings![0].message).toContain(`Showing ${kept(body)} of ${total} blocks`);
-      expect(body.totals).toEqual({ blocks: total, days: body.summary.totalDays });
+      expect(body.warnings![0].message).toMatch(new RegExp(`^Showing 1(-${kept(body)})? of `));
+      expect(body.warnings![0].howToFetchAll).toBe('Pass nextCursor as cursor, with no other argument, to read the next page.');
+      expect(body.hasMore).toBe(true);
+      expect(body.nextCursor).toEqual(expect.any(String));
+      expect(body.totals!.blocks).toBeGreaterThan(kept(body));
 
-      // Every dated day is kept whole, so what is left is the blocks on non-journal pages, which no date reaches:
-      // no call reads on, hasMore is false and no warning names one
-      const dated = body.entries.map(entry => entry.date).filter(date => date !== null);
-      expect(dated, 'every dated day is kept').toHaveLength(body.summary.totalDays);
-      expect(body.entries.at(-1)?.date, 'the cut falls among the blocks on non-journal pages').toBeNull();
-      expect(body.warnings![0].message).toContain('non-journal pages');
-      expect(advice(body)).toEqual([]);
-      expect(body.hasMore, 'hasMore is false: no parameter reads on').toBe(false);
+      // The pages read on to the end: every block once (a day cut between two pages is on both, its blocks are not), the
+      // last page has no cursor and no warning, and only the first has the summary
+      const pages = await readToEnd(body);
+      expect(pages.length, 'the hub in full output is more than one page').toBeGreaterThan(1);
+      const uuids = pages.flatMap(page => page.entries.flatMap(entry => entry.blocks.flatMap(function walk(block: { uuid: string; children?: unknown[] }): string[] {
+        return [block.uuid, ...((block.children ?? []) as Array<{ uuid: string; children?: unknown[] }>).flatMap(walk)];
+      })));
+      expect(new Set(uuids).size, 'no block is repeated').toBe(uuids.length);
+      expect(uuids.length, 'no block is missing').toBe(body.totals!.blocks);
+      expect(pages.slice(1).every(page => page.summary === undefined)).toBe(true);
+      const last = pages[pages.length - 1];
+      expect([last.hasMore, last.nextCursor, last.warnings]).toEqual([undefined, undefined, undefined]);
 
-      // A value above the maximum is clamped to it, and the same cut comes back
-      expect((await timeline(5000, { slim_results: false })).text).toBe(atMax.text);
+      // A value above the maximum is clamped to it, and the same cut comes back, with a cursor that says the same: it
+      // differs only in the snapshot it names
+      const clamped = (await timeline(5000, { slim_results: false })).body;
+      expect({ ...clamped, nextCursor: saying(clamped.nextCursor!) }).toEqual({ ...body, nextCursor: saying(body.nextCursor!) });
     });
 
-    it('names a later day, never a kept one, exactly when a call reads on, and a raise at the end of the dated days', async () => {
+    it('reads the aliased project to the end by the cursor at any page size: every block once, in the order of the whole', async () => {
       // The aliased project is linked on several days, and a page with days and blocks of its own on non-journal pages
       const ALIASED = 'project atlas';
       const atMax = await timeline(MAX_DATE_RANGE_BLOCKS, {}, ALIASED);
@@ -394,30 +419,24 @@ describe('result caps (#61)', () => {
       // No cut at the maximum, so there is nothing to read on from
       expect(atMax.body.warnings).toBeUndefined();
       expect(atMax.body.hasMore).toBeUndefined();
+      expect(atMax.body.nextCursor).toBeUndefined();
+      const every = (body: PageBody) => body.entries.flatMap(entry => entry.blocks.flatMap(function walk(block: { uuid: string; children?: unknown[] }): string[] {
+        return [block.uuid, ...((block.children ?? []) as Array<{ uuid: string; children?: unknown[] }>).flatMap(walk)];
+      }));
+      const whole = every(atMax.body);
 
-      for (let max = 1; max < total; max++) {
-        const { body } = await timeline(max, {}, ALIASED);
+      for (const max of [1, 2, 3, Math.floor(total / 2), total - 1]) {
+        const first = (await timeline(max, {}, ALIASED)).body;
         const label = `max_blocks ${max}`;
-        expect(body.warnings!.map(warning => warning.code), label).toEqual(['blocks_truncated']);
-        expect(body.hasMore, label).toBe(true);
-        expect(advice(body), `${label}: a way on is named`).toHaveLength(1);
-        const how = advice(body)[0].howToFetchAll!;
-        const keptDays = body.entries.map(entry => entry.date).filter((date): date is number => date !== null);
-        const named = /start_date (\d+)/.exec(how);
-        if (how.includes('repeats its kept blocks')) {
-          // Cut inside a day: the call starts at that day, the last one kept, and says it repeats what was kept
-          expect(named, `${label}: a date to read on from: ${how}`).not.toBeNull();
-          expect(Number(named![1]), `${label}: the day cut in is the last kept day`).toBe(keptDays[keptDays.length - 1]);
-        } else if (named) {
-          // Cut between days: the day named is the next one dropped, the first day not read. That is a later day than any
-          // kept, so it differs from the first kept one too
-          expect(keptDays.length, `${label}: a date is named only while a dated day is left`).toBeLessThan(days.length);
-          expect(Number(named[1]), `${label}: the day named is the first day not kept: ${how}`).toBe(days[keptDays.length]);
-        } else {
-          // Every dated day is kept whole and the rest have no day: the way on is a raise of max_blocks, never a date
-          expect(keptDays, `${label}: every dated day is kept`).toEqual(days);
-          expect(how, label).toBe(`Set max_blocks to ${total} (or higher) to get all ${total}.`);
-        }
+        expect(first.warnings!.map(warning => warning.code), label).toEqual(['blocks_truncated']);
+        expect(first.hasMore, label).toBe(true);
+        expect(advice(first), `${label}: a way on is named`).toHaveLength(1);
+        expect(advice(first)[0].howToFetchAll, label).toBe('Pass nextCursor as cursor, with no other argument, to read the next page.');
+        expect(first.totals!.blocks, label).toBe(total);
+        const pages = await readToEnd(first);
+        expect(pages.flatMap(every), `${label}: every block once, in order`).toEqual(whole);
+        expect(pages.slice(0, -1).every(page => kept(page) <= max), label).toBe(true);
+        expect(pages.slice(1).every(page => page.summary === undefined && page.page === first.page), `${label}: the frame stays, the summary does not`).toBe(true);
       }
     });
   });
@@ -483,56 +502,33 @@ describe('result caps (#61)', () => {
         expect(body.dateRange, label).toEqual(atMax.body.dateRange);
         expect(body.totals, label).toEqual({ blocks: total, days });
         expect(body.warnings!.map(w => w.code), label).toEqual(['blocks_truncated']);
-        // Below the maximum the warning leads with paging (#187), and suggests no raise past the maximum
+        // The warning leads with the cursor (ADR-0038) and suggests no raise past the maximum
         expect(body.hasMore, label).toBe(true);
-        const how = body.warnings![0].howToFetchAll!;
-        expect(how, label).toMatch(
-          /^(Call again with start_date \d+, the same end_date \(\d+\) and the same max_blocks|To read it whole, call again with start_date \d+, end_date \d+ and max_blocks \d+\.)/
-        );
-        expect(how, label).not.toContain('Set max_blocks');
+        expect(body.nextCursor, label).toEqual(expect.any(String));
+        expect(body.warnings![0].howToFetchAll, label).toBe('Pass nextCursor as cursor, with no other argument, to read the next page.');
         expectNoSuggestionPast(body as Meta, 'max_blocks', MAX_DATE_RANGE_BLOCKS);
+        expect(body.warnings![0].message, label).toMatch(new RegExp(`^Showing 1(-${effective})? of ${total} blocks`));
 
-        // The warning names the last day kept
-        const lastDay = body.entries[body.entries.length - 1]?.date;
-        if (lastDay === undefined) continue;
-        expect(body.warnings![0].message, label).toContain(`the entries end at ${lastDay}`);
-
-        // Follow the warning literally, call by call: the start_date it names, the same end of the range
-        // and the same max_blocks (or the day alone at the count it names). Every call must reach blocks
-        // not yet seen, so the advice can't loop, and the calls together must read every block.
-        const everything = atMax.body.entries.flatMap(e => flatten(e.blocks));
-        const seen = new Set(uuidsOf(body));
-        let warning = body.warnings![0];
-        let calls = 1;
-        while (warning.howToFetchAll) {
-          expect(++calls, `${label}: following the warning ends`).toBeLessThanOrEqual(everything.length + 1);
-          const how = warning.howToFetchAll;
-          const alone = /To read it whole, call again with start_date (\d+), end_date (\d+) and max_blocks (\d+)\./.exec(how);
-          const paged = /^Call again with start_date (\d+), the same end_date \((\d+)\) and the same max_blocks/.exec(how);
-          expect(alone ?? paged, `${label}: a call the warning names: ${how}`).not.toBeNull();
-          const before = seen.size;
-          let next: RangeBody | undefined;
-          if (alone) {
-            const day = (await range(Number(alone[3]), { start_date: Number(alone[1]), end_date: Number(alone[2]) })).body;
-            expect(day.warnings, `${label}: the day alone at max_blocks ${alone[3]} is whole`).toBeUndefined();
-            uuidsOf(day).forEach(uuid => seen.add(uuid));
-            const then = /Then continue with start_date (\d+), the same end_date \((\d+)\) and max_blocks (\d+)/.exec(how);
-            if (then) next = (await range(Number(then[3]), { start_date: Number(then[1]), end_date: Number(then[2]) })).body;
-          } else {
-            expect(Number(paged![2]), `${label}: the same end_date`).toBe(END);
-            next = (await range(max, { start_date: Number(paged![1]), end_date: Number(paged![2]) })).body;
-          }
-          if (next) uuidsOf(next).forEach(uuid => seen.add(uuid));
-          expect(seen.size, `${label}: the call reaches blocks not seen before`).toBeGreaterThan(before);
-          if (!next) break;
-          if (!next.warnings) break;
-          warning = next.warnings[0];
+        // Follow the cursor, call by call, with nothing else: the calls together read every block once, and a day cut
+        // between two pages is on both with the same date
+        const seen = [...uuidsOf(body)];
+        let page: RangeBody = body;
+        let pages = 1;
+        while (page.nextCursor) {
+          expect(++pages, `${label}: following the cursor ends`).toBeLessThanOrEqual(total + 1);
+          const text = (await call('logseq_explore_timeline', { cursor: page.nextCursor })).content[0].text;
+          const next = JSON.parse(text) as RangeBody;
+          expect(next.summary, `${label}: only the first page has the summary`).toBeUndefined();
+          expect(next.dateRange, label).toEqual(atMax.body.dateRange);
+          seen.push(...uuidsOf(next));
+          page = next;
         }
-        expect([...seen].sort(), `${label}: following the warning reads every block`).toEqual([...everything].sort());
+        expect(seen, `${label}: every block once, in order`).toEqual(all);
+        expect([page.hasMore, page.nextCursor, page.warnings], `${label}: the last page says nothing`).toEqual([undefined, undefined, undefined]);
 
-        // A kept block that lost children is marked, and the warning names the marker exactly then
+        // A kept block that lost children is marked, and the warning names the marker
         const marked = JSON.stringify(body.entries).includes('"childrenTruncated":true');
-        expect(body.warnings![0].message.includes('childrenTruncated'), `${label}: warning matches the marks`).toBe(marked);
+        if (marked) expect(body.warnings![0].message, `${label}: the warning names the marker`).toContain('childrenTruncated');
       }
     });
 
