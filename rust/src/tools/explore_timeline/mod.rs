@@ -284,9 +284,10 @@ fn snippet_of(block: &Value) -> String {
 }
 
 /// `hasMore`, `nextCursor` and `warnings` as keys of the result, then `totals` (what there was before a cut, only with a
-/// cut): `hasMore` is true when a `nextCursor` reads on, or any warning offers a way to fetch the rest (BR-0013).
-fn meta_parts(warnings: &[ResultWarning], next: Option<&str>, totals: Option<(usize, usize)>) -> Vec<(&'static str, Value)> {
-    let mut parts = vec![("hasMore", Value::Bool(next.is_some() || warnings.iter().any(|warning| warning.how_to_fetch_all.is_some())))];
+/// cut): `hasMore` is true when a `nextCursor` reads on, or when a warning of the read itself offers a way to fetch what
+/// it left out (BR-0013). A raise of `max_blocks` beside the cursor never makes it true.
+fn meta_parts(more: bool, next: Option<&str>, warnings: &[ResultWarning], totals: Option<(usize, usize)>) -> Vec<(&'static str, Value)> {
+    let mut parts = vec![("hasMore", Value::Bool(more))];
     if let Some(next) = next {
         parts.push(("nextCursor", Value::from(next)));
     }
@@ -435,14 +436,14 @@ impl Timeline {
 /// The text of one page of the result: what was answered and the range, the meta (`hasMore`, `nextCursor`, `warnings`,
 /// `totals`) when there is something to say, the `summary` on the first page only, then the entries (BR-0013). The meta
 /// comes only with something to say, so a result that fits one page is unchanged; resolving refs always brings it.
-fn write(timeline: &Timeline, args: &Args, first: bool, entries: &[Entry], warnings: &[ResultWarning], next: Option<&str>, totals: Option<(usize, usize)>) -> String {
+fn write(timeline: &Timeline, args: &Args, first: bool, entries: &[Entry], warnings: &[ResultWarning], next: Option<&str>, offered: bool, totals: Option<(usize, usize)>) -> String {
     let always_meta = args.include_content && args.resolve_refs;
     let mut parts: Vec<(&str, Value)> = timeline.answered.iter().map(|(key, value)| (*key, value.clone())).collect();
     if let Some(range) = &timeline.date_range {
         parts.push(("dateRange", range.clone()));
     }
     if always_meta || !warnings.is_empty() || next.is_some() {
-        parts.extend(meta_parts(warnings, next, totals));
+        parts.extend(meta_parts(next.is_some() || offered, next, warnings, totals));
     }
     if first {
         parts.push(("summary", timeline.summary.clone()));
@@ -558,6 +559,8 @@ async fn read_page(client: &LogseqClient, snapshots: &Snapshots, args: &Args, re
     }
 
     let first = resume.is_none();
+    // A warning of the read itself (a ref past the depth limit) may offer a way of its own to fetch what it left out
+    let offered = timeline.warnings.iter().chain(&resolved_warnings).any(|warning| warning.how_to_fetch_all.is_some());
     let words = Words { nested, newest_first, requested: args.max_blocks };
     // The text of the page with its first `kept` blocks, ending as `cut` says
     let text_for = |kept: usize, cut: Option<Cut>| -> String {
@@ -582,7 +585,7 @@ async fn read_page(client: &LogseqClient, snapshots: &Snapshots, args: &Args, re
             }));
         }
         let totals = cut.map(|_| (total, day_count(&timeline.entries)));
-        write(timeline, args, first, &entries, &warnings, next.as_deref(), totals)
+        write(timeline, args, first, &entries, &warnings, next.as_deref(), offered, totals)
     };
     // How a page of `kept` blocks would end, for measuring it: by the page size when it holds all it could, else by size
     let guess = |kept: usize| (start + kept < total).then_some(if kept == reach { Cut::Count } else { Cut::Size { oversize: false } });
@@ -796,14 +799,14 @@ mod tests {
     fn a_day_is_written_as_an_integer_and_the_meta_leaves_out_totals_unless_there_was_a_cut() {
         assert_eq!(Value::from(20250101_i64).to_string(), "20250101");
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: Some("h".into()) };
-        let parts = meta_parts(&[warning], None, Some((9, 2)));
+        let parts = meta_parts(true, None, &[warning], Some((9, 2)));
         assert_eq!(
             object_of(parts).to_string(),
             r#"{"hasMore":true,"warnings":[{"code":"c","message":"m","howToFetchAll":"h"}],"totals":{"blocks":9,"days":2}}"#
         );
-        assert_eq!(object_of(meta_parts(&[], None, None)).to_string(), r#"{"hasMore":false,"warnings":[]}"#);
+        assert_eq!(object_of(meta_parts(false, None, &[], None)).to_string(), r#"{"hasMore":false,"warnings":[]}"#);
         // a cursor makes hasMore true and sits right after it (BR-0013)
-        assert_eq!(object_of(meta_parts(&[], Some("abc"), None)).to_string(), r#"{"hasMore":true,"nextCursor":"abc","warnings":[]}"#);
+        assert_eq!(object_of(meta_parts(true, Some("abc"), &[], None)).to_string(), r#"{"hasMore":true,"nextCursor":"abc","warnings":[]}"#);
     }
 
     fn day(date: i64, name: &str, blocks: Vec<Value>) -> Entry {
@@ -831,22 +834,22 @@ mod tests {
         let warning = ResultWarning { code: "c".into(), message: "m".into(), how_to_fetch_all: None };
         let entries = [day(20250101, "Jan 1st, 2025", vec![block("a")])];
         let answered = vec![("page", json!("atlas")), ("resolvedFrom", json!({"name": "atlas"})), ("resolvedAliases", json!(["Atlas"]))];
-        let text = write(&frame(answered, true), &all_args(), true, &entries, &[warning.clone()], Some("abc"), Some((9, 2)));
+        let text = write(&frame(answered, true), &all_args(), true, &entries, &[warning.clone()], Some("abc"), false, Some((9, 2)));
         let value: Value = serde_json::from_str(&text).unwrap();
         // what was answered, what must not be missed (the flags, the cursor, the warnings, the counts, the overview), then the data
         assert_eq!(keys(&value), ["page", "resolvedFrom", "resolvedAliases", "dateRange", "hasMore", "nextCursor", "warnings", "totals", "summary", "entries"]);
         // a period alone has no page; with nothing to say there is no meta
-        let quiet = write(&frame(vec![], true), &all_args(), true, &entries, &[], None, None);
+        let quiet = write(&frame(vec![], true), &all_args(), true, &entries, &[], None, false, None);
         assert_eq!(keys(&serde_json::from_str::<Value>(&quiet).unwrap()), ["dateRange", "summary", "entries"]);
         // a page with no dated mention has no range
-        let bare = write(&frame(vec![("page", json!("atlas"))], false), &all_args(), true, &[], &[warning.clone()], None, None);
+        let bare = write(&frame(vec![("page", json!("atlas"))], false), &all_args(), true, &[], &[warning.clone()], None, true, None);
         assert_eq!(keys(&serde_json::from_str::<Value>(&bare).unwrap()), ["page", "hasMore", "warnings", "summary", "entries"]);
         // a page after the first has no summary, and keeps what was answered and the range
-        let later = write(&frame(vec![("page", json!("atlas"))], true), &all_args(), false, &entries, &[warning], None, None);
+        let later = write(&frame(vec![("page", json!("atlas"))], true), &all_args(), false, &entries, &[warning], None, true, None);
         assert_eq!(keys(&serde_json::from_str::<Value>(&later).unwrap()), ["page", "dateRange", "hasMore", "warnings", "entries"]);
         // resolving refs always brings the meta
         let resolving = Args { resolve_refs: true, ..all_args() };
-        let text = write(&frame(vec![], true), &resolving, true, &entries, &[], None, None);
+        let text = write(&frame(vec![], true), &resolving, true, &entries, &[], None, false, None);
         assert_eq!(keys(&serde_json::from_str::<Value>(&text).unwrap()), ["dateRange", "hasMore", "warnings", "summary", "entries"]);
     }
 
