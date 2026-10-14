@@ -21,6 +21,8 @@ use parity_support::suggestion_rules::{
     GUIDANCE, REQUIRED_CASES, candidates_of, check_list, check_reference_list, check_reference_lists, fold, matches_of, missing_required_cases, parse_not_found,
     required_kinds_of, split_list,
 };
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 
 // ---- the LogSeq calls
@@ -189,6 +191,68 @@ fn an_absent_is_error_is_not_is_error_false_and_the_content_blocks_are_counted()
     let mut two_blocks = result.clone();
     two_blocks["content"].as_array_mut().unwrap().push(json!({"type": "text", "text": "{}"}));
     assert_eq!(compare_results(&result, &two_blocks, &[]), vec!["expected 1 content block(s), got 2".to_owned()]);
+}
+
+/// A `nextCursor` token (ADR-0038) made of `payload`, as the server writes one: base64url, no padding.
+fn token(payload: &Value) -> String {
+    URL_SAFE_NO_PAD.encode(payload.to_string())
+}
+
+fn cursor_payload(snapshot: Value) -> Value {
+    json!({"v": 1, "tool": "logseq_find_blocks", "args": {"text": "importer", "limit": 100}, "position": {"kind": "index", "at": 100}, "anchor": 4242, "snapshot": snapshot})
+}
+
+/// A tool result whose meta carries `next_cursor`.
+fn paged_result(next_cursor: &str) -> Value {
+    let meta = json!({"meta": {"hasMore": true, "nextCursor": next_cursor, "warnings": [], "totals": {"matches": 250}}});
+    json!({"content": [{"type": "text", "text": "[]"}, {"type": "text", "text": meta.to_string()}]})
+}
+
+// ADR-0038: the snapshot a token names is a counter and a start time, which differ between runs and between cases
+#[test]
+fn a_next_cursor_is_compared_by_what_it_says_without_the_snapshot_it_names() {
+    let recorded = paged_result(&token(&cursor_payload(json!({"started": 1_760_000_000_000_u64, "n": 1}))));
+    let again = paged_result(&token(&cursor_payload(json!({"started": 1_760_999_999_999_u64, "n": 7}))));
+    assert_eq!(compare_results(&recorded, &again, &[]), Vec::<String>::new());
+    // key order inside the payload is no difference either, as for any JSON result
+    let reordered = json!({"snapshot": {"n": 1, "started": 5}, "anchor": 4242, "position": {"at": 100, "kind": "index"}, "args": {"limit": 100, "text": "importer"}, "tool": "logseq_find_blocks", "v": 1});
+    assert_eq!(compare_results(&recorded, &paged_result(&token(&reordered)), &[]), Vec::<String>::new());
+}
+
+#[test]
+fn a_next_cursor_that_says_something_else_is_a_failure_in_each_field_it_holds() {
+    let recorded = paged_result(&token(&cursor_payload(json!({"started": 1, "n": 1}))));
+    let edits: [(&str, fn(&mut Value)); 6] = [
+        ("the version", |payload| payload["v"] = json!(2)),
+        ("the tool", |payload| payload["tool"] = json!("logseq_find_pages")),
+        ("the arguments", |payload| payload["args"]["limit"] = json!(50)),
+        ("the position", |payload| payload["position"]["at"] = json!(101)),
+        ("the anchor", |payload| payload["anchor"] = json!(4243)),
+        ("a new field", |payload| payload["extra"] = json!(true)),
+    ];
+    for (what, edit) in edits {
+        let mut payload = cursor_payload(json!({"started": 1, "n": 1}));
+        edit(&mut payload);
+        let failures = compare_results(&recorded, &paged_result(&token(&payload)), &[]);
+        assert_eq!(failures.len(), 1, "{what} passed: {failures:?}");
+        assert!(failures[0].starts_with("content[1].text differs"), "{what}: {failures:?}");
+    }
+    // a token with no snapshot, or text that is no token, is held to the bytes, so neither passes for a cursor
+    let mut without = cursor_payload(json!({"started": 1, "n": 1}));
+    without.as_object_mut().unwrap().remove("snapshot");
+    assert_eq!(compare_results(&recorded, &paged_result(&token(&without)), &[]).len(), 1);
+    assert_eq!(compare_results(&paged_result("not a token"), &paged_result("not a token"), &[]), Vec::<String>::new());
+    assert_eq!(compare_results(&paged_result("not a token"), &paged_result("another"), &[]).len(), 1);
+    // a cursor is one only under the key `nextCursor`: the same token under another key is compared as text
+    let other = |snapshot: Value| {
+        let meta = json!({"meta": {"hasMore": true, "cursor": token(&cursor_payload(snapshot)), "warnings": [], "totals": {}}});
+        json!({"content": [{"type": "text", "text": meta.to_string()}]})
+    };
+    assert_eq!(compare_results(&other(json!({"started": 1, "n": 1})), &other(json!({"started": 2, "n": 1})), &[]).len(), 1);
+    // and the rest of the result is held as ever: a cursor that matches does not excuse a different total
+    let mut changed = paged_result(&token(&cursor_payload(json!({"started": 9, "n": 9}))));
+    changed["content"][1]["text"] = json!(changed["content"][1]["text"].as_str().unwrap().replace("250", "251"));
+    assert_eq!(compare_results(&recorded, &changed, &[]).len(), 1);
 }
 
 #[test]
