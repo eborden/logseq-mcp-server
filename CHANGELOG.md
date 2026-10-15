@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 1.0.0 was the first release, so its entry has no earlier release to compare against. The 2.0.0 entry is a hard cut and opens with a migration note.
 
+## [2.0.1] - 2026-10-15
+
+A patch: one error message is clearer, and no tool, parameter or result changes.
+
+### Changed
+
+- A list parameter over its limit (`names` on `logseq_find_pages`, at most 50; `links_to` on `logseq_find_blocks`, at most 5) is refused with the count sent and the limit, for example `Invalid parameter 'names': 51 items` and `Expected: at most 50 items`. It used to echo the whole list and not say how many items it held (#584, #586). The refusal is still made before any LogSeq call, and an empty list, a wrong type and a non-string element read as before.
+
 ## [2.0.0] - 2026-10-14
 
 v2.0.0 is a hard cut with no deprecation window (ADR-0037). The 16 v1 tools become 10, each named `logseq_<type>_<object>` with a type of `get`, `find`, `explore` or `check`, and every page parameter is `page`. There are no known external callers of v1, so nothing is kept as an alias beyond the few named below. A caller of the tools (the `logseq-skills` plugin skills are already rewritten for v2) should read the migration note first. `Cargo.toml`, `package.json` and the plugin manifests all read 2.0.0.
@@ -202,5 +210,6 @@ A call that sends only a retired name for a required parameter (`topic_name`, `c
 - The unused `node-fetch` dependency. The client uses the global `fetch`.
 
 <!-- Placeholder: replace this with the v2.0.0 tag link when tagging (#499) -->
-[2.0.0]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...HEAD
+[2.0.1]: https://github.com/eborden/logseq-mcp-server/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/eborden/logseq-mcp-server/releases/tag/v1.0.0
