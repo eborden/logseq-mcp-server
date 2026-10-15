@@ -117,11 +117,8 @@ jobs:
         run: |
           base="$(git rev-parse HEAD^1)"
           dir=tests/data/parity
-          # TEMPORARY (#540): the base still has the data where the crate used to live. This is read only for the PR that
-          # moves the crate to the repo root; the follow-up (#577) deletes this line and reads the base from "$dir" too.
-          base_dir=rust/tests/data/parity
-          if [ -z "$(git ls-tree -r --name-only "$base" -- "$base_dir")" ]; then
-            echo "::error::The base has no golden files under ${base_dir}, so nothing can be compared."
+          if [ -z "$(git ls-tree -r --name-only "$base" -- "$dir")" ]; then
+            echo "::error::The base has no golden files under ${dir}, so nothing can be compared."
             exit 1
           fi
           # A group file's goldens: each case's name, the request it answers and its result, a line of JSON each (none for a file that is not
@@ -149,21 +146,21 @@ jobs:
           }
           # The files of both folders by name relative to the folder, once each.
           names() {
-            { git ls-tree -r --name-only "$base" -- "$base_dir" | sed "s#^${base_dir}/##"; git ls-tree -r --name-only HEAD -- "$dir" | sed "s#^${dir}/##"; } | sort -u
+            { git ls-tree -r --name-only "$base" -- "$dir" | sed "s#^${dir}/##"; git ls-tree -r --name-only HEAD -- "$dir" | sed "s#^${dir}/##"; } | sort -u
           }
           changed=""
-          if [ "$(cases_at "$base" "$base_dir")" != "$(cases_at HEAD "$dir")" ]; then
+          if [ "$(cases_at "$base" "$dir")" != "$(cases_at HEAD "$dir")" ]; then
             # Name the files whose own goldens changed
             while IFS= read -r name; do
               case "$name" in
                 "clock-cases.json" | "tool-list.json" | "call-ceilings.json" | "") continue ;;
               esac
-              if [ "$(file_cases "$base" "$base_dir/$name" | sorted)" != "$(file_cases HEAD "$dir/$name" | sorted)" ]; then
+              if [ "$(file_cases "$base" "$dir/$name" | sorted)" != "$(file_cases HEAD "$dir/$name" | sorted)" ]; then
                 changed="${changed}${dir}/${name}"$'\n'
               fi
             done <<< "$(names)"
           fi
-          if [ "$(tools_at "$base" "$base_dir")" != "$(tools_at HEAD "$dir")" ]; then
+          if [ "$(tools_at "$base" "$dir")" != "$(tools_at HEAD "$dir")" ]; then
             changed="${changed}${dir}/tool-list.json"$'\n'
           fi
           if [ -z "$changed" ]; then
@@ -192,10 +189,8 @@ jobs:
         run: |
           base="$(git rev-parse HEAD^1)"
           file=tests/data/parity/call-ceilings.json
-          # TEMPORARY (#540): the base's copy is where the crate used to live; the follow-up (#577) reads it from "$file".
-          base_file=rust/tests/data/parity/call-ceilings.json
-          if ! old="$(git show "${base}:${base_file}" 2> /dev/null)"; then
-            echo "::error::The base has no ${base_file}, so the ceilings cannot be compared."
+          if ! old="$(git show "${base}:${file}" 2> /dev/null)"; then
+            echo "::error::The base has no ${file}, so the ceilings cannot be compared."
             exit 1
           fi
           new="$(git show "HEAD:${file}" 2> /dev/null || echo 'missing')"
