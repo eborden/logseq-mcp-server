@@ -1,5 +1,5 @@
 //! The parity test's parts (#371, #379): the cases, the stub LogSeq, the server process, the comparator and the
-//! recorder. `rust/tests/parity.rs` runs them, `parity_self_check.rs` runs them against perturbed answers,
+//! recorder. `tests/parity.rs` runs them, `parity_self_check.rs` runs them against perturbed answers,
 //! `parity_comparator.rs` and `parity_harness.rs` hold the parts to their own rules, and `parity_record.rs`
 //! records the golden results.
 

@@ -50,7 +50,7 @@ pub(crate) enum Problem {
     TooManyCells,
     /// Anything a type said itself. The text must be fixed text written in this crate: `custom` keeps what it
     /// is given, so a `try_from` or `deserialize_with` that formats a received value into its error would put
-    /// the value in a message (ADR-0004). `rust/tests/wire_error_text.rs` lists where `custom` can be called
+    /// the value in a message (ADR-0004). `tests/wire_error_text.rs` lists where `custom` can be called
     /// from.
     Other(String),
 }
