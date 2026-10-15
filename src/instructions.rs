@@ -16,7 +16,7 @@ Types: get (you name it), find (criteria in, hits out), explore (what it is, how
 - keywords, blocks linking to pages, a block property: logseq_find_blocks
 - a page name you lack, or a page property: logseq_find_pages
 - before writing links: logseq_check_links
-- a named page or block: logseq_get_page, logseq_get_block; this page: logseq_get_current; long page: logseq_get_page detail outline, then logseq_get_block
+- a named page or block (a miss suggests names): logseq_get_page, logseq_get_block; this page: logseq_get_current; long page: logseq_get_page detail outline, then logseq_get_block
 
 Reading results:
 - ((uuid)) is a block ref: logseq_get_block, or resolve_refs.
@@ -25,9 +25,10 @@ Reading results:
 - Tips in a trailing meta block are optional."##;
 
 /// The most characters the instructions may hold: the length of the text this replaced (#496). Every
-/// session pays for each one, so a longer text has to say what it buys and raise this on purpose.
+/// session pays for each one, so a longer text has to say what it buys and raise this on purpose. Raised by 4 (#573):
+/// "(a miss suggests names)" on the get line keeps the model from looking up a page it was told by name.
 #[cfg(test)]
-const MAX_CHARS: usize = 1145;
+const MAX_CHARS: usize = 1149;
 
 #[cfg(test)]
 mod tests {
