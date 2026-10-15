@@ -28,3 +28,4 @@ reviewer: A new tool that returns blocks should call `resolve_block_refs` rather
 | 2026-10-05 | Added a `test:` enforcement line for the fixture-only suite that checks a ref or embed of a missing block comes back `missing`. | #145 |
 | 2026-10-07 | Added the `unavailable` status, for a ref whose lookup LogSeq answered with `null` (until now `depth_limit`, #265), "unavailable refs" to the Statement's list of warnings, and a `test:` line for the suite that pins it. | #286 |
 | 2026-10-08 | Mechanical enforcement: the resolver and its tests are the Rust crate's, and the integration suite's, with the TypeScript server's removal. Statement unchanged. | #370 |
+| 2026-10-14 | Paths in citations updated for the crate moving to the repo root (path text only, no change to the rule). | #576 |

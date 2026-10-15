@@ -20,3 +20,4 @@ reviewer: No tool result field, and no truncation or correctness signal, is carr
 | 2026-10-05 | Introduced. | #56 |
 | 2026-10-08 | Mechanical enforcement: the test moved to the Rust crate with the TypeScript server's removal. Statement unchanged. | #370 |
 | 2026-10-08 | Statement: the TypeScript names (`buildTips`, `src/utils/tips.ts`, `JSON.stringify`) are the Rust crate's (`src/tips.rs`, `suggest_call`). The rule is unchanged. | #372 |
+| 2026-10-14 | Paths in citations updated for the crate moving to the repo root (path text only, no change to the rule). | #576 |
