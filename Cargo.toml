@@ -7,7 +7,7 @@ edition = "2024"
 # rmcp 3.x needs 1.88. rust-toolchain.toml pins the same version for local builds and CI.
 rust-version = "1.88"
 publish = false
-description = "The Rust MCP server for LogSeq (ADR-0025, #122)"
+description = "Read-only MCP server that lets Claude search and read a LogSeq graph: page context, link traversal and journals by date, in a handful of batched Datalog calls."
 
 [dependencies]
 # The official MCP SDK. No macros (the tools are listed by hand, see src/server.rs) and only

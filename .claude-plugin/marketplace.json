@@ -5,7 +5,7 @@
     "url": "https://github.com/eborden"
   },
   "metadata": {
-    "description": "LogSeq MCP server and skills for Claude Code"
+    "description": "Read-only LogSeq MCP server and skills for Claude Code"
   },
   "plugins": [
     {
