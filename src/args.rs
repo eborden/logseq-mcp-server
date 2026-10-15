@@ -121,7 +121,7 @@ enum Why {
     /// The wrong kind of value for the parameter: a number for a string, a word that is none of the allowed ones
     Mismatch,
     /// A limit broken, worded where it is enforced
-    Refused { expected: String, example: Option<String> },
+    Refused { expected: String, example: Option<String>, shown: Option<String> },
     /// A required parameter was not sent
     Missing(String),
     /// Anything else serde can say; no argument type of ours makes it
@@ -142,7 +142,12 @@ impl ArgError {
     }
 
     fn refused(expected: impl Into<String>, example: Option<&str>) -> Self {
-        ArgError::new(Why::Refused { expected: expected.into(), example: example.map(str::to_owned) })
+        ArgError::new(Why::Refused { expected: expected.into(), example: example.map(str::to_owned), shown: None })
+    }
+
+    /// A refusal that says `shown` in place of the value sent, for a value too long to echo.
+    fn refused_showing(shown: String, expected: impl Into<String>, example: Option<&str>) -> Self {
+        ArgError::new(Why::Refused { expected: expected.into(), example: example.map(str::to_owned), shown: Some(shown) })
     }
 
     fn at(mut self, param: &'static str, value: &Value) -> Self {
@@ -177,9 +182,9 @@ impl ArgError {
                     example: Some(format!("{param}: {}", property.example())),
                 }
             }
-            (Why::Refused { expected, example }, Some((param, value, _))) => InvalidParameter {
+            (Why::Refused { expected, example, shown }, Some((param, value, _))) => InvalidParameter {
                 param: param.to_owned(),
-                value,
+                value: shown.unwrap_or(value),
                 expected,
                 example: example.map(|example| format!("{param}: {example}")),
             },
@@ -475,7 +480,8 @@ impl<'de> Argument<'de> {
             return Err(ArgError::refused(format!("at least {}", items_of(self.limits.min_items)), Some(LIST_EXAMPLE)));
         }
         if let Some(max) = self.limits.max_items.filter(|max| items.len() > *max) {
-            return Err(ArgError::refused(format!("at most {}", items_of(max)), Some(LIST_EXAMPLE)));
+            // The count sent, not the list: echoing it spends the caller's context and hides how far over it was
+            return Err(ArgError::refused_showing(items_of(items.len()), format!("at most {}", items_of(max)), Some(LIST_EXAMPLE)));
         }
         visitor.visit_seq(Elements { items: items.iter() })
     }
@@ -666,7 +672,7 @@ pub(crate) mod testing {
                 }
                 refused.push((json!([]), message(param, "[]", "at least 1 item", Some(example))));
                 let too_many = json!(vec!["a"; max + 1]);
-                refused.push((too_many.clone(), message(param, &too_many.to_string(), &format!("at most {max} items"), Some(example))));
+                refused.push((too_many.clone(), message(param, &format!("{} items", max + 1), &format!("at most {max} items"), Some(example))));
                 taken.extend([json!(["Alice"]), json!(vec!["a"; max]), json!(["", "a"])]);
                 message(param, "missing", "a list of strings (required)", Some(example))
             }
@@ -994,7 +1000,7 @@ mod tests {
         assert_eq!(bad(json!({"names": [["a"]]})), message("names", "[[\"a\"]]", "a list of strings, and every element is a string", example));
         // the size limits of the schema, counted in elements
         assert_eq!(bad(json!({"names": []})), message("names", "[]", "at least 1 item", example));
-        assert_eq!(bad(json!({"names": ["a", "b", "c", "d"]})), message("names", "[\"a\",\"b\",\"c\",\"d\"]", "at most 3 items", example));
+        assert_eq!(bad(json!({"names": ["a", "b", "c", "d"]})), message("names", "4 items", "at most 3 items", example));
         assert_eq!(sample(json!({"names": ["a", "b", "c"]})).unwrap().names.map(|names| names.len()), Some(3));
     }
 
