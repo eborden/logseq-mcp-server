@@ -209,7 +209,6 @@ A call that sends only a retired name for a required parameter (`topic_name`, `c
 
 - The unused `node-fetch` dependency. The client uses the global `fetch`.
 
-<!-- Placeholder: replace this with the v2.0.0 tag link when tagging (#499) -->
 [2.0.1]: https://github.com/eborden/logseq-mcp-server/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/eborden/logseq-mcp-server/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/eborden/logseq-mcp-server/releases/tag/v1.0.0
