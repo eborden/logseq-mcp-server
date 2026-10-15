@@ -30,7 +30,7 @@ use serde_json::{Value, json};
 // ---------------------------------------------------------------- the fixture
 
 fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("tests").join("fixtures").join("graph-linking")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("graph-linking")
 }
 
 fn fixture(path: &str) -> String {

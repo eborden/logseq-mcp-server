@@ -202,10 +202,10 @@ fn ignores_what_is_not_a_read() {
 
 #[test]
 fn only_the_top_level_env_rs_is_exempt() {
-    let src = Path::new("/repo/rust/src");
-    assert!(is_exempt(Path::new("/repo/rust/src/env.rs"), src));
-    assert!(!is_exempt(Path::new("/repo/rust/src/x/env.rs"), src));
-    assert!(!is_exempt(Path::new("/repo/rust/src/myenv.rs"), src));
+    let src = Path::new("/repo/src");
+    assert!(is_exempt(Path::new("/repo/src/env.rs"), src));
+    assert!(!is_exempt(Path::new("/repo/src/x/env.rs"), src));
+    assert!(!is_exempt(Path::new("/repo/src/myenv.rs"), src));
 }
 
 #[test]
