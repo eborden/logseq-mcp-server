@@ -30,7 +30,7 @@ Date: 2026-10-05
 
 ## Mechanical enforcement
 
-- test: `rust/src/client.rs` (`a_401_is_an_auth_error_that_never_shows_the_token`, and the config's `Debug` output redacts the token in `rust/src/config.rs`)
+- test: `src/client.rs` (`a_401_is_an_auth_error_that_never_shows_the_token`, and the config's `Debug` output redacts the token in `src/config.rs`)
 - test: `tests/integration/auth-error.test.ts` (the same through the MCP caller, against a real LogSeq that rejects a bogus token)
 - reviewer: No token, key or password appears in a diff, fixture, log line or error message.
 

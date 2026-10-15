@@ -12,19 +12,19 @@ A tool that resolved through an alias, ISO date or namespace leaf must say so: `
 
 ## Mechanical enforcement
 
-One resolver serves every page-taking tool: `require_page` in `rust/src/resolve/mod.rs`. Tools call it, not a lookup of their own.
+One resolver serves every page-taking tool: `require_page` in `src/resolve/mod.rs`. Tools call it, not a lookup of their own.
 
-test: `rust/src/resolve/mod.rs`
+test: `src/resolve/mod.rs`
 test: `tests/integration/page-resolution.test.ts`
-reviewer: A new page-taking tool resolves its page name with `require_page` (`rust/src/resolve/mod.rs`), not a lookup of its own.
+reviewer: A new page-taking tool resolves its page name with `require_page` (`src/resolve/mod.rs`), not a lookup of its own.
 
 Link-following tools are alias-aware too (#69, #92): references written under any name of a page's alias group count as references to that page. These tests pin it per tool:
 
-test: `rust/tests/context_calls.rs`
-test: `rust/tests/concept_calls.rs`
-test: `rust/tests/timeline_calls.rs`
-test: `rust/tests/network_path_calls.rs`
-test: `rust/tests/find_blocks_calls.rs`
+test: `tests/context_calls.rs`
+test: `tests/concept_calls.rs`
+test: `tests/timeline_calls.rs`
+test: `tests/network_path_calls.rs`
+test: `tests/find_blocks_calls.rs`
 test: `tests/integration/alias-sets.test.ts`
 
 ## Changelog
@@ -33,7 +33,7 @@ test: `tests/integration/alias-sets.test.ts`
 |---|---|---|
 | 2026-10-05 | Introduced. | #57 |
 | 2026-10-08 | Mechanical enforcement: the resolver and the per-tool alias tests are the Rust crate's and the integration suite's, with the TypeScript server's removal. Statement unchanged. | #370 |
-| 2026-10-08 | Statement: the TypeScript error names (`AmbiguousPageError`, `PageNotFoundError`) are the Rust crate's (`AmbiguousPage`, `PageNotFound`, `rust/src/errors.rs`). The rule is unchanged. | #372 |
+| 2026-10-08 | Statement: the TypeScript error names (`AmbiguousPageError`, `PageNotFoundError`) are the Rust crate's (`AmbiguousPage`, `PageNotFound`, `src/errors.rs`). The rule is unchanged. | #372 |
 | 2026-10-12 | Statement: `search_by_relationship` has one relationship type, `connected-within`, since the `references` mode became `find_blocks` with `page` and `links_to`, and `find_blocks` is named beside it, with a list of `resolvedFrom` entries in its `meta` (ADR-0037). Mechanical enforcement: added a `test:` line for `find_blocks_calls.rs` (a name that is an alias says which page it stood for, a missing or ambiguous page is the error and makes no search, a name given twice is resolved once). The rule itself is unchanged. | #527 |
 | 2026-10-13 | Statement and enforcement: `explore_context` replaces `get_backlinks` (ADR-0037), so the statement names it for the missing-page error and `find_blocks` alone for a bare-array result; the `get_backlinks_calls.rs` line is dropped, its resolver cases are in `context_calls.rs`, already listed. The rule is unchanged. | #529 |
 | 2026-10-13 | Statement and enforcement: `explore_network` with `to` replaces `search_by_relationship` (ADR-0037), so the statement says it keys `resolvedFrom` by `page` and `to` and names it for the missing-page error, and the `search_by_relationship_calls.rs` line is `network_path_calls.rs`, which pins the same cases (a name given twice resolved once, a missing page on either side, an alias and the page it names as one page). The rule is unchanged. | #530 |

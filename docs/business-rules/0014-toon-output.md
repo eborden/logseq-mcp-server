@@ -10,7 +10,7 @@ TOON writes a list's keys once instead of on every row, so flat lists cost the m
 
 ## Mechanical enforcement
 
-test: `rust/src/toon.rs` (a fixed value encodes to a pinned TOON text, so key order, `null`, empty arrays and crate upgrades are checked)
+test: `src/toon.rs` (a fixed value encodes to a pinned TOON text, so key order, `null`, empty arrays and crate upgrades are checked)
 
 ## Changelog
 

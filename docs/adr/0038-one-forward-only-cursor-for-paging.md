@@ -17,7 +17,7 @@ A tool that cuts a result says so with a warning, but the way on differs per too
 
 So there are four mechanisms (`offset`, `references_offset`, moving a date, nothing). A made-up page with 90 top-level blocks of about 1,000 characters returns about 28 of them, and blocks 29 to 90 can't be read by any call. A block with 60 children returns the first 25 and the other 35 have no way on. The outline stops at its first 200 blocks. Since #507 the warnings of these tools carry no `howToFetchAll`, and `hasMore` stays false.
 
-The code pays for the variety. Each paged tool measures whether a raise of its cap "fits" before it may offer it (`raise_only_if_it_fits`, `offer_related_raise_only_if_it_fits`, `network_truncated_then_cut_by_size`, the `Raise` types of `find_blocks` and `find_pages`, and the date wordings of `explore_timeline/cap.rs`), because a raise that would only be cut again is a false promise (BR-0006). The summary prompts in `rust/src/prompts.rs` carry paragraph-long instructions for paging the timeline by dates.
+The code pays for the variety. Each paged tool measures whether a raise of its cap "fits" before it may offer it (`raise_only_if_it_fits`, `offer_related_raise_only_if_it_fits`, `network_truncated_then_cut_by_size`, the `Raise` types of `find_blocks` and `find_pages`, and the date wordings of `explore_timeline/cap.rs`), because a raise that would only be cut again is a false promise (BR-0006). The summary prompts in `src/prompts.rs` carry paragraph-long instructions for paging the timeline by dates.
 
 Positions this decision meets:
 
@@ -104,11 +104,11 @@ Date: 2026-10-13
 ## Mechanical enforcement
 
 - test: `tests/guards/tool-list.test.ts` (the ADR-0016 budget and the recorded list hold the cost of `cursor` on each tool)
-- test: `rust/src/budget.rs` (`fit`, which measures each page against the 30,000 characters)
+- test: `src/budget.rs` (`fit`, which measures each page against the 30,000 characters)
 - reviewer: A tool that can cut a list pages it with `cursor` and `nextCursor`, has no `offset` and offers no cap raise as the way on.
-- test: `rust/src/cursor.rs` (the token round trip and every refusal: a bad version, a payload that doesn't parse, a token of another tool)
-- test: `rust/src/snapshots.rs` (the cache's bounds in count, bytes and age, and that it serves only the arguments it was built from)
-- test: `rust/tests/find_blocks_cursor_calls.rs` (a hit costs 0 calls, a miss costs page 1's calls, a stale anchor says `cursor_stale`, a cut list is read to the end, and a bad token or a cursor beside another argument is refused before any call; `find_blocks` is the first tool on the cursor, #550)
+- test: `src/cursor.rs` (the token round trip and every refusal: a bad version, a payload that doesn't parse, a token of another tool)
+- test: `src/snapshots.rs` (the cache's bounds in count, bytes and age, and that it serves only the arguments it was built from)
+- test: `tests/find_blocks_cursor_calls.rs` (a hit costs 0 calls, a miss costs page 1's calls, a stale anchor says `cursor_stale`, a cut list is read to the end, and a bad token or a cursor beside another argument is refused before any call; `find_blocks` is the first tool on the cursor, #550)
 - test: `tests/guards/tool-taxonomy-rules.ts` (`ALLOWED_PARAMETERS` gives every paged tool a `cursor` and none an `offset`, so this guard is the `test:` for "no `offset`")
-- test: `rust/tests/network_cursor_calls.rs` (`explore_network` without `to`, #556: the walk runs to 500 pages and `max_nodes` is the page size; a hit costs 0 calls, a miss page 1's calls, a stale anchor says `cursor_stale`, a walk several times the budget is read to the end with every page and edge once, and a bad token or a cursor beside another argument is refused before any call)
+- test: `tests/network_cursor_calls.rs` (`explore_network` without `to`, #556: the walk runs to 500 pages and `max_nodes` is the page size; a hit costs 0 calls, a miss page 1's calls, a stale anchor says `cursor_stale`, a walk several times the budget is read to the end with every page and edge once, and a bad token or a cursor beside another argument is refused before any call)
 - test: `tests/integration/explore-network-page1.test.ts` (page 1 of the walk equals the capped walk's nodes, depths and edges on the hub fixture, written before the walk changed)

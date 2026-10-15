@@ -75,7 +75,7 @@ Claude Desktop, in `claude_desktop_config.json` (macOS: `~/Library/Application S
 }
 ```
 
-From a clone (needed on Windows and Linux arm64, which have no prebuilt binary or wheel): build with `cargo build --release --locked` in `rust/` (see [docs/development.md](docs/development.md)), then use the absolute path of `rust/target/release/logseq-mcp-server` as the command, with no args.
+From a clone (needed on Windows and Linux arm64, which have no prebuilt binary or wheel): build with `cargo build --release --locked` (see [docs/development.md](docs/development.md)), then use the absolute path of `target/release/logseq-mcp-server` as the command, with no args.
 
 Prebuilt binaries and wheels cover macOS (Apple silicon and Intel) and Linux x86_64. A desktop app may not find `uvx` on its PATH; if so, set `command` to the full path of `uvx`. There is no npm package: the name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`. Plugin details (cache, checksums, offline use): [docs/plugin.md](docs/plugin.md).
 

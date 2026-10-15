@@ -10,16 +10,16 @@ Slim blocks leave out empty fields: a blank `pageName`, properties with no value
 
 Full entities carry fields the model never uses, and they fill its finite context window. Dropping the `hasMore: false` signal would make "nothing was cut" indistinguishable from "unknown". Introduced in #42.
 
-The default lives in `DEFAULT_SLIM_RESULTS` (`rust/src/slim.rs`): each tool that takes `slim_results` reads the argument with it as the default and advertises `default: true` in its schema.
+The default lives in `DEFAULT_SLIM_RESULTS` (`src/slim.rs`): each tool that takes `slim_results` reads the argument with it as the default and advertises `default: true` in its schema.
 
 ## Mechanical enforcement
 
 test: `tests/integration/slim-default.test.ts` (omitted means slim, false means full)
-test: `rust/src/slim.rs`
+test: `src/slim.rs`
 test: `tests/guards/tool-list.test.ts`
-test: `rust/tests/parity.rs`
+test: `tests/parity.rs`
 
-`tests/guards/tool-list.test.ts` asserts that every `slim_results` parameter of the recorded `tools/list` advertises `default: true`, and the parity test (`rust/tests/parity.rs`, run by `cargo test`) holds the server's schema to that list.
+`tests/guards/tool-list.test.ts` asserts that every `slim_results` parameter of the recorded `tools/list` advertises `default: true`, and the parity test (`tests/parity.rs`, run by `cargo test`) holds the server's schema to that list.
 
 ## Changelog
 
@@ -28,8 +28,8 @@ test: `rust/tests/parity.rs`
 | 2026-10-05 | Introduced. | #72 |
 | 2026-10-06 | The default is described as living in the `slim_results` schema (`DEFAULT_SLIM_RESULTS`), not in `wantsSlim`, which is deleted. No change to the rule. | #121 |
 | 2026-10-08 | Mechanical enforcement: the tests moved to the integration suite and the Rust crate with the TypeScript server's removal. Statement unchanged. Added the recorded-list assertion for the `slim_results` default. | #370 |
-| 2026-10-08 | Rationale only: where the default lives is the Rust crate's (`DEFAULT_SLIM_RESULTS` in `rust/src/slim.rs`, read by each tool's `slim_results` argument) and not the TypeScript argument schema. Statement unchanged. | #372 |
-| 2026-10-08 | Mechanical enforcement: the parity check of the server's schema against the recorded `tools/list` is `rust/tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
+| 2026-10-08 | Rationale only: where the default lives is the Rust crate's (`DEFAULT_SLIM_RESULTS` in `src/slim.rs`, read by each tool's `slim_results` argument) and not the TypeScript argument schema. Statement unchanged. | #372 |
+| 2026-10-08 | Mechanical enforcement: the parity check of the server's schema against the recorded `tools/list` is `tests/parity.rs` (`cargo test`), no longer a Node CI step. Added it as a `test:` line. Statement unchanged. | #376 |
 | 2026-10-12 | The statement names `find_blocks`, which replaced `search_blocks` and `query_by_property` (ADR-0037). Nothing else changed. | #525 |
 | 2026-10-13 | The statement names `explore_context`, the new name of `build_context`, among the tools with no slim mode, and the rationale drops the keyword search of `get_context_for_query`, which went (ADR-0037). Nothing else changed. | #529 |
 | 2026-10-13 | The statement names `explore_timeline`, which replaced `query_by_date_range` and brings `slim_results` to a page's days (ADR-0037), and says where a slim block names its page: an entry of one day names it, an entry with no day or one that joins a week or month cannot, so each block there does. The default and the full output are unchanged. | #531 |

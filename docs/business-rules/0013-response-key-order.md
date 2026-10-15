@@ -32,14 +32,14 @@ The rule states an intent, not a layout. Which key belongs to which category, an
 
 ## Mechanical enforcement
 
-test: `rust/src/tools/explore_context/mod.rs` (the order of a page's context, with and without its optional keys)
-test: `rust/src/tools/explore_network/mod.rs` (the order of a network, which starts with `page`)
-test: `rust/src/tools/explore_network/path.rs` (the order of a path, with and without its optional keys)
-test: `rust/src/tools/explore_timeline/mod.rs` (the order of a result, with and without its optional keys, and of its entries)
-test: `rust/src/tools/find_pages/mod.rs` (the order of a page list, and of its `names` before the total)
-test: `rust/src/tools/get_current/mod.rs` (the order of the current context)
-test: `rust/src/tools/check_links/mod.rs` (the order of the check result and its nested records)
-test: `rust/src/resolve_refs/mod.rs` (the order of a `resolvedRefs` entry)
+test: `src/tools/explore_context/mod.rs` (the order of a page's context, with and without its optional keys)
+test: `src/tools/explore_network/mod.rs` (the order of a network, which starts with `page`)
+test: `src/tools/explore_network/path.rs` (the order of a path, with and without its optional keys)
+test: `src/tools/explore_timeline/mod.rs` (the order of a result, with and without its optional keys, and of its entries)
+test: `src/tools/find_pages/mod.rs` (the order of a page list, and of its `names` before the total)
+test: `src/tools/get_current/mod.rs` (the order of the current context)
+test: `src/tools/check_links/mod.rs` (the order of the check result and its nested records)
+test: `src/resolve_refs/mod.rs` (the order of a `resolvedRefs` entry)
 none-yet: #299 (a later wave gives each tool a typed output whose declaration order is its wire order, and pins that order with a unit test per tool)
 reviewer: A new key in a tool result goes in the position of its category, and an optional key does not move the others.
 
@@ -49,10 +49,10 @@ reviewer: A new key in a tool result goes in the position of its category, and a
 |---|---|---|
 | 2026-10-08 | Introduced. | #378 |
 | 2026-10-08 | Enforcement: unit tests pin the key order of the first tools' typed outputs (additive; the `none-yet` line stays for the other tools). | #398 |
-| 2026-10-12 | Mechanical enforcement: the `test:` path of the current context follows the rename of `logseq_get_current_context` to `logseq_get_current` (`rust/src/tools/get_current/mod.rs`). Same test; statement and paragraphs unchanged. | #517 |
-| 2026-10-12 | Mechanical enforcement: the `test:` path of the page list follows the rename of `logseq_list_pages` to `logseq_find_pages` (`rust/src/tools/find_pages/mod.rs`), whose test also pins the new `names` key before `total`, as the server's reading of the request (category 1). Statement and paragraphs unchanged. | #524 |
-| 2026-10-13 | Mechanical enforcement: the `test:` path of the context follows the rename of `build_context` to `explore_context` (`rust/src/tools/explore_context/mod.rs`), and the `get_context_for_query` line goes with that tool (ADR-0037). Statement and paragraphs unchanged. The first key of that result, the echo of the request, is now `page` (it was `topic`), as the parameter is; the order of the keys is the same. | #529 |
-| 2026-10-13 | Mechanical enforcement: the `test:` path of the network follows the rename of `get_concept_network` to `explore_network` (`rust/src/tools/explore_network/mod.rs`; its first key is `page`, as its parameter), and a new line pins the order of the path of `explore_network` with `to` (`page`, `to`, the names resolved, `hops`, `hasMore`, `warnings`, then `nodes` and `edges`). Statement unchanged. | #530 |
-| 2026-10-13 | Mechanical enforcement: the `test:` path of the evolution result follows the merge of `get_concept_evolution` and `query_by_date_range` into `explore_timeline` (`rust/src/tools/explore_timeline/mod.rs`; its first key is `page`, as its parameter, and it pins the order `page`, `resolvedFrom`, `resolvedAliases`, `dateRange`, `hasMore`, `warnings`, `totals`, `summary`, `entries`). A result with a period alone is in this order too: `query_by_date_range` listed its meta after the data, which no rule pinned. Statement unchanged. | #531 |
+| 2026-10-12 | Mechanical enforcement: the `test:` path of the current context follows the rename of `logseq_get_current_context` to `logseq_get_current` (`src/tools/get_current/mod.rs`). Same test; statement and paragraphs unchanged. | #517 |
+| 2026-10-12 | Mechanical enforcement: the `test:` path of the page list follows the rename of `logseq_list_pages` to `logseq_find_pages` (`src/tools/find_pages/mod.rs`), whose test also pins the new `names` key before `total`, as the server's reading of the request (category 1). Statement and paragraphs unchanged. | #524 |
+| 2026-10-13 | Mechanical enforcement: the `test:` path of the context follows the rename of `build_context` to `explore_context` (`src/tools/explore_context/mod.rs`), and the `get_context_for_query` line goes with that tool (ADR-0037). Statement and paragraphs unchanged. The first key of that result, the echo of the request, is now `page` (it was `topic`), as the parameter is; the order of the keys is the same. | #529 |
+| 2026-10-13 | Mechanical enforcement: the `test:` path of the network follows the rename of `get_concept_network` to `explore_network` (`src/tools/explore_network/mod.rs`; its first key is `page`, as its parameter), and a new line pins the order of the path of `explore_network` with `to` (`page`, `to`, the names resolved, `hops`, `hasMore`, `warnings`, then `nodes` and `edges`). Statement unchanged. | #530 |
+| 2026-10-13 | Mechanical enforcement: the `test:` path of the evolution result follows the merge of `get_concept_evolution` and `query_by_date_range` into `explore_timeline` (`src/tools/explore_timeline/mod.rs`; its first key is `page`, as its parameter, and it pins the order `page`, `resolvedFrom`, `resolvedAliases`, `dateRange`, `hasMore`, `warnings`, `totals`, `summary`, `entries`). A result with a period alone is in this order too: `query_by_date_range` listed its meta after the data, which no rule pinned. Statement unchanged. | #531 |
 | 2026-10-14 | Statement: `nextCursor` (ADR-0038) is named among the completeness flags, right after `hasMore`. It is a new key in its category, so additive. No tool returns it yet; the cursor core task (#528) adds it. | #546 |
 | 2026-10-14 | Statement: drops "once a tool takes a `cursor`"; a result that can be read on carries `nextCursor` right after `hasMore`. Wording only, the promises are unchanged. | #572 |

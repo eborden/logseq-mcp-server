@@ -2,7 +2,7 @@
 
 ## Statement
 
-Don't turn errors into empty results. A dropped connection must not look like "no data". Propagate infrastructure errors (`LogseqError::is_infrastructure` in `rust/src/client.rs`: LogSeq not running, auth, timeout) and unexpected ones as errors. Only an empty result is "none", and expected partial results go in a `warnings` field.
+Don't turn errors into empty results. A dropped connection must not look like "no data". Propagate infrastructure errors (`LogseqError::is_infrastructure` in `src/client.rs`: LogSeq not running, auth, timeout) and unexpected ones as errors. Only an empty result is "none", and expected partial results go in a `warnings` field.
 
 ## Rationale
 
@@ -10,13 +10,13 @@ People and agents act on what they are shown. A result that says "no matches" wh
 
 ## Mechanical enforcement
 
-test: `rust/tests/get_page_block_calls.rs`
-test: `rust/tests/get_page_outline_calls.rs`
-test: `rust/tests/resolve_refs_calls.rs`
-test: `rust/tests/context_calls.rs`
-test: `rust/src/server.rs`
+test: `tests/get_page_block_calls.rs`
+test: `tests/get_page_outline_calls.rs`
+test: `tests/resolve_refs_calls.rs`
+test: `tests/context_calls.rs`
+test: `src/server.rs`
 
-`rust/tests/get_page_outline_calls.rs` pins the resolver's error paths: a refused connection or a LogSeq error from the namespace-leaf query, and a refused connection at the suggestion lookup, are the error and never "page not found", while an error answered by the suggestion lookup is a missing page with no suggestions (suggestions are best effort) and an unreadable answer is a response error. `rust/src/server.rs` pins that a failed call reaches the MCP caller as an `isError` result, and `tests/integration/auth-error.test.ts` pins that a rejected token reaches the caller with an actionable message, against a real LogSeq.
+`tests/get_page_outline_calls.rs` pins the resolver's error paths: a refused connection or a LogSeq error from the namespace-leaf query, and a refused connection at the suggestion lookup, are the error and never "page not found", while an error answered by the suggestion lookup is a missing page with no suggestions (suggestions are best effort) and an unreadable answer is a response error. `src/server.rs` pins that a failed call reaches the MCP caller as an `isError` result, and `tests/integration/auth-error.test.ts` pins that a rejected token reaches the caller with an actionable message, against a real LogSeq.
 reviewer: A new error arm on a `Result` from a LogSeq call (`match`, `.ok()`, `unwrap_or_default()`) propagates infrastructure errors and never maps an error to an empty result. An arm that swallows the error is a defect: either propagate it with `?`, add context, convert it to a typed `ToolError`, or delete the arm.
 
 ## Changelog

@@ -45,8 +45,8 @@ empty result, oversized result. -->
 ## Test plan
 <!-- Tests added, and what each one pins. Measurements are approximate, no graph data. -->
 - [ ] Tests added: <what each pins>
-- [ ] `cd rust && cargo test --locked` passes
-- [ ] `cd rust && cargo test --locked --test parity --test parity_self_check` passes (the parity cases and their self-check, #371)
+- [ ] `cargo test --locked` passes
+- [ ] `cargo test --locked --test parity --test parity_self_check` passes (the parity cases and their self-check, #371)
 - [ ] `npm run typecheck` and `npx vitest run tests/guards tests/rust-guards` pass
 - [ ] `npm run test:integration` passes against this worktree's fixture instance, and `git status` shows no change under `tests/fixtures/graph/`
 - [ ] `npx tsx scripts/measure-api-calls.ts` still runs. Approximate calls before/after: <n / n>
@@ -54,7 +54,7 @@ empty result, oversized result. -->
 
 ### If it applies (tick, or write N/A)
 - [ ] **ADR or business rule added, changed, superseded or retired**: this PR needs the maintainer's explicit OK before merge. A changed rule has a new Changelog row citing this PR. (An additive-only Mechanical enforcement edit needs no OK; say so here.)
-- [ ] **Tool contract changed**: additive only, the diff of the golden results in `rust/tests/data/parity/` reviewed (a PR that changes one needs the maintainer's OK and the `golden-change` label), tool-list budget respected (ADR-0016)
+- [ ] **Tool contract changed**: additive only, the diff of the golden results in `tests/data/parity/` reviewed (a PR that changes one needs the maintainer's OK and the `golden-change` label), tool-list budget respected (ADR-0016)
 - [ ] **API call count or behavior of a tool changed**: "Current Implementation Status" table in `CLAUDE.md` updated
 - [ ] **New tool**: the "When Adding New Tools" checklist in `CLAUDE.md` is done
 
