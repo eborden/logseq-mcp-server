@@ -2,7 +2,7 @@
 name = "logseq-mcp-server"
 # The server's version: serverInfo.version is this (src/server.rs). tests/rust-guards/version.test.ts keeps
 # it equal to package.json and the plugin manifest.
-version = "2.0.0"
+version = "2.0.1"
 edition = "2024"
 # rmcp 3.x needs 1.88. rust-toolchain.toml pins the same version for local builds and CI.
 rust-version = "1.88"
