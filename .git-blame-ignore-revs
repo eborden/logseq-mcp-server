@@ -1,0 +1,10 @@
+# Commits that git blame skips. Only pure renames are listed.
+# The other commits of the move to the repo root (#540, PR #576) also change real
+# content (workflow and guard edits, new docs, a deleted README), so ignoring them
+# would hide who wrote those changes.
+
+# Move the crate's src, Cargo files and toolchain to the repo root (#540), 106 renames
+c3072ef0837e9c7cea59c598cb6db4b46c1bece4
+
+# Move the Rust integration tests into the root tests/ directory (#540), 64 renames
+7bf9bbb89e6cab3b31bbed97931c31fb394b812b

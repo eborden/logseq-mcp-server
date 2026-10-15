@@ -27,6 +27,7 @@ cargo build --release --locked        # target/release/logseq-mcp-server
 - `tests/integration/setup.md` has the steps for the integration tests against a per-worktree fixture LogSeq instance (`npx tsx scripts/logseq-instance.ts start`, then `stop`).
 - `tests/fixtures/README.md` says what each fixture page is for.
 - `tests/data/parity/` holds the golden-result cases and results; `cargo test --test parity` holds the server to them, and `PARITY_RECORD=1 cargo test --test parity_record` records them (never in CI).
+- Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone so local `git blame` skips the commits that moved the crate to the repo root (GitHub's blame view already reads the file).
 - `scripts/measure-api-calls.ts` and `scripts/measure-output-size.ts` count calls and bytes per tool. They read the personal graph by default (BR-0001): never commit or post their output.
 
 ## Running a build
