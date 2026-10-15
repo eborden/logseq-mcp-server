@@ -1,67 +1,66 @@
 # LogSeq MCP Server
 
-Turn your LogSeq knowledge graph into an AI-accessible database.
+A read-only [MCP](https://modelcontextprotocol.io) server that lets Claude (or any MCP client) search and read your [LogSeq](https://logseq.com) graph. It follows links, builds context for a topic and reads journals by date, using batched Datalog queries so a question costs a handful of LogSeq calls, not one per page.
 
-## What This Does
+It never writes to your graph. Every tool only reads.
 
-Provides 10 MCP tools for Claude to traverse your LogSeq graph, track concepts over time, and build comprehensive context. Goes beyond basic search: understand relationships, discover connections, analyze temporal patterns.
+## Who it is for
 
-## Quick Start
+You keep notes in LogSeq and want an AI assistant to use them: "what do I know about project atlas?", "what was I working on last week?", "how does this page connect to that one?". You run LogSeq desktop on the same machine as the client.
 
-1. Enable LogSeq HTTP server (Settings → API → Enable HTTP server)
-2. Generate auth token in LogSeq
-3. Create `~/.logseq-mcp/config.json`:
-   ```json
-   {
-     "apiUrl": "http://127.0.0.1:12315",
-     "authToken": "your-token-here"
-   }
-   ```
-   `apiUrl` defaults to `http://127.0.0.1:12315`. Optionally add `"timeoutMs"` (a whole number of milliseconds from 1 to 2147483647, default `30000`) to change how long each LogSeq API call may take before it fails with a timeout error. The limit applies per call, not per tool run.
+## What you can ask
 
-   To load the config from another file, set the environment variable `LOGSEQ_MCP_CONFIG` to its absolute path. A relative path stops the server at startup with a configuration error. The integration tests use it to run against a per-worktree LogSeq instance (`tests/integration/setup.md`).
+- "What do I know about project atlas?" (a page, its blocks, related pages and what links to it)
+- "What was I working on last week?" (the journal days in a period)
+- "Find every block that mentions the importer and links to Alice."
+- "How does project atlas connect to Bob's team page?" (the shortest path of links)
+- "How did my thinking on testing change this year?" (a page over time, by month)
+- "What should I work on?" (open TODOs, stale ones, an order)
 
-   Tips are on by default: four tools (`find_blocks`, `get_page`, `explore_timeline`, `find_pages`) add a trailing `meta.tips` block suggesting a next call. Set `"tips": false` in the config file, or the environment variable `LOGSEQ_MCP_TIPS=off`, to drop them. The variable wins over the file, in both directions. It accepts `on`, `true`, `1`, `yes` and `off`, `false`, `0`, `no` (case-insensitive); any other value stops the server at startup with a configuration error.
+## The tools
 
-   Some tools also accept `name` or `page_name` in place of `page`, and `block_uuid` in place of `uuid`. This is best-effort only: the aliases are not in the input schemas, so a client that validates arguments against the schema rejects an alias-only call. Always use the canonical names.
-4. Connect it to your MCP client (next section). The server is a Rust binary. Run it with `uvx`, which needs [uv](https://docs.astral.sh/uv/), or build it from a clone, which needs the Rust toolchain that `rust/rust-toolchain.toml` pins (rustup reads it). Node is only for the repo's tooling and tests.
+10 tools in four kinds, named after what they do:
+
+| Kind | Tools | Use for |
+|---|---|---|
+| `get` | `get_page`, `get_block`, `get_current`, `get_graph` | One thing you can name: a page, a block, what is open now, the graph |
+| `find` | `find_blocks`, `find_pages` | Things that match a filter: text, page, links, property, period |
+| `explore` | `explore_context`, `explore_network`, `explore_timeline` | Walking outward from a page: context, links, time |
+| `check` | `check_links` | A gate on a `[[link]]` pass before you save it |
+
+Long results are cut with a warning and a `nextCursor` you pass back as `cursor`. Details, parameters, Markdown output, prompts and resources: [docs/tools.md](docs/tools.md).
 
 ## Install
 
-The server is a Rust binary. Run it from PyPI with `uvx`, let the Claude Code plugin download it from GitHub Releases (ADR-0035), or build it from a clone. There is no npm package: the name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`; it would run someone else's package. Do steps 1-3 of Quick Start first; the server reads its token from `~/.logseq-mcp/config.json`, so no credentials go into the client config.
+You need LogSeq desktop with its HTTP API on, and one of the options below. The server is a native Rust binary; Node is only for developing it.
 
-### uvx (PyPI)
+**1. Set up LogSeq.** Turn on the HTTP API server (Settings, then API) and generate an auth token. Then create `~/.logseq-mcp/config.json`:
 
-Needs [uv](https://docs.astral.sh/uv/). The package is [`logseq-mcp-server` on PyPI](https://pypi.org/project/logseq-mcp-server/).
-
-```bash
-uvx logseq-mcp-server               # run it without installing
-uv tool install logseq-mcp-server   # or install it as a command (see `uv tool update-shell` if uv's tool directory is not on your PATH)
+```json
+{
+  "apiUrl": "http://127.0.0.1:12315",
+  "authToken": "your-token-here"
+}
 ```
 
-The wheels (ADR-0036) exist for macOS (Apple silicon and Intel) and Linux x86_64, and carry the same binary, byte for byte, as the GitHub Release. Windows and Linux arm64 have no wheel, so the install fails there; build from a clone instead. In an MCP client config the command is `uvx` with the argument `logseq-mcp-server`. A client that does not start from your shell, such as a desktop app, may not find `uvx` on its PATH; if so, set `command` to the full path of the `uvx` executable. The server still reads `~/.logseq-mcp/config.json`, as in Quick Start.
+The token lives only in that file, so no credentials go in your client's config. Other settings and environment variables: [docs/configuration.md](docs/configuration.md).
 
-### Build from a clone
+**2. Connect a client.** Pick one.
+
+Claude Code plugin (also bundles the skills, and downloads the release binary for you):
 
 ```bash
-git clone https://github.com/eborden/logseq-mcp-server
-cd logseq-mcp-server/rust             # a clone checks out `main`, which holds the Rust server
-cargo build --release --locked        # rust/target/release/logseq-mcp-server
+claude plugin marketplace add eborden/logseq-mcp-server
+claude plugin install logseq@logseq-mcp-server
 ```
 
-### Claude Code
+Claude Code with `uvx` (needs [uv](https://docs.astral.sh/uv/); the package is [`logseq-mcp-server` on PyPI](https://pypi.org/project/logseq-mcp-server/)):
 
 ```bash
 claude mcp add logseq -- uvx logseq-mcp-server
-# or, with a build from a clone:
-claude mcp add logseq -- /absolute/path/to/logseq-mcp-server/rust/target/release/logseq-mcp-server
 ```
 
-Or install the [plugin](#install-as-a-claude-code-plugin), which also bundles the skills and downloads the release binary.
-
-### Claude Desktop
-
-Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows: `%APPDATA%\Claude\claude_desktop_config.json`), then restart Claude Desktop:
+Claude Desktop, in `claude_desktop_config.json`, then restart it:
 
 ```json
 {
@@ -74,190 +73,28 @@ Add the server to `claude_desktop_config.json` (macOS: `~/Library/Application Su
 }
 ```
 
-With a build from a clone, set `command` to the absolute path of `rust/target/release/logseq-mcp-server` and drop `args`. Do this on Windows, which has no wheel.
+From a clone (needed on Windows and Linux arm64, which have no prebuilt binary or wheel): build with `cargo build --release --locked` in `rust/` (see [docs/development.md](docs/development.md)), then use the absolute path of `rust/target/release/logseq-mcp-server` as the command, with no args.
 
-## Install as a Claude Code plugin
+Prebuilt binaries and wheels cover macOS (Apple silicon and Intel) and Linux x86_64. A desktop app may not find `uvx` on its PATH; if so, set `command` to the full path of `uvx`. There is no npm package: the name `logseq-mcp-server` on npm is not this project, so don't run `npx logseq-mcp-server`. Plugin details (cache, checksums, offline use): [docs/plugin.md](docs/plugin.md).
 
-The repo is both a Claude Code plugin and its own marketplace. The plugin bundles the MCP server and the `logseq-skills` workflows.
+## Skills and prompts
 
-First do steps 1-3 of Quick Start (HTTP server on, token, `~/.logseq-mcp/config.json`). The plugin carries no credentials.
+The `logseq-skills` workflows (recall a topic, refresh on a person, history of a decision, connect two projects, plan the week, stale work, who owns it, weekly and monthly summaries, link concepts) ship with the plugin and live in `skills/logseq-skills/`. The server also offers five prompts and two resources; see [docs/tools.md](docs/tools.md).
 
-```bash
-claude plugin marketplace add eborden/logseq-mcp-server
-claude plugin install logseq@logseq-mcp-server
-```
+## Privacy and read-only
 
-The plugin starts `scripts/logseq-mcp-server.sh`, a small POSIX `sh` launcher (ADR-0035). On the first start it downloads the release binary for your platform and for the plugin's own version from [GitHub Releases](https://github.com/eborden/logseq-mcp-server/releases), checks each download against the release's `SHA256SUMS` (it never runs a freshly downloaded file that doesn't match), caches it and replaces itself with the server. Later starts run the cached binary as it sits, without checking it again. Everything it says goes to stderr, since stdout is the MCP channel.
+- The server only reads. It has no tool that edits, creates or deletes anything in your graph (BR-0002).
+- It talks to LogSeq on your machine (`apiUrl`, `127.0.0.1` by default). It makes no other network calls while serving, and it logs to stderr only, never graph content.
+- Your token stays in `~/.logseq-mcp/config.json`. Error messages never echo it.
+- What a client does with the results (for example, sending them to a model) is up to that client.
 
-- **Platforms:** macOS (Apple silicon and Intel) and Linux x86_64. Windows and Linux arm64 have no release binary yet; build from a clone and use `LOGSEQ_MCP_BINARY` below.
-- **Needs:** `sh`, `curl`, and `shasum` or `sha256sum`. No Node. The first start needs the network (a few MB from `github.com`); a proxy is read from `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY`.
-- **Cache:** `~/Library/Caches/logseq-mcp-server/<version>/` on macOS, `~/.cache/logseq-mcp-server/<version>/` elsewhere (`XDG_CACHE_HOME` replaces the parent, and must be an absolute path). It holds the binary, `SHA256SUMS`, `LICENSE` and `THIRD-PARTY-NOTICES.txt`, created readable by you only (0700 and 0600). Because a cached binary is trusted as it sits and is not re-checked, the launcher refuses a cache directory that someone else owns or that group or others can write to. The check follows symlinks and tests the effective user, so it fails closed on purpose in two cases: a `sudo` or root run that keeps your `HOME`, and an NFS mount that maps owners differently. Both refusals name `XDG_CACHE_HOME`; point it at a directory of your own. A start that was killed hard can leave a `.partial.*` directory in it; the next download removes the ones over a day old, and nothing in them is ever run.
-- **Trust limits:** `SHA256SUMS` comes from the same release as the binary, so the check catches a corrupt or truncated download but not a compromised release or account (ADR-0035 Decision 4). The launcher doesn't verify a signature or an attestation; to tie a binary to the workflow run and commit that built it, run `gh attestation verify <binary> --repo eborden/logseq-mcp-server` by hand.
+## Learn more
 
-Two environment variables, set where the plugin's server starts, change where the binary comes from:
+- [Changelog](CHANGELOG.md), with the v1 to v2 migration note
+- [Tools, prompts and resources](docs/tools.md)
+- [Configuration](docs/configuration.md)
+- [Claude Code plugin](docs/plugin.md)
+- [Architecture](docs/architecture.md), then the [decisions](docs/adr/README.md) and [rules](docs/business-rules/README.md)
+- [Development](docs/development.md) and [releasing](docs/releasing.md)
 
-| Variable | Effect |
-|---|---|
-| `LOGSEQ_MCP_BINARY` | An absolute path to a server binary to run as it is: no download, no checks. For offline use, or a binary you built (`cd rust && cargo build --release --locked`). |
-| `LOGSEQ_MCP_RELEASE_BASE_URL` | Where the release files are fetched from, in place of `https://github.com/eborden/logseq-mcp-server/releases/download/v<version>`. An `https://`, `http://` or `file://` base. The checksum checks still run, but over plain `http://` the checksums come from the same unprotected place as the binary, so they prove nothing against an attacker on the network (the launcher warns on stderr). |
-
-To use a clone's plugin with your own build, with no download:
-
-```bash
-git clone https://github.com/eborden/logseq-mcp-server
-cd logseq-mcp-server/rust && cargo build --release --locked && cd ..
-LOGSEQ_MCP_BINARY="$PWD/rust/target/release/logseq-mcp-server" claude --plugin-dir .
-```
-
-A binary you download by hand through a browser is quarantined by macOS, and Gatekeeper refuses it until you run `xattr -d com.apple.quarantine <file>`. The launcher's `curl` download isn't affected.
-
-Under a plugin, the tools appear as `mcp__plugin_logseq_logseq__logseq_*`. The skills refer to them by bare name, so either form works.
-
-## 10 Tools at a Glance
-
-### Basic Operations (4)
-| Tool | Purpose |
-|------|---------|
-| `find_blocks` | Find blocks, newest first, by `text` (a case-insensitive substring), the `page` they are on, the pages they link to (`links_to`, 1 to 5; `[[x]]` and `#x` count, plain text does not; every page's aliases are followed), a block property (`property` with `value`), a period of journal days (`start_date` with `end_date`, `last_n` days or a `preset`), or any of them together. Paged with `limit` and a `cursor` (the `nextCursor` of a cut result, passed alone); `include_context` adds each block's page, references and tags |
-| `get_page` | Retrieve a page. `detail`: `page` (default), `full` (with its blocks) or `outline` (top-level blocks: uuid, first-line snippet, child count) |
-| `get_block` | Get specific block by UUID |
-| `find_pages` | Find non-journal pages as `{ name, aliases? }`, filtered by `text` (a substring of a name or alias), exact `names` (up to 50, each answered with its page or `null` and the closest names) and a page property (`property` with `value`) |
-
-### Graph Traversal (1)
-| Tool | Purpose |
-|------|---------|
-| `explore_network` | The pages linked to a page as nodes and edges, in both link directions (a walk of up to 500 pages read in pages of `max_nodes` with `cursor`; `max_depth` up to 3; journals and roll-up pages that link over 30 pages are leaves; `with_snippets` says why two pages connect). With `to`, the shortest link path to a second page instead, as nodes and edges with their reference counts. Blocks that link to a page are `find_blocks` with `links_to` |
-
-### Context Building (2)
-| Tool | Purpose |
-|------|---------|
-| `explore_context` | Explore one page in one call: its blocks, related pages and the blocks that link to it (references, most-linking pages first), read to the end with a cursor |
-| `get_current` | What the user has open in LogSeq right now |
-
-### Temporal Queries (1)
-| Tool | Purpose |
-|------|---------|
-| `explore_timeline` | A page or a period over time: the journal days in a period, or the blocks on a page and the blocks that link to it by day, oldest first; or both (a period leaves out non-journal pages). `group_by` week or month, `top_concepts_limit` for what a period was about, capped by `max_blocks` and a 30,000-character budget |
-
-### Graph Information (1)
-| Tool | Purpose |
-|------|---------|
-| `get_graph` | Get current LogSeq graph information including filesystem path |
-
-### Linking Gate (1)
-| Tool | Purpose |
-|------|---------|
-| `check_links` | Check a `[[link]]` pass on a note: prose unchanged, brackets balanced, no ref dropped, every ref names a page or alias |
-
-### Markdown output and compact results
-
-`get_page`, `get_block`, `explore_context` and `explore_network` take `format: "markdown"` (the default is `"json"`). The result is one plain text block: page properties as `key:: value` lines, blocks as indented `- ` bullets with `((uuid))` refs kept (block uuids are left out, except in `compact`), related pages and references grouped by source page, and a short footer for warnings, `hasMore` and tips. It is roughly 45-80% smaller than the JSON. `explore_context` also takes `compact: true`, which swaps block bodies for a first-line snippet plus the block's uuid (it pays off on long blocks, and `resolve_refs` is skipped with a warning). For a long page, `get_page` with `detail: "outline"` lists the top-level blocks (uuid, snippet, child count) and `get_block` reads the ones you pick. The `logseq://page/{name}` resource renders through the same code.
-
-## Prompts
-
-Prompts are ready-made starting points that a host shows as slash commands or a menu. Each one sends the model a short message naming the tools to call and the limits to keep. They only read.
-
-| Prompt | Arguments | What it does |
-|--------|-----------|--------------|
-| `weekly_summary` | `week` (optional): `this` (default), `last`, or a date in the week | Summarize a Monday-to-Friday week of journals into a few short signals |
-| `monthly_summary` | `month` (optional): `this` (default), `last`, or `YYYY-MM` | Summarize a month from its weekly pages, with each thread's trajectory |
-| `continue_on` | `topic` (required) | Pick up where you left off: current state, latest activity, open tasks, next step |
-| `what_do_i_know` | `topic` (required) | Research a topic across the graph, with sources and gaps |
-| `prioritize_tasks` | `focus` (optional) | Find open TODO and DOING tasks, spot stale ones, suggest an order |
-
-The server cannot write to your graph. The summary prompts end by showing the summary in the chat. If you want it saved as a page, ask, and a host with file access can do it.
-
-## Resources
-
-| URI | Contents |
-|-----|----------|
-| `logseq://guide` | The reading guide: how to read results (case-insensitive names, `((uuid))` refs, `hasMore` and `warnings`), which tool to start with, and an index of tools and prompts |
-| `logseq://page/{name}` | One page as Markdown text. The name is URL-encoded and may be an alias or an ISO date (`logseq://page/2025-01-01`). Pages over 50,000 characters are cut with a notice |
-
-## Skills
-
-Beyond individual tools, the `logseq-skills` provides structured workflows that combine multiple tools:
-
-**Available workflows:**
-- **Recall a topic** - "What do I know about X?" - one `explore_context` call per page, in parallel for several
-- **Refresh on a person** - A pre-meeting read of a person's page, their recent days and what is open with them
-- **History of a decision** - How a page or decision changed over time, with the blocks that matter
-- **Connect two projects** - The shortest path of links between two pages, and what each link says
-- **Plan the week** - "What should I work on?" - find and organize TODOs, by marker and by property
-- **Stale work** - Find old, waiting or blocked tasks
-- **Who owns it** - Pages and blocks that carry a property
-- **Weekly and monthly summaries** - Generate structured summaries from journal entries
-- **Link concepts** - Add `[[links]]` to notes already written, with a gate
-
-The tool references are one file per tool type (`get`, `find`, `explore`, `check`), each tool with parameters and worked JSON examples.
-
-See `skills/logseq-skills/` for complete workflow documentation (also reachable at `.claude/skills/logseq-skills/` through a symlink for project-local use).
-
-## Example Usage
-
-**"What do I know about React?"**
-```
-Use: explore_context("React")
-Gets: Page + blocks + related pages + references + temporal context
-```
-
-**"Show everything connected to Machine Learning"**
-```
-Use: explore_network("Machine Learning", max_depth=2)
-Gets: Network graph with nodes and edges
-```
-
-**"How does Machine Learning connect to Statistics?"**
-```
-Use: explore_network("Machine Learning", to="Statistics")
-Gets: The shortest path of links, as nodes and edges with their reference counts
-```
-
-**"How did my thinking on testing evolve this year?"**
-```
-Use: explore_timeline(page="testing", start_date=20250101, end_date=20251231, group_by="month")
-Gets: The days the page was written about or linked, joined by month
-```
-
-**"What was I working on last week?"**
-```
-Use: explore_timeline(start_date=20251114, end_date=20251120)
-Gets: All journal entries in date range
-```
-
-## Releasing
-
-For the maintainer. Nothing releases or publishes automatically, and nothing publishes to npm (ADR-0035). A release is the native binaries, the three PyPI wheels built from them and `SHA256SUMS` on a GitHub Release, built by a manual workflow (`release.yml`) that runs only when started by hand from the Actions tab, only on `main`, and creates a draft release. You publish the draft yourself, which creates the tag. A second manual workflow (`pypi.yml`, ADR-0036) then uploads the wheels of the public release to PyPI.
-
-The order, from ADR-0035 (Decision 12) and ADR-0036 (Decision 9). Steps 2 and 5 are runs of a workflow from the Actions tab ("Run workflow", branch `main`):
-
-1. Bump the version in `rust/Cargo.toml`, `package.json` and both `.claude-plugin/` manifests together (a test keeps them equal), and move the `CHANGELOG.md` "Unreleased" entries under it with the release date. Merge that first: the release is built at the commit the run starts from.
-2. Run `release.yml` with `dry_run` on, read the artifacts and the logs (every leg of the build, and the `wheels` job), then with it off to create the draft.
-3. **Pre-publish check.** Draft assets can't be downloaded anonymously, so download them with `gh release download v<version> --dir <empty dir>`. On a clean macOS and a clean Linux machine, run the launcher against that directory and call one tool, then install the wheel for that machine from it (`logseq_mcp_server-<version>-py3-none-<platform>.whl`, one per platform) and call one tool:
-
-   ```bash
-   LOGSEQ_MCP_RELEASE_BASE_URL="file://<empty dir>" sh scripts/logseq-mcp-server.sh
-   uvx --from <empty dir>/<the wheel for this machine> logseq-mcp-server
-   ```
-
-4. Publish the draft. Then, on a clean machine with no override, start the plugin once and call one tool. A bad release is fixed by a new patch version, not an edit.
-5. Run `pypi.yml` with `version` set to the release (plain `x.y.z`, no `v`; the release has to be public) and `dry_run` on, read its log (checksums, attestations, the install check), then run it with `dry_run` off and approve the `pypi` environment. PyPI never accepts a file name twice, so a mistake costs a version number.
-6. **Post-publish check.** On a clean macOS and a clean Linux machine with no override, run `uvx logseq-mcp-server` through an MCP client and call one tool. A bad upload is fixed by a new patch version, not an edit.
-
-## Development
-
-The server is Rust (`rust/`, since #356). The TypeScript tooling (`scripts/`, `tests/`) holds the guard tests, the integration suites and the measure scripts:
-
-```bash
-npm ci
-(cd rust && cargo build && cargo test --locked)   # includes the golden-result test: the Rust server against the recorded results
-npx vitest run tests/guards tests/rust-guards  # the repo's guard tests
-npm run test:integration              # needs LogSeq serving the fixture graph; see tests/integration/setup.md
-```
-
-## Architecture
-
-- **Rust** MCP server (`rust/`, rmcp) that talks to LogSeq's HTTP API over stdio. The TypeScript server it replaced was removed in #356
-- **Golden results**: `rust/tests/data/parity/` holds the cases and the results recorded from the TypeScript server, and `cargo test --test parity` holds the Rust server to them (`PARITY_RECORD=1 cargo test --test parity_record` records them)
-- **Vitest** for the repo's guard tests and the integration suites, **cargo test** for the server
-- **TDD approach** - all tools have comprehensive test coverage
+Licensed under MIT; see `LICENSE`.
